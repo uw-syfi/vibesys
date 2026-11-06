@@ -45,6 +45,9 @@ With input or output that is not a terminal there are no keys and no footer, and
 printed. --agent starts in the conversation of that agent (a name such as worker-1, or an id), and without
 a terminal follows only it. A replay holds the newest 200 items of the agent viewed and says how many it
 left out; --full-history replays them all. run attach has no --json: its lines are the output.
+At a terminal the lines are lightly coloured (tool calls dim, failures red, prompts cyan, outcomes green or
+yellow) with the terminal's own 16 colours; NO_COLOR set to anything, or TERM=dumb, turns it off, and with
+input or output that is not a terminal the bytes are plain text.
 A run starts subagents only on the lead's harness and model, and on each --allow-agent: a harness alone
 allows its default model. A spawn outside that is refused, and run get shows what is allowed.
 A run has no limit unless run start is given one: --max-time (such as 30m) and --max-cost (dollars). When a

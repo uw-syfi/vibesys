@@ -62,10 +62,20 @@ func Main(args []string) int {
 	}
 	return clientcli.Main(ctx, args, clientcli.Env{
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
-		Terminal: isTerminal, Screen: screen,
+		Terminal: isTerminal, Screen: screen, Color: isTerminal && wantsColor(os.Getenv),
 		Dir: dir, Home: homeDir(), FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
 		Connect: connector, Prove: prover, HostBuild: hostBuild, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
 	})
+}
+
+// wantsColor says whether the person's terminal is to be written to with colour: not when NO_COLOR is
+// set to anything non-empty (no-color.org), and not when TERM is "dumb" or unset.
+func wantsColor(getenv func(string) string) bool {
+	if getenv("NO_COLOR") != "" {
+		return false
+	}
+	term := getenv("TERM")
+	return term != "" && term != "dumb"
 }
 
 // homeDir is the user's home directory, or empty when there is none.

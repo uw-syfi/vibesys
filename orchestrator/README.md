@@ -415,6 +415,19 @@ on, because a view stopped in key mode would leave the shell in it. With stdin o
 at a time. `--agent NAME-OR-ID` starts in that agent's view, or for a pipe follows only that agent, and
 ends with the run or when that agent has ended. A run that has ended is replayed and attach exits.
 
+Colour is restrained and follows the terminal's theme: only the 16 standard colours, dim and bold, no
+backgrounds. What an agent said stays in the terminal's own style; tool calls, turn lines, milestones and
+the footer are dim, with the agent's name bold on a turn line; prompts and steers are cyan; a failed tool
+call and its error line are red; outcomes are coloured in the milestones (a handoff, a measurement and a
+job that succeeded green; a failed job, agent or turn red; a limit reached or a stalled run yellow); a
+final report is bold; the agent list has bold names and coloured statuses. There is no colour unless a
+terminal is at both ends, and none when `NO_COLOR` is set to anything (no-color.org) or `TERM` is `dumb`;
+there is no flag. Without it, and with no terminal, the bytes are exactly the plain text. The model never
+knows about colour: a line says what it means (a kind, and a tone such as good or bad), and `RenderColor`
+alone turns that into escape sequences, after cutting the line to the width, so colour cannot change what
+a line says or where it is cut. Every span it starts is closed, a styled line ends with a reset, and the
+reset is written again when the view leaves.
+
 A replay holds the newest 200 items of the agent viewed and says how many came before; `--full-history`
 replays all of them. The items are read as `WatchAgent` sends them (the newest page), then `ListItems`
 pages back from its cursor, 75 at a time, until the replay is full.

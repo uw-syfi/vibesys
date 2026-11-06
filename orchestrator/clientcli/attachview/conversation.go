@@ -276,8 +276,11 @@ func (m *Model) emit(lines []Line) []Line {
 	out := make([]Line, 0, len(lines))
 	for _, line := range lines {
 		line.Label = strings.ReplaceAll(Sanitize(line.Label), "\n", " ")
+		line.Subject = strings.ReplaceAll(Sanitize(line.Subject), "\n", " ")
+		line.Mark = strings.ReplaceAll(Sanitize(line.Mark), "\n", " ")
 		for _, text := range strings.Split(Sanitize(line.Text), "\n") {
-			out = append(out, Line{Kind: line.Kind, Label: line.Label, Text: text})
+			line.Text = text
+			out = append(out, line)
 		}
 	}
 	return out
@@ -320,10 +323,14 @@ func (m *Model) print(lines []Line) []Output {
 // view shows every change except the turns of the lead, which its own stream says in order with its
 // items. The view of another agent shows its own changes and the run's.
 func (m *Model) changeLine(c Change) (Line, bool) {
-	if !m.shows(c) || strings.TrimSpace(m.View.text(c)) == "" {
+	if !m.shows(c) {
 		return Line{}, false
 	}
-	return Line{Kind: LineMilestone, Text: m.View.Describe(c, m.opt.Zone)}, true
+	text, mark, tone := m.View.words(c)
+	if strings.TrimSpace(text) == "" {
+		return Line{}, false
+	}
+	return Line{Kind: LineMilestone, Text: Clock(c.At, m.opt.Zone) + "  " + text, Mark: mark, Tone: tone}, true
 }
 
 func (m *Model) shows(c Change) bool {
@@ -502,12 +509,12 @@ func (m *Model) enter(id string, at time.Time) []entry {
 	name := m.View.AgentName(m.agent)
 	if t := m.turn(id); t != nil {
 		m.lastTurn = max(m.lastTurn, t.GetOrdinal())
-		return append(ents, entry{t.GetStartedAt().AsTime(), Line{Kind: LineTurn, Text: Clock(t.GetStartedAt().AsTime(), m.opt.Zone) + "  " + fmt.Sprintf("%s turn %d started: %s", name, t.GetOrdinal(), m.View.triggerWords(t))}})
+		return append(ents, entry{t.GetStartedAt().AsTime(), Line{Kind: LineTurn, Subject: name, Text: Clock(t.GetStartedAt().AsTime(), m.opt.Zone) + "  " + fmt.Sprintf("%s turn %d started: %s", name, t.GetOrdinal(), m.View.triggerWords(t))}})
 	}
 	if m.cut[id] {
 		return ents // when it started is not known: the first item the view has is not its first.
 	}
-	return append(ents, entry{at, Line{Kind: LineTurn, Text: Clock(at, m.opt.Zone) + "  " + name + " turn started"}})
+	return append(ents, entry{at, Line{Kind: LineTurn, Subject: name, Text: Clock(at, m.opt.Zone) + "  " + name + " turn started"}})
 }
 
 // closeTurn says how a turn ended, once. A turn the view cannot yet say has ended is left unsaid, and
@@ -529,7 +536,9 @@ func (m *Model) closeTurn(id string) []entry {
 	if m.cut[id] {
 		tools = -1 // the view did not see all of the turn's items, so it cannot count its calls.
 	}
-	return []entry{{at, Line{Kind: LineTurn, Text: Clock(at, m.opt.Zone) + "  " + turnEndWords(m.View.AgentName(m.agent), t, tools)}}}
+	name := m.View.AgentName(m.agent)
+	mark, tone := turnTone(t)
+	return []entry{{at, Line{Kind: LineTurn, Subject: name, Mark: mark, Tone: tone, Text: Clock(at, m.opt.Zone) + "  " + turnEndWords(name, t, tools)}}}
 }
 
 // catchUp shows what the viewed agent did that has not been shown: its turns from number floor on, as
@@ -659,7 +668,7 @@ func (m *Model) header() []Line {
 	if p := a.GetParentAgentId(); p != "" {
 		parent = ", started by " + m.View.AgentName(p)
 	}
-	return []Line{{Kind: LineHeader, Text: fmt.Sprintf("-- %s: %s, %s%s (id %s) --", m.View.AgentName(m.agent), StatusWord(a.GetRole().String(), "AGENT_ROLE_"), StatusWord(a.GetStatus().String(), "AGENT_STATUS_"), parent, m.agent)}}
+	return []Line{{Kind: LineHeader, Subject: m.View.AgentName(m.agent), Text: fmt.Sprintf("-- %s: %s, %s%s (id %s) --", m.View.AgentName(m.agent), StatusWord(a.GetRole().String(), "AGENT_ROLE_"), StatusWord(a.GetStatus().String(), "AGENT_STATUS_"), parent, m.agent)}}
 }
 
 // up is the view of the parent of the viewed agent: the agent that started it, else the lead.
@@ -705,7 +714,8 @@ func (m *Model) openPicker() []Output {
 		if a.GetId() == m.agent {
 			here = "  <- here"
 		}
-		lines = append(lines, Line{Kind: LinePicker, Text: fmt.Sprintf("  %2d  %-12s %-9s %-8s %s%s", i+1, m.View.AgentName(a.GetId()), StatusWord(a.GetRole().String(), "AGENT_ROLE_"), StatusWord(a.GetStatus().String(), "AGENT_STATUS_"), a.GetId(), here)})
+		name, status := m.View.AgentName(a.GetId()), StatusWord(a.GetStatus().String(), "AGENT_STATUS_")
+		lines = append(lines, Line{Kind: LinePicker, Subject: name, Mark: status, Tone: agentTone(a.GetStatus()), Text: fmt.Sprintf("  %2d  %-12s %-9s %-8s %s%s", i+1, name, StatusWord(a.GetRole().String(), "AGENT_ROLE_"), status, a.GetId(), here)})
 	}
 	m.picker = p
 	return m.print(lines)

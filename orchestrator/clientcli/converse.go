@@ -38,7 +38,8 @@ func (c *call) converse(ctx context.Context, s *session, start string, history i
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	controls := c.Terminal && c.Screen != nil
-	restore := func() {}
+	color := c.Terminal && c.Color
+	leaveRaw := func() {}
 	var width, height int
 	if controls {
 		r, err := c.Screen.Raw()
@@ -46,10 +47,19 @@ func (c *call) converse(ctx context.Context, s *session, start string, history i
 			fmt.Fprintf(c.Stderr, "note: the terminal would not give keys (%v), so the view is plain lines\n", err)
 			controls = false
 		} else {
-			var once sync.Once
-			restore = func() { once.Do(r) }
+			leaveRaw = r
 			width, height = c.Screen.Size()
 		}
+	}
+	// restore puts the terminal back as it was found: no style left on, then the keys as they were.
+	var once sync.Once
+	restore := func() {
+		once.Do(func() {
+			if color {
+				_, _ = c.Stdout.Write([]byte(attachview.Reset))
+			}
+			leaveRaw()
+		})
 	}
 	defer restore() // a panic, too, leaves the terminal as it was found.
 	inputs := make(chan attachview.Input)
@@ -63,7 +73,7 @@ func (c *call) converse(ctx context.Context, s *session, start string, history i
 	}
 	opt := attachview.Options{Controls: controls, Start: start, Only: start != "" && !controls, History: history, Zone: c.Zone, Now: c.Clock.Now(), Width: width, Height: height}
 	m, outs := attachview.Begin(opt, s.view, s.history)
-	p := &painter{w: c.Stdout, controls: controls, width: width}
+	p := &painter{w: c.Stdout, controls: controls, color: color, width: width}
 	sub := &subscription{c: c, ctx: ctx, client: s.client, send: send}
 	defer sub.stop()
 
@@ -120,7 +130,9 @@ func (c *call) ended(s *session, e attachview.Exit) error {
 type painter struct {
 	w        io.Writer
 	controls bool
-	footer   string
+	// color draws lines with style (attachview.RenderColor), and the footer dim.
+	color  bool
+	footer string
 	// width is the terminal's, or zero when it is not known.
 	width int
 	err   error
@@ -139,11 +151,11 @@ func (p *painter) apply(outs []attachview.Output, sub *subscription) *attachview
 		case attachview.Print:
 			p.print(o.Lines)
 		case attachview.Clear:
-			p.write(clearScreen + p.footer)
+			p.write(clearScreen + p.footerText())
 		case attachview.SetFooter:
 			p.footer = o.Text
 			if p.controls {
-				p.write(eraseLine + o.Text)
+				p.write(eraseLine + p.footerText())
 			}
 		case attachview.Subscribe:
 			sub.open(o)
@@ -156,11 +168,27 @@ func (p *painter) apply(outs []attachview.Output, sub *subscription) *attachview
 	return nil
 }
 
+// footerText is the footer as it is drawn.
+func (p *painter) footerText() string {
+	if p.color {
+		return attachview.StyleFooter(p.footer)
+	}
+	return p.footer
+}
+
+// render draws a line, with style when the painter has colour.
+func (p *painter) render(l attachview.Line) string {
+	if p.color {
+		return attachview.RenderColor(l, p.width)
+	}
+	return attachview.Render(l, p.width)
+}
+
 // print draws lines. How a line looks is attachview.Render's to say; this adds only the footer.
 func (p *painter) print(lines []attachview.Line) {
 	if !p.controls {
 		for _, line := range lines {
-			p.write(attachview.Render(line, p.width) + "\n")
+			p.write(p.render(line) + "\n")
 		}
 		return
 	}
@@ -169,9 +197,9 @@ func (p *painter) print(lines []attachview.Line) {
 		b.WriteString(eraseLine)
 	}
 	for _, line := range lines {
-		b.WriteString(attachview.Render(line, p.width) + "\n")
+		b.WriteString(p.render(line) + "\n")
 	}
-	b.WriteString(p.footer)
+	b.WriteString(p.footerText())
 	p.write(b.String())
 }
 

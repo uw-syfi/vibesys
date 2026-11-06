@@ -52,6 +52,10 @@ type Env struct {
 	// Screen is the terminal's keys and size, set when Terminal is. Without it a verb that would
 	// take keys prints plain lines.
 	Screen Screen
+	// Color says output to the terminal may be styled with the 16 standard colours, dim and bold: a
+	// terminal is at the other end, NO_COLOR is not set to anything and TERM is not "dumb". Main works
+	// it out, the one place that reads the environment; it is false without a Terminal.
+	Color bool
 	// Dir is the working directory, absolute.
 	Dir string
 	// Home is the user's home directory, where a host started by this client looks for programs

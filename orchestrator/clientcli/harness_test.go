@@ -109,6 +109,8 @@ type world struct {
 	// links are the symbolic links of the file system, by the path of each: from to its target.
 	links    map[string]string
 	terminal bool
+	// color is the environment's say that a terminal may be written to with colour.
+	color bool
 	// screen is the terminal's keys and size, for a world with a terminal.
 	screen clientcli.Screen
 	stdin  io.Reader
@@ -155,7 +157,7 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	errb := &watchedBuffer{on: w.onStderr}
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
-		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal, Screen: w.screen,
+		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal, Screen: w.screen, Color: w.color,
 		Dir: w.dir, Home: "/home/u", Configs: w.configs, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },

@@ -49,44 +49,105 @@ func (v *View) Describe(c Change, zone *time.Location) string {
 }
 
 func (v *View) text(c Change) string {
+	text, _, _ := v.words(c)
+	return text
+}
+
+// words is a change as text, with how it went: the phrase of the text that says so (empty for the
+// whole text) and the tone of it. A renderer decides what a tone looks like.
+func (v *View) words(c Change) (text, mark string, tone Tone) {
 	switch c.Kind {
 	case RunMoved:
-		return v.runText(c.Run)
+		text = v.runText(c.Run)
+		if c.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED {
+			return text, "run failed", ToneBad
+		}
+		return text, "", ToneNone
 	case AgentStarted:
 		a := c.Agent
-		return fmt.Sprintf("%s started (%s%s)", v.AgentName(a.GetId()), strings.ToLower(strings.TrimPrefix(a.GetHarness().String(), "HARNESS_")), WithPrefix(", model ", a.GetModel()))
+		return fmt.Sprintf("%s started (%s%s)", v.AgentName(a.GetId()), strings.ToLower(strings.TrimPrefix(a.GetHarness().String(), "HARNESS_")), WithPrefix(", model ", a.GetModel())), "", ToneNone
 	case AgentEnded:
 		a := c.Agent
-		return fmt.Sprintf("%s %s%s", v.AgentName(a.GetId()), StatusWord(a.GetStatus().String(), "AGENT_STATUS_"), WithPrefix(": ", EndDetail(a, 300)))
+		name := v.AgentName(a.GetId())
+		status := StatusWord(a.GetStatus().String(), "AGENT_STATUS_")
+		text = fmt.Sprintf("%s %s%s", name, status, WithPrefix(": ", EndDetail(a, 300)))
+		if tone = agentTone(a.GetStatus()); tone != ToneNone {
+			return text, name + " " + status, tone
+		}
+		return text, "", ToneNone
 	case TurnEnded:
-		return turnEndWords(v.AgentName(c.Turn.GetAgentId()), c.Turn, -1)
+		name := v.AgentName(c.Turn.GetAgentId())
+		mark, tone = turnTone(c.Turn)
+		return turnEndWords(name, c.Turn, -1), mark, tone
 	case HandoffPosted:
 		h := c.Message.GetHandoff()
-		return fmt.Sprintf("%s handed off%s%s", v.AgentName(c.Message.GetFromAgentId()), planWords(v.handoffPlan(c.Message)), WithPrefix(": ", OneLine(h.GetClaim(), 200)))
+		name := v.AgentName(c.Message.GetFromAgentId())
+		return fmt.Sprintf("%s handed off%s%s", name, planWords(v.handoffPlan(c.Message)), WithPrefix(": ", OneLine(h.GetClaim(), 200))), name + " handed off", ToneGood
 	case ReportPosted:
 		r := c.Message.GetReport()
-		return fmt.Sprintf("%s reported (%s, number %d): %s", v.AgentName(c.Message.GetFromAgentId()), ReportWord(r.GetKind()), r.GetSequence(), OneLine(r.GetHeadline(), 300))
+		text = fmt.Sprintf("%s reported (%s, number %d): %s", v.AgentName(c.Message.GetFromAgentId()), ReportWord(r.GetKind()), r.GetSequence(), OneLine(r.GetHeadline(), 300))
+		if r.GetKind() == pb.ReportKind_REPORT_KIND_FINAL {
+			return text, "", ToneStrong
+		}
+		return text, "", ToneNone
 	case RunStalled:
-		return "run stalled: its lead is idle and nothing else is going on"
+		return "run stalled: its lead is idle and nothing else is going on", "run stalled", ToneWarn
 	case RunResumed:
-		return "run is no longer stalled"
+		return "run is no longer stalled", "", ToneNone
 	case ReminderSent:
-		return v.reminderText(c)
+		text = v.reminderText(c)
+		if limit, ok := c.Message.GetBody().(*pb.Message_RunLimitReached); ok {
+			return text, "reached its " + LimitWord(limit.RunLimitReached.GetLimit()), ToneWarn
+		}
+		return text, "", ToneNone
 	case JobFinishedMessage:
 		j := c.Message.GetJobFinished()
-		return fmt.Sprintf("job %s %s%s", j.GetJobId(), StatusWord(j.GetOutcome().String(), "JOB_OUTCOME_"), WithPrefix(": ", OneLine(j.GetDetail(), 200)))
+		outcome := StatusWord(j.GetOutcome().String(), "JOB_OUTCOME_")
+		tone = ToneWarn
+		switch j.GetOutcome() {
+		case pb.JobOutcome_JOB_OUTCOME_SUCCEEDED:
+			tone = ToneGood
+		case pb.JobOutcome_JOB_OUTCOME_FAILED:
+			tone = ToneBad
+		}
+		return fmt.Sprintf("job %s %s%s", j.GetJobId(), outcome, WithPrefix(": ", OneLine(j.GetDetail(), 200))), "job " + j.GetJobId() + " " + outcome, tone
 	case SubagentSettled:
 		s := c.Message.GetSubagentSettled()
-		return fmt.Sprintf("%s settled without a handoff (%s)%s", v.AgentName(s.GetAgentId()), StatusWord(s.GetStatus().String(), "AGENT_STATUS_"), WithPrefix(": ", OneLine(s.GetDetail(), 200)))
+		name := v.AgentName(s.GetAgentId())
+		return fmt.Sprintf("%s settled without a handoff (%s)%s", name, StatusWord(s.GetStatus().String(), "AGENT_STATUS_"), WithPrefix(": ", OneLine(s.GetDetail(), 200))), name + " settled without a handoff", ToneWarn
 	case MessageRejected:
-		return v.rejectedText(c.Message)
+		return v.rejectedText(c.Message), "", ToneWarn
 	case JobMoved:
-		return fmt.Sprintf("%s job %s %s", JobKind(c.Job), c.Job.GetId(), StatusWord(c.Job.GetState().String(), "JOB_STATE_"))
+		text = fmt.Sprintf("%s job %s %s", JobKind(c.Job), c.Job.GetId(), StatusWord(c.Job.GetState().String(), "JOB_STATE_"))
+		switch c.Job.GetState() {
+		case cliv1.JobState_JOB_STATE_SUCCEEDED:
+			return text, "", ToneGood
+		case cliv1.JobState_JOB_STATE_FAILED, cliv1.JobState_JOB_STATE_LOST:
+			return text, "", ToneBad
+		}
+		return text, "", ToneNone
 	case Measured:
 		m := c.Result.GetMeasure()
-		return fmt.Sprintf("measured %s: %s = %g", ShortCommit(c.Result.GetCommit()), m.GetMetric().GetName(), m.GetValue())
+		return fmt.Sprintf("measured %s: %s = %g", ShortCommit(c.Result.GetCommit()), m.GetMetric().GetName(), m.GetValue()), "measured " + ShortCommit(c.Result.GetCommit()), ToneGood
 	}
-	return ""
+	return "", "", ToneNone
+}
+
+// agentTone is how an agent's status went: failed or lost is bad, and the others are not remarked on.
+func agentTone(s pb.AgentStatus) Tone {
+	switch s {
+	case pb.AgentStatus_AGENT_STATUS_FAILED, pb.AgentStatus_AGENT_STATUS_LOST:
+		return ToneBad
+	}
+	return ToneNone
+}
+
+// turnTone is the phrase of a turn's end line that says it failed, and its tone.
+func turnTone(t *pb.Turn) (string, Tone) {
+	if t.GetStatus() == pb.TurnStatus_TURN_STATUS_FAILED {
+		return fmt.Sprintf("turn %d failed", t.GetOrdinal()), ToneBad
+	}
+	return "", ToneNone
 }
 
 // handoffPlan is the plan a handoff is about, or zero when nothing says. The agent fills in the

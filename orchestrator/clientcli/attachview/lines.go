@@ -44,10 +44,10 @@ func assistantLines(text string) []Line {
 
 // toolLines is one line for the call, and a second for what went wrong when it failed.
 func toolLines(it *pb.Item, t *pb.ToolCall) []Line {
-	lines := []Line{{Kind: LineTool, Text: toolWords(t)}}
 	if !toolFailed(it, t) {
-		return lines
+		return []Line{{Kind: LineTool, Text: toolWords(t)}}
 	}
+	lines := []Line{{Kind: LineTool, Text: toolWords(t), Tone: ToneBad}}
 	why := "failed"
 	if t.ExitCode != nil {
 		why = fmt.Sprintf("failed (exit %d)", t.GetExitCode())
@@ -55,7 +55,7 @@ func toolLines(it *pb.Item, t *pb.ToolCall) []Line {
 	if out := lastLine(t.GetOutput()); out != "" {
 		why += ": " + out
 	}
-	return append(lines, Line{Kind: LineToolFailure, Text: why})
+	return append(lines, Line{Kind: LineToolFailure, Text: why, Tone: ToneBad})
 }
 
 func toolFailed(it *pb.Item, t *pb.ToolCall) bool {

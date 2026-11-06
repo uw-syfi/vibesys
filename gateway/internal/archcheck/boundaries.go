@@ -28,7 +28,7 @@ var boundaries = map[string]allowance{
 	"gateway/cmd/vibesys-client/main.go":              {reason: "a program's own argument vector", args: 1},
 	"gateway/cmd/vibesys-host/main.go":                {reason: "a program's own argument vector", args: 1},
 	"gateway/internal/buildinfo/buildinfo.go":         {reason: "a build of no release is told apart by the bytes of its program; process-boundaries.md, host control", reads: 1},
-	"gateway/internal/clientmain/clientmain.go":       {reason: "the client finds the host program beside itself, takes its root from the environment, and checks a start with the XDG place a host would use; process-boundaries.md, release manifest and host control", env: 3},
+	"gateway/internal/clientmain/clientmain.go":       {reason: "the client finds the host program beside itself, takes its root from the environment, checks a start with the XDG place a host would use, and reads NO_COLOR and TERM to say whether the terminal gets colour; process-boundaries.md, release manifest and host control", env: 4},
 	"gateway/internal/clientmain/hosts.go":            {reason: "the client takes its root from VIBESYS_HOME by gatewayroot.Rule, and checks a chosen state directory with the XDG place a host would use; process-boundaries.md, host control", env: 2},
 	"gateway/internal/connect/process.go":             {reason: "the client starts a host, on a clean environment, and keeps what it said on stderr for its own failure; process-boundaries.md, host control", exec: 1, reads: 4, writes: 4},
 	"gateway/internal/hostcommand/runner.go":          {reason: "external:runs the host's own child commands", exec: 1},
