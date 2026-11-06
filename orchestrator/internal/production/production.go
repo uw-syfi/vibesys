@@ -210,6 +210,8 @@ type Wiring struct {
 	Sidecars daemon.Sidecars
 	Jobs     jobs.JobSource
 	Plans    daemon.PlanReader
+	// Tree is the file system a start is checked against.
+	Tree Tree
 	// Version is the binary's version, reported by Hello.
 	Version string
 	// Location is where the agents of every run this daemon starts find the vibesys-cli and its
@@ -234,6 +236,9 @@ type Daemon struct {
 // Open takes the state directory's lock, opens its database and recovers. It fails with an error
 // that wraps ErrHeld when another process holds the lock.
 func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
+	if wiring.Tree == nil {
+		return nil, errors.New("production: Wiring.Tree is required: starts are checked against it")
+	}
 	db, err := store.OpenSQLite(layout.State, store.SQLiteOptions{})
 	if err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -286,6 +291,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Plans: x.wiring.Plans, Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
+		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Tree: x.wiring.Tree},
 	})
 }
 

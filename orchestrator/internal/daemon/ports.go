@@ -116,3 +116,22 @@ type PlanReader interface {
 
 // ErrPlanNotFound is the answer to a plan number that names no plan.
 var ErrPlanNotFound = errors.New("daemon: no such plan")
+
+// StartChecks refuses a StartRun that cannot work, before it is decided: no run, event or receipt
+// is made for a refused start. It is the daemon's only look at the repository and at whether
+// agents can be launched at all, so the loop does no file I/O of its own.
+type StartChecks interface {
+	// CheckStart returns nil when a run of task in repository can start, and a *StartRefusal when
+	// it cannot. It may be called for every start and must be cheap.
+	CheckStart(repository, task string) error
+}
+
+// StartRefusal says why a start was refused, in words that name the offending path or setting.
+type StartRefusal struct {
+	Reason string
+	// NotReady says the daemon, and not the request, is at fault: no agent can launch whatever the
+	// repository holds. Otherwise the repository or the task is wrong.
+	NotReady bool
+}
+
+func (r *StartRefusal) Error() string { return r.Reason }

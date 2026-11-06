@@ -197,7 +197,14 @@ under `STATE/sessions/`.
 
 The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
-task, so the repository must hold `.vibesys/tasks/TASK/`.
+task, so the repository must hold `.vibesys/tasks/TASK/`. A start that cannot work is refused when it
+is dispatched, for every client, and makes no run, event or receipt: `InvalidArgument` when the
+repository path is not absolute, is not the root of a git work tree (it has no `.git`), or has no
+`.vibesys/tasks/TASK/` (a task name is one folder name, so `../x` is refused), and
+`FailedPrecondition` when the host has no sidecar launcher, with the launcher's own reason. The
+message names the offending path or setting. A retry of a command id that already has a receipt
+gets that receipt without the check. The check is `daemon.StartChecks`, implemented by
+`production.StartChecks`; only the operator's `StartRun` is checked.
 
 ### Which `vibesys-cli` the agents run, and where it finds its daemon
 
