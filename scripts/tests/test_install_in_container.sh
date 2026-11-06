@@ -44,12 +44,26 @@ until_true() {
 hosts() { pgrep -f "^$home/releases/[^ ]*/bin/vibesys-host " || true; }
 no_hosts() { [ -z "$(hosts)" ]; }
 
+# gone PID...: succeed when none of the processes still holds its file descriptors, which is when a
+# process has exited (a zombie has closed them). The process list is not enough: a process that
+# is exiting loses its command line, and so stops matching, before it closes its files, and the
+# state directory's lock is one of them.
+gone() {
+  local pid state
+  for pid in "$@"; do
+    state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)"
+    [ -z "$state" ] || [ "$state" = Z ] || return 1
+  done
+}
+
 # stop_hosts: end every vibesys-host of an installed release and wait for them to be gone.
 stop_hosts() {
   local pids
   pids="$(hosts)"
   # shellcheck disable=SC2086 # a list of pids
   [ -z "$pids" ] || kill -TERM $pids 2>/dev/null || true
+  # shellcheck disable=SC2086 # a list of pids
+  until_true 30 gone $pids || die "a vibesys-host did not stop: $(hosts)"
   until_true 30 no_hosts || die "a vibesys-host did not stop: $(hosts)"
 }
 
