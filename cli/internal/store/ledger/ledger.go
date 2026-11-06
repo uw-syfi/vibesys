@@ -435,6 +435,12 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if edit.Status != nil {
 		plan.Status = *edit.Status
 	}
+	if edit.Priority != nil {
+		if !edit.Priority.Valid() {
+			return nil, none, invalid("edit.Priority", fmt.Sprintf("%q is not a priority", *edit.Priority))
+		}
+		plan.Priority = *edit.Priority
+	}
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)
 	}

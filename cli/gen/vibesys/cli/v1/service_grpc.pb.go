@@ -32,6 +32,7 @@ const (
 	DaemonService_AddNote_FullMethodName          = "/vibesys.cli.v1.DaemonService/AddNote"
 	DaemonService_HoldJob_FullMethodName          = "/vibesys.cli.v1.DaemonService/HoldJob"
 	DaemonService_ReleaseJob_FullMethodName       = "/vibesys.cli.v1.DaemonService/ReleaseJob"
+	DaemonService_SetJobPriority_FullMethodName   = "/vibesys.cli.v1.DaemonService/SetJobPriority"
 	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
 	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
 	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
@@ -95,6 +96,10 @@ type DaemonServiceClient interface {
 	// ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
 	// Protocol 5.
 	ReleaseJob(ctx context.Context, in *ReleaseJobRequest, opts ...grpc.CallOption) (*ReleaseJobResponse, error)
+	// SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+	// its plans' again. A reason is required, and the change is kept as a note on the job.
+	// Protocol 6.
+	SetJobPriority(ctx context.Context, in *SetJobPriorityRequest, opts ...grpc.CallOption) (*SetJobPriorityResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
@@ -280,6 +285,16 @@ func (c *daemonServiceClient) ReleaseJob(ctx context.Context, in *ReleaseJobRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReleaseJobResponse)
 	err := c.cc.Invoke(ctx, DaemonService_ReleaseJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) SetJobPriority(ctx context.Context, in *SetJobPriorityRequest, opts ...grpc.CallOption) (*SetJobPriorityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetJobPriorityResponse)
+	err := c.cc.Invoke(ctx, DaemonService_SetJobPriority_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -491,6 +506,10 @@ type DaemonServiceServer interface {
 	// ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
 	// Protocol 5.
 	ReleaseJob(context.Context, *ReleaseJobRequest) (*ReleaseJobResponse, error)
+	// SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+	// its plans' again. A reason is required, and the change is kept as a note on the job.
+	// Protocol 6.
+	SetJobPriority(context.Context, *SetJobPriorityRequest) (*SetJobPriorityResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
@@ -563,6 +582,9 @@ func (UnimplementedDaemonServiceServer) HoldJob(context.Context, *HoldJobRequest
 }
 func (UnimplementedDaemonServiceServer) ReleaseJob(context.Context, *ReleaseJobRequest) (*ReleaseJobResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseJob not implemented")
+}
+func (UnimplementedDaemonServiceServer) SetJobPriority(context.Context, *SetJobPriorityRequest) (*SetJobPriorityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetJobPriority not implemented")
 }
 func (UnimplementedDaemonServiceServer) ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJobs not implemented")
@@ -839,6 +861,24 @@ func _DaemonService_ReleaseJob_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServiceServer).ReleaseJob(ctx, req.(*ReleaseJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_SetJobPriority_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetJobPriorityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).SetJobPriority(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_SetJobPriority_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).SetJobPriority(ctx, req.(*SetJobPriorityRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1152,6 +1192,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseJob",
 			Handler:    _DaemonService_ReleaseJob_Handler,
+		},
+		{
+			MethodName: "SetJobPriority",
+			Handler:    _DaemonService_SetJobPriority_Handler,
 		},
 		{
 			MethodName: "ListJobs",

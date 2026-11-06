@@ -203,6 +203,9 @@ type Job struct {
 	// Hold is set while the job is held (Job.Control): it keeps its place in the queue and is not
 	// started. Only a queued job is held, and a job that leaves the queue is not held any more.
 	Hold *JobHold
+	// Priority is the job's own priority, which overrides its plans' (EffectivePriority). Empty
+	// inherits.
+	Priority Priority
 }
 
 // MaxAttempts is the most attempts a job gets. A job whose supervisor is proved gone is queued again

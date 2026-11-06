@@ -57,6 +57,7 @@ func properties(c Contract) map[string]func(TB, Contract) {
 		"a job refused a lease waits for it, naming its holder":                                leasedWaits,
 		"a job starts on one of its options, and never one it cannot hold":                     startsOnItsOwnOption,
 		"a held job, and any but a First one while the daemon drains, waits and keeps no turn": steeredWaits,
+		"jobs are considered by aged priority, and in the policy's order within one":           byPriority,
 	}
 	if c.Fair {
 		out["a run with work waiting starts within one turn of every run"] = boundedStarvation
@@ -180,6 +181,10 @@ func (g gen) state() schedule.State {
 	for range g.r.IntN(schedule.RecentGrants + 4) {
 		s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: runs[g.r.IntN(len(runs))], Claims: g.claims(s.Resources)})
 	}
+	// Mostly the scheduler knows the time, which ages the priorities of the jobs that wait.
+	if g.r.IntN(4) != 0 {
+		s.Now = epoch.Add(time.Duration(g.r.IntN(4*60)) * time.Minute)
+	}
 	// Sometimes the daemon drains.
 	if g.r.IntN(10) == 0 {
 		s.Drain = &core.Drain{Agent: "lead", Reason: "a new build", Since: epoch}
@@ -194,6 +199,11 @@ func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
 	c := schedule.Candidate{
 		ID: schedule.ID(fmt.Sprintf("w%d", i)), Run: runs[g.r.IntN(len(runs))],
 		Submitted: epoch.Add(time.Duration(g.r.IntN(4)) * time.Second), Seq: uint64(100 + i), First: g.r.IntN(8) == 0,
+		Priority: []core.Priority{"", core.PriorityLow, core.PriorityNormal, core.PriorityHigh}[g.r.IntN(4)],
+	}
+	// Some have waited long enough for their priority to age.
+	if g.r.IntN(3) == 0 {
+		c.Submitted = c.Submitted.Add(-time.Duration(g.r.IntN(3*60)) * time.Minute)
 	}
 	n := 1
 	switch g.r.IntN(12) {
@@ -613,6 +623,43 @@ func steeredWaits(t TB, c Contract) {
 				}
 			case schedule.Refuse:
 				// It can never start, which says more than why it may not now.
+			}
+		}
+	})
+}
+
+// byPriority: after the First jobs, Step considers the waiting jobs by the priority each counts as
+// now, aged by its wait (schedule.Rank), highest first; among jobs of one priority, in the order the
+// policy gives them. The decisions come in the order the jobs were considered.
+func byPriority(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		byID := map[schedule.ID]schedule.Candidate{}
+		var rest []schedule.Candidate
+		for _, w := range schedule.ArrivalOrder(s.Waiting) {
+			byID[w.ID] = w
+			if !w.First {
+				rest = append(rest, w)
+			}
+		}
+		policy := c.New().Order(slices.Clone(rest), schedule.UsageOf(s))
+		place := map[schedule.ID]int{}
+		for i, w := range policy {
+			place[w.ID] = i
+		}
+		var considered []schedule.Candidate
+		for _, d := range c.Step(s, c.rules()) {
+			if w := byID[d.Target()]; !w.First {
+				considered = append(considered, w)
+			}
+		}
+		for i := 1; i < len(considered); i++ {
+			a, b := considered[i-1], considered[i]
+			ra, rb := schedule.Rank(a, s.Now).Level(), schedule.Rank(b, s.Now).Level()
+			if ra < rb {
+				t.Fatalf("seed %d: %s (%s) was considered before %s (%s) at %v", seed, a.ID, schedule.Rank(a, s.Now), b.ID, schedule.Rank(b, s.Now), s.Now)
+			}
+			if ra == rb && place[a.ID] > place[b.ID] {
+				t.Fatalf("seed %d: %s was considered before %s, of one priority, which the policy orders the other way", seed, a.ID, b.ID)
 			}
 		}
 	})

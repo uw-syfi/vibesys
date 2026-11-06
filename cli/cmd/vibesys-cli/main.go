@@ -79,6 +79,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"note":       noteCommand,
 	"hold":       holdCommand,
 	"release":    releaseCommand,
+	"job":        jobCommand,
 	"jobs":       jobsCommand,
 	"logs":       logsCommand,
 	"show":       showCommand,
@@ -109,6 +110,8 @@ commands:
   note <job> <text>                              add a note to a job
   hold <job> [--reason text]                     keep a queued job from starting; it keeps its place
   release <job>                                  let a held job start in its turn
+  job priority <job> high|normal|low|inherit --reason text
+                                                 a queued job's own priority, over its plans'
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit

@@ -233,14 +233,18 @@ func FuzzDecodePlan(f *testing.F) {
 		&cliv1.Plan{Number: 1, Title: "t", Body: "b", Status: cliv1.PlanStatus_PLAN_STATUS_OPEN},
 		&cliv1.Plan{Number: 2, Status: cliv1.PlanStatus_PLAN_STATUS_WON, Comments: []*cliv1.PlanComment{{Text: "c", Agent: "a"}}},
 		&cliv1.Plan{Status: 99},
+		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_CHOSEN, Priority: cliv1.Priority_PRIORITY_HIGH},
+		&cliv1.Plan{Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Priority: 99},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
 		decode(t, data, message)
 		_, statusErr := wire.ToPlanStatus("status", message.GetStatus())
+		_, priorityErr := wire.ToPriority("priority", message.GetPriority())
 		first, err := wire.ToPlan(message)
-		if (err != nil) != (statusErr != nil) {
-			t.Fatalf("a plan with status %s: ToPlan error %v, ToPlanStatus error %v; they must agree", message.GetStatus(), err, statusErr)
+		if (err != nil) != (statusErr != nil || priorityErr != nil) {
+			t.Fatalf("a plan with status %s and priority %s: ToPlan error %v, ToPlanStatus error %v, ToPriority error %v; they must agree",
+				message.GetStatus(), message.GetPriority(), err, statusErr, priorityErr)
 		}
 		if err != nil {
 			return

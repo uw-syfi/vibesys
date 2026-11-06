@@ -58,6 +58,9 @@ func describe(j *cliv1.Job) string {
 	if p := placementOf(j.GetEnvironment()); p != "" {
 		fmt.Fprintf(&b, "\ton %s", p)
 	}
+	if p := j.GetPriority(); p != cliv1.Priority_PRIORITY_UNSPECIFIED {
+		fmt.Fprintf(&b, "\tpriority %s", priorityName(p))
+	}
 	if h := j.GetHold(); h != nil && j.GetState() == cliv1.JobState_JOB_STATE_QUEUED {
 		fmt.Fprintf(&b, "\n\t  %s", describeHold(h))
 	}

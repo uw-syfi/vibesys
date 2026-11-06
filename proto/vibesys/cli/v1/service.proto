@@ -59,6 +59,10 @@ service DaemonService {
   // ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
   // Protocol 5.
   rpc ReleaseJob(ReleaseJobRequest) returns (ReleaseJobResponse);
+  // SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+  // its plans' again. A reason is required, and the change is kept as a note on the job.
+  // Protocol 6.
+  rpc SetJobPriority(SetJobPriorityRequest) returns (SetJobPriorityResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
   // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
@@ -335,6 +339,19 @@ message ReleaseJobResponse {
   Job job = 1;
 }
 
+message SetJobPriorityRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  // The job's own priority; unspecified inherits its plans'.
+  Priority priority = 3;
+  // Why, required.
+  string reason = 4;
+}
+
+message SetJobPriorityResponse {
+  Job job = 1;
+}
+
 message ListJobsRequest {
   CallContext context = 1;
   // Filters combine with AND; an empty one matches everything.
@@ -483,6 +500,11 @@ message EditPlanRequest {
     defined_only: true
     not_in: [0]
   }];
+  // A new priority for the plan's queued jobs that set none of their own. Protocol 6.
+  optional Priority priority = 6 [(buf.validate.field).enum.defined_only = true];
+  // Why the priority changes: required with priority, and refused without it. The change and the
+  // reason are kept as a comment on the plan.
+  string reason = 7;
 }
 
 message EditPlanResponse {

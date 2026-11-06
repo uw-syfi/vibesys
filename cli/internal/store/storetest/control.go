@@ -72,4 +72,59 @@ func testControl(t *testing.T, newStore New) {
 			t.Errorf("a refused change changed the job: %+v", got)
 		}
 	})
+
+	t.Run("a queued job's priority is set with its note, needs a reason and is kept", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		job := e.submit(e.check(1, "key-a")).Job
+		at := e.now()
+		high, err := e.s.ControlJob(e.ctx, job.ID, core.SetJobPriority{Priority: core.PriorityHigh, Reason: "gates the others", Agent: "lead", At: at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := core.Note{Text: core.PriorityChange("", core.PriorityHigh, "gates the others"), At: at, Agent: "lead"}
+		if high.Priority != core.PriorityHigh || len(high.Notes) != 1 || !reflect.DeepEqual(high.Notes[0], want) {
+			t.Errorf("job = %+v, want high with the note %+v", high, want)
+		}
+		if stored := e.job(job.ID); !reflect.DeepEqual(stored, high) {
+			t.Errorf("Job = %+v, want %+v", stored, high)
+		}
+		for _, bad := range []core.SetJobPriority{
+			{Priority: core.PriorityLow, At: e.now()},
+			{Priority: "urgent", Reason: "r", At: e.now()},
+			{Priority: core.PriorityLow, Reason: "r"},
+		} {
+			_, err := e.s.ControlJob(e.ctx, job.ID, bad)
+			wantKind(t, "a bad priority change", err, core.FailureInvalidInput)
+		}
+		inherit, err := e.s.ControlJob(e.ctx, job.ID, core.SetJobPriority{Reason: "back to the plan's", At: e.now()})
+		if err != nil || inherit.Priority != "" || len(inherit.Notes) != 2 {
+			t.Errorf("inherit = %+v, %v", inherit, err)
+		}
+		e.reach(e.job(job.ID), core.JobRunning)
+		_, err = e.s.ControlJob(e.ctx, job.ID, core.SetJobPriority{Priority: core.PriorityHigh, Reason: "r", At: e.now()})
+		wantKind(t, "the priority of a running job", err, core.FailureConflict)
+	})
+
+	t.Run("a plan's priority is edited with its comment as one change", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: "t", At: e.now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Priority != "" {
+			t.Errorf("a new plan has priority %q, want none (normal)", plan.Priority)
+		}
+		high := core.PriorityHigh
+		comment := core.PlanComment{Text: core.PriorityChange(core.PriorityNormal, high, "gates the others"), At: e.now(), Agent: "lead"}
+		edited, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Priority: &high, Comment: &comment, At: e.now()})
+		if err != nil || edited.Priority != high || len(edited.Comments) != 1 {
+			t.Fatalf("EditPlan = %+v, %v", edited, err)
+		}
+		if got, err := e.s.Plan(e.ctx, plan.Number); err != nil || !reflect.DeepEqual(got, edited) {
+			t.Errorf("Plan = %+v, %v; want %+v", got, err, edited)
+		}
+		bad := core.Priority("urgent")
+		_, err = e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Priority: &bad, At: e.now()})
+		wantKind(t, "a plan priority that is none", err, core.FailureInvalidInput)
+	})
 }

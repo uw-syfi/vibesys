@@ -20,6 +20,13 @@
 // where each may run, and Filters may hold a job back. A buggy policy, placer or filter can be
 // unfair, never unsafe.
 //
+// Priority orders the waiting jobs before the policy does: the jobs that are not First are
+// considered by the priority each counts as now (core.AgedPriority of Candidate.Priority, for how
+// long it has waited by State.Now), highest first, and the policy's order holds among jobs of one
+// priority. So priority picks among the jobs the rules let start, never past them: a measure still
+// runs alone, capacity and claims still hold, a waiting job still keeps its turn (now its turn in
+// this order), and no job that runs is stopped.
+//
 // An operator steers the queue on top of that. A held job (Candidate.Hold) waits, and a draining
 // daemon (State.Drain) starts no job but the First ones, which its stores have running already;
 // each such job waits as core.WaitHeld, naming the hold or the drain. A job held back this way, by a
@@ -109,6 +116,8 @@ type Candidate struct {
 	Leased *LeasedOut
 	// Hold, when set, says the job is held: it does not start, and keeps no turn.
 	Hold *core.JobHold
+	// Priority is the job's priority before aging: its own or its plans'. None is normal.
+	Priority core.Priority
 }
 
 // LeasedOut is a lease a job was refused: the resource, and who held its lease, or, when the place
@@ -138,6 +147,18 @@ type State struct {
 	Recent []Grant
 	// Drain, when set, says the daemon is draining: no job starts but the First ones.
 	Drain *core.Drain
+	// Now is when Step decides, which a job's wait since it was submitted ages its priority by. The
+	// zero time ages nothing.
+	Now time.Time
+}
+
+// Rank is the priority a waiting job counts as at a moment: its priority, aged by how long it has
+// waited since it was submitted.
+func Rank(c Candidate, now time.Time) core.Priority {
+	if now.IsZero() {
+		return c.Priority.OrNormal()
+	}
+	return core.AgedPriority(c.Priority, now.Sub(c.Submitted))
 }
 
 // Remember returns the recent grants with the started ones added, keeping the last RecentGrants.
@@ -322,8 +343,8 @@ func ArrivalOrder(cs []Candidate) []Candidate {
 }
 
 // Step decides, for every waiting job, whether it starts now and where. The decisions come in the
-// order the jobs were considered: the First ones in arrival order, then the rest in the policy's
-// order.
+// order the jobs were considered: the First ones in arrival order, then the rest by priority, and
+// in the policy's order within one priority.
 func Step(s State, rules Rules) []Decision {
 	arrived := ArrivalOrder(s.Waiting)
 	var first, rest []Candidate
@@ -337,6 +358,8 @@ func Step(s State, rules Rules) []Decision {
 	if rules.Policy != nil && len(rest) > 0 {
 		rest = permutation(rest, rules.Policy.Order(slices.Clone(rest), UsageOf(s)), func(c Candidate) ID { return c.ID })
 	}
+	// Priority first; the policy's order within one priority, as the sort is stable.
+	slices.SortStableFunc(rest, func(a, b Candidate) int { return cmp.Compare(Rank(b, s.Now).Level(), Rank(a, s.Now).Level()) })
 	if rules.Placer == nil {
 		rules.Placer = LeastLoaded{}
 	}

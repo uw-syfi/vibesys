@@ -2,7 +2,9 @@ package app_test
 
 import (
 	"testing"
+	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
@@ -99,5 +101,70 @@ func TestAHeldJobLetsTheOthersByAndRunsInItsTurnOnceReleased(t *testing.T) {
 	_, err = a.HoldJob(ctx, call, first.ID, "")
 	if f := core.AsFailure(err); f.Kind != core.FailureConflict {
 		t.Fatalf("a hold of a finished job = %v, want a conflict", err)
+	}
+}
+
+// A plan's priority orders its queued jobs before the others, its own priority overrides a job's
+// plan, and a low job that waited twice core.PriorityAging goes before a later high one. Each change
+// is kept with its reason: a plan comment, or a note on the job.
+func TestPriorityOrdersTheQueueAndAgingKeepsALowJobFromStarving(t *testing.T) {
+	w := newWorld(t)
+	a := w.newApp()
+	ctx := ctxFor(t)
+	gate := submit(t, a, "mark", "gate", ";", "hold", "g0", ";", "exit", "0")
+	if !w.gates.Reached(ctx, "gate") {
+		t.Fatalf("the first job did not start")
+	}
+	plan, err := a.CreatePlan(ctx, call, "the integration line", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPlan := func(name string) core.Job {
+		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: command("mark", name, ";", "hold", "g-"+name, ";", "exit", "0"), Plan: plan.Number})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Job
+	}
+	explore := submit(t, a, "mark", "explore", ";", "hold", "g-explore", ";", "exit", "0")
+	gating := byPlan("gating")
+	high := core.PriorityHigh
+	edited, err := a.EditPlan(ctx, call, plan.Number, app.PlanChange{Priority: &high, Reason: "gates every later plan"})
+	if err != nil || edited.Priority != high || len(edited.Comments) != 1 || edited.Comments[0].Agent != call.Agent {
+		t.Fatalf("EditPlan = %+v, %v", edited, err)
+	}
+	if want := core.PriorityChange(core.PriorityNormal, high, "gates every later plan"); edited.Comments[0].Text != want {
+		t.Fatalf("the comment is %q, want %q", edited.Comments[0].Text, want)
+	}
+	low, err := a.SetJobPriority(ctx, call, explore.ID, core.PriorityLow, "exploratory")
+	if err != nil || low.Priority != core.PriorityLow || low.Notes[len(low.Notes)-1].Text != core.PriorityChange("", core.PriorityLow, "exploratory") {
+		t.Fatalf("SetJobPriority = %+v, %v", low, err)
+	}
+	if _, err := a.SetJobPriority(ctx, call, explore.ID, core.PriorityHigh, ""); core.AsFailure(err).Kind != core.FailureInvalidInput {
+		t.Fatalf("a change of priority with no reason = %v, want invalid input", err)
+	}
+
+	// The plan's job goes first though it came later.
+	w.gates.Release("g0")
+	if !w.gates.Reached(ctx, "gating") {
+		t.Fatalf("the high plan's job did not start first")
+	}
+	if job, _ := a.Job(ctx, scope, explore.ID); job.State != core.JobQueued {
+		t.Fatalf("the low job is %s, want it queued behind the high one", job.State)
+	}
+	// The low job has waited past twice the aging when a new high job comes: it goes first.
+	w.clock.Advance(2*core.PriorityAging + time.Minute)
+	later := byPlan("later")
+	w.gates.Release("g-gating")
+	if !w.gates.Reached(ctx, "explore") {
+		t.Fatalf("the low job that waited past twice the aging did not start before a later high one")
+	}
+	if job, _ := a.Job(ctx, scope, later.ID); job.State != core.JobQueued {
+		t.Fatalf("the later high job is %s, want it queued", job.State)
+	}
+	w.gates.Release("g-explore")
+	w.gates.Release("g-later")
+	for _, id := range []core.JobID{gate.ID, gating.ID, explore.ID, later.ID} {
+		awaitState(t, a, id, core.JobSucceeded)
 	}
 }

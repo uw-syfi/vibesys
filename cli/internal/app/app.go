@@ -218,6 +218,8 @@ func (a *App) loop() {
 			continue
 		}
 		var reqs []lifecycle.Request
+		// The machine ages the priority of the jobs that wait by the time it is told.
+		state = state.At(a.now())
 		before := state
 		if m.readiness != storeNotObserved {
 			a.generations.advance(m.generation)

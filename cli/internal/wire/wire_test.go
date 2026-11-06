@@ -97,6 +97,7 @@ func anyJob(r *rand.Rand) core.Job {
 	}
 	j.CancelReason = pick(r, "", "stop it")
 	j.NoCache = r.IntN(2) == 0
+	j.Priority = pick(r, "", core.PriorityLow, core.PriorityNormal, core.PriorityHigh)
 	if r.IntN(2) == 0 {
 		j.Hold = &core.JobHold{Agent: pick(r, "", "lead"), Reason: pick(r, "", "after the integration check"), At: epoch.Add(3 * time.Hour)}
 	}
@@ -122,6 +123,15 @@ func TestAJobSurvivesTheContractAndBack(t *testing.T) {
 // Every value the contract's enums can take is either one the domain names or is refused with the
 // field named, so adding a value to the contract without a table entry fails here.
 func TestEveryContractEnumValueIsTranslatedOrRefused(t *testing.T) {
+	for n, name := range cliv1.Priority_name {
+		p, err := wire.ToPriority("priority", cliv1.Priority(n))
+		if err != nil || wire.Priority(p) != cliv1.Priority(n) || (name != "PRIORITY_UNSPECIFIED") != p.Valid() {
+			t.Fatalf("%s: got %q, %v", name, p, err)
+		}
+	}
+	if _, err := wire.ToPriority("priority", 99); err == nil {
+		t.Fatalf("a priority this build does not know was accepted")
+	}
 	for n, name := range cliv1.JobState_name {
 		state, err := wire.ToJobState("state", cliv1.JobState(n))
 		if name == "JOB_STATE_UNSPECIFIED" {

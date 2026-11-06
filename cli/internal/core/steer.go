@@ -120,6 +120,8 @@ func (j Job) Control(c JobControl) (Job, error) {
 		}
 		out.Hold = nil
 		out.Notes = append(cloneNotes(j.Notes), Note{Text: fmt.Sprintf("released (held since %s)", j.Hold.At.UTC().Format(time.RFC3339)), At: c.At, Agent: c.Agent})
+	case SetJobPriority:
+		return j.setPriority(c)
 	default:
 		return Job{}, failf(FailureInvalidInput, "control: %T is not a change to how a job waits", c)
 	}

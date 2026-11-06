@@ -54,6 +54,8 @@ type Plan struct {
 	Comments  []PlanComment
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Priority is that of the plan's queued jobs that have none of their own. Empty is normal.
+	Priority Priority
 }
 
 // NewPlan is a request to create a plan. The store assigns the number and the open status.
@@ -65,11 +67,13 @@ type NewPlan struct {
 
 // PlanEdit changes a plan. A nil field is left as it is, and the whole edit is one change.
 type PlanEdit struct {
-	Title   *string
-	Body    *string
-	Status  *PlanStatus
-	Comment *PlanComment
-	At      time.Time
+	Title  *string
+	Body   *string
+	Status *PlanStatus
+	// Priority, when set, is a new priority for the plan; Comment then records the change.
+	Priority *Priority
+	Comment  *PlanComment
+	At       time.Time
 }
 
 // PlanFilter selects plans. Fields combine with AND and the zero value matches every plan.

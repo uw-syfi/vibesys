@@ -21,6 +21,10 @@ type PlanChange struct {
 	Title  *string
 	Body   *string
 	Status *core.PlanStatus
+	// Priority is a new priority for the plan's queued jobs that have none of their own, and Reason
+	// why, which a priority needs and nothing else takes.
+	Priority *core.Priority
+	Reason   string
 }
 
 // CreatePlan stores a new open plan with the next number.
@@ -80,8 +84,19 @@ func (a *App) ViewPlan(ctx context.Context, scope core.Scope, number core.PlanNu
 // EditPlan changes a plan's title, body or status as one change. An edit that sets nothing is
 // refused, since it would only move the update time.
 func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.PlanNumber, change PlanChange) (core.Plan, error) {
-	if change.Title == nil && change.Body == nil && change.Status == nil {
-		return core.Plan{}, invalid("edit: set at least one of title, body or status")
+	if change.Title == nil && change.Body == nil && change.Status == nil && change.Priority == nil {
+		return core.Plan{}, invalid("edit: set at least one of title, body, status or priority")
+	}
+	if change.Priority == nil && change.Reason != "" {
+		return core.Plan{}, invalid("reason: a reason goes with a change of priority")
+	}
+	if change.Priority != nil {
+		if !change.Priority.Valid() {
+			return core.Plan{}, invalid("priority: %q is not a priority (low, normal or high)", *change.Priority)
+		}
+		if err := core.CheckPriorityReason("reason", change.Reason); err != nil {
+			return core.Plan{}, err
+		}
 	}
 	if change.Title != nil {
 		if err := core.CheckPlanTitle("title", *change.Title); err != nil {
@@ -96,7 +111,40 @@ func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.Plan
 	if change.Status != nil && !change.Status.Valid() {
 		return core.Plan{}, invalid("status: %q is not a plan status", *change.Status)
 	}
-	return a.editPlan(ctx, c, number, core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status})
+	if change.Priority == nil {
+		return a.editPlan(ctx, c, number, core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status})
+	}
+	return a.reprioritizePlan(ctx, c, number, change)
+}
+
+// reprioritizePlan edits a plan with a new priority, recording the change and its reason as a
+// comment in the same change, and then tells the machine of every queued job of the plan, whose
+// priority it may change.
+func (a *App) reprioritizePlan(ctx context.Context, c core.CallContext, number core.PlanNumber, change PlanChange) (core.Plan, error) {
+	st, err := a.open(ctx, c.Scope)
+	if err != nil {
+		return core.Plan{}, err
+	}
+	was, err := st.Plan(ctx, number)
+	if err != nil {
+		return core.Plan{}, err
+	}
+	at := a.now()
+	comment := core.PlanComment{Text: core.PriorityChange(was.Priority.OrNormal(), *change.Priority, change.Reason), At: at, Agent: c.Agent}
+	plan, err := st.EditPlan(ctx, number, core.PlanEdit{
+		Title: change.Title, Body: change.Body, Status: change.Status, Priority: change.Priority, Comment: &comment, At: at,
+	})
+	if err != nil {
+		return core.Plan{}, err
+	}
+	queued, err := st.Jobs(ctx, core.JobFilter{States: []core.JobState{core.JobQueued}})
+	if err != nil {
+		return core.Plan{}, err
+	}
+	if err := a.steer(a.generationContext(ctx, storeIDOf(c.Scope)), c.Scope, st, core.LinkedTo(number, queued)); err != nil {
+		return core.Plan{}, err
+	}
+	return plan, nil
 }
 
 // CommentPlan adds a comment, which carries a decision or a result.

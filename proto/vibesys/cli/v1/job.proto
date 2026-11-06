@@ -18,6 +18,17 @@ enum JobKind {
   JOB_KIND_MEASURE = 3;
 }
 
+// Priority orders the queued jobs that may start: one of a higher priority is considered first,
+// and among jobs of one priority the scheduler's policy orders them. A job that has waited long
+// counts a level higher (aging), so no job waits for ever. No running job is ever stopped for one
+// of a higher priority.
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+}
+
 // JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
@@ -222,6 +233,9 @@ message Job {
   // Set while the job is held: it keeps its place in the queue and is not started until it is
   // released. Only a queued job is held, and a job that starts is not held any more.
   JobHold hold = 20;
+  // The job's own priority, set by `job priority`, which overrides that of its plans. Unspecified
+  // inherits: the highest priority of the plans it is linked to, and normal with none.
+  Priority priority = 21 [(buf.validate.field).enum.defined_only = true];
 }
 
 // JobHold says who held a queued job, when and why. A held job keeps its place in the queue, holds

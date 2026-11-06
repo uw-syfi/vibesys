@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 5 is migrated to version 6 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, and version 6 a job's hold); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 6 is migrated to version 7 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, version 6 a job's hold, and version 7 a job's and a plan's priority); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -108,7 +108,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
-| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
+| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. It considers the waiting jobs by aged priority first and in the policy's order within one, and holds back a held job and, while the daemon drains, every job. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
 | `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
 | `internal/lease/` | `Leases`: where the daemons that share a resource take turns at holding it alone, and `Book`, where each resource is leased, which only `production` fills. |
@@ -268,6 +268,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `note <job> <text>` | Add a note to a job in any state. |
 | `hold <job> [--reason text]` | Keep a queued job from starting: it keeps its place in the queue, stands in no other job's way, and `jobs` shows `held since <time> by <agent>: <reason>` under it and the hold as its wait. Only a queued job is held (a running or final one is `CONFLICT`, exit `1`). The hold and its release are kept as notes on the job. See "Steering the queue". |
 | `release <job>` | Let a held job start in its turn, which is its place by submit time as if it had never been held. Releasing a job that is not held prints it unchanged. |
+| `job priority <job> high\|normal\|low\|inherit --reason text` | Set a queued job's own priority, which overrides its plans', or with `inherit` let it take theirs again. `--reason` is required, and the change is kept as a note on the job (`priority <from> -> <to>: <reason>`, with the agent and the time). A job that is not queued is `CONFLICT` (exit `1`). See "Steering the queue". |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits, and who held a held one and why. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
@@ -279,7 +280,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
 | `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. |
 | `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
-| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s]` | Change what is given and keep the rest. |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--priority p --reason text]` | Change what is given and keep the rest. `--priority high\|normal\|low` sets the priority of the plan's queued jobs that set none of their own (a new plan is `normal`); it needs `--reason`, and the change is kept as a comment on the plan in the same edit. A plan whose priority is not normal says it at the end of its line. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or the daemon's status with `--json`. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this and reads the exit code. |
@@ -350,6 +351,21 @@ agent of a run, steers it without cancelling anything:
   naming who held it and why. Only a queued job can be held, and a job that starts, or ends, is not
   held any more. A job the daemon had already begun to start when the hold arrived (its launch was
   under way, its store still said queued) starts anyway, and the hold is dropped when it does.
+- Priority orders the jobs that may start. A job's priority is its own (`job priority`), or else
+  the highest of the plans it is linked to (`plan edit --priority`), or else `normal`. Among the
+  queued jobs the scheduler would start, those of a higher priority are considered first, and
+  among jobs of one priority the policy (`[scheduler] policy`) orders them as before: `fifo` by
+  submit time, `fair-share` by the run that used least of what the job claims lately. So with
+  `fair-share`, priority comes first and fairness between runs holds within each priority. A job
+  that waits ages: it counts one level higher for each hour it has waited (`core.PriorityAging`),
+  so a low job counts as normal after an hour and as high after two, and a normal job as high after
+  an hour. Under `fifo`, a job that has waited two hours is therefore considered before every job
+  submitted after it, whatever their priority, and no job is starved. Priority never preempts: a
+  job that runs is never stopped. It changes nothing else either: a measure still runs alone on
+  its placement, capacity, claims, leases and holds still apply, and a job that waits for a
+  resource still keeps its turn on it, its turn now coming from this order (so a high measure
+  waiting for its placement keeps the normal checks after it off that placement). A job that its
+  store already has running (a parked supervisor) goes first, as before.
 - `daemon drain [--reason t]` makes the daemon start no queued job: jobs that run finish, queued
   jobs keep their places, and each says it waits because the daemon is draining. A job whose store
   already has it running (a parked supervisor found after a crash) still starts, as it has started
@@ -376,7 +392,7 @@ on its first command (see "The daemon and the supervisors"); a drain the old dae
 the new one the same way.
 
 Who asks is the caller's own word (`--agent`, `VIBESYS_AGENT`): the daemon checks no right to hold,
-release, drain or resume. The optimization skills carry the convention: the lead steers, workers do
+release, set a priority, drain or resume. The optimization skills carry the convention: the lead steers, workers do
 not hold other agents' jobs.
 
 ## Who submitted a job
@@ -509,7 +525,8 @@ queued jobs start from `schedule`:
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
-  submitted it) that used least of what the job claims lately. A job that waits keeps its turn: a
+  submitted it) that used least of what the job claims lately, each within one priority, after
+  the jobs of a higher priority (see "Steering the queue"). A job that waits keeps its turn: a
   later job does not take what an earlier one waits for, so a measure is not starved by checks.
 - A job whose supervisor is parked goes first. A job in doubt holds its claims while its command
   can run; one whose work the daemon could not read holds every resource. Recovery adopts running

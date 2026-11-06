@@ -6,6 +6,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 )
 
 // Steering the queue: an operator, or a lead agent, holds and releases queued jobs and drains the
@@ -61,9 +62,9 @@ func (m *MemoryDrainRecord) Save(ctx context.Context, d *core.Drain) error {
 	return nil
 }
 
-// steeringOf is how a job waits, as its store has it, for the machine.
-func steeringOf(job core.Job) lifecycle.Steering {
-	return lifecycle.Steering{Hold: job.Hold}
+// steeringOf is how a job waits, as its store has it with its task's plans, for the machine.
+func steeringOf(job core.Job, plans []core.Plan) lifecycle.Steering {
+	return lifecycle.Steering{Hold: job.Hold, Priority: core.EffectivePriority(job, plans)}
 }
 
 // HoldJob holds a queued job: it keeps its place in the queue and is not started until it is
@@ -96,11 +97,39 @@ func (a *App) controlJob(ctx context.Context, c core.CallContext, id core.JobID,
 	if err != nil {
 		return core.Job{}, err
 	}
-	ref := lifecycle.Ref{Store: storeIDOf(scope), Job: id}
-	if err := a.settleEffect(ctx, message{event: lifecycle.Steered{Ref: ref, Steering: steeringOf(job)}, changed: true}); err != nil {
+	if err := a.steer(ctx, scope, st, []core.Job{job}); err != nil {
 		return core.Job{}, err
 	}
 	return job, nil
+}
+
+// steer tells the machine how the jobs wait now, as the store has them, with the task's plans.
+func (a *App) steer(ctx context.Context, scope core.Scope, st store.Store, jobs []core.Job) error {
+	plans, err := st.Plans(ctx, core.PlanFilter{})
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
+		if err := a.settleEffect(ctx, message{event: lifecycle.Steered{Ref: ref, Steering: steeringOf(job, plans)}, changed: true}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetJobPriority sets a queued job's own priority, which overrides its plans', or with no priority
+// lets it inherit theirs again. A reason is required; the change is kept as a note on the job with
+// who asked and when. A job that is not queued is refused as a conflict: no job that runs is ever
+// stopped or reordered.
+func (a *App) SetJobPriority(ctx context.Context, c core.CallContext, id core.JobID, priority core.Priority, reason string) (core.Job, error) {
+	if priority != "" && !priority.Valid() {
+		return core.Job{}, invalid("priority: %q is not a priority (low, normal or high)", priority)
+	}
+	if err := core.CheckPriorityReason("reason", reason); err != nil {
+		return core.Job{}, err
+	}
+	return a.controlJob(ctx, c, id, core.SetJobPriority{Priority: priority, Reason: reason, Agent: c.Agent, At: a.now()})
 }
 
 // Drain makes the daemon start no queued job until Resume: the jobs that run go on, the queued ones

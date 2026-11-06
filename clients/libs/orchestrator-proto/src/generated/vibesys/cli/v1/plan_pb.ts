@@ -6,7 +6,7 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { Job } from "./job_pb.js";
+import type { Job, Priority } from "./job_pb.js";
 import { file_vibesys_cli_v1_job } from "./job_pb.js";
 import type { Verdict } from "./verdict_pb.js";
 import { file_vibesys_cli_v1_verdict } from "./verdict_pb.js";
@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/plan.proto.
  */
 export const file_vibesys_cli_v1_plan: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJSCgtQbGFuQ29tbWVudBIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSLuAQoEUGxhbhIOCgZudW1iZXIYASABKA0SDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCRIqCgZzdGF0dXMYBCABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEi0KCGNvbW1lbnRzGAUgAygLMhsudmliZXN5cy5jbGkudjEuUGxhbkNvbW1lbnQSLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiVwoJTGlua2VkSm9iEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYhIoCgd2ZXJkaWN0GAIgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdCJXCghQbGFuVmlldxIiCgRwbGFuGAEgASgLMhQudmliZXN5cy5jbGkudjEuUGxhbhInCgRqb2JzGAIgAygLMhkudmliZXN5cy5jbGkudjEuTGlua2VkSm9iKp4BCgpQbGFuU3RhdHVzEhsKF1BMQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFAoQUExBTl9TVEFUVVNfT1BFThABEhYKElBMQU5fU1RBVFVTX0NIT1NFThACEhMKD1BMQU5fU1RBVFVTX1dPThADEhYKElBMQU5fU1RBVFVTX1BBUktFRBAEEhgKFFBMQU5fU1RBVFVTX1JFSkVDVEVEEAVCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_verdict]);
+  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJSCgtQbGFuQ29tbWVudBIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSKaAgoEUGxhbhIOCgZudW1iZXIYASABKA0SDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCRIqCgZzdGF0dXMYBCABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEi0KCGNvbW1lbnRzGAUgAygLMhsudmliZXN5cy5jbGkudjEuUGxhbkNvbW1lbnQSLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgoIcHJpb3JpdHkYCCABKA4yGC52aWJlc3lzLmNsaS52MS5Qcmlvcml0eSJXCglMaW5rZWRKb2ISIAoDam9iGAEgASgLMhMudmliZXN5cy5jbGkudjEuSm9iEigKB3ZlcmRpY3QYAiABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0IlcKCFBsYW5WaWV3EiIKBHBsYW4YASABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuEicKBGpvYnMYAiADKAsyGS52aWJlc3lzLmNsaS52MS5MaW5rZWRKb2IqngEKClBsYW5TdGF0dXMSGwoXUExBTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIUChBQTEFOX1NUQVRVU19PUEVOEAESFgoSUExBTl9TVEFUVVNfQ0hPU0VOEAISEwoPUExBTl9TVEFUVVNfV09OEAMSFgoSUExBTl9TVEFUVVNfUEFSS0VEEAQSGAoUUExBTl9TVEFUVVNfUkVKRUNURUQQBUI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_verdict]);
 
 /**
  * @generated from message vibesys.cli.v1.PlanComment
@@ -86,6 +86,13 @@ export type Plan = Message<"vibesys.cli.v1.Plan"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 7;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * The priority of the plan's queued jobs that set none of their own. Unspecified is normal.
+   *
+   * @generated from field: vibesys.cli.v1.Priority priority = 8;
+   */
+  priority: Priority;
 };
 
 /**

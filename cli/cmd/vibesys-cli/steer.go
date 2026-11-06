@@ -65,6 +65,65 @@ func releaseCommand(ctx context.Context, d deps, args []string) int {
 	return printJob(d, c.json, resp, resp.GetJob())
 }
 
+// jobCommand is `job priority <job> high|normal|low|inherit --reason text`: a queued job's own
+// priority, which overrides its plans', or with inherit theirs again.
+func jobCommand(ctx context.Context, d deps, args []string) int {
+	if len(args) == 0 || args[0] != "priority" {
+		return fail(d, d.jsonErrors, usagef("job: name a subcommand: priority"))
+	}
+	fs, c := newFlags("job priority", d)
+	reason := fs.String("reason", "", "why the priority changes, required; kept as a note on the job")
+	positional, err := parse(fs, args[1:])
+	if err != nil {
+		return parseFailed(d, fs, err)
+	}
+	if len(positional) != 2 {
+		return fail(d, c.json, usagef("job priority: give a job and a priority (high, normal, low or inherit)"))
+	}
+	priority, err := parsePriority("priority", positional[1], true)
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	if *reason == "" {
+		return fail(d, c.json, usagef("--reason: a change of priority needs a reason"))
+	}
+	callCtx, err := c.callContext(d)
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	cl, err := connect(ctx, d)
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	defer cl.Close()
+	resp, err := cl.SetJobPriority(ctx, &cliv1.SetJobPriorityRequest{Context: callCtx, JobId: positional[0], Priority: priority, Reason: *reason})
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	return printJob(d, c.json, resp, resp.GetJob())
+}
+
+// priorityNames maps what a user writes to priorities. It is read from the contract's enum, so a
+// priority added there is a priority here.
+var priorityNames = enumNames(cliv1.Priority_name, "PRIORITY_", func(n int32) cliv1.Priority { return cliv1.Priority(n) })
+
+func priorityName(p cliv1.Priority) string { return lower("PRIORITY_", p.String()) }
+
+// parsePriority reads a priority by name, and with inherit allowed, "inherit" as none of its own.
+func parsePriority(field, name string, inherit bool) (cliv1.Priority, error) {
+	if inherit && name == "inherit" {
+		return cliv1.Priority_PRIORITY_UNSPECIFIED, nil
+	}
+	if p, ok := priorityNames[name]; ok {
+		return p, nil
+	}
+	more := ""
+	if inherit {
+		more = " or inherit"
+	}
+	return 0, usagef("%s: %q is not a priority (%s%s)", field, name, choices(cliv1.Priority_name, "PRIORITY_"), more)
+}
+
 // printJob prints a response that carries one job: the response with --json, and the job's lines
 // otherwise.
 func printJob(d deps, asJSON bool, resp proto.Message, job *cliv1.Job) int {

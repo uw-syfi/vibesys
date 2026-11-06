@@ -18,6 +18,12 @@ func (c *Client) ReleaseJob(ctx context.Context, req *cliv1.ReleaseJobRequest) (
 	return resp, c.fail(err)
 }
 
+// SetJobPriority sets a queued job's own priority, or lets it inherit its plans'.
+func (c *Client) SetJobPriority(ctx context.Context, req *cliv1.SetJobPriorityRequest) (*cliv1.SetJobPriorityResponse, error) {
+	resp, err := c.rpc.SetJobPriority(ctx, req)
+	return resp, c.fail(err)
+}
+
 // Drain makes the daemon start no queued job until Resume.
 func (c *Client) Drain(ctx context.Context, req *cliv1.DrainRequest) (*cliv1.DrainResponse, error) {
 	resp, err := c.rpc.Drain(ctx, req)

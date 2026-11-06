@@ -88,3 +88,53 @@ func TestOnlyAQueuedJobIsHeldAndADaemonThatIsNotRunningIsNotDrained(t *testing.T
 		t.Fatalf("hold of no such job: %+v", r)
 	}
 }
+
+// A lead funds a plan at high priority and marks an exploratory job low, each with a reason: the
+// plan line says its priority, `plan view` keeps the change as a comment, and the job's line says
+// its own priority and keeps the change as a note. A change with no reason, or a reason with no
+// change, is invalid input and starts no daemon.
+func TestAPriorityChangeNeedsAReasonAndIsKept(t *testing.T) {
+	c := newCLI(t)
+	c.env["VIBESYS_AGENT"] = "lead"
+	for _, args := range [][]string{
+		jobPriority("j1", "high"),
+		jobPriority("j1", "urgent", "--reason", "r"),
+		jobPriority("j1"),
+		{"job", "--task", "kv", "nice", "j1", "high", "--reason", "r"},
+		{"plan", "edit", "1", "--task", "kv", "--priority", "high"},
+		{"plan", "edit", "1", "--task", "kv", "--priority", "inherit", "--reason", "r"},
+		{"plan", "edit", "1", "--task", "kv", "--title", "t", "--reason", "r"},
+	} {
+		if r := c.run(args...); r.code != exitInvalidInput {
+			t.Errorf("%v: %+v, want invalid input", args, r)
+		}
+	}
+	if c.starter.Calls() != 0 {
+		t.Fatalf("an invalid priority change started a daemon")
+	}
+	c.taskWithAJob("kv")
+	c.planOK("create", "--title", "the integration line")
+	if r := c.planOK("edit", "1", "--priority", "high", "--reason", "gates every later plan"); r.stdout != "1\topen\tthe integration line\tpriority high\n" {
+		t.Fatalf("plan edit --priority = %q", r.stdout)
+	}
+	view := c.planOK("view", "1").stdout
+	if !strings.Contains(view, "lead, ") || !strings.Contains(view, "priority normal -> high: gates every later plan") {
+		t.Fatalf("plan view, want the change as a comment by lead:\n%s", view)
+	}
+	if r := c.run("daemon", "drain"); r.code != exitOK {
+		t.Fatalf("daemon drain: %+v", r)
+	}
+	job := c.submit("exit", "0")
+	r := c.run(jobPriority(job, "low", "--reason", "exploratory")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "\tpriority low") || !strings.Contains(r.stdout, "note: priority inherited -> low: exploratory") {
+		t.Fatalf("job priority: %+v", r)
+	}
+	if r := c.run(jobPriority(job, "inherit", "--reason", "back to the plan", "--json")...); r.code != exitOK || strings.Contains(r.stdout, `"priority"`) {
+		t.Fatalf("job priority inherit --json, want no priority of its own: %+v", r)
+	}
+}
+
+// jobPriority is the arguments of `job priority` for the test task.
+func jobPriority(args ...string) []string {
+	return append([]string{"job", "priority", "--task", "kv"}, args...)
+}

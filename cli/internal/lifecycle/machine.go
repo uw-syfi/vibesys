@@ -112,9 +112,11 @@ type entry struct {
 }
 
 // Steering is what an operator said of how a queued job waits, as its store keeps it: whether it
-// is held. The scheduler applies it to a job while it is queued (schedule.Candidate).
+// is held, and its priority before aging (its own or its plans', core.EffectivePriority). The
+// scheduler applies it to a job while it is queued (schedule.Candidate).
 type Steering struct {
-	Hold *core.JobHold
+	Hold     *core.JobHold
+	Priority core.Priority
 }
 
 // Work is what a job asks of the machine, as the shell read it from the job: the places it may run,
@@ -160,6 +162,8 @@ type State struct {
 	seq     uint64
 	// drain, when set, says the daemon is draining: it starts no queued job (schedule.State.Drain).
 	drain *core.Drain
+	// now is the time the shell said it is (At), which ages the priority of the jobs that wait.
+	now time.Time
 	// recovering holds every launch back until RecoveryDone, so that a queued job is not started
 	// before the machine has heard of the job that is still running.
 	recovering bool
@@ -667,7 +671,7 @@ func (Discard) request()       {}
 func Step(s State, e Event) (State, []Request) {
 	out := State{
 		entries: slices.Clone(s.entries), seq: s.seq, recovering: s.recovering, unread: slices.Clone(s.unread),
-		scheduling: s.scheduling, recent: s.recent, drain: s.drain,
+		scheduling: s.scheduling, recent: s.recent, drain: s.drain, now: s.now,
 	}
 	var reqs []Request
 	switch e := e.(type) {
@@ -1339,7 +1343,7 @@ func (s *State) schedule() []Request {
 	if s.recovering {
 		return reqs
 	}
-	st := schedule.State{Resources: s.resources(), Recent: s.recent, Drain: s.drain}
+	st := schedule.State{Resources: s.resources(), Recent: s.recent, Drain: s.drain, Now: s.now}
 	for _, e := range s.entries {
 		switch {
 		case e.holdsMachine():
@@ -1388,7 +1392,7 @@ func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
 func (s *State) candidate(e entry, first bool) schedule.Candidate {
 	return schedule.Candidate{
 		ID: idOf(e.ref), Options: s.optionsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased,
-		Hold: e.steer.Hold,
+		Hold: e.steer.Hold, Priority: e.steer.Priority,
 	}
 }
 
@@ -1520,6 +1524,14 @@ func (s State) Troubled() []Trouble {
 		}
 	}
 	return out
+}
+
+// At returns the state as of a moment: the shell says what time it is before each Step, and the
+// scheduler ages the priority of the jobs that wait by it. A state never told is at the zero time,
+// which ages nothing.
+func (s State) At(now time.Time) State {
+	s.now = now
+	return s
 }
 
 // Draining is the drain the machine applies, or nil when it starts jobs.

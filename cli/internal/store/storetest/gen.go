@@ -235,6 +235,7 @@ func (g *gen) plan() core.Plan {
 		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(),
 		Status:   []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)],
 		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
+		Priority: core.Priorities()[g.pick(3)],
 	}
 }
 
@@ -247,6 +248,7 @@ func (g *gen) job() core.Job {
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
 		Needs: g.needs(), TaskVersion: g.name(), Hold: &core.JobHold{Agent: g.text(), Reason: g.text(), At: g.instant()},
+		Priority: core.Priorities()[g.pick(3)],
 	}
 }
 

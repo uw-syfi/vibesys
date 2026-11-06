@@ -68,6 +68,12 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if err != nil {
 		return core.SubmitOutcome{}, err
 	}
+	// The plans give the job its priority when it has none of its own. They are read before the
+	// job is queued, so a store that cannot say queues nothing.
+	plans, err := st.Plans(ctx, core.PlanFilter{})
+	if err != nil {
+		return core.SubmitOutcome{}, err
+	}
 	at := a.now()
 	sub.At = at
 	if req.Note != "" {
@@ -94,7 +100,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		event = lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(recoveryErr)}
 	}
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
-		event = a.admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job)
+		event = a.admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job, plans)
 	}
 	// Settled, so a returned submission is in Status, even while recovery waits.
 	err = a.settleEffect(ctx, message{event: event, readiness: readiness, scope: &scope, changed: true})

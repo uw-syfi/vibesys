@@ -235,6 +235,7 @@ func Job(j core.Job) *cliv1.Job {
 	if j.Hold != nil {
 		out.Hold = JobHold(*j.Hold)
 	}
+	out.Priority = Priority(j.Priority)
 	return out
 }
 
@@ -368,6 +369,9 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 	}
 	out.TaskVersion = j.GetTaskVersion()
 	out.Hold = ToJobHold(j.GetHold())
+	if out.Priority, err = ToPriority("job.priority", j.GetPriority()); err != nil {
+		return core.Job{}, err
+	}
 	return out, nil
 }
 

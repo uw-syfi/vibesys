@@ -145,14 +145,16 @@ func (x *PlanComment) GetAgent() string {
 // Plan is stored the way an issue is: a number the CLI assigns, a free-form markdown body, and
 // comments that carry decisions and results.
 type Plan struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Number        uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
-	Status        PlanStatus             `protobuf:"varint,4,opt,name=status,proto3,enum=vibesys.cli.v1.PlanStatus" json:"status,omitempty"`
-	Comments      []*PlanComment         `protobuf:"bytes,5,rep,name=comments,proto3" json:"comments,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Number    uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+	Title     string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Body      string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Status    PlanStatus             `protobuf:"varint,4,opt,name=status,proto3,enum=vibesys.cli.v1.PlanStatus" json:"status,omitempty"`
+	Comments  []*PlanComment         `protobuf:"bytes,5,rep,name=comments,proto3" json:"comments,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// The priority of the plan's queued jobs that set none of their own. Unspecified is normal.
+	Priority      Priority `protobuf:"varint,8,opt,name=priority,proto3,enum=vibesys.cli.v1.Priority" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -234,6 +236,13 @@ func (x *Plan) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Plan) GetPriority() Priority {
+	if x != nil {
+		return x.Priority
+	}
+	return Priority_PRIORITY_UNSPECIFIED
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -350,7 +359,7 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\vPlanComment\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
-	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xab\x02\n" +
+	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xe1\x02\n" +
 	"\x04Plan\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
@@ -360,7 +369,8 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"e\n" +
+	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x124\n" +
+	"\bpriority\x18\b \x01(\x0e2\x18.vibesys.cli.v1.PriorityR\bpriority\"e\n" +
 	"\tLinkedJob\x12%\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\x121\n" +
 	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"c\n" +
@@ -397,24 +407,26 @@ var file_vibesys_cli_v1_plan_proto_goTypes = []any{
 	(*LinkedJob)(nil),             // 3: vibesys.cli.v1.LinkedJob
 	(*PlanView)(nil),              // 4: vibesys.cli.v1.PlanView
 	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
-	(*Job)(nil),                   // 6: vibesys.cli.v1.Job
-	(*Verdict)(nil),               // 7: vibesys.cli.v1.Verdict
+	(Priority)(0),                 // 6: vibesys.cli.v1.Priority
+	(*Job)(nil),                   // 7: vibesys.cli.v1.Job
+	(*Verdict)(nil),               // 8: vibesys.cli.v1.Verdict
 }
 var file_vibesys_cli_v1_plan_proto_depIdxs = []int32{
-	5, // 0: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
-	0, // 1: vibesys.cli.v1.Plan.status:type_name -> vibesys.cli.v1.PlanStatus
-	1, // 2: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
-	5, // 3: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
-	5, // 4: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
-	6, // 5: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
-	7, // 6: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
-	2, // 7: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
-	3, // 8: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	5,  // 0: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
+	0,  // 1: vibesys.cli.v1.Plan.status:type_name -> vibesys.cli.v1.PlanStatus
+	1,  // 2: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
+	5,  // 3: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
+	5,  // 4: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
+	6,  // 5: vibesys.cli.v1.Plan.priority:type_name -> vibesys.cli.v1.Priority
+	7,  // 6: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
+	8,  // 7: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
+	2,  // 8: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
+	3,  // 9: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_plan_proto_init() }

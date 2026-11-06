@@ -68,6 +68,25 @@ func (s *Server) ReleaseJob(ctx context.Context, req *cliv1.ReleaseJobRequest) (
 	return &cliv1.ReleaseJobResponse{Job: wire.Job(job)}, nil
 }
 
+// SetJobPriority implements cliv1.DaemonServiceServer.
+func (s *Server) SetJobPriority(ctx context.Context, req *cliv1.SetJobPriorityRequest) (*cliv1.SetJobPriorityResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	priority, err := wire.ToPriority("priority", req.GetPriority())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	job, err := s.app.SetJobPriority(ctx, call, core.JobID(req.GetJobId()), priority, req.GetReason())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return &cliv1.SetJobPriorityResponse{Job: wire.Job(job)}, nil
+}
+
 // Drain implements cliv1.DaemonServiceServer.
 func (s *Server) Drain(ctx context.Context, req *cliv1.DrainRequest) (*cliv1.DrainResponse, error) {
 	ctx, cancel := s.bound(ctx)

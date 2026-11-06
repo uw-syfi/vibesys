@@ -215,7 +215,13 @@ func printPlan(d deps, asJSON bool, resp planResponse) {
 // describePlan is the one line a plan takes: its number first, as a job's id is, so a caller can
 // read it back.
 func describePlan(p *cliv1.Plan) string {
-	return fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
+	line := fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
+	switch p.GetPriority() {
+	case cliv1.Priority_PRIORITY_UNSPECIFIED, cliv1.Priority_PRIORITY_NORMAL:
+	default:
+		line += "\tpriority " + priorityName(p.GetPriority())
+	}
+	return line
 }
 
 // planCreate is `plan create --title t [--body text | --body-file path]`.
@@ -343,13 +349,15 @@ func renderPlanView(v *cliv1.PlanView) string {
 
 func clockText(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-// planEdit is `plan edit <number> [--title t] [--body text | --body-file path] [--status s]`. It
-// changes what it is given and leaves the rest.
+// planEdit is `plan edit <number> [--title t] [--body text | --body-file path] [--status s]
+// [--priority p --reason text]`. It changes what it is given and leaves the rest.
 func planEdit(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan edit", d)
-	var title, status optString
+	var title, status, priority optString
 	fs.Var(&title, "title", "a new title, one line")
 	fs.Var(&status, "status", "a new status ("+planStatusChoices()+")")
+	fs.Var(&priority, "priority", "a new priority for the plan's queued jobs that set none of their own (low, normal or high); needs --reason")
+	reason := fs.String("reason", "", "why the priority changes; kept as a comment on the plan")
 	body := addTextFlag(fs, "body", "a new body, in markdown")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
@@ -375,8 +383,20 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	} else if given {
 		req.Body = &text
 	}
-	if req.Title == nil && req.Body == nil && req.Status == nil {
-		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file or --status"))
+	if priority.set {
+		p, err := parsePriority("--priority", priority.value, false)
+		if err != nil {
+			return fail(d, c.json, err)
+		}
+		if *reason == "" {
+			return fail(d, c.json, usagef("--reason: a change of priority needs a reason"))
+		}
+		req.Priority, req.Reason = &p, *reason
+	} else if *reason != "" {
+		return fail(d, c.json, usagef("--reason goes with --priority"))
+	}
+	if req.Title == nil && req.Body == nil && req.Status == nil && req.Priority == nil {
+		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status or --priority"))
 	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {

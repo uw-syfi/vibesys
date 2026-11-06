@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
@@ -147,6 +148,26 @@ func TestTheContractCatchesABrokenScheduler(t *testing.T) {
 				})
 			},
 			policy: fifo.New, property: "a held job, and any but a First one while the daemon drains, waits and keeps no turn",
+		},
+		// Priority is left out: the jobs are considered in the policy's order alone.
+		"ignores priority": {
+			step: func(s schedule.State, rules schedule.Rules) []schedule.Decision {
+				s.Waiting = slices.Clone(s.Waiting)
+				for i := range s.Waiting {
+					s.Waiting[i].Priority = ""
+				}
+				s.Now = time.Time{}
+				return schedule.Step(s, rules)
+			},
+			policy: fifo.New, property: "jobs are considered by aged priority, and in the policy's order within one",
+		},
+		// A low job never counts higher, however long it waits.
+		"never ages a priority": {
+			step: func(s schedule.State, rules schedule.Rules) []schedule.Decision {
+				s.Now = time.Time{}
+				return schedule.Step(s, rules)
+			},
+			policy: fifo.New, property: "jobs are considered by aged priority, and in the policy's order within one",
 		},
 		// A policy that always serves the run that came first starves the others.
 		"starves a run": {

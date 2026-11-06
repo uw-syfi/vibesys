@@ -163,6 +163,9 @@ func (d *driver) step(step int) {
 		if g.pick(2) == 0 {
 			edit.Status = ptr([]core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)])
 		}
+		if g.pick(3) == 0 {
+			edit.Priority = ptr([]core.Priority{core.PriorityLow, core.PriorityNormal, core.PriorityHigh, "bad"}[g.pick(4)])
+		}
 		if g.pick(2) == 0 {
 			edit.Comment = &core.PlanComment{Text: g.text(), At: d.instant(), Agent: g.text()}
 		}
@@ -199,7 +202,9 @@ func (d *driver) step(step int) {
 	case op == 15:
 		id := d.jobID(jobs)
 		var control core.JobControl = core.ReleaseJob{Agent: g.text(), At: d.instant()}
-		if g.pick(2) == 0 {
+		if g.pick(3) == 0 {
+			control = core.SetJobPriority{Priority: []core.Priority{"", core.PriorityLow, core.PriorityHigh, "bad"}[g.pick(4)], Reason: g.text(), Agent: g.text(), At: d.instant()}
+		} else if g.pick(2) == 0 {
 			control = core.HoldJob{Hold: core.JobHold{Agent: g.text(), Reason: g.text(), At: d.instant()}}
 		}
 		d.do(step, "ControlJob", func(s store.Store) (any, error) { return s.ControlJob(ctx, id, control) })

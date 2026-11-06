@@ -102,13 +102,13 @@
 // read, with an error of kind core.FailureIncompatible that names the file: a newer version says to
 // upgrade, and version 1, the hand-written encoding that came before protojson, says the store is
 // to be removed, because nothing migrates it and no release wrote it. This program reads versions 2
-// to 6. The refusal of version 1 names the store's directory and, when the index records it, the
+// to 7. The refusal of version 1 names the store's directory and, when the index records it, the
 // index entry to remove. The index reads an entry of another version for its task when it has this
 // version's shape, so such a store stays known and is refused alone. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
 // promotion and a refusal), so Open migrates a store of version 2 under the owner's lock: it makes
 // the directories version 2 did not have, then writes the format file at version 3, which is the
 // migration's one commit point. Versions 4 to 6 only added fields (a job's placement, its needs and
-// task version, its hold), so a store of an older version is migrated the same way, to the current
+// task version, its hold, its priority and a plan's), so a store of an older version is migrated the same way, to the current
 // version. A record keeps the version it was written with.
 // It refuses a record it cannot decode, one with a field it does not know, and one whose name and
 // content disagree, with an error of kind core.FailureInternal that names the file. It refuses a
