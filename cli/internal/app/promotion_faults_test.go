@@ -65,6 +65,13 @@ func (f faultyBranches) IsAncestor(ctx context.Context, repo string, a, d core.C
 	return wrap(f.plan, "IsAncestor", true, func() (bool, error) { return f.Branches.IsAncestor(ctx, repo, a, d) })
 }
 
+func (f faultyBranches) CheckFastForward(ctx context.Context, repo, branch string, to core.Commit) error {
+	_, err := wrap(f.plan, "CheckFastForward", true, func() (struct{}, error) {
+		return struct{}{}, f.Branches.CheckFastForward(ctx, repo, branch, to)
+	})
+	return err
+}
+
 func (f faultyBranches) FastForward(ctx context.Context, repo, branch string, from, to core.Commit) error {
 	_, err := wrap(f.plan, "FastForward", false, func() (struct{}, error) {
 		return struct{}{}, f.Branches.FastForward(ctx, repo, branch, from, to)

@@ -20,6 +20,15 @@ type FakeBranches struct {
 type fakeRepo struct {
 	branches map[string]core.Commit
 	parents  map[core.Commit][]core.Commit
+	// checkouts are the work trees by path. A clean one holds the files of its branch's head.
+	checkouts map[string]*fakeCheckout
+}
+
+type fakeCheckout struct {
+	branch string
+	// at is the commit whose files and index the checkout holds.
+	at    core.Commit
+	dirty bool
 }
 
 var _ Branches = (*FakeBranches)(nil)
@@ -30,7 +39,7 @@ func NewFakeBranches() *FakeBranches { return &FakeBranches{repos: map[string]*f
 func (f *FakeBranches) repo(path string) *fakeRepo {
 	r, ok := f.repos[path]
 	if !ok {
-		r = &fakeRepo{branches: map[string]core.Commit{}, parents: map[core.Commit][]core.Commit{}}
+		r = &fakeRepo{branches: map[string]core.Commit{}, parents: map[core.Commit][]core.Commit{}, checkouts: map[string]*fakeCheckout{}}
 		f.repos[path] = r
 	}
 	return r
@@ -59,6 +68,31 @@ func (f *FakeBranches) AddBranch(repository, branch string, at core.Commit) {
 		r.parents[at] = nil
 	}
 	r.branches[branch] = at
+}
+
+// AddCheckout makes a work tree at path that has the branch checked out and holds its head's files.
+// The branch must exist.
+func (f *FakeBranches) AddCheckout(repository, path, branch string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repo(repository)
+	r.checkouts[path] = &fakeCheckout{branch: branch, at: r.branches[branch]}
+}
+
+// DirtyCheckout gives the work tree at path a local change to a tracked file.
+func (f *FakeBranches) DirtyCheckout(repository, path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repo(repository).checkouts[path].dirty = true
+}
+
+// CheckoutState returns the commit whose files the work tree at path holds, and whether it has local
+// changes, for a test that looks without going through the daemon.
+func (f *FakeBranches) CheckoutState(repository, path string) (core.Commit, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.repo(repository).checkouts[path]
+	return c.at, c.dirty
 }
 
 // FailNextFastForward makes the next FastForward fail with err before it changes anything: a move
@@ -142,6 +176,34 @@ func (f *FakeBranches) FastForward(_ context.Context, repository, branch string,
 	if !ahead {
 		return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("commit %s is not a descendant of %s, so branch %q cannot fast-forward to it", to, from, branch)}
 	}
+	if err := r.checkCheckouts(branch); err != nil {
+		return err
+	}
+	for _, c := range r.checkouts {
+		if c.branch == branch {
+			c.at = to
+		}
+	}
 	r.branches[branch] = to
+	return nil
+}
+
+// CheckFastForward implements Branches.
+func (f *FakeBranches) CheckFastForward(_ context.Context, repository, branch string, _ core.Commit) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repo(repository)
+	if _, ok := r.branches[branch]; !ok {
+		return &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s has no branch %q", repository, branch)}
+	}
+	return r.checkCheckouts(branch)
+}
+
+func (r *fakeRepo) checkCheckouts(branch string) error {
+	for path, c := range r.checkouts {
+		if c.branch == branch && c.dirty {
+			return dirtyCheckout(branch, path)
+		}
+	}
 	return nil
 }

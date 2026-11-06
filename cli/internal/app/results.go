@@ -202,6 +202,12 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 			"commit %s does not contain the result branch head %s, so the branch cannot fast-forward to it; merge or rebase onto the head and measure it again",
 			commit, head)}
 	}
+	// A checkout of the branch with local changes cannot move with it. That is refused here too, before
+	// anything is recorded, so a refused promotion leaves no record that every later look at the
+	// branch would try to carry out.
+	if err := a.cfg.Branches.CheckFastForward(ctx, string(t.scope.Repository()), branch, commit); err != nil {
+		return nil, nil, err
+	}
 	// The frontier is offered the commit before the promotion is recorded. A member needs no
 	// promotion, so a crash between the two leaves a frontier that is right and a promotion that
 	// can be asked for again, which finds the commit a member already and changes nothing there.
