@@ -1,0 +1,101 @@
+{
+  "proto/vibesys/cli/v1/environment.proto": [
+    "EnvironmentKind.ENVIRONMENT_KIND_DOCKER"
+  ],
+  "proto/vibesys/cli/v1/job.proto": [
+    "LeaseHolder.pid"
+  ],
+  "proto/vibesys/cli/v1/machine.proto": [
+    "MachineDaemon.pid",
+    "MachineDaemon.runtime_dir"
+  ],
+  "proto/vibesys/cli/v1/operator.proto": [
+    "ApptainerSettings.local_scratch_dir",
+    "LegacyDocker",
+    "OperatorConfig.docker"
+  ],
+  "proto/vibesys/cli/v1/service.proto": [
+    "DaemonProcess",
+    "DaemonProcess.pid",
+    "StatusResponse.checkout_directory",
+    "StatusResponse.pid"
+  ],
+  "proto/vibesys/cli/v1/store.proto": [
+    "EventFile",
+    "FormatFile",
+    "FrontierFile",
+    "JobFile",
+    "OwnerFile",
+    "OwnerFile.dir",
+    "OwnerFile.pid",
+    "PlanFile",
+    "PromotionFile",
+    "ResultFile",
+    "TaskFile"
+  ],
+  "proto/vibesys/cli/v1/supervisor.proto": [
+    "ResultFormat.json_argument"
+  ],
+  "proto/vibesys/cli/v1/task.proto": [
+    "TaskEnvironmentV02.docker_in_docker",
+    "TaskResultV02.json_argument"
+  ],
+  "proto/vibesys/desktop/v1/settings.proto": [
+    "DesktopRetainedRecentEntry.original_json"
+  ],
+  "proto/vibesys/evaluator/v1/core.proto": [
+    "SamplePhaseRequest.artifacts_dir",
+    "SamplePhaseResponse.path",
+    "SampleStartRequest.env_artifacts_dir",
+    "SampleStartRequest.scratch_dir",
+    "SampleStartResponse.artifacts_dir",
+    "WriteRecordRequest.path"
+  ],
+  "proto/vibesys/evaluator/v1/loadgen.proto": [
+    "Capture.json_pointer",
+    "FileHeader",
+    "FileKind",
+    "FileKind.FILE_KIND_CAPABILITIES",
+    "FileKind.FILE_KIND_REQUESTS",
+    "FileKind.FILE_KIND_RESULTS",
+    "FileKind.FILE_KIND_SELFTEST",
+    "FileKind.FILE_KIND_SUMMARY",
+    "FileKind.FILE_KIND_UNSPECIFIED",
+    "HttpCall.path",
+    "RefEncoding.REF_ENCODING_JSON_STRING",
+    "RefEncoding.REF_ENCODING_JSON_VALUE"
+  ],
+  "proto/vibesys/evaluator/v1/phase.proto": [
+    "HistoryEntry.info_json",
+    "KeptOperation.info_json"
+  ],
+  "proto/vibesys/orchestrator/v1/effects.proto": [
+    "LaunchSession.worktree",
+    "SessionPlugin.home",
+    "SessionPlugin.marketplace"
+  ],
+  "proto/vibesys/orchestrator/v1/events.proto": [
+    "SidecarSource"
+  ],
+  "proto/vibesys/orchestrator/v1/orchestrator.proto": [
+    "Agent.provider_conversation_id",
+    "Agent.worktree",
+    "CliLocation.home",
+    "CliLocation.xdg_runtime_dir",
+    "CliLocation.xdg_state_home",
+    "Harness.HARNESS_CLAUDE_CODE",
+    "Harness.HARNESS_CODEX",
+    "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
+    "ToolCall.args_json",
+    "ToolCall.provider_call_id"
+  ],
+  "proto/vibesys/orchestrator/v1/sidecar.proto": [
+    "ConversationOpened.provider_conversation_id",
+    "ConversationOpened.worktree",
+    "SidecarCommand",
+    "SidecarDelta",
+    "SidecarEvent",
+    "SidecarItem",
+    "SidecarService"
+  ]
+}

@@ -161,4 +161,5 @@ the log as the truth and a cache beside it, is in [run-recovery.md](run-recovery
 
 The older Python run engine (the `vibesys` command and its libraries) has its own module graph; see [python-module-graph.md](python-module-graph.md). The TypeScript packages of the desktop app are in
 [clients-architecture.md](clients-architecture.md). Confinement of agents and jobs is in
-[sandboxing.md](sandboxing.md). How a search is written is in [flows.md](flows.md).
+[sandboxing.md](sandboxing.md). What may cross between our processes, and the checks that hold it, is in
+[process-boundaries.md](process-boundaries.md). How a search is written is in [flows.md](flows.md).

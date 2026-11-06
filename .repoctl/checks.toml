@@ -29,6 +29,7 @@ commands = [
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_architecture_conceptual"],
   ["python3", "-m", "scripts.check_skills"],
+  ["python3", "scripts/check_boundaries.py"],
   ["python3", "-m", "scripts.published_skills"],
 ]
 # Every command here takes under a second or two, so the pre-push gate runs them all.
@@ -42,6 +43,7 @@ gate_commands = [
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_architecture_conceptual"],
   ["python3", "-m", "scripts.check_skills"],
+  ["python3", "scripts/check_boundaries.py"],
   ["python3", "-m", "scripts.published_skills"],
 ]
 

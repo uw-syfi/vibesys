@@ -126,7 +126,7 @@ func TestRepositoryObeysTheRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range archcheck.Violations(files) {
+	for _, v := range append(archcheck.Violations(files), archcheck.BoundaryViolations(files)...) {
 		t.Error(v)
 	}
 }

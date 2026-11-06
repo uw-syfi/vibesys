@@ -17,7 +17,7 @@ uv run <skill>/scripts/plot_progress.py --branch vibesys/<task> --repo . --out <
 ```
 
 `uv` supplies matplotlib from the script's inline metadata; with plain Python (3.11 or newer) install
-`matplotlib>=3.8` first. The CLI is `$VIBESYS_CLI` when set, else `vibesys-cli` on the path; `--cli`
+`matplotlib>=3.8` first. The CLI is `vibesys-cli` on the path; `--cli`
 names another. The script uses the numbers the CLI computed (headline value, objectives, noise) and
 repairs nothing: if the CLI reports an error, fix that, not the script. A task with a single metric
 gets the progress and plan charts only.
