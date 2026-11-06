@@ -67,8 +67,9 @@ before the output:
 | 3 | the wait timed out; no job was cancelled | the jobs still run; wait again |
 | 4 | no answer: no daemon, an incompatible one, an internal failure, or the end of the jobs is unknown | says nothing about the jobs, which may still succeed; do not resubmit, inspect (see [jobs.md](references/jobs.md)) |
 
-With `--json`, `wait` prints one `WaitOutcome`: `kind` (`ALL_SUCCEEDED`, `SOME_FAILED`,
-`FIRST_SUCCEEDED`, `FIRST_FAILED` or `TIMED_OUT`), `decided_by` (the job that ended the wait) and
+With `--json`, `wait` prints one `WaitOutcome`: `kind` (`WAIT_OUTCOME_KIND_ALL_SUCCEEDED`,
+`WAIT_OUTCOME_KIND_SOME_FAILED`, `WAIT_OUTCOME_KIND_FIRST_SUCCEEDED`, `WAIT_OUTCOME_KIND_FIRST_FAILED` or
+`WAIT_OUTCOME_KIND_TIMED_OUT`), `decided_by` (the job that ended the wait) and
 `jobs` with each job's last state. `submit --wait --json` prints the submit response first and
 the `WaitOutcome` on the last line. The exit code follows the `kind`; use it to branch.
 
@@ -81,12 +82,13 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
   never report a number from anywhere else.
 - `vibesys-cli compare <sha> [--against <sha2>]` prints one verdict and its numbers, against the
   result branch head or against `<sha2>`. It exits 0 for every verdict; read the verdict, which
-  `--json` has as `comparison.verdict.kind`. Only `better` is a gain. `worse` and `within_noise` are
+  `--json` has as `comparison.verdict.kind` (`VERDICT_KIND_BETTER`, `VERDICT_KIND_WORSE`,
+  `VERDICT_KIND_WITHIN_NOISE`, `VERDICT_KIND_INCONCLUSIVE` or `VERDICT_KIND_TRADEOFF`). Only `better` is a gain. `worse` and `within_noise` are
   not. On `inconclusive`, add samples within your brief's budget, unless the line says `not comparable`: the two commits were measured under different task versions or metrics, which more samples cannot fix, so report it. Never compute a verdict yourself.
 - Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
   on both sides stay inconclusive however many you add.
 - `vibesys-cli result --json` has the number to report for the result branch, in
   `current.result.measure.value`: the head's latest checked measurement, the one a promotion rests
-  on included. It exits 1 when there is none (`none.reason` says why); for `head_not_measured`,
+  on included. It exits 1 when there is none (`none.reason` says why); for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`,
   `vibesys-cli submit measure <head SHA>` gives it one.
 - Tell the reader the base, the sample counts and the environment from the output, never from memory.

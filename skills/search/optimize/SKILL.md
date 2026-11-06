@@ -116,7 +116,7 @@ It selects a working CLI or installs one only after explicit user approval.
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
 - A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
-  is none: for `head_not_measured`, submit `vibesys-cli submit measure <head SHA>` and report after
+  is none: for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`, submit `vibesys-cli submit measure <head SHA>` and report after
   that lands.
   Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
 - Workers may submit their own jobs. The daemon runs as many at once as its capacity allows, and
