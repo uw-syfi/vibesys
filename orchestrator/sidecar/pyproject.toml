@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "One process per agent session: drives a provider through agentshim and serves the orchestrator's SidecarService over a Unix socket."
 requires-python = ">=3.12"
 dependencies = [
-    "agentshim @ git+https://github.com/vic-lsh/agentshim@1bd3b407f6bc5c9594c5b349e2f400e854bd7210",
+    "agentshim==0.27.0",
     "grpcio==1.76.0",
     "protobuf==6.33.5",
     "jinja2>=3.1",
@@ -26,9 +26,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vs_sidecar"]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.pytest.ini_options]
 # A rootdir of its own, so the repository's root conftest (vs_sim, which this project does not
