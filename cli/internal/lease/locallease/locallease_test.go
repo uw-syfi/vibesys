@@ -29,6 +29,15 @@ func world(t leasetest.TB) leasetest.World {
 	return leasetest.World{
 		Daemon: func() lease.Leases { return dir },
 		Crash:  func(l lease.Lease) { l.(*Lease).f.Close() },
+		Plant: func(l lease.Lease, record []byte) {
+			f := l.(*Lease).f
+			if err := f.Truncate(0); err != nil {
+				t.Fatalf("planting a record: %v", err)
+			}
+			if _, err := f.WriteAt(record, 0); err != nil {
+				t.Fatalf("planting a record: %v", err)
+			}
+		},
 	}
 }
 

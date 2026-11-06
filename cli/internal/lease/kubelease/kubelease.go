@@ -29,7 +29,7 @@ import (
 // otherwise. A crashed holder blocks the cluster this long.
 const DefaultDuration = 60 * time.Second
 
-// HolderAnnotation is the annotation of a Lease object that names its holder, as a lease.Record in
+// HolderAnnotation is the annotation of a Lease object that names its holder, as a cliv1.LeaseRecord in
 // JSON. The object's own holderIdentity is a token of the one lease, so that a renewal or a release
 // never touches a lease taken after it.
 const HolderAnnotation = "vibesys.dev/holder"
@@ -150,7 +150,7 @@ func (c Cluster) Acquire(ctx context.Context, key lease.Key, holder core.LeaseHo
 	}
 	token := c.token()
 	name := c.name(key)
-	record, err := json.Marshal(lease.RecordOf(holder))
+	record, err := lease.EncodeRecord(holder)
 	if err != nil {
 		return nil, err
 	}
@@ -222,11 +222,11 @@ func (c Cluster) held(o *Object, now time.Time) bool {
 }
 
 func holderOf(o *Object) core.LeaseHolder {
-	var r lease.Record
-	if err := json.Unmarshal([]byte(o.Metadata.Annotations[HolderAnnotation]), &r); err != nil {
-		return core.LeaseHolder{}
+	h, err := lease.DecodeRecord([]byte(o.Metadata.Annotations[HolderAnnotation]))
+	if err != nil {
+		return lease.Anonymous()
 	}
-	return r.Holder()
+	return h
 }
 
 // merged keeps the annotations others put on the object, with the holder's set to record, or

@@ -39,6 +39,10 @@ type World struct {
 	// of its expiry, and returns once l is given back, or once a bound that only guards against a
 	// hang has passed. Lost must then be closed.
 	Lose func(l lease.Lease)
+	// Plant, when set, replaces the record kept beside l with exactly these bytes, leaving l held,
+	// as a daemon of another build would have written it. It is how the contract checks records
+	// of other builds and damaged ones.
+	Plant func(l lease.Lease, record []byte)
 }
 
 // Contract is an implementation under test.
@@ -94,6 +98,8 @@ func properties() []property {
 		{"ACrashGivesItBack", aCrashGivesItBack},
 		{"AFailedAttemptHoldsNothing", aFailedAttemptHoldsNothing},
 		{"ALostLeaseSaysSo", aLostLeaseSaysSo},
+		{"ARecordOfAnOlderBuildNamesItsHolder", anOlderRecordNamesItsHolder},
+		{"AnUnreadableRecordNamesNobodyAndStaysHeld", anUnreadableRecordStaysHeld},
 		{"ItKeepsTheModel", itKeepsTheModel},
 	}
 }
@@ -360,5 +366,40 @@ func (r *recorder) TempDir() string {
 func (r *recorder) cleanup() {
 	for i := len(r.cleanups) - 1; i >= 0; i-- {
 		r.cleanups[i]()
+	}
+}
+
+// anOlderRecordNamesItsHolder has the record kept beside a held lease be what the builds before the
+// messages wrote (a JSON object with these keys, and a field a later build may add), and checks
+// whoever finds the lease held is told its holder.
+func anOlderRecordNamesItsHolder(t TB, c Contract) {
+	w := c.New(t)
+	if w.Plant == nil {
+		return
+	}
+	a, b := w.Daemon(), w.Daemon()
+	l := acquire(t, a, "k", holder(0, 1))
+	w.Plant(l, []byte(`{"user":"alice","host":"host-a","pid":4242,"job":"j-old","since":"2026-01-01T13:30:00.5Z","later":[1,2]}`+"\n"))
+	want := core.LeaseHolder{User: "alice", Host: "host-a", PID: 4242, Job: "j-old", Since: epoch.Add(90 * time.Minute)}
+	refused(t, b, "k", holder(1, 1), want)
+}
+
+// anUnreadableRecordStaysHeld damages the record kept beside a held lease, and checks the lease is
+// still held: the lock is the lease and the record only names its holder, so whoever finds it is
+// told it is held by nobody it can name, never that it is free.
+func anUnreadableRecordStaysHeld(t TB, c Contract) {
+	w := c.New(t)
+	if w.Plant == nil {
+		return
+	}
+	for _, damage := range []string{"", "\n", "not json", "{", `{"pid":"x"}`, `[1,2]`, `{"since":"later"}`, "\x00\xff"} {
+		a, b := w.Daemon(), w.Daemon()
+		l := acquire(t, a, "k", holder(0, 1))
+		w.Plant(l, []byte(damage))
+		refused(t, b, "k", holder(1, 1), core.LeaseHolder{})
+		if err := l.Release(ctx(t)); err != nil {
+			t.Fatalf("releasing after the record %q was damaged: %v", damage, err)
+		}
+		_ = acquire(t, b, "k", holder(1, 2)).Release(ctx(t))
 	}
 }

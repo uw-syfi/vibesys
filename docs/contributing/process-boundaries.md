@@ -230,6 +230,21 @@ Anything one of our programs writes and another reads is a message: lease
 holder files, node readings, task objectives. The few text sentinels our own
 scripts print over `ssh` are confined to one package and tested.
 
+The lease holder (`LeaseRecord`) and the node reading (`NodeReading`) are messages
+in `shared.proto`, kept as protojson with the proto field names. Daemons of
+different builds share these files during an upgrade, so:
+
+- A record of a build from before the messages has the same keys and reads as
+  one. `pid` is an `int32` so protojson writes a number, as the old readers expect.
+- Readers discard unknown fields, so a field a later build adds does not stop an
+  older build from reading the holder. A field is only added, and optional.
+- The lock is the lease, never the record. A held lease whose record is empty or
+  damaged is reported held by nobody nameable, never as free. `DecodeLeaseRecord`
+  returns a named invalid-input failure and no holder for such a record.
+- A node reading that is not one is treated as none kept: it is advisory.
+
+`leasetest` holds every lease implementation to the first three.
+
 ## What is not built yet
 
 Each row is a part of the design above that the code does not do yet, with the
@@ -250,7 +265,6 @@ part they wait for.
 | Tool schemas | descriptors to JSON Schema, `Handoff` `oneof`, templates | hand schemas and decode structs in the tool server |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
 | Job environment | `JobEnvironment`, `ResultFormat` as a `oneof` | the SDK's manifest reader and name copies |
-| Lease and node records | messages for the lease holder and node reading | hand JSON structs |
 | Task objectives | a message for `objectives.toml`; decide whether manifest 0.1 is still written | hand TOML structs |
 | `cli.v1` validation | protovalidate rules on the supervisor and store messages | the gap against the data rule |
 

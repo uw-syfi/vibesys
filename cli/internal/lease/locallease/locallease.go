@@ -16,9 +16,7 @@
 package locallease
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -143,7 +141,7 @@ func regular(f *os.File) (*os.File, error) {
 const recordLimit = 4096
 
 func writeHolder(f *os.File, h core.LeaseHolder) error {
-	b, err := json.Marshal(lease.RecordOf(h))
+	b, err := lease.EncodeRecord(h)
 	if err != nil {
 		return err
 	}
@@ -166,11 +164,11 @@ func readHolder(f *os.File) core.LeaseHolder {
 	if err != nil {
 		return core.LeaseHolder{}
 	}
-	var r lease.Record
-	if err := json.Unmarshal(bytes.TrimSpace(b), &r); err != nil {
-		return core.LeaseHolder{}
+	h, err := lease.DecodeRecord(b)
+	if err != nil {
+		return lease.Anonymous()
 	}
-	return r.Holder()
+	return h
 }
 
 // Lease is a lease of this machine: an open lock file.

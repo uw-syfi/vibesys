@@ -360,3 +360,82 @@ func saysSucceeded(m *cliv1.SupervisorOutcome) bool {
 	}
 	return false
 }
+
+func FuzzDecodeLeaseRecord(f *testing.F) {
+	r := newRand(20)
+	f.Add([]byte(nil))
+	for range 8 {
+		data, err := wire.EncodeLeaseRecord(anyHolder(r))
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(data)
+	}
+	f.Add([]byte(`{"user":"a","pid":3,"future":true}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		first, err := wire.DecodeLeaseRecord(data)
+		if err != nil {
+			if !wire.IsInvalidInput(err) || !reflect.DeepEqual(first, core.LeaseHolder{}) {
+				t.Fatalf("%q refused as %v with the holder %+v", data, err, first)
+			}
+			return
+		}
+		out, err := wire.EncodeLeaseRecord(first)
+		if err != nil {
+			t.Fatalf("a decoded holder %+v cannot be written: %v", first, err)
+		}
+		again, err := wire.DecodeLeaseRecord(out)
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded holder changed on the way back: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}
+
+// FuzzDecodeLeaseRecordMessage hands the message decoder what a peer could send.
+func FuzzDecodeLeaseRecordMessage(f *testing.F) {
+	seedMessages(f, wire.LeaseRecord(core.LeaseHolder{User: "u", PID: 1}), &cliv1.LeaseRecord{Pid: -1})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		m := &cliv1.LeaseRecord{}
+		if proto.Unmarshal(data, m) != nil {
+			t.Skip()
+		}
+		if _, err := wire.ToLeaseHolder(m); err != nil && !wire.IsInvalidInput(err) {
+			t.Fatalf("refused with %v, which is not invalid input", err)
+		}
+	})
+}
+
+func FuzzDecodeNodeReading(f *testing.F) {
+	at := time.Unix(1e9, 0).UTC()
+	seedMessages(f, wire.NodeReading(at, map[string]string{"uname": "Linux"}), &cliv1.NodeReading{})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		m := &cliv1.NodeReading{}
+		if proto.Unmarshal(data, m) != nil {
+			t.Skip()
+		}
+		gotAt, out, err := wire.ToNodeReading(m)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("refused with %v, which is not invalid input", err)
+			}
+			return
+		}
+		enc, err := wire.EncodeNodeReading(gotAt, out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at2, out2, err := wire.DecodeNodeReading(enc)
+		if err != nil || !at2.Equal(gotAt) || !reflect.DeepEqual(out2, out) {
+			t.Fatalf("a decoded reading changed on the way back: %v %v, %v", at2, out2, err)
+		}
+	})
+}
+
+func FuzzDecodeNodeReadingJSON(f *testing.F) {
+	f.Add([]byte(`{"at":"2026-01-01T00:00:00Z","outputs":{"a":"b"}}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if _, out, err := wire.DecodeNodeReading(data); err != nil && (out != nil || !wire.IsInvalidInput(err)) {
+			t.Fatalf("%q refused as %v with %v", data, err, out)
+		}
+	})
+}
