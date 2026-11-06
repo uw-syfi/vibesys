@@ -1023,13 +1023,14 @@ fails on a stale `gen/`.
 ```
 
 runs `gofmt` and `go vet`, vets for each release target (Linux and macOS, amd64 and arm64), then
-runs the tests twice. The first run is every package under the race detector, which covers the
-packages a later change adds without listing them; the tests that drive a real Docker daemon run
-beside it, where a daemon is reachable. The second is every test again without the detector, as the
-binary ships, with a wider range of simulation seeds. The tests include the architecture rules above,
+runs the tests twice. `./check.sh race` and `./check.sh plain` run one half each (formatting and the first run,
+and the vets and the second run), which is how CI runs them, as two jobs at once. The first run is every
+package under the race detector, which covers the packages a later change adds without listing them. The
+second is every test again without the detector, as the binary ships, with a wider range of simulation
+seeds; the tests that drive a real Docker daemon run beside it, where a daemon is reachable. The tests include the architecture rules above,
 building a real release with `build_release.sh` and installing it with `install.sh`, so they need
-`go`, `curl`, `awk` and `sha256sum` or `shasum`. CI runs the same script as the `cli` job
-(`cli_checks`, with a 600 s timeout and a 7 minute job limit).
+`go`, `curl`, `awk` and `sha256sum` or `shasum`. CI runs the same script as the `cli` and
+`cli-plain` jobs (`cli_race_checks` and `cli_plain_checks`, each with a 600 s timeout and a 7 minute job limit).
 
 A test that walks a large space of cases on one goroutine, such as the exhaustive model check of the
 lifecycle machine or a crash of a store at every step of its script, is a sweep. The detector has
