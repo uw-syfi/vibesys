@@ -88,6 +88,7 @@ Each check names the path, the rule and the fix when it fails.
 | Boundary inventory | Per file, the exact count of file reads, file writes, environment reads, `encoding/json` uses, command starts and `os.Args` uses in the host and orchestrator Go code. A new use fails until the change adds it, with a reason, to the baseline; a removed use fails until the baseline shrinks. | `orchestrator_checks` and `gateway_checks` (the `archcheck` packages of each module) |
 | Environment names | Every `VIBESYS_*` and `XDG_*` string in the managed-run product code is in a shrink-only allowlist until a message carries it. | `scripts/check_boundaries.py`, the always-on `doc-checks` job |
 | Mechanism words | Message, field, enum and rpc names in the orchestrator, `cli`, desktop and evaluator packages that contain a mechanism word (path, dir, file, pid, process, socket, json, sidecar, provider, worktree, marketplace, home, xdg, docker, sqlite, claude, codex) are in a shrink-only allowlist. | `scripts/check_boundaries.py` |
+| Unvalidated messages | Every `cli.v1` message that has fields and no protovalidate rule is in a shrink-only allowlist. Empty messages are exempt. Each daemon and supervisor server validates the request of every RPC at its edge (`wire.RequestValidator`), and the store and run records validate on read, so a bad value is refused naming its field. | `scripts/check_boundaries.py` |
 | Release gate | A `vibesys-v*` tag fails while `orchestrator/v1` is outside the breaking check. | `managed-release.yml` runs `scripts/check_boundaries.py --release` |
 
 Limits, stated so nobody reads more into the checks than they do:
@@ -98,6 +99,12 @@ Limits, stated so nobody reads more into the checks than they do:
 - The mechanism-word check reads the `.proto` text, not the compiled descriptors,
   and has no per-name reason option yet. An allowlist entry is the reviewed
   decision that the peer needs that fact.
+- The unvalidated-message check counts a message with any `buf.validate` option as
+  validated. Whether the rules are the right ones is review, and a message nested in
+  a validated one still needs its own rule to leave the list. Rules on `cli.v1` are
+  additive and carry only what a release already assumed; the retained store fixture
+  (`cli/internal/store/filestore/testdata`) and `TestWhatEarlierBuildsSentStillPasses`
+  hold that.
 - Unenforced: whether a field is something the receiver needs, as opposed to
   how the sender works, needs judgment. Ask it in review for every new field.
 
@@ -252,7 +259,7 @@ part they wait for.
 | Job environment | `JobEnvironment`, `ResultFormat` as a `oneof` | the SDK's manifest reader and name copies |
 | Lease and node records | messages for the lease holder and node reading | hand JSON structs |
 | Task objectives | a message for `objectives.toml`; decide whether manifest 0.1 is still written | hand TOML structs |
-| `cli.v1` validation | protovalidate rules on the supervisor and store messages | the gap against the data rule |
+| `cli.v1` validation | rules on the remaining data messages (jobs, results, outcomes, plan) and the responses; the allowlist lists them | the gap against the data rule |
 
 ## Boundaries and owners
 

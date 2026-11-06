@@ -7,6 +7,7 @@
 package cliv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -563,47 +564,47 @@ var File_vibesys_cli_v1_store_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_store_proto_rawDesc = "" +
 	"\n" +
-	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\"$\n" +
+	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\"-\n" +
 	"\n" +
-	"FormatFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\"H\n" +
-	"\aJobFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12%\n" +
-	"\x03job\x18\x02 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"f\n" +
+	"FormatFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\"Y\n" +
+	"\aJobFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12-\n" +
+	"\x03job\x18\x02 \x01(\v2\x13.vibesys.cli.v1.JobB\x06\xbaH\x03\xc8\x01\x01R\x03job\"w\n" +
 	"\n" +
-	"ResultFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12.\n" +
-	"\x06result\x18\x03 \x01(\v2\x16.vibesys.cli.v1.ResultR\x06result\"L\n" +
-	"\bPlanFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12(\n" +
-	"\x04plan\x18\x02 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"r\n" +
-	"\rPromotionFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\x127\n" +
-	"\tpromotion\x18\x03 \x01(\v2\x19.vibesys.cli.v1.PromotionR\tpromotion\"r\n" +
-	"\fFrontierFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12\x10\n" +
+	"ResultFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x126\n" +
+	"\x06result\x18\x03 \x01(\v2\x16.vibesys.cli.v1.ResultB\x06\xbaH\x03\xc8\x01\x01R\x06result\"]\n" +
+	"\bPlanFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x120\n" +
+	"\x04plan\x18\x02 \x01(\v2\x14.vibesys.cli.v1.PlanB\x06\xbaH\x03\xc8\x01\x01R\x04plan\"\x8c\x01\n" +
+	"\rPromotionFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x19\n" +
+	"\x03seq\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12?\n" +
+	"\tpromotion\x18\x03 \x01(\v2\x19.vibesys.cli.v1.PromotionB\x06\xbaH\x03\xc8\x01\x01R\tpromotion\"{\n" +
+	"\fFrontierFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x128\n" +
-	"\amembers\x18\x03 \x03(\v2\x1e.vibesys.cli.v1.FrontierMemberR\amembers\"P\n" +
-	"\tEventFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12+\n" +
-	"\x05event\x18\x02 \x01(\v2\x15.vibesys.cli.v1.EventR\x05event\"\x96\x01\n" +
-	"\tOwnerFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12\x1e\n" +
+	"\amembers\x18\x03 \x03(\v2\x1e.vibesys.cli.v1.FrontierMemberR\amembers\"a\n" +
+	"\tEventFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x123\n" +
+	"\x05event\x18\x02 \x01(\v2\x15.vibesys.cli.v1.EventB\x06\xbaH\x03\xc8\x01\x01R\x05event\"\xa8\x01\n" +
+	"\tOwnerFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12'\n" +
 	"\n" +
-	"generation\x18\x02 \x01(\x04R\n" +
+	"generation\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\n" +
 	"generation\x12\x12\n" +
 	"\x04host\x18\x03 \x01(\tR\x04host\x12\x10\n" +
 	"\x03dir\x18\x04 \x01(\tR\x03dir\x12\x10\n" +
 	"\x03pid\x18\x05 \x01(\x03R\x03pid\x12\x19\n" +
-	"\bgiven_up\x18\x06 \x03(\tR\agivenUp\"V\n" +
-	"\bTaskFile\x12\x16\n" +
-	"\x06format\x18\x01 \x01(\x05R\x06format\x12\x1e\n" +
+	"\bgiven_up\x18\x06 \x03(\tR\agivenUp\"\x97\x01\n" +
+	"\bTaskFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12)\n" +
 	"\n" +
-	"repository\x18\x02 \x01(\tR\n" +
-	"repository\x12\x12\n" +
-	"\x04task\x18\x03 \x01(\tR\x04taskB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"repository\x18\x02 \x01(\tB\t\xbaH\x06r\x042\x02^/R\n" +
+	"repository\x12?\n" +
+	"\x04task\x18\x03 \x01(\tB+\xbaH(r&2$^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$R\x04taskB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_store_proto_rawDescOnce sync.Once

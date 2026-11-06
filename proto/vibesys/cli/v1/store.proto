@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "vibesys/cli/v1/event.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
@@ -25,54 +26,54 @@ option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 // FormatFile is the `format` file of a store, and the part of every other file that is read first,
 // so that a file of another version is reported as that and not as a record with unknown fields.
 message FormatFile {
-  int32 format = 1;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
 }
 
 // JobFile is jobs/<job>.json: one job, replaced whole on each change.
 message JobFile {
-  int32 format = 1;
-  Job job = 2;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  Job job = 2 [(buf.validate.field).required = true];
 }
 
 // ResultFile is results/<job>.json: the result a job saved, with its place in the order of saving.
 message ResultFile {
-  int32 format = 1;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
   uint64 seq = 2;
-  Result result = 3;
+  Result result = 3 [(buf.validate.field).required = true];
 }
 
 // PlanFile is plans/<number>.json: one plan, replaced whole on each change.
 message PlanFile {
-  int32 format = 1;
-  Plan plan = 2;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  Plan plan = 2 [(buf.validate.field).required = true];
 }
 
 // PromotionFile is promotions/<n>.json: the nth promotion.
 message PromotionFile {
-  int32 format = 1;
-  uint64 seq = 2;
-  Promotion promotion = 3;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  uint64 seq = 2 [(buf.validate.field).uint64.gt = 0];
+  Promotion promotion = 3 [(buf.validate.field).required = true];
 }
 
 // FrontierFile is frontier/<n>.json: the task's frontier after its nth change, whole. The frontier is
 // the last of them, and a store with none has an empty frontier.
 message FrontierFile {
-  int32 format = 1;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
   uint64 seq = 2;
   repeated FrontierMember members = 3;
 }
 
 // EventFile is runs/<run>/<n>.json: the nth event of a run.
 message EventFile {
-  int32 format = 1;
-  Event event = 2;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  Event event = 2 [(buf.validate.field).required = true];
 }
 
 // OwnerFile is .owner: who owns the store. generation counts the owners the store has had, so that
 // no two owners have the same record, not even the same process opening it twice.
 message OwnerFile {
-  int32 format = 1;
-  uint64 generation = 2;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  uint64 generation = 2 [(buf.validate.field).uint64.gt = 0];
   string host = 3;
   // The owner's runtime directory, where its supervisors can be reached.
   string dir = 4;
@@ -83,7 +84,7 @@ message OwnerFile {
 
 // TaskFile is an entry of the per-user index of stores: tasks/<hash>.json.
 message TaskFile {
-  int32 format = 1;
-  string repository = 2;
-  string task = 3;
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  string repository = 2 [(buf.validate.field).string.pattern = "^/"];
+  string task = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"];
 }

@@ -134,7 +134,7 @@ func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 func (g *guard) write(rec ownerRec, publish func(name string, data []byte) error) error {
 	data, err := encode(rec.file())
 	if err != nil {
-		return err
+		return refused("the store at %s cannot write its owner record %s: %v", g.root, path.Join(g.root, ownerFile), err)
 	}
 	if err := publish(path.Join(g.root, ownerFile), data); err != nil {
 		return unavailable(g.root, err)

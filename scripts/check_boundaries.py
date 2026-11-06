@@ -8,6 +8,12 @@ removed use cannot make room for a new one:
     is a contract between two processes, so each use is listed in
     ``scripts/boundaries_env_allowlist.json`` until a message carries it.
 
+``unvalidated`` (C5)
+    Messages of ``cli.v1`` that carry no protovalidate rule, and are not empty. A message with
+    fields that nothing constrains is a message whose receiver trusts its peer. Each is listed in
+    ``scripts/boundaries_unvalidated_allowlist.json`` until a rule goes on it; the list only
+    shrinks. The other proto packages join when their contracts get rules.
+
 ``mechanism-word`` (C3)
     Message, field, enum and rpc names in ``.proto`` files that name a mechanism (a path, a pid,
     a socket, a sidecar, a provider) instead of what the peer needs. Each is listed in
@@ -31,6 +37,7 @@ if TYPE_CHECKING:
 
 ENV_ALLOWLIST = "scripts/boundaries_env_allowlist.json"
 PROTO_ALLOWLIST = "scripts/boundaries_proto_allowlist.json"
+UNVALIDATED_ALLOWLIST = "scripts/boundaries_unvalidated_allowlist.json"
 DOC = "docs/contributing/process-boundaries.md"
 
 PRODUCT_ROOTS = ("sdk/", "cli/", "orchestrator/", "gateway/", "clients/", "skills/")
@@ -160,6 +167,76 @@ def proto_names(text: str) -> list[str]:
     return names
 
 
+VALIDATED_ROOTS = ("proto/vibesys/cli/v1/",)
+"""The packages whose messages must carry a rule. ``cli.v1`` has released builds, so its rules are
+additive; the other managed-run packages are still being shaped and join once they have rules."""
+
+_MESSAGE_OPEN = re.compile(r"^\s*message\s+(\w+)\s*\{")
+
+
+def _unvalidated_in(text: str) -> list[str]:
+    """The names of the messages in one file's text that have fields and no rule."""
+    stripped = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    # Each entry: [qualified name, depth outside it, has a field, has a rule]
+    stack: list[list[object]] = []
+    depth = 0
+    names: list[str] = []
+    for raw in stripped.splitlines():
+        line = raw.split("//", 1)[0]
+        opened = _MESSAGE_OPEN.match(line)
+        if opened:
+            outer = f"{stack[-1][0]}." if stack else ""
+            stack.append([outer + opened.group(1), depth, False, False])
+        # A one-line message holds its fields after its brace.
+        body = line.split("{", 1)[1] if opened else line
+        if stack:
+            stack[-1][2] = stack[-1][2] or any(_FIELD.match(part) for part in body.split(";"))
+            stack[-1][3] = stack[-1][3] or "buf.validate" in body
+        depth += line.count("{") - line.count("}")
+        while stack and depth <= int(str(stack[-1][1])):
+            name, _, has_field, has_rule = stack.pop()
+            if has_field and not has_rule:
+                names.append(str(name))
+    return sorted(names)
+
+
+def unvalidated_hits(protos: Mapping[str, str]) -> dict[str, list[str]]:
+    """The messages with fields and no ``buf.validate`` option of their own, by file.
+
+    A nested message is judged on its own text, not its parent's. A message with no fields has
+    nothing to constrain (an empty request, an empty settings marker), so it is exempt.
+    """
+    return {
+        path: names
+        for path, text in sorted(protos.items())
+        if path.startswith(VALIDATED_ROOTS)
+        and path.endswith(".proto")
+        and (names := _unvalidated_in(text))
+    }
+
+
+def unvalidated_violations(
+    protos: Mapping[str, str], allowed: Mapping[str, Iterable[str]]
+) -> list[str]:
+    """Diagnostics for each unlisted unvalidated message, and each listed one that has a rule now."""
+    found = unvalidated_hits(protos)
+    problems: list[str] = []
+    for path in sorted(set(found) | set(allowed)):
+        have, want = set(found.get(path, [])), set(allowed.get(path, []))
+        problems.extend(
+            f"{path}: unvalidated: {name} has fields and no protovalidate rule; add the rules its "
+            f"receiver already assumes in the same file ({DOC}), or list it in "
+            f"{UNVALIDATED_ALLOWLIST} only when it is new and has no rule to state"
+            for name in sorted(have - want)
+        )
+        problems.extend(
+            f"{path}: unvalidated: {name} is listed but is validated, empty or gone; "
+            f"remove it from {UNVALIDATED_ALLOWLIST}"
+            for name in sorted(want - have)
+        )
+    return problems
+
+
 def mechanism_hits(protos: Mapping[str, str]) -> dict[str, list[str]]:
     """The declared names that contain a mechanism word, by file."""
     found: dict[str, list[str]] = {}
@@ -245,8 +322,13 @@ def violations(root: Path) -> list[str]:
     """Every violation of both ratchets in the tree under ``root``."""
     env_allowed = json.loads((root / ENV_ALLOWLIST).read_text(encoding="utf-8"))
     proto_allowed = json.loads((root / PROTO_ALLOWLIST).read_text(encoding="utf-8"))
+    unvalidated_allowed = json.loads((root / UNVALIDATED_ALLOWLIST).read_text(encoding="utf-8"))
     sources, protos = _sources(root)
-    return env_violations(sources, env_allowed) + mechanism_violations(protos, proto_allowed)
+    return (
+        env_violations(sources, env_allowed)
+        + mechanism_violations(protos, proto_allowed)
+        + unvalidated_violations(protos, unvalidated_allowed)
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -259,6 +341,9 @@ def main(argv: list[str]) -> int:
         )
         (root / PROTO_ALLOWLIST).write_text(
             json.dumps(mechanism_hits(protos), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        (root / UNVALIDATED_ALLOWLIST).write_text(
+            json.dumps(unvalidated_hits(protos), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         return 0
     if argv == ["--release"]:

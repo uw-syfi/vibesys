@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/rpc"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // readyByte is what a supervisor writes to its readiness pipe when it serves.
@@ -89,7 +90,7 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 		listener.Close()
 		return fmt.Errorf("supervisor: %w", err)
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer(grpc.ChainUnaryInterceptor(wire.RequestValidator()), grpc.ChainStreamInterceptor(wire.StreamRequestValidator()))
 	cliv1.RegisterSupervisorServiceServer(server, rpc.NewServer(sup, deps.BinaryVersion))
 	served := make(chan error, 1)
 	var serving owned.Group
