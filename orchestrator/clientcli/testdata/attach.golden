@@ -1,0 +1,19 @@
+03:00:00  run running
+03:00:00  lead lead-run-1 started (claude_code, model claude-sonnet)
+03:01:00  worker worker-1 started (claude_code)
+03:02:00  lead lead-run-1 turn 1 completed, cost $0.0421
+03:04:00  worker worker-1 ended
+03:04:00  worker worker-1 turn 1 completed
+03:04:00  worker worker-1 handed off plan 2: plan 2 is 3% faster
+03:05:00  worker worker-2 started (claude_code)
+03:07:00  worker worker-2 lost: the sidecar went away while running
+03:07:00  worker worker-2 settled without a handoff (lost): lost
+03:08:00  lead lead-run-1 turn 2 failed
+03:08:00  job job-9 failed: exit 2
+03:06:00  measure job job-1 running
+03:09:00  measure job job-1 succeeded
+03:09:00  measured 01234567: score = 12.5
+03:09:00  lead lead-run-1 reported: plan 2 won: 3% faster
+03:09:00  your message to worker worker-2 was rejected: agent gone
+03:10:00  run stopping by operator
+03:12:00  run ended by operator

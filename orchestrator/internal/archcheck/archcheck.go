@@ -44,6 +44,7 @@ var rules = map[string][]string{
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
 	"internal/localfs":                 {},
 	"gatewayroot":                      {"internal/localfs"},
+	"clientcli":                        {"internal/client", "gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
@@ -68,9 +69,11 @@ var testRules = map[string][]string{
 	// localfs's own tests run its checks against the fake.
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
-	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
-	"internal/wire":    {"internal/core", "internal/client"},
-	"internal/daemon":  {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
+	// The verbs are tested against a whole daemon in memory, as the client library is.
+	"clientcli":       {"internal/core", "internal/daemon", "internal/daemon/daemontest", "gen/vibesys/orchestrator/"},
+	"internal/core":   {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/wire":   {"internal/core", "internal/client"},
+	"internal/daemon": {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the
@@ -84,7 +87,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"clientcli", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}

@@ -1,0 +1,293 @@
+package clientcli
+
+import (
+	"slices"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+)
+
+// ChangeKind says what a Change is about.
+type ChangeKind int
+
+// The things a watcher of a run is told about. A change is reported once, when the run first
+// shows it.
+const (
+	RunMoved ChangeKind = iota
+	AgentStarted
+	AgentEnded
+	TurnEnded
+	HandoffPosted
+	ReportPosted
+	JobFinishedMessage
+	SubagentSettled
+	MessageRejected
+	JobMoved
+	Measured
+)
+
+// Change is one thing that happened to the run, with the typed message that shows it.
+type Change struct {
+	Kind    ChangeKind
+	At      time.Time
+	Run     *pb.Run
+	Agent   *pb.Agent
+	Turn    *pb.Turn
+	Message *pb.Message
+	Job     *cliv1.Job
+	Result  *cliv1.Result
+}
+
+// View is one run as a client sees it: the snapshot folded with the events after it. It is the
+// whole state a verb keeps, and applying the same frames in the same order always gives the same
+// View and the same Changes.
+type View struct {
+	RunID    string
+	Run      *pb.Run
+	Agents   map[string]*pb.Agent
+	Turns    map[string]*pb.Turn
+	Messages map[string]*pb.Message
+	// Search is the run's latest search view, or nil if none has arrived.
+	Search *pb.SearchState
+	// Sequence is the last sequence applied.
+	Sequence uint64
+	// Truncated says a snapshot left out part of the history, so counts over it are not the run's.
+	Truncated bool
+}
+
+// NewView is the empty view of a run.
+func NewView(run string) *View {
+	return &View{RunID: run, Agents: map[string]*pb.Agent{}, Turns: map[string]*pb.Turn{}, Messages: map[string]*pb.Message{}}
+}
+
+// Load folds a snapshot in and returns what it shows that the view did not have, oldest first. On
+// an empty view that is the history of the run.
+func (v *View) Load(s *pb.RunsSnapshot) []Change {
+	v.Sequence = max(v.Sequence, s.GetSequence())
+	v.Truncated = v.Truncated || s.GetTruncated()
+	var out []Change
+	for _, r := range s.GetRuns() {
+		if r.GetId() == v.RunID {
+			out = append(out, v.setRun(r, time.Time{})...)
+		}
+	}
+	for _, a := range s.GetAgents() {
+		if a.GetRunId() == v.RunID {
+			out = append(out, v.setAgent(a, time.Time{})...)
+		}
+	}
+	for _, t := range s.GetTurns() {
+		if v.Agents[t.GetAgentId()] != nil {
+			out = append(out, v.setTurn(t, time.Time{})...)
+		}
+	}
+	for _, m := range s.GetMessages() {
+		if m.GetRunId() == v.RunID {
+			out = append(out, v.setMessage(m, time.Time{})...)
+		}
+	}
+	for _, search := range s.GetSearches() {
+		out = append(out, v.ApplySearch(search)...)
+	}
+	slices.SortStableFunc(out, func(a, b Change) int { return a.At.Compare(b.At) })
+	return out
+}
+
+// Apply folds one event in. An event of another run, or one the view has already passed, changes
+// nothing.
+func (v *View) Apply(ev *pb.Event) []Change {
+	if ev.GetSequence() <= v.Sequence {
+		return nil
+	}
+	v.Sequence = ev.GetSequence()
+	if ev.GetRunId() != v.RunID {
+		return nil
+	}
+	at := ev.GetAt().AsTime()
+	switch b := ev.GetBody().(type) {
+	case *pb.Event_RunUpdated:
+		return v.setRun(b.RunUpdated, at)
+	case *pb.Event_AgentUpdated:
+		return v.setAgent(b.AgentUpdated, at)
+	case *pb.Event_TurnUpdated:
+		return v.setTurn(b.TurnUpdated, at)
+	case *pb.Event_MessageUpdated:
+		return v.setMessage(b.MessageUpdated, at)
+	}
+	return nil
+}
+
+// ApplySearch folds in a search view of this run, and returns the jobs and measurements it shows
+// that the previous one did not.
+func (v *View) ApplySearch(s *pb.SearchState) []Change {
+	if s.GetRunId() != v.RunID {
+		return nil
+	}
+	previous := map[string]cliv1.JobState{}
+	for _, j := range v.Search.GetJobs() {
+		previous[j.GetId()] = j.GetState()
+	}
+	measured := map[string]bool{}
+	for _, r := range v.Search.GetResults() {
+		measured[r.GetJobId()] = true
+	}
+	v.Search = s
+	var out []Change
+	for _, j := range s.GetJobs() {
+		if state, seen := previous[j.GetId()]; !seen || state != j.GetState() {
+			out = append(out, Change{Kind: JobMoved, At: jobTime(j), Job: j})
+		}
+	}
+	for _, r := range s.GetResults() {
+		if r.GetMeasure() != nil && !measured[r.GetJobId()] {
+			out = append(out, Change{Kind: Measured, At: pick(r.GetRecordedAt(), time.Time{}), Result: r})
+		}
+	}
+	return out
+}
+
+func jobTime(j *cliv1.Job) time.Time {
+	for _, t := range []*timestamppb.Timestamp{j.GetFinishedAt(), j.GetStartedAt(), j.GetSubmittedAt()} {
+		if t != nil {
+			return t.AsTime()
+		}
+	}
+	return time.Time{}
+}
+
+// pick is a timestamp's time, or fallback when the message has none.
+func pick(t *timestamppb.Timestamp, fallback time.Time) time.Time {
+	if t == nil {
+		return fallback
+	}
+	return t.AsTime()
+}
+
+func (v *View) setRun(r *pb.Run, now time.Time) []Change {
+	previous := v.Run
+	v.Run = r
+	if previous.GetStatus() == r.GetStatus() {
+		return nil
+	}
+	at := pick(r.GetCreatedAt(), now)
+	switch {
+	case previous != nil && !now.IsZero():
+		at = now
+	case r.GetEndedAt() != nil:
+		at = pick(r.GetEndedAt(), now)
+	}
+	return []Change{{Kind: RunMoved, At: at, Run: r}}
+}
+
+func (v *View) setAgent(a *pb.Agent, now time.Time) []Change {
+	previous := v.Agents[a.GetId()]
+	v.Agents[a.GetId()] = a
+	var out []Change
+	if previous == nil {
+		out = append(out, Change{Kind: AgentStarted, At: pick(a.GetStartedAt(), now), Agent: a})
+	}
+	if agentOver(a) && !agentOver(previous) {
+		out = append(out, Change{Kind: AgentEnded, At: pick(a.GetEndedAt(), now), Agent: a})
+	}
+	return out
+}
+
+func (v *View) setTurn(t *pb.Turn, now time.Time) []Change {
+	previous := v.Turns[t.GetId()]
+	v.Turns[t.GetId()] = t
+	if t.GetStatus() == pb.TurnStatus_TURN_STATUS_RUNNING || (previous != nil && previous.GetStatus() != pb.TurnStatus_TURN_STATUS_RUNNING) {
+		return nil
+	}
+	return []Change{{Kind: TurnEnded, At: pick(t.GetEndedAt(), now), Turn: t, Agent: v.Agents[t.GetAgentId()]}}
+}
+
+func (v *View) setMessage(m *pb.Message, now time.Time) []Change {
+	previous := v.Messages[m.GetId()]
+	v.Messages[m.GetId()] = m
+	at := pick(m.GetAt(), now)
+	if previous == nil {
+		switch m.GetBody().(type) {
+		case *pb.Message_Handoff:
+			return []Change{{Kind: HandoffPosted, At: at, Message: m, Agent: v.Agents[m.GetFromAgentId()]}}
+		case *pb.Message_Report:
+			return []Change{{Kind: ReportPosted, At: at, Message: m, Agent: v.Agents[m.GetFromAgentId()]}}
+		case *pb.Message_JobFinished:
+			return []Change{{Kind: JobFinishedMessage, At: at, Message: m}}
+		case *pb.Message_SubagentSettled:
+			return []Change{{Kind: SubagentSettled, At: at, Message: m}}
+		}
+	}
+	if m.GetDelivery() == pb.Delivery_DELIVERY_REJECTED && previous.GetDelivery() != pb.Delivery_DELIVERY_REJECTED && m.GetFromAgentId() == "" {
+		return []Change{{Kind: MessageRejected, At: at, Message: m}}
+	}
+	return nil
+}
+
+func agentOver(a *pb.Agent) bool {
+	switch a.GetStatus() {
+	case pb.AgentStatus_AGENT_STATUS_ENDED, pb.AgentStatus_AGENT_STATUS_FAILED, pb.AgentStatus_AGENT_STATUS_LOST:
+		return true
+	}
+	return false
+}
+
+// Lead is the run's lead agent, or nil before the view has it.
+func (v *View) Lead() *pb.Agent { return v.Agents[v.Run.GetLeadAgentId()] }
+
+// Started says the lead's session has opened: the lead is live, or was.
+func (v *View) Started() bool {
+	lead := v.Lead()
+	return lead.GetCapabilities() != nil && lead.GetStatus() != pb.AgentStatus_AGENT_STATUS_LAUNCHING
+}
+
+// Over says the run has a final status.
+func (v *View) Over() bool { return v.Run != nil && !live(v.Run) }
+
+// Reports are the reports posted in the run, oldest first.
+func (v *View) Reports() []*pb.Message {
+	var out []*pb.Message
+	for _, m := range v.Messages {
+		if m.GetReport() != nil {
+			out = append(out, m)
+		}
+	}
+	slices.SortFunc(out, func(a, b *pb.Message) int { return a.GetAt().AsTime().Compare(b.GetAt().AsTime()) })
+	return out
+}
+
+// Snapshot is the view as a RunsSnapshot of this one run, in the shape the service sends.
+func (v *View) Snapshot() *pb.RunsSnapshot {
+	out := &pb.RunsSnapshot{Sequence: v.Sequence, Truncated: v.Truncated}
+	if v.Run != nil {
+		out.Runs = []*pb.Run{v.Run}
+	}
+	for _, a := range sortedByKey(v.Agents) {
+		out.Agents = append(out.Agents, a)
+	}
+	for _, t := range sortedByKey(v.Turns) {
+		out.Turns = append(out.Turns, t)
+	}
+	for _, m := range sortedByKey(v.Messages) {
+		out.Messages = append(out.Messages, m)
+	}
+	if v.Search != nil {
+		out.Searches = []*pb.SearchState{v.Search}
+	}
+	return out
+}
+
+func sortedByKey[T any](m map[string]T) []T {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	out := make([]T, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, m[k])
+	}
+	return out
+}
