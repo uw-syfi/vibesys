@@ -8,20 +8,19 @@ that run the same command lines and write the same files.
 
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys_evaluator._private import core
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-#: Names the loadgen binary; ``loadgen`` on ``PATH`` when unset.
-LOADGEN_ENV = "VIBESYS_EVALUATOR_LOADGEN"
+#: Names the loadgen binary; consulted after the wheel's bundled one (``core.find_binary``).
+LOADGEN_ENV = core.ENV_VARS["loadgen"]
 #: loadgen's own per-step timeout (its default): bounds how long a phase runs past its window.
 STEP_TIMEOUT_SECS = 10.0
 _STDERR_TAIL = 2000
@@ -131,11 +130,20 @@ class ProcessLoadgen:
     """The loadgen binary, run as a child process."""
 
     def __init__(self, path: str | None = None) -> None:
-        """Use ``path``, else ``$VIBESYS_EVALUATOR_LOADGEN``, else ``loadgen`` on ``PATH``."""
-        self._path = path or os.environ.get(LOADGEN_ENV) or shutil.which("loadgen") or "loadgen"
+        """Use ``path``, else the wheel's bundled loadgen, ``$VIBESYS_EVALUATOR_LOADGEN`` or ``PATH``."""
+        self._missing = ""
+        if path is None:
+            try:
+                path = core.find_binary("loadgen")
+            except core.CoreNotFoundError as error:
+                self._missing = str(error)
+                path = "loadgen"
+        self._path = path
 
     def run(self, args: Sequence[str], *, timeout_secs: float) -> LoadgenExit:
         """Run it; stderr (its own and the generator's) is kept (its tail), stdout is passed through."""
+        if self._missing:
+            return LoadgenExit(code=127, stderr=self._missing)
         return _run([self._path, *args], timeout_secs, "loadgen")
 
 

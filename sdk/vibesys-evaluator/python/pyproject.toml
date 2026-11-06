@@ -7,6 +7,7 @@ name = "vibesys-evaluator"
 version = "0.2.0rc1"
 description = "Build VibeSys benchmark evaluators for services: workloads, phases, validation"
 requires-python = ">=3.12"
+readme = "README.md"
 license = "MIT"
 # The schema's generated Python types (protoc-gen-py) and their validation, and a YAML
 # parser for the tasks' Kubernetes manifests (microservices.k8s). Nothing else: the package runs in
@@ -22,4 +23,6 @@ where = ["src"]
 include = ["vibesys_evaluator*"]
 
 [tool.setuptools.package-data]
-vibesys_evaluator = ["py.typed"]
+# _bin/ holds the Go binaries of a platform wheel (packaging/evaluator_wheels.py); a development
+# tree has none.
+vibesys_evaluator = ["py.typed", "_bin/*"]

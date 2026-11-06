@@ -86,13 +86,20 @@ def _stop(signum: int, _frame: FrameType | None) -> None:
 
 
 def with_signals(command: Callable[[], int]) -> int:
-    """Run ``command`` with the stop signals turned into ``Stopped``; 128 + signal if one came."""
+    """Run ``command`` with the stop signals turned into ``Stopped``; 128 + signal if one came.
+
+    A missing core binary (a source distribution has none) ends the command with the message that
+    says how to provide it, not a traceback.
+    """
     for sig in SIGNALS:
         signal.signal(sig, _stop)
     try:
         return command()
     except Stopped as stop:
         return 128 + stop.signum
+    except core.CoreNotFoundError as missing:
+        log(str(missing))
+        return 1
 
 
 @dataclass(kw_only=True)

@@ -1,8 +1,9 @@
 name: Build and publish vibesys-evaluator release
 
 # A published GitHub release whose tag is evaluator-v<version> releases vibesys-evaluator: the
-# wheel to PyPI, one image per domain (ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>
-# and ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>), and the Go module tag
+# platform wheels (Linux and macOS, x86_64 and arm64, each bundling the Go binaries) and the sdist
+# to PyPI, one image per domain (ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version> and
+# ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>), and the Go module tag
 # sdk/vibesys-evaluator/go/v<semver>, all from the same commit of main. The flow and the
 # one-time setup are in docs/contributing/publishing.md, "vibesys-evaluator releases".
 on:
@@ -71,6 +72,13 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # The platform wheels bundle the Go binaries, cross-compiled here (CGO_ENABLED=0).
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sdk/vibesys-evaluator/go/go.mod
+          cache: false
+
       - name: Validate the tag, the source version and main
         id: version
         run: |
@@ -108,34 +116,57 @@ jobs:
             --no-emit-project --no-emit-workspace --no-hashes --no-header --no-annotate \
             -o "$RUNNER_TEMP/evaluator-constraints.txt"
 
-      # Like the vibesys wheel, a single universal wheel and no sdist: the package is pure
-      # Python, and an sdist would be a second artifact to verify for no installer that needs it.
-      - name: Build the wheel
+      # One wheel per platform, each bundling the three Go binaries in vibesys_evaluator/_bin
+      # (packaging/evaluator_wheels.py: linux x86_64 and aarch64, static, with the manylinux and
+      # the musllinux tags; macOS x86_64 and arm64, cross-compiled), and one sdist, which has no
+      # binary and tells a user to set $VIBESYS_EVALUATOR_BIN. There is no py3-none-any wheel.
+      # The binaries are stamped with the Go module version of the release.
+      - name: Build the wheels
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          GO_VERSION: ${{ steps.version.outputs.go_version }}
+          COMMIT: ${{ steps.version.outputs.commit }}
         run: |
-          mkdir -p dist/evaluator
-          uv build --package vibesys-evaluator --wheel --out-dir dist/evaluator
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "$COMMIT")"
+          export SOURCE_DATE_EPOCH
+          uv run --frozen python packaging/evaluator_wheels.py build \
+            --out dist/evaluator --go-version "$GO_VERSION"
           uv run --frozen python packaging/check_release_version.py \
-            --source-root "$PACKAGE_ROOT/python" --wheel-dir dist/evaluator
+            --source-root "$PACKAGE_ROOT/python" --wheel-dir dist/evaluator --evaluator-wheels
+          uv run --frozen python packaging/evaluator_wheels.py verify dist/evaluator --version "$VERSION"
+          ls -l dist/evaluator
+
+      # The wheel the images and the smoke tests below use: linux x86_64 (the runner's).
+      - name: Pick the linux x86_64 wheel
+        id: linux_wheel
+        run: |
+          set -- dist/evaluator/*-py3-none-manylinux_2_17_x86_64.*.whl
+          test "$#" -eq 1
+          test -f "$1"
+          echo "wheel=$1" >> "$GITHUB_OUTPUT"
 
       - name: Install the wheel in a clean environment
         id: install
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          GO_VERSION: ${{ steps.version.outputs.go_version }}
+          WHEEL: ${{ steps.linux_wheel.outputs.wheel }}
         run: |
-          set -- dist/evaluator/*.whl
-          test "$#" -eq 1
           root="$(cd "$RUNNER_TEMP" && pwd -P)/evaluator-installed"
           home="$root/home"
           venv="$root/venv"
           mkdir -p "$home"
           test -z "$(find "$home" -mindepth 1 -print -quit)"
-          cp "$1" "$root/"
-          wheel="$root/$(basename "$1")"
+          cp "$WHEEL" "$root/"
+          wheel="$root/$(basename "$WHEEL")"
           uv_bin="$(command -v uv)"
           python_path="$(uv python find 3.12)"
+          # No Go toolchain on this PATH: the wheel alone must carry everything.
           clean_path="/usr/bin:/bin"
+          if PATH="$clean_path" command -v go > /dev/null; then
+            echo "::error::a Go toolchain is on the clean PATH ($clean_path); the smoke test needs none"
+            exit 1
+          fi
           clean_env=(env -i HOME="$home" PATH="$clean_path" PYTHONNOUSERSITE=1
             UV_CACHE_DIR="$root/uv-cache" UV_PYTHON_DOWNLOADS=never)
           "${clean_env[@]}" "$uv_bin" venv --no-config --python "$python_path" "$venv"
@@ -154,7 +185,34 @@ jobs:
           assert installed == os.environ["EXPECTED_VERSION"], installed
           print(f"vibesys_evaluator {installed} imports from {where.parent}")
           '
+          # The binaries are the wheel's (in _bin/, stamped with the release), and a task script's
+          # main() runs a sample through the core binary, with no Go toolchain on PATH.
+          "${clean_env[@]}" "$venv/bin/python" -I "$GITHUB_WORKSPACE/packaging/evaluator_wheel_smoke.py" \
+            --check "$GO_VERSION" "$venv"
+          "${clean_env[@]}" "$venv/bin/python" -I "$GITHUB_WORKSPACE/packaging/evaluator_wheel_smoke.py" \
+            benchmark --vs-output "$root/smoke-records.jsonl"
+          grep -q '"smoke_ops"' "$root/smoke-records.jsonl"
           echo "python=$venv/bin/python" >> "$GITHUB_OUTPUT"
+
+      # The Linux binaries are static, which is what lets one wheel carry the musllinux tag too:
+      # run the wheel's binaries on Alpine (musl), with no network. The other three wheels' binaries
+      # cannot run on this runner; their architecture and static linking are checked in the
+      # build step (evaluator_wheels.py verify).
+      - name: Run the wheel's binaries on musl
+        env:
+          GO_VERSION: ${{ steps.version.outputs.go_version }}
+          WHEEL: ${{ steps.linux_wheel.outputs.wheel }}
+        run: |
+          bins="$RUNNER_TEMP/musl-bin"
+          mkdir -p "$bins"
+          unzip -q -j "$WHEEL" 'vibesys_evaluator/_bin/*' -d "$bins"
+          docker run --rm --network none -v "$bins:/b:ro" \
+            alpine@sha256:bfe7ceb9f09ec0566c48fb93356e45a47a00be5a1dd14fa5b909e7709c66b034 sh -c '
+            set -e
+            /b/vibesys-evaluator core version | grep -F "\"loadgen_version\":\"$0\""
+            /b/loadgen --capabilities > /dev/null
+            /b/otelcapture -h 2> /dev/null || test "$?" -eq 2
+            ' "$GO_VERSION"
 
       - name: Check the type completeness of the installed public API
         env:
@@ -191,12 +249,6 @@ jobs:
       - name: Check the public API snapshot
         run: uv run --frozen python scripts/check_vibesys_evaluator_api.py
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: sdk/vibesys-evaluator/go/go.mod
-          cache: false
-
       - name: Test loadgen and its conformance fixtures
         working-directory: sdk/vibesys-evaluator/go
         run: |
@@ -209,8 +261,8 @@ jobs:
           go vet ./...
           go test -race ./...
 
-      # Each image installs the wheel verified above (the Dockerfile's `wheels` stage replaced by
-      # dist/evaluator), not one it builds itself.
+      # Each image installs the linux x86_64 wheel verified above (the Dockerfile's `wheels` stage
+      # replaced by a directory holding just that wheel), not one it builds itself.
       # Each image is built once, here, into an OCI archive. The image job pushes these exact
       # blobs, so the digest recorded now is the digest published, and the smoke test below
       # runs what is published.
@@ -218,19 +270,21 @@ jobs:
         id: image
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          GO_VERSION: ${{ steps.version.outputs.go_version }}
           COMMIT: ${{ steps.version.outputs.commit }}
+          LINUX_WHEEL: ${{ steps.linux_wheel.outputs.wheel }}
         run: |
           docker buildx create --name evaluator-release --driver docker-container \
             --driver-opt image=moby/buildkit:v0.22.0@sha256:832fa7aa1eb3deb56fa62ae933bfa42dad9a83ff4824dbbaf173b49c722b59d0 \
             --use
-          mkdir -p "$RUNNER_TEMP/image"
+          mkdir -p "$RUNNER_TEMP/image" "$RUNNER_TEMP/image-wheel"
+          # The images are linux/amd64: they install that platform's wheel (the Dockerfile's
+          # `wheels` stage), which carries the Go binaries; no Go toolchain runs in the image build.
+          cp "$LINUX_WHEEL" "$RUNNER_TEMP/image-wheel/"
           for domain in $DOMAINS; do
             archive="$RUNNER_TEMP/image/vibesys-evaluator-$domain.oci.tar"
             docker buildx build --file "$PACKAGE_ROOT/image/Dockerfile" --target "$domain" \
               --platform linux/amd64 --provenance=false --sbom=false --pull --no-cache \
-              --build-context wheels=dist/evaluator \
-              --build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION" \
+              --build-context wheels="$RUNNER_TEMP/image-wheel" \
               --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
               --label "org.opencontainers.image.revision=$COMMIT" \
               --label "org.opencontainers.image.version=$VERSION" \
@@ -270,10 +324,18 @@ jobs:
             > "$RUNNER_TEMP/image/capabilities.json"
           loadgen_version="$(sed -n 2p "$RUNNER_TEMP/image/capabilities.json" | jq -r .loadgenVersion)"
           if [[ "$loadgen_version" != "$GO_VERSION" ]]; then
-            echo "::error::loadgen in the image reports version '$loadgen_version', not $GO_VERSION: the image must stamp loadgen with the release version (build argument VIBESYS_EVALUATOR_VERSION)."
+            echo "::error::loadgen in the image reports version '$loadgen_version', not $GO_VERSION: the wheel must stamp its binaries with the release version (evaluator_wheels.py build --go-version)."
             exit 1
           fi
           docker run --rm --network none "$microservices" python -c 'import vibesys_evaluator.microservices.k8s'
+          # The core on the PATH and the one the package runs are both the wheel's.
+          docker run --rm --network none "$microservices" python -c '
+          import shutil
+          from vibesys_evaluator._private import core
+          for name in core.ENV_VARS:
+              assert core.find_binary(name).endswith(f"/vibesys_evaluator/_bin/{name}"), name
+              assert shutil.which(name), name
+          '
           # The harness the image installs is the one the package replays with.
           docker run --rm --network none "vibesys-evaluator-llm-serving-verify:$VERSION" python -c '
           import importlib.metadata
@@ -282,11 +344,13 @@ jobs:
           assert installed == agentx.HARNESS_VERSION, installed
           '
 
-      - name: Upload the verified wheel
+      - name: Upload the verified wheels and sdist
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: evaluator-dist
-          path: dist/evaluator/*.whl
+          path: |
+            dist/evaluator/*.whl
+            dist/evaluator/*.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -301,7 +365,7 @@ jobs:
           retention-days: 7
 
   pypi:
-    name: Publish the wheel to PyPI
+    name: Publish the wheels and sdist to PyPI
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -311,24 +375,87 @@ jobs:
       actions: read # download the verified wheel
       id-token: write # PyPI Trusted Publishing and the wheel's PyPI attestations
     steps:
-      - name: Download the verified wheel
+      - name: Download the verified wheels and sdist
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: evaluator-dist
           path: dist/evaluator
 
-      - name: Require exactly one wheel and no sdist
+      # Exactly what verify built: the four platform wheels and the sdist, and no py3-none-any
+      # wheel (an installer must never take a wheel without the binaries over the sdist's message).
+      - name: Require the four platform wheels and the sdist
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          test "$(find dist/evaluator -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 1
-          test -f "dist/evaluator/vibesys_evaluator-$VERSION-py3-none-any.whl"
+          test "$(find dist/evaluator -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 5
+          test -f "dist/evaluator/vibesys_evaluator-$VERSION.tar.gz"
+          for platform in manylinux_2_17_x86_64 manylinux_2_17_aarch64 macosx_12_0_x86_64 macosx_12_0_arm64; do
+            set -- dist/evaluator/vibesys_evaluator-"$VERSION"-py3-none-*"$platform"*.whl
+            test "$#" -eq 1
+            test -f "$1"
+          done
+          test -z "$(find dist/evaluator -name '*-any.whl' -print -quit)"
+
+      # A version is published once and never overwritten. A re-run after a partial upload skips
+      # the files PyPI already holds with the same sha256 and uploads the rest; a file PyPI holds
+      # with other contents stops the release.
+      - name: Keep only the files PyPI does not hold yet
+        id: pending
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          status="$(curl -sS -o "$RUNNER_TEMP/pypi.json" -w '%{http_code}' \
+            "https://pypi.org/pypi/vibesys-evaluator/$VERSION/json")"
+          case "$status" in
+            200) ;;
+            404) echo '{"urls": []}' > "$RUNNER_TEMP/pypi.json" ;;
+            *) echo "::error::PyPI answered $status for vibesys-evaluator $VERSION"; exit 1 ;;
+          esac
+          remaining=0
+          for file in dist/evaluator/*; do
+            name="$(basename "$file")"
+            ours="$(sha256sum "$file" | cut -d' ' -f1)"
+            held="$(jq -r --arg name "$name" '.urls[] | select(.filename == $name) | .digests.sha256' "$RUNNER_TEMP/pypi.json")"
+            if [[ -z "$held" ]]; then
+              remaining=$((remaining + 1))
+            elif [[ "$held" == "$ours" ]]; then
+              echo "$name is already on PyPI with this sha256"
+              rm "$file"
+            else
+              echo "::error::$name is already on PyPI with sha256 $held, not the verified $ours. Publish a new version."
+              exit 1
+            fi
+          done
+          echo "pending=$remaining" >> "$GITHUB_OUTPUT"
 
       - name: Publish with PyPI Trusted Publishing
+        if: steps.pending.outputs.pending != '0'
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/evaluator
           attestations: true
+
+      # Every file has a PyPI attestation (PEP 740: publisher identity and the source commit),
+      # the publish action's, which PyPI serves from its integrity API.
+      - name: Check that PyPI serves an attestation for every file
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          curl -fsS "https://pypi.org/pypi/vibesys-evaluator/$VERSION/json" \
+            | jq -r '.urls[].filename' | sort > "$RUNNER_TEMP/files.txt"
+          test "$(wc -l < "$RUNNER_TEMP/files.txt" | tr -d ' ')" -eq 5
+          while read -r name; do
+            for attempt in 1 2 3 4 5 6; do
+              if curl -fsS -o /dev/null -H 'Accept: application/vnd.pypi.integrity.v1+json' \
+                "https://pypi.org/integrity/vibesys-evaluator/$VERSION/$name/provenance"; then
+                echo "attested: $name"
+                continue 2
+              fi
+              sleep 20
+            done
+            echo "::error::PyPI serves no attestation for $name"
+            exit 1
+          done < "$RUNNER_TEMP/files.txt"
 
   image:
     name: Push and attest the ${{ matrix.domain }} image

@@ -10,8 +10,9 @@ import zipfile
 from email.parser import BytesParser
 from email.policy import default
 from pathlib import Path
-from typing import Never, cast
+from typing import TYPE_CHECKING, Never, cast
 
+from evaluator_wheels import release_names
 from packaging.version import Version
 from release_versions import (
     ReleaseIdentity,
@@ -19,6 +20,9 @@ from release_versions import (
     go_module_version,
     python_release_identity,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TAG_PREFIX = "refs/tags/v"
@@ -44,12 +48,15 @@ def check_release_version(
     source_root: Path = REPO_ROOT,
     wheel_dir: Path | None = None,
     tag_prefix: str = DEFAULT_TAG_PREFIX,
+    expected_files: Callable[[str], set[str]] | None = None,
 ) -> Version:
     """Return the canonical project version after checking every supplied source.
 
     ``source_root`` holds the ``pyproject.toml`` of the distribution being released, and
     ``tag_prefix`` is what its release tags start with before the version (``refs/tags/v`` for
-    ``vibesys``, ``refs/tags/evaluator-v`` for ``vibesys-evaluator``).
+    ``vibesys``, ``refs/tags/evaluator-v`` for ``vibesys-evaluator``). ``wheel_dir`` must hold
+    exactly the one universal wheel, unless ``expected_files`` names the release's files from the
+    version (the evaluator's platform wheels and sdist): then it holds exactly those.
     """
     source_root = source_root.resolve()
     project = tomllib.loads((source_root / "pyproject.toml").read_text()).get("project")
@@ -71,7 +78,10 @@ def check_release_version(
 
     if wheel_dir is not None:
         _check_wheels(
-            wheel_dir.resolve(), distribution=cast("str", project["name"]), version=version
+            wheel_dir.resolve(),
+            distribution=cast("str", project["name"]),
+            version=version,
+            expected_files=expected_files,
         )
     return version
 
@@ -88,17 +98,30 @@ def _python_identity(raw: str, *, source: str) -> ReleaseIdentity:
         raise ReleaseVersionError(str(exc)) from exc
 
 
-def _check_wheels(wheel_dir: Path, *, distribution: str, version: Version) -> None:
-    expected = {wheel_filename(distribution, version)}
+def _check_wheels(
+    wheel_dir: Path,
+    *,
+    distribution: str,
+    version: Version,
+    expected_files: Callable[[str], set[str]] | None,
+) -> None:
+    expected = (
+        {wheel_filename(distribution, version)}
+        if expected_files is None
+        else expected_files(str(version))
+    )
     actual = {
         path.name for path in wheel_dir.iterdir() if path.is_file() and path.name != ".gitignore"
     }
     if actual != expected:
         _fail(
-            "Release directory must contain exactly one universal wheel and no sdist: "
+            "Release directory must contain exactly one universal wheel and no sdist "
+            "(or exactly the files the release names): "
             f"expected {sorted(expected)}, found {sorted(actual)}"
         )
     for filename in sorted(expected):
+        if not filename.endswith(".whl"):
+            continue
         _check_wheel_metadata(wheel_dir / filename, version=version)
 
 
@@ -122,12 +145,21 @@ def _fail(message: str) -> Never:
     raise ReleaseVersionError(message)
 
 
+def _evaluator_files() -> Callable[[str], set[str]]:
+    return release_names
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag")
     parser.add_argument("--wheel-dir", type=Path)
     parser.add_argument("--source-root", type=Path, default=REPO_ROOT)
     parser.add_argument("--tag-prefix", default=DEFAULT_TAG_PREFIX)
+    parser.add_argument(
+        "--evaluator-wheels",
+        action="store_true",
+        help="the release is vibesys-evaluator's platform wheels and sdist (evaluator_wheels.py)",
+    )
     parser.add_argument(
         "--go-module-version",
         action="store_true",
@@ -145,6 +177,7 @@ def main() -> int:
             source_root=args.source_root,
             wheel_dir=args.wheel_dir,
             tag_prefix=args.tag_prefix,
+            expected_files=_evaluator_files() if args.evaluator_wheels else None,
         )
     except (OSError, ValueError, ReleaseVersionError) as exc:
         print(f"release version check failed: {exc}", file=sys.stderr)

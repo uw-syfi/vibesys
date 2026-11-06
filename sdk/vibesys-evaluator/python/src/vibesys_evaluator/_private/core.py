@@ -6,8 +6,10 @@ one JSON message on its stdin and decodes the one JSON message it writes to stdo
 (``CoreDomainError``, from the response's ``error_kind`` and ``message``); any other exit, a
 reply that is not JSON, or a missing binary is a ``CoreError`` of the core itself.
 
-The binary is found in the wheel (``vibesys_evaluator/_bin``), then ``$VIBESYS_EVALUATOR_BIN``,
-then ``PATH``.
+The binary is found in the wheel (``vibesys_evaluator/_bin``, where the platform wheels bundle the
+Go binaries), then ``$VIBESYS_EVALUATOR_BIN``, then ``PATH``. ``loadgen`` and ``otelcapture`` are
+found the same way (``find_binary(name)``), with ``$VIBESYS_EVALUATOR_LOADGEN`` and
+``$VIBESYS_EVALUATOR_OTELCAPTURE``.
 """
 
 from __future__ import annotations
@@ -26,6 +28,12 @@ if TYPE_CHECKING:
 #: Names the core binary; consulted after the wheel's bundled one.
 BIN_ENV = "VIBESYS_EVALUATOR_BIN"
 BIN_NAME = "vibesys-evaluator"
+#: The environment variable that names each of the wheel's binaries.
+ENV_VARS = {
+    BIN_NAME: BIN_ENV,
+    "loadgen": "VIBESYS_EVALUATOR_LOADGEN",
+    "otelcapture": "VIBESYS_EVALUATOR_OTELCAPTURE",
+}
 _BUNDLED_DIR = Path(__file__).resolve().parent.parent / "_bin"
 _DOMAIN_EXIT = 1
 
@@ -58,21 +66,29 @@ class CoreDomainError(CoreError):
         self.response = response
 
 
-def find_binary() -> str:
-    """The core binary: the wheel's own, then ``$VIBESYS_EVALUATOR_BIN``, then ``PATH``."""
+def find_binary(name: str = BIN_NAME) -> str:
+    """The binary ``name``: the wheel's own, then its environment variable, then ``PATH``.
+
+    ``name`` is one of the wheel's binaries (``vibesys-evaluator``, ``loadgen``, ``otelcapture``);
+    each has its own variable (``ENV_VARS``).
+    """
     suffix = ".exe" if sys.platform == "win32" else ""
-    bundled = _BUNDLED_DIR / (BIN_NAME + suffix)
+    bundled = _BUNDLED_DIR / (name + suffix)
     if bundled.is_file():
         return str(bundled)
-    named = os.environ.get(BIN_ENV)
+    env = ENV_VARS[name]
+    named = os.environ.get(env)
     if named:
         return named
-    found = shutil.which(BIN_NAME)
+    found = shutil.which(name)
     if found:
         return found
     msg = (
-        f"the {BIN_NAME} binary is not bundled, ${BIN_ENV} is unset and it is not on PATH; install it "
-        f"with `go install github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/cmd/{BIN_NAME}@<tag>`"
+        f"the {name} binary is not bundled in this installation of vibesys-evaluator, ${env} is "
+        f"unset and it is not on PATH. The platform wheels bundle it (pip install vibesys-evaluator "
+        f"on Linux or macOS, x86_64 or arm64); a source distribution or another platform does not. "
+        f"Set ${env} to the binary, or build it: "
+        f"`go install github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/cmd/{name}@<tag>`"
     )
     raise CoreNotFoundError(msg)
 

@@ -94,13 +94,30 @@ of the alias being replaced, a reader can see new binaries with old checksums fo
 `vibesys-evaluator` is the package task writers build benchmark evaluators on. One version
 covers its published parts, all built from one commit of `main`:
 
-- the wheel `vibesys-evaluator` on PyPI (one universal wheel, no sdist, like `vibesys`);
+- the wheels `vibesys-evaluator` on PyPI: one platform wheel per supported platform, each bundling
+  the Go binaries `vibesys-evaluator`, `loadgen` and `otelcapture` in `vibesys_evaluator/_bin/` (so
+  `pip install vibesys-evaluator` needs no Go toolchain), and an sdist. There is no universal
+  wheel. The matrix, built by `packaging/evaluator_wheels.py`:
+
+  | Wheel platform tag | Binaries |
+  |---|---|
+  | `manylinux_2_17_x86_64.manylinux2014_x86_64.musllinux_1_2_x86_64` | linux/amd64, static |
+  | `manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_2_aarch64` | linux/arm64, static |
+  | `macosx_12_0_x86_64` | darwin/amd64, cross-compiled |
+  | `macosx_12_0_arm64` | darwin/arm64, cross-compiled |
+
+  Every binary is built with `CGO_ENABLED=0 go build -trimpath` on the Linux release runner and
+  stamped with the Go module version, so a Linux wheel carries the manylinux and musllinux tags at
+  once. The sdist holds no binary: installed from it (on Windows, or any platform without a
+  wheel), the package fails with a message that says to set `$VIBESYS_EVALUATOR_BIN` (or put the
+  binary on `PATH`, or `go install` it). Go authors do not use the wheel: they `go install` or
+  import the Go module;
 - one image per domain, which task images build `FROM`:
-  `ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>` (with loadgen, kubectl and
-  buildctl) and `ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>` (with the AgentX
+  `ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>` (with kubectl and buildctl; the
+  Go binaries come from the wheel and are linked onto the `PATH`) and `ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>` (with the AgentX
   harness pinned by `sdk/vibesys-evaluator/image/llm-serving/uv.lock`), each a target of
   `sdk/vibesys-evaluator/image/Dockerfile`;
-- the Go module tag `sdk/vibesys-evaluator/go/v<semver>` for its load generator.
+- the Go module tag `sdk/vibesys-evaluator/go/v<semver>` for its Go authoring SDK and, with `go install`, the binaries (Go authors; Python authors get the binaries in the wheel).
 
 `.github/workflows/evaluator-release.yml` releases them. `publish.yml` skips a release whose tag
 starts with `evaluator-`.
@@ -138,14 +155,21 @@ role. Task images pull them without credentials only once they are public.
    published release is the only trigger.
 3. The workflow refuses the release unless the tag's version equals `project.version` and the
    tagged commit is contained in `main`, and also when the release took the "latest" marker. It
-   then builds the wheel and the images without any write permission and verifies them: the wheel
-   installs and imports in a clean environment, `pyright --verifytypes` passes on the installed
-   package, the package's tests, its public API snapshot, the loadgen Go tests and the conformance
-   fixtures pass, both images import the package at the release version, the microservices
+   then builds the wheels, the sdist and the images without any write permission and verifies
+   them: the release holds exactly the four platform wheels and the sdist, each wheel's `RECORD`,
+   tags, binaries (executable, of the wheel's architecture, statically linked) are checked, the
+   linux x86_64 wheel installs and imports in a clean environment with no Go toolchain on `PATH`
+   and runs a `main()` sample through the bundled core, its binaries run on Alpine (musl) and
+   report the release version, `pyright --verifytypes` passes on the installed package, the
+   package's tests, its public API snapshot, the Go tests and the conformance fixtures pass,
+   both images import the package at the release version and hold the wheel's binaries (the
+   images install that same linux x86_64 wheel; no Go runs in the image build), the microservices
    image runs `loadgen --capabilities` with the release version, and the llm-serving image holds
-   the harness version the package replays with.
-4. The wheel that was verified is published by Trusted Publishing, from the only job that runs in
-   `pypi-evaluator`. Then each image that was verified is pushed by digest-preserving copy, so
+   the harness version the package replays with. The macOS and linux aarch64 binaries cannot run
+   on the runner; they are checked for architecture and static linking.
+4. The wheels and sdist that were verified are published by Trusted Publishing, from the only job
+   that runs in `pypi-evaluator`, with PyPI attestations; the job then checks that PyPI serves an
+   attestation for every file. Then each image that was verified is pushed by digest-preserving copy, so
    the digest recorded at build time is the one published, and its build provenance is attested
    (`gh attestation verify oci://ghcr.io/uw-syfi/vibesys-evaluator-<domain>@<digest> --repo uw-syfi/vibesys`).
    Last, the Go module tag is created on the same commit and each image reference with its digest
@@ -157,7 +181,8 @@ Evaluator releases run one at a time, and a started one is never cancelled. Neve
 above: it belongs to the Python releases. The workflow edits the release with `--latest=false`.
 
 Recovery follows the wheel's rule: never delete or move a published tag, image tag or version. A
-re-run after a partial failure is safe: it skips an image tag that already has the verified
-digest and a Go tag that already points at the commit, and fails if either holds something else.
-If a release is bad, yank the wheel on PyPI, mark the GitHub release as affected, and publish a
+re-run after a partial failure is safe: it skips a PyPI file that is already there with the
+verified sha256, an image tag that already has the verified digest and a Go tag that already
+points at the commit, and fails if any of them holds something else.
+If a release is bad, yank the version on PyPI, mark the GitHub release as affected, and publish a
 higher version.
