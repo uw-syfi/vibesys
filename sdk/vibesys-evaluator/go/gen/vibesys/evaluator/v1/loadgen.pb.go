@@ -1225,7 +1225,13 @@ type OperationResult struct {
 	EndUnixNanos int64         `protobuf:"varint,5,opt,name=end_unix_nanos,json=endUnixNanos,proto3" json:"end_unix_nanos,omitempty"`
 	Steps        []*StepResult `protobuf:"bytes,6,rep,name=steps,proto3" json:"steps,omitempty"`
 	// ERROR_KIND_UNSPECIFIED when every step succeeded.
-	Error         ErrorKind `protobuf:"varint,7,opt,name=error,proto3,enum=vibesys.evaluator.v1.ErrorKind" json:"error,omitempty"`
+	Error ErrorKind `protobuf:"varint,7,opt,name=error,proto3,enum=vibesys.evaluator.v1.ErrorKind" json:"error,omitempty"`
+	// The client that ran it: in a closed loop the client's number (0 to
+	// clients - 1), in an open loop the in-flight slot it held (0 to
+	// max-in-flight - 1). Two operations of one client never overlap in time.
+	// Unset in files written before it was defined; the accuracy checker then
+	// assigns display lanes itself.
+	Client        *uint32 `protobuf:"varint,8,opt,name=client,proto3,oneof" json:"client,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1307,6 +1313,13 @@ func (x *OperationResult) GetError() ErrorKind {
 		return x.Error
 	}
 	return ErrorKind_ERROR_KIND_UNSPECIFIED
+}
+
+func (x *OperationResult) GetClient() uint32 {
+	if x != nil && x.Client != nil {
+		return *x.Client
+	}
+	return 0
 }
 
 // StepResult is the outcome of one step.
@@ -2342,7 +2355,7 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\x04name\x127\n" +
 	"\fjson_pointer\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^(/[^/]*)+$H\x00R\vjsonPointer\x12!\n" +
 	"\x06header\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x06headerB\x0f\n" +
-	"\x06source\x12\x05\xbaH\x02\b\x01\"\xc0\x02\n" +
+	"\x06source\x12\x05\xbaH\x02\b\x01\"\xe8\x02\n" +
 	"\x0fOperationResult\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\rR\toperation\x120\n" +
@@ -2350,7 +2363,9 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x10start_unix_nanos\x18\x04 \x01(\x03R\x0estartUnixNanos\x12$\n" +
 	"\x0eend_unix_nanos\x18\x05 \x01(\x03R\fendUnixNanos\x126\n" +
 	"\x05steps\x18\x06 \x03(\v2 .vibesys.evaluator.v1.StepResultR\x05steps\x12?\n" +
-	"\x05error\x18\a \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05error\"\xcc\x02\n" +
+	"\x05error\x18\a \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05error\x12\x1b\n" +
+	"\x06client\x18\b \x01(\rH\x00R\x06client\x88\x01\x01B\t\n" +
+	"\a_client\"\xcc\x02\n" +
 	"\n" +
 	"StepResult\x12(\n" +
 	"\x10start_unix_nanos\x18\x01 \x01(\x03R\x0estartUnixNanos\x12$\n" +
@@ -2579,6 +2594,7 @@ func file_vibesys_evaluator_v1_loadgen_proto_init() {
 		(*Capture_JsonPointer)(nil),
 		(*Capture_Header)(nil),
 	}
+	file_vibesys_evaluator_v1_loadgen_proto_msgTypes[11].OneofWrappers = []any{}
 	file_vibesys_evaluator_v1_loadgen_proto_msgTypes[12].OneofWrappers = []any{
 		(*StepResult_Body)(nil),
 		(*StepResult_Digest)(nil),

@@ -13,10 +13,11 @@
    complete type.
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
    against the package.
-5. The Go SDK's snapshot ``api/go-workload.txt`` (``go doc -all`` of
-   ``go/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
-   to the code) loses no line of the last release's: a removed or changed
-   declaration is a break. Skipped, with a note, until a release has it.
+5. The Go SDK's snapshots ``api/go-workload.txt`` and ``api/go-check.txt``
+   (``go doc -all`` of ``go/workload`` and ``go/check``; each package's Go
+   test ``TestAPISnapshotIsCurrent`` keeps its snapshot equal to the code)
+   lose no line of the last release's: a removed or changed declaration is a
+   break. Skipped, with a note, for a snapshot no release has yet.
 
 Usage:
     uv run python scripts/check_vibesys_evaluator_api.py [--write]
@@ -45,7 +46,7 @@ REPO = Path(__file__).resolve().parent.parent
 SDK = REPO / "sdk" / "vibesys-evaluator"
 SRC = SDK / "python" / "src"
 SNAPSHOT = SDK / "api" / "public-api.txt"
-GO_SNAPSHOT = SDK / "api" / "go-workload.txt"
+GO_SNAPSHOTS = (SDK / "api" / "go-workload.txt", SDK / "api" / "go-check.txt")
 EXAMPLES = SDK / "examples"
 PACKAGE = "vibesys_evaluator"
 #: The public modules, in the snapshot's order.
@@ -261,9 +262,14 @@ def _approved_break(tag: str) -> str | None:
 
 
 def check_go_release() -> bool:
-    """The Go snapshot keeps every line of the last release's; True when nothing is removed."""
+    """Each Go snapshot keeps every line of the last release's; True when nothing is removed."""
+    results = [_check_go_snapshot(snapshot) for snapshot in GO_SNAPSHOTS]
+    return all(results)
+
+
+def _check_go_snapshot(snapshot: Path) -> bool:
     tag = _last_release()
-    path = GO_SNAPSHOT.relative_to(REPO).as_posix()
+    path = snapshot.relative_to(REPO).as_posix()
     git = shutil.which("git") or "git"
     released = (
         _run([git, "show", f"{tag}:{path}"], cwd=REPO, capture_output=True) if tag else None
@@ -271,10 +277,10 @@ def check_go_release() -> bool:
     if released is None or released.returncode != 0:
         print(f"go api: no release has {path} yet; skipped")
         return True
-    current = set(GO_SNAPSHOT.read_text().splitlines())
+    current = set(snapshot.read_text().splitlines())
     removed = [line for line in released.stdout.splitlines() if line.strip() and line not in current]
     if not removed:
-        print(f"go api: every declaration of {tag} is kept")
+        print(f"go api: every declaration of {tag}'s {path} is kept")
         return True
     print(f"go api: lines of {tag}'s {path} that changed or went away:")
     print("\n".join(f"  {line}" for line in removed))

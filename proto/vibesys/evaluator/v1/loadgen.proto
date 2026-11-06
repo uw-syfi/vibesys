@@ -250,6 +250,12 @@ message OperationResult {
   repeated StepResult steps = 6;
   // ERROR_KIND_UNSPECIFIED when every step succeeded.
   ErrorKind error = 7 [(buf.validate.field).enum.defined_only = true];
+  // The client that ran it: in a closed loop the client's number (0 to
+  // clients - 1), in an open loop the in-flight slot it held (0 to
+  // max-in-flight - 1). Two operations of one client never overlap in time.
+  // Unset in files written before it was defined; the accuracy checker then
+  // assigns display lanes itself.
+  optional uint32 client = 8;
 }
 
 // StepResult is the outcome of one step.

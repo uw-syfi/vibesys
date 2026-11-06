@@ -1,0 +1,580 @@
+package check // import "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/check"
+
+Package check is vibesys-evaluator's model-based accuracy checker: it decides
+whether a captured history of a candidate's responses is one the task's oracle
+allows.
+
+The task writes the oracle as one or more Specs, in Go. A Spec projects the
+history's calls onto keyed Pieces (Project) and models one key's state (Init,
+Step, optionally Fault). The check splits the pieces into partitions by key,
+samples reads, and searches each partition for an order of its pieces that
+respects real time and that the model accepts (porcupine's linearizability
+search), under time and memory budgets. The verdict is PASS, FAIL (with the
+first violation explained and an HTML timeline) or UNKNOWN (something could not
+be decided; never a pass), with what was covered.
+
+Main is the oracle's command line: it checks a history directory the accuracy
+capture wrote (OpenHistory). Register, Window, Counter and PMap are building
+blocks for model states.
+
+The authoring guide is sdk/vibesys-evaluator/docs/accuracy-checks.md; the
+history directory's format is in sdk/vibesys-evaluator/docs/spec.md ("Accuracy
+history").
+
+CONSTANTS
+
+const DefaultReportDir = "/vibesys/artifacts/accuracy"
+    DefaultReportDir is where Main writes the report and timelines unless --out
+    says otherwise.
+
+
+VARIABLES
+
+var DefaultOptions = Options{
+	PartitionTimeout:   60 * time.Second,
+	TotalTimeout:       10 * time.Minute,
+	MaxSearchSteps:     -1,
+	MemoryBytes:        2 << 30,
+	MaxReadsPerKey:     5000,
+	MaxOpsPerPartition: 50000,
+	MaxLostShare:       0.01,
+	OverlapWarning:     12,
+	ExplainTimeout:     60 * time.Second,
+	MaxExplained:       3,
+	MaxTimelineOps:     3000,
+	Seed:               1,
+}
+    DefaultOptions are what a check gets for the fields left zero.
+
+
+FUNCTIONS
+
+func Main(oracle func(h *History) ([]AnySpec, error))
+    Main is the command line of a task's oracle: it checks a captured history
+    directory (see OpenHistory) against the specs oracle builds for it, prints
+    the report, writes it and the failures' timelines to --out, and exits 0 on
+    PASS, 1 on FAIL and 2 on UNKNOWN, with the verdict's one-paragraph reason on
+    standard error when it is not PASS.
+
+        ORACLE --history DIR [--out DIR] [--partition-timeout D] [--total-timeout D]
+               [--max-search-steps N] [--memory-mb N] [--workers N] [--max-reads-per-key N]
+               [--max-ops-per-partition N] [--max-lost-share F] [--seed N]
+
+    The flags' defaults are DefaultOptions. oracle gets the opened history,
+    so the specs can read its dataset (History.Dataset); an error from it is an
+    UNKNOWN verdict.
+
+
+TYPES
+
+type AnySpec interface {
+	// Has unexported methods.
+}
+    AnySpec is a Spec of any state, input and output types: what Check and Main
+    take.
+
+type Call struct {
+	// Phase is the phase's index, from 0.
+	Phase int
+	// Index is the operation's position in the phase's request stream.
+	Index uint64
+	// Client is the loadgen client that ran it (two operations of one client never overlap), or
+	// -1 when the history does not record it.
+	Client int
+	// Op is the operation's name.
+	Op string
+	// Info is the Request's info, a JSON object.
+	Info json.RawMessage
+	// Start is when the first step was sent; End when the last step's response was complete or
+	// the operation failed.
+	Start, End int64
+	// Steps are the steps that were sent, in order.
+	Steps []Step
+}
+    Call is one operation a phase sent, as loadgen recorded it, with the
+    generator's Info. Times are Unix nanoseconds of the loadgen clock.
+
+func (c *Call) Lost() bool
+    Lost says whether some step got no response (a transport error, a timeout,
+    or the phase ended first): the operation may or may not have taken effect.
+
+type Counter struct {
+	// Has unexported fields.
+}
+    Counter is a commutative counter under bounded staleness: increments (the
+    units of a resource taken) whose sum is exact for strict operations and
+    whose recent increments make a stale read's range. Its state is the settled
+    sum plus the set of recent increments, independent of the order the search
+    applied them in.
+
+func (c Counter) Add(n int, call, ret int64) Counter
+    Add records an increment over [call, ret].
+
+func (c Counter) Equal(o Counter) bool
+    Equal compares sums and recent increments.
+
+func (c Counter) Hash() uint64
+    Hash agrees with Equal.
+
+func (c Counter) Prune(floor int64, bound time.Duration) Counter
+    Prune folds increments that every read from floor on must see into the
+    settled sum.
+
+func (c Counter) Range(s int64, bound time.Duration) (lo, hi int)
+    Range is the least and most a read that started at s may show: every
+    increment acknowledged more than bound before s, and at most all of them.
+
+func (c Counter) Value() int
+    Value is the exact sum (what a strict operation sees).
+
+type Coverage struct {
+	// Calls read, and those with a lost response.
+	Calls, LostCalls int
+	// Pieces projected, those with an unknown outcome, and the unknown reads dropped.
+	Pieces, UnknownPieces, UnknownReadsDropped int
+	Keys, Faults                               int
+	// ReadsSampledOut are reads dropped by MaxReadsPerKey.
+	ReadsSampledOut int
+	// OpsChecked are in partitions with a verdict (ok or illegal), OpsUnchecked in the others.
+	OpsChecked, OpsUnchecked int
+	ByStatus                 map[Status]int
+}
+    Coverage says what was and was not checked.
+
+type Failure struct {
+	Partition   string
+	Explanation string
+	// Timeline is porcupine's HTML timeline of the failing prefix, nil when it is too large.
+	Timeline []byte
+}
+    Failure explains one failing partition.
+
+type Fault struct {
+	// Kind is the task-level name of what was done ("restart", "flush").
+	Kind string
+	// Target is what it hit, for messages.
+	Target string
+	// Start and End are Unix nanoseconds of the loadgen clock.
+	Start, End int64
+	// AfterPhase is the phase it follows.
+	AfterPhase int
+}
+    Fault is a fault injected between two phases, with no operation in flight
+    from Start to End.
+
+type History struct {
+	// Phases is the number of phases.
+	Phases int
+	// Faults are the faults injected between phases, in order.
+	Faults []Fault
+	// Dataset is the path of the dataset file the generator read, or "" when there is none.
+	Dataset string
+	// Has unexported fields.
+}
+    History is a captured run: its phases, loaded one at a time, and the faults
+    between them.
+
+func NewHistory(phases [][]Call, faults []Fault) *History
+    NewHistory is a history held in memory (tests, synthetic histories).
+
+func OpenHistory(dir string) (*History, error)
+    OpenHistory opens a history directory: history.binpb (a HistoryManifest)
+    and, per phase, phase-<i>/ with loadgen's results.binpb and summary.binpb
+    and the generator's kept.binpb (or state/kept.binpb, where a phase pod
+    leaves it). Without history.binpb it reads the phase-<i> directories it
+    finds, with no faults, and dataset.json if there is one. Phases are read
+    when Phase asks for them.
+
+func (h *History) Phase(i int) ([]Call, error)
+    Phase loads phase i's calls, ordered by start.
+
+type Op[I, O any] struct {
+	Keys    []string
+	In      I
+	Out     O
+	Unknown bool
+	Write   bool
+	// Call and Return are the op's real-time window. An unknown outcome's Return is where its
+	// effect window ends (Spec.EffectWindow), or the end of the history.
+	Call, Return int64
+	// Floor is a time every op the search may still place after this one was called at or after:
+	// a model may forget time-based detail no such op can observe (versions that are settled for
+	// every read from Floor on), which keeps its states small and comparable.
+	Floor int64
+}
+    Op is a piece as Step sees it.
+
+type Options struct {
+	// PartitionTimeout bounds one partition's search; past it the partition is undecided.
+	PartitionTimeout time.Duration
+	// TotalTimeout bounds the whole check, from projection to the last search: partitions not
+	// started by then are undecided (status skipped). Explaining failures has its own budget.
+	TotalTimeout time.Duration
+	// MaxSearchSteps bounds one partition's search in model steps, a budget that does not depend
+	// on the machine's speed. Negative: no bound (the default).
+	MaxSearchSteps int64
+	// MemoryBytes bounds the checker's heap. Above it the search that has taken the most steps is
+	// aborted (undecided, status memory), one at a time; when all partitions are done, those are
+	// retried alone.
+	MemoryBytes int64
+	// Workers is how many partitions are searched at once (default GOMAXPROCS).
+	Workers int
+	// MaxReadsPerKey keeps at most this many reads per key, a uniform sample drawn from Seed;
+	// writes are always kept. Negative: keep every read.
+	MaxReadsPerKey int
+	// MaxOpsPerPartition: a partition with more ops than this after sampling is not searched
+	// (undecided, status too-large).
+	MaxOpsPerPartition int
+	// MaxLostShare is the largest share of pieces with an unknown outcome (Piece.Unknown: lost
+	// responses and 5xx alike) a spec accepts; above it the check fails, since at the check's
+	// fixed low load they are the candidate's fault. Negative: no limit.
+	MaxLostShare float64
+	// OverlapWarning: a partition with more ops in flight at once than this gets a warning, since
+	// a search that must reject a history costs about 2^overlap per operation.
+	OverlapWarning int
+	// ExplainTimeout bounds the search for each failing partition's first violation.
+	ExplainTimeout time.Duration
+	// MaxExplained is how many failing partitions per spec are explained.
+	MaxExplained int
+	// MaxTimelineOps: a failing prefix with more ops than this gets no HTML timeline.
+	MaxTimelineOps int
+	// Seed seeds the read sample.
+	Seed int64
+	// HeapBytes measures the heap the memory budget bounds; nil measures the Go runtime's heap
+	// objects. A test may count something else.
+	HeapBytes func() int64
+}
+    Options bound a check. A zero field takes its default (DefaultOptions).
+
+type PMap[V Value[V]] struct {
+	// Has unexported fields.
+}
+    PMap is a persistent string-keyed map for model states: Set returns a new
+    map and shares the rest. The search keeps one state per explored (linearized
+    set, state) pair, so a state that copies all its items on every step (every
+    slot of a resource) costs memory and time linear in its size per step; PMap
+    keeps a shared immutable base and a small overlay, merged when it grows.
+    Its hash is order-independent and maintained incrementally, so Hash is O(1).
+
+func (p PMap[V]) Equal(o PMap[V]) bool
+    Equal compares contents.
+
+func (p PMap[V]) Get(k string) (V, bool)
+    Get returns the value at k.
+
+func (p PMap[V]) Hash() uint64
+    Hash agrees with Equal.
+
+func (p PMap[V]) Len() int
+    Len is the number of keys.
+
+func (p PMap[V]) MapRecent(f func(V) V) PMap[V]
+    MapRecent applies f to the values set since the last compaction (the
+    overlay), e.g. to prune them; values in the shared base were pruned when
+    they were last set. O(overlay).
+
+func (p PMap[V]) Range(f func(k string, v V))
+    Range calls f for every key in order.
+
+func (p PMap[V]) Set(k string, v V) PMap[V]
+    Set returns the map with k set to v.
+
+type PartitionReport struct {
+	Name string
+	Keys int
+	// Ops searched (after sampling): writes and reads, of which Unknowns have an unknown outcome.
+	Ops, Writes, Reads, Unknowns int
+	SampledOut                   int
+	// MaxInFlight is the most ops in flight at once: what makes a search hard.
+	MaxInFlight int
+	Status      Status
+	Reason      string
+	Duration    time.Duration
+	Steps       int64
+	// PeakHeapBytes is the checker's whole heap at its highest while this partition was searched.
+	PeakHeapBytes int64
+	// Has unexported fields.
+}
+    PartitionReport is what happened to one partition.
+
+type Piece[I, O any] struct {
+	// Keys are the state keys the piece touches. Usually one: an operation over several keys is
+	// projected into one piece per key. Several keys mean the piece is atomic over them, and the
+	// check then searches the keys' connected component as one partition.
+	Keys []string
+	In   I
+	Out  O
+	// Unknown means the outcome is unknown (a lost response, a 5xx, an error that may have been
+	// applied): Out is ignored and Step must allow both outcomes. An unknown read tells nothing
+	// and is dropped.
+	Unknown bool
+	// Write marks a piece that may change state. Reads may be sampled (a dropped read can hide a
+	// violation, never invent one); writes are always kept.
+	Write bool
+	// Origin is the call the piece comes from, for reports. The check keeps a copy without the
+	// response bodies.
+	Origin *Call
+	// Start and End override Origin's times (a multi-step call whose piece is one step); zero
+	// means Origin's.
+	Start, End int64
+}
+    Piece is one model operation projected from a call onto the keys it touches.
+
+type Projection[I, O any] struct {
+	// Has unexported fields.
+}
+    Projection collects one spec's pieces and violations as Project adds them.
+
+func (p *Projection[I, O]) Add(piece Piece[I, O])
+    Add adds a piece.
+
+func (p *Projection[I, O]) Violation(c *Call, format string, args ...any)
+    Violation records a response that is wrong on its own.
+
+type Register[V comparable] struct {
+	// Has unexported fields.
+}
+    Register is one item under bounded staleness, in linearization order:
+    the values written to it, each with the time its write returned. A read
+    that started at call may show the latest version whose write returned more
+    than bound before call (the settled one) and every version after it in
+    linearization order. A version written by an op whose outcome is unknown
+    returns at math.MaxInt64: it may show from then on and never settles.
+    With bound 0 a Register is a linearizable register whose reads also see
+    writes still in flight.
+
+    A Register remembers the order of the writes of the last bound, so states
+    the search reaches by different orders of concurrent writes differ; for an
+    item written often by concurrent clients, Window is the order-insensitive
+    relaxation. Register is a value: Write and Prune return a new one and share
+    nothing mutable.
+
+func NewRegister[V comparable](initial V) Register[V]
+    NewRegister starts at the initial (seeded) value, settled since forever.
+
+func (r Register[V]) Allowed(call int64, bound time.Duration) []V
+    Allowed lists the versions a read that started at call may show under bound.
+
+func (r Register[V]) Equal(o Register[V]) bool
+    Equal compares versions and their times.
+
+func (r Register[V]) Hash() uint64
+    Hash agrees with Equal.
+
+func (r Register[V]) Latest() V
+    Latest is the value of the last write in linearization order (what a strict
+    read sees).
+
+func (r Register[V]) Len() int
+    Len is the number of versions kept.
+
+func (r Register[V]) MayShow(v V, call int64, bound time.Duration) bool
+    MayShow says whether a read that started at call may show v.
+
+func (r Register[V]) Prune(floor int64, bound time.Duration) Register[V]
+    Prune forgets versions that no read starting at or after floor can show.
+
+func (r Register[V]) Write(v V, ret int64) Register[V]
+    Write appends a version written by an op that returned at ret (math.MaxInt64
+    if unknown).
+
+type Report struct {
+	Verdict Verdict
+	// Reason is one paragraph that says why, and what to do for a verdict other than PASS.
+	Reason  string
+	Specs   []*SpecReport
+	Elapsed time.Duration
+	// PeakHeapBytes is the highest heap the budget watchdog saw.
+	PeakHeapBytes int64
+}
+    Report is the result of a check.
+
+func Check(h *History, specs []AnySpec, o Options) *Report
+    Check checks a history against specs, all of which must hold, under the
+    options' budgets.
+
+    For each spec it projects the history phase by phase (stopping after a
+    phase with violations), fails when the share of unknown outcomes is above
+    MaxLostShare, splits the pieces into partitions (connected components of
+    keys), samples reads per key, and searches the partitions, largest first and
+    in parallel, each first over prefixes of doubling length (an early violation
+    is found at a fraction of the cost) and then whole. A partition aborted for
+    memory is retried alone once the others are done. The first violations of
+    failing partitions are explained.
+
+    The verdict is FAIL when some spec has a violation, an illegal partition
+    or too many unknown outcomes; otherwise UNKNOWN when something could not be
+    decided (a budget ran out, a task or capture bug); otherwise PASS.
+
+func (r *Report) Text(maxPartitions int) string
+    Text renders the report: the verdict, then per spec its coverage, partitions
+    (the undecided and failing first, at most maxPartitions), violations and
+    explanations.
+
+func (r *Report) WriteFiles(dir string) ([]string, error)
+    WriteFiles writes report.txt and each failure's timeline
+    (<spec>-failure-<n>.html) into dir, creating it, and returns the paths
+    written.
+
+type Spec[S, I, O any] struct {
+	// Name names the spec in reports.
+	Name string
+	// Project turns the history into pieces. It ranges over phases, which yields each phase's
+	// calls in order (a phase's calls are released when the next is read, so keep what later
+	// phases need, not the calls), and adds pieces and violations to out. Whatever needs the
+	// whole history (a lookup across phases) is added after the loop. An error is a task bug:
+	// the check's verdict is UNKNOWN.
+	Project func(phases iter.Seq[[]Call], out *Projection[I, O]) error
+	// Init is the state of a partition over keys (sorted; one key unless atomic pieces joined
+	// several).
+	Init func(keys []string) S
+	// Step returns the states the system may be in after op (several when the model allows more
+	// than one outcome, as for an op whose outcome is unknown), or none and the reason the op
+	// cannot follow s.
+	Step func(s S, op Op[I, O]) ([]S, string)
+	// Fault returns the states after a fault. nil means faults change no state: they are then not
+	// copied into partitions.
+	Fault func(s S, f Fault) []S
+	Equal func(a, b S) bool
+	Hash  func(s S) uint64
+	// EffectWindow bounds when an op whose outcome is unknown takes effect: within this long
+	// after its call, or never. 0 means at any time until the end of the history, which keeps
+	// every unknown outcome open for the rest of its partition and makes the search much harder.
+	EffectWindow time.Duration
+	// DescribeState and DescribeOp render states and ops in failure explanations and timelines
+	// (optional: %v otherwise).
+	DescribeState func(s S) string
+	DescribeOp    func(op Op[I, O]) string
+}
+    Spec is one view of a history that must hold: a projection of its calls
+    onto keyed pieces, and a model of one key's state that each piece steps.
+    The check passes when, for every partition (the keys that atomic pieces
+    join), some order of the partition's pieces that respects real time is one
+    the model accepts. A task may give several Specs over one history; all must
+    hold.
+
+    S is the model's state, I a piece's input and O its output. Step must treat
+    S as immutable and return new states; Equal and Hash define state identity
+    for the search's cache (Hash must agree with Equal), so states that differ
+    only in how they were reached should compare equal.
+
+type SpecReport struct {
+	Name     string
+	Verdict  Verdict
+	Reason   string
+	Coverage Coverage
+	// MaxInFlight is the most ops of one partition in flight at once.
+	MaxInFlight int
+	Partitions  []PartitionReport
+	Failures    []Failure
+	Violations  []Violation
+	// LostShareExceeded: more pieces had an unknown outcome than Options.MaxLostShare allows.
+	LostShareExceeded bool
+	// Errors are problems of the task or the capture, not of the candidate: the verdict is
+	// UNKNOWN unless the spec also failed.
+	Errors   []string
+	Warnings []string
+	// HeapBeforeSearch is the heap when the searches started: what projection holds.
+	HeapBeforeSearch int64
+}
+    SpecReport is one spec's part of a Report.
+
+type Status string
+    Status is what happened to one partition.
+
+const (
+	StatusOK       Status = "ok"
+	StatusIllegal  Status = "illegal"
+	StatusTimeout  Status = "timeout"
+	StatusMemory   Status = "memory"
+	StatusTooLarge Status = "too-large"
+	// StatusSkipped: the total budget ran out before the partition's search started.
+	StatusSkipped Status = "skipped"
+)
+type Step struct {
+	Start, End int64
+	// Status is the HTTP status, 0 when no response arrived.
+	Status int
+	// Body is the response body; nil when it was not kept.
+	Body []byte
+	// Error describes a transport, timeout or capture error.
+	Error string
+}
+    Step is one step of a Call.
+
+type Value[V any] interface {
+	Equal(V) bool
+	Hash() uint64
+}
+    Value is what a PMap holds: comparable and hashable (Register, Window and
+    Counter are).
+
+type Verdict string
+    Verdict is a check's outcome.
+
+const (
+	// Pass: every spec holds on every partition.
+	Pass Verdict = "PASS"
+	// Fail: some response is wrong on its own, some partition has no order the model accepts, or
+	// too many outcomes are unknown.
+	Fail Verdict = "FAIL"
+	// Unknown: no failure was found, but something could not be decided (a budget ran out, a task
+	// or capture bug). It is never a pass.
+	Unknown Verdict = "UNKNOWN"
+)
+func (v Verdict) ExitCode() int
+    ExitCode is the accuracy command's exit status for the verdict: 0 PASS,
+    1 FAIL, 2 UNKNOWN.
+
+type Violation struct {
+	Spec    string
+	Call    *Call
+	Message string
+}
+    Violation is a response that is wrong on its own, found without the model's
+    state (a malformed body, a status the operation never answers): the check
+    fails without a search.
+
+type Window[V comparable] struct {
+	// Has unexported fields.
+}
+    Window is a bounded-staleness item whose state does not depend on the
+    order in which the search linearized concurrent writes, so states reached
+    by different interleavings compare equal and the search's cache merges
+    them (a Register remembers the order of every write in the last bound,
+    and an exhaustive search over a hot item then explodes).
+
+    It relaxes Register soundly: a read that started at c may show any written
+    value that is not certainly overwritten in real time, i.e. there is no write
+    that started after it returned and itself returned more than bound before c.
+    Every value a Register allows is allowed here (a write that real time puts
+    after another is after it in every linearization), so a valid history stays
+    valid; a violation that needs the linearization order of overlapping writes
+    to show can be missed. Last-writer-wins items with stale reads only (profile
+    fields, prices).
+
+func NewWindow[V comparable](initial V) Window[V]
+    NewWindow starts at the initial value.
+
+func (w Window[V]) Allowed(c int64, bound time.Duration) []V
+    Allowed lists the values a read that started at c may show.
+
+func (w Window[V]) Equal(o Window[V]) bool
+    Equal compares entries.
+
+func (w Window[V]) Hash() uint64
+    Hash agrees with Equal.
+
+func (w Window[V]) Len() int
+    Len is the number of entries kept.
+
+func (w Window[V]) MayShow(v V, c int64, bound time.Duration) bool
+    MayShow says whether a read that started at c may show v.
+
+func (w Window[V]) Prune(floor int64, bound time.Duration) Window[V]
+    Prune drops entries that no read starting at or after floor can show.
+
+func (w Window[V]) Write(v V, call, ret int64) Window[V]
+    Write records a write over [call, ret] (ret = math.MaxInt64 when its outcome
+    is unknown).
+

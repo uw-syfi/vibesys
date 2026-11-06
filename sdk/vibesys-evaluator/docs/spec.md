@@ -132,6 +132,7 @@ models or tasks.
           └─▶ vibesys_evaluator.llm_serving ────┼──▶ vibesys_evaluator (core)
           └─▶ vibesys_evaluator (core) ─────────┘
  a Go generator ──▶ go/workload (the microservices domain's Go SDK)
+ a Go oracle ─────▶ go/check (the accuracy checker)
 ```
 
 The core owns one concern per seam, each a private module behind the public
@@ -313,6 +314,83 @@ service API's:
   (bit-identical to Python's; `Uint64` is Python's `below(2**64)`).
 - `Main(workload)` is the generator command.
 
+## Accuracy checks (`go/check`)
+
+`github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/check` decides whether
+a captured history of a candidate's responses is one the task's oracle
+allows. Listing: [`api/go-check.txt`](../api/go-check.txt); the authoring
+guide is [`accuracy-checks.md`](accuracy-checks.md). The oracle is Go, one
+or more `Spec[S, I, O]`s, all of which must hold:
+
+- `Project(phases, out)` turns the history's `Call`s, phase by phase, into
+  `Piece`s (keys, input, output, `Unknown`, `Write`, `Origin`) and
+  `Violation`s (a response wrong on its own);
+- `Init(keys)`, `Step(state, op) (states, reason)`, optionally
+  `Fault(state, fault)`, `Equal`/`Hash`, and `EffectWindow` (an unknown
+  outcome takes effect within it, or never).
+
+`Check(history, specs, options)` projects each spec (stopping after a phase
+with violations), fails when more than `MaxLostShare` (default 1%) of the
+pieces have an unknown outcome, splits the pieces into partitions (the
+connected components of their keys), keeps every write and at most
+`MaxReadsPerKey` reads per key (a seeded sample), and searches each
+partition with porcupine for an order that respects real time and that the
+model accepts: largest first, in parallel, first over prefixes of doubling
+length, then whole. Budgets: time per partition and in total, model steps,
+a heap budget whose watchdog aborts the search with the most steps (retried
+alone once the others are done), and a cap on ops per partition. The
+verdict is FAIL (a violation, an illegal partition, too many lost
+responses; the first violation explained with porcupine's HTML timeline),
+else UNKNOWN (an undecided partition, a task or capture problem; never a
+pass), else PASS, with coverage and the most ops of one partition in flight
+at once (a warning above 12).
+
+`Main(oracle)` is the oracle's command line, the task's `[accuracy] command`:
+
+```text
+ORACLE --history DIR [--out DIR] [--partition-timeout D] [--total-timeout D]
+       [--max-search-steps N] [--memory-mb N] [--workers N]
+       [--max-reads-per-key N] [--max-ops-per-partition N]
+       [--max-lost-share F] [--seed N]
+```
+
+It exits 0 on PASS, 1 on FAIL and 2 on UNKNOWN, prints the report, writes
+`report.txt` and the failures' timelines to `--out` (default
+`/vibesys/artifacts/accuracy`), and prints the verdict's one-paragraph
+reason on standard error when it is not PASS.
+
+### Accuracy history
+
+The accuracy capture writes one directory per run, which `OpenHistory`
+reads:
+
+```text
+DIR/history.binpb            HistoryManifest: phases, faults, dataset
+DIR/<dataset>                the dataset file the generator read
+DIR/phase-<i>/results.binpb  loadgen's results: every body kept, client set
+DIR/phase-<i>/summary.binpb  loadgen's summary (the operation names)
+DIR/phase-<i>/kept.binpb     a KeptOperation for every operation (its info)
+```
+
+- Phases are `phase-0` to `phase-<phases - 1>`, each run by loadgen at the
+  task's fixed load with every `PlannedOperation.keep_bodies` set.
+- `OperationResult.client` is the loadgen client that ran the operation (in
+  an open loop, the in-flight slot); two operations of one client never
+  overlap. The checker uses it for the timelines' lanes.
+- `kept.binpb` holds the generator's `KeptOperation`s, length-delimited
+  without a header, one for every operation (its `info_json`); a phase pod
+  leaves them in `state/kept.binpb`, which the reader also accepts.
+- `HistoryManifest.faults` are the `FaultEvent`s between phases: a kind
+  (`restart`, `restart_all`, `flush`, ... the oracle's `Fault` gives it
+  meaning), a target, the phase it follows, and its start and end on the
+  clock loadgen stamps its results with (the phase pod's). No operation may
+  be in flight from a fault's start to its end; the checker reports one
+  that is as a capture problem (UNKNOWN).
+- Operations never sent (start 0) are not in the history. An operation with
+  a step that got no response (status 0) is `Call.Lost`.
+- A directory without `history.binpb` (today's phase directories) is read
+  with the phases it has, no faults, and `dataset.json` if present.
+
 ## Core command line (`vibesys-evaluator`)
 
 The Go module's `cmd/vibesys-evaluator` is the core the language SDKs wrap, one
@@ -478,8 +556,9 @@ All in `proto/vibesys/evaluator/v1/`; see the comments there for every field.
   the generator sustained while the buffer had room, its start-up time). Selftest file: `SelftestResult`; `--capabilities` prints a
   `Capabilities`; both after their own `FileHeader` kind.
 - `phase.proto`: `PhaseInput` (sample seed, phase index, load, history),
-  `HistoryEntry`, `PhaseOutput`, and `KeptOperation` (a generator's own
-  record, in `--state`, of what it must check).
+  `HistoryEntry`, `PhaseOutput`, `KeptOperation` (a generator's own
+  record, in `--state`, of what it must check), and the accuracy history's
+  `HistoryManifest` and `FaultEvent` (see "Accuracy history").
 
 Length-delimited binary is the default; `--format json` writes proto3 JSON,
 one message per line. Histograms are microseconds in the standard compressed
@@ -624,9 +703,10 @@ CI against the code (griffe) and against the last release (`griffe check`);
 breaking it needs the user's approval ([`AGENTS.md`](../AGENTS.md)), and
 an approved Python break is recorded in `api/approved-breaks.toml` against
 the release it breaks, which the check then accepts for that release only.
-The public Go API is `api/go-workload.txt` (`go doc -all` of
-`go/workload`), checked against the code (a Go test) and against the last
-release (no declaration of it may change or go away).
+The public Go API is `api/go-workload.txt` and `api/go-check.txt` (`go doc
+-all` of `go/workload` and `go/check`), checked against the code (a Go test
+each) and against the last release (no declaration of them may change or go
+away).
 `Rand`'s algorithms are part of the API: changing a stream is a break.
 
 ## Out of scope
