@@ -20,3 +20,10 @@ noise near the claimed improvement.
 Use a profiler when timing alone cannot locate the cost. A counter suggests a
 cause only when the captured input and launch match the scored workload;
 validate the proposed fix with the original benchmark.
+
+When GPU time is scarce or queued, compile a new kernel for the target
+architecture on a machine without the GPU before you spend a GPU job on it:
+Triton and HIP compilers can target an architecture offline and report shared
+memory per block, register use and spills. A kernel over the device's
+shared-memory limit, or one that spills, fails or runs slowly anyway, so fix
+the tile or warp count first. Then use the GPU job for correctness and timing.
