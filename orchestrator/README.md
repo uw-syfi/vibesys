@@ -217,7 +217,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 `vibesys-host serve --root ROOT` when none serves.
 
 ```sh
-vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--detach] [--json]
+vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
 vibesys-client run list                       # runs, newest first; starts that never ran are hidden, `--all` shows them
 vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
@@ -233,6 +233,31 @@ takes the lead's harness and the first allowed model on it; a spawn outside the 
 `run get` prints it as "may use". `run get` also counts the agents that ended without a measured cost, since
 their spend is missing from the usage total.
 
+A run has no limit unless `run start` is given one, and a start without one prints a line saying so and how
+to set one. `--max-time 30m` is the run's time limit, counted by the host from the start (the host's clock,
+not the client's: the host is usually another machine). `--max-cost 5` is its cost limit in dollars. When
+the first of them is reached, `Run.limit_reached` and `limit_reached_at` record it and the core, in the one
+`Decide` that saw it:
+
+- tells the lead once, with a `RunLimitReached` message that a template words (which limit, how long the run
+  has gone, what it has cost, how long the grace is), to post its final report and start nothing new;
+- refuses every further spawn with `REFUSAL_TIME_LIMIT_REACHED` or `REFUSAL_COST_LIMIT_REACHED`;
+- arms `TimerLimitGrace`, and stops the run `core.LimitGrace` (10 minutes) later. The run also stops as
+  soon as the lead posts a final report. A lead that had already given its final report is not told: the
+  run stops at once.
+
+A run stopped this way ends as `ended`, not `failed`, with `Run.stop_reason` `TIME_LIMIT` or `COST_LIMIT`.
+`run get` and `run wait` name it ("ended by cost limit"), so a wait for a report on such a run returns at once,
+failed, with that reason, and never waits past the end of the run.
+
+The cost counts what the agents' finished turns reported, and is checked when a turn ends. So a run can pass
+`--max-cost` by what is in flight when the limit is reached, which the grace and the refused spawns bound but
+a long turn can still make a good part of a dollar. A turn whose provider reported no cost adds nothing: Claude
+Code reports its own, and Codex's is priced from its tokens by the agent library, which has no price for a
+model it does not know, so `--max-cost` never takes effect for such a model. The orchestrator cannot tell that
+at the start, since the library prices a turn only when it ends; `run get` says "no agent has reported a cost,
+so this limit cannot take effect" once a turn has finished without one, and the time limit always holds.
+
 When a run is over (and never before), the orchestrator removes the working copy of each subagent that holds
 nothing git lacks. A commit made there that no branch holds is first kept under
 `refs/vibesys/runs/<run>/<agent>` in the repository (`git log refs/vibesys/runs/<run>/<agent>`), so
@@ -246,8 +271,11 @@ returns for a final report, at once with the one the run already has however lat
 has). `--after N` counts only reports numbered above N, for either. A run is stalled when its lead is idle
 and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
 orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
-has had no new input since is finished, not stalled: it is not reminded, and `run get` says so. A wait for a report on a
-stalled run goes on to its timeout, which names the stall.
+has started no new work since (spawned an agent, started a job, posted a progress report) is finished, not
+stalled: it is not reminded, and `run get` says so. A question put to it, which it answers in text, is not new
+work, so it stays finished. A wait for a report on a stalled run goes on to its timeout, which names the stall;
+one on a finished lead (`--after N` with N its final report) goes on to its timeout too, and the timeout says
+the lead's report is final, so the answer is in its reply (`run attach`).
 
 `vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the
 orchestrator, and `vibesys-client host` is its client. It never starts a host to ask a question:

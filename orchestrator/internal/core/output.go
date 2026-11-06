@@ -115,7 +115,7 @@ func (e ArmTimer) ID() EffectID { return EffectID("timer/" + string(e.Timer())) 
 // Timer is the timer's identity.
 func (e ArmTimer) Timer() TimerID {
 	switch e.Kind {
-	case TimerRunDeadline:
+	case TimerRunDeadline, TimerLimitGrace:
 		return TimerID(fmt.Sprintf("%s/%s", e.Kind, e.Run))
 	case TimerLeadIdle:
 		// Each stall is its own timer: a stall that ended and began again must not be answered by

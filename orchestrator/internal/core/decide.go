@@ -147,18 +147,17 @@ func callerAgent(c Command) AgentID {
 }
 
 func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
-	if !b.Deadline.IsZero() && !b.Deadline.After(t.in.At) {
-		r.Refusal = RefuseDeadlinePassed
-		return ""
-	}
 	if busy, ok := t.runInRepository(b.Repository); ok {
 		r.Run, r.Refusal = busy, RefuseRepositoryInUse
 		return ""
 	}
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
-		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, Deadline: b.Deadline, CreatedAt: t.in.At,
+		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, MaxCostUSD: b.MaxCostUSD, CreatedAt: t.in.At,
 		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow),
+	}
+	if b.MaxTime > 0 {
+		run.Deadline = t.in.At.Add(b.MaxTime)
 	}
 	r.Run, r.Agent = run.ID, run.Lead
 	t.emit(run.ID, run)
@@ -229,6 +228,14 @@ func (t *tx) spawnAgent(c Command, b SpawnAgent, r *Receipt) RunID {
 		r.Run, r.Refusal = run.ID, RefuseRunNotRunning
 		return ""
 	}
+	switch run.LimitReached {
+	case LimitTime:
+		r.Run, r.Refusal = run.ID, RefuseTimeLimitReached
+		return ""
+	case LimitCost:
+		r.Run, r.Refusal = run.ID, RefuseCostLimitReached
+		return ""
+	}
 	lead := t.s.agents[run.Lead].Agent
 	spec, ok := resolveSpec(run.Allowed, lead.Spec, b.Spec)
 	switch {
@@ -241,6 +248,7 @@ func (t *tx) spawnAgent(c Command, b SpawnAgent, r *Receipt) RunID {
 	}
 	id := AgentID(t.mint("agent"))
 	t.launch(run, Agent{ID: id, Run: run.ID, Parent: run.Lead, Role: b.Role, Spec: spec, PlanNumber: b.PlanNumber})
+	t.newWork(run.ID)
 	r.Run, r.Agent = run.ID, id
 	r.Message = t.post(Message{Run: run.ID, From: callerAgent(c), To: id, Body: Brief{Text: b.Brief}}).ID
 	return run.ID
@@ -361,7 +369,20 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	report := b.Report
 	report.Sequence = run.ReportsPosted
 	r.Message = t.post(Message{Run: caller.Run, From: caller.ID, Body: report}).ID
+	if run.FinalReported && run.LimitReached != "" {
+		// The lead did what the limit asked of it, so there is nothing to wait out.
+		t.beginStop(t.s.runs[run.ID], run.LimitReached.stopReason())
+	}
 	return caller.Run
+}
+
+// newWork says the lead has started work after its final report, so the run is judged as any other.
+// Merely being asked a question does not: a lead that answers in text has not stopped finishing.
+func (t *tx) newWork(id RunID) {
+	if run := t.s.runs[id]; run.FinalReported {
+		run.FinalReported = false
+		t.emit(id, run)
+	}
 }
 
 // sortedAgents returns a run's agents in id order, so that no outcome depends on map order.

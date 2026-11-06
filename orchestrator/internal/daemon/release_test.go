@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -71,7 +71,7 @@ func newWorld(t *testing.T, deadline time.Duration, leadBusy bool) *world {
 	}
 	cmd := startRun("start")
 	if deadline > 0 {
-		cmd.GetStartRun().Deadline = timestamppb.New(w.r.Clock.Now().Add(deadline))
+		cmd.GetStartRun().MaxTime = durationpb.New(deadline)
 	}
 	receipt := dispatch(t, w.r, cmd)
 	w.r.Settle(t)
@@ -112,7 +112,10 @@ func (w *world) end(how ending, restart bool) {
 	case endOperator:
 		dispatch(w.t, w.r, &pb.Command{Id: "stop", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(w.run.ID)}}})
 	case endDeadline:
+		// The deadline tells the lead to finish and gives it the grace; the Fake lead never does.
 		w.r.Clock.Advance(time.Hour)
+		w.r.Settle(w.t)
+		w.r.Clock.Advance(core.LimitGrace + time.Second)
 	}
 	if restart {
 		w.r.Restart(w.t)

@@ -703,31 +703,17 @@ func TestAMessageStopsBeingRetriedAfterItsAttempts(t *testing.T) {
 	}
 }
 
-func TestTheDeadlineStopsARunOnce(t *testing.T) {
+// The time limit is counted from the host's own clock at the start, so a client's clock is not in it.
+func TestAMaxTimeIsCountedFromTheStart(t *testing.T) {
 	w := newScript(t)
-	deadline := epoch.Add(time.Hour)
-	r := w.command(operator, core.StartRun{Repository: "r", Task: "t", Deadline: deadline, Lead: lead, Brief: "b"})
+	r := w.command(operator, core.StartRun{Repository: "r", Task: "t", MaxTime: 90 * time.Minute, Lead: lead, Brief: "b"})
+	run, _ := w.s.Run(r.Run)
+	if want := w.now.Add(90 * time.Minute); !run.Deadline.Equal(want) {
+		t.Fatalf("deadline = %v, want %v", run.Deadline, want)
+	}
 	w.wantEffects("ArmTimer", "LaunchSession", "ArmTimer")
-	timer := w.effects[0].(core.ArmTimer)
-	if !timer.FireAt.Equal(deadline) {
+	if timer := w.effects[0].(core.ArmTimer); timer.Kind != core.TimerRunDeadline || !timer.FireAt.Equal(run.Deadline) {
 		t.Fatalf("timer = %+v", timer)
-	}
-	w.open(r.Agent, steers)
-	w.step(core.TimerFired{Timer: timer})
-	if got, _ := w.s.Run(r.Run); got.Status != core.RunStopping || got.StopReason != core.StopDeadline {
-		t.Fatalf("run is %+v", got)
-	}
-	w.step(core.TimerFired{Timer: timer})
-	if len(w.events) != 0 {
-		t.Fatalf("a repeated deadline recorded %v", w.events)
-	}
-}
-
-func TestADeadlineInThePastIsRefused(t *testing.T) {
-	w := newScript(t)
-	r := w.command(operator, core.StartRun{Repository: "r", Task: "t", Deadline: epoch, Lead: lead, Brief: "b"})
-	if r.Refusal != core.RefuseDeadlinePassed {
-		t.Fatalf("refusal = %q", r.Refusal)
 	}
 }
 

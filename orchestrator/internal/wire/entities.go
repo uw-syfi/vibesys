@@ -18,12 +18,21 @@ func runOut(r core.Run) *pb.Run {
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 		AllowedAgents: choicesOut(r.Allowed), KeptCheckouts: checkoutsOut(r.Kept),
 		NeverOpened: r.NeverOpened,
+		MaxCostUsd:  limitOut(r.MaxCostUSD), LimitReached: runLimits.out(r.LimitReached), LimitReachedAt: when(r.LimitReachedAt),
 	}
 }
 
 // runRecordOut is a run as it is stored: the public message, and what only the host keeps.
 func runRecordOut(r core.Run) *pb.RunRecord {
 	return &pb.RunRecord{Run: runOut(r), JobTool: jobToolOut(r.JobTool)}
+}
+
+// limitOut is the contract's cost limit: absent for none.
+func limitOut(usd float64) *float64 {
+	if usd == 0 {
+		return nil
+	}
+	return &usd
 }
 
 func runRecordIn(r *pb.RunRecord, errs *errorList) core.Run {
@@ -54,6 +63,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), Kept: checkoutsIn(r.GetKeptCheckouts()),
 		NeverOpened: r.GetNeverOpened(),
+		MaxCostUSD:  r.GetMaxCostUsd(), LimitReached: runLimits.in(r.GetLimitReached(), errs), LimitReachedAt: moment(r.GetLimitReachedAt(), errs),
 	}
 }
 
@@ -320,6 +330,11 @@ func messageOut(m core.Message) *pb.Message {
 		out.Body = &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{
 			IdleSeconds: uint32(b.Idle / time.Second), SubagentsStarted: b.Subagents, WorkersStarted: b.Workers, JudgesStarted: b.Judges,
 		}}
+	case core.RunLimitReached:
+		out.Body = &pb.Message_RunLimitReached{RunLimitReached: &pb.RunLimitReached{
+			Limit: runLimits.out(b.Limit), ElapsedSeconds: uint32(b.Elapsed / time.Second), SpentUsd: b.Spent,
+			MaxCostUsd: limitOut(b.MaxCost), GraceSeconds: uint32(b.Grace / time.Second),
+		}}
 	case core.SubagentSettled:
 		out.Body = &pb.Message_SubagentSettled{SubagentSettled: &pb.SubagentSettled{
 			AgentId: string(b.Agent), Status: agentStatuses.out(b.Status), Detail: b.Detail,
@@ -357,6 +372,12 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 			Idle:      time.Duration(b.LeadIdleReminder.GetIdleSeconds()) * time.Second,
 			Subagents: b.LeadIdleReminder.GetSubagentsStarted(), Workers: b.LeadIdleReminder.GetWorkersStarted(),
 			Judges: b.LeadIdleReminder.GetJudgesStarted(),
+		}
+	case *pb.Message_RunLimitReached:
+		l := b.RunLimitReached
+		out.Body = core.RunLimitReached{
+			Limit: runLimits.in(l.GetLimit(), errs), Elapsed: time.Duration(l.GetElapsedSeconds()) * time.Second,
+			Spent: l.SpentUsd, MaxCost: l.GetMaxCostUsd(), Grace: time.Duration(l.GetGraceSeconds()) * time.Second,
 		}
 	case *pb.Message_SubagentSettled:
 		out.Body = core.SubagentSettled{

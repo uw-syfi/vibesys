@@ -192,12 +192,12 @@ func (w *Workload) newCommand() core.InputBody {
 		}
 	}
 	if len(live) == 0 || (len(runs) < 6 && w.r.IntN(25) == 0) {
-		var deadline time.Time
+		var maxTime time.Duration
 		if w.r.IntN(3) == 0 {
-			deadline = w.now.Add(time.Duration(1+w.r.IntN(48)) * time.Hour)
+			maxTime = time.Duration(1+w.r.IntN(48)) * time.Hour
 		}
 		return w.command(core.Operator{}, core.StartRun{
-			Repository: "repo-a", Task: "task-" + w.id("t"), FanoutLimit: uint32(1 + w.r.IntN(4)), Deadline: deadline,
+			Repository: "repo-a", Task: "task-" + w.id("t"), FanoutLimit: uint32(1 + w.r.IntN(4)), MaxTime: maxTime,
 			Lead: core.AgentSpec{Harness: core.ClaudeCode, Model: "model-a", Effort: "high"}, Brief: "do the task",
 		})
 	}

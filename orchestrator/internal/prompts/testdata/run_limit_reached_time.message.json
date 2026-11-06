@@ -1,0 +1,12 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "runId": "r1",
+  "runLimitReached": {
+    "elapsedSeconds": 1800,
+    "graceSeconds": 600,
+    "limit": "RUN_LIMIT_TIME"
+  },
+  "toAgentId": "agent-a"
+}

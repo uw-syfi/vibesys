@@ -9,7 +9,8 @@ package store
 // Version 9 replaced a run's CLI location, which named the tool's places, with its job tool endpoint.
 // Version 10 split what clients receive from what is stored: a run, an agent and a receipt are held
 // in records with their private parts, and a capabilities message no longer says a session streams text.
-const schemaVersion = 10
+// Version 11 gave a run its limits (a cost limit, the limit it reached and when), and a start its time limit as a duration.
+const schemaVersion = 11
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

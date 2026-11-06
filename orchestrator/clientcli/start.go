@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/names"
@@ -20,11 +22,18 @@ import (
 // confinementNotice is printed on every start, to stderr so that --json stays clean.
 const confinementNotice = "note: agents run as your user with their permissions bypassed and no confinement."
 
+// noLimitNotice is printed on a start that gives the run neither limit, to stderr so that --json stays
+// clean. A run has no default limit, so the person is told it has none and how to give it one.
+const noLimitNotice = "note: this run has no time or spending limit; --max-time 30m and --max-cost 5 (dollars) set one."
+
 // startArgs are the flags of `run start`.
 type startArgs struct {
-	repository, task, brief, harness, model, effort, deadline string
-	fanout                                                    uint
-	detach, json                                              bool
+	repository, task, brief, harness, model, effort string
+	fanout                                          uint
+	detach, json                                    bool
+	// maxTime and maxCost are the run's limits, zero for none.
+	maxTime time.Duration
+	maxCost float64
 	// allow is the --allow-agent values, each harness or harness:model.
 	allow []string
 }
@@ -42,7 +51,22 @@ func parseStart(args []string) (startArgs, error) {
 		a.allow = append(a.allow, v)
 		return nil
 	})
-	fs.StringVar(&a.deadline, "deadline", "", "RFC 3339 time the run stops by")
+	fs.Func("max-time", "time limit of the run, such as 30m (default: none)", func(v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("%q is not a positive duration such as 30m", v)
+		}
+		a.maxTime = d
+		return nil
+	})
+	fs.Func("max-cost", "cost limit of the run in dollars, such as 5 (default: none)", func(v string) error {
+		c, err := strconv.ParseFloat(v, 64)
+		if err != nil || !(c > 0) || math.IsInf(c, 0) {
+			return fmt.Errorf("%q is not a positive number of dollars such as 5", v)
+		}
+		a.maxCost = c
+		return nil
+	})
 	fs.UintVar(&a.fanout, "fanout", 4, "how many subagents may be live at once")
 	fs.BoolVar(&a.detach, "detach", false, "return once the lead is live instead of attaching")
 	fs.BoolVar(&a.json, "json", false, "print the receipt as JSON")
@@ -75,12 +99,12 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 		}
 		start.AllowAgents = append(start.AllowAgents, choice)
 	}
-	if a.deadline != "" {
-		at, err := time.Parse(time.RFC3339, a.deadline)
-		if err != nil {
-			return nil, usageError("--deadline %q is not an RFC 3339 time such as 2026-01-02T15:04:05Z", a.deadline)
-		}
-		start.Deadline = timestamppb.New(at)
+	if a.maxTime > 0 {
+		start.MaxTime = durationpb.New(a.maxTime)
+	}
+	if a.maxCost > 0 {
+		cost := a.maxCost
+		start.MaxCostUsd = &cost
 	}
 	return &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: start}}, nil
 }
@@ -112,6 +136,9 @@ func start(ctx context.Context, c *call, args []string) error {
 		return err
 	}
 	fmt.Fprintln(c.Stderr, confinementNotice)
+	if a.maxTime == 0 && a.maxCost == 0 {
+		fmt.Fprintln(c.Stderr, noLimitNotice)
+	}
 	conn, err := c.openFor(ctx, VerbStart)
 	if err != nil {
 		return err

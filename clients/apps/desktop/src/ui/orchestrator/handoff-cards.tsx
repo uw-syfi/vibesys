@@ -29,6 +29,7 @@ export function verdictOf(
         leadBrief: true,
         handoffReminder: true,
         leadIdleReminder: true,
+        runLimitReached: true,
       }) && message.body.value.submittedByAgentId === from,
   );
   if (
@@ -42,6 +43,7 @@ export function verdictOf(
       leadBrief: true,
       handoffReminder: true,
       leadIdleReminder: true,
+      runLimitReached: true,
     }) &&
     job.body.value.outcome !== JobOutcome.UNSPECIFIED
   ) {
@@ -221,6 +223,7 @@ export function HandoffCards(props: {
           leadBrief: true,
           handoffReminder: true,
           leadIdleReminder: true,
+          runLimitReached: true,
         }) ||
         oneofIs(message.body, 'report', {
           text: true,
@@ -231,6 +234,7 @@ export function HandoffCards(props: {
           leadBrief: true,
           handoffReminder: true,
           leadIdleReminder: true,
+          runLimitReached: true,
         }),
     )
     .sort((a, b) => (ms(a.at) ?? 0) - (ms(b.at) ?? 0));
@@ -252,6 +256,7 @@ export function HandoffCards(props: {
           leadBrief: true,
           handoffReminder: true,
           leadIdleReminder: true,
+          runLimitReached: true,
         }) ? (
           <HandoffCard
             key={message.id}
@@ -269,6 +274,7 @@ export function HandoffCards(props: {
             leadBrief: true,
             handoffReminder: true,
             leadIdleReminder: true,
+            runLimitReached: true,
           }) ? (
           <ReportCard key={message.id} message={message} report={message.body.value} />
         ) : null,

@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
@@ -55,8 +56,8 @@ message StartRun {
   string repository = 1 [(buf.validate.field).string.min_len = 1];
   string task = 2 [(buf.validate.field).string.min_len = 1];
   uint32 fanout_limit = 3;
-  // Absent when the run has no deadline.
-  google.protobuf.Timestamp deadline = 4;
+  reserved 4;
+  reserved "deadline";
   // The lead has nothing to inherit from, so its harness is required.
   AgentSpec lead = 5 [
     (buf.validate.field).required = true,
@@ -71,6 +72,14 @@ message StartRun {
   string brief = 6;
   // Agents the run may use besides the lead's own harness and model, which are always allowed.
   repeated AllowedAgent allow_agents = 7;
+  // The most the run may cost in dollars. Absent when the run has no cost limit.
+  optional double max_cost_usd = 8 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // How long the run may take, counted from its start by the host, so that a client's clock is not
+  // in it. Absent when the run has no time limit.
+  google.protobuf.Duration max_time = 9 [(buf.validate.field).duration.gt = {seconds: 0}];
 }
 
 message StopRun {
@@ -161,8 +170,8 @@ enum Refusal {
   REFUSAL_AGENT_IS_LEAD = 6;
   // The agent's session is already over or closing.
   REFUSAL_AGENT_NOT_LIVE = 7;
-  // The deadline had passed when the command arrived.
-  REFUSAL_DEADLINE_PASSED = 8;
+  reserved 8;
+  reserved "REFUSAL_DEADLINE_PASSED";
   // Another run that is not over already works in the repository. The receipt's run_id is that run.
   REFUSAL_REPOSITORY_IN_USE = 9;
   // The harness and model asked for are outside what the run may use. The receipt's allowed_agents
@@ -170,6 +179,10 @@ enum Refusal {
   REFUSAL_AGENT_NOT_ALLOWED = 10;
   // A handoff has no body, or the body of another role than the one posting it.
   REFUSAL_HANDOFF_NOT_YOURS = 11;
+  // The run reached its time limit: it starts no new agent.
+  REFUSAL_TIME_LIMIT_REACHED = 12;
+  // The run reached its cost limit: it starts no new agent.
+  REFUSAL_COST_LIMIT_REACHED = 13;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.

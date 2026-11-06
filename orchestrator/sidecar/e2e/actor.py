@@ -9,6 +9,7 @@ from e2e.effects import UnscriptedError, perform
 from e2e.scripts import ROLES, is_job_finished, lead
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from e2e.effects import Machine, Performed, Script
@@ -30,9 +31,11 @@ class Actor:
     record: Path
     messages: list[str] = field(default_factory=list)
     received: int = 0
+    roles: Mapping[str, Callable[..., Script]] = field(default_factory=lambda: ROLES)
+    """What each role does; the default is the toy task."""
 
     def _script(self) -> Script:
-        script = ROLES.get(self.role)
+        script = self.roles.get(self.role)
         if script is None:
             msg = f"no script for role {self.role!r}"
             raise UnscriptedError(msg)

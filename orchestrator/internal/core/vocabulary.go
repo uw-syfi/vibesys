@@ -24,6 +24,9 @@ const (
 	// MaxLeadReminders is how many reminders a run's lead gets in all. A lead that does not act on
 	// three is confused, and each further reminder would only cost money; the stall stays visible.
 	MaxLeadReminders = 3
+	// LimitGrace is how long a lead has to finish after its run reached a limit. When it has passed,
+	// or when the lead has given its final report, the run stops.
+	LimitGrace = 10 * time.Minute
 )
 
 // The harnesses. The empty harness means "the lead's", on a spawn only.
@@ -50,14 +53,34 @@ func (s RunStatus) Live() bool { return s == RunStarting || s == RunRunning }
 // Final says the run is over.
 func (s RunStatus) Final() bool { return s == RunEnded || s == RunFailed }
 
+// RunLimit is a limit an operator can put on a run. The empty value is "none".
+type RunLimit string
+
+// The limits.
+const (
+	// LimitTime is how long the run may take: its deadline.
+	LimitTime RunLimit = "time"
+	// LimitCost is what the run may cost, as the finished turns of its agents report it.
+	LimitCost RunLimit = "cost"
+)
+
+// stopReason is why a run stops for having reached the limit.
+func (l RunLimit) stopReason() RunStopReason {
+	if l == LimitCost {
+		return StopCostLimit
+	}
+	return StopTimeLimit
+}
+
 // RunStopReason says why a run left RunRunning.
 type RunStopReason string
 
 // The stop reasons. The empty reason means the run has not been stopped.
 const (
-	StopOperator RunStopReason = "operator"
-	StopDeadline RunStopReason = "deadline"
-	StopLeadGone RunStopReason = "lead_gone"
+	StopOperator  RunStopReason = "operator"
+	StopTimeLimit RunStopReason = "time_limit"
+	StopCostLimit RunStopReason = "cost_limit"
+	StopLeadGone  RunStopReason = "lead_gone"
 )
 
 // AgentRole is what an agent is for.
@@ -206,20 +229,23 @@ type Refusal string
 
 // The refusals. The empty refusal means the command was accepted.
 const (
-	RefuseRunNotFound    Refusal = "run_not_found"
-	RefuseAgentNotFound  Refusal = "agent_not_found"
-	RefuseNotPermitted   Refusal = "not_permitted"
-	RefuseRunNotRunning  Refusal = "run_not_running"
-	RefuseFanoutLimit    Refusal = "fanout_limit"
-	RefuseAgentIsLead    Refusal = "agent_is_lead"
-	RefuseAgentNotLive   Refusal = "agent_not_live"
-	RefuseDeadlinePassed Refusal = "deadline_passed"
+	RefuseRunNotFound   Refusal = "run_not_found"
+	RefuseAgentNotFound Refusal = "agent_not_found"
+	RefuseNotPermitted  Refusal = "not_permitted"
+	RefuseRunNotRunning Refusal = "run_not_running"
+	RefuseFanoutLimit   Refusal = "fanout_limit"
+	RefuseAgentIsLead   Refusal = "agent_is_lead"
+	RefuseAgentNotLive  Refusal = "agent_not_live"
 	// RefuseRepositoryInUse says another run that is not over works in the repository. The
 	// receipt's run is that run.
 	RefuseRepositoryInUse Refusal = "repository_in_use"
 	// RefuseAgentNotAllowed says the harness and model asked for are outside what the run may use.
 	// The receipt lists what is allowed.
 	RefuseAgentNotAllowed Refusal = "agent_not_allowed"
+	// RefuseTimeLimitReached and RefuseCostLimitReached say the run reached that limit and starts no new
+	// agent.
+	RefuseTimeLimitReached Refusal = "time_limit_reached"
+	RefuseCostLimitReached Refusal = "cost_limit_reached"
 	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
 	RefuseHandoffNotYours Refusal = "handoff_not_yours"
 )
@@ -252,4 +278,6 @@ const (
 	// TimerLaunchDeadline ends a session that has not opened within LaunchTimeout.
 	TimerLaunchDeadline TimerKind = "launch_deadline"
 	TimerLeadIdle       TimerKind = "lead_idle"
+	// TimerLimitGrace ends the wait for a lead that was told its run reached a limit.
+	TimerLimitGrace TimerKind = "limit_grace"
 )

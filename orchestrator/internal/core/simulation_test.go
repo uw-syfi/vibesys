@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -318,7 +319,10 @@ func (w *sim) startRun() {
 		start.AllowAgents = append(start.AllowAgents, &pb.AllowedAgent{Harness: pb.Harness(1 + w.r.IntN(2)), Model: []string{"", "m", "x"}[w.r.IntN(3)]})
 	}
 	if w.r.IntN(2) == 0 {
-		start.Deadline = timestamp(w.now.Add(time.Duration(300+w.r.IntN(1800)) * time.Second))
+		start.MaxCostUsd = &[]float64{1, 3, 10}[w.r.IntN(3)]
+	}
+	if w.r.IntN(2) == 0 {
+		start.MaxTime = durationpb.New(time.Duration(300+w.r.IntN(1800)) * time.Second)
 	}
 	w.command(core.Operator{}, &pb.Command{Body: &pb.Command_StartRun{StartRun: start}})
 }
@@ -612,7 +616,12 @@ func (w *sim) cooperate(e core.Effect, id core.Session) {
 
 func (w *sim) endTurn(s *session, status core.TurnStatus) {
 	in := uint64(10 + s.items)
-	s.say(core.TurnEnded{Turn: s.turn, Status: status, Usage: core.Usage{InputTokens: &in}})
+	usage := core.Usage{InputTokens: &in}
+	if w.r.IntN(2) == 0 {
+		cost := []float64{0.25, 1, 2}[w.r.IntN(3)]
+		usage.CostUSD = &cost
+	}
+	s.say(core.TurnEnded{Turn: s.turn, Status: status, Usage: usage})
 	s.turn = ""
 }
 

@@ -205,10 +205,23 @@ func bodies(r *rand.Rand) []core.Message {
 			Agent: core.AgentID(text(r, "agent:", 3)), Status: statuses[r.IntN(len(statuses))], Detail: optional(r, "detail:"),
 		}),
 		envelope(core.HandoffReminder{}),
+		envelope(core.RunLimitReached{
+			Limit: []core.RunLimit{core.LimitTime, core.LimitCost}[r.IntN(2)], Elapsed: time.Duration(r.Uint32()) * time.Second,
+			Spent: spent(r), MaxCost: r.Float64() * 100, Grace: time.Duration(r.Uint32()) * time.Second,
+		}),
 		envelope(core.LeadIdleReminder{
 			Idle: time.Duration(r.Uint32()) * time.Second, Subagents: r.Uint32(), Workers: r.Uint32(), Judges: r.Uint32(),
 		}),
 	}
+}
+
+// spent is a cost so far, absent about a third of the time.
+func spent(r *rand.Rand) *float64 {
+	if r.IntN(3) == 0 {
+		return nil
+	}
+	usd := r.Float64() * 100
+	return &usd
 }
 
 // handoff draws the fields every handoff has around the body of a role.

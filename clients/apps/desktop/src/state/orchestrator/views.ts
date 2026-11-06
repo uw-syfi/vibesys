@@ -208,6 +208,7 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
           leadBrief: true,
           handoffReminder: true,
           leadIdleReminder: true,
+          runLimitReached: true,
         }),
     )
     .flatMap((message): JobBar[] => {
@@ -221,6 +222,7 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
         leadBrief: true,
         handoffReminder: true,
         leadIdleReminder: true,
+        runLimitReached: true,
       })
         ? message.body.value
         : null;

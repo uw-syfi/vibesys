@@ -223,3 +223,34 @@ func TestGetAndReplayShowTheUsageOfFinishedTurns(t *testing.T) {
 	got = w.run(context.Background(), "run", "attach", run)
 	contains(t, "replay", got.stdout, "turn 1 completed, cost $0.0301, 7 out")
 }
+
+// run get says what limits a run has, how much of the cost limit shows, and which limit was reached.
+func TestRunGetSaysTheLimitsOfARunAndWhichWasReached(t *testing.T) {
+	cost, half := 0.04, 0.025
+	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
+	run.MaxCostUsd, run.Deadline = &half, at(30)
+	run.Usage = &pb.Usage{CostUsd: &cost}
+	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{lead})}}))
+	got := w.run(context.Background(), "run", "get", "run-1")
+	contains(t, "get", got.stdout, "limits      time 30m, cost $0.025 (reported so far $0.04)")
+	if strings.Contains(got.stdout, "was reached") {
+		t.Errorf("a run under its limits says one was reached: %q", got.stdout)
+	}
+
+	run.LimitReached, run.LimitReachedAt = pb.RunLimit_RUN_LIMIT_COST, at(20)
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{lead})}}))
+	got = w.run(context.Background(), "run", "get", "run-1")
+	contains(t, "get", got.stdout, "the cost limit was reached at 03:20:00 and the lead was told to finish")
+
+	// A cost limit on a model nobody can price is said to be unable to take effect, once a turn has ended.
+	blind := runOf("run-2", "/work/repo2", pb.RunStatus_RUN_STATUS_RUNNING, 0)
+	blind.MaxCostUsd = &half
+	frame := &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: &pb.RunsSnapshot{
+		Runs: []*pb.Run{blind}, Agents: []*pb.Agent{leadOf("run-2", pb.AgentStatus_AGENT_STATUS_IDLE)}, Sequence: 5,
+		Turns: []*pb.Turn{{Id: "t1", AgentId: "lead-run-2", Ordinal: 1, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, StartedAt: at(1)}},
+	}}}
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got = w.run(context.Background(), "run", "get", "run-2")
+	contains(t, "get", got.stdout, "no agent has reported a cost, so this limit cannot take effect")
+}

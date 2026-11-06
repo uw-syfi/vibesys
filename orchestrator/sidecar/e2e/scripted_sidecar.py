@@ -8,6 +8,8 @@ harness the request names. Two modes:
 - ``act`` (``VIBESYS_E2E_SCRIPT=act``): the agent acts. Each message runs its role's script (see
   ``e2e.scripts``): real commands and real calls of the orchestrator's tools, mirrored in the
   frames the provider peer plays back.
+- ``limit`` (``VIBESYS_E2E_SCRIPT=limit``): as ``act``, with a lead that waits until its run reaches
+  a limit and then posts its final report.
 
 It also writes ``open.json`` in its state directory: what ``Open`` carried, for the tests to read,
 with the tool servers' environment left out because it holds the session's token. In ``act`` mode it
@@ -32,7 +34,7 @@ from google.protobuf import json_format
 from e2e.actor import Actor
 from e2e.host import HostMachine
 from e2e.peers import ActingClaudePeers, ActingCodex
-from e2e.scripts import Me
+from e2e.scripts import LIMIT_ROLES, ROLES, Me
 from vs_sidecar.driver import (
     PROVIDERS,
     AgentshimDriver,
@@ -107,7 +109,9 @@ def replying_executor() -> tuple[FakeExecutor, str]:
     return FakeExecutor([], peers=lambda _request: peer), "claude"
 
 
-def acting_executor(request: sc.OpenSessionRequest, state_dir: Path) -> tuple[FakeExecutor, str]:
+def acting_executor(
+    request: sc.OpenSessionRequest, state_dir: Path, *, limit: bool = False
+) -> tuple[FakeExecutor, str]:
     """The peer for the request's harness whose turns run its role's script.
 
     The holder is told nothing of the run or the role, which is the point of the contract, so this
@@ -126,7 +130,7 @@ def acting_executor(request: sc.OpenSessionRequest, state_dir: Path) -> tuple[Fa
         harness=orch.Harness.Name(request.harness).removeprefix("HARNESS_").lower(),
     )
     role = server.env["VIBESYS_ORCHESTRATOR_ROLE"]
-    actor = Actor(me, role, machine, state_dir)
+    actor = Actor(me, role, machine, state_dir, roles=LIMIT_ROLES if limit else ROLES)
     holder: list[FakeExecutor] = []
 
     def on_turn() -> None:
@@ -160,8 +164,10 @@ def scripted_drivers(
         # lint-waiver: LW-770102 [S607]; a fixed program in a test fixture, which is its purpose.
         # > The stand-in must be a real process in a group of its own, which nothing else here makes.
         subprocess.Popen(["sleep", "600"], start_new_session=True)  # noqa: S607
-    if os.environ.get(MODE_VARIABLE) == "act":
-        executor, _provider = acting_executor(request, state_dir)
+    if os.environ.get(MODE_VARIABLE) in ("act", "limit"):
+        executor, _provider = acting_executor(
+            request, state_dir, limit=os.environ.get(MODE_VARIABLE) == "limit"
+        )
     else:
         executor, _provider = replying_executor()
 

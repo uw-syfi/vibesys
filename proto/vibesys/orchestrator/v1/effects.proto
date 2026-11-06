@@ -91,6 +91,8 @@ enum TimerKind {
   TIMER_KIND_LAUNCH_DEADLINE = 3;
   // How long a run's lead may sit idle with nothing outstanding before it is reminded.
   TIMER_KIND_LEAD_IDLE = 4;
+  // How long the lead has to finish after its run reached a limit, before the run is stopped.
+  TIMER_KIND_LIMIT_GRACE = 5;
 }
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
