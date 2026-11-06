@@ -37,6 +37,11 @@
 //     cancelled. The engine lives in the job's supervisor, so what it keeps is that job's.
 //   - An exit code that is the transport's own (ssh's 255), and a step that never started its
 //     command, are not the command's ending: the engine reports them as lost.
+//   - A cluster that cannot be reached does not end a wait on it: the wait for an allocation in the
+//     queue, the check of a kept one, the start of its holder and the reading of its node make a
+//     call that lost its connection again on the poll, saying once to the run's log when the
+//     cluster stops answering and once when it answers again, until it has not answered for
+//     UnreachableTimeout. A lost read never cancels the allocation.
 package apptainer
 
 import (
@@ -51,7 +56,9 @@ import (
 // Cluster is the cluster as the engine uses it: files on the file system its nodes share, batch
 // allocations, and the node of a running one. Every call answers by a bound of its own, except
 // Publish, which copies as long as the data needs, and reports a cluster it cannot reach as a
-// *core.Failure of kind FailureUnavailable. The real one runs Slurm's and Apptainer's programs
+// *core.Failure of kind FailureUnavailable. A call of the Cluster or of a Node whose connection to
+// the cluster failed, or that did not answer within its bound, returns an error that wraps
+// ErrConnectionLost; a process of Node.Start whose connection failed ends with docker.ErrLost. The real one runs Slurm's and Apptainer's programs
 // through ssh (clustercli); a Fake keeps a cluster in memory.
 type Cluster interface {
 	// Has reports whether a file is at the path, an absolute path of the shared file system.

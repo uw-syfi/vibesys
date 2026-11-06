@@ -3,6 +3,7 @@ package clustercli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -84,7 +85,11 @@ func (n *node) Hold(ctx context.Context) (io.Closer, error) {
 			return h, nil
 		}
 		_ = h.Close()
-		return nil, unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
+		failed := unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
+		if exit := (*exec.ExitError)(nil); errors.As(h.waitErr, &exit) && n.c.cfg.Shell.Lost(exit.ExitCode()) {
+			return nil, fmt.Errorf("%w (%w)", failed, apptainer.ErrConnectionLost)
+		}
+		return nil, failed
 	case <-limit:
 		_ = h.Close()
 		return nil, unavailable("the step that holds the allocation %s did not start within %v", n.job, CallTimeout)

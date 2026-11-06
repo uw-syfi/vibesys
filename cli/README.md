@@ -959,6 +959,18 @@ start without it, saying to install it.
   of the allocation, its reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait
   begins and each time one of them changes, and the node and how long it waited once it runs. A
   run whose allocation runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
+- A cluster that cannot be reached does not end a wait on it. A call whose ssh connection fails (it
+  cannot connect, the login node resets it, or ssh exits 255), or that does not answer within 2
+  minutes, is made again every `[slurm] poll_interval_seconds` while the run waits for its
+  allocation in the queue, checks the allocation a sample kept, starts the step that holds its
+  allocation, or reads its node, and the allocation keeps its place in the queue. The job's log
+  says once when the cluster stops answering (`the cluster is unreachable since <time>`) and once
+  when it answers again. The run fails, before its command, only when the cluster stays
+  unreachable for 30 minutes in a row, saying so with the last failure; the queue's own bound
+  still applies. A lost read is never a reason to cancel the allocation: the run's end cancels it,
+  trying again on the poll for up to 2 minutes, and an allocation the cluster could not be reached
+  to cancel is cancelled by the next run of the daemon's scope. A call that fails otherwise, such
+  as `squeue` reporting an error, fails the run at once.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
   a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
   placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the

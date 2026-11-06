@@ -32,9 +32,9 @@ type Converter interface {
 	Lock(ctx context.Context, dir, name string) (io.Closer, error)
 }
 
-// ErrConnectionLost is wrapped by an error of a Cluster call whose connection to the cluster failed
-// (ssh's own exit status 255), so the call did not happen as far as anyone saw and may succeed if
-// made again.
+// ErrConnectionLost is wrapped by an error of a Cluster or Node call whose connection to the cluster
+// failed (ssh's own exit status 255), or that did not answer within its bound, so how the call
+// ended is unknown and it may succeed if made again.
 var ErrConnectionLost = errors.New("apptainer: the connection to the cluster was lost")
 
 // ErrConverting says that another conversion of the image on this machine holds its lock.

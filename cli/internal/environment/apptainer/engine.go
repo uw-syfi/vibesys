@@ -128,6 +128,9 @@ type Config struct {
 	Poll time.Duration
 	// QueueTimeout bounds the wait for an allocation; zero is DefaultQueueTimeout.
 	QueueTimeout time.Duration
+	// UnreachableTimeout bounds how long a wait on the cluster goes on while the cluster cannot be
+	// reached; zero is DefaultUnreachableTimeout.
+	UnreachableTimeout time.Duration
 	// MaxTime, when set, is the longest time limit an allocation asks for, such as the MaxTime of
 	// the partition, in whole minutes: a container that runs longer is ended by Slurm and fails.
 	// Zero is no cap.
@@ -211,6 +214,9 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.QueueTimeout <= 0 {
 		cfg.QueueTimeout = DefaultQueueTimeout
+	}
+	if cfg.UnreachableTimeout <= 0 {
+		cfg.UnreachableTimeout = DefaultUnreachableTimeout
 	}
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = DefaultConvertTimeout
@@ -342,7 +348,7 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	if b != nil && b.alloc != "" {
 		alloc = b.alloc
 	}
-	if err := e.cfg.Cluster.Cancel(ctx, alloc); err != nil {
+	if err := e.cancel(ctx, alloc); err != nil {
 		return fmt.Errorf("the allocation of %s was not confirmed ended: %w", name, err)
 	}
 	if b != nil {
@@ -415,12 +421,22 @@ func (e *Engine) take(k *kept) bool {
 func (e *Engine) release(k *kept) error {
 	ctx, stop := clock.Deadline(context.Background(), e.cfg.Timers, CallTimeout)
 	defer stop()
-	err := e.cfg.Cluster.Cancel(ctx, k.name)
+	err := e.cancel(ctx, k.name)
 	_ = k.hold.Close()
 	if err != nil {
 		return fmt.Errorf("the allocation %s, kept for a container that did not take it, was not confirmed ended: %w", k.job, err)
 	}
 	return nil
+}
+
+// cancel cancels the allocations of the name, confirmed, made again on the poll while it loses its
+// connection to the cluster, for up to CallTimeout: a cancel by name may be made any number of
+// times. An allocation the cluster cannot be reached to cancel stays known to Slurm by its name and
+// its scope, and the next run of the scope cancels it (docker's sweep).
+func (e *Engine) cancel(ctx context.Context, name string) error {
+	return e.patiently(ctx, io.Discard, "the cancel of "+name, CallTimeout, func(ctx context.Context) error {
+		return e.cfg.Cluster.Cancel(ctx, name)
+	})
 }
 
 // ownerOf is the live container whose allocation b joined. e.mu is held.
@@ -550,7 +566,11 @@ func (e *Engine) reuse(ctx context.Context, b *box, log io.Writer) (bool, error)
 		}
 		return false, e.release(k)
 	}
-	st, err := e.cfg.Cluster.State(ctx, k.job)
+	var st JobState
+	err := e.patiently(ctx, log, "the check of the allocation "+k.job+" the job kept", e.cfg.UnreachableTimeout, func(ctx context.Context) (err error) {
+		st, err = e.cfg.Cluster.State(ctx, k.job)
+		return err
+	})
 	if err == nil && st.Phase != Running {
 		err = unavailable("the allocation %s that the job kept for its next container ended before it ran it (Slurm says %s), "+
 			"so the job lost its place on the node; submit the job again", k.job, orUnknown(st.Name))
@@ -601,14 +621,20 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	b.ends = start.Add(limit)
 	e.mu.Unlock()
 	node := e.cfg.Cluster.Node(job)
-	hold, err := node.Hold(ctx)
+	var hold io.Closer
+	err = e.patiently(ctx, log, "the hold of the allocation "+job, e.cfg.UnreachableTimeout, func(ctx context.Context) (err error) {
+		hold, err = node.Hold(ctx)
+		return err
+	})
 	if err != nil {
 		return err
 	}
 	e.mu.Lock()
 	b.hold = hold
 	e.mu.Unlock()
-	return e.read(ctx, node)
+	return e.patiently(ctx, log, "the reading of the node of the allocation "+job, e.cfg.UnreachableTimeout, func(ctx context.Context) error {
+		return e.read(ctx, node)
+	})
 }
 
 // await waits for the job to run, pausing between reads of its state, up to QueueTimeout. When
@@ -617,34 +643,46 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 // the wait once it runs, so that the run's log says why nothing ran yet. A job that runs at once
 // writes nothing.
 //
+// A read that loses its connection to the cluster is made again on the poll, and the job keeps
+// its place in the queue, until the cluster has been unreachable for UnreachableTimeout (outage):
+// the outage's start and end go to log once each. The job is never cancelled here: an await that
+// fails leaves the allocation known, which Remove cancels.
+//
 // It returns when the last read that found the job queued began, or the zero time when none did.
 func (e *Engine) await(ctx context.Context, job string, log io.Writer) (time.Time, error) {
 	limit, stop := e.cfg.Timers.Timeout(ctx, e.cfg.QueueTimeout)
 	defer stop()
+	unreachable := e.outage(log, "the wait for the allocation "+job, e.cfg.UnreachableTimeout)
+	defer unreachable.close()
 	since := e.cfg.Clock.Now()
 	var said *JobState
+	var last JobState // what the last read that answered said
 	var queuedAt time.Time
 	for {
 		read := e.cfg.Clock.Now()
 		st, err := e.cfg.Cluster.State(ctx, job)
+		again, err := unreachable.seen(ctx, err)
 		if err != nil {
 			return time.Time{}, err
 		}
-		switch st.Phase {
-		case Running:
-			if said != nil {
-				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
-					job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
+		if !again {
+			last = st
+			switch st.Phase {
+			case Running:
+				if said != nil {
+					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
+						job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
+				}
+				return queuedAt, nil
+			case Queued:
+				queuedAt = read
+				if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
+					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
+					said = &st
+				}
+			case Ended:
+				return time.Time{}, unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 			}
-			return queuedAt, nil
-		case Queued:
-			queuedAt = read
-			if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
-				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
-				said = &st
-			}
-		case Ended:
-			return time.Time{}, unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 		}
 		pause, stopPause := e.cfg.Timers.Timeout(ctx, e.cfg.Poll)
 		select {
@@ -652,9 +690,9 @@ func (e *Engine) await(ctx context.Context, job string, log io.Writer) (time.Tim
 			stopPause()
 		case <-limit:
 			stopPause()
-			why := orUnknown(st.Name)
-			if st.Reason != "" {
-				why += ", " + st.Reason
+			why := orUnknown(last.Name)
+			if last.Reason != "" {
+				why += ", " + last.Reason
 			}
 			return time.Time{}, unavailable("the allocation %s did not start within %v (Slurm says %s); it is cancelled", job, e.cfg.QueueTimeout, why)
 		case <-ctx.Done():

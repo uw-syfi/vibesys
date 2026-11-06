@@ -2,6 +2,7 @@ package remote_test
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"math/rand/v2"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
@@ -55,6 +57,32 @@ func TestOutputSaysWhoFailedAndTheTransportsCodeIsNotTheProgramsOwn(t *testing.T
 	}
 	if !(remote.SSH{}).Lost(255) || (remote.SSH{}).Lost(1) || (remote.Local{}).Lost(255) {
 		t.Errorf("only ssh's own 255 is a lost exit")
+	}
+}
+
+// lossy is this machine, through a transport whose own exit code is 255, as ssh's is.
+type lossy struct{ remote.Local }
+
+func (lossy) Lost(code int) bool { return code == 255 }
+
+// A program whose end the transport lost is an unavailable failure that wraps ErrLost; a program
+// that failed by itself, whatever its code, does not.
+func TestAProgramTheTransportLostWrapsErrLost(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	for _, c := range []struct {
+		sh   remote.Shell
+		code string
+		lost bool
+	}{{lossy{}, "255", true}, {lossy{}, "1", false}, {remote.Local{}, "255", false}} {
+		_, err := remote.Output(ctx, c.sh, []string{"/bin/sh", "-c", "echo 'Connection reset by peer' >&2; exit " + c.code}, nil)
+		var f *core.Failure
+		if err == nil || errors.Is(err, remote.ErrLost) != c.lost || !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
+			t.Errorf("exit %s through %T: %v, want an unavailable failure, lost %v", c.code, c.sh, err, c.lost)
+		}
+		if c.lost && !strings.Contains(err.Error(), "cannot reach") {
+			t.Errorf("exit %s: %v does not say the machine could not be reached", c.code, err)
+		}
 	}
 }
 

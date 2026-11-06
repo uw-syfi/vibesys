@@ -205,6 +205,54 @@ func TestACopyWhoseConnectionDropsIsLost(t *testing.T) {
 	}
 }
 
+// Every call whose transport exits as ssh does when it cannot connect, or its connection drops, is
+// lost, so the engine may make it again; one whose program failed, or whose 255 is not the
+// transport's, is not.
+func TestEveryCallWhoseConnectionDropsIsLost(t *testing.T) {
+	calls := map[string]func(c *clustercli.Cluster) error{
+		"state": func(c *clustercli.Cluster) error { _, err := c.State(ctx(t), "77"); return err },
+		"has":   func(c *clustercli.Cluster) error { _, err := c.Has(ctx(t), "/shared/x"); return err },
+		"read":  func(c *clustercli.Cluster) error { _, _, err := c.Read(ctx(t), "/shared/x"); return err },
+		"jobs":  func(c *clustercli.Cluster) error { _, err := c.Jobs(ctx(t), "s"); return err },
+		"cancel": func(c *clustercli.Cluster) error {
+			return c.Cancel(ctx(t), apptainer.JobName("c"))
+		},
+		"submit": func(c *clustercli.Cluster) error {
+			_, err := c.Submit(ctx(t), apptainer.Allocation{Name: apptainer.JobName("c"), Comment: "s", Limit: time.Hour})
+			return err
+		},
+		"read the node": func(c *clustercli.Cluster) error {
+			_, err := c.Node("77").Read(ctx(t), map[string]string{"a": "true"})
+			return err
+		},
+	}
+	for name, call := range calls {
+		for _, c := range []struct {
+			exit    string
+			lost255 bool
+			lost    bool
+		}{{"255", true, true}, {"255", false, false}, {"1", true, false}} {
+			sh := newShell(t)
+			sh.exit, sh.lost255 = c.exit, c.lost255
+			if err := call(newCluster(t, sh)); err == nil || errors.Is(err, apptainer.ErrConnectionLost) != c.lost {
+				t.Errorf("%s, exit %s (lost255 %v): %v, want lost %v", name, c.exit, c.lost255, err, c.lost)
+			}
+		}
+	}
+	// The step that holds an allocation is lost when its transport is.
+	for _, c := range []struct {
+		code    string
+		lost255 bool
+		lost    bool
+	}{{"255", true, true}, {"255", false, false}, {"1", true, false}} {
+		sh := newShell(t)
+		sh.lost255, sh.env = c.lost255, []string{"SRUN_FAIL=" + c.code}
+		if _, err := node(t, sh).Hold(ctx(t)); err == nil || errors.Is(err, apptainer.ErrConnectionLost) != c.lost {
+			t.Errorf("hold, srun exit %s (lost255 %v): %v, want lost %v", c.code, c.lost255, err, c.lost)
+		}
+	}
+}
+
 // Publishers of one path at once each copy a file of their own, and the path ends as one of them,
 // whole.
 func TestPublishersAtOnceLeaveOneWholeFile(t *testing.T) {
