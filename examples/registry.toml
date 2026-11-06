@@ -58,9 +58,6 @@ path = "examples/database/differential-dataflow"
 path = "examples/database/kv-store"
 
 [[example]]
-path = "examples/microservices/hotel-correctness"
-
-[[example]]
 path = "examples/microservices/repositories/deathstarbench"
 external_repo = true
 skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
@@ -76,9 +73,6 @@ external_repo = true
 [[example]]
 path = "examples/microservices/repositories/train-ticket"
 external_repo = true
-
-[[example]]
-path = "examples/microservices/social-network-kubernetes"
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"

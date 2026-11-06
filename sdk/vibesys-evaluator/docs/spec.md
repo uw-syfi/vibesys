@@ -340,14 +340,14 @@ GENERATOR check    --phase-input F --dataset F --state DIR
 Where the examples show the hard parts:
 
 - Multi-step template: `examples/kv-store/bench.py` (`login`: log in, capture
-  the token, send it); `examples/social-network-k8s/bench.py`
-  (`compose_post`: compose, then read your write);
-  `examples/hotel-k8s/bench.py` (`reserve_capacity`, `set_capacity`).
-- Cross-phase state: `Model` and `apply_compose`/`apply_edge` in
-  `examples/social-network-k8s/bench.py`; the history replay replaces the
-  write journal, `--state-out`/`--state-in` and run.py's ConfigMaps.
-- Writes checked within the 1 s bound: `apply_*` and `check_rates`,
-  `check_features` in `examples/hotel-k8s/bench.py`.
+  the token, send it).
+- The larger tasks, with cross-phase state (the history replaces the write
+  journal, `--state-out`/`--state-in` and run.py's ConfigMaps) and writes
+  checked within the 1 s bound, are the `hotel-k8s` and `social-network-k8s`
+  tasks under `.vibesys/tasks/` in the DeathStarBench fork
+  (`vibesys-playground/DeathStarBench`, `vibesys` branch), which the
+  repository's `examples/microservices/repositories/deathstarbench` submodule
+  checks out.
 
 ## loadgen command line
 

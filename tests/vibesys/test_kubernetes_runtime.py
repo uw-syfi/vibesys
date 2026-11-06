@@ -24,7 +24,6 @@ from vs_sim.api.testing import HANG_GUARD_S
 
 EVALUATOR_ROOT = Path(__file__).parents[2] / "resources/evaluators/microservice"
 EXAMPLES_ROOT = Path(__file__).parents[2] / "examples/microservices"
-SOCIAL_CONFIG = EXAMPLES_ROOT / "social-network-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
 TRAIN_EXAMPLE = "examples/microservices/repositories/train-ticket"
 TRAIN_CONFIG = EXAMPLES_ROOT / "repositories/train-ticket/.vibesys/tasks/kubernetes/runtime.yaml"
 sys.path.insert(0, str(EVALUATOR_ROOT))
@@ -881,87 +880,6 @@ def test_cli_signal_during_startup_closes_lifecycle(
 
     assert result == 130
     assert closed == [True]
-
-
-def test_social_network_assets_build_and_override_candidate_services() -> None:
-    config = runtime_cli.load_config(SOCIAL_CONFIG)
-    lifecycle = KubernetesLifecycle(
-        config,
-        Path("examples/microservices/repositories"),
-        config_dir=SOCIAL_CONFIG.parent,
-    )
-
-    lifecycle_config = config.model_copy(update={"http_probes": ()})
-    runner = _NodePortRunner(selector={"service": "nginx-thrift"})
-    lifecycle = KubernetesLifecycle(
-        lifecycle_config,
-        Path("examples/microservices/repositories"),
-        config_dir=SOCIAL_CONFIG.parent,
-        runner=runner,
-        forwards=_launcher(),
-    )
-    lifecycle.start()
-    # The gateway is reached through a NodePort, not a kubectl stream.
-    assert config.access == "node_port"
-    assert [service["metadata"] for service in runner.node_services] == [
-        {"name": "vibesys-node-gateway"}
-    ]
-    assert lifecycle.base_url.startswith("http://172.18.0.2:")
-    apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
-    rendered = runner.inputs[apply_index]
-    assert rendered is not None
-    documents = list(yaml.safe_load_all(rendered))
-
-    assert len(config.image_builds) == 1
-    assert config.image_builds[0].context == Path("deathstarbench/socialNetwork")
-    assert len(config.image_overrides) == 11
-    assert all(override.image == "${IMAGE:candidate}" for override in config.image_overrides)
-    assert "kind: Namespace" not in rendered
-    assert rendered.count(f"namespace: {lifecycle.namespace}") == 78
-    mongodb_deployments = [
-        document
-        for document in documents
-        if document["kind"] == "Deployment" and document["metadata"]["name"].endswith("-mongodb")
-    ]
-    assert len(mongodb_deployments) == 6
-    for deployment in mongodb_deployments:
-        resources = deployment["spec"]["template"]["spec"]["containers"][0]["resources"]
-        assert resources["limits"]["memory"] == "512Mi"
-        assert resources["requests"]["memory"] == "128Mi"
-    nginx = next(
-        document
-        for document in documents
-        if document["kind"] == "Deployment" and document["metadata"]["name"] == "nginx-thrift"
-    )
-    loader_resources = nginx["spec"]["template"]["spec"]["initContainers"][0]["resources"]
-    assert loader_resources["limits"]["memory"] == "512Mi"
-    assert loader_resources["requests"]["memory"] == "128Mi"
-    nginx_resources = nginx["spec"]["template"]["spec"]["containers"][0]["resources"]
-    assert nginx_resources["limits"]["memory"] == "512Mi"
-    assert nginx_resources["requests"]["memory"] == "128Mi"
-    nginx_config = next(
-        document
-        for document in documents
-        if document["kind"] == "ConfigMap" and document["metadata"]["name"] == "nginx-thrift"
-    )
-    assert "worker_processes  1;" in nginx_config["data"]["nginx.conf"]
-    loader_command = nginx["spec"]["template"]["spec"]["initContainers"][0]["args"][1]
-    assert "fetch --depth=1 origin 867806e575e1f7fb24437ae969910ddb17a76121" in loader_command
-    deployments = {
-        document["metadata"]["name"]: document
-        for document in documents
-        if document["kind"] == "Deployment"
-    }
-    for name, deployment in deployments.items():
-        resources = deployment["spec"]["template"]["spec"]["containers"][0]["resources"]
-        expected_limit = "100m" if name == "jaeger" else "1"
-        assert resources["limits"]["cpu"] == expected_limit
-        assert resources["requests"]["cpu"] == "100m"
-    for override in config.image_overrides:
-        candidate = deployments[override.resource.removeprefix("deployment/")]
-        probe = candidate["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
-        assert probe["tcpSocket"]["port"] == 9090
-        assert probe["periodSeconds"] == 2
 
 
 def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:

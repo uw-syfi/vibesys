@@ -543,44 +543,6 @@ def test_manifest_declared_go_gates_and_hotel_composition_run_from_prepared_offl
     )
     _assert_successful_offline(remote_result)
 
-    microservice, prepared = prepared_by_name["microservice"]
-    module = prepared.requirements.go_module
-    assert module is not None
-    wrapper = (
-        Path(__file__).parents[2]
-        / "examples/microservices/hotel-correctness/.vibesys/tasks/compose/evaluator/run.py"
-    )
-    hotel = prepare_trusted_evaluation_plan(
-        TrustedEvaluationPlan(
-            accuracy_command=shlex.join(
-                (
-                    "python3",
-                    str(wrapper),
-                    "--package-root",
-                    str(microservice.root),
-                    "--",
-                    "-h",
-                )
-            )
-        ),
-        prepared.requirements,
-        TrustedEvaluationCommandPaths(
-            source_project_root=tmp_path,
-            runtime_project_root=str(tmp_path),
-            python_executable="python3",
-            runtime_package_root=str(microservice.root),
-            runtime_go_module_cache_root=str(module.cache_root),
-        ),
-    )
-    result = run_test_command(
-        shlex.split(hotel.accuracy_command or ""),
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    _assert_successful_offline(result)
-
     _assert_incomplete_cache_is_rejected(
         stack.root,
         stack_module.cache_root,

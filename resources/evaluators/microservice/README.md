@@ -7,7 +7,7 @@ generation, protocol execution, measurement, correctness gating, statistics,
 and output across applications.
 
 The initial implementation includes a production HTTP driver and adapters for
-Train Ticket and DeathStarBench Social Network. The same core is designed to
+Train Ticket. The same core is designed to
 support future gRPC and Thrift drivers without adding protocol-specific logic to
 the scheduler.
 
@@ -182,8 +182,6 @@ retains one observation per measured logical operation for diagnosis.
 | [`appsupport/`](appsupport/) | Mode-neutral topology, preflight, input, and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
-| [`apps/hotel/`](apps/hotel/) | Typed DeathStarBench Hotel Reservation adapter |
-| [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
 | [`cmd/servicebench/`](cmd/servicebench/) | Thin CLI with legacy bundled registrations |
 | [`composition/`](composition/) | Generic typed registry registration helpers |
@@ -239,10 +237,7 @@ configuration is accepted only by the selected adapter.
 
 See the checked-in workloads for complete examples:
 
-- `examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml`
 - `examples/microservices/repositories/train-ticket/.vibesys/tasks/default/benchmark/workload.toml`
-- `examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml`
-- `examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml`
 
 ## Running the evaluator
 
@@ -322,7 +317,7 @@ output path:
 
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/repositories/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/otel-spans.json"]' \
   --telemetry-output /tmp/otel-report.json \
   --output-json /tmp/result.json
