@@ -58,4 +58,6 @@ type Env struct {
 	Locate func(root string) (Dial, error)
 	// Hosts finds and ends the process of a host that does not answer.
 	Hosts HostProcesses
+	// Configs is the host's configuration in each root.
+	Configs HostConfigs
 }

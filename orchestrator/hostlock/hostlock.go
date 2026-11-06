@@ -12,12 +12,12 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// Marshal is the record of the process pid running release.
-func Marshal(pid int, release string) ([]byte, error) {
+// Marshal is the record of the process pid running release, the host of root.
+func Marshal(pid int, release, root string) ([]byte, error) {
 	if pid <= 0 {
 		return nil, fmt.Errorf("a host lock names a process, and %d is not one", pid)
 	}
-	lock := &pb.HostLock{Pid: uint32(pid), Release: release}
+	lock := &pb.HostLock{Pid: uint32(pid), Release: release, Root: root}
 	if err := protovalidate.Validate(lock); err != nil {
 		return nil, fmt.Errorf("not a valid host lock: %w", err)
 	}

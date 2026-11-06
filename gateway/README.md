@@ -20,29 +20,33 @@ go build -o /tmp/vibesys-host ./cmd/vibesys-host
 /tmp/vibesys-host serve
 ```
 
-Both commands accept `--root PATH`, the host's `.vibesys` directory. Without it the root is
-`$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when that variable is set (an absolute path, else an error),
-so a gateway belongs to one orchestrator state directory, and `~/.vibesys` otherwise. `serve --idle-timeout 10m` sets the period
+Both commands accept `--root PATH`, the directory a host serves from. `gatewayroot.Rule` states how a
+root is chosen, and the [orchestrator README](../orchestrator/README.md#the-hosts-root) explains it. `serve --idle-timeout 10m` sets the period
 with no open transport connections before shutdown. Open connections, even
 without active RPCs, keep it alive, and keepalive (a ping after 30 s of
 silence, then 10 s for its acknowledgement) ends one that has gone half-open.
 
-`connect` dials the same socket and pipes stdin and stdout unchanged. If needed,
-it starts the same executable with `serve` in a detached session and waits up
-to `--startup-timeout 10s` for the socket. The gateway inherits no SSH streams.
-Diagnostics go to stderr; stdout carries only transport bytes.
+`connect` dials the same socket and pipes stdin and stdout unchanged. If nobody serves it, it starts
+the same executable with `serve` in a detached session and reads how that went from a
+`HostStartReport` on a pipe: serving, refused with the reason, or another process got there first. It
+never reads a log or waits for a socket to appear, and `--startup-timeout 10s` bounds the whole start.
+The gateway inherits no SSH streams. Diagnostics go to stderr; stdout carries only transport bytes.
+`connect` also replaces an idle host of another API hash, and leaves one with live runs alone, saying
+so on stderr; the handshake then fails naming both hashes. A host started by `connect` stays up when
+it cannot serve the orchestrator, because a desktop app still reads logs through it, and it says what
+is wrong when asked.
 
-The first 16 hexadecimal characters of the generated API hash select
-`ROOT/gateway/PREFIX/sock`; the provisioned binary belongs at
-`ROOT/gateway/PREFIX/vibesys-host`. `lifecycle.HashPrefixLength` defines that length
-once. This prefix selects the binary and directory only. Hello compares the
-full hash, so a prefix collision cannot establish compatibility. Its directory
-is mode 0700 and the socket is mode 0600. A process lock serializes serving and
-stale-socket recovery for each prefix. Different prefixes can coexist. Startup
-validates the complete socket path before binding or dialing and names the
-path and platform limit on failure. The limit is 104 bytes on macOS and 108
-on Linux, including the terminating NUL. A host with a longer root must
-supply a shorter `--root`.
+A root has one socket, whatever the API hash: `ROOT/host.sock`, with `ROOT/host.lock` serializing
+serving and stale-socket recovery, and the host's own log in `ROOT/host.log`. The socket path is a
+function of the root with its symlinks resolved, so a starter and a finder that reach the same root
+different ways get the same path. A socket address has one limit here, 100 bytes
+(`lifecycle.MaxSocketPath`), below the 104 of macOS and the 108 of Linux. A longer `ROOT/host.sock`
+is replaced by `/tmp/vibesys-UID/HASH.sock`, in a directory that must be owned by the user with no
+group or other access, where HASH is a digest of the root. The socket is mode 0600.
+
+The first 16 hexadecimal characters of the generated API hash select only where a provisioned binary
+lives, `ROOT/gateway/PREFIX/vibesys-host`. `lifecycle.HashPrefixLength` defines that length once.
+Hello compares the full hash, so a prefix collision cannot establish compatibility.
 
 ## Disk input and stream behavior
 

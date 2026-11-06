@@ -20,8 +20,8 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
 
-// start opens an orchestrator over a fresh state directory with the given settings.
-func start(t *testing.T, settings map[string]string) *hosted.Orchestrator {
+// start opens an orchestrator over a fresh state directory with the given configuration.
+func start(t *testing.T, config *pb.HostConfig) *hosted.Orchestrator {
 	t.Helper()
 	// A Unix socket path is short, so the directory is made under the temporary directory's root.
 	state, err := os.MkdirTemp("", "h")
@@ -29,18 +29,23 @@ func start(t *testing.T, settings map[string]string) *hosted.Orchestrator {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(state) })
-	settings["VIBESYS_ORCHESTRATOR_STATE_DIR"] = state
-	return startAt(t, state, filepath.Join(state, "bin", "vibesys-host"), "test", settings)
+	return startAt(t, state, filepath.Join(state, "bin", "vibesys-host"), "test", config)
 }
 
 // startAt opens an orchestrator over a state directory, as a host binary at executable.
-func startAt(t *testing.T, state, executable, version string, settings map[string]string) *hosted.Orchestrator {
+func startAt(t *testing.T, state, executable, version string, config *pb.HostConfig) *hosted.Orchestrator {
 	t.Helper()
-	settings["VIBESYS_ORCHESTRATOR_STATE_DIR"] = state
+	return startIn(t, state, state, executable, version, config)
+}
+
+// startIn starts the host of root, on the state directory state.
+func startIn(t *testing.T, root, state, executable, version string, config *pb.HostConfig) *hosted.Orchestrator {
+	t.Helper()
+	config.StateDirectory = state
 	ctx, cancel := context.WithCancel(context.Background())
 	x := hosted.Start(ctx, hosted.Options{
 		Version: version, Executable: executable, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Getenv: func(k string) string { return settings[k] }, Home: state, Stop: cancel,
+		Config: config, Root: root, Getenv: func(string) string { return "" }, Home: state, Stop: cancel,
 	})
 	t.Cleanup(func() {
 		cancel()
@@ -93,12 +98,12 @@ func part(id *pb.IdentifyResponse, which pb.HostPart) *pb.PartReadiness {
 // with a build nobody chose.
 func TestACLISettingThatNamesNoExecutableIsReportedAsAJobToolProblem(t *testing.T) {
 	for _, setting := range []string{"vibesys-cli", "/missing/vibesys-cli"} {
-		x := start(t, map[string]string{"VIBESYS_ORCHESTRATOR_CLI": setting})
+		x := start(t, &pb.HostConfig{JobTool: setting})
 		if x.Reason() != "" {
 			t.Fatalf("setting %q: the orchestrator should still be served, got %q", setting, x.Reason())
 		}
 		problem := part(identify(t, x, "test"), pb.HostPart_HOST_PART_JOB_TOOL).GetProblem()
-		if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED || !strings.Contains(problem.GetDetail(), "VIBESYS_ORCHESTRATOR_CLI") {
+		if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED || !strings.Contains(problem.GetDetail(), "job_tool") {
 			t.Errorf("setting %q: problem %v, want the setting named", setting, problem)
 		}
 	}
@@ -107,9 +112,9 @@ func TestACLISettingThatNamesNoExecutableIsReportedAsAJobToolProblem(t *testing.
 // With no setting, no release and none on its PATH the host has no job tool to give the agents: the
 // skills have no PATH fallback, so it reports that, and a run is not started.
 func TestNoCLIToGiveTheAgentsIsAProblemOfTheJobTool(t *testing.T) {
-	x := start(t, map[string]string{"PATH": "/nonexistent"})
+	x := start(t, &pb.HostConfig{ToolPath: []string{"/nonexistent"}})
 	problem := part(identify(t, x, "test"), pb.HostPart_HOST_PART_JOB_TOOL).GetProblem()
-	if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_NO_RELEASE || !strings.Contains(problem.GetDetail(), "VIBESYS_ORCHESTRATOR_CLI") {
+	if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_NO_RELEASE || !strings.Contains(problem.GetDetail(), "job_tool") {
 		t.Fatalf("problem %v, want the setting named and no release", problem)
 	}
 }
@@ -119,7 +124,7 @@ func TestAnExecutableCLISettingIsAJobToolTheOperatorChose(t *testing.T) {
 	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	x := start(t, map[string]string{"VIBESYS_ORCHESTRATOR_CLI": cli})
+	x := start(t, &pb.HostConfig{JobTool: cli})
 	if x.Reason() != "" {
 		t.Fatalf("not served: %s", x.Reason())
 	}
@@ -139,7 +144,7 @@ func TestARepairedInstallIsSeenByARunningHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(state) })
-	x := startAt(t, state, filepath.Join(dir, "bin", "vibesys-host"), "1.0.0", map[string]string{})
+	x := startAt(t, state, filepath.Join(dir, "bin", "vibesys-host"), "1.0.0", &pb.HostConfig{})
 	problem := part(identify(t, x, "1.0.0"), pb.HostPart_HOST_PART_JOB_TOOL).GetProblem()
 	if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_RELEASE_INCOMPLETE || !strings.Contains(problem.GetDetail(), "bin/vibesys-cli") {
 		t.Fatalf("problem %v, want the release's missing tool named", problem)
@@ -169,11 +174,12 @@ func TestAHostThatCannotServeTheOrchestratorStillIdentifiesItself(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(state) })
-	first := startAt(t, state, "/x/bin/vibesys-host", "1.0.0", map[string]string{})
+	first := startAt(t, state, "/x/bin/vibesys-host", "1.0.0", &pb.HostConfig{})
 	if first.Reason() != "" {
 		t.Skipf("the first host does not serve here: %s", first.Reason())
 	}
-	second := startAt(t, state, "/y/bin/vibesys-host", "1.0.1", map[string]string{})
+	// Another root, so it is a live host sharing the state directory: the refusal comes at once.
+	second := startIn(t, state+"-another-root", state, "/y/bin/vibesys-host", "1.0.1", &pb.HostConfig{})
 	id := identify(t, second, "1.0.0")
 	unserved := id.GetUnserved()
 	if unserved.GetReason() != pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE || unserved.GetHeldByRelease() != "1.0.0" {
@@ -184,16 +190,74 @@ func TestAHostThatCannotServeTheOrchestratorStillIdentifiesItself(t *testing.T) 
 	}
 }
 
+// A host that says it is done has let go of the state directory, so a host of any root can take it at
+// once. Done before the store's lock was free let a new host in during the gap.
+func TestAHostThatIsDoneHasLetGoOfTheState(t *testing.T) {
+	state, err := os.MkdirTemp("", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(state) })
+	for range 20 {
+		ctx, cancel := context.WithCancel(context.Background())
+		first := hosted.Start(ctx, hosted.Options{
+			Version: "1.0.0", Executable: "/x/bin/vibesys-host", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: &pb.HostConfig{StateDirectory: state}, Root: state, Getenv: func(string) string { return "" }, Home: state, Stop: cancel,
+		})
+		if first.Reason() != "" {
+			cancel()
+			t.Fatalf("the host does not serve: %s", first.Reason())
+		}
+		cancel()
+		<-first.Done()
+		// Another root is refused at the first look, so this finds any lock still held.
+		ctx, cancel = context.WithCancel(context.Background())
+		next := hosted.Start(ctx, hosted.Options{
+			Version: "1.0.0", Executable: "/x/bin/vibesys-host", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: &pb.HostConfig{StateDirectory: state}, Root: state + "-another-root", Getenv: func(string) string { return "" }, Home: state, Stop: cancel,
+		})
+		reason := next.Reason()
+		cancel()
+		<-next.Done()
+		if reason != "" {
+			t.Fatalf("the state is still held after Done: %s", reason)
+		}
+	}
+}
+
+// A new host of the same root that starts while the old one is still on its way out serves, whichever
+// gets there first; it does not end with "another process holds the orchestrator".
+func TestANewHostServesAcrossTheHandOver(t *testing.T) {
+	state, err := os.MkdirTemp("", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(state) })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := hosted.Start(ctx, hosted.Options{
+		Version: "1.0.0", Executable: "/x/bin/vibesys-host", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: &pb.HostConfig{StateDirectory: state}, Root: state, Getenv: func(string) string { return "" }, Home: state, Stop: cancel,
+	})
+	if first.Reason() != "" {
+		t.Fatalf("the host does not serve: %s", first.Reason())
+	}
+	next := make(chan *hosted.Orchestrator, 1)
+	go func() {
+		next <- startAt(t, state, "/x/bin/vibesys-host", "1.0.1", &pb.HostConfig{})
+	}()
+	cancel()
+	<-first.Done()
+	if reason := (<-next).Reason(); reason != "" {
+		t.Fatalf("the new host refused during the hand-over: %s", reason)
+	}
+}
+
 // A state directory the host refuses is reported as such.
 func TestARefusedStateDirectoryIsReportedAsData(t *testing.T) {
 	refused := hosted.Start(context.Background(), hosted.Options{
 		Version: "dev", Executable: "/x/bin/vibesys-host", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Getenv: func(k string) string {
-			if k == "VIBESYS_ORCHESTRATOR_STATE_DIR" {
-				return "relative/state"
-			}
-			return ""
-		}, Home: "/nonexistent", Stop: func() {},
+		Config: &pb.HostConfig{StateDirectory: "relative/state"}, Root: "/nonexistent/root", Getenv: func(string) string { return "" }, Home: "/nonexistent", Stop: func() {},
 	})
 	id := identify(t, refused, "")
 	if id.GetUnserved().GetReason() != pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED || id.GetRelation() != pb.ReleaseRelation_RELEASE_RELATION_UNKNOWN {

@@ -26,6 +26,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
 // CallBound is how long the daemon waits for one call to a sidecar, the job source or the plan
@@ -78,19 +79,20 @@ type Layout struct {
 // maxSocketPath is the longest path a Unix socket address holds on the systems that matter.
 const maxSocketPath = 100
 
-// LayoutFor resolves the layout from the environment. The agent socket is in the state directory,
+// LayoutFor resolves the layout: the state directory chosen in the host's configuration, or fallback
+// when none was. The agent socket is in the state directory,
 // which outlives a login session: the runtime directory ($XDG_RUNTIME_DIR, /run/user/UID) is removed
 // when the last login of a user ends on a machine without lingering, and a live run's tools would
 // lose their socket with it. A state directory so long that the socket's path does not fit in a Unix
-// socket address is an error that names the setting, never another place.
-func LayoutFor(getenv func(string) string, home string) (Layout, error) {
-	state, err := localfs.StateDir(getenv, home, localfs.SystemDetector{})
+// socket address is an error that says what to do, never another place.
+func LayoutFor(chosen, fallback string) (Layout, error) {
+	state, err := localfs.StateDir(chosen, fallback, localfs.SystemDetector{})
 	if err != nil {
 		return Layout{}, err
 	}
 	agentSocket := filepath.Join(state.Path(), "agent.sock")
 	if len(agentSocket) > maxSocketPath {
-		return Layout{}, fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold: set %s to a shorter absolute path on a local disk", agentSocket, maxSocketPath, localfs.EnvStateDir)
+		return Layout{}, fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", agentSocket, maxSocketPath, localfs.Remedy)
 	}
 	return Layout{State: state, AgentSocket: agentSocket}, nil
 }
@@ -154,6 +156,8 @@ func secretIn(dir string) ([]byte, error) {
 // a source with no jobs.
 type Wiring struct {
 	Search *Reconciler
+	// Root is the root this process is the host of, which it records as the state directory's holder.
+	Root string
 
 	Sidecars daemon.Sidecars
 	Jobs     jobs.JobSource
@@ -199,7 +203,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 		}
 		return nil, fmt.Errorf("open the database: %w", err)
 	}
-	if err := writeHolder(layout.State.Path(), wiring.Version); err != nil {
+	if err := writeHolder(layout.State.Path(), wiring.Version, wiring.Root); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -335,16 +339,11 @@ func listenPrivate(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("remove the stale socket: %w", err)
-	}
-	old := syscall.Umask(0o177)
-	defer syscall.Umask(old)
-	l, err := net.Listen("unix", path)
+	listener, err := privatesocket.Listen(path)
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", path, err)
+		return nil, err
 	}
-	return l, nil
+	return listener, nil
 }
 
 // NoSidecars is the host of a build with no sidecar launcher: it launches nothing, and says why.

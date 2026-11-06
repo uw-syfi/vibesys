@@ -1,12 +1,14 @@
 package gatewayroot_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
+	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
 
 // getenv answers from a fixed set of settings.
@@ -14,60 +16,72 @@ func getenv(settings map[string]string) func(string) string {
 	return func(k string) string { return settings[k] }
 }
 
-// A gateway root is a function of the flag and the state directory alone: the flag wins; else a
-// state directory gives a root under it, one per state directory, never the default; else
-// ~/.vibesys. So two state directories never share a gateway, whatever the home is.
-func TestTheRootFollowsTheFlagThenTheStateDirectoryThenTheDefault(t *testing.T) {
-	const stateEnv = "VIBESYS_ORCHESTRATOR_STATE_DIR"
-	states := []string{"", "/s/a", "/s/b", "/s/a/", "/s/../s/a", "/h/.vibesys"}
-	flags := []string{"", "/f/root", "/s/a/host"}
-	homes := []string{"/h", "/other"}
-	seen := map[string]string{}
-	for _, state := range states {
-		for _, flag := range flags {
-			for _, home := range homes {
-				got, err := gatewayroot.For(flag, getenv(map[string]string{stateEnv: state}), home)
-				if err != nil {
-					t.Fatalf("flag %q state %q home %q: %v", flag, state, home, err)
-				}
-				switch {
-				case flag != "":
-					if got != flag {
-						t.Errorf("flag %q state %q: got %q, want the flag", flag, state, got)
+// Over every combination the root follows the one rule: the flag wins; else VIBESYS_HOME; else where
+// the program is installed; else ~/.vibesys. When the setting and the install place could differ
+// and no flag decides, it is an error printing the rule, never one of the two.
+func TestTheRootFollowsTheOneRuleOverEveryCombination(t *testing.T) {
+	flags := []string{"", "/f/root"}
+	settings := []string{"", "/s/a", "/s/b/", " /s/a "}
+	installs := []string{"", "/s/a", "/i/c"}
+	homes := []string{"", "/h"}
+	for _, flag := range flags {
+		for _, setting := range settings {
+			for _, installed := range installs {
+				for _, home := range homes {
+					got, err := gatewayroot.For(flag, getenv(map[string]string{gatewayroot.EnvHome: setting}), home, installed)
+					want := expected(flag, strings.TrimSpace(setting), installed, home)
+					var refused *gatewayroot.Error
+					switch {
+					case want == "":
+						if !errors.As(err, &refused) || !strings.Contains(err.Error(), gatewayroot.Rule) {
+							t.Errorf("flag %q setting %q installed %q home %q: %q, %v; want an error printing the rule", flag, setting, installed, home, got, err)
+						}
+					case err != nil || got != want:
+						t.Errorf("flag %q setting %q installed %q home %q: %q, %v; want %q", flag, setting, installed, home, got, err, want)
 					}
-				case state == "":
-					if want := filepath.Join(home, ".vibesys"); got != want {
-						t.Errorf("no state, home %q: got %q, want %q", home, got, want)
-					}
-				default:
-					if got == filepath.Join(home, ".vibesys") || !strings.HasPrefix(got, filepath.Clean(state)+"/") {
-						t.Errorf("state %q home %q: root %q is not under the state directory", state, home, got)
-					}
-					if prev, ok := seen[filepath.Clean(state)]; ok && prev != got {
-						t.Errorf("state %q: roots %q and %q for one state directory", state, prev, got)
-					}
-					seen[filepath.Clean(state)] = got
 				}
 			}
 		}
 	}
-	if seen["/s/a"] == seen["/s/b"] {
-		t.Errorf("two state directories share the root %q", seen["/s/a"])
+}
+
+func expected(flag, setting, installed, home string) string {
+	switch {
+	case flag != "":
+		return flag
+	case setting != "" && installed != "" && filepath.Clean(setting) != installed:
+		return ""
+	case setting != "":
+		return filepath.Clean(setting)
+	case installed != "":
+		return installed
+	case home == "":
+		return ""
+	}
+	return filepath.Join(home, ".vibesys")
+}
+
+// A setting that is not an absolute path is an error naming it, never a root relative to the working
+// directory.
+func TestARelativeHomeSettingIsRefusedNamingIt(t *testing.T) {
+	_, err := gatewayroot.For("", getenv(map[string]string{gatewayroot.EnvHome: "here"}), "/h", "")
+	if err == nil || !strings.Contains(err.Error(), gatewayroot.EnvHome) || !strings.Contains(err.Error(), `"here"`) {
+		t.Errorf("got %v", err)
 	}
 }
 
-// A state directory that is not absolute is an error naming the setting, never a root relative to the
-// working directory; with no state directory and no home there is nothing to default to.
-func TestTheRootRefusesWhatItCannotPlaceWithoutGuessing(t *testing.T) {
-	_, err := gatewayroot.For("", getenv(map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": "state"}), "/h")
-	if err == nil || !strings.Contains(err.Error(), "VIBESYS_ORCHESTRATOR_STATE_DIR") {
-		t.Errorf("relative state directory: %v, want an error naming the setting", err)
+// The state of the old default root stays where existing hosts left it. Any other root keeps its
+// state inside itself, so two roots never meet on one state directory, whatever the home is.
+func TestTheStateDirectoryFollowsTheRoot(t *testing.T) {
+	home := t.TempDir()
+	home, _ = filepath.EvalSymlinks(home)
+	none := getenv(nil)
+	if got, want := gatewayroot.StateDirectory(filepath.Join(home, ".vibesys"), home, none), filepath.Join(home, ".local", "state", "vibesys", "orchestrator"); got != want {
+		t.Errorf("the default root: %q, want %q", got, want)
 	}
-	if _, err := gatewayroot.For("", getenv(nil), ""); err == nil {
-		t.Error("no home and no state directory: want an error")
-	}
-	if got, err := gatewayroot.For("/f", getenv(nil), ""); err != nil || got != "/f" {
-		t.Errorf("a flag needs no home: got %q, %v", got, err)
+	a, b := gatewayroot.StateDirectory("/local/a", home, none), gatewayroot.StateDirectory("/local/b", home, none)
+	if a != "/local/a/state" || b != "/local/b/state" {
+		t.Errorf("other roots: %q, %q", a, b)
 	}
 }
 
@@ -88,20 +102,52 @@ func TestTheRootIsTheSameThroughASymlinkedHome(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		direct, err := gatewayroot.For("", getenv(nil), real)
+		direct, err := gatewayroot.For("", getenv(nil), real, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		through, err := gatewayroot.For("", getenv(nil), link)
+		through, err := gatewayroot.For("", getenv(nil), link, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if direct != through || direct != filepath.Join(real, ".vibesys") {
 			t.Errorf("root exists %v: direct %q, through the link %q", exists, direct, through)
 		}
-		flagged, err := gatewayroot.For(filepath.Join(link, ".vibesys"), getenv(nil), "/unused")
+		flagged, err := gatewayroot.For(filepath.Join(link, ".vibesys"), getenv(nil), "/unused", "")
 		if err != nil || flagged != direct {
 			t.Errorf("root exists %v: --root through the link is %q (%v), want %q", exists, flagged, err, direct)
 		}
+		setting, err := gatewayroot.For("", getenv(map[string]string{gatewayroot.EnvHome: filepath.Join(link, ".vibesys")}), "/unused", direct)
+		if err != nil || setting != direct {
+			t.Errorf("root exists %v: %s through the link is %q (%v), want %q", exists, gatewayroot.EnvHome, setting, err, direct)
+		}
+	}
+}
+
+// A program in an installed release belongs to the directory that holds releases/, through whatever
+// links reach it, and a bundle unpacked anywhere else belongs to nothing.
+func TestAProgramIsInstalledInTheDirectoryThatHoldsItsReleases(t *testing.T) {
+	home := t.TempDir()
+	home, _ = filepath.EvalSymlinks(home)
+	release := filepath.Join(home, "releases", "1.0.0")
+	releasetest.Write(t, release)
+	if err := os.Symlink(filepath.Join("releases", "1.0.0"), filepath.Join(home, "current")); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	link := filepath.Join(bin, "vibesys-client")
+	if err := os.Symlink(filepath.Join(home, "current", "bin", "vibesys-client"), link); err != nil {
+		t.Fatal(err)
+	}
+	if got := gatewayroot.Installed(link); got != home {
+		t.Errorf("through the links: %q, want %q", got, home)
+	}
+	unpacked := filepath.Join(t.TempDir(), "unpacked")
+	releasetest.Write(t, unpacked)
+	if got := gatewayroot.Installed(filepath.Join(unpacked, "bin", "vibesys-client")); got != "" {
+		t.Errorf("an unpacked bundle: %q, want nothing", got)
+	}
+	if got := gatewayroot.Installed(filepath.Join(t.TempDir(), "vibesys-client")); got != "" {
+		t.Errorf("a build in no release: %q, want nothing", got)
 	}
 }

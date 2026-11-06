@@ -28,15 +28,16 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
-// EnvSidecar names how to start a sidecar: the path of an orchestrator/sidecar checkout, run with
-// `uv run --frozen --project PATH python -m vs_sidecar`, or a command whose words are run as given.
-// It is a developer override. Without it the sidecar of the release the host was installed in
-// is used (see release.Release.SessionHolderCommand).
-const EnvSidecar = "VIBESYS_ORCHESTRATOR_SIDECAR"
+// SettingSessionHolder is the field of the host's configuration that says how to start a sidecar: the
+// path of an orchestrator/sidecar checkout, run with `uv run --frozen --project PATH python -m
+// vs_sidecar`, or a command whose words are run as given. It is a developer override. Without it the
+// sidecar of the release the host was installed in is used (see release.Release.SessionHolderCommand).
+const SettingSessionHolder = "session_holder_command"
 
 // SidecarsFor gives the sidecar launcher. Sessions keep their files under root. executable is the
 // host binary, which each agent's tool server runs. The launcher resolves its parts on every
@@ -49,10 +50,10 @@ func SidecarsFor(parts Parts, root, executable string, log *slog.Logger) (*Proce
 	return &ProcessSidecars{Root: root, Parts: parts, Executable: executable, Log: log}, nil
 }
 
-// sidecarCommand is EnvSidecar when it is set, whatever it holds, and otherwise the release's
+// sidecarCommand is the setting when there is one, whatever it holds, and otherwise the release's
 // own sidecar. A set but wrong value is never replaced by the release.
-func sidecarCommand(getenv func(string) string, find release.Finder) ([]string, error) {
-	if setting := strings.TrimSpace(getenv(EnvSidecar)); setting != "" {
+func sidecarCommand(setting string, find release.Finder) ([]string, error) {
+	if setting = strings.TrimSpace(setting); setting != "" {
 		return sidecarSetting(setting)
 	}
 	rel, err := find()
@@ -62,13 +63,13 @@ func sidecarCommand(getenv func(string) string, find release.Finder) ([]string, 
 			return command, nil
 		}
 	}
-	return nil, fmt.Errorf("%s is not set and %w, so no agent session can start: set %s to an orchestrator/sidecar checkout or to the command that runs the sidecar", EnvSidecar, err, EnvSidecar)
+	return nil, fmt.Errorf("the host's configuration names no %s and %w, so no agent session can start: choose an orchestrator/sidecar checkout or the command that runs the sidecar with `vibesys-client host configure --session-holder`", SettingSessionHolder, err)
 }
 
 func sidecarSetting(setting string) ([]string, error) {
 	if info, err := os.Stat(setting); err == nil && info.IsDir() {
 		if _, err := os.Stat(filepath.Join(setting, "pyproject.toml")); err != nil {
-			return nil, fmt.Errorf("%s=%s is a directory without pyproject.toml, so it is not an orchestrator/sidecar checkout", EnvSidecar, setting)
+			return nil, fmt.Errorf("%s=%s is a directory without pyproject.toml, so it is not an orchestrator/sidecar checkout", SettingSessionHolder, setting)
 		}
 		return []string{"uv", "run", "--frozen", "--quiet", "--project", setting, "python", "-m", "vs_sidecar"}, nil
 	}
@@ -128,7 +129,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	}
 	dir := s.sessionDir(l.Session)
 	if sock := filepath.Join(dir, "sock"); len(sock) > maxSocketPath {
-		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter VIBESYS_ORCHESTRATOR_STATE_DIR", sock, maxSocketPath)
+		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", sock, maxSocketPath, localfs.Remedy)
 	}
 	s.reapAgent(l.Session.Agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -181,7 +182,7 @@ func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession, 
 	}
 	home := filepath.Join(s.agentDir(l.Session.Agent), "plugin-home")
 	if !filepath.IsAbs(home) {
-		return nil, fmt.Errorf("launch.plugin.home %s is not absolute: set VIBESYS_ORCHESTRATOR_STATE_DIR to an absolute path", home)
+		return nil, fmt.Errorf("launch.plugin.home %s is not absolute; %s", home, localfs.Remedy)
 	}
 	launch.Plugin = &pb.SessionPlugin{Marketplace: plugin.Marketplace, Name: plugin.Name, Home: home}
 	return launch, nil

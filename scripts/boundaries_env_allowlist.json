@@ -56,6 +56,17 @@
   "clients/apps/desktop/src/main/index.ts": {
     "VIBESYS_DESKTOP_USER_DATA": 1
   },
+  "orchestrator/gatewayroot/gatewayroot.go": {
+    "VIBESYS_HOME": 1
+  },
+  "orchestrator/hostconfig/hostconfig.go": {
+    "VIBESYS_ORCHESTRATOR_CLI": 1,
+    "VIBESYS_ORCHESTRATOR_MARKETPLACE": 1,
+    "VIBESYS_ORCHESTRATOR_SIDECAR": 1,
+    "VIBESYS_ORCHESTRATOR_STATE_DIR": 1,
+    "XDG_RUNTIME_DIR": 1,
+    "XDG_STATE_HOME": 1
+  },
   "orchestrator/internal/daemon/ports.go": {
     "VIBESYS_ORCHESTRATOR_AGENT": 1,
     "VIBESYS_ORCHESTRATOR_ROLE": 1,
@@ -65,23 +76,15 @@
     "VIBESYS_ORCHESTRATOR_TOKEN": 1
   },
   "orchestrator/internal/localfs/localfs.go": {
-    "VIBESYS_ORCHESTRATOR_STATE_DIR": 1,
-    "XDG_STATE_HOME": 2
+    "XDG_STATE_HOME": 1
   },
   "orchestrator/internal/production/agentcli.go": {
-    "VIBESYS_ORCHESTRATOR_CLI": 1,
     "XDG_RUNTIME_DIR": 1,
     "XDG_STATE_HOME": 1
   },
   "orchestrator/internal/production/cli_ensure.go": {
     "XDG_RUNTIME_DIR": 2,
     "XDG_STATE_HOME": 2
-  },
-  "orchestrator/internal/production/plugin.go": {
-    "VIBESYS_ORCHESTRATOR_MARKETPLACE": 1
-  },
-  "orchestrator/internal/production/sidecars.go": {
-    "VIBESYS_ORCHESTRATOR_SIDECAR": 1
   },
   "orchestrator/sidecar/src/vs_sidecar/driver.py": {
     "VIBESYS_AGENT": 1,

@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
-	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
@@ -23,7 +22,7 @@ import (
 func (r *rig) dial(ctx context.Context) *grpc.ClientConn {
 	r.t.Helper()
 	connection, err := grpc.NewClient("passthrough:///gateway", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(r.root, schemahash.APISchemaHash))
+		return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(r.root))
 	}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
 	if err != nil {
 		r.t.Fatal(err)
@@ -35,7 +34,7 @@ func (r *rig) dial(ctx context.Context) *grpc.ClientConn {
 // publishes its socket a moment before it listens, and the bound only guards against one that never does.
 func (r *rig) awaitServing() {
 	r.t.Helper()
-	socket := lifecycle.SocketPath(r.root, schemahash.APISchemaHash)
+	socket := lifecycle.SocketPath(r.root)
 	deadline := time.Now().Add(bound)
 	for {
 		connection, err := net.Dial("unix", socket)

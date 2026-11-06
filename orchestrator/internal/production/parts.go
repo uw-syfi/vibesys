@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
@@ -14,6 +15,9 @@ import (
 // launch and every start check, as a few stats, so repairing an install takes effect with no
 // restart and a refusal is never remembered past the problem that caused it.
 type Parts struct {
+	// Config is the host's configuration, which chooses any part in place of the release's.
+	Config *pb.HostConfig
+	// Getenv reads the job tool's places (see LocationFor), which are all it is for.
 	Getenv func(string) string
 	// Find looks for the release the host is installed in.
 	Find  release.Finder
@@ -24,20 +28,20 @@ type Parts struct {
 
 // SessionHolder is the command that holds a session, and who chose it.
 func (p Parts) SessionHolder() ([]string, pb.PartOrigin, error) {
-	command, err := sidecarCommand(p.Getenv, p.Find)
-	return command, p.origin(EnvSidecar), err
+	command, err := sidecarCommand(p.Config.GetSessionHolderCommand(), p.Find)
+	return command, origin(p.Config.GetSessionHolderCommand()), err
 }
 
 // Skills is the plugin every session loads, and who chose it.
 func (p Parts) Skills() (Plugin, pb.PartOrigin, error) {
-	plugin, err := PluginFor(p.Getenv, p.Find)
-	return plugin, p.origin(EnvMarketplace), err
+	plugin, err := PluginFor(p.Config.GetSkillsDirectory(), p.Find)
+	return plugin, origin(p.Config.GetSkillsDirectory()), err
 }
 
 // JobTool is the tool the skills run, and who chose it.
 func (p Parts) JobTool() (string, pb.PartOrigin, error) {
-	tool, err := ResolveCLI(p.Getenv, p.Find, p.Files)
-	return tool, p.origin(EnvCLI), err
+	tool, err := ResolveCLI(p.Config.GetJobTool(), hostconfig.ToolPath(p.Config, p.Home), p.Find, p.Files)
+	return tool, origin(p.Config.GetJobTool()), err
 }
 
 // Location is where the agents of a run that starts now find the job tool and its places. It is the
@@ -50,8 +54,8 @@ func (p Parts) Location() core.CliLocation {
 	return LocationFor(p.Getenv, p.Home, tool)
 }
 
-func (p Parts) origin(setting string) pb.PartOrigin {
-	if strings.TrimSpace(p.Getenv(setting)) != "" {
+func origin(setting string) pb.PartOrigin {
+	if strings.TrimSpace(setting) != "" {
 		return pb.PartOrigin_PART_ORIGIN_OPERATOR
 	}
 	return pb.PartOrigin_PART_ORIGIN_RELEASE

@@ -55,7 +55,7 @@ func requireRefused(t *testing.T, fs localfs.Filesystem, kind string) {
 	if !errors.As(err, &refusal) {
 		t.Fatalf("%s: want a RefusedError, got %v", fs.Type, err)
 	}
-	for _, want := range []string{filepath.Join(dir, "state"), fs.Type, localfs.EnvStateDir, "local", kind} {
+	for _, want := range []string{filepath.Join(dir, "state"), fs.Type, localfs.Remedy, "local", kind} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: error %q does not say %q", fs.Type, err, want)
 		}
@@ -192,8 +192,8 @@ func TestADetectorThatFailsRefusesRatherThanGuesses(t *testing.T) {
 	dir := t.TempDir()
 	real, _ := filepath.EvalSymlinks(dir)
 	_, err := localfs.Resolve(dir, localfstest.Fake{Unreadable: map[string]bool{real: true}})
-	if err == nil || !strings.Contains(err.Error(), localfs.EnvStateDir) {
-		t.Fatalf("want a refusal naming %s, got %v", localfs.EnvStateDir, err)
+	if err == nil || !strings.Contains(err.Error(), localfs.Remedy) {
+		t.Fatalf("want a refusal naming %s, got %v", localfs.Remedy, err)
 	}
 }
 
@@ -201,7 +201,7 @@ func TestTheDefaultDirectoryIsRefusedNotRelocated(t *testing.T) {
 	home := t.TempDir()
 	realHome, _ := filepath.EvalSymlinks(home)
 	detector := localfstest.Fake{Mounts: map[string]localfs.Filesystem{realHome: nfs}}
-	_, err := localfs.StateDir(noEnv, home, detector)
+	_, err := localfs.StateDir("", localfs.DefaultPath(noEnv, home), detector)
 	var refusal *localfs.RefusedError
 	if !errors.As(err, &refusal) || !refusal.Default {
 		t.Fatalf("want the default refused as a default, got %v", err)
@@ -209,14 +209,9 @@ func TestTheDefaultDirectoryIsRefusedNotRelocated(t *testing.T) {
 	if !strings.Contains(err.Error(), "default state directory") || !strings.Contains(err.Error(), ".local/state/vibesys/orchestrator") {
 		t.Errorf("the error does not name the default: %v", err)
 	}
-	// The variable moves it, to a local disk, and nothing else does.
+	// A choice moves it, to a local disk, and nothing else does.
 	elsewhere := t.TempDir()
-	got, err := localfs.StateDir(func(k string) string {
-		if k == localfs.EnvStateDir {
-			return filepath.Join(elsewhere, "state")
-		}
-		return ""
-	}, home, localfstest.Fake{Mounts: map[string]localfs.Filesystem{realHome: nfs}})
+	got, err := localfs.StateDir(filepath.Join(elsewhere, "state"), localfs.DefaultPath(noEnv, home), localfstest.Fake{Mounts: map[string]localfs.Filesystem{realHome: nfs}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,31 +241,27 @@ func TestTheDefaultPathFollowsXDGWhenItIsAbsolute(t *testing.T) {
 	}
 }
 
-func TestARelativeStateDirectoryVariableIsRejected(t *testing.T) {
-	_, err := localfs.StateDir(func(k string) string {
-		if k == localfs.EnvStateDir {
-			return "state"
-		}
-		return ""
-	}, "/home/x", localfstest.Fake{})
-	if err == nil || !strings.Contains(err.Error(), localfs.EnvStateDir) {
-		t.Fatalf("want a rejection naming the variable, got %v", err)
+func TestARelativeChosenStateDirectoryIsRejected(t *testing.T) {
+	_, err := localfs.StateDir("state", "/home/x/state", localfstest.Fake{})
+	if err == nil || !strings.Contains(err.Error(), localfs.Remedy) {
+		t.Fatalf("want a rejection that says how to choose, got %v", err)
 	}
 }
 
 func TestAnEmptyHomeNeverMakesTheDefaultRelative(t *testing.T) {
-	_, err := localfs.StateDir(noEnv, "", localfstest.Fake{})
-	if err == nil || !strings.Contains(err.Error(), localfs.EnvStateDir) || !strings.Contains(err.Error(), "home") {
-		t.Fatalf("want a refusal that names the home directory and %s, got %v", localfs.EnvStateDir, err)
+	_, err := localfs.StateDir("", localfs.DefaultPath(noEnv, ""), localfstest.Fake{})
+	if err == nil || !strings.Contains(err.Error(), localfs.Remedy) || !strings.Contains(err.Error(), "home") {
+		t.Fatalf("want a refusal that names the home directory and %s, got %v", localfs.Remedy, err)
 	}
-	// An absolute XDG_STATE_HOME needs no home, and the variable always wins.
+	// An absolute XDG_STATE_HOME needs no home.
+	state := t.TempDir()
 	get := func(k string) string {
 		if k == "XDG_STATE_HOME" {
-			return t.TempDir()
+			return state
 		}
 		return ""
 	}
-	if got, err := localfs.StateDir(get, "", localfstest.Fake{}); err != nil || !filepath.IsAbs(got.Path()) {
+	if got, err := localfs.StateDir("", localfs.DefaultPath(get, ""), localfstest.Fake{}); err != nil || !filepath.IsAbs(got.Path()) {
 		t.Fatalf("an absolute XDG_STATE_HOME must stand without a home: %v %v", got, err)
 	}
 }

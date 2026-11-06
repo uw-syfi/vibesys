@@ -1,109 +1,178 @@
 package lifecycle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"syscall"
+
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
-// HashPrefixLength names the per-version directory; Hello still verifies the
-// entire API hash before declaring compatibility.
-const HashPrefixLength = 16
+const (
+	socketFileName = "host.sock"
+	lockFileName   = "host.lock"
+	logFileName    = "host.log"
 
-// lockFileName is shared with older hosts. Changing it would let a new host
-// win a different lock and remove a live old host's socket.
-const lockFileName = "vibesysd.lock"
+	// MaxSocketPath is the longest socket path a root gets to keep inside itself. A Unix socket
+	// address holds 104 bytes on macOS and 108 on Linux with its terminating NUL; one limit for both
+	// means a root behaves the same on either.
+	MaxSocketPath = 100
+)
 
 var ErrServing = errors.New("gateway already serving")
 
-// SocketPath is shared by serve and connect. Root is the host's .vibesys
-// directory; schemaHash is the generated API hash.
-func SocketPath(root, schemaHash string) string {
-	return filepath.Join(root, "gateway", schemaHash[:min(len(schemaHash), HashPrefixLength)], "sock")
+// SocketPath is the one socket of the host of root, a function of root alone: a client that starts
+// a host and a client that finds one compute the same path, whatever their environments. It is
+// ROOT/host.sock, unless that does not fit in a socket address. Then it is a name derived from root
+// in a private directory of this user under /tmp, which is short on every system. /tmp is written
+// out because $TMPDIR differs between shells and on macOS is too long itself.
+func SocketPath(root string) string {
+	inside := filepath.Join(root, socketFileName)
+	if len(inside) <= MaxSocketPath {
+		return inside
+	}
+	sum := sha256.Sum256([]byte(root))
+	return filepath.Join(shortSocketDirectory(), hex.EncodeToString(sum[:16])+".sock")
 }
 
-// Endpoint owns the listener and the per-hash process lock. The lock file is
-// retained across exits: unlinking it would allow different inodes to be locked.
-type Endpoint struct {
-	Listener *net.UnixListener
-	lock     *os.File
+func shortSocketDirectory() string {
+	return "/tmp/vibesys-" + strconv.Itoa(os.Getuid())
 }
 
-func Listen(root, schemaHash string) (*Endpoint, error) {
-	path := SocketPath(root, schemaHash)
-	if err := ValidateSocketPath(path); err != nil {
+// CheckSocketDirectory refuses a socket whose directory another user could have made, which is only
+// possible for the directory under /tmp. Anything that reaches for a socket checks this first:
+// whoever owns that directory could otherwise answer as the host. A directory that does not exist
+// yet is fine, because nobody can be listening.
+func CheckSocketDirectory(socket string) error {
+	directory := filepath.Dir(socket)
+	if directory != shortSocketDirectory() {
+		return nil
+	}
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("refusing the socket directory %s: it must be a directory of this user that nobody else can reach", directory)
+	}
+	return nil
+}
+
+// LogPath is where a host's stderr goes. It is appended to, so whoever starts a host can read what
+// that one attempt wrote and nothing older.
+func LogPath(root string) string { return filepath.Join(root, logFileName) }
+
+// Held is a root whose lock this process holds, and whose socket it has not published yet. The lock
+// file is retained across exits: unlinking it would allow different inodes to be locked.
+type Held struct {
+	root string
+	lock *os.File
+}
+
+// Hold takes the lock of root. It is ErrServing when another process holds it.
+func Hold(root string) (*Held, error) {
+	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return nil, err
-	}
-	for _, dir := range []string{filepath.Dir(directory), directory} {
-		if err := os.Chmod(dir, 0700); err != nil {
-			return nil, err
-		}
-	}
-	lock, err := os.OpenFile(filepath.Join(directory, lockFileName), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(root, lockFileName), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
-	release := true
-	defer func() {
-		if release {
-			lock.Close()
-		}
-	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, ErrServing
 		}
+		return nil, err
+	}
+	return &Held{root: root, lock: lock}, nil
+}
+
+// Record writes what a reader of the lock file finds while the lock is held: who holds it. It
+// replaces whatever an earlier holder left.
+func (h *Held) Record(data []byte) error {
+	if err := h.lock.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := h.lock.WriteAt(data, 0); err != nil {
+		return err
+	}
+	return h.lock.Sync()
+}
+
+// Close releases the lock.
+func (h *Held) Close() error { return h.lock.Close() }
+
+// Publish starts listening on the root's socket, replacing one an earlier holder left behind. The
+// Endpoint owns the lock from here on.
+func (h *Held) Publish() (*Endpoint, error) {
+	path := SocketPath(h.root)
+	if filepath.Dir(path) == shortSocketDirectory() {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, err
+		}
+	}
+	if err := CheckSocketDirectory(path); err != nil {
 		return nil, err
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("refusing to replace non-socket %q", path)
 		}
-		if err := os.Remove(path); err != nil {
-			return nil, err
-		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	// The socket's mode is what guards it, since a root may be readable by others.
+	listener, err := privatesocket.Listen(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0600); err != nil {
-		listener.Close()
+	return &Endpoint{Listener: listener, held: h, path: path}, nil
+}
+
+// Endpoint owns the listener and the root's lock.
+type Endpoint struct {
+	Listener *net.UnixListener
+	held     *Held
+	path     string
+}
+
+// Listen holds root and publishes its socket, for what has nothing to do in between.
+func Listen(root string) (*Endpoint, error) {
+	held, err := Hold(root)
+	if err != nil {
 		return nil, err
 	}
-	release = false
-	return &Endpoint{Listener: listener, lock: lock}, nil
+	endpoint, err := held.Publish()
+	if err != nil {
+		held.Close()
+		return nil, err
+	}
+	return endpoint, nil
 }
 
-// Record writes what a reader of the lock file finds while the lock is held: who holds it. It
-// replaces whatever an earlier holder left.
-func (e *Endpoint) Record(data []byte) error {
-	if err := e.lock.Truncate(0); err != nil {
-		return err
-	}
-	if _, err := e.lock.WriteAt(data, 0); err != nil {
-		return err
-	}
-	return e.lock.Sync()
+func (e *Endpoint) Close() error {
+	// The name goes while the lock is held, so it can never be another host's.
+	return errors.Join(e.Listener.Close(), privatesocket.Remove(e.path), e.held.Close())
 }
 
-// Holder reads the record of the process holding the lock file of the host that serves root with
-// schemaHash. held is false when no process holds the lock, whatever the file says: a record left
-// by a process that has since exited names nobody, and the number it holds may belong to another
-// program now. The probe takes and releases the lock when it is free.
-func Holder(root, schemaHash string) (record []byte, held bool, err error) {
-	file, err := os.Open(filepath.Join(filepath.Dir(SocketPath(root, schemaHash)), lockFileName))
+// Holder reads the record of the process holding the lock of root. held is false when no process
+// holds the lock, whatever the file says: a record left by a process that has since exited names
+// nobody, and the number it holds may belong to another program now. The probe takes and releases
+// the lock when it is free.
+func Holder(root string) (record []byte, held bool, err error) {
+	file, err := os.Open(filepath.Join(root, lockFileName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
 	}
@@ -119,22 +188,4 @@ func Holder(root, schemaHash string) (record []byte, held bool, err error) {
 	}
 	record, err = io.ReadAll(file)
 	return record, true, err
-}
-
-func (e *Endpoint) Close() error {
-	return errors.Join(e.Listener.Close(), e.lock.Close())
-}
-
-// ValidateSocketPath reports the kernel address bound before any bind or dial.
-// The sockaddr's byte array includes the terminating NUL, so the path itself
-// must be strictly shorter than that array (104 bytes on macOS, 108 on Linux).
-func ValidateSocketPath(path string) error {
-	limit := 108
-	if runtime.GOOS == "darwin" {
-		limit = 104
-	}
-	if len(path) >= limit {
-		return fmt.Errorf("Unix socket path %q is %d bytes; must be shorter than the %d-byte limit on %s", path, len(path), limit, runtime.GOOS)
-	}
-	return nil
 }

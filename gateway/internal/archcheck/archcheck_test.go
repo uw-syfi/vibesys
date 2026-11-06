@@ -53,7 +53,7 @@ func TestRules(t *testing.T) {
 		bad                bool
 	}{
 		{"allowed composition", "gateway/internal/hostmain/a.go", goFile("context", "os/signal", module+"gateway/internal/connect", module+"gateway/internal/lifecycle", module+"gateway/internal/pipe", module+"gateway/internal/server", module+"gateway/schemahash", module+"orchestrator/hosted"), false},
-		{"client composition", "gateway/internal/clientmain/a.go", goFile("context", "github.com/mattn/go-isatty", module+"gateway/internal/connect", module+"gateway/internal/lifecycle", module+"gateway/schemahash", module+"orchestrator/clientcli", module+"orchestrator/gatewayroot"), false},
+		{"client composition", "gateway/internal/clientmain/a.go", goFile("context", "github.com/mattn/go-isatty", module+"gateway/internal/connect", module+"gateway/internal/lifecycle", module+"orchestrator/clientcli", module+"orchestrator/gatewayroot"), false},
 		{"client may not import the host's orchestrator", "gateway/internal/clientmain/a.go", goFile(module + "orchestrator/hosted"), true},
 		{"host may not import the client's verbs", "gateway/internal/hostmain/a.go", goFile(module + "orchestrator/clientcli"), true},
 		{"second client command file", archcheck.ClientDirectory + "/extra.go", goFile("os", module+"gateway/internal/clientmain"), true},

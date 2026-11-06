@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -22,9 +23,9 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
-	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
-	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
@@ -51,7 +52,7 @@ func Main(args []string) int {
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
 		Dir:      dir, FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
-		Connect: connector, Locate: locator, Hosts: hostProcesses{},
+		Connect: connector, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
 	})
 }
 
@@ -81,8 +82,7 @@ func (randomIDs) NewCommandID() string {
 
 // connector says how to reach the host for a --root value, starting it when none serves.
 func connector(root string) (clientcli.Dial, error) {
-	home, _ := os.UserHomeDir()
-	directory, err := gatewayroot.For(root, os.Getenv, home)
+	directory, err := hostRoot(root)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,51 @@ func connector(root string) (clientcli.Dial, error) {
 	if err != nil {
 		return nil, err
 	}
-	socket := lifecycle.SocketPath(directory, schema.APISchemaHash)
+	home, _ := os.UserHomeDir()
+	launcher := connect.Process{
+		Binary: host, Args: []string{"serve", "--root", directory, "--start-report-fd", strconv.Itoa(connect.ReportFD)},
+		// The host's whole environment is its own to decide; this is what it needs to find its home.
+		Env: hostconfig.Environ(nil, home, os.Getenv), Dir: directory, Log: lifecycle.LogPath(directory),
+	}
+	holding := func() (bool, error) {
+		_, held, err := lifecycle.Holder(directory)
+		return held, err
+	}
+	socket := lifecycle.SocketPath(directory)
 	return func(ctx context.Context) (net.Conn, error) {
 		ctx, cancel := context.WithTimeout(ctx, startup)
 		defer cancel()
-		return connect.Dial(ctx, socket, host, []string{"serve", "--root", directory}, os.Stderr)
+		connection, err := connect.Dial(ctx, socket, retiredNotice{launcher}, holding)
+		return connection, startFailure(err)
 	}, nil
+}
+
+// retiredNotice names the settings this environment still has that no host reads any more, each
+// time a start is about to ignore them.
+type retiredNotice struct{ connect.Process }
+
+func (n retiredNotice) Launch(ctx context.Context) (*pb.HostStartReport, error) {
+	for _, setting := range hostconfig.Retired {
+		if os.Getenv(setting.Name) != "" {
+			fmt.Fprintf(os.Stderr, "note: %s is no longer read; use `%s host configure %s`\n", setting.Name, clientcli.Program, setting.Flag)
+		}
+	}
+	return n.Process.Launch(ctx)
+}
+
+// startFailure gives a failed start the type the verbs read their exit code from.
+func startFailure(err error) error {
+	var refused *connect.RefusedError
+	var ended *connect.EndedError
+	switch {
+	case errors.As(err, &refused):
+		return &clientcli.StartRefused{Detail: refused.Why.GetDetail()}
+	case errors.As(err, &ended):
+		return &clientcli.StartRefused{Detail: ended.Error()}
+	case errors.Is(err, context.DeadlineExceeded):
+		return &clientcli.StartTimedOut{Err: err}
+	}
+	return err
 }
 
 // hostBinary finds the vibesys-host to start: the host program of the release this program is

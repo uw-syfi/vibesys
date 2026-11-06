@@ -12,8 +12,8 @@
 #            installed vibesys-client and no setting, and again with scripted agents.
 #
 # The scripted agents are orchestrator/sidecar/e2e, copied into the container as test code. They
-# replace only the sidecar, through the developer override VIBESYS_ORCHESTRATOR_SIDECAR; the host,
-# client, vibesys-cli and marketplace are the bundle's own. No model is called.
+# replace only the session holder, named by `vibesys-client host configure`; the host, client,
+# vibesys-cli and marketplace are the bundle's own. No model is called.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 image="${VIBESYS_INSTALL_TEST_IMAGE:-debian:bookworm-slim}"

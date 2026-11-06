@@ -82,6 +82,11 @@
   "proto/vibesys/orchestrator/v1/events.proto": [
     "SidecarSource"
   ],
+  "proto/vibesys/orchestrator/v1/host_config.proto": [
+    "HostConfig.skills_directory",
+    "HostConfig.state_directory",
+    "HostConfig.tool_path"
+  ],
   "proto/vibesys/orchestrator/v1/host_control.proto": [
     "HostLock.pid"
   ],

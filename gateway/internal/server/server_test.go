@@ -57,7 +57,7 @@ func startWithConfig(t *testing.T, config server.Config) fixture {
 	t.Cleanup(func() { os.RemoveAll(root) })
 	// This guards hangs across the whole fixture, including tests with many retained logs.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func startWithConfig(t *testing.T, config server.Config) fixture {
 	if err := os.Symlink(run, filepath.Join(root, "runs", "run-1")); err != nil {
 		t.Fatal(err)
 	}
-	return fixture{root: root, run: run, socket: lifecycle.SocketPath(root, schemahash.APISchemaHash), ctx: ctx}
+	return fixture{root: root, run: run, socket: lifecycle.SocketPath(root), ctx: ctx}
 }
 
 func client(t *testing.T, f fixture, throughPipe bool) apiv1.HostServiceClient {
@@ -174,7 +174,7 @@ func TestHello(t *testing.T) {
 	if err != nil || hello.GetApiSchemaHash() != schemahash.APISchemaHash || hello.GetGatewayVersion() != "test-version" {
 		t.Fatalf("Hello = %v, %v", hello, err)
 	}
-	for _, hash := range []string{strings.Repeat("0", 64), strings.Repeat("f", 64), schemahash.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
+	for _, hash := range []string{strings.Repeat("0", 64), strings.Repeat("f", 64), schemahash.APISchemaHash[:16] + strings.Repeat("0", 48)} {
 		_, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: hash})
 		if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), schemahash.APISchemaHash) || !strings.Contains(err.Error(), `"`+hash+`"`) {
 			t.Fatalf("mismatch = %v", err)

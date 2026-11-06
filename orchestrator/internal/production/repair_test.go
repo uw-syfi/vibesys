@@ -42,7 +42,7 @@ func removeFrom(t *testing.T, dir string, files ...string) (repair func()) {
 func TestARepairedInstallIsUsedByTheNextStartCheckAndLaunch(t *testing.T) {
 	dir, find := diskRelease(t, good)
 	repair := removeFrom(t, dir, "bin/vibesys-cli", "sidecar/.venv/bin/python")
-	parts := Parts{Getenv: cliTestEnv(), Find: find, Files: OSFiles{}}
+	parts := Parts{Find: find, Files: OSFiles{}}
 	checks := StartChecks{Sidecars: readyLauncher{}, Parts: parts, Tree: everythingIsADir{}}
 	sidecars := &ProcessSidecars{Root: t.TempDir(), Parts: parts, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	launch := func() error {
@@ -72,7 +72,7 @@ func TestARepairedInstallIsUsedByTheNextStartCheckAndLaunch(t *testing.T) {
 // The readiness of every part is typed, and Check agrees with it.
 func TestReadinessSaysWhyEachPartIsOrIsNotReady(t *testing.T) {
 	dir, find := diskRelease(t, good)
-	parts := Parts{Getenv: cliTestEnv(), Find: find, Files: OSFiles{}}
+	parts := Parts{Find: find, Files: OSFiles{}}
 	if err := parts.Check(); err != nil {
 		t.Fatalf("a whole release is not ready: %v", err)
 	}

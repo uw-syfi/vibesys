@@ -29,15 +29,14 @@ func TestTheAgentSocketIsInTheStateDirectoryWhateverTheRuntimeDirectoryIs(t *tes
 		if err := os.MkdirAll(state, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": state, "XDG_RUNTIME_DIR": runtimeDir}
-		layout, err := LayoutFor(func(k string) string { return env[k] }, root)
+		layout, err := LayoutFor(state, filepath.Join(root, runtimeDir))
 		if err != nil && !strings.Contains(err.Error(), "socket path") {
 			t.Skipf("the test directory is not a local filesystem: %v", err)
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		again, err := LayoutFor(func(k string) string { return env[k] }, root)
+		again, err := LayoutFor(state, filepath.Join(root, runtimeDir))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,16 +53,15 @@ func TestTheAgentSocketIsInTheStateDirectoryWhateverTheRuntimeDirectoryIs(t *tes
 	}
 }
 
-// A state directory too long for a socket path is an error that names the setting to change.
-func TestAStateDirectoryTooLongForTheAgentSocketNamesTheSetting(t *testing.T) {
+// A state directory too long for a socket path is an error that says how to choose another.
+func TestAStateDirectoryTooLongForTheAgentSocketSaysHowToChoose(t *testing.T) {
 	state := filepath.Join(t.TempDir(), strings.Repeat("d", maxSocketPath))
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Skipf("cannot make a long directory here: %v", err)
 	}
-	env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": state}
-	_, err := LayoutFor(func(k string) string { return env[k] }, "/home/user")
-	if err == nil || !strings.Contains(err.Error(), "VIBESYS_ORCHESTRATOR_STATE_DIR") || !strings.Contains(err.Error(), "agent.sock") {
-		t.Fatalf("got %v, want an error naming VIBESYS_ORCHESTRATOR_STATE_DIR and the socket", err)
+	_, err := LayoutFor(state, "/home/user/state")
+	if err == nil || !strings.Contains(err.Error(), "--state-directory") || !strings.Contains(err.Error(), "agent.sock") {
+		t.Fatalf("got %v, want an error naming --state-directory and the socket", err)
 	}
 }
 
@@ -71,8 +69,7 @@ func TestAStateDirectoryTooLongForTheAgentSocketNamesTheSetting(t *testing.T) {
 // and version, and the holder keeps serving.
 func TestASecondDaemonNamesTheHolder(t *testing.T) {
 	dir := t.TempDir()
-	env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": dir}
-	layout, err := LayoutFor(func(k string) string { return env[k] }, dir)
+	layout, err := LayoutFor(dir, "/unused")
 	if err != nil {
 		t.Skipf("the test directory is not a local filesystem: %v", err)
 	}

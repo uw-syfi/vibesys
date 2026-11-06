@@ -23,7 +23,7 @@ func TestARefusedStartCreatesNoRunEventOrReceipt(t *testing.T) {
 		code    codes.Code
 	}{
 		{"bad repository or task", &daemon.StartRefusal{Reason: "task \"task\" has no directory /repo/.vibesys/tasks/task"}, codes.InvalidArgument},
-		{"no launcher", &daemon.StartRefusal{Reason: "no agent can be launched: VIBESYS_ORCHESTRATOR_SIDECAR is not set", NotReady: true}, codes.FailedPrecondition},
+		{"no launcher", &daemon.StartRefusal{Reason: "no agent can be launched: no session holder is configured", NotReady: true}, codes.FailedPrecondition},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

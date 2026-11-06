@@ -14,32 +14,29 @@ func TestTheLockRecordIsReadOnlyWhileTheLockIsHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	if _, held, err := Holder(root, "hash"); err != nil || held {
+	if _, held, err := Holder(root); err != nil || held {
 		t.Fatalf("no host has run: held %v, %v", held, err)
 	}
-	endpoint, err := Listen(root, "hash")
+	endpoint, err := Listen(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := endpoint.Record([]byte("first, a long record")); err != nil {
+	if err := endpoint.held.Record([]byte("first, a long record")); err != nil {
 		t.Fatal(err)
 	}
-	if err := endpoint.Record([]byte("second")); err != nil {
+	if err := endpoint.held.Record([]byte("second")); err != nil {
 		t.Fatal(err)
 	}
-	record, held, err := Holder(root, "hash")
+	record, held, err := Holder(root)
 	if err != nil || !held || string(record) != "second" {
 		t.Fatalf("while held: %q, held %v, %v; want the second record, whole", record, held, err)
 	}
-	if _, held, _ := Holder(root, "other-hash"); held {
-		t.Fatal("a host of another hash was found")
-	}
 	endpoint.Close()
-	if record, held, err := Holder(root, "hash"); err != nil || held || record != nil {
+	if record, held, err := Holder(root); err != nil || held || record != nil {
 		t.Fatalf("after the host exited: %q, held %v, %v; want nobody", record, held, err)
 	}
 	// A new host can take the lock the probe just released.
-	again, err := Listen(root, "hash")
+	again, err := Listen(root)
 	if err != nil {
 		t.Fatalf("the probe left the lock held: %v", err)
 	}

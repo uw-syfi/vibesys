@@ -6,7 +6,6 @@ import * as Scope from 'effect/Scope';
 import {hostKey} from '../state/host.js';
 import {commandOf} from '../state/remote-command.js';
 import {untilTrue} from '../testing/main/drive.js';
-import {fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
 import {fakeSpawner, type Started} from '../testing/main/fake-process.js';
 import {makeGatewayDialers} from './gateway-dialers.js';
@@ -92,10 +91,9 @@ describe('gateway dialers', () => {
     }),
   );
 
-  it.effect('reaches this machine by its socket', () =>
+  it.effect('reaches this machine by its own bridge, over no link', () =>
     Effect.gen(function* () {
       const local = fakeLocalHost();
-      local.listen(fakeGateway());
       const spawner = fakeSpawner(() => {});
       const poolScope = yield* Scope.make();
       const dialers = yield* Effect.gen(function* () {
@@ -110,7 +108,8 @@ describe('gateway dialers', () => {
         .dial(false)
         .pipe(Effect.provideService(Scope.Scope, scope));
       expect(duplex.destroyed).toBe(false);
-      expect(spawner.started).toEqual([]);
+      expect(spawner.started.map(started => started.args)).toEqual([['connect']]);
+      expect(spawner.started.map(started => started.command)).not.toContain('ssh');
       yield* Scope.close(scope, Exit.void);
       yield* Scope.close(poolScope, Exit.void);
     }),

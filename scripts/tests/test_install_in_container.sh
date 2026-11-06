@@ -41,30 +41,30 @@ until_true() {
   done
 }
 
-hosts() { pgrep -f "^$home/releases/[^ ]*/bin/vibesys-host " || true; }
-no_hosts() { [ -z "$(hosts)" ]; }
+# host_process: the process of an installed release's host, if any. Only the check that nothing is
+# left after a refused start looks at the process list; everything else asks the host.
+host_process() { pgrep -f "^$home/releases/[^ ]*/bin/vibesys-host " || true; }
+no_host_process() { [ -z "$(host_process)" ]; }
 
-# gone PID...: succeed when none of the processes still holds its file descriptors, which is when a
-# process has exited (a zombie has closed them). The process list is not enough: a process that
-# is exiting loses its command line, and so stops matching, before it closes its files, and the
-# state directory's lock is one of them.
-gone() {
-  local pid state
-  for pid in "$@"; do
-    state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)"
-    [ -z "$state" ] || [ "$state" = Z ] || return 1
-  done
+# host_answers: a host serves this root, asked the way every client asks.
+host_answers() { vibesys-client host status >/dev/null 2>&1; }
+
+# no_host: the client finds nobody serving, as against a host it cannot reach.
+no_host() {
+  local out
+  out="$(vibesys-client host status 2>&1)" && return 1
+  [[ "$out" == *"no host is running"* ]]
 }
 
-# stop_hosts: end every vibesys-host of an installed release and wait for them to be gone.
-stop_hosts() {
-  local pids
-  pids="$(hosts)"
-  # shellcheck disable=SC2086 # a list of pids
-  [ -z "$pids" ] || kill -TERM $pids 2>/dev/null || true
-  # shellcheck disable=SC2086 # a list of pids
-  until_true 30 gone $pids || die "a vibesys-host did not stop: $(hosts)"
-  until_true 30 no_hosts || die "a vibesys-host did not stop: $(hosts)"
+# host_release VERSION: the host that answers is of that release.
+host_release() {
+  vibesys-client host status --json | grep -Eq "\"release\": *\"$1\""
+}
+
+# stop_host: stop the host. `host stop` returns once nobody serves.
+stop_host() {
+  vibesys-client host stop
+  no_host || die "a stopped host still answers"
 }
 
 phase_install() {
@@ -234,19 +234,55 @@ phase_product() {
   [ "$rc" = 1 ] || die "start without a harness exited $rc, want 1"
   grep -q 'claude binary not found' /tmp/noharness.err || die "the failure does not name the missing harness (claude)"
   ! grep -q 'VIBESYS_ORCHESTRATOR_' /tmp/noharness.err /tmp/noharness.out || die "the failure asks for a VIBESYS_ORCHESTRATOR_ setting"
-  [ -n "$(hosts)" ] || die "no vibesys-host of the release was started"
-  stop_hosts
+  host_answers || die "no vibesys-host of the release was started"
+  host_release 1.0.0 || die "the host is not of the release that started it"
+  stop_host
+
+  check "a start the host refuses leaves no host, and shows only what caused this failure"
+  printf 'an old line from another day\n' >>"$home/host.log"
+  : >"$HOME/not-a-directory"
+  vibesys-client host configure --state-directory "$HOME/not-a-directory/state" >/dev/null
+  rc=0
+  vibesys-client run list >/tmp/refused.out 2>/tmp/refused.err || rc=$?
+  cat /tmp/refused.out /tmp/refused.err
+  [ "$rc" = 1 ] || die "a refused start exited $rc, want 1"
+  grep -q 'not-a-directory' /tmp/refused.err || die "the refusal does not name the state directory"
+  ! grep -q 'an old line' /tmp/refused.err || die "the refusal shows an old log line"
+  until_true 30 no_host_process || die "the refused start left a process: $(host_process)"
+  no_host || die "the refused start left a host"
+  vibesys-client host configure --clear >/dev/null
+
+  check "the old settings do nothing: a host started with all of them set to nonsense ignores them"
+  local stale="$HOME/nonsense"
+  VIBESYS_ORCHESTRATOR_SIDECAR="$stale/sidecar" VIBESYS_ORCHESTRATOR_MARKETPLACE="$stale/marketplace" \
+    VIBESYS_ORCHESTRATOR_STATE_DIR="$stale/state" VIBESYS_ORCHESTRATOR_CLI="$stale/cli" \
+    vibesys-client run list >/tmp/hostile.out 2>/tmp/hostile.err || {
+    cat /tmp/hostile.out /tmp/hostile.err
+    die "a run list with old settings in the environment failed"
+  }
+  grep -q 'VIBESYS_ORCHESTRATOR_SIDECAR' /tmp/hostile.err || die "the client does not name the setting it ignores"
+  host_answers || die "no host was started"
+  ! vibesys-client host status --json | grep -q 'PART_ORIGIN_OPERATOR' || die "the host took a part from the environment"
+  [ ! -e "$stale" ] || die "the host used a place the environment names"
+  [ -d "$state" ] || die "the host's state is not in its usual place"
+  stop_host
+
+  check "VIBESYS_HOME that disagrees with the install is refused, printing the rule"
+  rc=0
+  VIBESYS_HOME="$HOME/elsewhere" vibesys-client host status >/tmp/rootrule.out 2>/tmp/rootrule.err || rc=$?
+  [ "$rc" = 2 ] || die "a disagreeing VIBESYS_HOME exited $rc, want 2"
+  grep -q 'the root is --root when given' /tmp/rootrule.err || die "the refusal does not print the rule: $(cat /tmp/rootrule.err)"
+  [ ! -e "$HOME/elsewhere" ] || die "a refused VIBESYS_HOME was created"
 
   check "a run with scripted agents: start, leave, check, stop"
-  # The one developer override: the sidecar is the scripted one, run by the release's own Python.
-  # The host, client, vibesys-cli and marketplace are the release's. The scripted agents call
-  # vibesys-cli by name, so a directory holding only that link is on their PATH.
+  # The host's configuration names the session holder: the scripted one, run by the release's own
+  # Python. The host, client, vibesys-cli and marketplace are the release's. The scripted agents call
+  # vibesys-cli by name, so a directory holding only that link is on the host's tool path.
   mkdir -p "$HOME/agent-path"
   ln -sf "$home/current/bin/vibesys-cli" "$HOME/agent-path/vibesys-cli"
-  export PATH="$HOME/agent-path:$PATH"
-  export PYTHONPATH=/opt/scripted
-  export VIBESYS_E2E_SCRIPT=act
-  export VIBESYS_ORCHESTRATOR_SIDECAR="$py /opt/scripted/e2e/scripted_sidecar.py"
+  vibesys-client host configure \
+    --session-holder "env PYTHONPATH=/opt/scripted VIBESYS_E2E_SCRIPT=act $py /opt/scripted/e2e/scripted_sidecar.py" \
+    --tool-path "$HOME/agent-path:$PATH" >/dev/null
 
   local started run
   started="$(vibesys-client run start --task toy --detach --json)" || die "run start --detach failed"
@@ -275,7 +311,7 @@ EOF
   ! none_live || die "the run's recorded processes are not running"
 
   check "host status answers through a symlinked home, and the installer's stop is refused with a live run"
-  [ -n "$(hosts)" ] || die "no host is running"
+  host_answers || die "no host is running"
   # The same home reached through a link is the same host: one socket and one lock.
   ln -sfn "$HOME" "$HOME/home-link"
   vibesys-client --root "$HOME/home-link/.vibesys" host status | tee /tmp/status.out
@@ -283,7 +319,7 @@ EOF
   if install "$v2" >/tmp/install5.log 2>&1; then die "switch was allowed while a run is live"; fi
   grep -q "live runs" /tmp/install5.log || die "refusal did not say why: $(cat /tmp/install5.log)"
   [ "$(readlink "$home/current")" = "releases/1.0.0" ] || die "current moved despite the refusal"
-  [ -n "$(hosts)" ] || die "the refused install stopped the host"
+  host_answers || die "the refused install stopped the host"
 
   check "stop the run and nothing of it is left"
   vibesys-client run stop "$run" --yes
@@ -292,19 +328,31 @@ EOF
   until_true 30 no_leftovers || die "a sidecar or tool server is left: $(pgrep -af 'scripted_sidecar|vibesys-host mcp')"
 
   check "with no live run the installer stops the idle host and switches, and the next host is the new release's"
-  [ -n "$(hosts)" ] || die "the idle host is not running"
+  host_answers || die "the idle host is not running"
   install "$v2" >/tmp/install6.log 2>&1 || {
     cat /tmp/install6.log
     die "install of the new release failed with an idle host"
   }
   [ "$(readlink "$home/current")" = "releases/1.0.1" ] || die "the install did not switch"
   [ -d "$home/releases/1.0.0" ] || die "the old release was removed"
-  no_hosts || die "the installer left the old host running: $(hosts)"
+  no_host || die "the installer left the old host running"
   [ "$(vibesys-client --version)" = "vibesys-client 1.0.1" ] || die "the client is not the new release"
   vibesys-client run list >/dev/null
-  hosts | grep -q . || die "no host started from the new release"
-  pgrep -f "^$home/releases/1.0.1/bin/vibesys-host " >/dev/null || die "the new host is not from releases/1.0.1"
-  stop_hosts
+  host_answers || die "no host started from the new release"
+  host_release 1.0.1 || die "the new host is not of release 1.0.1"
+  stop_host
+
+  check "VIBESYS_HOME moves the install and its host together, set or not"
+  local other="$HOME/other"
+  VIBESYS_HOME="$other" VIBESYS_INSTALL_DIR="$other-bin" install "$v1" >/tmp/install7.log 2>&1 || {
+    cat /tmp/install7.log
+    die "install into VIBESYS_HOME failed"
+  }
+  VIBESYS_HOME="$other" "$other-bin/vibesys-client" run list >/dev/null
+  [ -S "$other/host.sock" ] || die "the host of VIBESYS_HOME does not serve at $other/host.sock"
+  "$other-bin/vibesys-client" host status >/dev/null || die "the installed client does not find the host of its own root"
+  no_host || die "the host of VIBESYS_HOME answers the other install's client"
+  "$other-bin/vibesys-client" host stop
 
   echo "all product checks passed"
 }

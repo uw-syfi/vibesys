@@ -139,8 +139,9 @@ func hostWorld(h *fakeHost, procs clientcli.HostProcesses) clientcli.Env {
 				return h.dial(ctx)
 			}, nil
 		},
-		Locate: func(string) (clientcli.Dial, error) { return h.dial, nil },
-		Hosts:  procs,
+		Locate:  func(string) (clientcli.Dial, error) { return h.dial, nil },
+		Hosts:   procs,
+		Configs: &fakeConfigs{},
 	}
 }
 

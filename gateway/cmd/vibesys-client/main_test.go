@@ -13,7 +13,6 @@ import (
 
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
-	"github.com/uw-syfi/vibesys/gateway/schemahash"
 )
 
 // stamped is the release version the test builds the client with, as scripts/build_release_bundle.sh
@@ -75,7 +74,7 @@ func TestClientCLIExitCodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root)
 	if err != nil {
 		t.Fatal(err)
 	}

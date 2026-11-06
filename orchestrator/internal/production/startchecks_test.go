@@ -97,11 +97,11 @@ func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 // A daemon with a part missing refuses every start, with the part's own reason, before it looks at
 // the repository.
 func TestADaemonWithAPartMissingRefusesEveryStartWithItsReason(t *testing.T) {
-	checks := StartChecks{Sidecars: readyLauncher{}, Parts: brokenParts("VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release"), Tree: everythingIsADir{}}
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: brokenParts("no session holder is configured and there is no release"), Tree: everythingIsADir{}}
 	for _, repository := range []string{"/repo", "relative", ""} {
 		_, err := checks.CheckStart(repository, "demo")
 		r := refusal(t, err)
-		if !r.NotReady || !strings.Contains(r.Reason, "VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release") {
+		if !r.NotReady || !strings.Contains(r.Reason, "no session holder is configured and there is no release") {
 			t.Fatalf("%q: got %+v, want a NotReady refusal with the launcher's reason", repository, r)
 		}
 	}

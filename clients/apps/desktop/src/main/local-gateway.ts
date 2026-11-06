@@ -1,23 +1,19 @@
 /**
  * Reaching the gateway on this machine: install the executable this build ships if it is not
- * already there, dial its Unix socket, and start it (once) if nothing listens yet. The same
- * executable the ssh hosts run, so a local run and a remote one behave alike.
+ * already there, and run its stdio bridge, as the ssh hosts do. The bridge finds the host, starts
+ * it when nobody serves, and replaces an idle host of another API, so this app knows nothing of the
+ * socket and a local run and a remote one behave alike.
  */
 import {join} from 'node:path';
 import type {Duplex} from 'node:stream';
-import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
-import * as Option from 'effect/Option';
-import * as Queue from 'effect/Queue';
-import * as Scope from 'effect/Scope';
+import type * as Scope from 'effect/Scope';
 import {gatewayTarget} from '../state/gateway-target.js';
 import {GatewayFailed} from './errors.js';
+import {bridge} from './gateway-bridge.js';
 import {GatewayArtifacts, HOST_PROGRAM} from './gateway-provision.js';
 import {LocalHost} from './local-host.js';
 import {type ProcessSpawner, spawnScoped} from './process.js';
-
-/** A window about as long as a slow first start of the gateway on a busy machine. */
-const STARTUP_BOUND = '15 seconds';
 
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((byte, index) => byte === b[index]);
@@ -36,8 +32,17 @@ const install = (binary: string, bytes: Uint8Array) =>
     if (installed === null || !sameBytes(installed, bytes)) yield* host.replace(binary, bytes);
   });
 
-/** A duplex to this machine's running gateway, started if need be. Ends with the scope. */
-export const dialLocalGateway = (): Effect.Effect<
+/** How a bridge on this machine ending is put into words: no link can be at fault. */
+const onThisMachine = {
+  explain: (code: number | null, stderr: string, where: string) => ({
+    message: stderr === '' ? `${where} exited: ${code}` : `${where} exited: ${code}: ${stderr}`,
+  }),
+};
+
+/** A duplex to this machine's host, started if need be. Ends with the scope. */
+export const dialLocalGateway = (
+  log: (line: string) => void,
+): Effect.Effect<
   Duplex,
   GatewayFailed,
   LocalHost | GatewayArtifacts | ProcessSpawner | Scope.Scope
@@ -54,48 +59,9 @@ export const dialLocalGateway = (): Effect.Effect<
     // Read first to fail clearly when development skipped the Go build.
     const bytes = yield* artifacts.read(target);
     const binary = join(host.directory, HOST_PROGRAM);
-    const socket = join(host.directory, 'sock');
     yield* install(binary, bytes);
-
-    const outer = yield* Effect.scope;
-    const changes = yield* host.changes(host.directory);
-    const startupFailed = Deferred.makeUnsafe<never, GatewayFailed>();
-    const dialing = Effect.scoped(
-      Effect.gen(function* () {
-        let started = false;
-        while (true) {
-          const dialed = yield* host.dial(socket).pipe(
-            Effect.provideService(Scope.Scope, outer),
-            Effect.map(Option.some),
-            Effect.catchTag('NotListening', () => Effect.succeed(Option.none<Duplex>())),
-          );
-          if (Option.isSome(dialed)) return dialed.value;
-          if (!started) {
-            started = true;
-            const starter = yield* spawnScoped(binary, ['connect']).pipe(
-              Effect.mapError(error => new GatewayFailed({message: error.message})),
-            );
-            starter.stdout.resume();
-            starter.stderr.resume();
-            yield* Effect.forkScoped(
-              starter.exit.pipe(
-                Effect.flatMap(code =>
-                  Deferred.fail(
-                    startupFailed,
-                    new GatewayFailed({message: `gateway startup exited: ${code}`}),
-                  ),
-                ),
-              ),
-            );
-          }
-          yield* Queue.take(changes);
-        }
-      }),
+    const process = yield* spawnScoped(binary, ['connect']).pipe(
+      Effect.mapError(error => new GatewayFailed({message: error.message})),
     );
-    const duplex = yield* Effect.raceFirst(dialing, Deferred.await(startupFailed)).pipe(
-      Effect.timeoutOption(STARTUP_BOUND),
-    );
-    if (Option.isNone(duplex))
-      return yield* new GatewayFailed({message: 'gateway startup timed out'});
-    return duplex.value;
+    return yield* bridge(process, onThisMachine, log);
   });
