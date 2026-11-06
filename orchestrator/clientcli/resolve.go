@@ -8,11 +8,6 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// live says a run has not reached a final status.
-func live(r *pb.Run) bool {
-	return r.GetStatus() != pb.RunStatus_RUN_STATUS_ENDED && r.GetStatus() != pb.RunStatus_RUN_STATUS_FAILED
-}
-
 // resolve picks the run a verb means. A given RUN is a full id or a unique prefix of one. An
 // omitted RUN is the one live run whose repository is repo, or else the most recent ended one there.
 // Every verb means the same run by it, so the rule lives here and nowhere else.

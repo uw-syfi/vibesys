@@ -12,7 +12,7 @@ import (
 // steer sends text to a run's lead, or to the agent named by --agent.
 func steer(ctx context.Context, c *call, args []string) error {
 	fs := flags("steer")
-	agent := fs.String("agent", "", "the agent to send to (default: the run's lead)")
+	agent := fs.String("agent", "", "the agent to send to, by the name attach shows (such as worker-1) or by id (default: the run's lead)")
 	asJSON := fs.Bool("json", false, "print the receipt as JSON")
 	positional, err := parse(fs, args)
 	if err != nil {
@@ -35,9 +35,13 @@ func steer(ctx context.Context, c *call, args []string) error {
 	if run := s.view.Run; !live(run) {
 		return failed("run %s has already %s, so nothing would act on a steer; it was not sent. Start a new run with `run start`", run.GetId(), statusWord(run.GetStatus().String(), "RUN_STATUS_"))
 	}
+	// --agent takes the name the attach view shows (worker-1) or an id. What names no agent of the run
+	// goes to the service as it was typed, and the service refuses an agent it does not know.
 	target := *agent
 	if target == "" {
 		target = s.view.Run.GetLeadAgentId()
+	} else if id, err := s.view.ResolveAgent(target); err == nil {
+		target = id
 	}
 	receipt, err := c.dispatch(ctx, s, &pb.Command{Id: c.IDs.NewCommandID(), Body: &pb.Command_SendMessage{SendMessage: &pb.SendMessage{AgentId: target, Text: text}}})
 	if err != nil {

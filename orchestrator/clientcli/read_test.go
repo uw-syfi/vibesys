@@ -221,7 +221,7 @@ func TestGetAndReplayShowTheUsageOfFinishedTurns(t *testing.T) {
 	}
 	l.awaitRun(t, run, hasStatus(pb.RunStatus_RUN_STATUS_ENDED))
 	got = w.run(context.Background(), "run", "attach", run)
-	contains(t, "replay", got.stdout, "turn 1 completed, cost $0.0301, 7 out")
+	contains(t, "replay", got.stdout, "turn 1 completed, 0 tool calls, cost $0.0301, 7 out")
 }
 
 // run get says what limits a run has, how much of the cost limit shows, and which limit was reached.

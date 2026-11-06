@@ -109,9 +109,11 @@ type world struct {
 	// links are the symbolic links of the file system, by the path of each: from to its target.
 	links    map[string]string
 	terminal bool
-	stdin    io.Reader
-	clock    *fakeClock
-	ids      *counterIDs
+	// screen is the terminal's keys and size, for a world with a terminal.
+	screen clientcli.Screen
+	stdin  io.Reader
+	clock  *fakeClock
+	ids    *counterIDs
 	// onStdout, when set, sees stdout as it is written.
 	onStdout func(written string)
 	// onStderr, when set, sees stderr as it is written.
@@ -153,7 +155,7 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	errb := &watchedBuffer{on: w.onStderr}
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
-		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal,
+		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal, Screen: w.screen,
 		Dir: w.dir, Home: "/home/u", Configs: w.configs, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
@@ -311,9 +313,75 @@ type fakeService struct {
 	hello    func() (*pb.HelloResponse, error)
 	frames   []*pb.WatchRunsResponse
 	dispatch func(*pb.Command) (*pb.DispatchResponse, error)
+	// items are the items of each agent, oldest first, as the service keeps them.
+	items map[string][]*pb.Item
+	// live are the frames WatchAgent sends for an agent after its first page.
+	live map[string][]*pb.WatchAgentResponse
 
 	mu       sync.Mutex
 	commands []*pb.Command
+	// agentErr, when set, is what WatchAgent answers.
+	agentErr error
+	// ended, when set, is told the agent of each WatchAgent stream as it ends.
+	ended chan string
+	// opened and closed are the agents whose WatchAgent streams were opened, and have ended, in order.
+	opened, closed []string
+}
+
+// maxPageItems is the most items one page holds, as the service's own limit is.
+const maxPageItems = 75
+
+// page is the newest limit items below before (zero for no bound), oldest first, with the cursor to
+// read older ones, as the service answers.
+func (f *fakeService) page(agent string, before, limit uint32) *pb.ItemsPage {
+	var below []*pb.Item
+	for _, it := range f.items[agent] {
+		if before == 0 || it.GetOrdinal() < before {
+			below = append(below, it)
+		}
+	}
+	limit = min(limit, maxPageItems)
+	page := &pb.ItemsPage{}
+	if int(limit) < len(below) {
+		below = below[len(below)-int(limit):]
+	}
+	page.Items = below
+	if len(below) > 0 && below[0].GetOrdinal() > 1 {
+		page.NextBeforeOrdinal = below[0].GetOrdinal()
+	}
+	return page
+}
+
+func (f *fakeService) WatchAgent(req *pb.WatchAgentRequest, stream grpc.ServerStreamingServer[pb.WatchAgentResponse]) error {
+	agent := req.GetAgentId()
+	if f.agentErr != nil {
+		return f.agentErr
+	}
+	f.mu.Lock()
+	f.opened = append(f.opened, agent)
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.closed = append(f.closed, agent)
+		f.mu.Unlock()
+		if f.ended != nil {
+			f.ended <- agent
+		}
+	}()
+	if err := stream.Send(&pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Page{Page: f.page(agent, 0, req.GetPageSize())}}); err != nil {
+		return err
+	}
+	for _, frame := range f.live[agent] {
+		if err := stream.Send(frame); err != nil {
+			return err
+		}
+	}
+	<-stream.Context().Done()
+	return nil
+}
+
+func (f *fakeService) ListItems(_ context.Context, req *pb.ListItemsRequest) (*pb.ListItemsResponse, error) {
+	return &pb.ListItemsResponse{Page: f.page(req.GetAgentId(), req.GetBeforeOrdinal(), req.GetPageSize())}, nil
 }
 
 func (f *fakeService) Hello(context.Context, *pb.HelloRequest) (*pb.HelloResponse, error) {

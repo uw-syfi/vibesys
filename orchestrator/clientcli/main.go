@@ -19,7 +19,7 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
             [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
   run list [--all] [--json]
-  run attach [RUN]
+  run attach [RUN] [--agent AGENT] [--full-history]
   run get [RUN] [--json]
   run wait [RUN] --until started|report|progress|stalled|ended --timeout DURATION [--after N] [--json]
   run steer [RUN] TEXT [--agent AGENT] [--json]
@@ -32,6 +32,19 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   release verify [--installed] DIR
   --version
 
+run attach shows what the run does as lines in the scrollback: the lead's replies in full, each tool call as
+one line ($ command, read PATH, write PATH, edit A, B, search PATTERN, or the tool's name and first line;
+output is hidden, except that a failed call shows its exit code and one line), a line when each turn starts
+(what started it) and ends (tool calls, cost, output tokens), and the other agents and the run's milestones
+as short lines. Agents are named by role and number in the order they started: lead, planner-1, worker-2.
+run steer --agent takes these names, or an agent's full id, which the agent's view and run get --json
+show. At a terminal a footer shows the elapsed time, active agents, cost and the keys: a lists the agents
+with numbers, a number opens that agent's conversation (replayed, then followed), Esc or b goes up to the
+agent that started it and on to the lead, and Ctrl-C detaches whatever the view and leaves the run going.
+With input or output that is not a terminal there are no keys and no footer, and the same lines are
+printed. --agent starts in the conversation of that agent (a name such as worker-1, or an id), and without
+a terminal follows only it. A replay holds the newest 200 items of the agent viewed and says how many it
+left out; --full-history replays them all. run attach has no --json: its lines are the output.
 A run starts subagents only on the lead's harness and model, and on each --allow-agent: a harness alone
 allows its default model. A spawn outside that is refused, and run get shows what is allowed.
 A run has no limit unless run start is given one: --max-time (such as 30m) and --max-cost (dollars). When a

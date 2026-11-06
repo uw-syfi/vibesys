@@ -52,7 +52,8 @@ var rules = map[string][]string{
 	"privatesocket":                    {},
 	"release/releasetest":              {"release"},
 	"cmd/release-manifest":             {"release"},
-	"clientcli":                        {"internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
+	"clientcli":                        {"clientcli/attachview", "internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
+	"clientcli/attachview":             {"gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
@@ -101,7 +102,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"clientcli", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"clientcli", "clientcli/attachview", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}
@@ -130,6 +131,40 @@ func confinement(name, source string) []string {
 	return found
 }
 
+// viewDir is the display layer of `run attach`: what is known, which agent is viewed, and the lines to
+// show for each thing that happens. It is pure: it holds no stream, terminal, file, clock or process, so
+// it is tested with no Fake and can be drawn by any renderer.
+const viewDir = "clientcli/attachview"
+
+// viewAllowed is what the view may import beyond its own package: the standard library that
+// does arithmetic on values (no io, os, net, context, sync, no reflection), the generated message types,
+// and the protobuf runtime those messages need to be copied and to hold times. A new need states itself
+// here, in the change that has it.
+var viewAllowed = map[string]bool{
+	"cmp": true, "fmt": true, "slices": true, "strconv": true, "strings": true, "time": true, "unicode": true, "unicode/utf8": true,
+	"google.golang.org/protobuf/proto":                   true,
+	"google.golang.org/protobuf/types/known/timestamppb": true,
+	repositoryPath + "cli/gen/vibesys/cli/v1":            true,
+}
+
+// viewImports checks the view's imports against the list above.
+func viewImports(name, source string) []string {
+	if !strings.HasPrefix(name, moduleDir+viewDir+"/") || strings.HasSuffix(name, "_test.go") {
+		return nil
+	}
+	targets, err := imports(name, source)
+	if err != nil {
+		return nil // layering reports it.
+	}
+	var found []string
+	for _, target := range targets {
+		if !viewAllowed[target] && !strings.HasPrefix(target, modulePath+"gen/vibesys/orchestrator/") {
+			found = append(found, fmt.Sprintf("%s: imports %s; the view of a run is pure and imports only the generated messages and the values-only standard library", name, target))
+		}
+	}
+	return found
+}
+
 // Violations checks the files, keyed by slash-separated path from the repository root, and returns
 // one sorted line per violation.
 func Violations(files map[string]string) []string {
@@ -139,6 +174,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, layering(name, source)...)
 			found = append(found, purity(name, source)...)
 			found = append(found, confinement(name, source)...)
+			found = append(found, viewImports(name, source)...)
 			found = append(found, capabilities(name, source)...)
 			found = append(found, layoutLiterals(name, source)...)
 			found = append(found, processScraping(name, source)...)

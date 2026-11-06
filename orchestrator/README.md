@@ -40,7 +40,8 @@ plan reader is a placeholder in production and the job source is left unwired un
 | `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `store`, `jobs`, `wire`, `hub`, `gen` |
 | `internal/daemon/daemontest` | The Fakes and the `Rig` that wire a whole daemon in memory | `daemon` and what it imports |
 | `internal/client` | The client library and `connect`, over the public service API | `gen` only |
-| `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `client`, `gen` |
+| `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `clientcli/attachview`, `client`, `gen` |
+| `clientcli/attachview` | The pure display layer of `run attach` and the run as a client sees it (`View`, `Describe`): model, inputs, outputs, `Update`, line kinds and `Render`, names, key decoding, `Sanitize`. No I/O, clock or stream | `gen` |
 | `gatewayroot` | Which host `.vibesys` directory a gateway serves from, so the host and its clients agree on it | `localfs` |
 | `internal/mcp` | The stdio MCP server an agent talks to, over a small `Daemon` interface the client satisfies | `core`, `gen` |
 | `internal/production` | The one place that reads the real clock, sockets and files | `client`, `core`, `daemon`, `hub`, `jobs`, `localfs`, `store`, `gen` |
@@ -219,7 +220,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 ```sh
 vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
 vibesys-client run list                       # runs, newest first; starts that never ran are hidden, `--all` shows them
-vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
+vibesys-client run attach [RUN] [--agent AGENT] [--full-history]  # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
 vibesys-client run wait [RUN] --until started|report|progress|stalled|ended --timeout 30m [--after N]
 vibesys-client run steer [RUN] "text" [--agent AGENT]
@@ -372,10 +373,70 @@ the existing path ends its process. A launch whose session ended before the daem
 for the process it may have started and ends that too. A restart of the daemon during a launch changes
 none of this: the session opens, fails with its reason, or is written off by the timer.
 
-A snapshot holds runs and agents, and every turn and message of those runs, not items, so `run attach`
+A snapshot holds runs and agents, and every turn and message of those runs, not items, so the snapshot
 shows an agent's turns and the handoffs and reports a late watcher missed, and not what the agent said
 in them (`WatchAgent` and `ListItems` page items). A run with more turns than a timeline window holds
 shows its earliest in the snapshot.
+
+### The `run attach` view
+
+`run attach` reads two streams and shows them as one: `WatchRuns` for the run (agents, turns, handoffs,
+jobs, limits, reports) and `WatchAgent` for the conversation of the one agent being viewed, which starts as
+the lead. It prints to the normal scrollback, never an alternate screen, so a person can scroll and copy.
+There is no `--json`: the lines are the output, the same lines at a terminal and in a pipe.
+
+What a view shows:
+
+- The viewed agent's assistant text in full, and its prompts and steers clipped and labelled (`[brief]`,
+  `[steer]`). Reasoning is not shown.
+- Each tool call as one line, clipped to the width: `$ first line of the command`, `read PATH`,
+  `write PATH`, `edit A, B`, `search PATTERN`, or the tool's name and first line. Its output is not shown,
+  except that a failed call (an error, a non-zero exit code) adds a line with its exit code and the last
+  non-blank line of its output.
+- A line when a turn starts, saying what started it (the brief, your steer, a worker finishing, a reminder),
+  and when it ends: tool calls, cost and output tokens. A turn's input-token figure is not shown, because it
+  adds up every model call in the turn and reads as the size of the context, which it is not.
+- The other agents and the run's milestones as short lines, as before. An item is printed once, when it is
+  complete, and an update of it is not printed again.
+- Agents are named by role and number in the order they started (`lead`, `planner-2`, `worker-1`), not by
+  id. `run steer --agent` takes these names or an id. The view of an agent says its id, and `run get --json`
+  lists them all.
+
+At a terminal (stdin and stdout both) there are keys and a footer line with the elapsed time, the active
+agents, the cost and the keys. `a` lists the agents with numbers, role and status; a number opens that
+agent's view, which clears the screen, replays its conversation the same way and follows it live, showing
+only that agent's items. `Esc` or `b` goes up to the agent that started the viewed one, and on to the
+lead, replaying it. Ctrl-C detaches from any view, with the same message and exit code, and the run goes
+on. The terminal is put back on every way out: the run ending, a failed stream, a detach, and a panic in a
+reader. With stdin or stdout not a terminal there are no keys and no footer, and the lines are written one
+at a time. `--agent NAME-OR-ID` starts in that agent's view, or for a pipe follows only that agent, and
+ends with the run or when that agent has ended. A run that has ended is replayed and attach exits.
+
+A replay holds the newest 200 items of the agent viewed and says how many came before; `--full-history`
+replays all of them. The items are read as `WatchAgent` sends them (the newest page), then `ListItems`
+pages back from its cursor, 75 at a time, until the replay is full.
+
+How it is built. The display layer is its own package, `clientcli/attachview`, with one job: `Update(model,
+input) (model, outputs)`, pure. Inputs are frames of the two streams, keys, resizes, ticks (the time arrives
+as an input) and the caller leaving; outputs are lines to print, a screen clear, a footer, a stream to open
+and the end. A line is a kind and text (`LineAssistant`, `LineTool`, `LineToolFailure`, `LineMilestone`,
+`LineTurn`...): it says what the line means, and `Render` alone gives it a marker, an indent and a width, so
+a colour change or a full-screen view touches `Render` and the painter. The package also holds the run's
+`View` and the milestone lines (`Describe`), so there is one way a change becomes a line and `run wait` and
+`run get` use the same words, and `Sanitize`, which removes terminal control sequences from every string
+that came from an agent or a tool before it is part of a line, the names of agents (`planner-2`) and key
+decoding. It knows nothing of terminals, streams, clocks or goroutines.
+
+`clientcli` depends on it and never the reverse: the shell (`converse.go`) owns the streams, the key reader,
+the footer's cursor control and the writes, and carries out each output. A switch ends the old `WatchAgent`
+and opens a new one, and every agent frame carries the generation of the subscription it was read under, so
+`Update` drops a late frame of a view that was left. The raw terminal (single keys, size, resize signals) is
+`gateway/internal/terminal`, handed to the verbs as `Env.Screen`; tests give them a Fake.
+
+The boundary is held by `internal/archcheck`, which fails the build when a file of `clientcli/attachview`
+imports anything but the generated messages, the protobuf runtime they need and the values-only part of
+the standard library (`viewAllowed`), imports `clientcli` or a client, a stream, `io`, `os`, `context` or
+`sync`, or reads the clock.
 
 ## Running it
 

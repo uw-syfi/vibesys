@@ -27,6 +27,18 @@ type Clock interface {
 // Dial opens one connection to the service. It is called again after a connection breaks.
 type Dial = func(ctx context.Context) (net.Conn, error)
 
+// Screen is the terminal a person is at, for a view that takes keys. It is the only part of the
+// terminal that is not plain reading of Stdin and writing of Stdout.
+type Screen interface {
+	// Raw makes the terminal deliver each key press at once and without echoing it, and returns the
+	// function that puts the terminal back as it was. The function may be called more than once.
+	Raw() (restore func(), err error)
+	// Size is the width and height of the terminal in characters, or zeros when it cannot tell.
+	Size() (width, height int)
+	// Resizes receives once each time the terminal changes size.
+	Resizes() <-chan struct{}
+}
+
 // Env is what a verb needs from the process it runs in.
 type Env struct {
 	// Version is the client's release version, sent in the handshake.
@@ -37,6 +49,9 @@ type Env struct {
 	// Terminal says a person is at both ends: stdin and stdout are terminals. Without it nothing
 	// prompts, and a verb that would hand over to an interactive view does not.
 	Terminal bool
+	// Screen is the terminal's keys and size, set when Terminal is. Without it a verb that would
+	// take keys prints plain lines.
+	Screen Screen
 	// Dir is the working directory, absolute.
 	Dir string
 	// Home is the user's home directory, where a host started by this client looks for programs

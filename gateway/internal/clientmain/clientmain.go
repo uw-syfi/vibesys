@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/gateway/internal/terminal"
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
@@ -49,10 +50,15 @@ func Main(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", clientcli.Program, err)
 		return clientcli.ExitFailed
 	}
+	isTerminal := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+	var screen clientcli.Screen
+	if isTerminal {
+		screen = terminal.New(os.Stdin, os.Stdout)
+	}
 	return clientcli.Main(ctx, args, clientcli.Env{
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
-		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
-		Dir:      dir, Home: homeDir(), FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
+		Terminal: isTerminal, Screen: screen,
+		Dir: dir, Home: homeDir(), FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
 		Connect: connector, Prove: prover, HostBuild: hostBuild, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
 	})
 }
