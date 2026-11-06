@@ -4,8 +4,8 @@ package store
 // do about it: nothing has been released, so the stored format changes in place and old rows are not
 // upgraded (docs/contributing/process-boundaries.md). Version 4 added report kinds and numbers, the
 // stall and usage fields of a run, and the reminders. Version 5 took the worktree off an agent and
-// renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use.
-const schemaVersion = 6
+// renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use. Version 7 gave a finished run the working copies it kept.
+const schemaVersion = 7
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

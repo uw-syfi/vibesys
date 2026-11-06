@@ -24,8 +24,8 @@ func TestWaitReturnsAtOnceWhenTheConditionAlreadyHolds(t *testing.T) {
 		extra []string
 	}{
 		"started": {frame: snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{live})},
-		// A report that came before the wait counts when the caller says which it has read.
-		"report":   {frame: snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{live}, final), extra: []string{"--after", "0"}},
+		// A final report that came before the wait is the one a late caller gets, with no --after.
+		"report":   {frame: snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{live}, final)},
 		"progress": {frame: snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{live}, reportMessage("run-1", "m1", "note", 3)), extra: []string{"--after", "0"}},
 		"stalled":  {frame: snapshotFrame(5, false, []*pb.Run{stalledRun("run-1", 1)}, []*pb.Agent{live})},
 		"ended":    {frame: snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{live})},
@@ -129,9 +129,11 @@ func TestWaitNeedsAGoalAndABound(t *testing.T) {
 	}
 }
 
-// A progress note is not the result, and neither is a report that came before the wait: the wait
-// counts final reports posted after it began, and returns for the one that arrives.
-func TestWaitForAReportIgnoresProgressNotesAndReportsFromBeforeIt(t *testing.T) {
+// A progress note is not the result. A wait for the final report returns at once with the one a
+// running run already has, however late the caller joins (the live finding: it used to run to its
+// timeout unless --after 0 was passed), and --after N keeps its meaning: it waits for a final report
+// numbered above N, ignoring progress notes and the final report it has already read.
+func TestWaitForAReportReturnsTheFinalReportARunAlreadyHasAndAfterKeepsItsMeaning(t *testing.T) {
 	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
 	earlier := []*pb.Message{
 		reportOf("run-1", "m1", "first note", 1, 1, pb.ReportKind_REPORT_KIND_PROGRESS),
@@ -148,6 +150,12 @@ func TestWaitForAReportIgnoresProgressNotesAndReportsFromBeforeIt(t *testing.T) 
 	got := w.run(context.Background(), waitArgs("report")...)
 	if got.code != 0 {
 		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "final report 2", "an early final")
+
+	got = w.run(context.Background(), append(waitArgs("report"), "--after", "2")...)
+	if got.code != 0 {
+		t.Fatalf("--after 2: exit %d, stderr %q", got.code, got.stderr)
 	}
 	contains(t, "stdout", got.stdout, "final report 4", "the result")
 
@@ -228,4 +236,14 @@ func TestWaitAfterGoesOnlyWithReports(t *testing.T) {
 		t.Fatalf("exit %d, want 2", got.code)
 	}
 	contains(t, "stderr", got.stderr, "--after")
+}
+
+// With only progress notes so far there is no final report to return, so a wait for one waits.
+func TestWaitForAReportWaitsWhenARunHasOnlyProgressNotes(t *testing.T) {
+	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
+	note := reportOf("run-1", "m1", "a note", 1, 1, pb.ReportKind_REPORT_KIND_PROGRESS)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{lead}, note)}}))
+	if got := w.runWaitingToTimeOut(waitArgs("report")...); got.code != 3 {
+		t.Fatalf("exit %d, want 3; stderr %q", got.code, got.stderr)
+	}
 }

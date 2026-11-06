@@ -62,6 +62,23 @@ func TestGetShowsWhatTheRunMayUse(t *testing.T) {
 	contains(t, "summary", w.run(context.Background(), "run", "get", "run-1").stdout, "may use     codex gpt-m; claude code (default model)")
 }
 
+// A finished run names the working copies that were kept because they hold work git lacks, and a run
+// with none says nothing of them.
+func TestGetNamesTheWorkingCopiesAFinishedRunKept(t *testing.T) {
+	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
+	run.KeptCheckouts = []*pb.KeptCheckout{{AgentId: "worker-1", Location: "/state/worker-1/worktree"}}
+	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ENDED)})
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.run(context.Background(), "run", "get", "run-1")
+	contains(t, "summary", got.stdout, "1 working copies hold work git lacks", "worker-1  /state/worker-1/worktree")
+
+	run.KeptCheckouts = nil
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	if got := w.run(context.Background(), "run", "get", "run-1"); strings.Contains(got.stdout, "working copies") {
+		t.Errorf("a run with none kept mentions them: %s", got.stdout)
+	}
+}
+
 // --allow-agent takes a harness, with a model after the first colon, and any number of times; a
 // harness that does not exist is a usage error naming the value.
 func TestStartCarriesEveryAllowAgentAndRefusesAnUnknownHarness(t *testing.T) {

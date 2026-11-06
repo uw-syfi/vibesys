@@ -34,6 +34,15 @@ type Run struct {
 	// Allowed is what the run may spend on: set when it starts, never changed. A subagent runs
 	// only on one of these.
 	Allowed []AgentChoice
+	// Kept are the working copies agents made that were not removed when the run ended, because they
+	// hold changes git does not have. Empty until the run is over and its checkouts are released.
+	Kept []Checkout
+}
+
+// Checkout is a working copy of a run's repository that one agent made.
+type Checkout struct {
+	Agent    AgentID
+	Location string
 }
 
 // AgentChoice is one harness and model a run may use. An empty Model is the harness's own default

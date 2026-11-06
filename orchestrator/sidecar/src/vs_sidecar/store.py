@@ -108,20 +108,27 @@ class Files(Protocol):
         ...
 
 
+#: The mode of every log: what a session says and was told is for its owner.
+PRIVATE = 0o600
+
+
 class DiskLog:
     """A ``LogFile`` on disk."""
 
     def __init__(self, path: Path) -> None:
         """Use the file at *path*."""
         self._path = path
+        if path.exists():
+            path.chmod(PRIVATE)  # a log an earlier build made is made private too.
 
     def read(self) -> bytes:
         """See ``LogFile.read``."""
         return self._path.read_bytes() if self._path.exists() else b""
 
     def append(self, data: bytes, *, durable: bool) -> None:
-        """See ``LogFile.append``."""
-        with self._path.open("ab") as handle:
+        """See ``LogFile.append``. A file made here is the owner's alone."""
+        descriptor = os.open(self._path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, PRIVATE)
+        with os.fdopen(descriptor, "ab") as handle:
             handle.write(data)
             handle.flush()
             if durable:

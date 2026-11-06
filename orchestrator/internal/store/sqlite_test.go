@@ -131,7 +131,7 @@ func TestEveryConnectionIsInWriteAheadLogModeWithItsBusyTimeout(t *testing.T) {
 // A store written under another schema version is refused, whichever way the version differs: the
 // stored format has not been released, so it changes in place and old rows are not read.
 func TestAStoreOfAnotherSchemaVersionIsRefused(t *testing.T) {
-	for _, version := range []int{2, 3, 4, 5, 7} {
+	for _, version := range []int{2, 3, 4, 5, 6, 8} {
 		dir, _ := populated(t, 1, 3)
 		damage(t, dir, fmt.Sprintf(`UPDATE meta SET value = %d WHERE key = 'schema_version'`, version))
 		_, err := store.OpenSQLite(dir, store.SQLiteOptions{})

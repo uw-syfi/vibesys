@@ -518,6 +518,20 @@ func (w *sim) carryOut(e core.Effect) {
 			w.timers = append(w.timers, b)
 		}
 		return
+	case core.ReleaseCheckouts:
+		// Working copies are removed only once nothing can continue in them, and the answer names some
+		// of them as kept.
+		if run, ok := w.state.Run(b.Run); !ok || !run.Status.Final() {
+			w.fail("asked to release the checkouts of %s while it is %q", b.Run, run.Status)
+		}
+		var kept []core.Checkout
+		for _, a := range w.state.Agents(b.Run) {
+			if a.Role != core.RoleLead && w.r.IntN(2) == 0 {
+				kept = append(kept, core.Checkout{Agent: a.ID, Location: "/state/" + string(a.ID) + "/worktree"})
+			}
+		}
+		w.decide(core.CheckoutsReleased{Run: b.Run, Kept: kept})
+		return
 	case core.LaunchSession:
 		if _, ok := w.state.Run(b.Run); !ok {
 			w.fail("launch %+v names no run", b)

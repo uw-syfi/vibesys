@@ -116,6 +116,8 @@ type world struct {
 	onStdout func(written string)
 	// onStderr, when set, sees stderr as it is written.
 	onStderr func(written string)
+	// configs, when set, is the host's configuration in every root.
+	configs clientcli.HostConfigs
 }
 
 func newWorld(t testing.TB, dial client.Dialer) *world {
@@ -152,7 +154,7 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
 		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal,
-		Dir: w.dir, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
+		Dir: w.dir, Home: "/home/u", Configs: w.configs, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
 		Locate: func(string) (clientcli.Dial, error) {

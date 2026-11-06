@@ -135,6 +135,15 @@ type EventStream interface {
 	Close()
 }
 
+// Checkouts removes the working copies that agents made of a repository once their run is over.
+type Checkouts interface {
+	// Release removes the working copy of each agent that has one and holds nothing git lacks. A commit
+	// such a copy made that no branch holds is first kept under a ref of the run. It
+	// returns the ones it left in place, because removing them would lose work, or because it could
+	// not tell. Repeating it is harmless: a working copy that is gone is not kept.
+	Release(ctx context.Context, repository string, run core.RunID, agents []core.AgentID) ([]core.Checkout, error)
+}
+
 // StartChecks refuses a StartRun that cannot work, before it is decided: no run, event or receipt
 // is made for a refused start. It is the daemon's only look at the repository and at whether
 // agents can be launched at all, so the loop does no file I/O of its own.

@@ -52,9 +52,15 @@ func Main(args []string) int {
 	return clientcli.Main(ctx, args, clientcli.Env{
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
-		Dir:      dir, FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
+		Dir:      dir, Home: homeDir(), FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
 		Connect: connector, Prove: prover, HostBuild: hostBuild, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
 	})
+}
+
+// homeDir is the user's home directory, or empty when there is none.
+func homeDir() string {
+	home, _ := os.UserHomeDir()
+	return home
 }
 
 // canonical resolves the symbolic links of a path, and leaves it as it is when it cannot.

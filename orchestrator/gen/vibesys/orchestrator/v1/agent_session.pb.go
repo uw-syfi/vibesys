@@ -600,13 +600,16 @@ func (x *SessionSkills) GetName() string {
 }
 
 // ToolServer is a program that serves the agent tools over its standard input and output. Its
-// credentials are in env, so they reach the session in this message and rest nowhere.
+// credentials are in env, so they reach the session in this message and rest nowhere: the session
+// keeps no log, file or event that holds the value of a name in secret_env.
 type ToolServer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The program and its arguments. The program is an absolute path.
-	Argv          []string          `protobuf:"bytes,2,rep,name=argv,proto3" json:"argv,omitempty"`
-	Env           map[string]string `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Argv []string          `protobuf:"bytes,2,rep,name=argv,proto3" json:"argv,omitempty"`
+	Env  map[string]string `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// The names in env whose values are credentials, so the session never writes them down.
+	SecretEnv     []string `protobuf:"bytes,4,rep,name=secret_env,json=secretEnv,proto3" json:"secret_env,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -658,6 +661,13 @@ func (x *ToolServer) GetArgv() []string {
 func (x *ToolServer) GetEnv() map[string]string {
 	if x != nil {
 		return x.Env
+	}
+	return nil
+}
+
+func (x *ToolServer) GetSecretEnv() []string {
+	if x != nil {
+		return x.SecretEnv
 	}
 	return nil
 }
@@ -1904,16 +1914,19 @@ const file_vibesys_orchestrator_v1_agent_session_proto_rawDesc = "" +
 	"\rSessionSkills\x12y\n" +
 	"\tdirectory\x18\x01 \x01(\tB[\xbaHX\xba\x01Q\n" +
 	"\x1fskill_bundle.directory.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\tdirectory\x12\x1b\n" +
-	"\x04name\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\"\xe7\x02\n" +
+	"\x04name\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\"\xa3\x04\n" +
 	"\n" +
 	"ToolServer\x12+\n" +
 	"\x04name\x18\x01 \x01(\tB\x17\xbaH\x14r\x122\x10^[A-Za-z0-9_-]+$R\x04name\x12\x8d\x01\n" +
 	"\x04argv\x18\x02 \x03(\tBy\xbaHv\xba\x01n\n" +
 	"\x19tool_server.argv.absolute\x12$the program must be an absolute path\x1a+this.size() == 0 || this[0].startsWith('/')\x92\x01\x02\b\x01R\x04argv\x12d\n" +
-	"\x03env\x18\x03 \x03(\v2,.vibesys.orchestrator.v1.ToolServer.EnvEntryB$\xbaH!\x9a\x01\x1e\"\x1cr\x1a2\x18^[A-Za-z_][A-Za-z0-9_]*$R\x03env\x1a6\n" +
+	"\x03env\x18\x03 \x03(\v2,.vibesys.orchestrator.v1.ToolServer.EnvEntryB$\xbaH!\x9a\x01\x1e\"\x1cr\x1a2\x18^[A-Za-z_][A-Za-z0-9_]*$R\x03env\x12C\n" +
+	"\n" +
+	"secret_env\x18\x04 \x03(\tB$\xbaH!\x92\x01\x1e\"\x1cr\x1a2\x18^[A-Za-z_][A-Za-z0-9_]*$R\tsecretEnv\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe9\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:u\xbaHr\x1ap\n" +
+	"\x1ctool_server.secret_env.named\x12#secret_env must name entries of env\x1a+this.secret_env.all(name, name in this.env)\"\xe9\x02\n" +
 	"\x10AgentEnvironment\x12j\n" +
 	"\x03set\x18\x01 \x03(\v22.vibesys.orchestrator.v1.AgentEnvironment.SetEntryB$\xbaH!\x9a\x01\x1e\"\x1cr\x1a2\x18^[A-Za-z_][A-Za-z0-9_]*$R\x03set\x12:\n" +
 	"\x05unset\x18\x02 \x03(\tB$\xbaH!\x92\x01\x1e\"\x1cr\x1a2\x18^[A-Za-z_][A-Za-z0-9_]*$R\x05unset\x1a6\n" +

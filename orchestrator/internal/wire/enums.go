@@ -141,6 +141,7 @@ var (
 		core.StartTimedOut:              pb.StartFailureReason_START_FAILURE_REASON_TIMED_OUT,
 		core.StartOther:                 pb.StartFailureReason_START_FAILURE_REASON_OTHER,
 		core.StartIncompatibleVersions:  pb.StartFailureReason_START_FAILURE_REASON_INCOMPATIBLE_VERSIONS,
+		core.StartStateLocationTooLong:  pb.StartFailureReason_START_FAILURE_REASON_STATE_LOCATION_TOO_LONG,
 	})
 	reportKinds = newEnum(map[core.ReportKind]pb.ReportKind{
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,

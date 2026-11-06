@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -288,7 +289,13 @@ func (m *monitor) observe(e core.Event) error {
 
 func (m *monitor) run(r core.Run) error {
 	if old, ok := m.runs[r.ID]; ok && old.Status.Final() {
-		return fmt.Errorf("run %s changed after it finished: %+v", r.ID, r)
+		// The one thing a finished run still learns is which working copies were kept.
+		old.Kept, r.Kept = nil, nil
+		if !reflect.DeepEqual(old, r) {
+			return fmt.Errorf("run %s changed after it finished: %+v", r.ID, r)
+		}
+		m.runs[r.ID] = r
+		return nil
 	}
 	switch {
 	case r.Status == core.RunFailed && r.StopReason != core.StopLeadGone:

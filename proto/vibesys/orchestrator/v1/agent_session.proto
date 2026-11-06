@@ -189,8 +189,15 @@ message SessionSkills {
 }
 
 // ToolServer is a program that serves the agent tools over its standard input and output. Its
-// credentials are in env, so they reach the session in this message and rest nowhere.
+// credentials are in env, so they reach the session in this message and rest nowhere: the session
+// keeps no log, file or event that holds the value of a name in secret_env.
 message ToolServer {
+  option (buf.validate.message).cel = {
+    id: "tool_server.secret_env.named"
+    message: "secret_env must name entries of env"
+    expression: "this.secret_env.all(name, name in this.env)"
+  };
+
   string name = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-]+$"];
   // The program and its arguments. The program is an absolute path.
   repeated string argv = 2 [
@@ -202,6 +209,8 @@ message ToolServer {
     }
   ];
   map<string, string> env = 3 [(buf.validate.field).map.keys.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
+  // The names in env whose values are credentials, so the session never writes them down.
+  repeated string secret_env = 4 [(buf.validate.field).repeated.items.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
 }
 
 // AgentEnvironment is laid over the login environment of the session's agent. The holder does not

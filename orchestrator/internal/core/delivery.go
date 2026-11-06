@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"cmp"
+	"slices"
+	"time"
+)
 
 // post routes a new message. It is the one way a message enters the system.
 func (t *tx) post(m Message) Message {
@@ -170,6 +174,29 @@ func (t *tx) finishRun(id RunID) {
 		run.Status = RunFailed
 	}
 	t.emit(id, run)
+	t.effect(ReleaseCheckouts{Run: id})
+}
+
+// checkoutsReleased records which working copies stayed. A run that is not over keeps all of its,
+// since it can still use them, and a repeat of the answer changes nothing.
+func (t *tx) checkoutsReleased(b CheckoutsReleased) {
+	run, ok := t.s.runs[b.Run]
+	if !ok || !run.Status.Final() {
+		return
+	}
+	// Only a subagent of this run made a working copy of its own; anything else is not the run's to name.
+	named := slices.DeleteFunc(slices.Clone(b.Kept), func(c Checkout) bool {
+		a, ok := t.s.agents[c.Agent]
+		return !ok || a.Run != run.ID || a.Role == RoleLead
+	})
+	kept := slices.SortedFunc(slices.Values(named), func(x, y Checkout) int {
+		return cmp.Or(cmp.Compare(x.Agent, y.Agent), cmp.Compare(x.Location, y.Location))
+	})
+	if slices.Equal(run.Kept, kept) {
+		return
+	}
+	run.Kept = kept
+	t.emit(run.ID, run)
 }
 
 // endTurn closes a turn, and first everything inside it, so that no reader sees a finished turn

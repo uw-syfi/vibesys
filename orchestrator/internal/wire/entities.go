@@ -16,7 +16,7 @@ func runOut(r core.Run) *pb.Run {
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
 		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
-		AllowedAgents: choicesOut(r.Allowed),
+		AllowedAgents: choicesOut(r.Allowed), KeptCheckouts: checkoutsOut(r.Kept),
 	}
 }
 
@@ -40,8 +40,24 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
 		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
-		Allowed: choicesIn(r.GetAllowedAgents(), errs),
+		Allowed: choicesIn(r.GetAllowedAgents(), errs), Kept: checkoutsIn(r.GetKeptCheckouts()),
 	}
+}
+
+func checkoutsOut(in []core.Checkout) []*pb.KeptCheckout {
+	var out []*pb.KeptCheckout
+	for _, c := range in {
+		out = append(out, &pb.KeptCheckout{AgentId: string(c.Agent), Location: c.Location})
+	}
+	return out
+}
+
+func checkoutsIn(in []*pb.KeptCheckout) []core.Checkout {
+	var out []core.Checkout
+	for _, c := range in {
+		out = append(out, core.Checkout{Agent: core.AgentID(c.GetAgentId()), Location: c.GetLocation()})
+	}
+	return out
 }
 
 func capabilitiesOut(c core.Capabilities) *pb.Capabilities {

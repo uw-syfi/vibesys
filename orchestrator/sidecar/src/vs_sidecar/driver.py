@@ -7,8 +7,9 @@ nowhere else. Tests give it an ``AgentFactory`` over agentshim's scripted provid
 
 from __future__ import annotations
 
+import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -374,6 +375,40 @@ def session_plugins(request: sc.OpenSessionRequest) -> SessionPlugins:
     )
 
 
+#: What a credential is replaced with wherever the sidecar writes down what crossed the provider's pipe.
+REDACTED = "[redacted]"
+
+
+def secrets(request: sc.OpenSessionRequest) -> tuple[str, ...]:
+    """The credential values *request* carries: the tool servers' ``secret_env`` entries, longest first.
+
+    Longest first, so a credential that contains another is replaced whole.
+    """
+    found = {
+        tool.env[name] for tool in request.tools for name in tool.secret_env if tool.env.get(name)
+    }
+    return tuple(sorted(found, key=len, reverse=True))
+
+
+def redact(text: str, values: tuple[str, ...]) -> str:
+    """*text* with every credential in *values* replaced, also where JSON wrote it with escapes."""
+    for value in values:
+        text = text.replace(value, REDACTED)
+        escaped = json.dumps(value)[1:-1]
+        if escaped != value:
+            text = text.replace(escaped, REDACTED)
+    return text
+
+
+def redacting(
+    sink: Callable[[RawFrame], None], values: tuple[str, ...]
+) -> Callable[[RawFrame], None]:
+    """*sink* behind a filter that removes *values* from each frame's text."""
+    if not values:
+        return sink
+    return lambda frame: sink(replace(frame, text=redact(frame.text, values)))
+
+
 def tool_servers(request: sc.OpenSessionRequest) -> tuple[StdioMcpServer, ...]:
     """The tool servers *request* gives the agent, each with exactly the environment it names."""
     return tuple(
@@ -421,7 +456,9 @@ def build_session(
         disable_subagents=True,
         # The host starts every turn: a wake-up an agent scheduled would never fire.
         disable_self_scheduling=True,
-        raw_sink=raw_sink,
+        # The tool servers' credentials cross the provider's pipe in the session's own start-up
+        # (Codex takes the servers' environment in a request), so the log of the pipe never holds them.
+        raw_sink=None if raw_sink is None else redacting(raw_sink, secrets(request)),
         new_conversation_id=new_conversation_id,
     )
 

@@ -74,6 +74,9 @@ type (
 		Session Session
 		Force   bool
 	}
+	// ReleaseCheckouts asks for the working copies the agents of a run that is over made to be removed,
+	// except those that hold work git does not have. It is answered by CheckoutsReleased.
+	ReleaseCheckouts struct{ Run RunID }
 	// ArmTimer asks for a TimerFired at FireAt.
 	ArmTimer struct {
 		Kind TimerKind
@@ -102,6 +105,9 @@ func (e Interrupt) ID() EffectID { return EffectID("interrupt/" + string(e.Turn)
 func (e CloseSession) ID() EffectID {
 	return EffectID(fmt.Sprintf("close/%s/%d/%t", e.Session.Agent, e.Session.N, e.Force))
 }
+
+// ID implements Effect.
+func (e ReleaseCheckouts) ID() EffectID { return EffectID("checkouts/" + string(e.Run)) }
 
 // ID implements Effect.
 func (e ArmTimer) ID() EffectID { return EffectID("timer/" + string(e.Timer())) }
