@@ -3,6 +3,7 @@ package archcheck_test
 import (
 	"fmt"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/archcheck"
+	"os"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,17 @@ func TestCapabilityRules(t *testing.T) {
 		{"internal/wire/a.go", "package p\nimport x \"os\"\nvar read = x.ReadFile", "fs-reads", true},
 		{"internal/wire/a.go", goFile("os"), "fs-reads", false},
 		{"internal/wire/a.go", "package p\nimport x \"path/filepath\"\nvar walk = x.WalkDir", "fs-reads", true},
+		{"internal/wire/a.go", "package p\nimport \"os\"\nvar w = os.WriteFile", "fs-writes", true},
+		{"internal/store/sqlite.go", "package p\nimport \"os\"\nvar w = os.MkdirAll", "fs-writes", false},
+		{"internal/wire/a.go", "package p\nimport \"os\"\nvar e = os.Getenv", "env-reads", true},
+		{"internal/wire/a.go", "package p\nimport \"os\"\nvar e = os.Environ", "env-reads", true},
+		{"hosted/command.go", "package p\nimport \"os\"\nvar e = os.Getenv", "env-reads", false},
+		{"internal/wire/a.go", "package p\nimport \"encoding/json\"\nvar j = json.Marshal", "json-use", true},
+		{"internal/wire/a.go", goFile("encoding/json"), "json-use", false},
+		{"internal/wire/a.go", "package p\nimport . \"encoding/json\"\nvar j = Marshal", "capability-import", true},
+		{"internal/wire/a.go", "package p\nimport \"os\"\nvar a = os.Args", "args-use", true},
+		{"internal/production/cli_ensure.go", "package p\nimport \"os/exec\"\nvar c = exec.Command", "exec-calls", false},
+		{"internal/production/cli_ensure.go", "package p\nimport \"os/exec\"\nvar c = exec.Command\nvar d = exec.CommandContext", "exec-calls", true},
 	} {
 		t.Run(tc.rule+tc.file+fmt.Sprint(tc.bad), func(t *testing.T) {
 			path := "orchestrator/" + tc.file
@@ -42,6 +54,29 @@ func TestCapabilityRules(t *testing.T) {
 		})
 	}
 }
+
+// A violation says which rule broke, where, and what to do; the fix names the design doc.
+func TestABoundaryViolationNamesThePathTheRuleAndTheFix(t *testing.T) {
+	path := "orchestrator/internal/wire/a.go"
+	got := archcheck.Violations(map[string]string{path: "package p\nimport \"os\"\nvar e = os.Getenv"})
+	if len(got) != 1 || !strings.Contains(got[0], path+": env-reads") || !strings.Contains(got[0], "docs/contributing/process-boundaries.md") {
+		t.Fatalf("violations = %v", got)
+	}
+}
+
+// The baseline is shrink-only: an entry that guards nothing is itself a violation.
+func TestTheBaselineHoldsNoEntryForAFileThatIsGoneOrCrossesNothing(t *testing.T) {
+	if stale := archcheck.StaleBaselines(func(string) bool { return false }); len(stale) == 0 {
+		t.Fatal("a baseline whose files are gone passed")
+	}
+	for _, s := range archcheck.StaleBaselines(func(rel string) bool {
+		_, err := os.Stat("../../" + rel)
+		return err == nil
+	}) {
+		t.Error(s)
+	}
+}
+
 func TestFileReadBaselineCannotGrowOrLeaveSlack(t *testing.T) {
 	// Generate aliases and counts. Neither renaming os nor taking a function
 	// value may escape the per-file capability count.
