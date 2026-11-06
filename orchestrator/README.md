@@ -258,6 +258,48 @@ fresh snapshot, never a gap. Live deltas of a running item reach only the client
 agent, merge within 50 ms, are bounded per client, and are always superseded by the stored item of
 the same sequence.
 
+## Install for managed runs
+
+Status: the installer and the release workflow exist, but no release has been published yet, so the
+command below does not work until the first `vibesys-v*` tag is pushed.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/install.sh | sh
+vibesys-client run start --task <task>
+```
+
+`install.sh` (POSIX sh, no root, no shell-profile edits) downloads the bundle for your operating
+system and architecture, checks its SHA-256, and lays it out like this:
+
+```text
+~/.vibesys/releases/<version>/bin/{vibesys-client,vibesys-host,vibesys-cli}
+~/.vibesys/releases/<version>/sidecar/       sidecar source and lock, plus a .venv made by uv
+~/.vibesys/releases/<version>/marketplace/   the skills plugin marketplace
+~/.vibesys/current -> releases/<version>
+~/.local/bin/vibesys-client -> ~/.vibesys/current/bin/vibesys-client
+```
+
+Only `vibesys-client` goes on your PATH. The host finds the sidecar, the marketplace and
+`vibesys-cli` relative to its own binary. If `uv` is missing the installer installs it into
+`~/.vibesys/uv`; uv fetches Python 3.12 itself. Git must be installed, because the sidecar depends
+on agentshim by Git URL.
+
+- A failed step names itself and leaves the previous install working: `current` moves last.
+- Installing the same version again changes nothing.
+- Switching versions is refused while a `vibesys-host` started from a release under `~/.vibesys`
+  is running (found in the `ps` command lines); `--force` overrides. Old releases are kept.
+- `VIBESYS_VERSION`, `VIBESYS_INSTALL_DIR`, `VIBESYS_HOME`, `VIBESYS_RELEASES_URL` and
+  `VIBESYS_INSTALL_BUNDLE=/path/to/bundle.tar.gz` (offline install) are read; see the header of
+  `install.sh`.
+
+You also need Claude Code or Codex installed and logged in, and Docker for tasks that use it.
+Agents run as your user, unconfined, with permissions bypassed.
+
+Bundles are built by `scripts/build_release_bundle.sh VERSION OS ARCH OUTDIR` and published by
+`.github/workflows/managed-release.yml` on `vibesys-v<version>` tags, with attestations; the tag
+`vibesys-latest` names the newest stable version. `scripts/tests/test_install.sh` installs a bundle
+in a clean container.
+
 ## Testing
 
 `./check.sh` runs formatting, `go vet` and every test.
