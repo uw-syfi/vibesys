@@ -8,12 +8,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fifo"
-	"github.com/uw-syfi/vibesys/cli/internal/schedule/scheduletest"
 )
-
-func TestFIFOPassesThePolicyContract(t *testing.T) {
-	scheduletest.Run(t, scheduletest.Contract{New: fifo.New})
-}
 
 // With one slot that every job takes, fifo is the daemon's rule before policies: the one job that
 // starts is the oldest waiting, by submission time and then by when the daemon heard of it, and

@@ -48,7 +48,12 @@ docker_log=""
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker_log="$(mktemp)"
   trap 'rm -f "$docker_log"' EXIT
-  CGO_ENABLED=0 go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/... ./cmd/vibesys-cli >"$docker_log" 2>&1 &
+  # Of the daemon's tests only the two files the docker tag adds run here, since the rest run in both
+  # steps below and would only run a third time, on cores the race run needs.
+  (
+    CGO_ENABLED=0 go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/... &&
+      CGO_ENABLED=0 go test -tags docker -count=1 -timeout 600s -run 'TestRealDocker|TestRealTwoImage' ./cmd/vibesys-cli
+  ) >"$docker_log" 2>&1 &
   docker_pid=$!
 else
   printf 'No Docker daemon is reachable: the tests against a real one were compiled and not run.\n' >&2
@@ -56,10 +61,11 @@ fi
 
 # The first step runs every package under the race detector, since the daemon's flows are concurrent
 # and a package added later is covered without being listed here. The race run includes the tests of
-# the release build and install.sh, which run real tools. The per-package timeout only guards against
-# a hang. It does not build the sweeps: tests that walk a large space of cases on one goroutine, such
+# install.sh and of the daemon as shipped, which run real tools. The per-package timeout only guards
+# against a hang. It does not build the sweeps: tests that walk a large space of cases on one goroutine, such
 # as the exhaustive model check of the lifecycle machine and the crash of a store at every step of its
-# script. With nothing running at once the detector checks nothing in them, and it makes them ten
+# script, and the build of a release, which only runs go build and the binaries it makes, none of
+# them under the detector. With nothing running at once the detector checks nothing in them, and it makes them ten
 # times slower. A sweep is a file named *_sweep_test.go that carries //go:build !race, and archcheck
 # refuses one that starts a goroutine, so a test that needs the detector cannot be moved out of it by
 # accident.

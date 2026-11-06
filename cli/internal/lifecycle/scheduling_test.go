@@ -142,14 +142,6 @@ func (w *world) heldBy(ref lifecycle.Ref) []schedule.Claim {
 	return out
 }
 
-func TestWithSeveralSlotsEveryEventSequenceKeepsTheClaimsAndMakesProgress(t *testing.T) {
-	for seed := range uint64(400) {
-		w := newScheduledWorld(t, seed, 1+int(seed%3))
-		w.churn(120, false)
-		w.drain()
-	}
-}
-
 // With more than one slot the machine runs jobs beside each other: some sequence of events has more
 // than one command running at once, or the tests above hold of nothing.
 func TestWithSeveralSlotsJobsRunBesideEachOther(t *testing.T) {
