@@ -566,7 +566,9 @@ jobs:
       - name: Check the host gateway
         run: ./support/repoctl/repoctl run-checks --group gateway_checks
 
-  # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
+  # The checks of vibesys-cli are two jobs that run at once (cli/check.sh, `race` and `plain`): as one
+  # job they took 200 s on a fast runner and 320 s on a slow one, against the commit stage's 360 s limit.
+  # Both run on every push to main for the same reason as `gateway`: a merge-queue run restores the
   # Go caches a passing main run saved.
   cli:
     needs: changes
@@ -583,8 +585,26 @@ jobs:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
-      - name: Check vibesys-cli
-        run: ./support/repoctl/repoctl run-checks --group cli_checks
+      - name: Check vibesys-cli under the race detector
+        run: ./support/repoctl/repoctl run-checks --group cli_race_checks
+
+  cli-plain:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Check vibesys-cli without the race detector
+        run: ./support/repoctl/repoctl run-checks --group cli_plain_checks
 
   # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
   # Go caches a passing main run saved.
@@ -1687,6 +1707,7 @@ jobs:
       - impact-tool
       - gateway
       - cli
+      - cli-plain
       - orchestrator
       - desktop-path
       - managed-install
@@ -1761,6 +1782,7 @@ jobs:
       - impact-tool
       - gateway
       - cli
+      - cli-plain
       - orchestrator
       - desktop-path
       - managed-install

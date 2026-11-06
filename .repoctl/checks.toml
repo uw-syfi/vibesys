@@ -524,18 +524,30 @@ timeout_seconds = 300
 commands = [["./check.sh"]]
 
 [[check_groups]]
-name = "cli_checks"
+name = "cli_race_checks"
 trigger_job = "cli"
 include_in_test = true
 language = "go"
 directory = "cli"
-# Same shape as gateway_checks: a cold Go cache costs about 70 s on a CI runner (module download,
-# then vet and test of the host and a vet per other release target); a warm one a few seconds. The
-# race run of every package adds a race-instrumented build of the standard library and of each
-# package, the seeded simulation takes about a minute under the detector, and the tests build the
-# four release binaries and run install.sh. Measured on 4 cores with a cold cache: about 3 minutes.
+# The first half of cli/check.sh, the `cli` job: formatting and every test under the race detector,
+# which is built apart from everything else (a race-instrumented standard library and package builds, a cold
+# Go cache costs about a minute on a CI runner; a warm one seconds). The seeded simulation takes about a
+# minute under the detector. The two halves are two jobs because one job took 200 s on a fast runner and
+# 320 s on a slow one against the 360 s limit of a pull request's commit stage.
 timeout_seconds = 600
-commands = [["./check.sh"]]
+commands = [["./check.sh", "race"]]
+
+[[check_groups]]
+name = "cli_plain_checks"
+trigger_job = "cli"
+include_in_test = true
+language = "go"
+directory = "cli"
+# The second half of cli/check.sh, the `cli-plain` job: the vets of every release target, the tests
+# against a real Docker daemon, and every test again without the detector, with the wider range of
+# simulation seeds and the sweeps. The tests build the four release binaries and run install.sh.
+timeout_seconds = 600
+commands = [["./check.sh", "plain"]]
 
 [[check_groups]]
 name = "orchestrator_checks"
