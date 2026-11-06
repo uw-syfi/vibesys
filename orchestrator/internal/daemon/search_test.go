@@ -117,7 +117,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 // message used to be reported as a lost stream, hiding that retrying cannot help.
 func TestEveryUnreadableCauseReachesClientsAsItsOwnReason(t *testing.T) {
 	want := map[core.ViewReason]pb.UnreadableReason{
-		core.NoDaemon:            pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON,
+		core.NoDaemon:            pb.UnreadableReason_UNREADABLE_REASON_NOT_ANSWERING,
 		core.Connecting:          pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON,
 		core.StartFailed:         pb.UnreadableReason_UNREADABLE_REASON_START_FAILED,
 		core.CLINotInstalled:     pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED,

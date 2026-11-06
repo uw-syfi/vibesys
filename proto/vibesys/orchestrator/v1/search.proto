@@ -60,4 +60,7 @@ enum UnreadableReason {
   UNREADABLE_REASON_STREAM_LOST = 8;
   // The job service sent a message past the size bound; retrying the same read cannot fix it.
   UNREADABLE_REASON_MESSAGE_TOO_LARGE = 9;
+  // The host asked for the job log and no job service answered, after starting one. A view that has
+  // not been asked for yet is NO_DAEMON; this one has been tried, and says the read failed.
+  UNREADABLE_REASON_NOT_ANSWERING = 10;
 }
