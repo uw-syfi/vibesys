@@ -87,6 +87,7 @@ Each check names the path, the rule and the fix when it fails.
 | --- | --- | --- |
 | Boundary inventory | Per file, the exact count of file reads, file writes, environment reads, `encoding/json` uses, command starts and `os.Args` uses in the host and orchestrator Go code. A new use fails until the change adds it, with a reason, to the baseline; a removed use fails until the baseline shrinks. | `orchestrator_checks` and `gateway_checks` (the `archcheck` packages of each module) |
 | Environment names | Every `VIBESYS_*` and `XDG_*` string in the managed-run product code is in a shrink-only allowlist until a message carries it. | `scripts/check_boundaries.py`, the always-on `doc-checks` job |
+| Environment reads | A read of a `VIBESYS_*` variable by its literal name (`os.Getenv`, `os.LookupEnv`, `getenv`, `os.environ`, `process.env`) anywhere but `cli/envcodec` fails. A read that is out of scope is listed with its exact count and a reason, and the list only shrinks. A name passed through a constant is not seen; the name check above still lists it. | `scripts/check_boundaries.py` |
 | Mechanism words | Message, field, enum and rpc names in the orchestrator, `cli`, desktop and evaluator packages that contain a mechanism word (path, dir, file, pid, process, socket, json, sidecar, provider, worktree, marketplace, home, xdg, docker, sqlite, claude, codex) are in a shrink-only allowlist. | `scripts/check_boundaries.py` |
 | Unvalidated messages | Every `cli.v1` message that has fields and no protovalidate rule is in a shrink-only allowlist. Empty messages are exempt. Each daemon and supervisor server validates the request of every RPC at its edge (`wire.RequestValidator`), and the store and run records validate on read, so a bad value is refused naming its field. | `scripts/check_boundaries.py` |
 | Release gate | A `vibesys-v*` tag fails while `orchestrator/v1` is outside the breaking check. | `managed-release.yml` runs `scripts/check_boundaries.py --release` |
@@ -222,15 +223,38 @@ Three consequences are held by tests:
 ### Environment contract
 
 Every environment variable that one of our programs reads from another is a
-field of a message with an `env_name` option naming the variable. One small
-encoder and decoder turn the message into the environment and back, validate on
-read, and name the variable when a value is invalid. The messages are
-`AgentContext` (what `vibesys-cli` reads as flag defaults),
-`ToolServerCredentials` (what only the tool server reads), `SkillEnvironment`
-and `JobEnvironment` (what a job's commands may read). Resource-specific
-variables stay with their resource as their own small message. Variables that
-belong to external tools (`KUBECONFIG`, `HOME` for the agent harness) are not
-ours to declare.
+field of a message with an `env_name` option naming the variable
+(`proto/vibesys/cli/v1/env.proto`). One small encoder and decoder
+(`cli/envcodec`) turn the message into the environment and back, validate on
+read, and name the variable when a value is invalid. A variable keeps its name,
+so `$VIBESYS_RUN` and `$VIBESYS_CLI` still read from a shell. The messages are
+`AgentContext` (the run's identity, which `vibesys-cli` reads as flag defaults),
+`OperatorContext` (`VIBESYS_PLACEMENT`, which the operator sets and the
+orchestrator leaves alone), `SkillEnvironment` (`VIBESYS_CLI`, which only the
+skills' shell commands read) and `ToolServerCredentials` (what only the tool
+server reads), and later `JobEnvironment` (what a job's commands may read).
+Resource-specific variables stay with their resource as their own small
+message. Variables that belong to external tools (`KUBECONFIG`, `HOME` for the
+agent harness) are not ours to declare.
+
+How a value is written: a string is itself, an unsigned integer is its decimal
+digits, and an enum is its value's name without the enum's prefix, in lower
+case. A field at its zero value is not set, and a variable that is unset or
+empty reads as the zero value, which the field's protovalidate rules then allow
+or refuse. A refusal names the variable and never repeats the value, because
+one of them is a secret. The writer holds a message to the same rules before it
+writes, so a sender cannot write what a reader would refuse.
+
+A message may declare an `env_namespace`, the prefix of the names it owns.
+The decoder reports a name in that prefix that no field declares and does not
+refuse it: the environment is inherited, and a name in the prefix can be
+another program's setting. The tool server prints the report on its standard
+error. This is the rule for unknown keys applied where refusing would break a
+session that has everything it needs.
+
+The session's token is on the tool server's environment only: it is a field of
+`ToolServerCredentials`, which rides in `OpenSessionRequest.tools[].env`, and a
+test holds it out of the agent's own environment and out of every argument.
 
 The agent's `HOME` and `XDG_*` are not rewritten to steer the job tool. The job
 tool's place is one variable naming its runtime directory; `daemon ensure
@@ -291,7 +315,6 @@ part they wait for.
 
 | Part | Not built | Removes |
 | --- | --- | --- |
-| Environment codec | the `env_name` option, `AgentContext`, `ToolServerCredentials`, `SkillEnvironment` | the Python env table and its golden |
 | Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule, and the `XDG_*` and `VIBESYS_CLI_CONFIG` a host keeps from its starter for the job tool |
 | Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
@@ -342,9 +365,9 @@ validated message; the other rows are what the parts above replace.
 
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
-| identity into the job tool | `VIBESYS_{REPO,TASK,RUN,AGENT,HARNESS,CLI,PLACEMENT}` | a Python table and a golden | partly typed: environment codec |
+| identity into the job tool | `VIBESYS_{REPO,TASK,RUN,AGENT,HARNESS,CLI,PLACEMENT}` | `AgentContext`, `OperatorContext`, `SkillEnvironment` (`env.proto`) | typed |
 | the job tool's place | `HOME` and `XDG_*` rewritten for the agent | `CliLocation` | leaks: job tool endpoint |
-| tool server credentials | `VIBESYS_ORCHESTRATOR_*` | `daemon/ports.go` | untyped: environment codec |
+| tool server credentials | `VIBESYS_ORCHESTRATOR_*` | `ToolServerCredentials` (`tool_server.proto`) | typed |
 | tool server to host | gRPC metadata for agent, session and token | `service.go` | typed |
 | agent to tool server | MCP over stdio | MCP; framing confined to `internal/mcp` | external |
 | tool arguments and results | hand JSON Schema, hand structs, formatted text | `tools.go` | two definitions: tool schemas |

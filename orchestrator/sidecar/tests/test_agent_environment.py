@@ -1,7 +1,7 @@
 """The provider process, and each tool server, get what the request says and nothing it does not.
 
-The holder does not interpret the names: the host builds the environment, and its own tests hold that
-to the identity golden. Agentshim builds a provider's environment from a login-shell probe and never
+The holder does not interpret the names: the host builds the environment from messages, and its own
+tests hold that to their definitions. Agentshim builds a provider's environment from a login-shell probe and never
 from this process's, so the carrier is the ``Agent`` built per session: these tests read the
 environment of the process the scripted executor was asked to spawn.
 """

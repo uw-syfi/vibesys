@@ -157,7 +157,7 @@ func (h *Sidecars) Launch(ctx context.Context, start daemon.SessionStart) (daemo
 		}
 		return nil, fmt.Errorf("fake host: cannot start %s/%d", l.Session.Agent, l.Session.N)
 	}
-	s := &Session{Launch: l, Start: start, Env: start.Tools, seen: map[string]bool{}, host: h}
+	s := &Session{Launch: l, Start: start, Credentials: start.Tools, seen: map[string]bool{}, host: h}
 	h.sessions[l.Session] = s
 	if h.Opening != nil {
 		for _, ev := range h.Opening(l) {
@@ -194,7 +194,8 @@ func (h *Sidecars) Attach(ctx context.Context, session core.Session) (daemon.Sid
 type Session struct {
 	Launch core.LaunchSession
 	Start  daemon.SessionStart
-	Env    daemon.LaunchEnv
+	// Credentials is what the session's tool server was told, which holds its token.
+	Credentials *pb.ToolServerCredentials
 	// Received lists each command once, by effect id.
 	Received []*pb.SessionCommand
 

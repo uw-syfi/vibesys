@@ -6,6 +6,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from scripts.check_boundaries import (
     DOC,
+    env_read_violations,
+    env_reads,
     env_uses,
     env_violations,
     is_product_code,
@@ -268,3 +270,56 @@ def test_a_new_unvalidated_message_fails_and_a_newly_ruled_one_must_leave_the_li
     assert "remove it from" in stale
 
     assert unvalidated_violations({_CLI: "message A { string id = 1; }"}, {_CLI: ["A"]}) == []
+
+
+def test_a_read_of_a_variable_by_name_fails_outside_the_codec_and_names_the_fix() -> None:
+    sources = {"orchestrator/hosted/new.go": 'v := os.Getenv("VIBESYS_NEW_THING")\n'}
+
+    (problem,) = env_read_violations(sources, {})
+
+    assert problem.startswith("orchestrator/hosted/new.go: env-read: VIBESYS_NEW_THING")
+    assert "cli/envcodec" in problem
+    assert "env_name" in problem
+
+
+@given(
+    name=st.from_regex(r"VIBESYS_[A-Z]{1,8}(_[A-Z]{1,8}){0,2}", fullmatch=True),
+    spelling=st.sampled_from(
+        [
+            'os.Getenv("{n}")',
+            'os.LookupEnv("{n}")',
+            'getenv("{n}")',
+            'd.getenv("{n}")',
+            "os.getenv('{n}')",
+            "os.environ.get('{n}')",
+            "os.environ['{n}']",
+            "process.env.{n}",
+            "process.env['{n}']",
+        ]
+    ),
+)
+def test_every_spelling_of_a_read_is_found_and_the_codec_is_exempt(
+    name: str, spelling: str
+) -> None:
+    text = spelling.format(n=name) + "\n"
+
+    assert env_reads({"cli/x.go": text}) == {"cli/x.go": {name: 1}}
+    assert env_reads({"cli/envcodec/envcodec.go": text}) == {}
+
+
+def test_a_name_that_is_only_written_is_not_a_read() -> None:
+    text = 'usage := "set VIBESYS_RUN"\nenv = append(env, "VIBESYS_RUN="+v)\n'
+
+    assert env_reads({"cli/x.go": text}) == {}
+
+
+def test_a_listed_read_needs_its_exact_count_and_a_reason() -> None:
+    sources = {"cli/x.go": 'os.Getenv("VIBESYS_A")\nos.Getenv("VIBESYS_A")\n'}
+    listed = {"cli/x.go": {"VIBESYS_A": {"count": 2, "reason": "the installer's own setting"}}}
+
+    assert env_read_violations(sources, listed) == []
+    assert env_read_violations(sources, {"cli/x.go": {"VIBESYS_A": {"count": 1, "reason": "r"}}})
+    (removed,) = env_read_violations({"cli/x.go": "package p\n"}, listed)
+    assert "shrink the entry" in removed
+    (unexplained,) = env_read_violations(sources, {"cli/x.go": {"VIBESYS_A": {"count": 2}}})
+    assert "without a reason" in unexplained

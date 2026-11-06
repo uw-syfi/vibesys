@@ -239,9 +239,11 @@ every job runs where the task's check and measure run (see "Running in docker"),
 ### Environment
 
 These are all the environment names the CLI reads (through one `getenv`, which a test records).
-The orchestrator sets every one of them for the agents it launches but `VIBESYS_PLACEMENT`, from the
-golden `proto/vibesys/cli/v1/conformance/identity_env.golden.json`, which the CLI's and the
-sidecar's tests both read; a name that is empty there is left unset in the agent's environment.
+The orchestrator sets every one of them for the agents it launches but `VIBESYS_PLACEMENT`. The
+names are the `env_name` of the fields of `AgentContext` and `OperatorContext`
+(`proto/vibesys/cli/v1/env.proto`), which `envcodec` reads and writes; a field that is empty is left
+unset in the agent's environment, and a value a field's rules refuse is a usage error naming the
+variable.
 `VIBESYS_PLACEMENT` is the operator's: an agent inherits it from the environment it was started in.
 
 | Name | Meaning |

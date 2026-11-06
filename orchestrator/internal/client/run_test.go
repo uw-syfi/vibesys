@@ -3,7 +3,6 @@ package client_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,10 +99,8 @@ func toolClient(ctx context.Context, t testing.TB, live *daemontest.Live, agent 
 	if session == nil {
 		t.Fatalf("agent %s has no session", agent)
 	}
-	var n uint32
-	fmt.Sscan(session.Env[daemon.EnvSession], &n)
 	c, err := client.Dial(ctx, live.AgentListener.Dial, client.Options{Session: &client.Session{
-		Agent: session.Env[daemon.EnvAgent], Session: n, Token: session.Env[daemon.EnvToken],
+		Agent: session.Credentials.GetAgent(), Session: session.Credentials.GetSession(), Token: session.Credentials.GetToken(),
 	}})
 	if err != nil {
 		t.Fatal(err)

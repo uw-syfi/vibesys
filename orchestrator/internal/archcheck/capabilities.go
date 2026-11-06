@@ -32,7 +32,7 @@ var boundaries = map[string]allowance{
 	"gatewayroot/gatewayroot.go":                 {reason: "says before a host starts whether its state directory can be made, as the host itself would find; process-boundaries.md, host control", reads: 1},
 	"hostconfig/hostconfig.go":                   {reason: "the host's configuration file in its root, a HostConfig message, and whether what it names is there; process-boundaries.md, host control", reads: 3, writes: 5},
 	"hostlock/hostlock.go":                       {reason: "the state directory's lock and the HostLock record its holder writes, read to name the holder, and only while the lock is held; process-boundaries.md, host control", reads: 2},
-	"hosted/command.go":                          {reason: "the tool server reads its identity from the environment; process-boundaries.md, environment codec", env: 1},
+	"hosted/command.go":                          {reason: "the tool server reads its credentials from the environment, through the environment codec (cli/envcodec); process-boundaries.md, environment codec", env: 1},
 	"internal/clidaemon/clidaemontest/corpus.go": {reason: "the conformance corpus is JSON beside the CLI's own", json: 2},
 	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; tool schemas move to descriptors, see process-boundaries.md, tool schemas", json: 17},
 	"internal/mcp/tools.go":                      {reason: "hand tool schemas beside the protos; process-boundaries.md, tool schemas", json: 7},
@@ -86,8 +86,8 @@ func capabilities(name, source string) []string {
 			alias = imp.Name.Name
 		}
 		aliases[alias] = target
-		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") {
-			report("cli-contract-importers", "CLI contract belongs to clidaemon, search and the client verbs that show a search view")
+		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && rel != "internal/production/agentenv.go" {
+			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, and the agent environment, whose messages are the CLI's")
 		}
 		if target == "os/exec" && execFiles[rel] == "" {
 			report("exec-confined", "process execution belongs to listed production files")

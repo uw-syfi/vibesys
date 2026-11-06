@@ -1120,8 +1120,9 @@ func (x *Run) GetFinalReported() bool {
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
 // store from. Each value is an absolute path, or empty for "not set": an empty value is unset in
-// the agent's environment, not set to the empty string. The environment names each one becomes are
-// in vibesys/cli/v1/conformance/identity_env.golden.json.
+// the agent's environment, not set to the empty string. The cli becomes SkillEnvironment.cli
+// (vibesys/cli/v1/env.proto), and the places become the job tool's places until the job tool's
+// endpoint replaces them.
 type CliLocation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vibesys-cli the orchestrator chose for its agents.

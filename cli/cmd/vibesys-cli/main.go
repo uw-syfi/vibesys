@@ -54,8 +54,8 @@ func realDeps(stdout, stderr io.Writer) deps { return depsFrom(stdout, stderr, o
 
 // depsFrom makes the real dependencies over getenv, which is the one way the binary reads its
 // environment: the context flags' defaults, the places of its daemon and store, and the home
-// directory. The names it reads are listed, with who sets them, in the identity golden
-// (proto/vibesys/cli/v1/conformance/identity_env.golden.json), which a test holds this to. The
+// directory. The context names are the env_name of the fields of AgentContext and OperatorContext
+// (proto/vibesys/cli/v1/env.proto), read by envcodec, and a test holds the binary to exactly those. The
 // daemon also takes the whole environment, through os.Environ, only to report what its jobs inherit;
 // it decides nothing by it.
 func depsFrom(stdout, stderr io.Writer, getenv func(string) string) deps {

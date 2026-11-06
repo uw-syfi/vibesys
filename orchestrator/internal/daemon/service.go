@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
@@ -107,7 +108,7 @@ func (s *Service) caller(ctx context.Context) (core.Caller, error) {
 	agent := md.Get(MetaAgent)
 	if s.Audience == AudienceOperator {
 		if len(agent)+len(md.Get(MetaSession))+len(md.Get(MetaToken)) > 0 {
-			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the socket named by "+EnvSocket)
+			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the endpoint named by "+envcodec.NameOf(&pb.ToolServerCredentials{}, "endpoint"))
 		}
 		return core.Operator{}, nil
 	}

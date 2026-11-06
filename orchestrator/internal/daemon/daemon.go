@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
@@ -412,9 +413,9 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 	}
 	start := SessionStart{
 		Launch: l, Repository: run.Repository, Task: run.Task, Location: run.Location,
-		Tools: LaunchEnv{
-			EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
-			EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
+		Tools: &pb.ToolServerCredentials{
+			Endpoint: d.cfg.AgentSocket, Agent: string(l.Session.Agent), Session: l.Session.N,
+			Token: d.cfg.Authority.Token(l.Session), Run: string(l.Run), Role: wire.RoleOut(l.Role),
 		},
 	}
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {

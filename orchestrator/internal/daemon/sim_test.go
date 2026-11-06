@@ -504,7 +504,7 @@ func (s *sim) agentAct(a core.Agent) {
 	if se == nil {
 		return // its launch has not been carried out.
 	}
-	token := se.Env[daemon.EnvToken]
+	token := se.Credentials.GetToken()
 	id := s.id("ag-" + string(a.ID))
 	var cmd *pb.Command
 	switch {

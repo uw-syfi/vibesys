@@ -1,83 +1,133 @@
 package production
 
 import (
-	"encoding/json"
-	"os"
+	"context"
+	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 )
 
-// environmentGolden is the one list of the names an agent's processes get, which the vibesys-cli's
-// tests read as well.
-const environmentGolden = "../../../proto/vibesys/cli/v1/conformance/identity_env.golden.json"
-
-// fieldFor fills what the golden names, each with its own value.
-var fieldFor = map[string]func(*daemon.SessionStart, string){
-	"repository":                   func(s *daemon.SessionStart, v string) { s.Repository = v },
-	"task":                         func(s *daemon.SessionStart, v string) { s.Task = v },
-	"run_id":                       func(s *daemon.SessionStart, v string) { s.Launch.Run = core.RunID(v) },
-	"session.agent_id":             func(s *daemon.SessionStart, v string) { s.Launch.Session.Agent = core.AgentID(v) },
-	"cli_location.cli":             func(s *daemon.SessionStart, v string) { s.Location.CLI = v },
-	"cli_location.xdg_runtime_dir": func(s *daemon.SessionStart, v string) { s.Location.RuntimeDir = v },
-	"cli_location.xdg_state_home":  func(s *daemon.SessionStart, v string) { s.Location.StateHome = v },
-	"cli_location.home":            func(s *daemon.SessionStart, v string) { s.Location.Home = v },
+func someWord(r *rand.Rand, max int) string {
+	letters := "abcxyz019-_"
+	out := make([]byte, r.IntN(max+1))
+	for i := range out {
+		out[i] = letters[r.IntN(len(letters))]
+	}
+	return string(out)
 }
 
-// The environment built here is the golden's, name for name, and an empty value does what it says:
-// unset removes the name, and keep leaves what the login environment holds.
-func TestTheAgentEnvironmentIsTheGoldenList(t *testing.T) {
-	data, err := os.ReadFile(environmentGolden)
+// maybePath is an absolute path, or empty.
+func maybePath(r *rand.Rand) string {
+	if r.IntN(3) == 0 {
+		return ""
+	}
+	return "/" + someWord(r, 20)
+}
+
+func names(t *testing.T, m proto.Message) []string {
+	t.Helper()
+	out, err := envcodec.Names(m)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var golden struct {
-		Names []struct {
-			Name  string `json:"name"`
-			From  string `json:"from"`
-			Empty string `json:"empty"`
-		} `json:"names"`
-	}
-	if err := json.Unmarshal(data, &golden); err != nil {
-		t.Fatal(err)
-	}
-	full := daemon.SessionStart{Launch: core.LaunchSession{
-		Session: core.Session{Agent: "a", N: 3}, Spec: core.AgentSpec{Harness: core.ClaudeCode},
-	}}
-	for from, fill := range fieldFor {
-		fill(&full, "value of "+from)
-	}
-	filled := agentEnvironment(full)
-	if len(filled.GetUnset()) != 0 {
-		t.Fatalf("names unset with everything given: %v", filled.GetUnset())
-	}
-	var empty daemon.SessionStart
-	blank := agentEnvironment(empty)
-	want := map[string]bool{}
-	for _, name := range golden.Names {
-		if name.From == "" {
-			if _, set := filled.GetSet()[name.Name]; set {
-				t.Errorf("%s is one the orchestrator does not fill, and it does", name.Name)
+	return out
+}
+
+// Whatever a start holds, the session is opened with an agent environment that the codec reads back
+// as the run's identity: each name is the env_name of a field, an empty value is unset and never set
+// to the empty string, and the places of the job tool are set when given. The agent's environment
+// never holds the session's token, which only its tool server's does, and the tool server's
+// credentials read back as exactly what the daemon gave.
+func TestTheSessionIsOpenedWithTheEnvironmentTheMessagesDeclare(t *testing.T) {
+	r := rand.New(rand.NewPCG(13, 17))
+	identity := append(names(t, &cliv1.AgentContext{}), names(t, &cliv1.SkillEnvironment{})...)
+	places := []string{"HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME"}
+	for i := range 300 {
+		w := newHolderWorld()
+		start := sessionStart("agent-1", core.RoleLead, "/"+someWord(r, 12))
+		start.Task = someWord(r, 12)
+		start.Launch.Run = core.RunID(someWord(r, 12))
+		start.Launch.Spec.Harness = []core.Harness{core.ClaudeCode, core.Codex}[r.IntN(2)]
+		start.Location = core.CliLocation{CLI: maybePath(r), RuntimeDir: maybePath(r), StateHome: maybePath(r), Home: maybePath(r)}
+		start.Tools.Token = "secret-" + someWord(r, 30)
+		if r.IntN(2) == 0 {
+			start.Repository = "/" + someWord(r, 12)
+		}
+		if _, err := w.sidecars("/sessions").Launch(context.Background(), start); err != nil {
+			t.Fatalf("round %d: %v", i, err)
+		}
+		if len(w.holders) != 1 {
+			t.Fatalf("round %d: %d holders", i, len(w.holders))
+		}
+		var opened *pb.OpenSessionRequest
+		for _, h := range w.holders {
+			opened = h.opened
+		}
+		environment := opened.GetEnvironment()
+
+		for name, value := range environment.GetSet() {
+			if value == "" {
+				t.Errorf("round %d: %s is set to the empty string", i, name)
 			}
-			continue
+			if !slices.Contains(identity, name) && !slices.Contains(places, name) {
+				t.Errorf("round %d: %s is set and no message declares it", i, name)
+			}
+			if _, unset := slices.BinarySearch(slices.Sorted(slices.Values(environment.GetUnset())), name); unset {
+				t.Errorf("round %d: %s is both set and unset", i, name)
+			}
 		}
-		want[name.Name] = true
-		got, set := filled.GetSet()[name.Name]
-		switch {
-		case !set:
-			t.Errorf("%s is missing", name.Name)
-		case fieldFor[name.From] != nil && got != "value of "+name.From:
-			t.Errorf("%s is %q, want it from %s", name.Name, got, name.From)
+		for _, name := range identity {
+			_, set := environment.GetSet()[name]
+			if set == slices.Contains(environment.GetUnset(), name) {
+				t.Errorf("round %d: %s must be exactly one of set and unset", i, name)
+			}
 		}
-		if unset := slices.Contains(blank.GetUnset(), name.Name); unset != (name.Empty == "unset") {
-			t.Errorf("%s: unset when empty is %v, the golden says %s", name.Name, unset, name.Empty)
+
+		var context cliv1.AgentContext
+		if err := envcodec.Decode(func(name string) string { return environment.GetSet()[name] }, &context); err != nil {
+			t.Fatalf("round %d: %v", i, err)
 		}
-	}
-	for name := range filled.GetSet() {
-		if !want[name] {
-			t.Errorf("%s is not in the golden", name)
+		wantContext := &cliv1.AgentContext{
+			Repository: start.Repository, Task: start.Task, RunId: string(start.Launch.Run), Agent: "agent-1",
+			Harness: strings.ReplaceAll(string(start.Launch.Spec.Harness), "_", "-"),
+		}
+		if !proto.Equal(&context, wantContext) {
+			t.Fatalf("round %d: the agent reads %v, want %v", i, &context, wantContext)
+		}
+		if got := environment.GetSet()[envcodec.NameOf(&cliv1.SkillEnvironment{}, "cli")]; got != start.Location.CLI {
+			t.Errorf("round %d: the skills' CLI is %q, want %q", i, got, start.Location.CLI)
+		}
+		if got, want := environment.GetSet()["HOME"], start.Location.Home; got != want {
+			t.Errorf("round %d: HOME is %q, want %q", i, got, want)
+		}
+
+		token := envcodec.NameOf(&pb.ToolServerCredentials{}, "token")
+		if _, ok := environment.GetSet()[token]; ok || slices.Contains(environment.GetUnset(), token) {
+			t.Fatalf("round %d: the agent's environment names the session's token", i)
+		}
+		if len(opened.GetTools()) != 1 {
+			t.Fatalf("round %d: %d tool servers", i, len(opened.GetTools()))
+		}
+		tool := opened.GetTools()[0]
+		for _, argument := range tool.GetArgv() {
+			if strings.Contains(argument, start.Tools.GetToken()) {
+				t.Fatalf("round %d: the token is in the tool server's argument %q", i, argument)
+			}
+		}
+		var credentials pb.ToolServerCredentials
+		if err := envcodec.Decode(func(name string) string { return tool.GetEnv()[name] }, &credentials); err != nil {
+			t.Fatalf("round %d: %v", i, err)
+		}
+		if !proto.Equal(&credentials, start.Tools) {
+			t.Fatalf("round %d: the tool server reads %v, the daemon gave %v", i, &credentials, start.Tools)
 		}
 	}
 }

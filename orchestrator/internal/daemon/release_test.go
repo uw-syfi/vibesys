@@ -11,7 +11,6 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 )
 
@@ -83,7 +82,7 @@ func newWorld(t *testing.T, deadline time.Duration, leadBusy bool) *world {
 // spawn adds a worker that behaves as kind says.
 func (w *world) spawn(kind worker) {
 	w.t.Helper()
-	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Credentials.GetToken()
 	id := fmt.Sprintf("spawn-%d", len(w.spawned))
 	resp, err := w.r.AgentService.Dispatch(agentContext(w.lead.ID, 1, token), &pb.DispatchRequest{Command: &pb.Command{Id: id, Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(w.run.ID), Role: pb.AgentRole_AGENT_ROLE_WORKER, Brief: "work",
@@ -97,7 +96,7 @@ func (w *world) spawn(kind worker) {
 	w.r.Settle(w.t)
 	if kind == workerHandedOff {
 		session := w.r.Sidecars.Session(core.Session{Agent: agent, N: 1})
-		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Env[daemon.EnvToken]), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done"}}}}})
+		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Credentials.GetToken()), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done"}}}}})
 		if err != nil {
 			w.t.Fatalf("handoff: %v", err)
 		}
@@ -153,7 +152,7 @@ func TestStoppingARunEndsTheSidecarsOfItsLeadAndItsWorkers(t *testing.T) {
 func TestAStoppedWorkersSidecarEndsAsTheRunsDo(t *testing.T) {
 	w := newWorld(t, 0, false)
 	w.spawn(workerIdle)
-	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Credentials.GetToken()
 	dispatchAs := func(id string, body *pb.Command) {
 		_, err := w.r.AgentService.Dispatch(agentContext(w.lead.ID, 1, token), &pb.DispatchRequest{Command: body})
 		if err != nil {

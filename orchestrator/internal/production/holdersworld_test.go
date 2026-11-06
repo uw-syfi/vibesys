@@ -15,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
 // The steps of a start where a host can crash or a holder can die.
@@ -449,6 +450,8 @@ func sessionStart(agent string, role core.AgentRole, repository string) daemon.S
 			Spec: core.AgentSpec{Harness: core.ClaudeCode},
 		},
 		Repository: repository, Task: "task",
-		Tools: daemon.LaunchEnv{"VIBESYS_ORCHESTRATOR_TOKEN": "a-token"},
+		Tools: &pb.ToolServerCredentials{
+			Endpoint: "/run/orchestrator-agent.sock", Agent: agent, Session: 1, Token: "a-token", Run: "run-1", Role: wire.RoleOut(role),
+		},
 	}
 }

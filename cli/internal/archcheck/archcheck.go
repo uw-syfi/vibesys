@@ -42,7 +42,10 @@ var rules = map[string][]string{
 		"gen/", "internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/environment/fakeenv", "internal/gitrepo", "internal/supervisor",
 	},
-	"cmd/vibesys-cli": {"gen/", "internal/wire", "internal/client", "internal/gitrepo", "internal/production", "internal/upgrade/"},
+	// The environment codec: a message written as environment variables and read back. It reads no
+	// process state; its callers hand it the environment.
+	"envcodec":        {"gen/"},
+	"cmd/vibesys-cli": {"envcodec", "gen/", "internal/wire", "internal/client", "internal/gitrepo", "internal/production", "internal/upgrade/"},
 
 	// The domain and what it needs from the machine.
 	"internal/core":                {},
