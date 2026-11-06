@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli", "orchestrator", "desktop_path"]
+jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli", "orchestrator", "desktop_path", "managed_install"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -387,3 +387,14 @@ files = [".claude-plugin/marketplace.json"]
 # With VIBESYS_E2E_DESKTOP_UI=1 the test also builds the desktop app and drives it on screen, so a
 # change to the app or to a package it uses (found through the package graph) selects it too.
 depends_on = ["pnpm:@vibesys/desktop"]
+
+[[components]]
+id = "managed_install"
+class = "manual"
+job = "managed_install"
+# The installer test builds a bundle and installs it in a clean container, so it runs when the
+# installer, the bundle builder, the workflow that publishes bundles, or what a bundle carries
+# (the sidecar project and lock, the skills and the plugin manifest) changes. The Go binaries are
+# built and tested by the gateway and cli jobs, so their sources do not select it.
+roots = ["orchestrator/sidecar", "skills"]
+files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]

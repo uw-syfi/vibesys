@@ -82,7 +82,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "repoctl only (f39d7eb8c)",
 			paths:       []string{"support/repoctl/test.go", "support/repoctl/test_test.go"},
-			wantCI:      []string{"agent_image", "cli", "clients", "desktop_path", "dockerfiles", "evaluators", "examples", "gateway", "impact", "orchestrator", "proto", "python", "real_tiers", "stitch"},
+			wantCI:      []string{"agent_image", "cli", "clients", "desktop_path", "dockerfiles", "evaluators", "examples", "gateway", "impact", "managed_install", "orchestrator", "proto", "python", "real_tiers", "stitch"},
 			wantGroups:  []string{"always_on", "repoctl_tests"},
 			wantSkipped: []string{},
 			wantTargets: 0,

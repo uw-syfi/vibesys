@@ -557,3 +557,15 @@ directory = "gateway"
 # about a minute of test time. The timeouts guard against a hang only.
 timeout_seconds = 660
 commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2e"]]
+
+[[check_groups]]
+name = "managed_install_tests"
+trigger_job = "managed_install"
+include_in_test = true
+language = "docker"
+directory = "."
+# Builds the four binaries for one platform (a cold Go cache costs about a minute), then installs
+# the bundle in a clean Debian container, which downloads uv, Python 3.12 and the sidecar's locked
+# dependencies, then installs a second version and several failures. Measured: about 4 minutes cold.
+timeout_seconds = 600
+commands = [["./scripts/tests/test_install.sh"]]

@@ -23,7 +23,7 @@ pnpm_packages = []
 [[cases]]
 name = "repoctl code and policy changes select all checks"
 paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml", ".github/actions/setup-runner-apt/action.yml"]
-jobs = ["agent_image", "dockerfiles", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway", "cli", "orchestrator", "desktop_path"]
+jobs = ["agent_image", "dockerfiles", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway", "cli", "orchestrator", "desktop_path", "managed_install"]
 [cases.collections]
 native_languages = "all"
 dockerfile_contexts = "all"
@@ -491,9 +491,9 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "plugin skills and the marketplace manifest select the desktop path end to end test"
+name = "plugin skills and the marketplace manifest select the desktop path end to end test and the installer test"
 paths = ["skills/search/optimize/SKILL.md", ".claude-plugin/marketplace.json"]
-jobs = ["desktop_path", "python"]
+jobs = ["desktop_path", "managed_install", "python"]
 [cases.collections]
 dockerfile_contexts = []
 native_languages = []
@@ -519,3 +519,13 @@ native_languages = []
 dockerfile_contexts = []
 native_targets = []
 pnpm_packages = { dependents_of = "pnpm:@vibesys/ui" }
+
+[[cases]]
+name = "the installer and the bundle builder select the installer test"
+paths = ["install.sh", "scripts/build_release_bundle.sh"]
+jobs = ["managed_install", "python"]
+[cases.collections]
+dockerfile_contexts = []
+native_languages = []
+native_targets = []
+pnpm_packages = []
