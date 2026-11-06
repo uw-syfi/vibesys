@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-import grpc
 import pytest
 from agentshim.testing import CodexScript, FakeExecutor
 from hypothesis import given
@@ -19,11 +18,15 @@ from tests import helpers as h
 from tests.fakes import ScriptedDriver
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
-from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2_grpc as sc_grpc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.holder import PROTOCOL, InvalidRequestError, OtherSessionError, SessionHolder
+from vs_sidecar.holder import (
+    PROTOCOL,
+    HolderLock,
+    InvalidRequestError,
+    OtherSessionError,
+    SessionHolder,
+)
 from vs_sidecar.main import BootstrapError, read_bootstrap, real_drivers, serve_holder
-from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import MemoryStore
 
 if TYPE_CHECKING:
@@ -191,22 +194,29 @@ def test_a_hello_with_no_versions_is_refused_by_name() -> None:
 # -- the bootstrap
 
 
+def _bootstrap(root: str = "/s") -> sc.SessionBootstrap:
+    return sc.SessionBootstrap(
+        listen_socket=f"{root}/sock",
+        state_directory=root,
+        lock_file=f"{root}/holder.lock",
+        processes_file=f"{root}/processes.pb",
+    )
+
+
 def test_a_bootstrap_is_read_from_the_whole_stream() -> None:
-    wanted = sc.SessionBootstrap(listen_socket="/s/sock", state_directory="/s")
+    wanted = _bootstrap()
     assert read_bootstrap(io.BytesIO(wanted.SerializeToString())) == wanted
 
 
-@given(
-    socket=st.one_of(st.just(""), relative),
-    state=st.one_of(st.just(""), relative),
+@pytest.mark.parametrize(
+    "field", ["listen_socket", "state_directory", "lock_file", "processes_file"]
 )
-def test_a_bad_bootstrap_is_refused_by_name(socket: str, state: str) -> None:
-    good = sc.SessionBootstrap(listen_socket="/s/sock", state_directory="/s")
-    bad = sc.SessionBootstrap(listen_socket=socket, state_directory="/s")
-    with pytest.raises(BootstrapError, match="listen_socket"):
-        read_bootstrap(io.BytesIO(bad.SerializeToString()))
-    bad = sc.SessionBootstrap(listen_socket="/s/sock", state_directory=state)
-    with pytest.raises(BootstrapError, match="state_directory"):
+@given(path=st.one_of(st.just(""), relative))
+def test_a_bad_bootstrap_is_refused_by_name(field: str, path: str) -> None:
+    good = _bootstrap()
+    bad = _bootstrap()
+    setattr(bad, field, path)
+    with pytest.raises(BootstrapError, match=field):
         read_bootstrap(io.BytesIO(bad.SerializeToString()))
     assert read_bootstrap(io.BytesIO(good.SerializeToString())) == good
 
@@ -235,9 +245,7 @@ def _leave() -> NoReturn:
 def test_a_process_nobody_opens_ends_after_its_wait_and_leaves_no_state() -> None:
     with tempfile.TemporaryDirectory(prefix="vs") as directory:
         root = Path(directory)
-        bootstrap = sc.SessionBootstrap(
-            listen_socket=str(root / "s"), state_directory=str(root / "state")
-        )
+        bootstrap = _bootstrap(str(root / "state"))
         with pytest.raises(_LeftError):
             serve_holder(
                 bootstrap,
@@ -246,34 +254,48 @@ def test_a_process_nobody_opens_ends_after_its_wait_and_leaves_no_state() -> Non
                 leave=_leave,
             )
         assert not (root / "state" / "events.log").exists()
-        assert (root / "state" / "sidecar.pid").read_text().strip() == str(os.getpid())
+        record = sc.SessionProcesses.FromString((root / "state" / "processes.pb").read_bytes())
+        assert record == sc.SessionProcesses(holder_pid=os.getpid())
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
-def test_a_process_on_a_socket_something_answers_on_leaves_it_alone() -> None:
+def test_a_second_process_for_a_session_ends_at_once_and_touches_nothing() -> None:
     with tempfile.TemporaryDirectory(prefix="vs") as directory:
         root = Path(directory)
-        socket = root / "s"
-        server = serve(SessionHolder(_Counted()), Wakeup(), socket)
+        bootstrap = _bootstrap(directory)
+        first = HolderLock.take(Path(bootstrap.lock_file))
         try:
-            bootstrap = sc.SessionBootstrap(
-                listen_socket=str(socket), state_directory=str(root / "state")
-            )
             with pytest.raises(_LeftError):
                 serve_holder(
                     bootstrap,
                     lambda _request, _state: pytest.fail("nobody opened it"),
                     leave=_leave,
                 )
-            assert not (root / "state" / "sidecar.pid").exists()
-            channel = grpc.insecure_channel(f"unix:{socket}")
-            stub = sc_grpc.AgentSessionServiceStub(channel)
-            hello = stub.Hello(sc.SessionHelloRequest(client=HOST), timeout=HANG_GUARD_SECONDS)
-            assert hello.compatibility == orch.COMPATIBILITY_COMPATIBLE
-            channel.close()
         finally:
-            server.stop(grace=0).wait()
+            first.release()
+        assert sorted(p.name for p in root.iterdir()) == ["holder.lock"]
+
+
+def test_a_process_whose_predecessor_died_takes_the_lock_whatever_files_are_left() -> None:
+    with tempfile.TemporaryDirectory(prefix="vs") as directory:
+        root = Path(directory)
+        bootstrap = _bootstrap(directory)
+        (root / "holder.lock").write_text("left over")
+        (root / "processes.pb").write_bytes(
+            sc.SessionProcesses(holder_pid=1234, agent_process_groups=[1234]).SerializeToString()
+        )
+        with pytest.raises(_LeftError):
+            serve_holder(
+                bootstrap,
+                lambda _request, _state: pytest.fail("nobody opened it"),
+                open_wait=0,
+                leave=_leave,
+            )
+        record = sc.SessionProcesses.FromString((root / "processes.pb").read_bytes())
+        assert record == sc.SessionProcesses(holder_pid=os.getpid())
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
 # -- a bundle that cannot be loaded

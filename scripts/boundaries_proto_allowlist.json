@@ -81,7 +81,11 @@
     "OpenSessionRequest.agent_data_directory",
     "OpenSessionRequest.working_directory",
     "SessionBootstrap.listen_socket",
+    "SessionBootstrap.lock_file",
+    "SessionBootstrap.processes_file",
     "SessionBootstrap.state_directory",
+    "SessionProcesses.agent_process_groups",
+    "SessionProcesses.holder_pid",
     "SessionSkills.directory"
   ],
   "proto/vibesys/orchestrator/v1/host_config.proto": [

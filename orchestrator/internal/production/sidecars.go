@@ -157,11 +157,15 @@ func (s *ProcessSidecars) refusedOpen(err error) error {
 func (s *ProcessSidecars) holderFor(ctx context.Context, session core.Session, place HolderPlace, command []string) (HolderLink, error) {
 	link, hello, err := s.ask(ctx, place)
 	if errors.Is(err, ErrNoHolder) {
+		// A process started by an earlier host that crashed before the session opened holds the
+		// place's lock and may not listen yet: it is waited for, and no second one is started.
 		exited := s.startingProcess(session)
-		if exited == nil {
-			s.Holders.ReapAgent(s.agentDir(session.Agent))
+		if exited == nil && !s.Holders.Alive(place) {
+			if err := s.Holders.ReapAgent(s.agentDir(session.Agent)); err != nil {
+				return nil, fmt.Errorf("end the agent processes an earlier session left: %w", err)
+			}
 			s.forgetConn(session)
-			if exited, err = s.Holders.Spawn(place, command, &pb.SessionBootstrap{ListenSocket: place.Socket, StateDirectory: place.Directory}); err != nil {
+			if exited, err = s.Holders.Spawn(place, command, place.Bootstrap()); err != nil {
 				return nil, fmt.Errorf("start the agent session: %w", err)
 			}
 			s.mu.Lock()
@@ -172,7 +176,7 @@ func (s *ProcessSidecars) holderFor(ctx context.Context, session core.Session, p
 			s.mu.Unlock()
 		}
 		if err := s.Holders.AwaitListening(ctx, place, exited); err != nil {
-			return nil, fmt.Errorf("the agent session did not answer on %s: %w: %s", place.Socket, err, s.Holders.Diagnostics(place))
+			return nil, fmt.Errorf("the agent session did not answer on %s: %w (its output is in %s)", place.Socket, err, place.LogFile())
 		}
 		link, hello, err = s.ask(ctx, place)
 	}
@@ -258,7 +262,14 @@ func (s *ProcessSidecars) Attach(ctx context.Context, session core.Session) (dae
 	link, hello, err := s.ask(ctx, place)
 	switch {
 	case errors.Is(err, ErrNoHolder):
-		s.Holders.Reap(place)
+		if s.Holders.Alive(place) {
+			// Its process lives and does not answer yet. It is not written off, or an agent would be left
+			// running beside the session that replaces it.
+			return nil, fmt.Errorf("the agent session's process lives and does not answer on %s", place.Socket)
+		}
+		if err := s.Holders.Reap(place); err != nil {
+			return nil, err
+		}
 		s.forgetConn(session)
 		return nil, daemon.ErrSidecarGone
 	case err != nil:
@@ -397,11 +408,18 @@ type heldSession struct {
 	log     *slog.Logger
 }
 
+// gone reads an error from a holder that did not answer. A free lock says the holder's process is
+// gone, at once and whatever the error was: waiting for a stream to end or a retry to give up is not
+// how the host finds out. Its agents are ended on the way, so none runs on unowned.
 func (c *heldSession) gone(err error) error {
-	if !c.owner.Holders.Listening(c.place) {
-		return daemon.ErrSidecarGone
+	if c.owner.Holders.Alive(c.place) {
+		return err
 	}
-	return err
+	reason := "its process is no longer running"
+	if reapErr := c.owner.Holders.Reap(c.place); reapErr != nil {
+		reason += "; " + reapErr.Error()
+	}
+	return &daemon.GoneError{Reason: reason}
 }
 
 // Send implements daemon.Sidecar.

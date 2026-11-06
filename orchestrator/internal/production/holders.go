@@ -32,6 +32,21 @@ type HolderPlace struct {
 	Directory string
 }
 
+// LockFile is the file a holder locks for its whole life.
+func (p HolderPlace) LockFile() string { return filepath.Join(p.Directory, "holder.lock") }
+
+// ProcessesFile is the SessionProcesses record a holder keeps while it holds the lock.
+func (p HolderPlace) ProcessesFile() string { return filepath.Join(p.Directory, "processes.pb") }
+
+// LogFile is where the holder's output goes. The host opens it and hands it over as the holder's
+// standard output and error, so it is a file for a person to read: nothing decides by it.
+func (p HolderPlace) LogFile() string { return filepath.Join(p.Directory, "holder.log") }
+
+// Bootstrap is the message a holder at the place starts from.
+func (p HolderPlace) Bootstrap() *pb.SessionBootstrap {
+	return &pb.SessionBootstrap{ListenSocket: p.Socket, StateDirectory: p.Directory, LockFile: p.LockFile(), ProcessesFile: p.ProcessesFile()}
+}
+
 // ErrNoHolder says nothing answers at a place.
 var ErrNoHolder = errors.New("nothing holds this session")
 
@@ -43,26 +58,28 @@ type SessionHolders interface {
 	Dial(ctx context.Context, place HolderPlace) (HolderLink, error)
 	// Spawn starts a holder at a place, in a session of its own so it outlives this process. It
 	// returns a channel that is closed when the process has ended. A holder's only input is its
-	// bootstrap, so nothing is added to the words of command.
+	// bootstrap, so nothing is added to the words of command. It first ends what a gone holder left
+	// at the place, and refuses with ErrHolderLives when a holder lives there.
 	Spawn(place HolderPlace, command []string, bootstrap *pb.SessionBootstrap) (<-chan struct{}, error)
 	// AwaitListening returns once something listens at a place. It returns an error when exited is
-	// closed first, or when the context ends.
+	// closed first, or when the context ends. With a nil exited, for a holder this host did not
+	// start, it returns an error when that holder ends first.
 	AwaitListening(ctx context.Context, place HolderPlace, exited <-chan struct{}) error
-	// Listening says something listens at a place. A process that ended leaves no listener, whatever
-	// its files say, so this is the host's proof of life.
-	Listening(place HolderPlace) bool
+	// Alive says a holder lives at a place: it holds the place's lock, which the system frees when the
+	// process ends, however it ends. This is the host's only proof of life, and a place with no lock
+	// has no holder, whatever any file says.
+	Alive(place HolderPlace) bool
 	// End ends the holder at a place and its agents, and leaves nothing that names either.
 	End(place HolderPlace) error
-	// Reap ends what a holder that is gone left running at a place.
-	Reap(place HolderPlace)
+	// Reap ends what a holder that is gone left running at a place. A place a holder lives at is left
+	// alone. A record of processes that cannot be read is reported as a *ProcessRecordError, and
+	// nothing is ended for it.
+	Reap(place HolderPlace) error
 	// ReapAgent does Reap for every session of an agent that nothing holds, so no old agent process
 	// works in a worktree under a new session.
-	ReapAgent(agentDirectory string)
+	ReapAgent(agentDirectory string) error
 	// Worktree makes a detached git worktree of a repository at path, unless one is there.
 	Worktree(ctx context.Context, repository, path string) error
-	// Diagnostics is text for a person about why a holder at a place did not come up. It is display
-	// only: no decision reads it.
-	Diagnostics(place HolderPlace) string
 }
 
 // HolderLink is the host's side of AgentSessionService. The stream it opens never waits: a Next with
@@ -79,13 +96,16 @@ type HolderLink interface {
 // ProcessHolders is SessionHolders over real processes, one Unix socket per session and gRPC.
 type ProcessHolders struct {
 	Log *slog.Logger
+	// Signals ends processes. Nil ends them through the operating system.
+	Signals ProcessSignals
 }
 
-const (
-	holderLog     = "sidecar.log"
-	holderPidFile = "sidecar.pid"
-	holderGroups  = "agent.pgids"
-)
+func (h *ProcessHolders) signals() ProcessSignals {
+	if h.Signals == nil {
+		return OSSignals{}
+	}
+	return h.Signals
+}
 
 // Dial implements SessionHolders.
 func (h *ProcessHolders) Dial(ctx context.Context, place HolderPlace) (HolderLink, error) {
@@ -111,14 +131,14 @@ func (h *ProcessHolders) Spawn(place HolderPlace, command []string, bootstrap *p
 	if err := os.MkdirAll(place.Directory, 0o700); err != nil {
 		return nil, err
 	}
-	for _, stale := range []string{filepath.Join(place.Directory, holderPidFile), place.Socket} {
-		_ = os.Remove(stale)
+	if err := prepareStart(place, h.signals()); err != nil {
+		return nil, err
 	}
 	data, err := proto.Marshal(bootstrap)
 	if err != nil {
 		return nil, err
 	}
-	log, err := os.OpenFile(filepath.Join(place.Directory, holderLog), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	log, err := os.OpenFile(place.LogFile(), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -138,15 +158,24 @@ func (h *ProcessHolders) Spawn(place HolderPlace, command []string, bootstrap *p
 	return exited, nil
 }
 
-// AwaitListening implements SessionHolders.
+// AwaitListening implements SessionHolders. A holder this host did not start has no exit to watch,
+// so its lock stands for it: once that is free and nothing listens, it is gone.
 func (h *ProcessHolders) AwaitListening(ctx context.Context, place HolderPlace, exited <-chan struct{}) error {
+	adopted := exited == nil
 	for {
-		if h.Listening(place) {
+		if h.listening(place) {
 			return nil
+		}
+		if adopted && !alive(place) {
+			return errors.New("it ended before it listened")
 		}
 		select {
 		case <-exited:
-			return errors.New("it exited at start")
+			// A process of ours that ended at once because another holds the place: wait for that one.
+			if !alive(place) {
+				return errors.New("it exited at start")
+			}
+			adopted, exited = true, nil
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(50 * time.Millisecond):
@@ -154,8 +183,7 @@ func (h *ProcessHolders) AwaitListening(ctx context.Context, place HolderPlace, 
 	}
 }
 
-// Listening implements SessionHolders.
-func (h *ProcessHolders) Listening(place HolderPlace) bool {
+func (h *ProcessHolders) listening(place HolderPlace) bool {
 	conn, err := net.DialTimeout("unix", place.Socket, time.Second)
 	if err != nil {
 		return false
@@ -164,36 +192,26 @@ func (h *ProcessHolders) Listening(place HolderPlace) bool {
 	return true
 }
 
-// End implements SessionHolders. The pid file is trusted only while the socket answers: the holder
-// wrote it before it listened, so a pid the system has since given to another program is never
-// signalled.
-func (h *ProcessHolders) End(place HolderPlace) error {
-	if h.Listening(place) {
-		if pid, ok := readPid(place.Directory); ok {
-			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-				return err
-			}
-		}
-	}
-	reap(place.Directory)
-	retire(place.Directory)
-	return nil
-}
+// Alive implements SessionHolders.
+func (h *ProcessHolders) Alive(place HolderPlace) bool { return alive(place) }
+
+// End implements SessionHolders.
+func (h *ProcessHolders) End(place HolderPlace) error { return killHolder(place, h.signals()) }
 
 // Reap implements SessionHolders.
-func (h *ProcessHolders) Reap(place HolderPlace) { reap(place.Directory) }
+func (h *ProcessHolders) Reap(place HolderPlace) error { return reapUnheld(place, h.signals()) }
 
 // ReapAgent implements SessionHolders.
-func (h *ProcessHolders) ReapAgent(agentDirectory string) {
+func (h *ProcessHolders) ReapAgent(agentDirectory string) error {
 	sessions, _ := os.ReadDir(agentDirectory)
+	var errs []error
 	for _, e := range sessions {
 		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
 			dir := filepath.Join(agentDirectory, e.Name())
-			if !h.Listening(HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}) {
-				reap(dir)
-			}
+			errs = append(errs, h.Reap(HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // Worktree implements SessionHolders.
@@ -206,47 +224,6 @@ func (h *ProcessHolders) Worktree(ctx context.Context, repository, path string) 
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// Diagnostics implements SessionHolders.
-func (h *ProcessHolders) Diagnostics(place HolderPlace) string {
-	path := filepath.Join(place.Directory, holderLog)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "no log at " + path
-	}
-	if len(data) > 2000 {
-		data = data[len(data)-2000:]
-	}
-	return strings.TrimSpace(string(data))
-}
-
-func readPid(dir string) (int, bool) {
-	data, err := os.ReadFile(filepath.Join(dir, holderPidFile))
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	return pid, err == nil && pid > 0
-}
-
-// retire removes what names a session's processes once they are ended.
-func retire(dir string) {
-	_ = os.Remove(filepath.Join(dir, holderPidFile))
-	_ = os.WriteFile(filepath.Join(dir, holderGroups), nil, 0o600)
-}
-
-// reap kills each process group a gone holder recorded, so its agent does not run on unowned.
-func reap(dir string) {
-	data, err := os.ReadFile(filepath.Join(dir, holderGroups))
-	if err != nil {
-		return
-	}
-	for _, field := range strings.Fields(string(data)) {
-		if pgid, err := strconv.Atoi(field); err == nil && pgid > 1 {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-	}
 }
 
 // grpcLink is HolderLink over gRPC.

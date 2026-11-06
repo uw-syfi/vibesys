@@ -60,6 +60,39 @@ message SessionBootstrap {
       expression: "this.startsWith('/')"
     }
   ];
+  // The file the process holds an exclusive lock on for its whole life, taken before anything else.
+  // A process that cannot take it ends at once, because another one lives for this session. The host
+  // learns whether the process lives by trying the same lock: it is free exactly when the process is
+  // gone, whatever any file says.
+  string lock_file = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "session_bootstrap.lock_file.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // The file the process replaces atomically with a SessionProcesses, while it holds the lock.
+  string processes_file = 4 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "session_bootstrap.processes_file.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+}
+
+// SessionProcesses is what must be ended when a session is over, as binary. The session's process
+// replaces it atomically while it holds its lock, and the host reads it only to clean up after that
+// process. Its pid is signalled only while the lock is held, since only then is it the pid of a
+// process that still lives; the groups are signalled only when the lock is free. These are process
+// ids on purpose: this reader's whole job is to signal processes, and no client sees it.
+message SessionProcesses {
+  // The process that holds the lock.
+  uint32 holder_pid = 1 [(buf.validate.field).uint32.gt = 0];
+  // The process groups of the agent's processes. Group 1 is never one of them.
+  repeated uint32 agent_process_groups = 2 [(buf.validate.field).repeated.items.uint32.gt = 1];
 }
 
 message SessionHelloRequest {

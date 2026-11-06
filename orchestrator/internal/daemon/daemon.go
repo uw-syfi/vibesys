@@ -175,7 +175,7 @@ func (d *Daemon) sidecar(ctx context.Context, session core.Session) (Sidecar, er
 	var unusable *LaunchError
 	switch {
 	case errors.Is(err, ErrSidecarGone):
-		return nil, d.lose(session, "the agent session was not found when the daemon looked for it", "")
+		return nil, d.lose(session, lostBecause("the agent session was not found when the daemon looked for it", err), "")
 	case errors.As(err, &unusable):
 		return nil, d.lose(session, unusable.Error(), unusable.Reason)
 	case err != nil:
@@ -376,7 +376,7 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 	}
 	err = bounded(d.cfg.Bounds, ctx, func(c context.Context) error { return sc.Send(c, cmd) })
 	if errors.Is(err, ErrSidecarGone) {
-		return d.lose(session, "the agent session went away while the daemon was sending it a command", "")
+		return d.lose(session, lostBecause("the agent session went away while the daemon was sending it a command", err), "")
 	}
 	return err
 }
@@ -482,7 +482,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 		})
 		switch {
 		case errors.Is(err, ErrSidecarGone):
-			return true, d.lose(session, "the agent session went away before its events could be read", "")
+			return true, d.lose(session, lostBecause("the agent session went away before its events could be read", err), "")
 		case err != nil:
 			return false, fmt.Errorf("follow %s/%d: %w", session.Agent, session.N, err)
 		}
@@ -498,7 +498,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 			case errors.Is(err, ErrIdle):
 				return progress, nil
 			case errors.Is(err, ErrSidecarGone):
-				return true, d.lose(session, "the agent session ended while the daemon was reading its events", "")
+				return true, d.lose(session, lostBecause("the agent session ended while the daemon was reading its events", err), "")
 			case err != nil:
 				// The stream broke; the next step reopens it after the committed offset.
 				f.stream.Close()

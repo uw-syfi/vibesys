@@ -187,8 +187,140 @@ func TestEveryInterleavingOfCrashesAndDeathsEndsInOneOutcome(t *testing.T) {
 			if live := s.world.liveAgents(); live > 1 {
 				t.Fatalf("%d sessions of one agent have agents running", live)
 			}
+			if live := s.world.liveAgents(); live > 0 && a.Status.Over() {
+				t.Fatalf("the lead ended (%s) and %d agents still run", a.Status, live)
+			}
 		})
 	}
+}
+
+// A host that crashes after it started a process and before the process listens finds that process
+// holding the session's lock, and waits for it. It does not start a second one in its place.
+func TestAHostThatCrashesBetweenSpawnAndBindStartsNoSecondProcess(t *testing.T) {
+	for late := 1; late <= 3; late++ {
+		t.Run(fmt.Sprint(late, " dials find nothing"), func(t *testing.T) {
+			s := newStartSim(t)
+			s.world.crashes[stepSpawnAfter] = true
+			s.world.lateBinds = late
+			lead := s.start()
+			s.settle()
+			a := s.lead(lead)
+			if a.Status.Over() || a.ResumeToken != "token" || a.Session != 1 {
+				t.Fatalf("lead %s, session %d, resume %q: want the first session open", a.Status, a.Session, a.ResumeToken)
+			}
+			if s.world.spawns != 1 || s.world.startedAgents() != 1 {
+				t.Fatalf("%d processes and %d agents were started, want one of each", s.world.spawns, s.world.startedAgents())
+			}
+		})
+	}
+}
+
+// A second process at a place a process holds is refused, whatever the host believes.
+func TestAProcessIsNotStartedAtAPlaceAProcessHolds(t *testing.T) {
+	w := newHolderWorld()
+	place := HolderPlace{Socket: "/s/sock", Directory: "/s"}
+	if _, err := w.Spawn(place, []string{"/bin/holder"}, place.Bootstrap()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Spawn(place, []string{"/bin/holder"}, place.Bootstrap()); !errors.Is(err, ErrHolderLives) {
+		t.Fatalf("got %v, want ErrHolderLives while the first has not bound", err)
+	}
+}
+
+// A holder whose process is gone is found gone from its lock, at once: a name its socket left, which
+// a call to it still reaches, is not taken for a holder, and a call that failed with Unavailable is
+// not retried until a stream ends. The agent it left is ended, and the reason is named.
+func TestADeadHoldersLockSaysSoWhateverItsSocketNameDoes(t *testing.T) {
+	for _, call := range []string{"send", "follow", "events"} {
+		t.Run(call, func(t *testing.T) {
+			w := newHolderWorld()
+			sidecars := w.sidecars("/sessions")
+			start := sessionStart("agent-1", core.RoleLead, "/repo")
+			held, err := sidecars.Launch(context.Background(), start)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream, err := held.Follow(context.Background(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			place := sidecars.place(start.Launch.Session)
+			w.holders[place.Socket].dead = true // SIGKILLed: the lock is free, the socket name is still there.
+			if !w.agents[place.Socket] {
+				t.Fatal("the agent is not running before the holder died")
+			}
+			switch call {
+			case "send":
+				err = held.Send(context.Background(), &pb.SessionCommand{EffectId: "e1"})
+			case "follow":
+				_, err = held.Follow(context.Background(), 0)
+			case "events":
+				_, err = stream.Next()
+			}
+			var gone *daemon.GoneError
+			if !errors.Is(err, daemon.ErrSidecarGone) || !errors.As(err, &gone) || !strings.Contains(gone.Reason, "no longer running") {
+				t.Fatalf("got %v, want the session gone, with its reason", err)
+			}
+			if w.agents[place.Socket] {
+				t.Fatal("the agent the holder left is still running")
+			}
+		})
+	}
+}
+
+// A holder that lives is never written off for an error from a call to it.
+func TestAHolderThatLivesIsNotWrittenOffForAFailedCall(t *testing.T) {
+	w := newHolderWorld()
+	sidecars := w.sidecars("/sessions")
+	start := sessionStart("agent-1", core.RoleLead, "/repo")
+	held, err := sidecars.Launch(context.Background(), start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	place := sidecars.place(start.Launch.Session)
+	w.holders[place.Socket].unreachable = true
+	err = held.Send(context.Background(), &pb.SessionCommand{EffectId: "e1"})
+	if err == nil || errors.Is(err, daemon.ErrSidecarGone) {
+		t.Fatalf("got %v, want the call's own error", err)
+	}
+	if !w.agents[place.Socket] {
+		t.Fatal("the agent of a holder that lives was ended")
+	}
+}
+
+// A holder killed without warning ends its session lost, with the reason, and the agent it left is
+// reaped: none runs on in the worktree of nothing. The lead goes on under a second session.
+func TestAKilledHoldersSessionEndsLostAndNamedAndItsAgentIsReaped(t *testing.T) {
+	s := newStartSim(t)
+	lead := s.start()
+	s.settle()
+	if s.world.liveAgents() != 1 {
+		t.Fatalf("%d agents run before the kill", s.world.liveAgents())
+	}
+	for _, h := range s.world.holders {
+		h.dead = true
+	}
+	s.settle()
+	a := s.lead(lead)
+	if a.Session != 2 || a.Status.Over() {
+		t.Fatalf("lead %s in session %d, want it live in the second", a.Status, a.Session)
+	}
+	if s.world.startedAgents() != 2 || s.world.liveAgents() != 1 {
+		t.Fatalf("%d agents started and %d live, want the first one reaped", s.world.startedAgents(), s.world.liveAgents())
+	}
+	events, err := s.r.Store.EventsAfter(a.Run, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if lost, ok := e.Event.Body.(core.Agent); ok && lost.Status == core.AgentLost {
+			if !strings.Contains(lost.EndDetail, "no longer running") {
+				t.Fatalf("the session was lost with %q, want the reason", lost.EndDetail)
+			}
+			return
+		}
+	}
+	t.Fatal("no event says the first session was lost")
 }
 
 // A holder of another protocol ends in a named outcome, never a hang, and is not left running.
@@ -443,7 +575,7 @@ func TestTheHolderATestRunsAgainstPlaysTheConformanceCorpus(t *testing.T) {
 		t.Run(scenario.Name, func(t *testing.T) {
 			w := newHolderWorld()
 			place := HolderPlace{Socket: "/s/sock", Directory: "/s"}
-			if _, err := w.Spawn(place, []string{"/bin/holder"}, &pb.SessionBootstrap{ListenSocket: place.Socket, StateDirectory: place.Directory}); err != nil {
+			if _, err := w.Spawn(place, []string{"/bin/holder"}, place.Bootstrap()); err != nil {
 				t.Fatal(err)
 			}
 			link, err := w.Dial(context.Background(), place)
