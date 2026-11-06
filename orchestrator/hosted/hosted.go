@@ -68,7 +68,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", err.Error())
 	}
 	searches := production.SearchFor()
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts}, o.Log)
+	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts}, o.Log)
 	if err != nil {
 		var held *production.HeldError
 		if errors.As(err, &held) {

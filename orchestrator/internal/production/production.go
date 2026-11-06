@@ -19,7 +19,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -158,7 +157,6 @@ type Wiring struct {
 
 	Sidecars daemon.Sidecars
 	Jobs     jobs.JobSource
-	Plans    daemon.PlanReader
 	// Tree is the file system a start is checked against.
 	Tree Tree
 	// Version is the binary's version, reported by Hello.
@@ -245,7 +243,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 // Service is the daemon's OrchestratorService for one audience.
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
-		Plans: x.wiring.Plans, Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
+		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
 		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree},
 	})
 }
@@ -360,17 +358,4 @@ func (NoSidecars) Launch(context.Context, core.LaunchSession, daemon.LaunchEnv) 
 // Attach implements daemon.Sidecars.
 func (NoSidecars) Attach(context.Context, core.Session) (daemon.Sidecar, error) {
 	return nil, daemon.ErrSidecarGone
-}
-
-// NoPlans is a plan reader for a build with no vibesys-cli wired in.
-type NoPlans struct{}
-
-// ListPlans implements daemon.PlanReader.
-func (NoPlans) ListPlans(context.Context, core.Run) ([]*pb.Plan, error) {
-	return nil, errors.New("this build has no vibesys-cli wired in, so plans cannot be read")
-}
-
-// ViewPlan implements daemon.PlanReader.
-func (NoPlans) ViewPlan(context.Context, core.Run, uint32) (*pb.Plan, error) {
-	return nil, errors.New("this build has no vibesys-cli wired in, so plans cannot be read")
 }

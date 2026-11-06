@@ -2,11 +2,11 @@
 // @generated from file vibesys/orchestrator/v1/service.proto (package vibesys.orchestrator.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenExtension, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, extDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { FileOptions } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
 import type { Command, Delta, Event, Receipt } from "./events_pb.js";
 import { file_vibesys_orchestrator_v1_events } from "./events_pb.js";
 import type { Agent, Item, Message as Message$1, Run, Turn } from "./orchestrator_pb.js";
@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/service.proto.
  */
 export const file_vibesys_orchestrator_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJfCg1CdWlsZFZlcnNpb25zEhYKDmJpbmFyeV92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SHAoUbWluX3Byb3RvY29sX3ZlcnNpb24YAyABKA0iTAoPRGlzcGF0Y2hSZXF1ZXN0EjkKB2NvbW1hbmQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21tYW5kQga6SAPIAQEiTQoQRGlzcGF0Y2hSZXNwb25zZRI5CgdyZWNlaXB0GAEgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEIGukgDyAEBIk4KDEhlbGxvUmVxdWVzdBI+CgZjbGllbnQYASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQEimgEKDUhlbGxvUmVzcG9uc2USPgoGZGFlbW9uGAEgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQnVpbGRWZXJzaW9uc0IGukgDyAEBEkkKDWNvbXBhdGliaWxpdHkYAiABKA4yJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21wYXRpYmlsaXR5Qgq6SAeCAQQQASAAIioKEFdhdGNoUnVuc1JlcXVlc3QSFgoOYWZ0ZXJfc2VxdWVuY2UYASABKAQiqQIKDFJ1bnNTbmFwc2hvdBIqCgRydW5zGAEgAygLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuEi4KBmFnZW50cxgCIAMoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50EhAKCHNlcXVlbmNlGAMgASgEEiwKBXR1cm5zGAQgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybhIyCghtZXNzYWdlcxgFIAMoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USNgoIc2VhcmNoZXMYBiADKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZRIRCgl0cnVuY2F0ZWQYByABKAgixgEKEVdhdGNoUnVuc1Jlc3BvbnNlEjkKCHNuYXBzaG90GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuc1NuYXBzaG90SAASLwoFZXZlbnQYAiABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FdmVudEgAEjYKBnNlYXJjaBgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlSABCDQoEYm9keRIFukgCCAEiZQoRV2F0Y2hBZ2VudFJlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHQoJcGFnZV9zaXplGAIgASgNQgq6SAcqBRjoByAAEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgEImgKCUl0ZW1zUGFnZRIsCgVpdGVtcxgBIAMoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW0SEAoIc2VxdWVuY2UYAiABKAQSGwoTbmV4dF9iZWZvcmVfb3JkaW5hbBgDIAEoDSL4AQoSV2F0Y2hBZ2VudFJlc3BvbnNlEjIKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VIABItCgRpdGVtGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEi8KBWRlbHRhGAMgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsdGFIABItCgR0dXJuGAQgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEhAKCHNlcXVlbmNlGAUgASgEQg0KBGJvZHkSBbpIAggBIm0KEExpc3RJdGVtc1JlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHwoOYmVmb3JlX29yZGluYWwYAiABKA1CB7pIBCoCIAASHQoJcGFnZV9zaXplGAMgASgNQgq6SAcqBRjoByAAIk0KEUxpc3RJdGVtc1Jlc3BvbnNlEjgKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VCBrpIA8gBASJSCgtQbGFuQ29tbWVudBIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSKTAgoEUGxhbhIXCgZudW1iZXIYASABKA1CB7pIBCoCIAASDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCRI9CgZzdGF0dXMYBCABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QbGFuU3RhdHVzQgi6SAWCAQIQARI2Cghjb21tZW50cxgFIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBsYW5Db21tZW50Ei4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIisKEExpc3RQbGFuc1JlcXVlc3QSFwoGcnVuX2lkGAEgASgJQge6SARyAhABIkEKEUxpc3RQbGFuc1Jlc3BvbnNlEiwKBXBsYW5zGAEgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGxhbiJDCg9WaWV3UGxhblJlcXVlc3QSFwoGcnVuX2lkGAEgASgJQge6SARyAhABEhcKBm51bWJlchgCIAEoDUIHukgEKgIgACJHChBWaWV3UGxhblJlc3BvbnNlEjMKBHBsYW4YASABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QbGFuQga6SAPIAQEqkAEKDUNvbXBhdGliaWxpdHkSHQoZQ09NUEFUSUJJTElUWV9VTlNQRUNJRklFRBAAEhwKGENPTVBBVElCSUxJVFlfQ09NUEFUSUJMRRABEiAKHENPTVBBVElCSUxJVFlfQ0xJRU5UX1RPT19PTEQQAhIgChxDT01QQVRJQklMSVRZX0RBRU1PTl9UT09fT0xEEAMqngEKClBsYW5TdGF0dXMSGwoXUExBTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIUChBQTEFOX1NUQVRVU19PUEVOEAESFgoSUExBTl9TVEFUVVNfQ0hPU0VOEAISEwoPUExBTl9TVEFUVVNfV09OEAMSFgoSUExBTl9TVEFUVVNfUEFSS0VEEAQSGAoUUExBTl9TVEFUVVNfUkVKRUNURUQQBTLGBQoTT3JjaGVzdHJhdG9yU2VydmljZRJWCgVIZWxsbxIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVxdWVzdBomLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVzcG9uc2USXwoIRGlzcGF0Y2gSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlc3BvbnNlEmQKCVdhdGNoUnVucxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXNwb25zZTABEmcKCldhdGNoQWdlbnQSKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVxdWVzdBorLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXNwb25zZTABEmIKCUxpc3RJdGVtcxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXNwb25zZRJiCglMaXN0UGxhbnMSKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0UGxhbnNSZXF1ZXN0GioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGlzdFBsYW5zUmVzcG9uc2USXwoIVmlld1BsYW4SKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5WaWV3UGxhblJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5WaWV3UGxhblJlc3BvbnNlQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJfCg1CdWlsZFZlcnNpb25zEhYKDmJpbmFyeV92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SHAoUbWluX3Byb3RvY29sX3ZlcnNpb24YAyABKA0iTAoPRGlzcGF0Y2hSZXF1ZXN0EjkKB2NvbW1hbmQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21tYW5kQga6SAPIAQEiTQoQRGlzcGF0Y2hSZXNwb25zZRI5CgdyZWNlaXB0GAEgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEIGukgDyAEBIk4KDEhlbGxvUmVxdWVzdBI+CgZjbGllbnQYASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQEimgEKDUhlbGxvUmVzcG9uc2USPgoGZGFlbW9uGAEgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQnVpbGRWZXJzaW9uc0IGukgDyAEBEkkKDWNvbXBhdGliaWxpdHkYAiABKA4yJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21wYXRpYmlsaXR5Qgq6SAeCAQQQASAAIioKEFdhdGNoUnVuc1JlcXVlc3QSFgoOYWZ0ZXJfc2VxdWVuY2UYASABKAQiqQIKDFJ1bnNTbmFwc2hvdBIqCgRydW5zGAEgAygLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuEi4KBmFnZW50cxgCIAMoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50EhAKCHNlcXVlbmNlGAMgASgEEiwKBXR1cm5zGAQgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybhIyCghtZXNzYWdlcxgFIAMoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USNgoIc2VhcmNoZXMYBiADKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZRIRCgl0cnVuY2F0ZWQYByABKAgixgEKEVdhdGNoUnVuc1Jlc3BvbnNlEjkKCHNuYXBzaG90GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuc1NuYXBzaG90SAASLwoFZXZlbnQYAiABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FdmVudEgAEjYKBnNlYXJjaBgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlSABCDQoEYm9keRIFukgCCAEiZQoRV2F0Y2hBZ2VudFJlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHQoJcGFnZV9zaXplGAIgASgNQgq6SAcqBRjoByAAEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgEImgKCUl0ZW1zUGFnZRIsCgVpdGVtcxgBIAMoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW0SEAoIc2VxdWVuY2UYAiABKAQSGwoTbmV4dF9iZWZvcmVfb3JkaW5hbBgDIAEoDSL4AQoSV2F0Y2hBZ2VudFJlc3BvbnNlEjIKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VIABItCgRpdGVtGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEi8KBWRlbHRhGAMgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsdGFIABItCgR0dXJuGAQgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEhAKCHNlcXVlbmNlGAUgASgEQg0KBGJvZHkSBbpIAggBIm0KEExpc3RJdGVtc1JlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHwoOYmVmb3JlX29yZGluYWwYAiABKA1CB7pIBCoCIAASHQoJcGFnZV9zaXplGAMgASgNQgq6SAcqBRjoByAAIk0KEUxpc3RJdGVtc1Jlc3BvbnNlEjgKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VCBrpIA8gBASqQAQoNQ29tcGF0aWJpbGl0eRIdChlDT01QQVRJQklMSVRZX1VOU1BFQ0lGSUVEEAASHAoYQ09NUEFUSUJJTElUWV9DT01QQVRJQkxFEAESIAocQ09NUEFUSUJJTElUWV9DTElFTlRfVE9PX09MRBACEiAKHENPTVBBVElCSUxJVFlfREFFTU9OX1RPT19PTEQQAzKBBAoTT3JjaGVzdHJhdG9yU2VydmljZRJWCgVIZWxsbxIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVxdWVzdBomLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVzcG9uc2USXwoIRGlzcGF0Y2gSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlc3BvbnNlEmQKCVdhdGNoUnVucxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXNwb25zZTABEmcKCldhdGNoQWdlbnQSKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVxdWVzdBorLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXNwb25zZTABEmIKCUxpc3RJdGVtcxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXNwb25zZTpJChBwcm90b2NvbF92ZXJzaW9uEhwuZ29vZ2xlLnByb3RvYnVmLkZpbGVPcHRpb25zGL6HAyABKA1SD3Byb3RvY29sVmVyc2lvbjpQChRtaW5fcHJvdG9jb2xfdmVyc2lvbhIcLmdvb2dsZS5wcm90b2J1Zi5GaWxlT3B0aW9ucxi/hwMgASgNUhJtaW5Qcm90b2NvbFZlcnNpb25CXFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MfC7GAH4uxgBYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
 
 /**
  * BuildVersions is what one build carries.
@@ -399,153 +399,6 @@ export const ListItemsResponseSchema: GenMessage<ListItemsResponse> = /*@__PURE_
   messageDesc(file_vibesys_orchestrator_v1_service, 12);
 
 /**
- * @generated from message vibesys.orchestrator.v1.PlanComment
- */
-export type PlanComment = Message<"vibesys.orchestrator.v1.PlanComment"> & {
-  /**
-   * @generated from field: string text = 1;
-   */
-  text: string;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp at = 2;
-   */
-  at?: Timestamp | undefined;
-
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.PlanComment.
- * Use `create(PlanCommentSchema)` to create a new message.
- */
-export const PlanCommentSchema: GenMessage<PlanComment> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 13);
-
-/**
- * @generated from message vibesys.orchestrator.v1.Plan
- */
-export type Plan = Message<"vibesys.orchestrator.v1.Plan"> & {
-  /**
-   * @generated from field: uint32 number = 1;
-   */
-  number: number;
-
-  /**
-   * @generated from field: string title = 2;
-   */
-  title: string;
-
-  /**
-   * @generated from field: string body = 3;
-   */
-  body: string;
-
-  /**
-   * @generated from field: vibesys.orchestrator.v1.PlanStatus status = 4;
-   */
-  status: PlanStatus;
-
-  /**
-   * @generated from field: repeated vibesys.orchestrator.v1.PlanComment comments = 5;
-   */
-  comments: PlanComment[];
-
-  /**
-   * @generated from field: google.protobuf.Timestamp created_at = 6;
-   */
-  createdAt?: Timestamp | undefined;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp updated_at = 7;
-   */
-  updatedAt?: Timestamp | undefined;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.Plan.
- * Use `create(PlanSchema)` to create a new message.
- */
-export const PlanSchema: GenMessage<Plan> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 14);
-
-/**
- * @generated from message vibesys.orchestrator.v1.ListPlansRequest
- */
-export type ListPlansRequest = Message<"vibesys.orchestrator.v1.ListPlansRequest"> & {
-  /**
-   * @generated from field: string run_id = 1;
-   */
-  runId: string;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.ListPlansRequest.
- * Use `create(ListPlansRequestSchema)` to create a new message.
- */
-export const ListPlansRequestSchema: GenMessage<ListPlansRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 15);
-
-/**
- * @generated from message vibesys.orchestrator.v1.ListPlansResponse
- */
-export type ListPlansResponse = Message<"vibesys.orchestrator.v1.ListPlansResponse"> & {
-  /**
-   * @generated from field: repeated vibesys.orchestrator.v1.Plan plans = 1;
-   */
-  plans: Plan[];
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.ListPlansResponse.
- * Use `create(ListPlansResponseSchema)` to create a new message.
- */
-export const ListPlansResponseSchema: GenMessage<ListPlansResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 16);
-
-/**
- * @generated from message vibesys.orchestrator.v1.ViewPlanRequest
- */
-export type ViewPlanRequest = Message<"vibesys.orchestrator.v1.ViewPlanRequest"> & {
-  /**
-   * @generated from field: string run_id = 1;
-   */
-  runId: string;
-
-  /**
-   * @generated from field: uint32 number = 2;
-   */
-  number: number;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.ViewPlanRequest.
- * Use `create(ViewPlanRequestSchema)` to create a new message.
- */
-export const ViewPlanRequestSchema: GenMessage<ViewPlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 17);
-
-/**
- * @generated from message vibesys.orchestrator.v1.ViewPlanResponse
- */
-export type ViewPlanResponse = Message<"vibesys.orchestrator.v1.ViewPlanResponse"> & {
-  /**
-   * @generated from field: vibesys.orchestrator.v1.Plan plan = 1;
-   */
-  plan?: Plan | undefined;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.ViewPlanResponse.
- * Use `create(ViewPlanResponseSchema)` to create a new message.
- */
-export const ViewPlanResponseSchema: GenMessage<ViewPlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 18);
-
-/**
  * Compatibility is the answer to a handshake, from the daemon's side.
  *
  * @generated from enum vibesys.orchestrator.v1.Compatibility
@@ -577,51 +430,6 @@ export enum Compatibility {
  */
 export const CompatibilitySchema: GenEnum<Compatibility> = /*@__PURE__*/
   enumDesc(file_vibesys_orchestrator_v1_service, 0);
-
-/**
- * PlanStatus mirrors vibesys-cli's plan status. The orchestrator shows it and decides nothing on
- * it. New consumers use the CLI contract generated in this module. This legacy read-through
- * remains until ListPlans and ViewPlan are retired.
- *
- * @generated from enum vibesys.orchestrator.v1.PlanStatus
- */
-export enum PlanStatus {
-  /**
-   * @generated from enum value: PLAN_STATUS_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: PLAN_STATUS_OPEN = 1;
-   */
-  OPEN = 1,
-
-  /**
-   * @generated from enum value: PLAN_STATUS_CHOSEN = 2;
-   */
-  CHOSEN = 2,
-
-  /**
-   * @generated from enum value: PLAN_STATUS_WON = 3;
-   */
-  WON = 3,
-
-  /**
-   * @generated from enum value: PLAN_STATUS_PARKED = 4;
-   */
-  PARKED = 4,
-
-  /**
-   * @generated from enum value: PLAN_STATUS_REJECTED = 5;
-   */
-  REJECTED = 5,
-}
-
-/**
- * Describes the enum vibesys.orchestrator.v1.PlanStatus.
- */
-export const PlanStatusSchema: GenEnum<PlanStatus> = /*@__PURE__*/
-  enumDesc(file_vibesys_orchestrator_v1_service, 1);
 
 /**
  * OrchestratorService is what the daemon serves to its clients, the desktop app and the headless
@@ -679,24 +487,23 @@ export const OrchestratorService: GenService<{
     input: typeof ListItemsRequestSchema;
     output: typeof ListItemsResponseSchema;
   },
-  /**
-   * Read-through to vibesys-cli, so the app needs one connection per host.
-   *
-   * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.ListPlans
-   */
-  listPlans: {
-    methodKind: "unary";
-    input: typeof ListPlansRequestSchema;
-    output: typeof ListPlansResponseSchema;
-  },
-  /**
-   * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.ViewPlan
-   */
-  viewPlan: {
-    methodKind: "unary";
-    input: typeof ViewPlanRequestSchema;
-    output: typeof ViewPlanResponseSchema;
-  },
 }> = /*@__PURE__*/
   serviceDesc(file_vibesys_orchestrator_v1_service, 0);
+
+/**
+ * The revision of this service's behavior. It rises only when a change breaks a peer. The daemon,
+ * the Go client and the desktop app read it from here, so it is written once.
+ *
+ * @generated from extension: uint32 protocol_version = 50110;
+ */
+export const protocol_version: GenExtension<FileOptions, number> = /*@__PURE__*/
+  extDesc(file_vibesys_orchestrator_v1_service, 0);
+
+/**
+ * The oldest revision this service still serves.
+ *
+ * @generated from extension: uint32 min_protocol_version = 50111;
+ */
+export const min_protocol_version: GenExtension<FileOptions, number> = /*@__PURE__*/
+  extDesc(file_vibesys_orchestrator_v1_service, 1);
 

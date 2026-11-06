@@ -58,9 +58,6 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--launch", type=Path, required=True, help="LaunchSession as protobuf JSON")
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--socket", type=Path, required=True)
-    parser.add_argument(
-        "--worktree", help="the agent's working directory, when the launch has none"
-    )
     parser.add_argument("--mcp-config", type=Path, help="JSON list of stdio MCP servers")
     parser.add_argument("--detach", action="store_true", help="fork into the background first")
     return parser.parse_args(argv)
@@ -70,19 +67,15 @@ class LaunchError(ValueError):
     """The launch cannot start a session; the message names what is wrong."""
 
 
-def load_launch(path: Path, worktree: str | None) -> fx.LaunchSession:
-    """The launch spec in *path*, with *worktree* filled in where the file has none.
+def load_launch(path: Path) -> fx.LaunchSession:
+    """The launch spec in *path*.
 
-    Raises ``LaunchError`` for a launch that breaks its contract or has no worktree, from the file
-    or ``--worktree``: the agent needs a directory to work in.
+    Raises ``LaunchError`` for a launch that breaks its contract or has no worktree: the agent
+    needs a directory to work in.
     """
     launch = json_format.Parse(path.read_text(), fx.LaunchSession())
-    if worktree and not launch.worktree:
-        launch.worktree = worktree
     if not launch.worktree:
-        msg = (
-            "launch.worktree is empty: give the agent's directory in the launch or with --worktree"
-        )
+        msg = "launch.worktree is empty: give the agent's directory in the launch"
         raise LaunchError(msg)
     try:
         protovalidate.Validator().validate(launch, fail_fast=True)
@@ -321,7 +314,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.detach:
         detach(args.state_dir / "sidecar.log")
     try:
-        launch = load_launch(args.launch, args.worktree)
+        launch = load_launch(args.launch)
     except LaunchError as error:
         sys.stderr.write(f"vs_sidecar: {error}\n")
         return 2

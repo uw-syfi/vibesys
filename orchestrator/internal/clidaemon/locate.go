@@ -6,24 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
-)
 
-// Reason classifies an unreadable link without discarding its last facts.
-type Reason uint8
-
-const (
-	NoDaemon Reason = iota + 1
-	StartFailed
-	CLINotInstalled
-	ClientTooOld
-	DaemonTooOld
-	StreamLost
-	MessageTooLarge
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
 // Unreadable is a link failure. Detail is for display, never state inference.
 type Unreadable struct {
-	Reason Reason
+	Reason core.ViewReason
 	Detail string
 }
 
@@ -57,7 +46,7 @@ func Locate(loc Location, uid int, fsys FS) (Socket, error) {
 		dir = filepath.Join(loc.XDGRuntimeDir, "vibesys-cli")
 	}
 	socket := filepath.Join(dir, "daemon.sock")
-	fail := func(detail string) (Socket, error) { return Socket{}, &Unreadable{NoDaemon, dir + ": " + detail} }
+	fail := func(detail string) (Socket, error) { return Socket{}, &Unreadable{core.NoDaemon, dir + ": " + detail} }
 	if len(socket) > 100 {
 		return fail("socket path exceeds 100 bytes")
 	}

@@ -56,9 +56,6 @@
   "clients/apps/desktop/src/main/index.ts": {
     "VIBESYS_DESKTOP_USER_DATA": 1
   },
-  "gateway/internal/hostcommand/runner.go": {
-    "VIBESYS_STATE_HOME": 1
-  },
   "orchestrator/internal/daemon/ports.go": {
     "VIBESYS_ORCHESTRATOR_AGENT": 1,
     "VIBESYS_ORCHESTRATOR_ROLE": 1,
@@ -88,13 +85,10 @@
   },
   "orchestrator/sidecar/src/vs_sidecar/driver.py": {
     "VIBESYS_AGENT": 1,
-    "VIBESYS_AGENT_ID": 1,
     "VIBESYS_CLI": 1,
     "VIBESYS_HARNESS": 1,
     "VIBESYS_REPO": 1,
     "VIBESYS_RUN": 1,
-    "VIBESYS_RUN_ID": 1,
-    "VIBESYS_SESSION": 1,
     "VIBESYS_TASK": 1,
     "XDG_RUNTIME_DIR": 1,
     "XDG_STATE_HOME": 1

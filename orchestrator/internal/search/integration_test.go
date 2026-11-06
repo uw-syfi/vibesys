@@ -2,6 +2,7 @@ package search_test
 
 import (
 	"context"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 
 	"testing"
 	"time"
@@ -29,14 +30,14 @@ func TestDisconnectedFollowerRetainsFactsAcrossReset(t *testing.T) {
 		Changed: func(f search.Facts) { changes++; store.Put("r", search.Fold(f)) },
 		Failed: func(e *clidaemon.Unreadable) {
 			v, _ := store.Get("r")
-			v.Reason = search.StreamLost
+			v.Reason = core.StreamLost
 			v.Detail = e.Detail
 			store.Put("r", v)
 		},
 		Sleep: func(context.Context, time.Duration) error {
 			sleeps++
 			v, _ := store.Get("r")
-			if len(v.Facts) != 1 || v.Reason != search.StreamLost || v.Detail == "" {
+			if len(v.Facts) != 1 || v.Reason != core.StreamLost || v.Detail == "" {
 				t.Fatalf("lost retained view: %+v", v)
 			}
 			if sleeps == 2 {

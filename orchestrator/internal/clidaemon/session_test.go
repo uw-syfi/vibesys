@@ -8,6 +8,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon/clidaemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"io/fs"
 	"math/rand/v2"
 	"os"
@@ -57,7 +58,7 @@ func TestLocateRejectsUnsafeDirectories(t *testing.T) {
 	for _, info := range []clidaemon.Directory{{Mode: fs.ModeSymlink | 0700}, {Mode: 0700}, {Mode: fs.ModeDir | 0755}, {Mode: fs.ModeDir | 0700, UID: 1}, {Mode: fs.ModeDir | 0700, Network: true}} {
 		_, err := clidaemon.Locate(clidaemon.Location{}, 0, &fakeFS{info: info})
 		var u *clidaemon.Unreadable
-		if !errors.As(err, &u) || u.Reason != clidaemon.NoDaemon {
+		if !errors.As(err, &u) || u.Reason != core.NoDaemon {
 			t.Fatalf("accepted %v: %v", info, err)
 		}
 	}
@@ -89,8 +90,8 @@ func TestHelloProtocolAndFailures(t *testing.T) {
 	for _, tc := range []struct {
 		protocol, min uint32
 		reject        bool
-		want          clidaemon.Reason
-	}{{3, 1, false, 0}, {2, 1, false, clidaemon.DaemonTooOld}, {4, 4, false, clidaemon.ClientTooOld}, {2, 1, true, clidaemon.DaemonTooOld}} {
+		want          core.ViewReason
+	}{{3, 1, false, 0}, {2, 1, false, core.DaemonTooOld}, {4, 4, false, core.ClientTooOld}, {2, 1, true, core.DaemonTooOld}} {
 		f := clidaemontest.New()
 		f.Versions = &pb.BuildVersions{ProtocolVersion: tc.protocol, MinProtocolVersion: tc.min}
 		f.RejectComponent = tc.reject

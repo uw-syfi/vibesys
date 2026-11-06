@@ -6,6 +6,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon/clidaemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"google.golang.org/protobuf/proto"
 	"testing"
 	"time"
@@ -27,16 +28,16 @@ func (f *fakeEnsurer) Ensure(ctx context.Context, loc clidaemon.Location) error 
 }
 func TestEnsureIsBoundedAndRunsOnce(t *testing.T) {
 	loc := clidaemon.Location{XDGRuntimeDir: "/run/user/7", XDGStateHome: "/state", Home: "/home/user"}
-	for _, reason := range []clidaemon.Reason{clidaemon.NoDaemon, clidaemon.DaemonTooOld, clidaemon.ClientTooOld, clidaemon.StreamLost} {
+	for _, reason := range []core.ViewReason{core.NoDaemon, core.DaemonTooOld, core.ClientTooOld, core.StreamLost} {
 		f := &fakeEnsurer{}
 		err := clidaemon.Ensure(deadlineContext{context.Background()}, f, loc, reason)
-		allowed := reason == clidaemon.NoDaemon || reason == clidaemon.DaemonTooOld
+		allowed := reason == core.NoDaemon || reason == core.DaemonTooOld
 		if allowed && (err != nil || f.Calls != 1 || f.Location != loc) || !allowed && (err == nil || f.Calls != 0) {
 			t.Fatalf("reason %v: %v calls %d", reason, err, f.Calls)
 		}
 	}
 	f := &fakeEnsurer{}
-	if clidaemon.Ensure(context.Background(), f, loc, clidaemon.NoDaemon) == nil || f.Calls != 0 {
+	if clidaemon.Ensure(context.Background(), f, loc, core.NoDaemon) == nil || f.Calls != 0 {
 		t.Fatal("unbounded ensure ran")
 	}
 }
@@ -52,7 +53,7 @@ func TestFollowerReconnectsWithCommittedTokenAndKeepsView(t *testing.T) {
 		Connect: func(context.Context) (clidaemon.Connection, error) {
 			connections++
 			if connections == 1 {
-				return nil, &clidaemon.Unreadable{Reason: clidaemon.NoDaemon, Detail: "absent"}
+				return nil, &clidaemon.Unreadable{Reason: core.NoDaemon, Detail: "absent"}
 			}
 			return f, nil
 		},
@@ -70,7 +71,7 @@ func TestFollowerReconnectsWithCommittedTokenAndKeepsView(t *testing.T) {
 		},
 		Changed: func(facts []*pb.TaskFact) { changes++; held = facts },
 		Failed: func(u *clidaemon.Unreadable) {
-			if u.Reason != clidaemon.StreamLost {
+			if u.Reason != core.StreamLost {
 				t.Fatalf("failure %v", u)
 			}
 			if len(held) != 1 {
@@ -89,12 +90,12 @@ func TestFollowerStopsOnTerminalHello(t *testing.T) {
 		name              string
 		version           *pb.BuildVersions
 		ensureErr         error
-		reason            clidaemon.Reason
+		reason            core.ViewReason
 		connects, ensures int
 	}{
-		{"daemon old", &pb.BuildVersions{ProtocolVersion: 2, MinProtocolVersion: 1}, nil, clidaemon.DaemonTooOld, 2, 1},
-		{"client old", &pb.BuildVersions{ProtocolVersion: 4, MinProtocolVersion: 4}, nil, clidaemon.ClientTooOld, 1, 0},
-		{"cli missing", &pb.BuildVersions{ProtocolVersion: 2, MinProtocolVersion: 1}, &clidaemon.Unreadable{Reason: clidaemon.CLINotInstalled}, clidaemon.CLINotInstalled, 1, 1},
+		{"daemon old", &pb.BuildVersions{ProtocolVersion: 2, MinProtocolVersion: 1}, nil, core.DaemonTooOld, 2, 1},
+		{"client old", &pb.BuildVersions{ProtocolVersion: 4, MinProtocolVersion: 4}, nil, core.ClientTooOld, 1, 0},
+		{"cli missing", &pb.BuildVersions{ProtocolVersion: 2, MinProtocolVersion: 1}, &clidaemon.Unreadable{Reason: core.CLINotInstalled}, core.CLINotInstalled, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clidaemontest.New()

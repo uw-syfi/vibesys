@@ -27,7 +27,7 @@ func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T
 		r.Daemon.Search = store
 		payload := strings.Repeat("x", search.MaxStateBytes-2048)
 		put := func(run core.RunID, detail string) {
-			store.Put(run, search.View{Reason: search.StreamLost, Detail: detail, Facts: search.Facts{{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: 1, Body: payload}}}}})
+			store.Put(run, search.View{Reason: core.StreamLost, Detail: detail, Facts: search.Facts{{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: 1, Body: payload}}}}})
 		}
 		var runs []core.RunID
 		for i := 0; i < 6; i++ {

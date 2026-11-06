@@ -15,6 +15,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -46,7 +47,6 @@ const (
 
 // ServiceDeps is what a Service is made of.
 type ServiceDeps struct {
-	Plans     PlanReader
 	Authority Authority
 	Audience  Audience
 	// Bounds limits the calls the service makes to the plan reader.
@@ -82,7 +82,7 @@ func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
 func (s *Service) Register(g grpc.ServiceRegistrar) { pb.RegisterOrchestratorServiceServer(g, s) }
 
 func (s *Service) versions() *pb.BuildVersions {
-	return &pb.BuildVersions{BinaryVersion: s.Binary, ProtocolVersion: ProtocolVersion, MinProtocolVersion: MinProtocolVersion}
+	return &pb.BuildVersions{BinaryVersion: s.Binary, ProtocolVersion: protocol.Version, MinProtocolVersion: protocol.MinVersion}
 }
 
 // Hello answers a handshake with the daemon's versions and whether the two can talk.
@@ -93,9 +93,9 @@ func (s *Service) Hello(_ context.Context, req *pb.HelloRequest) (*pb.HelloRespo
 	c := req.GetClient()
 	compat := pb.Compatibility_COMPATIBILITY_COMPATIBLE
 	switch {
-	case c.GetProtocolVersion() < MinProtocolVersion:
+	case c.GetProtocolVersion() < protocol.MinVersion:
 		compat = pb.Compatibility_COMPATIBILITY_CLIENT_TOO_OLD
-	case c.GetMinProtocolVersion() > ProtocolVersion:
+	case c.GetMinProtocolVersion() > protocol.Version:
 		compat = pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD
 	}
 	return &pb.HelloResponse{Daemon: s.versions(), Compatibility: compat}, nil
@@ -424,54 +424,4 @@ func (s *Service) ListItems(ctx context.Context, req *pb.ListItemsRequest) (*pb.
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &pb.ListItemsResponse{Page: page}, nil
-}
-
-func (s *Service) planRun(ctx context.Context, runID string, call string) (core.Run, error) {
-	caller, err := s.caller(ctx)
-	if err != nil {
-		return core.Run{}, err
-	}
-	if err := operatorOnly(caller, call); err != nil {
-		return core.Run{}, err
-	}
-	run, ok := s.e.State().Run(core.RunID(runID))
-	if !ok {
-		return core.Run{}, status.Errorf(codes.NotFound, "no run %s: list runs with WatchRuns", runID)
-	}
-	return run, nil
-}
-
-// ListPlans reads a run's plans through vibesys-cli.
-func (s *Service) ListPlans(ctx context.Context, req *pb.ListPlansRequest) (*pb.ListPlansResponse, error) {
-	if err := wire.Validate(req); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	run, err := s.planRun(ctx, req.GetRunId(), "ListPlans")
-	if err != nil {
-		return nil, err
-	}
-	plans, err := bound(s.Bounds, ctx, func(c context.Context) ([]*pb.Plan, error) { return s.Plans.ListPlans(c, run) })
-	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "list plans of run %s: %v", run.ID, err)
-	}
-	return &pb.ListPlansResponse{Plans: plans}, nil
-}
-
-// ViewPlan reads one plan.
-func (s *Service) ViewPlan(ctx context.Context, req *pb.ViewPlanRequest) (*pb.ViewPlanResponse, error) {
-	if err := wire.Validate(req); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	run, err := s.planRun(ctx, req.GetRunId(), "ViewPlan")
-	if err != nil {
-		return nil, err
-	}
-	plan, err := bound(s.Bounds, ctx, func(c context.Context) (*pb.Plan, error) { return s.Plans.ViewPlan(c, run, req.GetNumber()) })
-	switch {
-	case errors.Is(err, ErrPlanNotFound):
-		return nil, status.Errorf(codes.NotFound, "run %s has no plan %d: list them with ListPlans", run.ID, req.GetNumber())
-	case err != nil:
-		return nil, status.Errorf(codes.Unavailable, "view plan %d of run %s: %v", req.GetNumber(), run.ID, err)
-	}
-	return &pb.ViewPlanResponse{Plan: plan}, nil
 }

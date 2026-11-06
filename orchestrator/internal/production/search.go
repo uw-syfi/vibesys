@@ -119,7 +119,7 @@ func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
 	}
 	for _, k := range starts {
 		c, cancel := context.WithCancel(ctx)
-		a := &following{cancel: cancel, done: make(chan struct{}), view: search.View{Reason: search.Connecting}}
+		a := &following{cancel: cancel, done: make(chan struct{}), view: search.View{Reason: core.Connecting}}
 		for id, key := range next {
 			if key == k {
 				r.Store.Put(id, a.view)
@@ -192,20 +192,20 @@ func followSearch(ctx context.Context, f clidaemon.Follower, k Subscription, vie
 	f.Changed = func(facts search.Facts) { *view = search.Fold(facts); publish(*view) }
 	f.Failed = func(err *clidaemon.Unreadable) {
 		switch err.Reason {
-		case clidaemon.NoDaemon:
-			view.Reason = search.NoDaemon
-		case clidaemon.StartFailed:
-			view.Reason = search.StartFailed
-		case clidaemon.CLINotInstalled:
-			view.Reason = search.CLINotInstalled
-		case clidaemon.ClientTooOld:
-			view.Reason = search.ClientTooOld
-		case clidaemon.DaemonTooOld:
-			view.Reason = search.DaemonTooOld
-		case clidaemon.MessageTooLarge:
-			view.Reason = search.MessageTooLarge
+		case core.NoDaemon:
+			view.Reason = core.NoDaemon
+		case core.StartFailed:
+			view.Reason = core.StartFailed
+		case core.CLINotInstalled:
+			view.Reason = core.CLINotInstalled
+		case core.ClientTooOld:
+			view.Reason = core.ClientTooOld
+		case core.DaemonTooOld:
+			view.Reason = core.DaemonTooOld
+		case core.MessageTooLarge:
+			view.Reason = core.MessageTooLarge
 		default:
-			view.Reason = search.StreamLost
+			view.Reason = core.StreamLost
 		}
 		view.Detail = err.Detail
 		publish(*view)

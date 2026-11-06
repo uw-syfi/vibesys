@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -47,7 +48,7 @@ type Dialer interface {
 
 func NewClient(socket Socket, dial Dialer) (*Client, error) {
 	if socket.path == "" {
-		return nil, &Unreadable{NoDaemon, "socket was not located"}
+		return nil, &Unreadable{core.NoDaemon, "socket was not located"}
 	}
 	conn, err := grpc.NewClient("passthrough:///cli", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReceiveBytes)), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return dial.Dial(ctx, socket) }))
 	if err != nil {
@@ -74,10 +75,10 @@ func Hello(ctx context.Context, svc Service) error {
 	}
 	r, err := svc.Hello(ctx, &pb.HelloRequest{Component: pb.Component_COMPONENT_ORCHESTRATOR, Versions: &pb.BuildVersions{ProtocolVersion: RequiredDaemonProtocol, MinProtocolVersion: RequiredDaemonProtocol}})
 	if err != nil {
-		reason := NoDaemon
+		reason := core.NoDaemon
 		// Protocol 2 rejects COMPONENT_ORCHESTRATOR before negotiating versions.
 		if status.Code(err) == codes.InvalidArgument {
-			reason = DaemonTooOld
+			reason = core.DaemonTooOld
 		}
 		return &Unreadable{reason, err.Error()}
 	}
@@ -86,13 +87,13 @@ func Hello(ctx context.Context, svc Service) error {
 		if r.GetVersions().GetProtocolVersion() >= RequiredDaemonProtocol && r.GetVersions().GetMinProtocolVersion() <= RequiredDaemonProtocol {
 			return nil
 		}
-		return &Unreadable{DaemonTooOld, "daemon returned inconsistent versions"}
+		return &Unreadable{core.DaemonTooOld, "daemon returned inconsistent versions"}
 	case pb.Compatibility_COMPATIBILITY_CLIENT_TOO_OLD:
-		return &Unreadable{ClientTooOld, "CLI daemon needs a newer client"}
+		return &Unreadable{core.ClientTooOld, "CLI daemon needs a newer client"}
 	case pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD:
-		return &Unreadable{DaemonTooOld, "CLI daemon is too old"}
+		return &Unreadable{core.DaemonTooOld, "CLI daemon is too old"}
 	default:
-		return &Unreadable{NoDaemon, "CLI daemon returned no compatibility"}
+		return &Unreadable{core.NoDaemon, "CLI daemon returned no compatibility"}
 	}
 }
 
@@ -104,8 +105,8 @@ type Ensurer interface {
 
 // Ensure invokes the callee's start command once, only for a missing/old daemon.
 // It never retries a start, or stops a shared daemon.
-func Ensure(ctx context.Context, runner Ensurer, loc Location, reason Reason) error {
-	if reason != NoDaemon && reason != DaemonTooOld {
+func Ensure(ctx context.Context, runner Ensurer, loc Location, reason core.ViewReason) error {
+	if reason != core.NoDaemon && reason != core.DaemonTooOld {
 		return &Unreadable{reason, "daemon cannot be repaired by ensure"}
 	}
 	if _, ok := ctx.Deadline(); !ok {
@@ -113,10 +114,10 @@ func Ensure(ctx context.Context, runner Ensurer, loc Location, reason Reason) er
 	}
 	if err := runner.Ensure(ctx, loc); err != nil {
 		var unreadable *Unreadable
-		if errors.As(err, &unreadable) && unreadable.Reason == CLINotInstalled {
+		if errors.As(err, &unreadable) && unreadable.Reason == core.CLINotInstalled {
 			return unreadable
 		}
-		return &Unreadable{StartFailed, err.Error()}
+		return &Unreadable{core.StartFailed, err.Error()}
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,7 +51,7 @@ func (e ExecEnsurer) Ensure(ctx context.Context, loc clidaemon.Location) error {
 	}
 	binary := e.Executable
 	if !filepath.IsAbs(binary) {
-		return &clidaemon.Unreadable{Reason: clidaemon.CLINotInstalled, Detail: "recorded CLI executable must be absolute"}
+		return &clidaemon.Unreadable{Reason: core.CLINotInstalled, Detail: "recorded CLI executable must be absolute"}
 	}
 	env := []string{}
 	for _, v := range os.Environ() {
@@ -65,7 +66,7 @@ func (e ExecEnsurer) Ensure(ctx context.Context, loc clidaemon.Location) error {
 	}
 	err := e.Runner.Run(ctx, binary, strings.Fields(ensureArgv), env)
 	if errors.Is(err, os.ErrNotExist) {
-		return &clidaemon.Unreadable{Reason: clidaemon.CLINotInstalled, Detail: err.Error()}
+		return &clidaemon.Unreadable{Reason: core.CLINotInstalled, Detail: err.Error()}
 	}
 	return err
 }

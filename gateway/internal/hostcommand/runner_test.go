@@ -27,7 +27,7 @@ func TestProgram(t *testing.T) {
 		switch mode {
 		case "echo":
 			data, _ := io.ReadAll(os.Stdin)
-			fmt.Fprint(os.Stdout, string(data)+os.Getenv("VIBESYS_STATE_HOME"))
+			fmt.Fprint(os.Stdout, string(data))
 		case "fail":
 			fmt.Fprint(os.Stderr, "invalid configuration")
 			os.Exit(7)
@@ -41,7 +41,7 @@ func TestProgram(t *testing.T) {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(3)
 			}
-			pidFile := os.Getenv("VIBESYS_STATE_HOME") + "/pid"
+			pidFile := args[i+2] + "/pid"
 			if err := os.WriteFile(pidFile+".tmp", []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
 				os.Exit(4)
 			}
@@ -71,7 +71,7 @@ func TestRunnerContract(t *testing.T) {
 					}
 					switch c.Args[len(c.Args)-1] {
 					case "echo":
-						return hostcommand.Result{Output: append(append([]byte{}, c.Input...), []byte(c.StateRoot)...)}, nil
+						return hostcommand.Result{Output: append([]byte{}, c.Input...)}, nil
 					case "fail":
 						return hostcommand.Result{ExitCode: 7, Stderr: "invalid configuration"}, errors.New("exit status 7")
 					case "large":
@@ -84,12 +84,12 @@ func TestRunnerContract(t *testing.T) {
 				}}
 			}
 			run := func(ctx context.Context, mode string) (hostcommand.Result, error) {
-				return runner.Run(ctx, hostcommand.Command{Executable: binary, Args: []string{"-test.run=^TestProgram$", "--", "--host-command-program", mode}, Input: []byte{0, 255, 10}, StateRoot: "/state"})
+				return runner.Run(ctx, hostcommand.Command{Executable: binary, Args: []string{"-test.run=^TestProgram$", "--", "--host-command-program", mode}, Input: []byte{0, 255, 10}})
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			result, err := run(ctx, "echo")
-			if err != nil || string(result.Output) != string([]byte{0, 255, 10})+"/state" || result.ExitCode != 0 {
+			if err != nil || string(result.Output) != string([]byte{0, 255, 10}) || result.ExitCode != 0 {
 				t.Fatalf("echo: %+v %v", result, err)
 			}
 			result, err = run(ctx, "fail")
@@ -138,8 +138,7 @@ func TestRunCancelReapsTheProcessGroup(t *testing.T) {
 	go func() {
 		_, runErr := hostcommand.ExecRunner{}.Run(ctx, hostcommand.Command{
 			Executable: binary,
-			Args:       []string{"-test.run=^TestProgram$", "--", "--host-command-program", "groupfile"},
-			StateRoot:  stateRoot,
+			Args:       []string{"-test.run=^TestProgram$", "--", "--host-command-program", "groupfile", stateRoot},
 		})
 		done <- runErr
 	}()

@@ -33,7 +33,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 		for i, n := range history {
 			v := search.Fold(search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1", CancelReason: string(rune(n + 32))}}}})
 			if n%2 == 0 {
-				v.Reason = search.CLINotInstalled
+				v.Reason = core.CLINotInstalled
 				v.Detail = "configured CLI is missing"
 			}
 			store.Put(run.ID, v)
@@ -84,7 +84,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 		if rev > 0 && len(current.Jobs) != 1 {
 			return false
 		}
-		if v.Reason == search.CLINotInstalled && current.Health.GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED {
+		if v.Reason == core.CLINotInstalled && current.Health.GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED {
 			return false
 		}
 		msgs, err := w.Poll()
@@ -105,12 +105,46 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 	}
 }
 
+// Every cause that keeps a view from being read reaches clients as its own reason; an oversized
+// message used to be reported as a lost stream, hiding that retrying cannot help.
+func TestEveryUnreadableCauseReachesClientsAsItsOwnReason(t *testing.T) {
+	want := map[core.ViewReason]pb.UnreadableReason{
+		core.NoDaemon:            pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON,
+		core.Connecting:          pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON,
+		core.StartFailed:         pb.UnreadableReason_UNREADABLE_REASON_START_FAILED,
+		core.CLINotInstalled:     pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED,
+		core.ClientTooOld:        pb.UnreadableReason_UNREADABLE_REASON_CLIENT_TOO_OLD,
+		core.DaemonTooOld:        pb.UnreadableReason_UNREADABLE_REASON_DAEMON_TOO_OLD,
+		core.StreamLost:          pb.UnreadableReason_UNREADABLE_REASON_STREAM_LOST,
+		core.MessageTooLarge:     pb.UnreadableReason_UNREADABLE_REASON_MESSAGE_TOO_LARGE,
+		core.StoreOwnedElsewhere: pb.UnreadableReason_UNREADABLE_REASON_STORE_OWNED_ELSEWHERE,
+		core.StoreAway:           pb.UnreadableReason_UNREADABLE_REASON_STORE_AWAY,
+	}
+	for reason, expected := range want {
+		r := daemontest.NewRig(t)
+		store := new(search.Store)
+		r.Daemon.Search = store
+		run, _ := beginRun(t, r)
+		store.Put(run.ID, search.View{Reason: reason, Detail: "x"})
+		r.Settle(t)
+		w, frames, err := r.Service.WatchRunsFrom(core.Operator{}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := client.WatchRunsSnapshot(frames[0]).Searches[0].Health.GetUnreadable().GetReason()
+		w.Close()
+		if got != expected {
+			t.Errorf("reason %d reached clients as %v, want %v", reason, got, expected)
+		}
+	}
+}
+
 func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 	r := daemontest.NewRig(t)
 	store := new(search.Store)
 	r.Daemon.Search = store
 	run, lead := beginRun(t, r)
-	store.Put(run.ID, search.View{Reason: search.CLINotInstalled, Detail: "configured CLI is missing", Facts: search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1"}}}}})
+	store.Put(run.ID, search.View{Reason: core.CLINotInstalled, Detail: "configured CLI is missing", Facts: search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1"}}}}})
 	r.Settle(t)
 	w, first, err := r.AgentService.WatchRunsFrom(core.AgentCaller{Agent: lead.ID}, 0)
 	if err != nil {
@@ -139,7 +173,7 @@ func TestUnchangedTickPublishesNothingIncludingEndedRuns(t *testing.T) {
 	store := new(search.Store)
 	r.Daemon.Search = store
 	run, _ := beginRun(t, r)
-	store.Put(run.ID, search.View{Reason: search.CLINotInstalled, Detail: "missing"})
+	store.Put(run.ID, search.View{Reason: core.CLINotInstalled, Detail: "missing"})
 	r.Settle(t)
 	w, _, err := r.Service.WatchRunsFrom(core.Operator{}, 0)
 	if err != nil {
@@ -168,7 +202,7 @@ func TestUnchangedTickPublishesNothingIncludingEndedRuns(t *testing.T) {
 	}
 	assertQuiet()
 	// An ended run still publishes a later revision rather than being skipped forever.
-	store.Put(run.ID, search.View{Reason: search.StreamLost, Detail: "later"})
+	store.Put(run.ID, search.View{Reason: core.StreamLost, Detail: "later"})
 	r.Settle(t)
 	frames, err := w.Poll()
 	if err != nil {

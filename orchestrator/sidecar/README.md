@@ -36,12 +36,12 @@ is reused by each of its sessions, because the provider keeps the conversation t
 
 ```
 python -m vs_sidecar --launch launch.json --state-dir DIR --socket DIR/sidecar.sock \
-    [--worktree PATH] [--mcp-config mcp.json] [--detach]
+    [--mcp-config mcp.json] [--detach]
 ```
 
 `launch.json` is a `LaunchSession` in protobuf JSON, validated at start. The agent needs a
 directory: the launch must carry `worktree` (the daemon creates it and passes it in every
-launch), or `--worktree` fills it in; with neither the process exits with code 2 naming the key. `mcp.json` is a list of
+launch); without it the process exits with code 2 naming the key. `mcp.json` is a list of
 `{"name", "command", "args", "env"}` stdio servers; each gets the session's identity, laid over its
 own `env`, so a server cannot be told it is another agent. `--detach` double-forks and logs to
 `DIR/sidecar.log`; a daemon can instead start it in its own session.
@@ -58,7 +58,6 @@ which the sidecar's tests and the vibesys-cli's tests both read:
 | --- | --- |
 | `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT` | `repository`, `task`, `run_id` and `session.agent_id`: the vibesys-cli's flag defaults |
 | `VIBESYS_HARNESS` | the harness, as the CLI names it (`claude-code`, `codex`) |
-| `VIBESYS_SESSION` | `session.session` |
 | `VIBESYS_CLI` | `cli_location.cli`: the vibesys-cli the orchestrator chose; the skills run `"$VIBESYS_CLI"` |
 | `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` | `cli_location`: where that CLI finds its daemon and store |
 

@@ -30,8 +30,9 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/clidaemon":               {"gen/vibesys/cli/"},
-	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "gen/vibesys/cli/"},
+	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/"},
+	"internal/protocol":                {"gen/vibesys/orchestrator/"},
+	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "internal/core", "gen/vibesys/cli/"},
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "release", "gen/vibesys/orchestrator/"},
 	"internal/production":              {"release", "hostlock", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
@@ -50,9 +51,9 @@ var rules = map[string][]string{
 	"cmd/release-manifest":             {"release"},
 	"clientcli":                        {"internal/client", "release", "gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/client":                  {"gen/vibesys/orchestrator/"},
+	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},

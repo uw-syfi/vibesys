@@ -13,8 +13,8 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -32,15 +32,15 @@ func TestHelloSaysWhichSideIsTooOld(t *testing.T) {
 		client, min uint32
 		want        pb.Compatibility
 	}{
-		{"same", daemon.ProtocolVersion, daemon.MinProtocolVersion, pb.Compatibility_COMPATIBILITY_COMPATIBLE},
-		{"newer client that still speaks ours", daemon.ProtocolVersion + 3, daemon.ProtocolVersion, pb.Compatibility_COMPATIBILITY_COMPATIBLE},
-		{"newer client that dropped ours", daemon.ProtocolVersion + 3, daemon.ProtocolVersion + 1, pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD},
+		{"same", protocol.Version, protocol.MinVersion, pb.Compatibility_COMPATIBILITY_COMPATIBLE},
+		{"newer client that still speaks ours", protocol.Version + 3, protocol.Version, pb.Compatibility_COMPATIBILITY_COMPATIBLE},
+		{"newer client that dropped ours", protocol.Version + 3, protocol.Version + 1, pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD},
 	} {
 		resp, err := rig.Service.Hello(context.Background(), hello(tc.client, tc.min))
 		if err != nil || resp.GetCompatibility() != tc.want {
 			t.Errorf("%s: got %v, %v; want %v", tc.name, resp, err, tc.want)
 		}
-		if resp.GetDaemon().GetProtocolVersion() != daemon.ProtocolVersion {
+		if resp.GetDaemon().GetProtocolVersion() != protocol.Version {
 			t.Errorf("%s: the daemon reported protocol %d", tc.name, resp.GetDaemon().GetProtocolVersion())
 		}
 	}
@@ -119,36 +119,13 @@ func TestListItemsPagesBackThroughHistory(t *testing.T) {
 	}
 }
 
-func TestPlansAreReadThroughTheReader(t *testing.T) {
-	rig := daemontest.NewRig(t)
-	run, _ := beginRun(t, rig)
-	rig.Plans.Set(run.ID, &pb.Plan{Number: 1, Title: "first"}, &pb.Plan{Number: 2, Title: "second"})
-	list, err := rig.Service.ListPlans(context.Background(), &pb.ListPlansRequest{RunId: string(run.ID)})
-	if err != nil || len(list.GetPlans()) != 2 {
-		t.Fatalf("list: %v, %v", list, err)
-	}
-	view, err := rig.Service.ViewPlan(context.Background(), &pb.ViewPlanRequest{RunId: string(run.ID), Number: 2})
-	if err != nil || view.GetPlan().GetTitle() != "second" {
-		t.Fatalf("view: %v, %v", view, err)
-	}
-	if _, err := rig.Service.ViewPlan(context.Background(), &pb.ViewPlanRequest{RunId: string(run.ID), Number: 9}); status.Code(err) != codes.NotFound {
-		t.Errorf("a missing plan gave %v, want NotFound", err)
-	}
-	if _, err := rig.Service.ListPlans(context.Background(), &pb.ListPlansRequest{RunId: "run-nobody"}); status.Code(err) != codes.NotFound {
-		t.Errorf("a missing run gave %v, want NotFound", err)
-	}
-}
-
-// Reading is the operator's alone: an agent that asks to read history or plans is refused.
+// Reading is the operator's alone: an agent that asks to read history is refused.
 func TestAnAgentCannotReadWhatOnlyTheOperatorMay(t *testing.T) {
 	rig := daemontest.NewRig(t)
-	run, lead := beginRun(t, rig)
+	_, lead := beginRun(t, rig)
 	ctx := agentContext(lead.ID, lead.Session, rig.Auth.Token(core.Session{Agent: lead.ID, N: lead.Session}))
 	if _, err := rig.AgentService.ListItems(ctx, &pb.ListItemsRequest{AgentId: string(lead.ID), BeforeOrdinal: 5, PageSize: 2}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("ListItems by an agent gave %v, want PermissionDenied", err)
-	}
-	if _, err := rig.AgentService.ListPlans(ctx, &pb.ListPlansRequest{RunId: string(run.ID)}); status.Code(err) != codes.PermissionDenied {
-		t.Errorf("ListPlans by an agent gave %v, want PermissionDenied", err)
 	}
 }
 

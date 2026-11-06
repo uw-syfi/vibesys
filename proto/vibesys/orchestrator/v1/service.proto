@@ -2,12 +2,22 @@ syntax = "proto3";
 package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/descriptor.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/search.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+option (protocol_version) = 1;
+option (min_protocol_version) = 1;
+
+extend google.protobuf.FileOptions {
+  // The revision of this service's behavior. It rises only when a change breaks a peer. The daemon,
+  // the Go client and the desktop app read it from here, so it is written once.
+  uint32 protocol_version = 50110;
+  // The oldest revision this service still serves.
+  uint32 min_protocol_version = 50111;
+}
 
 // OrchestratorService is what the daemon serves to its clients, the desktop app and the headless
 // client, over one connection per host.
@@ -22,9 +32,6 @@ service OrchestratorService {
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
   // Older history, paged.
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
-  // Read-through to vibesys-cli, so the app needs one connection per host.
-  rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
-  rpc ViewPlan(ViewPlanRequest) returns (ViewPlanResponse);
 }
 
 // BuildVersions is what one build carries.
@@ -141,49 +148,4 @@ message ListItemsRequest {
 
 message ListItemsResponse {
   ItemsPage page = 1 [(buf.validate.field).required = true];
-}
-
-// PlanStatus mirrors vibesys-cli's plan status. The orchestrator shows it and decides nothing on
-// it. New consumers use the CLI contract generated in this module. This legacy read-through
-// remains until ListPlans and ViewPlan are retired.
-enum PlanStatus {
-  PLAN_STATUS_UNSPECIFIED = 0;
-  PLAN_STATUS_OPEN = 1;
-  PLAN_STATUS_CHOSEN = 2;
-  PLAN_STATUS_WON = 3;
-  PLAN_STATUS_PARKED = 4;
-  PLAN_STATUS_REJECTED = 5;
-}
-
-message PlanComment {
-  string text = 1;
-  google.protobuf.Timestamp at = 2;
-  string agent = 3;
-}
-
-message Plan {
-  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
-  string title = 2;
-  string body = 3;
-  PlanStatus status = 4 [(buf.validate.field).enum.defined_only = true];
-  repeated PlanComment comments = 5;
-  google.protobuf.Timestamp created_at = 6;
-  google.protobuf.Timestamp updated_at = 7;
-}
-
-message ListPlansRequest {
-  string run_id = 1 [(buf.validate.field).string.min_len = 1];
-}
-
-message ListPlansResponse {
-  repeated Plan plans = 1;
-}
-
-message ViewPlanRequest {
-  string run_id = 1 [(buf.validate.field).string.min_len = 1];
-  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
-}
-
-message ViewPlanResponse {
-  Plan plan = 1 [(buf.validate.field).required = true];
 }

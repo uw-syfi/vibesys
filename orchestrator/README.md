@@ -342,7 +342,7 @@ absolute path), as the run's `CliLocation` when the run starts. Every session of
 one after a daemon restart included, is launched with the run's recorded location and its task, so
 the agents of a run meet one daemon and one store. The sidecar puts them in the agent's environment
 with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT`,
-`VIBESYS_HARNESS`, `VIBESYS_SESSION`), as its README describes. The sidecar process's own
+`VIBESYS_HARNESS`), as its README describes. The sidecar process's own
 environment carries none of it: agentshim builds a provider's environment from a login-shell probe,
 so only the environment the sidecar gives the `Agent` arrives.
 
