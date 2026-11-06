@@ -17,6 +17,9 @@ type fakeTree map[string]bool
 func (t fakeTree) Exists(path string) bool { _, ok := t[path]; return ok }
 func (t fakeTree) IsDir(path string) bool  { return t[path] }
 
+// A fakeTree has no links.
+func (t fakeTree) RealPath(path string) (string, error) { return path, nil }
+
 // readyLauncher is a launcher that is wired in; what it launches does not matter here.
 type readyLauncher struct{ NoSidecars }
 
@@ -26,6 +29,8 @@ type everythingIsADir struct{}
 
 func (everythingIsADir) Exists(string) bool { return true }
 func (everythingIsADir) IsDir(string) bool  { return true }
+
+func (everythingIsADir) RealPath(path string) (string, error) { return path, nil }
 
 func refusal(t *testing.T, err error) *daemon.StartRefusal {
 	t.Helper()
@@ -55,7 +60,7 @@ func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := checks.CheckStart(c.repository, c.task)
+			_, err := checks.CheckStart(c.repository, c.task)
 			if c.want == nil {
 				if err != nil {
 					t.Fatalf("got %v, want it accepted", err)
@@ -80,7 +85,8 @@ func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 func TestADaemonWithNoLauncherRefusesEveryStartWithItsReason(t *testing.T) {
 	checks := StartChecks{Sidecars: refusedSidecars{reason: "VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release"}, Tree: everythingIsADir{}}
 	for _, repository := range []string{"/repo", "relative", ""} {
-		r := refusal(t, checks.CheckStart(repository, "demo"))
+		_, err := checks.CheckStart(repository, "demo")
+		r := refusal(t, err)
 		if !r.NotReady || !strings.Contains(r.Reason, "VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release") {
 			t.Fatalf("%q: got %+v, want a NotReady refusal with the launcher's reason", repository, r)
 		}
@@ -99,7 +105,7 @@ func TestATaskNameNeverLeavesTheTasksFolder(t *testing.T) {
 			name.WriteString(pieces[rng.IntN(len(pieces))])
 		}
 		task := name.String()
-		err := StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}.CheckStart("/repo", task)
+		_, err := StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}.CheckStart("/repo", task)
 		if err != nil {
 			refusal(t, err)
 			continue
@@ -110,7 +116,7 @@ func TestATaskNameNeverLeavesTheTasksFolder(t *testing.T) {
 		}
 	}
 	for _, escape := range []string{"..", "../x", "a/../../x", "x/..", "/etc", "a/b", ".", ""} {
-		if err := (StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}).CheckStart("/repo", escape); err == nil {
+		if _, err := (StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}).CheckStart("/repo", escape); err == nil {
 			t.Errorf("task %q was accepted", escape)
 		}
 	}

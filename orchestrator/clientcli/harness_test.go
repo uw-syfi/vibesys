@@ -95,10 +95,12 @@ type result struct {
 
 // world is a command line's surroundings: a service to dial, a file system and a working directory.
 type world struct {
-	t        testing.TB
-	dial     client.Dialer
-	files    fstest.MapFS
-	dir      string
+	t     testing.TB
+	dial  client.Dialer
+	files fstest.MapFS
+	dir   string
+	// links are the symbolic links of the file system, by the path of each: from to its target.
+	links    map[string]string
 	terminal bool
 	stdin    io.Reader
 	clock    *fakeClock
@@ -141,11 +143,28 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
 		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: &errb, Terminal: w.terminal,
-		Dir: w.dir, FS: w.files, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
+		Dir: w.dir, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
 	}
 	code := clientcli.Main(ctx, args, env)
 	return result{code: code, stdout: stdout.String(), stderr: errb.String()}
+}
+
+// canonical follows w.links from the longest leading part of path that is one, as the file system does.
+func (w *world) canonical(path string) string {
+	for range len(w.links) + 1 {
+		moved := false
+		for from, to := range w.links {
+			if path == from || strings.HasPrefix(path, from+"/") {
+				path, moved = to+strings.TrimPrefix(path, from), true
+				break
+			}
+		}
+		if !moved {
+			return path
+		}
+	}
+	return path
 }
 
 // live is a daemon in memory with a client on its operator socket.

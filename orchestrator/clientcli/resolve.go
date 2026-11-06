@@ -16,9 +16,9 @@ func live(r *pb.Run) bool {
 // resolve picks the run a verb means. A given RUN is a full id or a unique prefix of one. An
 // omitted RUN is the one live run whose repository is repo. Anything else is an error that lists
 // the candidates with their ids, so the caller can pass one.
-func resolve(arg, repo string, runs []*pb.Run) (*pb.Run, error) {
+func resolve(arg, repo string, runs []*pb.Run, canonical func(string) string) (*pb.Run, error) {
 	if arg == "" {
-		return resolveOmitted(repo, runs)
+		return resolveOmitted(repo, runs, canonical)
 	}
 	var matches []*pb.Run
 	for _, r := range runs {
@@ -38,12 +38,13 @@ func resolve(arg, repo string, runs []*pb.Run) (*pb.Run, error) {
 	return nil, failed("%q is the start of %d runs; pass more of the id.%s", arg, len(matches), candidates(matches))
 }
 
-func resolveOmitted(repo string, runs []*pb.Run) (*pb.Run, error) {
+func resolveOmitted(repo string, runs []*pb.Run, canonical func(string) string) (*pb.Run, error) {
 	var here, elsewhere []*pb.Run
+	repo = canonical(repo)
 	for _, r := range runs {
 		switch {
 		case !live(r):
-		case r.GetRepository() == repo:
+		case canonical(r.GetRepository()) == repo:
 			here = append(here, r)
 		default:
 			elsewhere = append(elsewhere, r)

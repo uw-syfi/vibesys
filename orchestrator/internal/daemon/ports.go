@@ -121,9 +121,10 @@ var ErrPlanNotFound = errors.New("daemon: no such plan")
 // is made for a refused start. It is the daemon's only look at the repository and at whether
 // agents can be launched at all, so the loop does no file I/O of its own.
 type StartChecks interface {
-	// CheckStart returns nil when a run of task in repository can start, and a *StartRefusal when
-	// it cannot. It may be called for every start and must be cheap.
-	CheckStart(repository, task string) error
+	// CheckStart returns the canonical form of repository (symbolic links resolved, so that one
+	// directory is one repository whichever way it was named) when a run of task in it can start,
+	// and a *StartRefusal when it cannot. It may be called for every start and must be cheap.
+	CheckStart(repository, task string) (canonical string, err error)
 }
 
 // StartRefusal says why a start was refused, in words that name the offending path or setting.

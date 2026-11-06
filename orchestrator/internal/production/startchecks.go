@@ -15,6 +15,8 @@ type Tree interface {
 	Exists(path string) bool
 	// IsDir says path is a directory, or a link to one.
 	IsDir(path string) bool
+	// RealPath returns path with every symbolic link resolved, and an error when it cannot.
+	RealPath(path string) (string, error)
 }
 
 // OSTree is the real file system.
@@ -32,6 +34,9 @@ func (OSTree) IsDir(path string) bool {
 	return ok && info.IsDir()
 }
 
+// RealPath implements Tree.
+func (OSTree) RealPath(path string) (string, error) { return filepath.EvalSymlinks(path) }
+
 func stat(path string) (os.FileInfo, bool) {
 	info, err := os.Stat(path)
 	return info, err == nil
@@ -46,21 +51,27 @@ type StartChecks struct {
 }
 
 // CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
-// repository path that is not absolute or is not the root of a git work tree, a task name that is
-// not one plain folder name, and a task the repository does not hold under .vibesys/tasks.
-func (c StartChecks) CheckStart(repository, task string) error {
+// repository path that is not absolute, does not exist or is not the root of a git work tree, a
+// task name that is not one plain folder name, and a task the repository does not hold under
+// .vibesys/tasks. It returns the repository with its symbolic links resolved.
+func (c StartChecks) CheckStart(repository, task string) (string, error) {
 	switch launcher := c.Sidecars.(type) {
 	case refusedSidecars:
-		return &daemon.StartRefusal{Reason: "no agent can be launched: " + launcher.reason, NotReady: true}
+		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + launcher.reason, NotReady: true}
 	case NoSidecars:
-		return &daemon.StartRefusal{Reason: "no agent can be launched: this build has no sidecar launcher wired in", NotReady: true}
+		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no sidecar launcher wired in", NotReady: true}
 	}
-	refuse := func(format string, args ...any) error {
-		return &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
+	refuse := func(format string, args ...any) (string, error) {
+		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
 	}
-	switch {
-	case !filepath.IsAbs(repository):
+	if !filepath.IsAbs(repository) {
 		return refuse("repository %q is not an absolute path", repository)
+	}
+	given := repository
+	repository, err := c.Tree.RealPath(given)
+	switch {
+	case err != nil:
+		return refuse("repository %s cannot be found: %v", given, err)
 	case !c.Tree.Exists(filepath.Join(repository, ".git")):
 		return refuse("repository %s is not a git work tree: it has no .git", repository)
 	case !validTaskName(task):
@@ -70,7 +81,7 @@ func (c StartChecks) CheckStart(repository, task string) error {
 	if !c.Tree.IsDir(dir) {
 		return refuse("task %q has no directory %s", task, dir)
 	}
-	return nil
+	return repository, nil
 }
 
 // validTaskName says a task is one plain folder name, so that joining it under .vibesys/tasks
