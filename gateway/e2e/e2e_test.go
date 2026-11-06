@@ -82,9 +82,8 @@ func newRig(t *testing.T) *rig {
 			r.env = append(r.env, kv)
 		}
 	}
-	// The runtime directory holds vibesys-cli's socket and the agent socket (whose name carries a
-	// hash of the state directory, so it never meets another orchestrator's). Both live under dir,
-	// so the test touches nothing of the user running it.
+	// The runtime directory holds vibesys-cli's socket; the agent socket is in the state directory.
+	// Both live under dir, so the test touches nothing of the user running it.
 	r.env = append(r.env,
 		"XDG_RUNTIME_DIR="+filepath.Join(dir, "rt"),
 		"XDG_STATE_HOME="+filepath.Join(dir, "xdg-state"),

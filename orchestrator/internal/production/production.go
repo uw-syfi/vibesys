@@ -7,7 +7,6 @@ package production
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -80,29 +79,21 @@ type Layout struct {
 // maxSocketPath is the longest path a Unix socket address holds on the systems that matter.
 const maxSocketPath = 100
 
-// LayoutFor resolves the layout from the environment. The agent socket goes under the user's
-// runtime directory when there is one, and in the state directory otherwise. In the runtime
-// directory its name carries a short hash of the state directory, so orchestrators with different
-// state directories never share, or take over, one agent socket.
+// LayoutFor resolves the layout from the environment. The agent socket is in the state directory,
+// which outlives a login session: the runtime directory ($XDG_RUNTIME_DIR, /run/user/UID) is removed
+// when the last login of a user ends on a machine without lingering, and a live run's tools would
+// lose their socket with it. A state directory so long that the socket's path does not fit in a Unix
+// socket address is an error that names the setting, never another place.
 func LayoutFor(getenv func(string) string, home string) (Layout, error) {
 	state, err := localfs.StateDir(getenv, home, localfs.SystemDetector{})
 	if err != nil {
 		return Layout{}, err
 	}
 	agentSocket := filepath.Join(state.Path(), "agent.sock")
-	if runtimeDir := getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		agentSocket = filepath.Join(runtimeDir, agentSocketName(state.Path()))
-	}
 	if len(agentSocket) > maxSocketPath {
-		return Layout{}, fmt.Errorf("the socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter state directory", agentSocket, maxSocketPath)
+		return Layout{}, fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold: set %s to a shorter absolute path on a local disk", agentSocket, maxSocketPath, localfs.EnvStateDir)
 	}
 	return Layout{State: state, AgentSocket: agentSocket}, nil
-}
-
-// agentSocketName is the agent socket's name in the runtime directory for a state directory.
-func agentSocketName(state string) string {
-	sum := sha256.Sum256([]byte(filepath.Clean(state)))
-	return "vibesys-orchestrator-" + hex.EncodeToString(sum[:8]) + ".sock"
 }
 
 // UnixDialer connects to a daemon's socket.

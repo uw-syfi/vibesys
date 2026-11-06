@@ -13,18 +13,18 @@ import (
 	"testing"
 )
 
-// Orchestrators with different state directories get different agent sockets in one runtime
-// directory, each short enough for a Unix socket, and one state directory always gets the same.
-func TestEachStateDirectoryHasItsOwnAgentSocket(t *testing.T) {
-	root := t.TempDir()
-	// A short runtime directory, as a real one is: a test directory may be too long for a socket.
-	runtimeDir, err := os.MkdirTemp("", "vsr-")
+// The agent socket is in the state directory whatever the runtime directory is, because the runtime
+// directory goes away when the last login of a user ends. Different state directories get different
+// sockets, and one state directory always gets the same.
+func TestTheAgentSocketIsInTheStateDirectoryWhateverTheRuntimeDirectoryIs(t *testing.T) {
+	// A short root, as a real state directory is: a test directory may be too long for a socket.
+	root, err := os.MkdirTemp("", "vss-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(runtimeDir) })
+	t.Cleanup(func() { os.RemoveAll(root) })
 	seen := map[string]string{}
-	for i := range 20 {
+	for i, runtimeDir := range []string{"", "/run/user/1000", "/tmp/rt", "/run/user/1000/", "relative"} {
 		state := filepath.Join(root, fmt.Sprintf("state-%d", i))
 		if err := os.MkdirAll(state, 0o700); err != nil {
 			t.Fatal(err)
@@ -45,14 +45,25 @@ func TestEachStateDirectoryHasItsOwnAgentSocket(t *testing.T) {
 		switch {
 		case again.AgentSocket != socket:
 			t.Fatalf("state %s got %s, then %s", state, socket, again.AgentSocket)
-		case filepath.Dir(socket) != runtimeDir:
-			t.Fatalf("state %s got socket %s outside the runtime directory %s", state, socket, runtimeDir)
-		case len(socket) > maxSocketPath:
-			t.Fatalf("socket %s is longer than %d bytes", socket, maxSocketPath)
+		case filepath.Dir(socket) != layout.State.Path():
+			t.Fatalf("state %s got socket %s outside it, with runtime directory %q", state, socket, runtimeDir)
 		case seen[socket] != "":
 			t.Fatalf("states %s and %s share the agent socket %s", seen[socket], state, socket)
 		}
 		seen[socket] = state
+	}
+}
+
+// A state directory too long for a socket path is an error that names the setting to change.
+func TestAStateDirectoryTooLongForTheAgentSocketNamesTheSetting(t *testing.T) {
+	state := filepath.Join(t.TempDir(), strings.Repeat("d", maxSocketPath))
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Skipf("cannot make a long directory here: %v", err)
+	}
+	env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": state}
+	_, err := LayoutFor(func(k string) string { return env[k] }, "/home/user")
+	if err == nil || !strings.Contains(err.Error(), "VIBESYS_ORCHESTRATOR_STATE_DIR") || !strings.Contains(err.Error(), "agent.sock") {
+		t.Fatalf("got %v, want an error naming VIBESYS_ORCHESTRATOR_STATE_DIR and the socket", err)
 	}
 }
 
