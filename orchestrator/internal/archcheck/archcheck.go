@@ -56,7 +56,7 @@ var rules = map[string][]string{
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
-	"internal/names":                   {},
+	"internal/names":                   {"gen/vibesys/orchestrator/"},
 	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
