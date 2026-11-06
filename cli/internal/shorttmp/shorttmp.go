@@ -28,13 +28,7 @@ const MaxLen = 16
 
 // Candidates are the short directories offered in place of a long TMPDIR, tried in order. The
 // first that Usable accepts is used.
-func Candidates(getenv func(string) string) []string {
-	out := []string{"/tmp", "/dev/shm", "/var/tmp"}
-	if dir := getenv("XDG_RUNTIME_DIR"); dir != "" {
-		out = append(out, dir)
-	}
-	return out
-}
+func Candidates() []string { return []string{"/tmp", "/dev/shm", "/var/tmp"} }
 
 // Choose returns the temporary directory a test binary should use: current when it is short and usable
 // (a network file system is not), and otherwise the first candidate that is short and usable. When
@@ -85,7 +79,7 @@ func Run(m *testing.M) int {
 	if current == "" {
 		current = os.TempDir()
 	}
-	if chosen := Choose(current, Candidates(os.Getenv), Usable); chosen != current {
+	if chosen := Choose(current, Candidates(), Usable); chosen != current {
 		os.Setenv("TMPDIR", chosen)
 	}
 	return m.Run()
