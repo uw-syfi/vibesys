@@ -96,14 +96,32 @@ func (pacedClock) After(d time.Duration) <-chan time.Time {
 	return ch
 }
 
+// fakeProcesses is the process table. The lock it reports is held while the host it belongs to
+// runs (when there is one), and for lingering more polls after the host stops answering.
 type fakeProcesses struct {
 	holder     *pb.HostLock
+	host       *fakeHost
+	lingering  int
 	terminated []*pb.HostLock
 }
 
-func (f *fakeProcesses) Holder(string) (*pb.HostLock, error) { return f.holder, nil }
+func (f *fakeProcesses) Holder(string) (*pb.HostLock, error) {
+	if f.host != nil && !f.host.isRunning() {
+		if f.lingering == 0 {
+			return nil, nil
+		}
+		f.lingering--
+	}
+	return f.holder, nil
+}
+
 func (f *fakeProcesses) Terminate(_ context.Context, _ string, h *pb.HostLock) error {
 	f.terminated = append(f.terminated, h)
+	if f.host != nil {
+		f.host.mu.Lock()
+		f.host.running = false
+		f.host.mu.Unlock()
+	}
 	return nil
 }
 
@@ -221,23 +239,28 @@ func TestHostStopForceEndsTheProcessOfAHostThatDoesNotAnswer(t *testing.T) {
 	}
 
 	holder := &pb.HostLock{Pid: 4242, Release: "0.1.0"}
-	procs := &fakeProcesses{holder: holder}
+	procs := &fakeProcesses{holder: holder, host: old}
 	code, out, errb := runHost(hostWorld(old, procs), "host", "stop", "--force")
 	if code != clientcli.ExitOK || len(procs.terminated) != 1 || procs.terminated[0].GetPid() != 4242 || !strings.Contains(out, "4242") {
 		t.Fatalf("exit %d, ended %v, %q %q", code, procs.terminated, out, errb)
 	}
 
 	free := &fakeProcesses{}
-	code, out, _ = runHost(hostWorld(old, free), "host", "stop", "--force")
+	oldAgain := &fakeHost{running: true, oldHost: true, identity: identity(0)}
+	code, out, _ = runHost(hostWorld(oldAgain, free), "host", "stop", "--force")
 	if code != clientcli.ExitOK || len(free.terminated) != 0 || !strings.Contains(out, "no host holds the lock") {
 		t.Fatalf("a free lock: exit %d, ended %v, %q", code, free.terminated, out)
 	}
 
 	// A host that answers is stopped through its service, and --force leaves its process alone.
 	good := &fakeHost{running: true, identity: identity(0)}
-	forced := &fakeProcesses{holder: holder}
+	forced := &fakeProcesses{holder: holder, host: good, lingering: 3}
 	if code, _, _ := runHost(hostWorld(good, forced), "host", "stop", "--force"); code != clientcli.ExitOK || len(forced.terminated) != 0 || good.isRunning() {
 		t.Fatalf("exit %d, ended %v, running %v", code, forced.terminated, good.isRunning())
+	}
+	// The stop returns only once the lock is free: a host that stopped answering but lingers is waited for.
+	if forced.lingering != 0 {
+		t.Fatalf("stop returned with the lock still held (%d polls to go)", forced.lingering)
 	}
 }
 

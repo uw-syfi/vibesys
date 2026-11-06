@@ -171,7 +171,8 @@ func (c *call) stopHost(ctx context.Context, onlyIfIdle bool) (bool, error) {
 	return true, c.awaitGone(ctx)
 }
 
-// awaitGone waits until no host serves.
+// awaitGone waits until no host serves and none holds the host's lock. A host stops answering
+// before it has exited, and the next host cannot take over until the lock is free.
 func (c *call) awaitGone(ctx context.Context) error {
 	for range goneTries {
 		dial, err := c.Locate(c.root)
@@ -179,7 +180,7 @@ func (c *call) awaitGone(ctx context.Context) error {
 			return unavailable("%v", err)
 		}
 		conn, err := dial(ctx)
-		if errors.Is(err, ErrNoHost) {
+		if errors.Is(err, ErrNoHost) && c.lockFree() {
 			return nil
 		}
 		if err == nil {
@@ -191,7 +192,16 @@ func (c *call) awaitGone(ctx context.Context) error {
 		case <-c.Clock.After(goneEvery):
 		}
 	}
-	return unavailable("the host was asked to stop and still answers after %s", goneEvery*goneTries)
+	return unavailable("the host was asked to stop and still holds its lock or answers after %s", goneEvery*goneTries)
+}
+
+// lockFree is whether no process holds the host's lock; true when this client cannot look.
+func (c *call) lockFree() bool {
+	if c.Hosts == nil {
+		return true
+	}
+	holder, err := c.Hosts.Holder(c.root)
+	return err == nil && holder == nil
 }
 
 // forceStop ends the process that holds the host's lock, for a host that does not answer.
