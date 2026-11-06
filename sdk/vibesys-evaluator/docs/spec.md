@@ -324,10 +324,14 @@ or more `Spec[S, I, O]`s, all of which must hold:
 
 - `Project(phases, out)` turns the history's `Call`s, phase by phase, into
   `Piece`s (keys, input, output, `Unknown`, `Write`, `Origin`) and
-  `Violation`s (a response wrong on its own);
+  `Violation`s (a response wrong on its own). It may range `phases` more
+  than once, each pass reading the history again: facts about the whole
+  history from a first pass, pieces from a second, in the memory of one
+  phase. A piece without keys touches no state: it is counted (toward
+  `MaxLostShare` when unknown) and never searched;
 - `Init(keys)`, `Step(state, op) (states, reason)`, optionally
-  `Fault(state, fault)`, `Equal`/`Hash`, and `EffectWindow` (an unknown
-  outcome takes effect within it, or never).
+  `Fault(state, keys, fault)`, `Equal`/`Hash`, and `EffectWindow` (an
+  unknown outcome takes effect within it, or never).
 
 `Check(history, specs, options)` projects each spec (stopping after a phase
 with violations), fails when more than `MaxLostShare` (default 1%) of the
@@ -359,6 +363,20 @@ It exits 0 on PASS, 1 on FAIL and 2 on UNKNOWN, prints the report, writes
 `/vibesys/artifacts/accuracy`), and prints the verdict's one-paragraph
 reason on standard error when it is not PASS.
 
+Its `import` command (`WriteHistory`) makes a history directory of loadgen
+phase directories captured before the accuracy capture wrote histories,
+with the faults between them, to check old runs; it exits 0, or 2 with the
+reason:
+
+```text
+ORACLE import --out DIR [--dataset FILE] [--fault SPEC]... PHASE_DIR...
+```
+
+A `SPEC` is `kind=K,after=N[,target=T][,start=TIME][,end=TIME]` (`TIME` in
+Unix nanoseconds or RFC 3339); a fault without times is placed between the
+last response of phase `N` and the first call of the next. The phase
+directories' files are hard-linked, or copied.
+
 ### Accuracy history
 
 The accuracy capture writes one directory per run, which `OpenHistory`
@@ -368,6 +386,7 @@ reads:
 DIR/history.binpb            HistoryManifest: phases, faults, dataset
 DIR/<dataset>                the dataset file the generator read
 DIR/phase-<i>/results.binpb  loadgen's results: every body kept, client set
+                             (or results.binpb.gz, as a phase's artifacts)
 DIR/phase-<i>/summary.binpb  loadgen's summary (the operation names)
 DIR/phase-<i>/kept.binpb     a KeptOperation for every operation (its info)
 ```

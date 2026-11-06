@@ -69,12 +69,59 @@ and its `Origin` call.
   other 4xx is a `Violation`; a 5xx, a timeout or a reset (`Call.Lost`) is an
   **unknown outcome**: the operation may or may not have taken effect, so its
   piece is `Unknown`.
-- **Lookups across phases** (an id created in phase 0, read in phase 2) are
-  resolved by keeping a small index across loop iterations and adding the
-  dependent pieces after the loop. Do not keep `Call`s: a phase's bodies are
-  released when the next phase is read, and only the pieces stay in memory.
+- **Operations that touch nothing.** A piece with no `Keys` touches no
+  state: a lost login, a request rejected before it reached any data. It is
+  counted, an unknown one toward `MaxLostShare` too, and never searched. Add
+  one rather than skipping the call, so that lost responses count whichever
+  step lost them.
 - **Several views.** When one projection cannot see every rule (per author and
   per reader, say), give several specs over the same history; all must hold.
+
+### Whole-history facts
+
+Some pieces need a fact about the whole history: a listing or an index
+query that found nothing is projected onto every key the history ever
+mentions (a key first created after the listing included, since the
+listing must not show it yet); a create whose response was lost and whose
+id the server generates may have made any id no acknowledged create
+claims; a timeline needs every name, mention and follow. `Project` may
+range `phases` more than once, and each pass reads the history again,
+phase by phase: collect the facts in a first pass and add the pieces in a
+second. Memory stays at one phase plus the facts.
+
+```go
+Project: func(phases iter.Seq[[]check.Call], out *check.Projection[In, Out]) error {
+    keys := map[string]map[string]bool{} // table -> every key the history mentions
+    for calls := range phases {          // pass 1: facts
+        for i := range calls {
+            for _, k := range mentioned(&calls[i]) {
+                add(keys, k)
+            }
+        }
+    }
+    for calls := range phases {          // pass 2: pieces
+        for i := range calls {
+            c := &calls[i]
+            if isListing(c) {
+                got := listed(c) // key -> entity in the answer
+                for k := range keys[table(c)] {
+                    e, ok := got[k]
+                    out.Add(check.Piece[In, Out]{Keys: []string{k}, In: member(c), Out: Out{Present: ok, Ent: e}, Origin: c})
+                }
+                continue
+            }
+            ...
+        }
+    }
+    return nil
+}
+```
+
+Keep facts small (ids, not entities or bodies), and never `Call`s: a phase's
+bodies are released when the next phase is read. Each spec's `Project`
+reads the history on its own; facts that several specs share can be
+collected once in `Main`'s oracle function, ranging `h.Phase(i)` over
+`h.Phases`, and closed over by the specs.
 
 ### The model
 
@@ -131,8 +178,9 @@ assumes the cleaner contract fails the base application.
 ### Faults
 
 Restarts and cache flushes happen between phases, at quiescent points.
-`Fault(state, fault)` returns the states after one; leave it nil when faults
-must not change anything (acknowledged writes are durable). With `Fault` nil
+`Fault(state, keys, fault)` returns the states of the partition over `keys`
+(the same keys `Init` got) after one; leave it nil when faults must not
+change anything (acknowledged writes are durable). With `Fault` nil
 the checker does not copy faults into partitions, which matters with
 thousands of keys; with `Fault` set, every partition sees every fault. A
 fault while an operation was in flight is a capture problem and makes the
@@ -140,17 +188,22 @@ verdict UNKNOWN.
 
 A restart can change state on purpose. Train Ticket's services re-apply their
 seed data on startup (create-if-absent for most tables, an upsert for routes
-and prices), so the model closes over the pristine seed and re-applies it:
+and prices), so the model closes over the pristine seed and re-applies it to
+the partition's keys:
 
 ```go
 seed := readSeed(h.Dataset) // in Main's oracle function
-spec.Fault = func(s State, f check.Fault) []State {
+spec.Fault = func(s State, keys []string, f check.Fault) []State {
     if f.Kind != "restart" {
         return []State{s}
     }
-    for id, e := range seed.ofService(f.Target) {
-        if _, present := s.get(id); !present || seed.upserts(f.Target) {
-            s = s.with(id, e)
+    for _, k := range keys {
+        e, seeded := seed.entity(k)
+        if !seeded || !seed.ofService(f.Target, k) {
+            continue
+        }
+        if _, present := s.get(k); !present || seed.upserts(f.Target) {
+            s = s.with(k, e)
         }
     }
     return []State{s}
@@ -220,12 +273,34 @@ partitions) checked in 28 s with a 2.2 GB peak heap; a social network run of
 171,000 calls spent 12.6 s projecting and 0.3 s searching. Memory, mostly the
 projected pieces, is the practical limit: project small inputs and outputs.
 
+## Re-checking old runs
+
+Runs captured before the accuracy capture wrote history directories are
+loadgen phase directories (`results.binpb` or `results.binpb.gz`,
+`summary.binpb`, the generator's `kept.binpb` or `state/kept.binpb`). Every
+oracle's command imports them, with the faults between them, and checks the
+result like any history:
+
+```sh
+oracle import --out /tmp/h --dataset run/dataset.json \
+    --fault kind=restart,target=frontend,after=0 \
+    --fault kind=flush,target=memcached,after=1,start=1762412345000000000 \
+    run/phase-0 run/phase-1 run/phase-2
+oracle --history /tmp/h --out /tmp/report
+```
+
+A fault without times is placed between the last response of its phase and
+the first call of the next. The phases must have kept a record of every
+operation they sent (the accuracy capture's setting); phases that kept only
+writes and sampled reads cannot be checked.
+
 ## Reading a report
 
 The first line is the verdict and its reason; then, per spec, the coverage
-(calls, lost calls, pieces, unknown outcomes, partitions, ops checked and
-unchecked, reads sampled out, the most ops in flight at once), warnings, the
-partitions (undecided and failing first) and the failures.
+(calls, lost calls, pieces, unknown outcomes, pieces without keys,
+partitions, ops checked and unchecked, reads sampled out, the most ops in
+flight at once), warnings, the partitions (undecided and failing first) and
+the failures.
 
 A failure names its partition and the **first violation**: the earliest
 response after which no order fits. The checker finds it by searching

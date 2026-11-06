@@ -14,8 +14,9 @@ first violation explained and an HTML timeline) or UNKNOWN (something could not
 be decided; never a pass), with what was covered.
 
 Main is the oracle's command line: it checks a history directory the accuracy
-capture wrote (OpenHistory). Register, Window, Counter and PMap are building
-blocks for model states.
+capture wrote (OpenHistory), and its import command makes one of older loadgen
+phase directories (WriteHistory). Register, Window, Counter and PMap are
+building blocks for model states.
 
 The authoring guide is sdk/vibesys-evaluator/docs/accuracy-checks.md; the
 history directory's format is in sdk/vibesys-evaluator/docs/spec.md ("Accuracy
@@ -63,6 +64,31 @@ func Main(oracle func(h *History) ([]AnySpec, error))
     The flags' defaults are DefaultOptions. oracle gets the opened history,
     so the specs can read its dataset (History.Dataset); an error from it is an
     UNKNOWN verdict.
+
+    The import command makes a history directory from loadgen phase directories
+    captured before the accuracy capture wrote histories (WriteHistory),
+    to check old runs; it exits 0, or 2 with the reason:
+
+        ORACLE import --out DIR [--dataset FILE] [--fault SPEC]... PHASE_DIR...
+
+    where a SPEC is kind=K,after=N[,target=T][,start=TIME][,end=TIME], TIME is
+    Unix nanoseconds or RFC 3339, and a fault without times is placed between
+    phase N and the next.
+
+func WriteHistory(dir string, phases []string, faults []Fault, dataset string) error
+    WriteHistory makes a history directory (see OpenHistory) at dir from
+    loadgen phase directories, in phase order, to check runs captured before the
+    accuracy capture wrote histories. Each phase directory has loadgen's results
+    (results.binpb, or results.binpb.gz as a phase's artifacts keep it) and
+    summary.binpb, and the generator's kept.binpb (or state/kept.binpb) with a
+    record of every operation sent. Files are hard-linked where the file system
+    allows and copied otherwise.
+
+    faults are the faults between phases. A fault without times (Start and
+    End 0) is placed between the last response of phase AfterPhase and the
+    first call of the next, which is where it happened when nothing better was
+    recorded; End 0 alone means a point in time at Start. dataset is the dataset
+    file the generator read, or "" for none. dir must be empty or not exist.
 
 
 TYPES
@@ -130,9 +156,10 @@ func (c Counter) Value() int
 type Coverage struct {
 	// Calls read, and those with a lost response.
 	Calls, LostCalls int
-	// Pieces projected, those with an unknown outcome, and the unknown reads dropped.
-	Pieces, UnknownPieces, UnknownReadsDropped int
-	Keys, Faults                               int
+	// Pieces projected, those with an unknown outcome, the unknown reads dropped, and the
+	// pieces without keys (counted, never searched).
+	Pieces, UnknownPieces, UnknownReadsDropped, Keyless int
+	Keys, Faults                                        int
 	// ReadsSampledOut are reads dropped by MaxReadsPerKey.
 	ReadsSampledOut int
 	// OpsChecked are in partitions with a verdict (ok or illegal), OpsUnchecked in the others.
@@ -179,11 +206,11 @@ func NewHistory(phases [][]Call, faults []Fault) *History
 
 func OpenHistory(dir string) (*History, error)
     OpenHistory opens a history directory: history.binpb (a HistoryManifest)
-    and, per phase, phase-<i>/ with loadgen's results.binpb and summary.binpb
-    and the generator's kept.binpb (or state/kept.binpb, where a phase pod
-    leaves it). Without history.binpb it reads the phase-<i> directories it
-    finds, with no faults, and dataset.json if there is one. Phases are read
-    when Phase asks for them.
+    and, per phase, phase-<i>/ with loadgen's results.binpb (or
+    results.binpb.gz) and summary.binpb and the generator's kept.binpb (or
+    state/kept.binpb, where a phase pod leaves it). Without history.binpb it
+    reads the phase-<i> directories it finds, with no faults, and dataset.json
+    if there is one. Phases are read when Phase asks for them.
 
 func (h *History) Phase(i int) ([]Call, error)
     Phase loads phase i's calls, ordered by start.
@@ -300,7 +327,9 @@ type PartitionReport struct {
 type Piece[I, O any] struct {
 	// Keys are the state keys the piece touches. Usually one: an operation over several keys is
 	// projected into one piece per key. Several keys mean the piece is atomic over them, and the
-	// check then searches the keys' connected component as one partition.
+	// check then searches the keys' connected component as one partition. No keys means the
+	// piece touches no state (a lost login, say): it is counted, an unknown outcome toward
+	// MaxLostShare too, and never searched.
 	Keys []string
 	In   I
 	Out  O
@@ -420,10 +449,12 @@ type Spec[S, I, O any] struct {
 	// Name names the spec in reports.
 	Name string
 	// Project turns the history into pieces. It ranges over phases, which yields each phase's
-	// calls in order (a phase's calls are released when the next is read, so keep what later
-	// phases need, not the calls), and adds pieces and violations to out. Whatever needs the
-	// whole history (a lookup across phases) is added after the loop. An error is a task bug:
-	// the check's verdict is UNKNOWN.
+	// calls in order, and adds pieces and violations to out. A phase's calls are released when
+	// the next is read: keep facts, not calls. phases can be ranged more than once, and each
+	// pass reads the history again, phase by phase: a piece that needs a fact about the whole
+	// history (every key a listing could have returned, an index of names, the ids lost creates
+	// may have made) is added in a second pass over facts the first pass collected, in the
+	// memory of one phase and the facts. An error is a task bug: the check's verdict is UNKNOWN.
 	Project func(phases iter.Seq[[]Call], out *Projection[I, O]) error
 	// Init is the state of a partition over keys (sorted; one key unless atomic pieces joined
 	// several).
@@ -432,9 +463,9 @@ type Spec[S, I, O any] struct {
 	// than one outcome, as for an op whose outcome is unknown), or none and the reason the op
 	// cannot follow s.
 	Step func(s S, op Op[I, O]) ([]S, string)
-	// Fault returns the states after a fault. nil means faults change no state: they are then not
-	// copied into partitions.
-	Fault func(s S, f Fault) []S
+	// Fault returns the states of the partition over keys (as Init's) after a fault. nil means
+	// faults change no state: they are then not copied into partitions.
+	Fault func(s S, keys []string, f Fault) []S
 	Equal func(a, b S) bool
 	Hash  func(s S) uint64
 	// EffectWindow bounds when an op whose outcome is unknown takes effect: within this long

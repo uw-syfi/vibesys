@@ -18,10 +18,12 @@ type Spec[S, I, O any] struct {
 	// Name names the spec in reports.
 	Name string
 	// Project turns the history into pieces. It ranges over phases, which yields each phase's
-	// calls in order (a phase's calls are released when the next is read, so keep what later
-	// phases need, not the calls), and adds pieces and violations to out. Whatever needs the
-	// whole history (a lookup across phases) is added after the loop. An error is a task bug:
-	// the check's verdict is UNKNOWN.
+	// calls in order, and adds pieces and violations to out. A phase's calls are released when
+	// the next is read: keep facts, not calls. phases can be ranged more than once, and each
+	// pass reads the history again, phase by phase: a piece that needs a fact about the whole
+	// history (every key a listing could have returned, an index of names, the ids lost creates
+	// may have made) is added in a second pass over facts the first pass collected, in the
+	// memory of one phase and the facts. An error is a task bug: the check's verdict is UNKNOWN.
 	Project func(phases iter.Seq[[]Call], out *Projection[I, O]) error
 	// Init is the state of a partition over keys (sorted; one key unless atomic pieces joined
 	// several).
@@ -30,9 +32,9 @@ type Spec[S, I, O any] struct {
 	// than one outcome, as for an op whose outcome is unknown), or none and the reason the op
 	// cannot follow s.
 	Step func(s S, op Op[I, O]) ([]S, string)
-	// Fault returns the states after a fault. nil means faults change no state: they are then not
-	// copied into partitions.
-	Fault func(s S, f Fault) []S
+	// Fault returns the states of the partition over keys (as Init's) after a fault. nil means
+	// faults change no state: they are then not copied into partitions.
+	Fault func(s S, keys []string, f Fault) []S
 	Equal func(a, b S) bool
 	Hash  func(s S) uint64
 	// EffectWindow bounds when an op whose outcome is unknown takes effect: within this long
@@ -49,7 +51,9 @@ type Spec[S, I, O any] struct {
 type Piece[I, O any] struct {
 	// Keys are the state keys the piece touches. Usually one: an operation over several keys is
 	// projected into one piece per key. Several keys mean the piece is atomic over them, and the
-	// check then searches the keys' connected component as one partition.
+	// check then searches the keys' connected component as one partition. No keys means the
+	// piece touches no state (a lost login, say): it is counted, an unknown outcome toward
+	// MaxLostShare too, and never searched.
 	Keys []string
 	In   I
 	Out  O
@@ -98,6 +102,7 @@ type Projection[I, O any] struct {
 	violations []Violation
 	errors     []string
 	unknown    int
+	keyless    int
 	origins    map[*Call]*Call
 	spec       string
 }
@@ -114,9 +119,6 @@ func (p *Projection[I, O]) Add(piece Piece[I, O]) {
 		}
 	}
 	switch {
-	case len(piece.Keys) == 0:
-		p.error("a piece has no keys (%s)", where(piece.Origin))
-		return
 	case piece.Origin == nil && start == 0:
 		p.error("a piece has neither an Origin nor its own times")
 		return
@@ -126,6 +128,10 @@ func (p *Projection[I, O]) Add(piece Piece[I, O]) {
 	}
 	if piece.Unknown {
 		p.unknown++
+	}
+	if len(piece.Keys) == 0 {
+		p.keyless++ // touches no state: only counted
+		return
 	}
 	p.pieces = append(p.pieces, event[I, O]{
 		keys: piece.Keys, in: piece.In, out: piece.Out, unknown: piece.Unknown, write: piece.Write,

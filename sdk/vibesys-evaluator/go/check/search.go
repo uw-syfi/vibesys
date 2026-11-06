@@ -216,7 +216,7 @@ func porcupineModel[S, I, O any](sp *Spec[S, I, O], keys []string, r *runner, c 
 					if sp.Fault == nil {
 						next = append(next, s)
 					} else {
-						next = append(next, sp.Fault(s, *in.fault)...)
+						next = append(next, sp.Fault(s, keys, *in.fault)...)
 					}
 					continue
 				}

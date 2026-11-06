@@ -2,6 +2,7 @@ package check
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,10 +110,10 @@ const (
 )
 
 // OpenHistory opens a history directory: history.binpb (a HistoryManifest) and, per phase,
-// phase-<i>/ with loadgen's results.binpb and summary.binpb and the generator's kept.binpb (or
-// state/kept.binpb, where a phase pod leaves it). Without history.binpb it reads the phase-<i>
-// directories it finds, with no faults, and dataset.json if there is one. Phases are read when
-// Phase asks for them.
+// phase-<i>/ with loadgen's results.binpb (or results.binpb.gz) and summary.binpb and the
+// generator's kept.binpb (or state/kept.binpb, where a phase pod leaves it). Without
+// history.binpb it reads the phase-<i> directories it finds, with no faults, and dataset.json if
+// there is one. Phases are read when Phase asks for them.
 func OpenHistory(dir string) (*History, error) {
 	h := &History{}
 	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
@@ -145,7 +146,11 @@ func OpenHistory(dir string) (*History, error) {
 		return nil, err
 	}
 	for i := range h.Phases {
-		if _, err := os.Stat(filepath.Join(dir, phaseDir(i), resultsFile)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, phaseDir(i), resultsFile)); errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(filepath.Join(dir, phaseDir(i), resultsFile+".gz")); err != nil {
+				return nil, fmt.Errorf("phase %d: no %s or %s.gz", i, resultsFile, resultsFile)
+			}
+		} else if err != nil {
 			return nil, fmt.Errorf("phase %d: %w", i, err)
 		}
 	}
@@ -193,16 +198,11 @@ func readPhase(dir string, phase int) ([]Call, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, resultsFile)
-	in, err := os.Open(path)
+	r, path, closeFn, err := openResults(dir)
 	if err != nil {
 		return nil, err
 	}
-	defer in.Close()
-	r, _, err := files.NewReader(in, files.Binpb, pb.FileKind_FILE_KIND_RESULTS)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+	defer closeFn()
 	var calls []Call
 	for {
 		res := &pb.OperationResult{}
@@ -242,6 +242,35 @@ func readPhase(dir string, phase int) ([]Call, error) {
 	}
 	sort.SliceStable(calls, func(i, j int) bool { return calls[i].Start < calls[j].Start })
 	return calls, nil
+}
+
+// openResults opens a phase's results: results.binpb, or results.binpb.gz as a phase's
+// artifacts keep it.
+func openResults(dir string) (r *files.Reader, path string, closeFn func(), err error) {
+	path = filepath.Join(dir, resultsFile)
+	in, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		path += ".gz"
+		in, err = os.Open(path)
+	}
+	if err != nil {
+		return nil, "", nil, err
+	}
+	var src io.Reader = in
+	if strings.HasSuffix(path, ".gz") {
+		gz, err := gzip.NewReader(bufio.NewReaderSize(in, 1<<16))
+		if err != nil {
+			in.Close()
+			return nil, "", nil, fmt.Errorf("%s: %w", path, err)
+		}
+		src = gz
+	}
+	r, _, err = files.NewReader(src, files.Binpb, pb.FileKind_FILE_KIND_RESULTS)
+	if err != nil {
+		in.Close()
+		return nil, "", nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return r, path, func() { in.Close() }, nil
 }
 
 func readSingle(path string, kind pb.FileKind, m proto.Message) error {
