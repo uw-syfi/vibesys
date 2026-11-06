@@ -74,9 +74,6 @@ func ResolvePort(argv []string, port int) []string {
 	return out
 }
 
-// ServiceURL is where the commands of the task's image reach the candidate's server.
-func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
-
 // overlap reports whether one absolute directory is the other or inside it.
 func overlap(a, b string) bool {
 	a, b = path.Clean(a), path.Clean(b)

@@ -12,6 +12,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // labCommand is `lab <subcommand> ...`: a lab holds a placement's containers, the candidate's image
@@ -139,6 +140,9 @@ func describeLab(job string, s *cliv1.LabStatus) string {
 		}
 		fmt.Fprintf(&b, "\n\trooms: %s\n\tport: %d (free in the candidate's container%s)\n\tartifacts: %s",
 			strings.Join(rooms, ", "), s.GetPort(), reach, s.GetArtifacts())
+		if env := wire.LabServiceEnv(s); env != "" {
+			fmt.Fprintf(&b, "\n\tservice: %s (in the task's container)", env)
+		}
 	}
 	b.WriteString("\n")
 	for _, p := range s.GetProcesses() {

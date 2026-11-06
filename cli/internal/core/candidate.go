@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -26,8 +27,11 @@ func ResolveProjectRoot(argv []string, root string) []string {
 const PortPlaceholder = "${PORT}"
 
 // EnvServiceURL names the variable a command of the task's image reaches the candidate's server
-// at: http://127.0.0.1:<port>.
+// at: ServiceURL.
 const EnvServiceURL = "VIBESYS_SERVICE_URL"
+
+// ServiceURL is where the commands of the task's image reach the candidate's server on the port.
+func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
 
 // CandidateBuild is how a candidate's image is built from its commit.
 type CandidateBuild struct {

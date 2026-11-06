@@ -139,7 +139,7 @@ func (r *run) prepareAndExecute() core.Attempt {
 		if port, err = r.boxes[0].container.Port(r.ctx, id); err != nil {
 			return notStarted(err)
 		}
-		beside, err := r.containerSpec(r.boxes[1], id, img, roleBeside, environment.ServiceURL(port))
+		beside, err := r.containerSpec(r.boxes[1], id, img, roleBeside, core.ServiceURL(port))
 		if err != nil {
 			return notStarted(err)
 		}
@@ -184,7 +184,7 @@ func (r *run) prepareAndExecute() core.Attempt {
 	x := r.x
 	x.Service = &core.ServiceSpec{
 		Argv:  environment.ResolvePort(cand.Serve.Argv, port),
-		Probe: []string{ProbeMount, ProbeCommand, environment.ServiceURL(port) + cand.Serve.Ready},
+		Probe: []string{ProbeMount, ProbeCommand, core.ServiceURL(port) + cand.Serve.Ready},
 	}
 	places := environment.Places{Command: r.boxes[1].container, Service: environment.Teeing(r.boxes[0].container, r.tail)}
 	return environment.ExecuteBeside(x, places, ev, r.sink)

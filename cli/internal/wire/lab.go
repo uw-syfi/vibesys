@@ -220,6 +220,16 @@ func LabStatus(s core.LabStatus) *cliv1.LabStatus {
 	return out
 }
 
+// LabServiceEnv is the variable, as NAME=value, that the task's container of a ready lab has to
+// reach a server started in the candidate's container on the lab's port, and empty for a lab
+// with no task's container: a task of one image.
+func LabServiceEnv(s *cliv1.LabStatus) string {
+	if s.GetPhase() != cliv1.LabPhase_LAB_PHASE_READY || !slices.Contains(s.GetRooms(), cliv1.LabRoom_LAB_ROOM_TASK) {
+		return ""
+	}
+	return core.EnvServiceURL + "=" + core.ServiceURL(int(s.GetPort()))
+}
+
 // ToLabReply returns the domain reply for the contract's message, or invalid_input naming field
 // for one that is empty or names a value this build does not know.
 func ToLabReply(field string, r *cliv1.LabReply) (core.LabReply, error) {

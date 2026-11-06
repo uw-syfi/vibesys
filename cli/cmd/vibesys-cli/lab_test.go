@@ -30,7 +30,7 @@ func newLabCLI(t *testing.T) *cli {
 func TestTheLabCommandsDriveALab(t *testing.T) {
 	c := newLabCLI(t)
 	r := c.run(withTask("lab", "start", "HEAD", "--for", "45m", "--wait", "--note", "explore")...)
-	if r.code != exitOK || !strings.Contains(r.stdout, "lab for 45m0s") || !strings.Contains(r.stdout, "\tready\t") || !strings.Contains(r.stdout, "rooms: candidate") {
+	if r.code != exitOK || !strings.Contains(r.stdout, "lab for 45m0s") || !strings.Contains(r.stdout, "\tready\t") || !strings.Contains(r.stdout, "rooms: candidate") || strings.Contains(r.stdout, "service:") {
 		t.Fatalf("lab start = %+v", r)
 	}
 	id := strings.Fields(r.stdout)[0]
@@ -71,6 +71,53 @@ func TestTheLabCommandsDriveALab(t *testing.T) {
 	}
 	if r := c.run(withTask("lab", "exec", id, "--", "print", "late")...); r.code != exitFailed {
 		t.Fatalf("lab exec on an ended lab = %+v", r)
+	}
+}
+
+// Regression: lab start --wait did not say where the task's container reaches a server started in
+// the candidate's, so a caller had to know the variable's name and build the URL from the port. A
+// lab of a task of two images prints the variable as the task's container has it; one of one image,
+// which has no task's container, prints none.
+func TestALabOfTwoImagesPrintsTheServiceURLTheTasksContainerSees(t *testing.T) {
+	c := newLabCLI(t)
+	dir := task.TasksDir + "/kv/"
+	tree := task.Tree{
+		dir + task.ManifestName: {Data: []byte(`
+version = "0.2"
+backends = ["cpu"]
+metric = "ops"
+
+[candidate]
+dockerfile = "serve/Dockerfile"
+context = "serve"
+serve = ["print", "serving on ${PORT}", ";", "ready", ";", "hold", "forever"]
+ready = "/health"
+startup_timeout_seconds = 60
+
+[accuracy]
+command = ["exit", "0"]
+timeout_seconds = 60
+
+[benchmark]
+command = ["exit", "0"]
+result_protocol = 2
+timeout_seconds = 60
+`)},
+		dir + task.ObjectiveName: {Data: []byte(tasktest.Objectives)},
+		dir + "Dockerfile":       {Data: []byte("FROM busybox:1.36.1\n")},
+		"serve/Dockerfile":       {Data: []byte("FROM busybox:1.36.1\n")},
+	}
+	c.world.Tasks.Put("/repo", full, tree)
+	r := c.run(withTask("lab", "start", "HEAD", "--wait")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "rooms: candidate, task") {
+		t.Fatalf("lab start = %+v", r)
+	}
+	port := strings.Fields(r.stdout[strings.Index(r.stdout, "port: "):])[1]
+	if want := "service: VIBESYS_SERVICE_URL=http://127.0.0.1:" + port + " "; !strings.Contains(r.stdout, want) {
+		t.Fatalf("lab start --wait printed %q; want %q", r.stdout, want)
+	}
+	if r := c.run(withTask("lab", "end", strings.Fields(r.stdout)[0])...); r.code != exitOK {
+		t.Fatalf("lab end = %+v", r)
 	}
 }
 

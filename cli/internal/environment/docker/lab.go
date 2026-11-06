@@ -95,7 +95,7 @@ func (r *run) prepareAndHold(hold environment.HoldLab) core.Attempt {
 		if port, err = r.boxes[0].container.Port(r.ctx, id); err != nil {
 			return notStarted(err)
 		}
-		beside, err := r.containerSpec(r.boxes[1], id, img, roleBeside, environment.ServiceURL(port))
+		beside, err := r.containerSpec(r.boxes[1], id, img, roleBeside, core.ServiceURL(port))
 		if err != nil {
 			return notStarted(err)
 		}
