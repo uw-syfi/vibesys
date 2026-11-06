@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -63,6 +64,33 @@ type Environment struct {
 	// candidates builds a candidate's image; nil builds every one to a digest of its build.
 	candidates func(core.CandidateBuild) (core.CandidateImage, error)
 	built      []core.CandidateBuild
+	// images is the content of each image the environment has, by its ID.
+	images map[string]string
+	// resolveErr, when set, is what ImageContent fails with.
+	resolveErr error
+}
+
+// WithImages sets the images the environment has, as the content digest of each by its ID, which
+// ImageContent answers from. The default has none.
+func WithImages(contents map[string]string) Option {
+	return func(e *Environment) { e.images = maps.Clone(contents) }
+}
+
+// WithImageContentError makes ImageContent fail with err, as an engine does that cannot be reached.
+func WithImageContentError(err error) Option { return func(e *Environment) { e.resolveErr = err } }
+
+// ImageContent implements environment.Environment from the images WithImages gave.
+func (e *Environment) ImageContent(ctx context.Context, id string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.resolveErr != nil {
+		return "", false, e.resolveErr
+	}
+	content, ok := e.images[id]
+	return content, ok, nil
 }
 
 // CandidatePort is the port a fake environment's candidate server is told to listen on.

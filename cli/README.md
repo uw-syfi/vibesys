@@ -741,9 +741,27 @@ refused with the reason.
   the real one, or two machines whose Docker builds on a third without a lease there, can still
   build one tag at once; under the containerd image store the build that ends second fails with
   `already exists`. A build that fails while the engine then has an image under its tag uses that
-  image, which is of the same files and bases, so losing that race fails no job. The image digest is recorded with
-  each result and is what makes two docker results comparable, with the backend, so results from
-  different images are never mixed.
+  image, which is of the same files and bases, so losing that race fails no job.
+- The image is recorded with each result by the digest of its content, the same SHA-256 over what
+  `docker image inspect` says a container of it runs (its `Config` with keys sorted, `Os`,
+  `Architecture`, `Variant` and `RootFS` layer diff IDs) that names an apptainer SIF, and not by its
+  ID. That digest, with the backend, is what makes two docker results comparable, so results from
+  images of different content are never mixed, and two builds of one content are one environment.
+  Under Docker's containerd image store an image's ID is the digest of its manifest or index, which
+  BuildKit's attestations make differ from one build of one content to the next: an image built
+  again, as when a release changes the image's tag, would otherwise make every later result
+  incomparable with every earlier one.
+- Results of builds before this one carry the image's ID in that place. Nothing in the store is
+  rewritten: when `compare`, `promote`, the frontier, `result` and `show` read such a result, the
+  daemon asks the engine of the placement it was taken on (its `placement` fact) for the image of
+  that ID, and when the engine still has it, the result is compared by the digest of its content.
+  An ID is only ever replaced by the content of the image it names, so two contents never compare as
+  one. When the image is gone, the placement is no longer in the operator config or its engine
+  cannot be asked, the result keeps its ID, which equals no content digest: it stays another
+  environment, and `compare` refuses with the two environments named, as before; measure that
+  commit again. The answer is kept for the daemon's life, so an image loaded back after the daemon
+  found it gone is seen after a restart. The cache key of such a result is still the one of its ID,
+  so a job of the same commit takes its samples and its check again once.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
@@ -1032,7 +1050,7 @@ for one node (`--nodes=1 --ntasks=1`), which a site that requires an explicit no
 Where a sample ran does not decide which results are compared, pooled or reused. Comparison,
 promotion, the frontier, check-pass and sample reuse and the cache key all go by what defines the
 measurement: the commit, the task version, the schema version, and the environment's kind, backend
-and image digest. The placement, the machine and the resources' facts are recorded with each result
+and the digest of its image's content. The placement, the machine and the resources' facts are recorded with each result
 and take no part. A difference between placements is noise that the noise floor and repeated
 samples absorb; a task whose number depends on the hardware pins it through its needs, or an
 operator through `VIBESYS_PLACEMENT`.

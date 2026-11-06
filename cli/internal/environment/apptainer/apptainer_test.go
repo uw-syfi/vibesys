@@ -403,7 +403,8 @@ func TestALostStepIsNeverTheCommandsExit(t *testing.T) {
 	nothingLeft(t, cluster)
 }
 
-// imageID is the ID the fake builds the rigs' task image with.
+// imageID is the ID the fake builds the rigs' task image with: of the image whose content the
+// fingerprint pins.
 func imageID(t testing.TB) string {
 	t.Helper()
 	w := fakeworld.New()
@@ -412,7 +413,13 @@ func imageID(t testing.TB) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f.ImageDigest
+	for _, id := range r.local.Images() {
+		if content, err := r.local.Content(context.Background(), id); err == nil && content == f.ImageDigest {
+			return id
+		}
+	}
+	t.Fatalf("no image has the content %s the fingerprint pins", f.ImageDigest)
+	return ""
 }
 
 // imagesOn are the files of the cluster's images directory.
@@ -446,7 +453,7 @@ func taskSIF(t testing.TB) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sifOf(t, r.local, f.ImageDigest)
+	return path.Join(root, "images", strings.TrimPrefix(f.ImageDigest, "sha256:")+".sif")
 }
 
 // An image is converted to a SIF on this machine, in its local directory, and the SIF is copied to

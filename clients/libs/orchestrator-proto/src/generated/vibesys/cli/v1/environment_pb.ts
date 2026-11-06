@@ -35,7 +35,9 @@ export type EnvironmentFingerprint = Message<"vibesys.cli.v1.EnvironmentFingerpr
   backend: BackendKind;
 
   /**
-   * The exact image digest ("sha256:..."), set for the docker environment and empty for host.
+   * The digest ("sha256:...") of the content of the docker environment's image, its config,
+   * platform and layers, and empty for host. Results recorded by earlier versions carry the image's
+   * ID here instead, which the daemon resolves to its content while the image is still there.
    *
    * @generated from field: string image_digest = 3;
    */

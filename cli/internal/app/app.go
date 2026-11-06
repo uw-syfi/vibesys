@@ -52,6 +52,8 @@ type App struct {
 	tasksChanged changed.Signal
 	// epoch names this boot of the daemon, for the streams that report a task's state.
 	epoch string
+	// images is what the engines said of the image IDs older results' fingerprints carry.
+	images imageContents
 }
 
 // storeReadiness separates a successful write from a complete recovery read.

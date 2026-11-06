@@ -144,8 +144,8 @@ func TestARunStartsItsContainerAsTheUserInTheCheckout(t *testing.T) {
 		t.Fatalf("containers %+v, want exactly one, running", boxes)
 	}
 	spec := boxes[0].Spec
-	if !strings.HasPrefix(spec.Name, "vibesys-cli-") || spec.Image != f.ImageDigest {
-		t.Errorf("container %q of image %q, want a vibesys-cli- name and the fingerprint's image %q", spec.Name, spec.Image, f.ImageDigest)
+	if content, err := s.r.client.Content(ctx, spec.Image); !strings.HasPrefix(spec.Name, "vibesys-cli-") || err != nil || content != f.ImageDigest {
+		t.Errorf("container %q of image %q of content %q (%v), want a vibesys-cli- name and the content the fingerprint pins, %q", spec.Name, spec.Image, content, err, f.ImageDigest)
 	}
 	if spec.User != (docker.User{UID: 1000, GID: 1000}) || spec.Dir != x.Checkout.Dir {
 		t.Errorf("runs as %+v in %q, want the invoking user in the checkout %q", spec.User, spec.Dir, x.Checkout.Dir)

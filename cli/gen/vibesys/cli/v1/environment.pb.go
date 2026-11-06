@@ -203,7 +203,9 @@ type EnvironmentFingerprint struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Kind    EnvironmentKind        `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.EnvironmentKind" json:"kind,omitempty"`
 	Backend BackendKind            `protobuf:"varint,2,opt,name=backend,proto3,enum=vibesys.cli.v1.BackendKind" json:"backend,omitempty"`
-	// The exact image digest ("sha256:..."), set for the docker environment and empty for host.
+	// The digest ("sha256:...") of the content of the docker environment's image, its config,
+	// platform and layers, and empty for host. Results recorded by earlier versions carry the image's
+	// ID here instead, which the daemon resolves to its content while the image is still there.
 	ImageDigest string `protobuf:"bytes,3,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
 	// Facts the environment pinned, by name: operating system, architecture, toolchain versions.
 	// A host environment's facts identify it: equality is over the whole map, so the names it reports

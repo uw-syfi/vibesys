@@ -143,6 +143,20 @@ func (d *Daemon) Load(ref, content string) docker.Image {
 	return img
 }
 
+// Images returns the IDs of the images the daemon has under a reference, sorted, each once.
+func (c *Client) Images() []string {
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	var out []string
+	for _, img := range c.d.images {
+		if !slices.Contains(out, img.ID) {
+			out = append(out, img.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // Prune removes every image, as an image prune does.
 func (d *Daemon) Prune() {
 	d.mu.Lock()

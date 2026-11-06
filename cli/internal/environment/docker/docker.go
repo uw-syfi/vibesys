@@ -180,9 +180,13 @@ func (p *Provider) Claims() []core.Claim {
 	return out
 }
 
-// Fingerprint implements environment.Environment. It pins the exact image the task's files
-// build, which it builds first if the engine does not have it, the machine the image runs on, the
-// placement, and what identifies each resource its containers get.
+// Fingerprint implements environment.Environment. It pins the content of the image the task's
+// files build (Engine.Content), which it builds first if the engine does not have it, the machine
+// the image runs on, the placement, and what identifies each resource its containers get. It pins
+// the content and not the image's ID: under Docker's containerd image store the ID is the digest
+// of a manifest that differs from one build to the next of the same content, so a task's image
+// built again, as when its key changes, would otherwise make every later result incomparable with
+// every earlier one.
 func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	spec, err := e.spec(ctx)
 	if err != nil {
@@ -193,6 +197,10 @@ func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 		return core.Fingerprint{}, err
 	}
 	m, err := e.p.cfg.Backend.Machine(ctx)
+	if err != nil {
+		return core.Fingerprint{}, err
+	}
+	content, err := e.p.cfg.Engine.Content(ctx, img.ID)
 	if err != nil {
 		return core.Fingerprint{}, err
 	}
@@ -212,9 +220,26 @@ func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	return core.Fingerprint{
 		Kind:        core.EnvironmentDocker,
 		Backend:     backendOf(spec),
-		ImageDigest: img.ID,
+		ImageDigest: content,
 		Facts:       all,
 	}, nil
+}
+
+// ImageContent implements environment.Environment: the content of the engine's local image of
+// the ID, and false when the engine has no image of it, or the ID is not an image ID.
+func (e *env) ImageContent(ctx context.Context, id string) (string, bool, error) {
+	if !imageID.MatchString(id) {
+		return "", false, nil
+	}
+	img, ok, err := e.p.cfg.Engine.Image(ctx, id)
+	if err != nil || !ok || img.ID != id {
+		return "", false, err
+	}
+	content, err := e.p.cfg.Engine.Content(ctx, id)
+	if err != nil {
+		return "", false, err
+	}
+	return content, true, nil
 }
 
 // Machine implements environment.Environment: the machine the engine runs containers on, which

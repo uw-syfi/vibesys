@@ -58,7 +58,8 @@ func TestARealContainerGetsAResourcesFileVariablesAndNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp.ImageDigest).Run() })
+	image := taskImageOf(t, fp)
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", image).Run() })
 	if fp.Facts["placement"] != "local" || fp.Facts["kubernetes_server"] != "https://127.0.0.1:6443" {
 		t.Errorf("fingerprint facts %v lack the placement and the cluster", fp.Facts)
 	}

@@ -348,12 +348,13 @@ func TestTheBuildContextHoldsEveryFileAndLinkOfTheTask(t *testing.T) {
 }
 
 func TestAChangedScriptBuildsANewImage(t *testing.T) {
-	s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Files: task.Tree{"check.sh": {Data: []byte("exit 0")}}}})
+	const copying = simpleDockerfile + "COPY check.sh /task/\n"
+	s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(copying), Files: task.Tree{"check.sh": {Data: []byte("exit 0")}}}})
 	first, err := s.env.Fingerprint(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := newRig(t, s.daemon, options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Files: task.Tree{"check.sh": {Data: []byte("exit 1")}}}, process: 2})
+	other := newRig(t, s.daemon, options{spec: docker.Spec{Dockerfile: []byte(copying), Files: task.Tree{"check.sh": {Data: []byte("exit 1")}}}, process: 2})
 	second, err := other.env(t).Fingerprint(context.Background())
 	if err != nil {
 		t.Fatal(err)

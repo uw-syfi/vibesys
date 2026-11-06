@@ -32,11 +32,20 @@ type Environment interface {
 	MachineReader
 
 	// Fingerprint returns the environment's identity: what a result's comparability and a check
-	// pass's reuse are judged by (core.Fingerprint.Equal). For docker it pins the exact image
-	// digest; where the container ran is recorded among its facts and does not count. It returns the same
+	// pass's reuse are judged by (core.Fingerprint.Equal). For docker it pins the digest of the
+	// image's content, which two builds of one content share whatever their IDs; where the
+	// container ran is recorded among its facts and does not count. It returns the same
 	// value for the same environment, and fails with core.FailureUnavailable when the
 	// environment cannot be reached.
 	Fingerprint(ctx context.Context) (core.Fingerprint, error)
+
+	// ImageContent returns the content digest, as Fingerprint pins it, of the image of an ID that
+	// the environment still has, so that a fingerprint an earlier version recorded with the
+	// image's ID can be compared with one that pins its content. It reports false, and no error,
+	// for an ID it has no image of, for anything that is not an image ID, and in an environment
+	// that runs no images, such as the host. It fails when it cannot ask, as when the engine
+	// cannot be reached.
+	ImageContent(ctx context.Context, id string) (content string, found bool, err error)
 
 	// Run executes one command in the checkout, with its service if the execution names one,
 	// writing the combined output to out as it appears. An environment that waits before the

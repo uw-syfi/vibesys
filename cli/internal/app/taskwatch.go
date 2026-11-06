@@ -93,7 +93,9 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 		}
 		return awayView(err), true
 	}
-	jobs, results, promotions, plans := snapshot.Jobs, snapshot.Results, snapshot.Promotions, snapshot.Plans
+	jobs, promotions, plans := snapshot.Jobs, snapshot.Promotions, snapshot.Plans
+	// The judgments compare results as compare does, older ones by their image's content.
+	results := a.withImageContents(ctx, snapshot.Results)
 	c := &core.TaskContent{Plans: plans, Jobs: jobs, Results: results}
 	for i, p := range promotions {
 		c.Promotions = append(c.Promotions, core.PromotionRecord{Seq: uint64(i + 1), Promotion: p})

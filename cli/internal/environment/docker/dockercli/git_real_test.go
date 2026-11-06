@@ -156,7 +156,8 @@ func TestATaskRunsFromACleanCheckoutOfItsCommitInItsPinnedImage(t *testing.T) {
 	}
 	// The image is this test's own, with a line no other run has: remove it, so that the tests
 	// leave one image of each fixed Dockerfile and not one for every run.
-	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp3.ImageDigest).Run() })
+	image := taskImageOf(t, fp3)
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", image).Run() })
 	if fp1.Equal(fp3) || fp1.ImageDigest == fp3.ImageDigest {
 		t.Errorf("a changed Dockerfile gave the same environment %s", fp3)
 	}

@@ -85,6 +85,7 @@ func Run(t *testing.T, rig Rig) {
 		{"a command whose output is lost ran, and its ending is not vouched for", caseOutputLost},
 		{"an execution that cannot be valid is refused and runs nothing", caseInvalid},
 		{"the fingerprint is stable and pins the environment", caseFingerprint},
+		{"an image the environment does not have resolves to no content", caseNoImageContent},
 		{"cancelling ends the run and its whole process group", caseCancel},
 		{"the limit ends the run and its whole process group", caseLimit},
 		{"cancelling asks the command to terminate and waits for its cleanup", caseCancelTerminates},
@@ -458,6 +459,14 @@ func caseFingerprint(h *harness) {
 	})
 	if err != nil {
 		h.t.Errorf("the fingerprint %v cannot be part of a job key: %v", first, err)
+	}
+}
+
+func caseNoImageContent(h *harness) {
+	for _, id := range []string{"sha256:" + strings.Repeat("e", 64), "not an image"} {
+		if content, found, err := h.env.ImageContent(h.ctx, id); err != nil || found || content != "" {
+			h.t.Errorf("ImageContent(%q) = %q, %v, %v; want nothing, and no error", id, content, found, err)
+		}
 	}
 }
 
