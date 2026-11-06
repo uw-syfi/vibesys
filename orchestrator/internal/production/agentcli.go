@@ -28,15 +28,23 @@ type Files interface {
 type OSFiles struct{}
 
 // Executable implements Files.
-func (OSFiles) Executable(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+func (f OSFiles) Executable(path string) bool {
+	mode, ok := f.mode(path)
+	return ok && mode.IsRegular() && mode.Perm()&0o111 != 0
 }
 
 // Regular implements Files.
-func (OSFiles) Regular(path string) bool {
+func (f OSFiles) Regular(path string) bool {
+	mode, ok := f.mode(path)
+	return ok && mode.IsRegular()
+}
+
+func (OSFiles) mode(path string) (os.FileMode, bool) {
 	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
+	if err != nil {
+		return 0, false
+	}
+	return info.Mode(), true
 }
 
 // ResolveCLI picks the vibesys-cli the daemon gives its agents, once, as an absolute path, so that
