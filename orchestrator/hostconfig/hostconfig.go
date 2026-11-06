@@ -146,10 +146,10 @@ func ToolPath(config *pb.HostConfig, home string) []string {
 
 // sessionFacts are what a host keeps of the environment it was started in. None of them chooses
 // anything about the host: they say who the user is and how this login's programs reach each other.
-// The others stay only because they name the job tool's places and its operator configuration, which
-// runs record and agents share with the operator's own shell, until that tool has a typed endpoint:
-// without them a daemon the host starts ignores the Slurm or Docker settings the operator's own
-// vibesys-cli obeys.
+// The others are what the job tool resolves its daemon, store and operator configuration from when the
+// host runs it: without them the host would ask for a daemon in another place than the operator's own
+// shell, which one daemon per machine refuses, and a daemon the host starts would ignore the Slurm or
+// Docker settings the operator's own vibesys-cli obeys.
 var sessionFacts = []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "VIBESYS_CLI_CONFIG"}
 
 // Environ is a host's whole environment: its home, PATH from its configuration, and the session

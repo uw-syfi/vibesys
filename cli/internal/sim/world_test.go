@@ -539,6 +539,11 @@ type rendezvous struct{ w *world }
 
 var _ client.Rendezvous = rendezvous{}
 
+// Place implements client.Rendezvous: the simulation has no paths.
+func (rendezvous) Place() client.Place {
+	return client.Place{Socket: "/sim/daemon.sock", RuntimeDirectory: "/sim"}
+}
+
 var errRefused = errors.New("connection refused")
 
 // pipeListener serves gRPC in memory over net.Pipe. It is not grpc's bufconn because a bufconn makes

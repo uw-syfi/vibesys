@@ -380,6 +380,8 @@ func (*noAnswer) AwaitExit(ctx context.Context) error {
 	return ctx.Err()
 }
 
+func (*noAnswer) Place() client.Place { return client.Place{} }
+
 func (n *noAnswer) Start(context.Context) error {
 	n.starts++
 	return runtimedir.ErrDaemonRunning

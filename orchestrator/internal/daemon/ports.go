@@ -87,7 +87,7 @@ type SessionStart struct {
 	Launch     core.LaunchSession
 	Repository string
 	Task       string
-	Location   core.CliLocation
+	JobTool    core.JobToolEndpoint
 	// Tools is what the session's tool server is told: who it speaks for and how to reach the
 	// daemon as that agent. It holds the session's token, which goes to the tool server and nowhere else.
 	Tools *pb.ToolServerCredentials

@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/machine.proto.
  */
 export const file_vibesys_cli_v1_machine: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9tYWNoaW5lLnByb3RvEg52aWJlc3lzLmNsaS52MSJnCg1NYWNoaW5lRGFlbW9uEhQKA3BpZBgBIAEoDUIHukgEKgIgABIeCgtydW50aW1lX2RpchgCIAEoCUIJukgGcgQyAl4vEg8KB3ZlcnNpb24YAyABKAkSDwoHc2FuZGJveBgEIAEoCEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9tYWNoaW5lLnByb3RvEg52aWJlc3lzLmNsaS52MSJnCg1NYWNoaW5lRGFlbW9uEhQKA3BpZBgBIAEoDUIHukgEKgIgABIeCgtydW50aW1lX2RpchgCIAEoCUIJukgGcgQyAl4vEg8KB3ZlcnNpb24YAyABKAkSDwoHc2FuZGJveBgEIAEoCCItCgxEYWVtb25QbGFjZXMSHQoKc3RhdGVfaG9tZRgBIAEoCUIJukgGcgQyAl4vQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate]);
 
 /**
  * MachineDaemon is a vibesys-cli daemon of a user on a machine. One daemon of each user holds the
@@ -60,4 +60,27 @@ export type MachineDaemon = Message<"vibesys.cli.v1.MachineDaemon"> & {
  */
 export const MachineDaemonSchema: GenMessage<MachineDaemon> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_machine, 0);
+
+/**
+ * DaemonPlaces is daemon-places.json in a runtime directory, written once, as protojson, before the
+ * first daemon starts there. Any later start in the directory reuses it, so no caller has to carry a
+ * state home in its environment, and every daemon of a directory keeps one store.
+ *
+ * @generated from message vibesys.cli.v1.DaemonPlaces
+ */
+export type DaemonPlaces = Message<"vibesys.cli.v1.DaemonPlaces"> & {
+  /**
+   * The directory the daemon's state lives under.
+   *
+   * @generated from field: string state_home = 1;
+   */
+  stateHome: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.DaemonPlaces.
+ * Use `create(DaemonPlacesSchema)` to create a new message.
+ */
+export const DaemonPlacesSchema: GenMessage<DaemonPlaces> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_machine, 1);
 

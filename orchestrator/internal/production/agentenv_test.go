@@ -43,20 +43,19 @@ func names(t *testing.T, m proto.Message) []string {
 
 // Whatever a start holds, the session is opened with an agent environment that the codec reads back
 // as the run's identity: each name is the env_name of a field, an empty value is unset and never set
-// to the empty string, and the places of the job tool are set when given. The agent's environment
+// to the empty string, and no place of the operator's is touched. The agent's environment
 // never holds the session's token, which only its tool server's does, and the tool server's
 // credentials read back as exactly what the daemon gave.
 func TestTheSessionIsOpenedWithTheEnvironmentTheMessagesDeclare(t *testing.T) {
 	r := rand.New(rand.NewPCG(13, 17))
-	identity := append(names(t, &cliv1.AgentContext{}), names(t, &cliv1.SkillEnvironment{})...)
-	places := []string{"HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME"}
+	identity := slices.Concat(names(t, &cliv1.AgentContext{}), names(t, &cliv1.SkillEnvironment{}), names(t, &cliv1.JobToolPlace{}))
 	for i := range 300 {
 		w := newHolderWorld()
 		start := sessionStart("agent-1", core.RoleLead, "/"+someWord(r, 12))
 		start.Task = someWord(r, 12)
 		start.Launch.Run = core.RunID(someWord(r, 12))
 		start.Launch.Spec.Harness = []core.Harness{core.ClaudeCode, core.Codex}[r.IntN(2)]
-		start.Location = core.CliLocation{CLI: maybePath(r), RuntimeDir: maybePath(r), StateHome: maybePath(r), Home: maybePath(r)}
+		start.JobTool = core.JobToolEndpoint{Executable: maybePath(r), RuntimeDirectory: maybePath(r)}
 		start.Tools.Token = "secret-" + someWord(r, 30)
 		if r.IntN(2) == 0 {
 			start.Repository = "/" + someWord(r, 12)
@@ -77,7 +76,7 @@ func TestTheSessionIsOpenedWithTheEnvironmentTheMessagesDeclare(t *testing.T) {
 			if value == "" {
 				t.Errorf("round %d: %s is set to the empty string", i, name)
 			}
-			if !slices.Contains(identity, name) && !slices.Contains(places, name) {
+			if !slices.Contains(identity, name) {
 				t.Errorf("round %d: %s is set and no message declares it", i, name)
 			}
 			if _, unset := slices.BinarySearch(slices.Sorted(slices.Values(environment.GetUnset())), name); unset {
@@ -102,11 +101,11 @@ func TestTheSessionIsOpenedWithTheEnvironmentTheMessagesDeclare(t *testing.T) {
 		if !proto.Equal(&context, wantContext) {
 			t.Fatalf("round %d: the agent reads %v, want %v", i, &context, wantContext)
 		}
-		if got := environment.GetSet()[envcodec.NameOf(&cliv1.SkillEnvironment{}, "cli")]; got != start.Location.CLI {
-			t.Errorf("round %d: the skills' CLI is %q, want %q", i, got, start.Location.CLI)
+		if got := environment.GetSet()[envcodec.NameOf(&cliv1.SkillEnvironment{}, "cli")]; got != start.JobTool.Executable {
+			t.Errorf("round %d: the skills' CLI is %q, want %q", i, got, start.JobTool.Executable)
 		}
-		if got, want := environment.GetSet()["HOME"], start.Location.Home; got != want {
-			t.Errorf("round %d: HOME is %q, want %q", i, got, want)
+		if got := environment.GetSet()[envcodec.NameOf(&cliv1.JobToolPlace{}, "runtime_directory")]; got != start.JobTool.RuntimeDirectory {
+			t.Errorf("round %d: the job tool's place is %q, want %q", i, got, start.JobTool.RuntimeDirectory)
 		}
 
 		token := envcodec.NameOf(&pb.ToolServerCredentials{}, "token")

@@ -505,7 +505,8 @@ runtime directory is refused, naming it. Two daemons with their own
 runtime directories would otherwise each schedule as if they had the machine.
 A second one on purpose is a sandbox daemon: `VIBESYS_CLI_SANDBOX=1` with its
 own `XDG_RUNTIME_DIR`, and its own `XDG_STATE_HOME` and `VIBESYS_CLI_CONFIG`
-when it should not share the index or the operator config. Its containers
+when it should not share the index or the operator config. The first start in a
+runtime directory records its state home there, and later starts reuse it. Its containers
 carry another scope label and its Slurm jobs another name, and the daemon's
 status lists it while it runs. A task's store lives in the repository
 (`.vibesys-state/`) and every linked worktree of a repository shares it, so a

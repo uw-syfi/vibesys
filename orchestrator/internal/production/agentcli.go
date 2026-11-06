@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
@@ -86,22 +85,4 @@ func ResolveCLI(setting string, toolPath []string, find release.Finder, files Fi
 		}
 	}
 	return "", fmt.Errorf("no vibesys-cli: %w, and none in the host's tool path; choose the one to use (%s) with `vibesys-client host configure --job-tool PATH`", err, SettingJobTool)
-}
-
-// LocationFor is the CliLocation the daemon records on each run it starts: the vibesys-cli it
-// chose, and the places that build reads its daemon and store from, taken from the daemon's own
-// environment. The vibesys-cli resolves its own places from the same three names and treats one
-// that is not an absolute path as unset, so such a value is recorded as unset too: an agent then
-// resolves the place as the daemon would have.
-func LocationFor(getenv func(string) string, home, cli string) core.CliLocation {
-	absolute := func(path string) string {
-		if filepath.IsAbs(path) {
-			return filepath.Clean(path)
-		}
-		return ""
-	}
-	return core.CliLocation{
-		CLI: absolute(cli), RuntimeDir: absolute(getenv("XDG_RUNTIME_DIR")),
-		StateHome: absolute(getenv("XDG_STATE_HOME")), Home: absolute(home),
-	}
 }

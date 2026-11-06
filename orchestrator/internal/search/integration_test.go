@@ -23,7 +23,8 @@ func TestDisconnectedFollowerRetainsFactsAcrossReset(t *testing.T) {
 	store := new(search.Store)
 	changes, sleeps := 0, 0
 	follower := clidaemon.Follower{
-		Connect: func(context.Context) (clidaemon.Connection, error) { return fake, nil },
+		Ensurer: clidaemontest.AnySocket{},
+		Connect: func(context.Context, clidaemon.Socket) (clidaemon.Connection, error) { return fake, nil },
 		Bound: func(c context.Context) (context.Context, context.CancelFunc) {
 			return context.WithDeadline(c, time.Unix(1<<40, 0))
 		},

@@ -131,10 +131,16 @@ func (w *sim) decide(body core.InputBody) {
 	w.inputs++
 	w.nonce++
 	w.now = w.now.Add(time.Duration(1+w.r.IntN(5)) * time.Second)
-	// The shell's own location changes between inputs, as it does between daemon starts; a run keeps
-	// the one in force when it started.
-	where := core.CliLocation{CLI: fmt.Sprintf("/cli/%d", w.inputs%3), Home: fmt.Sprintf("/home/%d", w.inputs%2)}
-	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Location: where, Body: body}
+	// The job tool the shell answers with changes between starts, as it does between daemon starts; a
+	// run keeps the one in force when it started.
+	if command, ok := body.(core.Command); ok {
+		if start, ok := command.Body.(core.StartRun); ok {
+			start.JobTool = core.JobToolEndpoint{Executable: fmt.Sprintf("/cli/%d", w.inputs%3), RuntimeDirectory: fmt.Sprintf("/run/%d", w.inputs%2)}
+			command.Body = start
+			body = command
+		}
+	}
+	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Body: body}
 	w.note("%d input %T %+v", w.inputs, body, body)
 	before := w.state
 	var events []core.Event

@@ -15,9 +15,9 @@ type Run struct {
 	CreatedAt  time.Time
 	StopReason RunStopReason
 	EndedAt    time.Time
-	// Location is where the run's agents find the vibesys-cli and its daemon and store. It is
-	// recorded when the run starts and every session of the run is launched with it.
-	Location CliLocation
+	// JobTool is the tool the run's agents use and the daemon it serves. It is recorded when the run
+	// starts and every session of the run is launched with it.
+	JobTool JobToolEndpoint
 	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
 	ReportsPosted uint32
 	// FinalReported says the lead's latest report is a final one and it has had no new input since: it
@@ -52,14 +52,12 @@ type AgentChoice struct {
 	Model   ModelName
 }
 
-// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
-// store from. Each is an absolute path, or empty for "not set", which the agent's environment
-// leaves unset.
-type CliLocation struct {
-	CLI        string
-	RuntimeDir string
-	StateHome  string
-	Home       string
+// JobToolEndpoint names the vibesys-cli an agent runs and the runtime directory of the daemon it
+// serves, as that tool named it when the run started. Both are absolute paths; the zero value is a run
+// with no job tool, which the agent's environment leaves unset.
+type JobToolEndpoint struct {
+	Executable       string
+	RuntimeDirectory string
 }
 
 // AgentSpec says what an agent runs on.

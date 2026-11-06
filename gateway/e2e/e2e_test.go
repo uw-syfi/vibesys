@@ -116,7 +116,7 @@ func newRig(t *testing.T) *rig {
 	r.holder = "uv run --frozen --quiet --project " + sidecar + " python " + script
 	// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.
 	r.holderEnv = []string{"PYTHONPATH=" + sidecar}
-	r.config = &pb.HostConfig{StateDirectory: r.state, JobTool: cli, ToolPath: append([]string{dir}, filepath.SplitList(os.Getenv("PATH"))...)}
+	r.config = &pb.HostConfig{StateDirectory: r.state, JobTool: r.sandboxed(cli), ToolPath: append([]string{dir}, filepath.SplitList(os.Getenv("PATH"))...)}
 	for _, d := range []string{"rt", "xdg-state"} {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
 			t.Fatal(err)

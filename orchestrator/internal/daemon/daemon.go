@@ -445,7 +445,7 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 		}
 	}
 	start := SessionStart{
-		Launch: l, Repository: run.Repository, Task: run.Task, Location: run.Location,
+		Launch: l, Repository: run.Repository, Task: run.Task, JobTool: run.JobTool,
 		Tools: &pb.ToolServerCredentials{
 			Endpoint: d.cfg.AgentSocket, Agent: string(l.Session.Agent), Session: l.Session.N,
 			Token: d.cfg.Authority.Token(l.Session), Run: string(l.Run), Role: wire.RoleOut(l.Role),

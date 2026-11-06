@@ -124,8 +124,8 @@ every default. `vibesys-client host configure` writes it and, with no flag, prin
 A host takes nothing else from the environment it was started in. It clears it and keeps `HOME`, a
 `PATH` from the tool path, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`, which say who and where the session
 is, and `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `VIBESYS_CLI_CONFIG`,
-which name the job tool's places and its operator configuration, so a daemon the host starts obeys
-the operator's Slurm and Docker settings. `VIBESYS_ORCHESTRATOR_SIDECAR`,
+which the job tool resolves its daemon, store and operator configuration from, so the host meets the
+operator's own daemon and a daemon the host starts obeys the operator's Slurm and Docker settings. `VIBESYS_ORCHESTRATOR_SIDECAR`,
 `_MARKETPLACE`, `_STATE_DIR` and `_CLI` are no longer read, and a client that starts a host with one
 of them set names it on stderr with the flag that replaces it.
 
@@ -446,13 +446,17 @@ it, never another build), then, for a host in no release, the first `vibesys-cli
 the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
 is unset.
 
-The choice is recorded, with the places that build reads its daemon and store from
-(`XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` of the daemon's own environment, each only if it is an
-absolute path), as the run's `CliLocation` when the run starts. Every session of the run, a resumed
-one after a daemon restart included, is launched with the run's recorded location and its task, so
-the agents of a run meet one daemon and one store. The host builds them into the session's
-`AgentEnvironment` with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`,
-`VIBESYS_AGENT`, `VIBESYS_HARNESS`), and `Open` carries it. The sidecar process's
+When a run starts the host asks that tool, in the host's own environment: `daemon ensure --json`
+makes sure of a daemon and answers with its socket and its runtime directory, so the host holds no
+rule for where it is. A start the tool cannot answer is refused, in the tool's words: for one, a
+daemon of another build that has jobs. The program and the directory are recorded as the run's
+`JobToolEndpoint`. Every session of the run, a resumed one after a daemon restart included, is
+launched with the run's recorded endpoint and its task, so the agents of a run meet one daemon and
+one store. The host builds them into the session's `AgentEnvironment` with the run's identity
+(`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT`, `VIBESYS_HARNESS`), the program
+(`VIBESYS_CLI`) and the directory (`VIBESYS_CLI_RUNTIME_DIR`), and `Open` carries it. Nothing else of
+the operator's environment changes: an agent's `HOME` and `XDG_*` are the operator's, so its
+credentials and git configuration resolve as for a person. The sidecar process's
 own environment carries none of it: agentshim builds a provider's environment from a login-shell
 probe, so only the environment the sidecar gives the `Agent` arrives.
 

@@ -165,10 +165,10 @@ type Wiring struct {
 	Tree Tree
 	// Version is the binary's version, reported by Hello.
 	Version string
-	// Locate is where the agents of a run that starts now find the vibesys-cli and its daemon and
-	// store: the CLI from ResolveCLI, the rest from the daemon's own environment. It is asked when a
-	// run starts, so a repaired install is used by the next run with no restart.
-	Locate func() core.CliLocation
+	// JobTool is what the agents of a run that starts now use: the CLI from ResolveCLI and the daemon it
+	// answers with. It is asked when a run starts, so a repaired install is used by the next run with
+	// no restart.
+	JobTool func(context.Context) (core.JobToolEndpoint, error)
 	// Parts says whether a run can be started now.
 	Parts PartsCheck
 }
@@ -224,7 +224,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Locate: wiring.Locate,
+			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {
@@ -248,7 +248,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
-		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree},
+		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool,
 	})
 }
 

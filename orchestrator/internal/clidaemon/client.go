@@ -41,14 +41,14 @@ type Client struct {
 	svc  pb.DaemonServiceClient
 }
 
-// Dialer opens a checked socket. The production implementation owns real I/O.
+// Dialer opens a socket. The production implementation owns real I/O.
 type Dialer interface {
 	Dial(context.Context, Socket) (net.Conn, error)
 }
 
 func NewClient(socket Socket, dial Dialer) (*Client, error) {
 	if socket.path == "" {
-		return nil, &Unreadable{core.NoDaemon, "socket was not located"}
+		return nil, &Unreadable{core.NoDaemon, "no socket was answered"}
 	}
 	conn, err := grpc.NewClient("passthrough:///cli", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReceiveBytes)), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return dial.Dial(ctx, socket) }))
 	if err != nil {
@@ -97,29 +97,31 @@ func Hello(ctx context.Context, svc Service) error {
 	}
 }
 
-// Ensurer runs the sibling CLI's daemon ensure command, reading only its exit
-// status. The production implementation is in PR 7 and never searches PATH.
+// Ensurer runs the tool's `daemon ensure --json`, for one recorded endpoint, and returns the socket
+// the tool answered. Whether a daemon of another build is replaced or refused is the tool's decision.
+// The production implementation never searches PATH.
 type Ensurer interface {
-	Ensure(context.Context, Location) error
+	Ensure(context.Context) (Socket, error)
 }
 
 // Ensure invokes the callee's start command once, only for a missing/old daemon.
 // It never retries a start, or stops a shared daemon.
-func Ensure(ctx context.Context, runner Ensurer, loc Location, reason core.ViewReason) error {
+func Ensure(ctx context.Context, runner Ensurer, reason core.ViewReason) (Socket, error) {
 	if reason != core.NoDaemon && reason != core.DaemonTooOld {
-		return &Unreadable{reason, "daemon cannot be repaired by ensure"}
+		return Socket{}, &Unreadable{reason, "daemon cannot be repaired by ensure"}
 	}
 	if _, ok := ctx.Deadline(); !ok {
-		return fmt.Errorf("Ensure requires a caller deadline")
+		return Socket{}, fmt.Errorf("Ensure requires a caller deadline")
 	}
-	if err := runner.Ensure(ctx, loc); err != nil {
+	socket, err := runner.Ensure(ctx)
+	if err != nil {
 		var unreadable *Unreadable
 		if errors.As(err, &unreadable) && unreadable.Reason == core.CLINotInstalled {
-			return unreadable
+			return Socket{}, unreadable
 		}
-		return &Unreadable{core.StartFailed, err.Error()}
+		return Socket{}, &Unreadable{core.StartFailed, err.Error()}
 	}
-	return nil
+	return socket, nil
 }
 
 // Sleep is injected by the shell; tests advance it without real time.

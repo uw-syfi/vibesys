@@ -158,7 +158,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, Deadline: b.Deadline, CreatedAt: t.in.At,
-		Location: t.in.Location, Allowed: allowance(b.Lead, b.Allow),
+		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow),
 	}
 	r.Run, r.Agent = run.ID, run.Lead
 	t.emit(run.ID, run)

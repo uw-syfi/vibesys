@@ -205,10 +205,8 @@ message Run {
   // Set when the run left RUNNING.
   RunStopReason stop_reason = 9 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp ended_at = 10;
-  // Where this run's agents find the vibesys-cli and the daemon and store it talks to. Recorded
-  // when the run starts and never changed, so a relaunch of any of its sessions meets the same
-  // ones. Empty for a run that started before it was recorded.
-  CliLocation cli_location = 11;
+  reserved 11;
+  reserved "cli_location";
   // How many reports the run's lead has posted. The next report is numbered one more.
   uint32 reports_posted = 12;
   // Set while the run has nothing left that could move it: its lead is idle, no other agent is
@@ -232,6 +230,10 @@ message Run {
   // because they hold changes git does not have. Empty while the run is live, and for a run that left
   // none. The run's operator decides what becomes of them.
   repeated KeptCheckout kept_checkouts = 19;
+  // The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
+  // of any of its sessions meets the same daemon. It is stored; item 10 of the redesign moves it out
+  // of what clients receive.
+  JobToolEndpoint job_tool = 20;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -253,17 +255,14 @@ message AllowedAgent {
   string model = 2;
 }
 
-// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
-// store from. Each value is an absolute path, or empty for "not set": an empty value is unset in
-// the agent's environment, not set to the empty string. The cli becomes SkillEnvironment.cli
-// (vibesys/cli/v1/env.proto), and the places become the job tool's places until the job tool's
-// endpoint replaces them.
-message CliLocation {
-  // The vibesys-cli the orchestrator chose for its agents.
-  string cli = 1 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
-  string xdg_runtime_dir = 2 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
-  string xdg_state_home = 3 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
-  string home = 4 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
+// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
+// anything about how the tool lays out what it keeps there.
+message JobToolEndpoint {
+  // The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
+  string executable = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
+  // The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
+  string runtime_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
 }
 
 message Agent {

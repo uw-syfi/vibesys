@@ -487,7 +487,7 @@ func FuzzOpenSessionRequest(f *testing.F) {
 		start := sessionStart("agent-1", core.RoleLead, repository)
 		start.Tools.Token = token
 		start.Launch.Spec.Model = core.ModelName(model)
-		start.Location.CLI = cli
+		start.JobTool.Executable = cli
 		_, err := sidecars.Launch(context.Background(), start)
 		if err == nil {
 			if w.startedAgents() != 1 {

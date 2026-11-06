@@ -44,9 +44,11 @@ type Rig struct {
 	Auth         daemon.Authority
 	Log          *slog.Logger
 	Limits       hub.Limits
-	// Location is where the daemon says its agents find the vibesys-cli and its daemon and store,
+	// JobTool is what the daemon says its agents use,
 	// read at each Restart. A run records the one in force when it starts.
-	Location core.CliLocation
+	JobTool core.JobToolEndpoint
+	// JobToolErr is what the job tool answers a start with in its place.
+	JobToolErr error
 	// JobStall makes that many polls of the job source hang until their bound ends.
 	JobStall int
 	// JobSource overrides the default Fake for integrated deterministic tests.
@@ -106,7 +108,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	}
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Locate: func() core.CliLocation { return r.Location },
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log,
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:
@@ -123,7 +125,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Daemon = d
 	for audience, service := range map[daemon.Audience]**daemon.Service{daemon.AudienceOperator: &r.Service, daemon.AudienceAgent: &r.AgentService} {
 		if *service, err = daemon.NewService(d.Engine, daemon.ServiceDeps{
-			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts,
+			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, JobTool: r.jobTool,
 		}); err != nil {
 			tb.Fatal(err)
 		}
@@ -169,4 +171,9 @@ func (g gatedJobs) Jobs(ctx context.Context, run core.Run) ([]core.JobUpdate, er
 		return g.r.JobSource.Jobs(ctx, run)
 	}
 	return g.r.Jobs.Jobs(ctx, run)
+}
+
+// jobTool answers a start with the tool the rig says its agents use.
+func (r *Rig) jobTool(context.Context) (core.JobToolEndpoint, error) {
+	return r.JobTool, r.JobToolErr
 }

@@ -9,10 +9,7 @@ type Input struct {
 	// Nonce is unique to this input. Decide builds every new id from it, and a replay reads those
 	// ids from the events, so it is never needed twice.
 	Nonce Nonce
-	// Location is where this daemon's own vibesys-cli and its daemon and store are. A run started by
-	// this input records it.
-	Location CliLocation
-	Body     InputBody
+	Body  InputBody
 }
 
 // InputBody is what happened. The set is closed.
@@ -60,6 +57,9 @@ type (
 		Brief       string
 		// Allow adds to what the run may use. The lead's own harness and model are always allowed.
 		Allow []AgentChoice
+		// JobTool is what the run's agents use. The shell sets it, as the tool answered it before the
+		// command was decided: it is no part of what the client sent, or of the command's digest.
+		JobTool JobToolEndpoint
 	}
 	// StopRun stops a run and every agent in it.
 	StopRun struct{ Run RunID }
