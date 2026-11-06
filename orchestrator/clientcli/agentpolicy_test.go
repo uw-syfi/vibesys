@@ -62,7 +62,7 @@ func TestGetShowsWhatTheRunMayUse(t *testing.T) {
 	contains(t, "summary", w.run(context.Background(), "run", "get", "run-1").stdout, "may use     codex gpt-m; claude code (default model)")
 }
 
-// A finished run names the working copies that were kept because they hold work git lacks, and a run
+// A finished run names the working copies that were kept because they hold uncommitted changes, and a run
 // with none says nothing of them.
 func TestGetNamesTheWorkingCopiesAFinishedRunKept(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
@@ -70,7 +70,7 @@ func TestGetNamesTheWorkingCopiesAFinishedRunKept(t *testing.T) {
 	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ENDED)})
 	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
 	got := w.run(context.Background(), "run", "get", "run-1")
-	contains(t, "summary", got.stdout, "1 working copies hold work git lacks", "worker-1  /state/worker-1/worktree")
+	contains(t, "summary", got.stdout, "1 working copies hold uncommitted changes", "worker-1  /state/worker-1/worktree")
 
 	run.KeptCheckouts = nil
 	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))

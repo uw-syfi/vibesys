@@ -38,7 +38,7 @@ var boundaries = map[string]allowance{
 	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; process-boundaries.md, tool schemas", json: 14},
 	"internal/mcp/tools.go":                      {reason: "external:a tool call's arguments arrive as raw JSON; process-boundaries.md, tool schemas", json: 2},
 	"internal/production/agentcli.go":            {reason: "checks that the chosen vibesys-cli is an executable file", reads: 1},
-	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, keeps the others, and holds the commits they made under a ref of the run; process-boundaries.md, session lock", reads: 2, exec: 5},
+	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, keeps the others, and holds the commits they made under a ref of the run; process-boundaries.md, session lock", reads: 2, exec: 6},
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
 	"internal/production/holders.go":             {reason: "the holder's log, the agents' directory listing, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 3, writes: 2, exec: 3},

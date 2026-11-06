@@ -137,7 +137,7 @@ type EventStream interface {
 
 // Checkouts removes the working copies that agents made of a repository once their run is over.
 type Checkouts interface {
-	// Release removes the working copy of each agent that has one and holds nothing git lacks. A commit
+	// Release removes the working copy of each agent that has one and holds no change to a tracked file; untracked files are build output, not work. A commit
 	// such a copy made that no branch holds is first kept under a ref of the run. It
 	// returns the ones it left in place, because removing them would lose work, or because it could
 	// not tell. Repeating it is harmless: a working copy that is gone is not kept.
