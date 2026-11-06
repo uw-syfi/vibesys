@@ -29,7 +29,7 @@ func (t *tx) route(m *Message, a agentState) {
 		t.effect(Steer{Session: Session{a.ID, a.Session}, Turn: a.turn.ID, Message: *m})
 	case !a.Status.Over():
 		m.Delivery = DeliveryQueued
-	case !a.Capabilities.Resumes || a.ConversationID == "":
+	case !a.Capabilities.Resumes || a.ResumeToken == "":
 		m.Delivery, m.Rejection = DeliveryRejected, RejectAgentGone
 	case a.Role != RoleLead && t.liveSubagents(m.Run) >= t.s.runs[m.Run].FanoutLimit:
 		m.Delivery, m.Rejection = DeliveryRejected, RejectFanoutLimit
@@ -46,8 +46,7 @@ func (t *tx) resume(a agentState) {
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
-		Session: Session{a.ID, a.Session}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
-		Location: run.Location, ConversationID: a.ConversationID, Worktree: a.Worktree,
+		Session: Session{a.ID, a.Session}, Run: run.ID, Role: a.Role, Spec: a.Spec, ResumeToken: a.ResumeToken,
 	})
 	t.armLaunchDeadline(run.ID, Session{a.ID, a.Session})
 }
@@ -245,7 +244,7 @@ func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string, start St
 
 	run := t.s.runs[a.Run]
 	if a.Role == RoleLead && run.Status.Live() {
-		if a.Capabilities.Resumes && a.ConversationID != "" && a.SessionFailures <= MaxLeadResumes {
+		if a.Capabilities.Resumes && a.ResumeToken != "" && a.SessionFailures <= MaxLeadResumes {
 			t.requeueSteers(a)
 			t.resume(t.s.agents[id])
 			return

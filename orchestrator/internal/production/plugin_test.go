@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"buf.build/go/protovalidate"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 )
 
 func marketplace(t *testing.T, manifest string) string {
@@ -31,16 +31,13 @@ func marketplace(t *testing.T, manifest string) string {
 
 const good = `{"name": "vibesys", "plugins": [{"name": "other"}, {"name": "vibesys", "source": "./skills"}]}`
 
-// A marketplace setting that is missing, relative, not a checkout or without the plugin is refused
-// with the setting named, when the daemon starts.
+// A marketplace setting that is missing or relative is refused with the setting named, when the
+// daemon starts. Nothing here reads what the marketplace holds: the harness is its one reader, so
+// one it cannot load comes back as the session's start failure.
 func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 	cases := map[string]struct{ path, want string }{
-		"unset":      {"", "names no"},
-		"relative":   {"skills", "not an absolute path"},
-		"no such":    {filepath.Join(t.TempDir(), "nowhere"), "not a marketplace checkout"},
-		"not json":   {marketplace(t, "{"), "not a marketplace manifest"},
-		"no plugin":  {marketplace(t, `{"plugins": [{"name": "other"}]}`), "lists no plugin named vibesys"},
-		"no plugins": {marketplace(t, `{}`), "lists no plugin named vibesys"},
+		"unset":    {"", "names no"},
+		"relative": {"skills", "not an absolute path"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -70,7 +67,7 @@ func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sidecars.Launch(context.Background(), core.LaunchSession{}, nil)
+	_, err = sidecars.Launch(context.Background(), daemon.SessionStart{})
 	if err == nil || !strings.Contains(err.Error(), SettingSkills) {
 		t.Fatalf("Launch = %v, want a refusal naming %s", err, SettingSkills)
 	}
@@ -82,55 +79,49 @@ func launcher(t *testing.T) (*ProcessSidecars, Plugin) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &ProcessSidecars{Root: t.TempDir()}, plugin
+	return &ProcessSidecars{Root: t.TempDir(), Executable: "/x/bin/vibesys-host", Log: slog.New(slog.DiscardHandler)}, plugin
 }
 
-func lead(agent core.AgentID, session uint32) core.LaunchSession {
-	return core.LaunchSession{
-		Session: core.Session{Agent: agent, N: session}, Run: "run", Repository: "/repo", Task: "task", Role: core.RoleLead,
-		Spec: core.AgentSpec{Harness: core.ClaudeCode},
+func lead(agent core.AgentID, session uint32) daemon.SessionStart {
+	return daemon.SessionStart{
+		Launch: core.LaunchSession{
+			Session: core.Session{Agent: agent, N: session}, Run: "run", Role: core.RoleLead,
+			Spec: core.AgentSpec{Harness: core.ClaudeCode},
+		},
+		Repository: "/repo", Task: "task",
 	}
 }
 
-// The launch file carries the plugin and survives the JSON the sidecar reads, and the sidecar's own
-// validation accepts it.
-func TestTheLaunchFileCarriesThePluginAndIsValid(t *testing.T) {
+// The request carries the skills, and the holder's own validation accepts it.
+func TestTheOpenRequestCarriesTheSkillsAndIsValid(t *testing.T) {
 	s, plugin := launcher(t)
-	spec, err := s.launchSpec(context.Background(), lead("a1", 1), plugin)
+	request, err := s.openRequest(lead("a1", 1), plugin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := protojson.Marshal(spec)
-	if err != nil {
-		t.Fatal(err)
+	if got := request.GetSkills(); got.GetDirectory() != plugin.Marketplace || got.GetName() != "vibesys" {
+		t.Fatalf("skills = %v", got)
 	}
-	var back pb.LaunchSession
-	if err := protojson.Unmarshal(data, &back); err != nil {
-		t.Fatal(err)
-	}
-	if got := back.GetPlugin(); got.GetMarketplace() != plugin.Marketplace || got.GetName() != "vibesys" || got.GetHome() == "" {
-		t.Fatalf("plugin = %v", got)
-	}
-	if err := protovalidate.Validate(&back); err != nil {
-		t.Fatalf("the launch file is invalid: %v", err)
+	if err := protovalidate.Validate(request); err != nil {
+		t.Fatalf("the open request is invalid: %v", err)
 	}
 }
 
-// A resume (a later session of the agent) finds the home the first session installed into, and
+// A resume (a later session of the agent) finds the directory the first session installed into, and
 // another agent never shares it.
-func TestAnAgentKeepsOnePluginHomeAcrossSessions(t *testing.T) {
+func TestAnAgentKeepsOneDataDirectoryAcrossSessions(t *testing.T) {
 	s, plugin := launcher(t)
 	home := func(agent core.AgentID, session uint32) string {
-		spec, err := s.launchSpec(context.Background(), lead(agent, session), plugin)
+		request, err := s.openRequest(lead(agent, session), plugin)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return spec.GetPlugin().GetHome()
+		return request.GetAgentDataDirectory()
 	}
 	if first, again := home("a1", 1), home("a1", 2); first != again {
-		t.Fatalf("session 2 got home %s, session 1 had %s", again, first)
+		t.Fatalf("session 2 got directory %s, session 1 had %s", again, first)
 	}
 	if home("a1", 1) == home("a2", 1) {
-		t.Fatal("two agents share a plugin home")
+		t.Fatal("two agents share a data directory")
 	}
 }

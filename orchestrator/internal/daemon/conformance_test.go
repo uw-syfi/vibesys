@@ -62,7 +62,7 @@ func TestEveryStartFailureScenarioEndsTheLeadWithItsReason(t *testing.T) {
 				t.Fatalf("scenario starts with %s but expects %s", got, scenario.Expect.StartFailure)
 			}
 			r := daemontest.NewRig(t)
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
 				return failedToStart(reason, "could not start the agent: "+step["detail"])
 			}
 			receipt := dispatch(t, r, startRun("c1"))
@@ -72,7 +72,7 @@ func TestEveryStartFailureScenarioEndsTheLeadWithItsReason(t *testing.T) {
 			if want := core.StartFailure(strings.ToLower(step["start_fails"])); lead.Status != core.AgentFailed || lead.StartFailure != want {
 				t.Fatalf("lead %s with reason %q, want failed with %q", lead.Status, lead.StartFailure, want)
 			}
-			if lead.ConversationID != "" {
+			if lead.ResumeToken != "" {
 				t.Fatalf("lead was shown open: %+v", lead)
 			}
 		})

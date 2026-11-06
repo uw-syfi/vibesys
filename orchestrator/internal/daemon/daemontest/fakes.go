@@ -52,7 +52,7 @@ func (n *Nonces) Next() core.Nonce {
 }
 
 // Reaction is what a session does when it is sent a command. The default one is DefaultReaction.
-type Reaction func(s *Session, cmd *pb.SidecarCommand)
+type Reaction func(s *Session, cmd *pb.SessionCommand)
 
 // Sidecars is a host of fake sidecars. A Session lives in it until it dies or closes, however many
 // daemons come and go, as a real sidecar outlives the daemon.
@@ -79,7 +79,7 @@ type Sidecars struct {
 	// Opening, when set, is what a launched session says as it starts, in place of opening at once.
 	// It returns the session's first events: a failure to start, or none, which leaves the session
 	// launching until something else ends it.
-	Opening func(l core.LaunchSession) []*pb.SidecarEvent
+	Opening func(l core.LaunchSession) []*pb.SessionEvent
 	// LaunchError, when set, is what a failing launch reports.
 	LaunchError error
 	// KillFailures makes that many Kill calls fail before any succeeds, as a signal that cannot be
@@ -140,7 +140,8 @@ func (h *Sidecars) Sessions() []*Session {
 }
 
 // Launch implements daemon.Sidecars. A repeated launch finds the session it started.
-func (h *Sidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.LaunchEnv) (daemon.Sidecar, error) {
+func (h *Sidecars) Launch(ctx context.Context, start daemon.SessionStart) (daemon.Sidecar, error) {
+	l := start.Launch
 	if hung, err := h.hang(ctx); hung {
 		return nil, err
 	}
@@ -156,7 +157,7 @@ func (h *Sidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.
 		}
 		return nil, fmt.Errorf("fake host: cannot start %s/%d", l.Session.Agent, l.Session.N)
 	}
-	s := &Session{Launch: l, Env: env, seen: map[string]bool{}, host: h}
+	s := &Session{Launch: l, Start: start, Env: start.Tools, seen: map[string]bool{}, host: h}
 	h.sessions[l.Session] = s
 	if h.Opening != nil {
 		for _, ev := range h.Opening(l) {
@@ -164,12 +165,12 @@ func (h *Sidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.
 		}
 		return &conn{host: h, s: s}, nil
 	}
-	conversation := l.ConversationID
-	if conversation == "" {
-		conversation = fmt.Sprintf("conv-%s", l.Session.Agent)
+	token := l.ResumeToken
+	if token == "" {
+		token = fmt.Sprintf("conv-%s", l.Session.Agent)
 	}
-	s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_Opened{Opened: &pb.ConversationOpened{
-		ProviderConversationId: conversation, Worktree: "/work/" + string(l.Session.Agent),
+	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
+		ResumeToken:  []byte(token),
 		Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
 	}}})
 	return &conn{host: h, s: s}, nil
@@ -192,12 +193,13 @@ func (h *Sidecars) Attach(ctx context.Context, session core.Session) (daemon.Sid
 // Session is one fake sidecar: the events it has emitted, and the commands it has taken.
 type Session struct {
 	Launch core.LaunchSession
+	Start  daemon.SessionStart
 	Env    daemon.LaunchEnv
 	// Received lists each command once, by effect id.
-	Received []*pb.SidecarCommand
+	Received []*pb.SessionCommand
 
 	mu     sync.Mutex
-	events []*pb.SidecarEvent
+	events []*pb.SessionEvent
 	seen   map[string]bool
 	dead   bool
 	closed bool
@@ -209,7 +211,7 @@ type Session struct {
 }
 
 // Emit appends an event to the session's stream, giving it the next offset.
-func (s *Session) Emit(ev *pb.SidecarEvent) {
+func (s *Session) Emit(ev *pb.SessionEvent) {
 	if ev.Offset == 0 {
 		ev.Offset = uint64(len(s.events)) + 1
 	}
@@ -217,7 +219,7 @@ func (s *Session) Emit(ev *pb.SidecarEvent) {
 }
 
 // EmitEvents appends events under the session's lock.
-func (s *Session) EmitEvents(evs ...*pb.SidecarEvent) {
+func (s *Session) EmitEvents(evs ...*pb.SessionEvent) {
 	s.mu.Lock()
 	for _, ev := range evs {
 		s.Emit(ev)
@@ -244,10 +246,10 @@ func (s *Session) BreakStream() {
 }
 
 // Commands returns the commands the session took, each once.
-func (s *Session) Commands() []*pb.SidecarCommand {
+func (s *Session) Commands() []*pb.SessionCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]*pb.SidecarCommand(nil), s.Received...)
+	return append([]*pb.SessionCommand(nil), s.Received...)
 }
 
 // Dead says the process is gone.
@@ -262,7 +264,7 @@ type conn struct {
 	s    *Session
 }
 
-func (c *conn) Send(ctx context.Context, cmd *pb.SidecarCommand) error {
+func (c *conn) Send(ctx context.Context, cmd *pb.SessionCommand) error {
 	if hung, err := c.host.hang(ctx); hung {
 		return err
 	}
@@ -276,7 +278,7 @@ func (c *conn) Send(ctx context.Context, cmd *pb.SidecarCommand) error {
 	return err
 }
 
-func (c *conn) send(cmd *pb.SidecarCommand) error {
+func (c *conn) send(cmd *pb.SessionCommand) error {
 	c.s.mu.Lock()
 	defer c.s.mu.Unlock()
 	if c.s.dead {
@@ -334,7 +336,7 @@ type stream struct {
 	after uint64
 }
 
-func (st *stream) Next() (*pb.SidecarEvent, error) {
+func (st *stream) Next() (*pb.SessionEvent, error) {
 	st.s.mu.Lock()
 	defer st.s.mu.Unlock()
 	if st.s.failNext {
@@ -357,21 +359,21 @@ func (st *stream) Close() {}
 
 // DefaultReaction makes a session behave like a cooperative agent: a turn writes one item and
 // ends, a steer is accepted, an interrupt ends the turn, and a close ends the session.
-func DefaultReaction(s *Session, cmd *pb.SidecarCommand) {
+func DefaultReaction(s *Session, cmd *pb.SessionCommand) {
 	switch b := cmd.GetBody().(type) {
-	case *pb.SidecarCommand_StartTurn:
+	case *pb.SessionCommand_StartTurn:
 		AnswerTurn(s, b.StartTurn.GetTurnId(), "ok")
-	case *pb.SidecarCommand_Steer:
-		s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_Steer{Steer: &pb.SteerOutcome{
+	case *pb.SessionCommand_Steer:
+		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Steer{Steer: &pb.SteerOutcome{
 			MessageId: b.Steer.GetMessage().GetId(), Accepted: true,
 		}}})
-	case *pb.SidecarCommand_Interrupt:
-		s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
+	case *pb.SessionCommand_Interrupt:
+		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
 			TurnId: b.Interrupt.GetTurnId(), Status: pb.TurnStatus_TURN_STATUS_INTERRUPTED,
 		}}})
-	case *pb.SidecarCommand_Close:
+	case *pb.SessionCommand_Close:
 		s.closed = true
-		s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_Closed{Closed: &pb.SessionClosed{}}})
+		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Closed{Closed: &pb.SessionClosed{}}})
 	}
 }
 
@@ -379,14 +381,14 @@ func DefaultReaction(s *Session, cmd *pb.SidecarCommand) {
 // and the end of the turn. The session's lock must be held.
 func AnswerTurn(s *Session, turn, text string) {
 	item := "item-" + turn
-	s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_Delta{Delta: &pb.SidecarDelta{
-		ItemId: item, Body: &pb.SidecarDelta_Text{Text: text},
+	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Delta{Delta: &pb.SessionDelta{
+		ItemId: item, Body: &pb.SessionDelta_Text{Text: text},
 	}}})
-	s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_Item{Item: &pb.SidecarItem{
+	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Item{Item: &pb.SessionItem{
 		Id: item, TurnId: turn, Status: pb.ItemStatus_ITEM_STATUS_FINISHED,
-		Body: &pb.SidecarItem_Assistant{Assistant: &pb.Text{Text: text}},
+		Body: &pb.SessionItem_Assistant{Assistant: &pb.Text{Text: text}},
 	}}})
-	s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
+	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
 		TurnId: turn, Status: pb.TurnStatus_TURN_STATUS_COMPLETED,
 	}}})
 }

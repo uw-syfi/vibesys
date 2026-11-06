@@ -98,27 +98,27 @@ type Session struct {
 	N     uint32
 }
 
-// SidecarFact is one event from a session's sidecar. Deltas never get here: the shell passes them
+// SessionFact is one event from a session's sidecar. Deltas never get here: the shell passes them
 // straight to whoever is watching, so a fact is always something to record.
-type SidecarFact struct {
+type SessionFact struct {
 	Session Session
 	// Offset increases within a session. A fact at or below what is committed is a repeat.
 	Offset uint64
 	Body   FactBody
 }
 
-func (SidecarFact) inputBody() {}
+func (SessionFact) inputBody() {}
 
 // FactBody is what a sidecar reported. The set is closed.
 type FactBody interface{ factBody() }
 
 // The facts.
 type (
-	// ConversationOpened says the session is ready.
-	ConversationOpened struct {
-		ConversationID string
-		Capabilities   Capabilities
-		Worktree       string
+	// SessionOpened says the session is ready.
+	SessionOpened struct {
+		// ResumeToken is what a later session opens with to continue this one. Opaque here.
+		ResumeToken  string
+		Capabilities Capabilities
 	}
 	// ItemObserved is an item, new or changed. Ordinal, Agent and At are filled in here.
 	ItemObserved struct {
@@ -154,17 +154,18 @@ type (
 	SessionClosed struct{}
 )
 
-func (ConversationOpened) factBody() {}
-func (ItemObserved) factBody()       {}
-func (TurnEnded) factBody()          {}
-func (SteerOutcome) factBody()       {}
-func (UsageReported) factBody()      {}
-func (SessionFailed) factBody()      {}
-func (SessionClosed) factBody()      {}
+func (SessionOpened) factBody() {}
+func (ItemObserved) factBody()  {}
+func (TurnEnded) factBody()     {}
+func (SteerOutcome) factBody()  {}
+func (UsageReported) factBody() {}
+func (SessionFailed) factBody() {}
+func (SessionClosed) factBody() {}
 
-// SidecarLost says a session's sidecar is gone: the shell could not reach it, could not start it,
-// or found it missing after a restart. It is the one fact about a session no sidecar can send.
-type SidecarLost struct {
+// SessionLost says what holds a session is gone: the shell could not reach it, could not start it,
+// could not work with it, or found it missing after a restart. It is the one fact about a session
+// that session cannot send.
+type SessionLost struct {
 	Session Session
 	// Detail says why, such as the error that stopped a launch. It reaches the agent's record and,
 	// for a subagent, its lead.
@@ -174,7 +175,7 @@ type SidecarLost struct {
 	StartFailure StartFailure
 }
 
-func (SidecarLost) inputBody() {}
+func (SessionLost) inputBody() {}
 
 // JobUpdate is a job's state as vibesys-cli reports it. A feed may repeat one.
 type JobUpdate struct {

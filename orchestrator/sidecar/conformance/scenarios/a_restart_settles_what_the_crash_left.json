@@ -1,6 +1,6 @@
 {
   "name": "a_restart_settles_what_the_crash_left",
-  "doc": "The sidecar dies mid-turn with a tool call still running. The restarted one fails the open turn after settling its running item, reports the session lost, and keeps the history.",
+  "doc": "The process dies mid-turn with a tool call still running. The restarted one fails the open turn after settling its running item, reports the session lost, and keeps the history.",
   "provider": [
     [
       {

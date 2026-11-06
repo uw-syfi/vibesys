@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.store import (
     FileStore,
     FrameDirection,
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _event(n: int) -> sc.SidecarEvent:
-    return sc.SidecarEvent(delta=sc.SidecarDelta(item_id=f"i{n}", text="x" * n))
+def _event(n: int) -> sc.SessionEvent:
+    return sc.SessionEvent(delta=sc.SessionDelta(item_id=f"i{n}", text="x" * n))
 
 
 @pytest.fixture(params=["memory", "file"])

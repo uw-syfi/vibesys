@@ -34,24 +34,6 @@ service OrchestratorService {
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
 }
 
-// BuildVersions is what one build carries.
-message BuildVersions {
-  // The release version, or "dev". Display only: callers never compare it.
-  string binary_version = 1;
-  // The revision of this contract's behavior. It increases only when a change breaks a peer.
-  uint32 protocol_version = 2;
-  // The oldest protocol_version this build still serves.
-  uint32 min_protocol_version = 3;
-}
-
-// Compatibility is the answer to a handshake, from the daemon's side.
-enum Compatibility {
-  COMPATIBILITY_UNSPECIFIED = 0;
-  COMPATIBILITY_COMPATIBLE = 1;
-  COMPATIBILITY_CLIENT_TOO_OLD = 2;
-  COMPATIBILITY_DAEMON_TOO_OLD = 3;
-}
-
 message DispatchRequest {
   Command command = 1 [(buf.validate.field).required = true];
 }

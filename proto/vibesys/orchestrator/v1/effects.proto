@@ -23,64 +23,29 @@ message Effect {
   }
 }
 
-// SessionRef names one session of one agent. A sidecar refuses a stale one.
+// SessionRef names one session of one agent. The program holding a session refuses a stale one.
 message SessionRef {
   string agent_id = 1 [(buf.validate.field).string.min_len = 1];
   uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
 }
 
+// LaunchSession asks for a session of an agent. What else the session needs comes from the run and
+// the host's configuration when the effect is carried out.
 message LaunchSession {
   SessionRef session = 1 [(buf.validate.field).required = true];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
-  string repository = 3 [(buf.validate.field).string.min_len = 1];
-  AgentRole role = 4 [(buf.validate.field).enum = {
+  AgentRole role = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
-  Harness harness = 5 [(buf.validate.field).enum = {
+  Harness harness = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
-  string model = 6;
-  string reasoning_effort = 7;
-  // Set to continue the provider's conversation instead of starting one.
-  string resume_conversation_id = 8;
-  // Set on a resume: the worktree the agent had.
-  string worktree = 9;
-  // The plugin every session loads, and none of the operator's own plugins, skills or config.
-  // Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
-  // when it writes the launch file, and the sidecar refuses a launch file without it.
-  SessionPlugin plugin = 10;
-  // The run task and CLI location for the agent.
-  string task = 11 [(buf.validate.field).string.min_len = 1];
-  CliLocation cli_location = 12;
-}
-
-// SessionPlugin is the published plugin a session loads, named by value so the sidecar never
-// guesses where its own checkout is.
-message SessionPlugin {
-  // The root of a local marketplace checkout: the directory holding .claude-plugin/marketplace.json.
-  string marketplace = 1 [
-    (buf.validate.field).string.min_len = 1,
-    (buf.validate.field).cel = {
-      id: "plugin.marketplace.absolute"
-      message: "must be an absolute path"
-      expression: "this.startsWith('/')"
-    }
-  ];
-  // The plugin's name in that marketplace.
-  string name = 2 [(buf.validate.field).string.min_len = 1];
-  // The session's plugin home: a fresh directory the first session of an agent installs the plugin
-  // into, and every later session of that agent reuses, because the provider keeps the
-  // conversation to resume there too. One per agent; never shared between agents.
-  string home = 3 [
-    (buf.validate.field).string.min_len = 1,
-    (buf.validate.field).cel = {
-      id: "plugin.home.absolute"
-      message: "must be an absolute path"
-      expression: "this.startsWith('/')"
-    }
-  ];
+  string model = 5;
+  string reasoning_effort = 6;
+  // Set to continue the agent's last session instead of starting afresh. See SessionOpened.
+  bytes resume_token = 7 [(buf.validate.field).bytes.max_len = 4096];
 }
 
 message StartTurn {

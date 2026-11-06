@@ -17,16 +17,16 @@ func (t *tx) live(s Session) (agentState, bool) {
 	return a, true
 }
 
-// fact applies one sidecar event. A repeat is at or below the committed offset, so a stream resumed
+// fact applies one session event. A repeat is at or below the committed offset, so a stream resumed
 // after a crash changes nothing it already changed.
-func (t *tx) fact(f SidecarFact) {
+func (t *tx) fact(f SessionFact) {
 	a, ok := t.live(f.Session)
 	if !ok || f.Offset <= a.offset {
 		return
 	}
-	t.source = &SidecarSource{Session: f.Session, Offset: f.Offset}
+	t.source = &SessionSource{Session: f.Session, Offset: f.Offset}
 	switch b := f.Body.(type) {
-	case ConversationOpened:
+	case SessionOpened:
 		t.opened(a, b)
 	case ItemObserved:
 		t.item(a, b)
@@ -48,11 +48,11 @@ func (t *tx) fact(f SidecarFact) {
 	}
 }
 
-func (t *tx) opened(a agentState, b ConversationOpened) {
+func (t *tx) opened(a agentState, b SessionOpened) {
 	if a.Status != AgentLaunching {
 		return
 	}
-	a.Status, a.ConversationID, a.Capabilities, a.Worktree = AgentIdle, b.ConversationID, b.Capabilities, b.Worktree
+	a.Status, a.ResumeToken, a.Capabilities = AgentIdle, b.ResumeToken, b.Capabilities
 	t.emit(a.Run, a.Agent)
 	if run := t.s.runs[a.Run]; a.Role == RoleLead && run.Status == RunStarting {
 		run.Status = RunRunning
@@ -127,7 +127,7 @@ func (t *tx) usage(a agentState, b UsageReported) {
 	t.emit(a.Run, turn)
 }
 
-func (t *tx) lost(b SidecarLost) {
+func (t *tx) lost(b SessionLost) {
 	a, ok := t.live(b.Session)
 	if !ok {
 		return

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def _engine(path: Path, driver: ScriptedDriver) -> Engine:
-    engine = Engine(h.launch(), FileStore.at(path), lambda _sink: driver)
+    engine = Engine(h.REF, FileStore.at(path), lambda _sink: driver)
     engine.start()
     return engine
 

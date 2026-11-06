@@ -1,1 +1,1 @@
-"""The orchestrator sidecar: one process per agent session, serving SidecarService."""
+"""The orchestrator sidecar: one process per agent session, serving AgentSessionService."""

@@ -18,9 +18,9 @@ func Decide(s State, in Input) (State, []Event, []Effect) {
 	switch b := in.Body.(type) {
 	case Command:
 		t.command(b)
-	case SidecarFact:
+	case SessionFact:
 		t.fact(b)
-	case SidecarLost:
+	case SessionLost:
 		t.lost(b)
 	case JobUpdate:
 		t.job(b)
@@ -44,7 +44,7 @@ type tx struct {
 	in      Input
 	// command and source fill the envelope of every event.
 	commandID CommandID
-	source    *SidecarSource
+	source    *SessionSource
 	events    []Event
 	effects   []Effect
 	minted    int
@@ -190,8 +190,7 @@ func (t *tx) launch(run Run, a Agent) {
 	a.Status, a.Stop, a.Session, a.StartedAt = AgentLaunching, StopNone, 1, t.in.At
 	t.emit(run.ID, a)
 	t.effect(LaunchSession{
-		Session: Session{a.ID, 1}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
-		Location: run.Location,
+		Session: Session{a.ID, 1}, Run: run.ID, Role: a.Role, Spec: a.Spec,
 	})
 	t.armLaunchDeadline(run.ID, Session{a.ID, 1})
 }

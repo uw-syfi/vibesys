@@ -58,68 +58,67 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 	return c, errs.err()
 }
 
-// ParseSidecarEvent reads one event of a session's stream. A delta is not a fact, and comes back on
+// ParseSessionEvent reads one event of a session's stream. A delta is not a fact, and comes back on
 // its own for the shell to pass to watchers.
-func ParseSidecarEvent(from core.Session, data []byte) (core.SidecarFact, *pb.Delta, error) {
-	var m pb.SidecarEvent
+func ParseSessionEvent(from core.Session, data []byte) (core.SessionFact, *pb.Delta, error) {
+	var m pb.SessionEvent
 	if err := parse(data, &m); err != nil {
-		return core.SidecarFact{}, nil, err
+		return core.SessionFact{}, nil, err
 	}
 	var errs errorList
-	f := core.SidecarFact{Session: from, Offset: m.GetOffset()}
+	f := core.SessionFact{Session: from, Offset: m.GetOffset()}
 	switch b := m.GetBody().(type) {
-	case *pb.SidecarEvent_Opened:
+	case *pb.SessionEvent_Opened:
 		o := b.Opened
-		f.Body = core.ConversationOpened{
-			ConversationID: o.GetProviderConversationId(), Capabilities: capabilitiesIn(o.GetCapabilities()),
-			Worktree: o.GetWorktree(),
+		f.Body = core.SessionOpened{
+			ResumeToken: string(o.GetResumeToken()), Capabilities: capabilitiesIn(o.GetCapabilities()),
 		}
-	case *pb.SidecarEvent_Item:
-		f.Body = sidecarItemIn(b.Item, &errs)
-	case *pb.SidecarEvent_Delta:
-		return core.SidecarFact{}, deltaOut(from, b.Delta), nil
-	case *pb.SidecarEvent_TurnEnded:
+	case *pb.SessionEvent_Item:
+		f.Body = sessionItemIn(b.Item, &errs)
+	case *pb.SessionEvent_Delta:
+		return core.SessionFact{}, deltaOut(from, b.Delta), nil
+	case *pb.SessionEvent_TurnEnded:
 		t := b.TurnEnded
 		f.Body = core.TurnEnded{
 			Turn: core.TurnID(t.GetTurnId()), Status: turnStatuses.in(t.GetStatus(), &errs), Usage: usageIn(t.GetUsage()),
 		}
-	case *pb.SidecarEvent_Steer:
+	case *pb.SessionEvent_Steer:
 		f.Body = core.SteerOutcome{Message: core.MessageID(b.Steer.GetMessageId()), Accepted: b.Steer.GetAccepted()}
-	case *pb.SidecarEvent_Usage:
+	case *pb.SessionEvent_Usage:
 		f.Body = core.UsageReported{Turn: core.TurnID(b.Usage.GetTurnId()), Usage: usageIn(b.Usage.GetUsage())}
-	case *pb.SidecarEvent_Failed:
+	case *pb.SessionEvent_Failed:
 		f.Body = core.SessionFailed{Detail: b.Failed.GetDetail(), StartFailure: startFailures.in(b.Failed.GetStartFailureReason(), &errs)}
-	case *pb.SidecarEvent_Closed:
+	case *pb.SessionEvent_Closed:
 		f.Body = core.SessionClosed{}
 	default:
-		errs.errs = append(errs.errs, describe("sidecar event", m.GetBody()))
+		errs.errs = append(errs.errs, describe("session event", m.GetBody()))
 	}
 	return f, nil, errs.err()
 }
 
-func sidecarItemIn(i *pb.SidecarItem, errs *errorList) core.ItemObserved {
+func sessionItemIn(i *pb.SessionItem, errs *errorList) core.ItemObserved {
 	out := core.ItemObserved{
 		ID: core.ItemID(i.GetId()), Turn: core.TurnID(i.GetTurnId()), Status: itemStatuses.in(i.GetStatus(), errs),
 	}
 	switch b := i.GetBody().(type) {
-	case *pb.SidecarItem_Assistant:
+	case *pb.SessionItem_Assistant:
 		out.Body = core.Assistant{Text: b.Assistant.GetText()}
-	case *pb.SidecarItem_Reasoning:
+	case *pb.SessionItem_Reasoning:
 		out.Body = core.Reasoning{Text: b.Reasoning.GetText()}
-	case *pb.SidecarItem_Prompt:
+	case *pb.SessionItem_Prompt:
 		out.Body = core.Prompt{Text: b.Prompt.GetText()}
-	case *pb.SidecarItem_Tool:
+	case *pb.SessionItem_Tool:
 		out.Body = toolIn(b.Tool)
 	}
 	return out
 }
 
-func deltaOut(from core.Session, d *pb.SidecarDelta) *pb.Delta {
+func deltaOut(from core.Session, d *pb.SessionDelta) *pb.Delta {
 	out := &pb.Delta{AgentId: string(from.Agent), ItemId: d.GetItemId()}
 	switch b := d.GetBody().(type) {
-	case *pb.SidecarDelta_Text:
+	case *pb.SessionDelta_Text:
 		out.Body = &pb.Delta_Text{Text: b.Text}
-	case *pb.SidecarDelta_CommandOutput:
+	case *pb.SessionDelta_CommandOutput:
 		out.Body = &pb.Delta_CommandOutput{CommandOutput: b.CommandOutput}
 	}
 	return out
@@ -131,10 +130,9 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 	switch b := e.(type) {
 	case core.LaunchSession:
 		out.Body = &pb.Effect_LaunchSession{LaunchSession: &pb.LaunchSession{
-			Session: sessionRef(b.Session), RunId: string(b.Run), Repository: b.Repository, Task: b.Task, Role: roles.out(b.Role),
-			CliLocation: locationOut(b.Location),
-			Harness:     harnesses.out(b.Spec.Harness), Model: string(b.Spec.Model), ReasoningEffort: string(b.Spec.Effort),
-			ResumeConversationId: b.ConversationID, Worktree: b.Worktree,
+			Session: sessionRef(b.Session), RunId: string(b.Run), Role: roles.out(b.Role),
+			Harness: harnesses.out(b.Spec.Harness), Model: string(b.Spec.Model), ReasoningEffort: string(b.Spec.Effort),
+			ResumeToken: []byte(b.ResumeToken),
 		}}
 	case core.StartTurn:
 		out.Body = &pb.Effect_StartTurn{StartTurn: &pb.StartTurn{
@@ -174,14 +172,13 @@ func DecodeEffect(data []byte) (core.Effect, error) {
 	case *pb.Effect_LaunchSession:
 		l := b.LaunchSession
 		e = core.LaunchSession{
-			Session: session(l.GetSession()), Run: core.RunID(l.GetRunId()), Repository: l.GetRepository(), Task: l.GetTask(),
-			Location: locationIn(l.GetCliLocation()),
-			Role:     roles.in(l.GetRole(), &errs),
+			Session: session(l.GetSession()), Run: core.RunID(l.GetRunId()),
+			Role: roles.in(l.GetRole(), &errs),
 			Spec: core.AgentSpec{
 				Harness: harnesses.in(l.GetHarness(), &errs), Model: core.ModelName(l.GetModel()),
 				Effort: core.EffortName(l.GetReasoningEffort()),
 			},
-			ConversationID: l.GetResumeConversationId(), Worktree: l.GetWorktree(),
+			ResumeToken: string(l.GetResumeToken()),
 		}
 	case *pb.Effect_StartTurn:
 		s := b.StartTurn

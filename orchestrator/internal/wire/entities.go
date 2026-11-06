@@ -57,8 +57,8 @@ func agentOut(a core.Agent) *pb.Agent {
 	return &pb.Agent{
 		Id: string(a.ID), RunId: string(a.Run), ParentAgentId: string(a.Parent), Role: roles.out(a.Role),
 		Harness: harnesses.out(a.Spec.Harness), Model: string(a.Spec.Model),
-		ReasoningEffort: string(a.Spec.Effort), PlanNumber: a.PlanNumber, Worktree: a.Worktree,
-		Status: agentStatuses.out(a.Status), ProviderConversationId: a.ConversationID,
+		ReasoningEffort: string(a.Spec.Effort), PlanNumber: a.PlanNumber,
+		Status: agentStatuses.out(a.Status), ResumeToken: []byte(a.ResumeToken),
 		Capabilities: capabilitiesOut(a.Capabilities), StartedAt: when(a.StartedAt), EndedAt: when(a.EndedAt),
 		Session: a.Session, StopStage: stopStages.out(a.Stop), HandedOff: a.HandedOff,
 		SessionFailures: a.SessionFailures, EndDetail: a.EndDetail, HandoffReminded: a.HandoffReminded,
@@ -74,8 +74,8 @@ func agentIn(a *pb.Agent, errs *errorList) core.Agent {
 			Harness: harnesses.in(a.GetHarness(), errs), Model: core.ModelName(a.GetModel()),
 			Effort: core.EffortName(a.GetReasoningEffort()),
 		},
-		PlanNumber: a.GetPlanNumber(), Worktree: a.GetWorktree(), Status: agentStatuses.in(a.GetStatus(), errs),
-		ConversationID: a.GetProviderConversationId(), Capabilities: capabilitiesIn(a.GetCapabilities()),
+		PlanNumber: a.GetPlanNumber(), Status: agentStatuses.in(a.GetStatus(), errs),
+		ResumeToken: string(a.GetResumeToken()), Capabilities: capabilitiesIn(a.GetCapabilities()),
 		StartedAt: moment(a.GetStartedAt(), errs), EndedAt: moment(a.GetEndedAt(), errs), Session: a.GetSession(),
 		Stop: stopStages.in(a.GetStopStage(), errs), HandedOff: a.GetHandedOff(), SessionFailures: a.GetSessionFailures(),
 		EndDetail: a.GetEndDetail(), StartFailure: startFailures.in(a.GetStartFailureReason(), errs), HandoffReminded: a.GetHandoffReminded(), Usage: usageIn(a.GetUsage()),
@@ -291,7 +291,7 @@ func EncodeEvent(sequence uint64, e core.Event) ([]byte, error) {
 		Sequence: sequence, RunId: string(e.Run), CommandId: string(e.Command), At: when(e.At),
 	}
 	if s := e.Source; s != nil {
-		out.Source = &pb.SidecarSource{AgentId: string(s.Session.Agent), Session: s.Session.N, Offset: s.Offset}
+		out.Source = &pb.SessionSource{AgentId: string(s.Session.Agent), Session: s.Session.N, Offset: s.Offset}
 	}
 	switch b := e.Body.(type) {
 	case core.Run:
@@ -323,7 +323,7 @@ func DecodeEvent(data []byte) (uint64, core.Event, error) {
 		Run: core.RunID(m.GetRunId()), Command: core.CommandID(m.GetCommandId()), At: moment(m.GetAt(), &errs),
 	}
 	if s := m.GetSource(); s != nil {
-		e.Source = &core.SidecarSource{
+		e.Source = &core.SessionSource{
 			Session: core.Session{Agent: core.AgentID(s.GetAgentId()), N: s.GetSession()}, Offset: s.GetOffset(),
 		}
 	}

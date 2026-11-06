@@ -11,6 +11,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 )
 
 // removeFrom takes files out of a release on disk and returns a function that puts them back, as
@@ -44,9 +45,10 @@ func TestARepairedInstallIsUsedByTheNextStartCheckAndLaunch(t *testing.T) {
 	repair := removeFrom(t, dir, "bin/vibesys-cli", "sidecar/.venv/bin/python")
 	parts := Parts{Find: find, Files: OSFiles{}}
 	checks := StartChecks{Sidecars: readyLauncher{}, Parts: parts, Tree: everythingIsADir{}}
-	sidecars := &ProcessSidecars{Root: t.TempDir(), Parts: parts, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sidecars := &ProcessSidecars{Root: t.TempDir(), Parts: parts, Holders: &ProcessHolders{Log: log}, Log: log}
 	launch := func() error {
-		_, err := sidecars.Launch(context.Background(), core.LaunchSession{Session: core.Session{Agent: "a", N: 1}}, nil)
+		_, err := sidecars.Launch(context.Background(), daemon.SessionStart{Launch: core.LaunchSession{Session: core.Session{Agent: "a", N: 1}}})
 		return err
 	}
 

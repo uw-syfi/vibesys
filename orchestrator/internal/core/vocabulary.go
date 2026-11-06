@@ -221,6 +221,8 @@ const (
 	StartWorkingDirUnavailable StartFailure = "working_directory_unavailable"
 	StartTimedOut              StartFailure = "timed_out"
 	StartOther                 StartFailure = "other"
+	// StartIncompatibleVersions says what holds the session and this host share no protocol.
+	StartIncompatibleVersions StartFailure = "incompatible_versions"
 )
 
 // TimerKind says what a timer is for.

@@ -1,0 +1,33 @@
+{
+  "session": {
+    "agentId": "agent-1",
+    "session": 1
+  },
+  "harness": "HARNESS_CODEX",
+  "workingDirectory": "/work",
+  "agentDataDirectory": "/data",
+  "skills": {
+    "directory": "/skills",
+    "name": "vibesys"
+  },
+  "tools": [
+    {
+      "name": "vibesys",
+      "argv": [
+        "/bin/vibesys-host",
+        "mcp"
+      ],
+      "env": {
+        "A_TOKEN": "x"
+      }
+    }
+  ],
+  "environment": {
+    "set": {
+      "A_NAME": "x"
+    },
+    "unset": [
+      "ANOTHER_NAME"
+    ]
+  }
+}

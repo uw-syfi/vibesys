@@ -12,8 +12,8 @@ import (
 )
 
 // failedToStart is what a session says when it cannot open.
-func failedToStart(reason pb.StartFailureReason, detail string) []*pb.SidecarEvent {
-	return []*pb.SidecarEvent{{Body: &pb.SidecarEvent_Failed{Failed: &pb.SessionFailed{Detail: detail, StartFailureReason: reason}}}}
+func failedToStart(reason pb.StartFailureReason, detail string) []*pb.SessionEvent {
+	return []*pb.SessionEvent{{Body: &pb.SessionEvent_Failed{Failed: &pb.SessionFailed{Detail: detail, StartFailureReason: reason}}}}
 }
 
 // startFault is one stage of a session's start that fails, and how it shows to the daemon.
@@ -48,7 +48,7 @@ var startFaults = []startFault{
 	{
 		name: "the agent program is missing",
 		arm: func(r *daemontest.Rig) {
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
 				return failedToStart(pb.StartFailureReason_START_FAILURE_REASON_AGENT_NOT_INSTALLED, "could not start the agent: claude binary not found in PATH")
 			}
 		},
@@ -57,7 +57,7 @@ var startFaults = []startFault{
 	{
 		name: "the agent is not signed in",
 		arm: func(r *daemontest.Rig) {
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
 				return failedToStart(pb.StartFailureReason_START_FAILURE_REASON_NOT_SIGNED_IN, "could not start the agent: please sign in")
 			}
 		},
@@ -66,7 +66,7 @@ var startFaults = []startFault{
 	{
 		name: "the plugin cannot be installed",
 		arm: func(r *daemontest.Rig) {
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
 				return failedToStart(pb.StartFailureReason_START_FAILURE_REASON_PLUGIN_UNAVAILABLE, "could not start the agent: plugin installation failed")
 			}
 		},
@@ -75,7 +75,7 @@ var startFaults = []startFault{
 	{
 		name: "the agent has no tools",
 		arm: func(r *daemontest.Rig) {
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
 				return failedToStart(pb.StartFailureReason_START_FAILURE_REASON_TOOLS_UNAVAILABLE, "could not start the agent: tool server vibesys failed")
 			}
 		},
@@ -84,7 +84,7 @@ var startFaults = []startFault{
 	{
 		name: "the session never opens",
 		arm: func(r *daemontest.Rig) {
-			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent { return nil }
+			r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent { return nil }
 		},
 		reason: core.StartTimedOut, detail: "did not open", never: true,
 	},
@@ -108,7 +108,7 @@ func TestEveryStageOfAStartThatFailsEndsTheRunWithItsReason(t *testing.T) {
 			if !lead.Status.Over() || lead.StartFailure != fault.reason {
 				t.Fatalf("lead %s with reason %q, want over with %q", lead.Status, lead.StartFailure, fault.reason)
 			}
-			if lead.ConversationID != "" || lead.Capabilities != (core.Capabilities{}) {
+			if lead.ResumeToken != "" || lead.Capabilities != (core.Capabilities{}) {
 				t.Fatalf("lead %+v was shown open", lead)
 			}
 			if run.Status != core.RunFailed {
@@ -144,7 +144,7 @@ func TestASessionThatOpensInTimeIsLeftAloneByItsLaunchTimer(t *testing.T) {
 // session is left running.
 func TestARestartDuringALaunchEndsInOneOutcome(t *testing.T) {
 	r := daemontest.NewRig(t)
-	r.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent { return nil }
+	r.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent { return nil }
 	receipt := dispatch(t, r, startRun("c1"))
 	r.Settle(t)
 	r.Restart(t)

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 def _engine(script: CodexScript, store: MemoryStore | None = None) -> tuple[Engine, MemoryStore]:
     store = store if store is not None else MemoryStore()
-    engine = Engine(h.launch(), store, h.codex_factory(script))
+    engine = Engine(h.REF, store, h.codex_factory(script))
     engine.start()
     return engine, store
 
@@ -41,9 +41,8 @@ def test_a_session_opens_with_its_conversation_id_and_what_it_can_do() -> None:
     engine, store = _engine(CodexScript())
     (opened,) = store.events_after(0)
     assert opened.offset == 1
-    assert opened.opened.provider_conversation_id
+    assert opened.opened.resume_token
     assert opened.opened.capabilities.steers
-    assert opened.opened.worktree == "/work"
     assert engine.events_after(0) == [opened]
 
 
@@ -157,7 +156,7 @@ def test_a_steer_sent_while_the_turn_runs_is_accepted_when_the_provider_takes_it
     started = threading.Event()
     factory = h.codex_factory(CodexScript().turn(AwaitSteer(then=(Say("thanks"),))))
     store = MemoryStore()
-    engine = Engine(h.launch(), store, lambda sink: _Started(factory(sink), started))  # type: ignore[arg-type,return-value]
+    engine = Engine(h.REF, store, lambda sink: _Started(factory(sink), started))  # type: ignore[arg-type,return-value]
     engine.start()
     engine.send(h.start_turn("e1", "t1"))
     # A steer comes from another thread while the turn thread reads the provider. The wait only

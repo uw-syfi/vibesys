@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// SidecarSource names the sidecar event an Event came from.
-type SidecarSource struct {
+// SessionSource names the sidecar event an Event came from.
+type SessionSource struct {
 	Session Session
 	Offset  uint64
 }
@@ -18,7 +18,7 @@ type Event struct {
 	Command CommandID
 	At      time.Time
 	// Source is nil unless a sidecar event caused this.
-	Source *SidecarSource
+	Source *SessionSource
 	Body   EventBody
 }
 
@@ -42,17 +42,14 @@ type Effect interface {
 
 // The effects.
 type (
-	// LaunchSession starts a session, resuming a conversation when ConversationID is set.
+	// LaunchSession starts a session, continuing the agent's last one when ResumeToken is set. What
+	// else the session needs is the run's, read when the effect is carried out.
 	LaunchSession struct {
-		Session        Session
-		Run            RunID
-		Repository     string
-		Task           string
-		Location       CliLocation
-		Role           AgentRole
-		Spec           AgentSpec
-		ConversationID string
-		Worktree       string
+		Session     Session
+		Run         RunID
+		Role        AgentRole
+		Spec        AgentSpec
+		ResumeToken string
 	}
 	// StartTurn starts a turn on Message.
 	StartTurn struct {

@@ -58,7 +58,7 @@ type world struct {
 func newWorld(t *testing.T, deadline time.Duration, leadBusy bool) *world {
 	t.Helper()
 	w := &world{t: t, r: daemontest.NewRig(t), kinds: map[core.AgentID]worker{}}
-	w.r.Sidecars.React = func(s *daemontest.Session, cmd *pb.SidecarCommand) {
+	w.r.Sidecars.React = func(s *daemontest.Session, cmd *pb.SessionCommand) {
 		kind := w.kinds[s.Launch.Session.Agent]
 		if s.Launch.Role == core.RoleLead && leadBusy {
 			kind = workerBusy

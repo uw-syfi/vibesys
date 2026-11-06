@@ -61,8 +61,8 @@ var ErrSidecarGone = errors.New("daemon: the session's sidecar is gone")
 // buffered and returns ErrIdle when the buffer is empty, so the daemon never waits on one.
 var ErrIdle = errors.New("daemon: no sidecar event is ready")
 
-// LaunchEnv is what the daemon gives a session's process at launch, so that the agent's tools reach
-// the daemon as that agent. It names the agent-only socket and never the operator's. The sidecar item decides how it reaches the process.
+// LaunchEnv is what the daemon gives a session's tools at launch, so that they reach the daemon as
+// that agent. It names the agent-only socket and never the operator's.
 type LaunchEnv map[string]string
 
 // The names in a LaunchEnv. The agent's identity is here and nowhere in a tool's arguments.
@@ -75,19 +75,32 @@ const (
 	EnvRole    = "VIBESYS_ORCHESTRATOR_ROLE"
 )
 
-// Sidecars starts and finds the sidecars. A sidecar serves the contract in sidecar.proto.
+// SessionStart is everything a session is started from: the effect the core decided, and what the
+// run says besides. The core does not store the rest with the effect, so a launch retried after a
+// restart reads the run as it is.
+type SessionStart struct {
+	Launch     core.LaunchSession
+	Repository string
+	Task       string
+	Location   core.CliLocation
+	Tools      LaunchEnv
+}
+
+// Sidecars starts sessions and finds the ones already running. How a session is held, and everything
+// said between the host and what holds it before it opens, is behind this: the daemon sees a session
+// start, and then opened or failed with a reason.
 type Sidecars interface {
-	// Launch starts the sidecar of a session, or returns the one already running for it, so a
-	// launch delivered twice starts one. ErrSidecarGone is not an error of Launch: any error means
-	// the launch failed.
-	Launch(ctx context.Context, launch core.LaunchSession, env LaunchEnv) (Sidecar, error)
-	// Attach finds the sidecar of a session that was launched before this daemon started. It
-	// returns ErrSidecarGone when there is none.
+	// Launch starts a session, or returns the one already running for it, so a launch delivered
+	// twice starts one. ErrSidecarGone is not an error of Launch: any error means the launch failed.
+	Launch(ctx context.Context, start SessionStart) (Sidecar, error)
+	// Attach finds a session that was launched before this daemon started. It returns ErrSidecarGone
+	// when there is none, and a *LaunchError when one is there and cannot be used.
 	Attach(ctx context.Context, session core.Session) (Sidecar, error)
 }
 
-// LaunchError is what Launch returns when it knows why a session could not start: the reason goes
-// to the core with the error's text. Any other error from Launch is read as core.StartOther.
+// LaunchError is what Launch and Attach return when they know why a session cannot be used: the
+// reason goes to the core with the error's text. Any other error from Launch is read as
+// core.StartOther.
 type LaunchError struct {
 	Reason core.StartFailure
 	Err    error
@@ -96,11 +109,11 @@ type LaunchError struct {
 func (e *LaunchError) Error() string { return e.Err.Error() }
 func (e *LaunchError) Unwrap() error { return e.Err }
 
-// Sidecar is the daemon's side of one session's SidecarService.
+// Sidecar is the daemon's side of one session's AgentSessionService.
 type Sidecar interface {
 	// Send carries out a command. A repeated effect id answers as the first delivery did. It
 	// returns ErrSidecarGone when the sidecar is no longer there.
-	Send(ctx context.Context, cmd *pb.SidecarCommand) error
+	Send(ctx context.Context, cmd *pb.SessionCommand) error
 	// Follow streams the session's events after an offset. Its context bounds the call that opens the
 	// stream and not the stream, which outlives it and ends with Close.
 	Follow(ctx context.Context, afterOffset uint64) (EventStream, error)
@@ -111,7 +124,7 @@ type Sidecar interface {
 // EventStream is one Follow. Next returns ErrIdle when nothing is ready, ErrSidecarGone when the
 // sidecar ended, and any other error when the stream broke and may be reopened.
 type EventStream interface {
-	Next() (*pb.SidecarEvent, error)
+	Next() (*pb.SessionEvent, error)
 	Close()
 }
 

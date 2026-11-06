@@ -166,6 +166,8 @@ guess at a folder named `bin`.
 
 ### Host and session holder
 
+`SessionBootstrap`, `OpenSessionRequest` and `SessionSkills` stay on the mechanism-word allowlist with a reason: the host decides where a session listens and works, so those paths are the facts the holder needs, not a detail of how it runs. The environment names in `production/sidecars.go` are listed until the environment codec gives each a message field.
+
 A session holder is started with one binary message on stdin (where to listen
 and its private state paths), and everything else arrives through typed calls
 on one service: `Hello` (versions and which session answers), `Open`, `Send`,
@@ -262,8 +264,7 @@ part they wait for.
 | --- | --- | --- |
 | Release manifest | `ReleaseManifest`, `release verify`, the host and installer reading it | hand path lists in the builder, installer and host; the `bin` folder rule |
 | Host control | `HostControlService`, `HostConfig`, host lock, `host status/stop/restart`, stable socket, minimal-environment start, client policy | the `holder` text file, the `ps` scan, the hash in the socket path, `VIBESYS_ORCHESTRATOR_{STATE_DIR,SIDECAR,MARKETPLACE,CLI}` on the host |
-| Session contract | `AgentSessionService` with `Hello` and `Open`, `SessionBootstrap`, the shrunk `LaunchSession`, store schema bump | `launch.json`, `mcp.json`, sidecar argv, the double fork, the host/sidecar version gap |
-| Session processes | `SessionProcesses` and the holder lock | `sidecar.pid`, `agent.pgids`, the `/proc` check |
+| Session processes | `SessionProcesses` and the holder lock | `sidecar.pid`, `agent.pgids` |
 | Host-side prompts | prompt rendering in the host; text-only `StartTurn` | the sidecar's prompt templates |
 | Environment codec | the `env_name` option, `AgentContext`, `ToolServerCredentials`, `SkillEnvironment` | the Python env table and its golden |
 | Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule |
@@ -302,13 +303,12 @@ validated message; the other rows are what the parts above replace.
 
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
-| launch | `launch.json`, protojson of `LaunchSession` | `effects.proto` | typed; names mechanisms |
-| tool servers | `mcp.json` read as untyped dictionaries | none | untyped: session contract |
-| bootstrap | argv flags | hand copies in Go and Python | untyped: session contract |
+| start | `SessionBootstrap` on stdin, then `Hello` and `Open` of `AgentSessionService` | `agent_session.proto` | typed |
+| tool servers | `ToolServer` in `Open`; agentshim hands them to the provider through an inherited pipe | `agent_session.proto` | typed |
 | pid and process groups | text files | hand copies | untyped: session processes |
-| commands and events | gRPC `SidecarService` | `sidecar.proto` | typed; names the implementation |
-| version check | none | none | missing: session contract |
-| why a session failed | free text | start-outcome work | in flight elsewhere |
+| commands and events | gRPC `AgentSessionService` | `agent_session.proto` | typed |
+| version check | `Hello`, ending in `INCOMPATIBLE_VERSIONS` | `agent_session.proto` | typed |
+| why a session failed | `StartFailureReason` | `orchestrator.proto` | typed |
 | prompts | rendered text from templates in the holder | `vs_sidecar/prompts/` | typed input, wrong layer: host-side prompts |
 | agent harness | in-process library | agentshim | not a process boundary |
 | harness and provider streams | stream-json and the provider's protocol | agentshim | external |

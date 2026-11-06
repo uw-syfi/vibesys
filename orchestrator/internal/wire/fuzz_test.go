@@ -37,8 +37,8 @@ func world(t *testing.T) (core.State, core.Session) {
 	}})
 	run := s.Runs()[0]
 	session := core.Session{Agent: run.Lead, N: 1}
-	s = step(s, 1, core.SidecarFact{Session: session, Offset: 1, Body: core.ConversationOpened{
-		ConversationID: "c", Capabilities: core.Capabilities{Steers: true, Resumes: true}, Worktree: "/w",
+	s = step(s, 1, core.SessionFact{Session: session, Offset: 1, Body: core.SessionOpened{
+		ResumeToken: "c", Capabilities: core.Capabilities{Steers: true, Resumes: true},
 	}})
 	return s, session
 }
@@ -63,10 +63,10 @@ func FuzzParseCommand(f *testing.F) {
 
 // Whatever a sidecar says, accepted input is something the core can decide on.
 func FuzzParseSidecarEvent(f *testing.F) {
-	seedCorpus(f, func(r *rand.Rand) proto.Message { return generated(r, &pb.SidecarEvent{}) })
+	seedCorpus(f, func(r *rand.Rand) proto.Message { return generated(r, &pb.SessionEvent{}) })
 	f.Fuzz(func(t *testing.T, data []byte) {
 		s, from := world(t)
-		fact, _, err := wire.ParseSidecarEvent(from, data)
+		fact, _, err := wire.ParseSessionEvent(from, data)
 		if err != nil || fact.Body == nil {
 			return
 		}

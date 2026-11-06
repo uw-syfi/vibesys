@@ -36,7 +36,7 @@ func (s State) Checkpoint() []Event {
 		a := s.agents[id]
 		agent := Event{Run: a.Run, At: checkpointAt, Body: a.Agent}
 		if a.offset > 0 {
-			agent.Source = &SidecarSource{Session: Session{Agent: a.ID, N: a.Session}, Offset: a.offset}
+			agent.Source = &SessionSource{Session: Session{Agent: a.ID, N: a.Session}, Offset: a.offset}
 		}
 		out = append(out, agent)
 		// The counters first, then the true running turn, so the fold ends with that turn running

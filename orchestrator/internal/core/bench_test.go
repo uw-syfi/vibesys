@@ -26,7 +26,7 @@ func BenchmarkDecide(b *testing.B) {
 			session := core.Session{Agent: leadID, N: agent.Session}
 			b.ResetTimer()
 			for i := range b.N {
-				core.Decide(w.s, core.Input{At: epoch, Nonce: "n", Body: core.SidecarFact{
+				core.Decide(w.s, core.Input{At: epoch, Nonce: "n", Body: core.SessionFact{
 					Session: session, Offset: 1000, Body: core.ItemObserved{
 						ID: core.ItemID(fmt.Sprintf("item-%d", i)), Turn: turn.ID, Status: core.ItemRunning, Body: core.ToolCall{Tool: "bash"},
 					},

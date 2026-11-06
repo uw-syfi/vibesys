@@ -34,13 +34,13 @@ func command(session *daemontest.Session) []string {
 	var out []string
 	for _, c := range session.Received {
 		switch c.GetBody().(type) {
-		case *pb.SidecarCommand_StartTurn:
+		case *pb.SessionCommand_StartTurn:
 			out = append(out, "start")
-		case *pb.SidecarCommand_Steer:
+		case *pb.SessionCommand_Steer:
 			out = append(out, "steer")
-		case *pb.SidecarCommand_Interrupt:
+		case *pb.SessionCommand_Interrupt:
 			out = append(out, "interrupt")
-		case *pb.SidecarCommand_Close:
+		case *pb.SessionCommand_Close:
 			out = append(out, "close")
 		}
 	}
@@ -315,7 +315,7 @@ func TestAReopenedStreamDoesNotShowItsDeltasTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	session.EmitEvents(&pb.SidecarEvent{Body: &pb.SidecarEvent_Delta{Delta: &pb.SidecarDelta{ItemId: "item-live", Body: &pb.SidecarDelta_Text{Text: "abc"}}}})
+	session.EmitEvents(&pb.SessionEvent{Body: &pb.SessionEvent_Delta{Delta: &pb.SessionDelta{ItemId: "item-live", Body: &pb.SessionDelta_Text{Text: "abc"}}}})
 	r.Settle(t)
 	session.BreakStream()
 	_ = step(r)

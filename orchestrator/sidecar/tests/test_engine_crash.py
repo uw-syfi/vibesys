@@ -18,7 +18,7 @@ def _turn() -> TurnScript:
 
 def _run(files: FaultyFiles) -> list:
     """Run one turn until the files crash; return what a follower saw."""
-    engine = Engine(h.launch(), FileStore(files), lambda _sink: ScriptedDriver([_turn()]))
+    engine = Engine(h.REF, FileStore(files), lambda _sink: ScriptedDriver([_turn()]))
     try:
         engine.start()
         engine.send(h.start_turn("e1", "t1"))
@@ -42,7 +42,7 @@ def test_a_crash_at_every_write_is_reported_by_the_next_sidecar_without_changing
     files = FaultyFiles(crash_at=at, keep=keep)
     shown = _run(files)
     survived = FileStore(files.reopened()).events_after(0)
-    second = Engine(h.launch(), FileStore(files.reopened()), lambda _sink: ScriptedDriver())
+    second = Engine(h.REF, FileStore(files.reopened()), lambda _sink: ScriptedDriver())
     second.start()
     events = second.events_after(0)
     assert events[: len(shown)] == shown

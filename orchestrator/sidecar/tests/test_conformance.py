@@ -1,4 +1,4 @@
-"""Every conformance scenario, against the Python sidecar over a real Unix socket."""
+"""Every conformance scenario, against this implementation over a real Unix socket."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ from agentshim import (
 
 from tests import conformance
 from tests.fakes import CrashError, ScriptedDriver, TurnScript
-from tests.helpers import launch
 from vs_sidecar.driver import StartError
 from vs_sidecar.engine import Engine
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2_grpc as sc_grpc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2_grpc as sc_grpc
+from vs_sidecar.holder import SessionHolder
 from vs_sidecar.main import work
 from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import FileStore
@@ -78,12 +78,20 @@ def _usage(counts: Mapping[str, int]) -> ProviderUsage:
 
 
 class GrpcClient:
-    """A ``conformance.Client`` over a Unix socket, to a sidecar it can kill and start again."""
+    """A ``conformance.Client`` over a Unix socket, to a process it can kill and start again."""
 
-    def __init__(self, provider: Sequence[Sequence[Mapping[str, Any]]], state: Path) -> None:
+    def __init__(
+        self,
+        provider: Sequence[Sequence[Mapping[str, Any]]],
+        state: Path,
+        *,
+        opens_itself: bool = True,
+    ) -> None:
         self._provider = provider
         self._state = state
         self._cleanup: Callable[[], None] = lambda: None
+        self._opens_itself = opens_itself
+        self._started = 0
         self._start()
 
     def _start(self) -> None:
@@ -96,31 +104,45 @@ class GrpcClient:
         driver = ScriptedDriver(
             [script_of(turn) for turn in self._provider if not _starts(turn)], start_error=failure
         )
-        self._provider = []  # a restarted sidecar has lost the agent: it has nothing to play
-        engine = Engine(
-            launch(), FileStore.at(self._state / "store"), lambda _sink: driver, wakeup.notify
-        )
-        engine.start()
-        socket = self._state / f"s{id(engine)}.sock"
-        server = serve(engine, wakeup, socket)
+        self._provider = []  # a restarted process has lost the agent: it has nothing to play
         stop = threading.Event()
-        worker = threading.Thread(target=self._work, args=(engine, wakeup, stop))
-        worker.start()
+        workers: list[threading.Thread] = []
+
+        def open_session(request: sc.OpenSessionRequest) -> Engine:
+            self._started += 1
+            engine = Engine(
+                request.session,
+                FileStore.at(self._state / "store"),
+                lambda _sink: driver,
+                wakeup.notify,
+            )
+            worker = threading.Thread(target=self._work, args=(engine, wakeup, stop))
+            workers.append(worker)
+            worker.start()
+            return engine
+
+        holder = SessionHolder(open_session)
+        socket = self._state / f"s{id(holder)}.sock"
+        server = serve(holder, wakeup, socket)
         channel = grpc.insecure_channel(f"unix:{socket}")
-        self._stub = sc_grpc.SidecarServiceStub(channel)
+        self._stub = sc_grpc.AgentSessionServiceStub(channel)
 
         def cleanup() -> None:
             stop.set()
             wakeup.notify()
-            worker.join(HANG_GUARD_SECONDS)
+            for worker in workers:
+                worker.join(HANG_GUARD_SECONDS)
             channel.close()
             server.stop(grace=0).wait()
 
         self._cleanup = cleanup
+        if self._opens_itself:
+            self.open(conformance.open_request({}))
 
     @staticmethod
     def _work(engine: Engine, wakeup: Wakeup, stop: threading.Event) -> None:
         try:
+            engine.start()
             work(engine, wakeup, stop)
         except CrashError:
             return  # the scripted crash: the process is gone
@@ -132,13 +154,27 @@ class GrpcClient:
     def close(self) -> None:
         self._cleanup()
 
-    def send(self, command: sc.SidecarCommand) -> None:
+    def hello(self, client: orch.BuildVersions) -> sc.SessionHelloResponse:
+        return self._stub.Hello(sc.SessionHelloRequest(client=client), timeout=HANG_GUARD_SECONDS)
+
+    def open(self, request: sc.OpenSessionRequest) -> sc.OpenSessionResponse:
+        return self._stub.Open(request, timeout=HANG_GUARD_SECONDS)
+
+    def code_of_refusal(self, call: Callable[[], object]) -> tuple[str, str]:
+        with pytest.raises(grpc.RpcError) as caught:
+            call()
+        return caught.value.code().name, caught.value.details() or ""
+
+    def agents_started(self) -> int:
+        return self._started
+
+    def send(self, command: sc.SessionCommand) -> None:
         self._stub.Send(sc.SendRequest(command=command), timeout=HANG_GUARD_SECONDS)
 
     def follow(
-        self, after_offset: int, until: Callable[[Sequence[sc.SidecarEvent]], bool]
-    ) -> list[sc.SidecarEvent]:
-        seen: list[sc.SidecarEvent] = []
+        self, after_offset: int, until: Callable[[Sequence[sc.SessionEvent]], bool]
+    ) -> list[sc.SessionEvent]:
+        seen: list[sc.SessionEvent] = []
         call = self._stub.Follow(
             sc.FollowRequest(after_offset=after_offset), timeout=HANG_GUARD_SECONDS
         )
@@ -153,13 +189,15 @@ class GrpcClient:
 
 
 @pytest.fixture
-def served() -> Iterator[Callable[[Sequence[Sequence[Mapping[str, Any]]]], GrpcClient]]:
+def served() -> Iterator[Callable[..., GrpcClient]]:
     clients: list[GrpcClient] = []
 
-    def start(provider: Sequence[Sequence[Mapping[str, Any]]]) -> GrpcClient:
+    def start(
+        provider: Sequence[Sequence[Mapping[str, Any]]], *, opens_itself: bool = True
+    ) -> GrpcClient:
         # A short path: a Unix socket's path has a small limit.
         directory = Path(tempfile.mkdtemp(prefix="vs"))
-        client = GrpcClient(provider, directory)
+        client = GrpcClient(provider, directory, opens_itself=opens_itself)
         clients.append(client)
         return client
 
@@ -169,20 +207,18 @@ def served() -> Iterator[Callable[[Sequence[Sequence[Mapping[str, Any]]]], GrpcC
 
 
 @pytest.mark.parametrize("name", conformance.names())
-def test_scenario(
-    name: str, served: Callable[[Sequence[Sequence[Mapping[str, Any]]]], GrpcClient]
-) -> None:
+def test_scenario(name: str, served: Callable[..., GrpcClient]) -> None:
     scenario = conformance.load(name)
-    client = served(scenario.provider)
+    client = served(scenario.provider, opens_itself=conformance.opens_itself(scenario))
     events = conformance.run(scenario, client)
     for check in scenario.checks:
         conformance.check(check, events, scenario, client)
 
 
 def test_an_invalid_command_is_refused_with_invalid_argument(
-    served: Callable[[Sequence[Sequence[Mapping[str, Any]]]], GrpcClient],
+    served: Callable[..., GrpcClient],
 ) -> None:
     client = served([])
     with pytest.raises(grpc.RpcError) as caught:
-        client.send(sc.SidecarCommand())
+        client.send(sc.SessionCommand())
     assert caught.value.code() == grpc.StatusCode.INVALID_ARGUMENT

@@ -13,15 +13,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from tests.fakes import CrashError, FaultyFiles, FileFaultError
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.store import FileStore, StoreError
 
 
-def _event(n: int) -> sc.SidecarEvent:
-    return sc.SidecarEvent(delta=sc.SidecarDelta(item_id=f"i{n}", text="x" * n))
+def _event(n: int) -> sc.SessionEvent:
+    return sc.SessionEvent(delta=sc.SessionDelta(item_id=f"i{n}", text="x" * n))
 
 
-def _offsets(events: list[sc.SidecarEvent]) -> list[int]:
+def _offsets(events: list[sc.SessionEvent]) -> list[int]:
     return [e.offset for e in events]
 
 
@@ -35,7 +35,7 @@ def test_a_failed_write_is_cut_off_and_the_log_goes_on_from_the_last_event_shown
 ) -> None:
     files = FaultyFiles(fail_at=at, keep=keep)
     store = FileStore(files)
-    shown: list[sc.SidecarEvent] = []
+    shown: list[sc.SessionEvent] = []
     failed = False
     for n in range(1, count + 1):
         try:

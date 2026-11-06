@@ -1,28 +1,23 @@
 package production
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net"
+	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/encoding/protojson"
+	"buf.build/go/protovalidate"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -47,7 +42,7 @@ func SidecarsFor(parts Parts, root, executable string, log *slog.Logger) (*Proce
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
-	return &ProcessSidecars{Root: root, Parts: parts, Executable: executable, Log: log}, nil
+	return &ProcessSidecars{Root: root, Parts: parts, Holders: &ProcessHolders{Log: log}, Executable: executable, Log: log}, nil
 }
 
 // sidecarCommand is the setting when there is one, whatever it holds, and otherwise the release's
@@ -76,33 +71,24 @@ func sidecarSetting(setting string) ([]string, error) {
 	return strings.Fields(setting), nil
 }
 
-// ProcessSidecars starts one detached sidecar process per session and reaches it over the Unix
-// socket in the session's directory, ROOT/AGENT/N, where AGENT is a digest of the agent id that
-// keeps the socket path short. A sidecar outlives the daemon; a daemon that restarts finds it by
-// that directory. When a sidecar is gone, the agent processes it left are killed through the
-// process groups it recorded in agent.pgids, before any new session of that agent starts.
+// ProcessSidecars starts one holder per session and reaches it over the socket in the session's
+// directory, ROOT/AGENT/N, where AGENT is a digest of the agent id that keeps the socket path short.
+// A holder outlives the host; a host that restarts finds it by that place and asks it who it is. It
+// is the shell's whole knowledge of the start: find or start the holder, Hello, Open. The daemon sees
+// none of it, only a session that started and then opened or failed with a reason.
 type ProcessSidecars struct {
 	Root string
 	// Parts gives the command that holds a session and the plugin every session loads. A launch
 	// with a part that cannot be resolved is refused.
-	Parts      Parts
+	Parts Parts
+	// Holders is the world the holders live in.
+	Holders    SessionHolders
 	Executable string
 	Log        *slog.Logger
 
-	mu    sync.Mutex
-	conns map[core.Session]*sidecarProcess
-}
-
-// ToolServerName is the name every agent's tool server is registered under, so the tools show up
-// as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
-const ToolServerName = "vibesys"
-
-// MCPServer is one stdio tool server in the sidecar's --mcp-config file.
-type MCPServer struct {
-	Name    string            `json:"name"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
+	mu       sync.Mutex
+	conns    map[core.Session]*heldSession
+	starting map[core.Session]<-chan struct{}
 }
 
 func (s *ProcessSidecars) agentDir(agent core.AgentID) string {
@@ -110,15 +96,15 @@ func (s *ProcessSidecars) agentDir(agent core.AgentID) string {
 	return filepath.Join(s.Root, hex.EncodeToString(sum[:8]))
 }
 
-func (s *ProcessSidecars) sessionDir(session core.Session) string {
-	return filepath.Join(s.agentDir(session.Agent), strconv.FormatUint(uint64(session.N), 10))
+func (s *ProcessSidecars) place(session core.Session) HolderPlace {
+	dir := filepath.Join(s.agentDir(session.Agent), strconv.FormatUint(uint64(session.N), 10))
+	return HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}
 }
 
-// Launch implements daemon.Sidecars.
-func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.LaunchEnv) (daemon.Sidecar, error) {
-	if sc, err := s.Attach(ctx, l.Session); err == nil {
-		return sc, nil
-	}
+// Launch implements daemon.Sidecars. Its parts and what it asks for are checked first, so a missing
+// part or a bad field is refused by name before anything starts. Open is repeatable, so a launch delivered again, by this host or by
+// one that came after a crash, asks again and starts nothing new.
+func (s *ProcessSidecars) Launch(ctx context.Context, start daemon.SessionStart) (daemon.Sidecar, error) {
 	command, _, err := s.Parts.SessionHolder()
 	if err != nil {
 		return nil, err
@@ -127,160 +113,267 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	if err != nil {
 		return nil, err
 	}
-	dir := s.sessionDir(l.Session)
-	if sock := filepath.Join(dir, "sock"); len(sock) > maxSocketPath {
-		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", sock, maxSocketPath, localfs.Remedy)
+	session := start.Launch.Session
+	place := s.place(session)
+	if len(place.Socket) > maxSocketPath {
+		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", place.Socket, maxSocketPath, localfs.Remedy)
 	}
-	s.reapAgent(l.Session.Agent)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	launch, err := s.launchSpec(ctx, l, plugin)
+	request, err := s.openRequest(start, plugin)
 	if err != nil {
 		return nil, err
 	}
-	data, err := protojson.Marshal(launch)
+	if err := protovalidate.Validate(request); err != nil {
+		return nil, fmt.Errorf("the session's start is invalid: %w", err)
+	}
+	if start.Launch.Role != core.RoleLead {
+		if err := s.Holders.Worktree(ctx, start.Repository, request.GetWorkingDirectory()); err != nil {
+			return nil, &daemon.LaunchError{Reason: core.StartWorkingDirUnavailable, Err: fmt.Errorf("create a worktree of %s for agent %s: %w", start.Repository, session.Agent, err)}
+		}
+	}
+	link, err := s.holderFor(ctx, session, place, command)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "launch.json"), data, 0o600); err != nil {
-		return nil, err
+	if _, err := link.Open(ctx, request); err != nil {
+		link.Close()
+		return nil, s.refusedOpen(err)
 	}
-	tools, err := json.Marshal([]MCPServer{{Name: ToolServerName, Command: s.Executable, Args: []string{"mcp"}, Env: env}})
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), tools, 0o600); err != nil {
-		return nil, err
-	}
-	for _, name := range []string{"sidecar.pid", "sock"} {
-		_ = os.Remove(filepath.Join(dir, name))
-	}
-	var out bytes.Buffer
-	cmd := s.command(ctx, command, dir)
-	cmd.Stdout, cmd.Stderr = &out, &out
-	// The sidecar detaches itself (it forks twice), so this returns once it is on its own.
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("start the agent session with %s: %w: %s", strings.Join(command, " "), err, strings.TrimSpace(out.String()))
-	}
-	return s.awaitReady(ctx, l.Session, dir)
+	return s.held(session, place, link), nil
 }
 
-// launchSpec is the launch file for a session: the effect's launch, the agent's worktree (made on
-// its first session), and the plugin the session loads. The plugin home is kept with the agent, not
-// the session, so a resume finds the one the first session installed into, which also holds the
-// provider's conversation.
-func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession, plugin Plugin) (*pb.LaunchSession, error) {
+// refusedOpen reads the answer to an Open that was not taken. A call that did not reach an answer
+// is the caller's to retry; a refusal already names the field.
+func (s *ProcessSidecars) refusedOpen(err error) error {
+	switch status.Code(err) {
+	case codes.InvalidArgument, codes.FailedPrecondition:
+		return &daemon.LaunchError{Reason: core.StartOther, Err: fmt.Errorf("the session refused its start: %s", status.Convert(err).Message())}
+	default:
+		return fmt.Errorf("open the agent session: %w", err)
+	}
+}
+
+// holderFor is the holder of a session: the one that answers at its place, or one it starts there.
+// A process it started that has not begun to listen yet is waited for and not started again.
+func (s *ProcessSidecars) holderFor(ctx context.Context, session core.Session, place HolderPlace, command []string) (HolderLink, error) {
+	link, hello, err := s.ask(ctx, place)
+	if errors.Is(err, ErrNoHolder) {
+		exited := s.startingProcess(session)
+		if exited == nil {
+			s.Holders.ReapAgent(s.agentDir(session.Agent))
+			s.forgetConn(session)
+			if exited, err = s.Holders.Spawn(place, command, &pb.SessionBootstrap{ListenSocket: place.Socket, StateDirectory: place.Directory}); err != nil {
+				return nil, fmt.Errorf("start the agent session: %w", err)
+			}
+			s.mu.Lock()
+			if s.starting == nil {
+				s.starting = map[core.Session]<-chan struct{}{}
+			}
+			s.starting[session] = exited
+			s.mu.Unlock()
+		}
+		if err := s.Holders.AwaitListening(ctx, place, exited); err != nil {
+			return nil, fmt.Errorf("the agent session did not answer on %s: %w: %s", place.Socket, err, s.Holders.Diagnostics(place))
+		}
+		link, hello, err = s.ask(ctx, place)
+	}
+	if err != nil {
+		return nil, s.unusable(place, err)
+	}
+	if hello.GetSession() != nil && !sameSession(hello.GetSession(), session) {
+		link.Close()
+		return nil, &daemon.LaunchError{Reason: core.StartOther, Err: fmt.Errorf("session %s/%d answers on the socket of %s/%d", hello.GetSession().GetAgentId(), hello.GetSession().GetSession(), session.Agent, session.N)}
+	}
+	return link, nil
+}
+
+// unusable ends a holder that cannot work with this host, whatever it was doing: nothing can drive
+// it, and an agent left running would hold the worktree against the session that replaces it. Any
+// other error passes through.
+func (s *ProcessSidecars) unusable(place HolderPlace, err error) error {
+	var incompatible *incompatibleError
+	if !errors.As(err, &incompatible) {
+		return err
+	}
+	if end := s.Holders.End(place); end != nil {
+		return fmt.Errorf("end the incompatible agent session: %w", end)
+	}
+	return &daemon.LaunchError{Reason: core.StartIncompatibleVersions, Err: err}
+}
+
+// incompatibleError says what answers at a place and this host share no protocol.
+type incompatibleError struct{ detail string }
+
+func (e *incompatibleError) Error() string { return e.detail }
+
+// helloBound is how long a holder has to answer who it is. Hello does no work and a holder serves it
+// on a thread of its own, so a holder that takes longer is hung, and a caller's longer bound must not
+// be spent on it.
+const helloBound = 10 * time.Second
+
+// ask says who answers at a place: a link and its Hello, ErrNoHolder when nothing does, an
+// *incompatibleError when it cannot work with this host, and any other error when it is not known.
+func (s *ProcessSidecars) ask(ctx context.Context, place HolderPlace) (HolderLink, *pb.SessionHelloResponse, error) {
+	link, err := s.Holders.Dial(ctx, place)
+	if err != nil {
+		return nil, nil, err
+	}
+	hctx, cancel := context.WithTimeout(ctx, helloBound)
+	defer cancel()
+	hello, err := link.Hello(hctx, &pb.SessionHelloRequest{Client: sessionVersions()})
+	if err != nil {
+		link.Close()
+		switch status.Code(err) {
+		case codes.Unavailable:
+			return nil, nil, ErrNoHolder // it was going as it was reached.
+		case codes.Unimplemented:
+			return nil, nil, &incompatibleError{detail: "the agent session at " + place.Socket + " is of a release with no version handshake, and this host cannot work with it"}
+		default:
+			return nil, nil, fmt.Errorf("ask who holds %s: %w", place.Socket, err)
+		}
+	}
+	if c := hello.GetCompatibility(); c != pb.Compatibility_COMPATIBILITY_COMPATIBLE {
+		link.Close()
+		return nil, nil, &incompatibleError{detail: fmt.Sprintf(
+			"the agent session at %s and this host cannot work together (%s): it is version %s, protocol %d; this host is version %s, protocol %d",
+			place.Socket, c, hello.GetVersions().GetBinaryVersion(), hello.GetVersions().GetProtocolVersion(), Version, sessionVersions().GetProtocolVersion(),
+		)}
+	}
+	return link, hello, nil
+}
+
+// sessionVersions is what this host says it speaks to a holder.
+func sessionVersions() *pb.BuildVersions {
+	current := uint32(pb.SessionProtocolVersion_SESSION_PROTOCOL_VERSION_CURRENT)
+	return &pb.BuildVersions{BinaryVersion: Version, ProtocolVersion: current, MinProtocolVersion: current}
+}
+
+func sameSession(ref *pb.SessionRef, session core.Session) bool {
+	return ref.GetAgentId() == string(session.Agent) && ref.GetSession() == session.N
+}
+
+// Attach implements daemon.Sidecars. A holder that never opened has no session to find: the launch
+// that started it was settled or is no longer wanted, so it is ended.
+func (s *ProcessSidecars) Attach(ctx context.Context, session core.Session) (daemon.Sidecar, error) {
+	place := s.place(session)
+	link, hello, err := s.ask(ctx, place)
+	switch {
+	case errors.Is(err, ErrNoHolder):
+		s.Holders.Reap(place)
+		s.forgetConn(session)
+		return nil, daemon.ErrSidecarGone
+	case err != nil:
+		return nil, s.unusable(place, err)
+	}
+	if !sameSession(hello.GetSession(), session) {
+		link.Close()
+		if err := s.Holders.End(place); err != nil {
+			return nil, err
+		}
+		return nil, daemon.ErrSidecarGone
+	}
+	return s.held(session, place, link), nil
+}
+
+// held keeps one connection per session, so the daemon's handle stays the same across asks.
+func (s *ProcessSidecars) held(session core.Session, place HolderPlace, link HolderLink) *heldSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.starting, session)
+	if c, ok := s.conns[session]; ok {
+		link.Close()
+		return c
+	}
+	if s.conns == nil {
+		s.conns = map[core.Session]*heldSession{}
+	}
+	c := &heldSession{owner: s, session: session, place: place, link: link, log: s.Log.With("session", place.Directory)}
+	s.conns[session] = c
+	return c
+}
+
+func (s *ProcessSidecars) startingProcess(session core.Session) <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	exited, ok := s.starting[session]
+	if !ok {
+		return nil
+	}
+	select {
+	case <-exited:
+		delete(s.starting, session)
+		return nil
+	default:
+		return exited
+	}
+}
+
+func (s *ProcessSidecars) forgetConn(session core.Session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.conns[session]; ok {
+		c.link.Close()
+		delete(s.conns, session)
+	}
+}
+
+// openRequest is what a session is opened with. The plugin's home is kept with the agent, not the
+// session, so a resume finds the one the first session installed into, which also holds what the
+// agent needs to continue. It does no I/O.
+func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) (*pb.OpenSessionRequest, error) {
+	l := start.Launch
 	launch, err := launchMessage(l)
 	if err != nil {
 		return nil, err
 	}
-	if launch.Worktree == "" {
-		if launch.Worktree, err = s.worktree(ctx, l); err != nil {
-			return nil, &daemon.LaunchError{Reason: core.StartWorkingDirUnavailable, Err: err}
+	workdir := start.Repository
+	if l.Role != core.RoleLead {
+		workdir = filepath.Join(s.agentDir(l.Session.Agent), "worktree")
+	}
+	environment := agentEnvironment(start)
+	toolEnv := maps.Clone(start.Tools)
+	if toolEnv == nil {
+		toolEnv = map[string]string{}
+	}
+	maps.Copy(toolEnv, environment.GetSet())
+	return &pb.OpenSessionRequest{
+		Session: launch.GetSession(), Harness: launch.GetHarness(), Model: launch.GetModel(), ReasoningEffort: launch.GetReasoningEffort(),
+		WorkingDirectory: workdir, AgentDataDirectory: filepath.Join(s.agentDir(l.Session.Agent), "plugin-home"), ResumeToken: launch.GetResumeToken(),
+		Skills:      &pb.SessionSkills{Directory: plugin.Marketplace, Name: plugin.Name},
+		Tools:       []*pb.ToolServer{{Name: ToolServerName, Argv: []string{s.Executable, "mcp"}, Env: toolEnv}},
+		Environment: environment,
+	}, nil
+}
+
+// ToolServerName is the name every agent's tool server is registered under, so the tools show up
+// as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
+const ToolServerName = "vibesys"
+
+// agentEnvironment is what the session's processes get over their login environment. The names are
+// listed, with what fills each, in proto/vibesys/cli/v1/conformance/identity_env.golden.json, which
+// a test holds this to. An empty value unsets its name, so the program resolves it as this process
+// would, except HOME, which the agent's own program needs.
+func agentEnvironment(start daemon.SessionStart) *pb.AgentEnvironment {
+	l, where := start.Launch, start.Location
+	out := &pb.AgentEnvironment{Set: map[string]string{}}
+	for _, name := range []struct{ name, value string }{
+		{"VIBESYS_REPO", start.Repository},
+		{"VIBESYS_TASK", start.Task},
+		{"VIBESYS_RUN", string(l.Run)},
+		{"VIBESYS_AGENT", string(l.Session.Agent)},
+		{"VIBESYS_HARNESS", strings.ReplaceAll(string(l.Spec.Harness), "_", "-")},
+		{"VIBESYS_CLI", where.CLI},
+		{"XDG_RUNTIME_DIR", where.RuntimeDir},
+		{"XDG_STATE_HOME", where.StateHome},
+		{"HOME", where.Home},
+	} {
+		switch {
+		case name.value != "":
+			out.Set[name.name] = name.value
+		case name.name != "HOME":
+			out.Unset = append(out.Unset, name.name)
 		}
 	}
-	home := filepath.Join(s.agentDir(l.Session.Agent), "plugin-home")
-	if !filepath.IsAbs(home) {
-		return nil, fmt.Errorf("launch.plugin.home %s is not absolute; %s", home, localfs.Remedy)
-	}
-	launch.Plugin = &pb.SessionPlugin{Marketplace: plugin.Marketplace, Name: plugin.Name, Home: home}
-	return launch, nil
-}
-
-// command is the process that starts a session's sidecar in dir. It inherits the daemon's
-// environment and nothing of the launch environment: what the agent's shell sees is built by the
-// sidecar from the launch message, not from this process.
-func (s *ProcessSidecars) command(ctx context.Context, command []string, dir string) *exec.Cmd {
-	argv := append(append([]string(nil), command...),
-		"--launch", filepath.Join(dir, "launch.json"), "--state-dir", dir, "--socket", filepath.Join(dir, "sock"),
-		"--mcp-config", filepath.Join(dir, "mcp.json"), "--detach")
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd
-}
-
-// awaitReady waits, within ctx, for the sidecar to write its pid and answer on its socket.
-func (s *ProcessSidecars) awaitReady(ctx context.Context, session core.Session, dir string) (daemon.Sidecar, error) {
-	for {
-		if pid, ok := readPid(dir); ok {
-			if !running(pid, dir) {
-				return nil, fmt.Errorf("the agent session exited at start: %s", tail(filepath.Join(dir, "sidecar.log")))
-			}
-			if conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "sock")); err == nil {
-				conn.Close()
-				return s.connect(session, dir, pid)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("the agent session did not answer on %s: %w: %s", filepath.Join(dir, "sock"), ctx.Err(), tail(filepath.Join(dir, "sidecar.log")))
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-}
-
-// Attach implements daemon.Sidecars.
-func (s *ProcessSidecars) Attach(_ context.Context, session core.Session) (daemon.Sidecar, error) {
-	dir := s.sessionDir(session)
-	pid, ok := readPid(dir)
-	if !ok || !running(pid, dir) {
-		reap(dir)
-		return nil, daemon.ErrSidecarGone
-	}
-	return s.connect(session, dir, pid)
-}
-
-func (s *ProcessSidecars) connect(session core.Session, dir string, pid int) (daemon.Sidecar, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if c, ok := s.conns[session]; ok && c.pid == pid {
-		return c, nil
-	}
-	conn, err := grpc.NewClient("unix://"+filepath.Join(dir, "sock"), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-	if s.conns == nil {
-		s.conns = map[core.Session]*sidecarProcess{}
-	}
-	if old, ok := s.conns[session]; ok {
-		old.conn.Close()
-	}
-	c := &sidecarProcess{dir: dir, pid: pid, conn: conn, client: pb.NewSidecarServiceClient(conn), log: s.Log.With("sidecar", dir)}
-	s.conns[session] = c
-	return c, nil
-}
-
-// reapAgent kills what every earlier, gone sidecar of an agent left running, so no old agent
-// process works in a worktree under a new session.
-func (s *ProcessSidecars) reapAgent(agent core.AgentID) {
-	sessions, _ := os.ReadDir(s.agentDir(agent))
-	for _, e := range sessions {
-		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
-			dir := filepath.Join(s.agentDir(agent), e.Name())
-			if pid, ok := readPid(dir); !ok || !running(pid, dir) {
-				reap(dir)
-			}
-		}
-	}
-}
-
-// worktree gives a first session its directory: the repository itself for the lead, and a
-// detached git worktree of it, kept with the agent's sessions, for every other agent.
-func (s *ProcessSidecars) worktree(ctx context.Context, l core.LaunchSession) (string, error) {
-	if l.Role == core.RoleLead {
-		return l.Repository, nil
-	}
-	path := filepath.Join(s.agentDir(l.Session.Agent), "worktree")
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
-	}
-	out, err := exec.CommandContext(ctx, "git", "-C", l.Repository, "worktree", "add", "--detach", path).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("create a worktree of %s for agent %s: %w: %s", l.Repository, l.Session.Agent, err, strings.TrimSpace(string(out)))
-	}
-	return path, nil
+	return out
 }
 
 func launchMessage(l core.LaunchSession) (*pb.LaunchSession, error) {
@@ -295,170 +388,47 @@ func launchMessage(l core.LaunchSession) (*pb.LaunchSession, error) {
 	return e.GetLaunchSession(), nil
 }
 
-// sidecarProcess is the daemon's side of one running sidecar.
-type sidecarProcess struct {
-	dir    string
-	pid    int
-	conn   *grpc.ClientConn
-	client pb.SidecarServiceClient
-	log    *slog.Logger
+// heldSession is the daemon's side of one running session.
+type heldSession struct {
+	owner   *ProcessSidecars
+	session core.Session
+	place   HolderPlace
+	link    HolderLink
+	log     *slog.Logger
 }
 
-func (c *sidecarProcess) gone(err error) error {
-	if !running(c.pid, c.dir) {
+func (c *heldSession) gone(err error) error {
+	if !c.owner.Holders.Listening(c.place) {
 		return daemon.ErrSidecarGone
 	}
 	return err
 }
 
 // Send implements daemon.Sidecar.
-func (c *sidecarProcess) Send(ctx context.Context, cmd *pb.SidecarCommand) error {
-	if _, err := c.client.Send(ctx, &pb.SendRequest{Command: cmd}); err != nil {
+func (c *heldSession) Send(ctx context.Context, cmd *pb.SessionCommand) error {
+	if err := c.link.Send(ctx, &pb.SendRequest{Command: cmd}); err != nil {
 		return c.gone(err)
 	}
 	return nil
 }
 
-// Follow implements daemon.Sidecar. A goroutine reads the stream into a buffer, so Next never
-// waits; the buffer is bounded, and a full one holds the stream back through flow control.
-func (c *sidecarProcess) Follow(_ context.Context, after uint64) (daemon.EventStream, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.client.Follow(ctx, &pb.FollowRequest{AfterOffset: after})
+// Follow implements daemon.Sidecar.
+func (c *heldSession) Follow(ctx context.Context, after uint64) (daemon.EventStream, error) {
+	stream, err := c.link.Follow(ctx, after, func(err error) error { return c.gone(err) })
 	if err != nil {
-		cancel()
 		return nil, c.gone(err)
 	}
-	f := &followStream{events: make(chan *pb.SidecarEvent, 256), cancel: cancel, owner: c}
-	c.log.Info("following the sidecar", "after", after)
-	go func() {
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				c.log.Info("the sidecar stream ended", "err", err)
-				f.end.Store(err)
-				close(f.events)
-				return
-			}
-			select {
-			case f.events <- resp.GetEvent():
-			case <-ctx.Done():
-				f.end.Store(ctx.Err())
-				close(f.events)
-				return
-			}
-		}
-	}()
-	return f, nil
+	c.log.Info("following the session", "after", after)
+	return stream, nil
 }
 
-// Kill implements daemon.Sidecar. It ends the sidecar and the agent processes it recorded, and
-// leaves nothing that names either, so a repeat, or a later look at the directory, finds nothing to
-// kill: a process id the system has since given to another program is never signalled.
-func (c *sidecarProcess) Kill(context.Context) error {
-	if running(c.pid, c.dir) {
-		if err := syscall.Kill(c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
-		}
+// Kill implements daemon.Sidecar. It ends the holder and the agent processes it recorded, and leaves
+// nothing that names either, so a repeat, or a later look at the directory, finds nothing to kill.
+func (c *heldSession) Kill(context.Context) error {
+	if err := c.owner.Holders.End(c.place); err != nil {
+		return err
 	}
-	reap(c.dir)
-	retire(c.dir)
-	c.log.Info("the sidecar was ended")
+	c.owner.forgetConn(c.session)
+	c.log.Info("the session was ended")
 	return nil
-}
-
-type followStream struct {
-	events chan *pb.SidecarEvent
-	end    errorBox
-	cancel context.CancelFunc
-	owner  *sidecarProcess
-}
-
-func (f *followStream) Next() (*pb.SidecarEvent, error) {
-	select {
-	case ev, ok := <-f.events:
-		if ok {
-			return ev, nil
-		}
-		err := f.end.Load()
-		if errors.Is(err, io.EOF) {
-			err = errors.New("the sidecar ended its stream")
-		}
-		return nil, f.owner.gone(err)
-	default:
-		return nil, daemon.ErrIdle
-	}
-}
-
-func (f *followStream) Close() { f.cancel() }
-
-type errorBox struct {
-	mu  sync.Mutex
-	err error
-}
-
-func (b *errorBox) Store(err error) { b.mu.Lock(); b.err = err; b.mu.Unlock() }
-func (b *errorBox) Load() error     { b.mu.Lock(); defer b.mu.Unlock(); return b.err }
-
-func readPid(dir string) (int, bool) {
-	data, err := os.ReadFile(filepath.Join(dir, "sidecar.pid"))
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	return pid, err == nil && pid > 0
-}
-
-func alive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-// running says pid is the sidecar of dir and not a program that was given the number after the
-// sidecar exited. Where the system names a process's command line, it must carry the directory,
-// which every sidecar is started with (`--state-dir DIR`, whatever program the setting names);
-// elsewhere liveness is all there is to go on.
-func running(pid int, dir string) bool {
-	if !alive(pid) {
-		return false
-	}
-	if _, err := os.Stat("/proc/self"); err != nil {
-		return true
-	}
-	cmdline, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
-	return err == nil && commandOwns(cmdline, dir)
-}
-
-// commandOwns says a NUL-separated command line has dir as a whole argument.
-func commandOwns(cmdline []byte, dir string) bool {
-	return bytes.Contains(cmdline, []byte("\x00"+dir+"\x00"))
-}
-
-// retire removes what names a session's processes once they are ended.
-func retire(dir string) {
-	_ = os.Remove(filepath.Join(dir, "sidecar.pid"))
-	_ = os.WriteFile(filepath.Join(dir, "agent.pgids"), nil, 0o600)
-}
-
-// reap kills each process group a gone sidecar recorded, so its agent does not run on unowned.
-func reap(dir string) {
-	data, err := os.ReadFile(filepath.Join(dir, "agent.pgids"))
-	if err != nil {
-		return
-	}
-	for _, field := range strings.Fields(string(data)) {
-		if pgid, err := strconv.Atoi(field); err == nil && pgid > 1 {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-	}
-}
-
-func tail(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "no log at " + path
-	}
-	if len(data) > 2000 {
-		data = data[len(data)-2000:]
-	}
-	return strings.TrimSpace(string(data))
 }

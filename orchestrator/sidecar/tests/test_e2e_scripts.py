@@ -190,10 +190,10 @@ def _driver(provider: str, actor: Actor, turns: list[None]) -> AgentshimDriver:
         clock=FakeClock(),
         ids=SequentialIds(),
     )
-    launch = h.launch(harness)
+    request = h.open_request(harness)
     return AgentshimDriver(
         lambda conversation_id: build_session(
-            launch, agent=lambda _name, _identity: agent, new_conversation_id=conversation_id
+            request, agent=lambda _name, _environment: agent, new_conversation_id=conversation_id
         ),
         preferred_id="11111111-1111-4111-8111-111111111111",
     )

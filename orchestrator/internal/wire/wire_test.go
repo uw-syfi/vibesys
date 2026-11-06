@@ -109,8 +109,6 @@ func generatedEffect(r *rand.Rand) *pb.Effect {
 	var e core.Effect
 	switch b := in.GetBody().(type) {
 	case *pb.Effect_LaunchSession:
-		// The plugin is filled in by the shell when it launches the session, and is not a core fact.
-		b.LaunchSession.Plugin = nil
 		e = core.LaunchSession{Session: ref(b.LaunchSession.GetSession())}
 	case *pb.Effect_StartTurn:
 		e = core.StartTurn{Turn: core.TurnID(b.StartTurn.GetTurnId())}
@@ -172,24 +170,24 @@ func TestSidecarEventsParse(t *testing.T) {
 	r := rand.New(rand.NewPCG(7, 8))
 	accepted := map[string]int{}
 	for range rounds {
-		in := generated(r, &pb.SidecarEvent{})
-		fact, delta, err := wire.ParseSidecarEvent(session, encoded(in))
+		in := generated(r, &pb.SessionEvent{})
+		fact, delta, err := wire.ParseSessionEvent(session, encoded(in))
 		if err != nil {
 			continue
 		}
 		accepted[whichBody(in)]++
-		if _, isDelta := in.GetBody().(*pb.SidecarEvent_Delta); isDelta != (delta != nil) || isDelta != (fact.Body == nil) {
+		if _, isDelta := in.GetBody().(*pb.SessionEvent_Delta); isDelta != (delta != nil) || isDelta != (fact.Body == nil) {
 			t.Fatalf("%v parsed to fact %+v and delta %v", in, fact, delta)
 		}
 		if !isDeltaOf(in) && (fact.Session != session || fact.Offset != in.GetOffset()) {
 			t.Fatalf("%v parsed to %+v", in, fact)
 		}
 	}
-	requireAll(t, &pb.SidecarEvent{}, accepted)
+	requireAll(t, &pb.SessionEvent{}, accepted)
 }
 
-func isDeltaOf(in *pb.SidecarEvent) bool {
-	_, ok := in.GetBody().(*pb.SidecarEvent_Delta)
+func isDeltaOf(in *pb.SessionEvent) bool {
+	_, ok := in.GetBody().(*pb.SessionEvent_Delta)
 	return ok
 }
 
@@ -218,8 +216,8 @@ func TestAnUnknownFieldIsRefusedAtAnyDepth(t *testing.T) {
 			_, err := wire.ParseCommand(b, core.Operator{})
 			return err
 		}},
-		{"sidecar event", func(r *rand.Rand) proto.Message { return generated(r, &pb.SidecarEvent{}) }, func(b []byte) error {
-			_, _, err := wire.ParseSidecarEvent(session, b)
+		{"sidecar event", func(r *rand.Rand) proto.Message { return generated(r, &pb.SessionEvent{}) }, func(b []byte) error {
+			_, _, err := wire.ParseSessionEvent(session, b)
 			return err
 		}},
 	}
@@ -274,7 +272,7 @@ func TestAMessageMissingItsBodyIsRefused(t *testing.T) {
 	if _, err := wire.ParseCommand(encoded(&pb.Command{Id: "c"}), core.Operator{}); err == nil {
 		t.Error("a command with no body was accepted")
 	}
-	if _, _, err := wire.ParseSidecarEvent(session, encoded(&pb.SidecarEvent{Offset: 1})); err == nil {
+	if _, _, err := wire.ParseSessionEvent(session, encoded(&pb.SessionEvent{Offset: 1})); err == nil {
 		t.Error("a sidecar event with no body was accepted")
 	}
 }

@@ -77,13 +77,12 @@
     "HistoryEntry.info_json",
     "KeptOperation.info_json"
   ],
-  "proto/vibesys/orchestrator/v1/effects.proto": [
-    "LaunchSession.worktree",
-    "SessionPlugin.home",
-    "SessionPlugin.marketplace"
-  ],
-  "proto/vibesys/orchestrator/v1/events.proto": [
-    "SidecarSource"
+  "proto/vibesys/orchestrator/v1/agent_session.proto": [
+    "OpenSessionRequest.agent_data_directory",
+    "OpenSessionRequest.working_directory",
+    "SessionBootstrap.listen_socket",
+    "SessionBootstrap.state_directory",
+    "SessionSkills.directory"
   ],
   "proto/vibesys/orchestrator/v1/host_config.proto": [
     "HostConfig.skills_directory",
@@ -94,8 +93,6 @@
     "HostLock.pid"
   ],
   "proto/vibesys/orchestrator/v1/orchestrator.proto": [
-    "Agent.provider_conversation_id",
-    "Agent.worktree",
     "CliLocation.home",
     "CliLocation.xdg_runtime_dir",
     "CliLocation.xdg_state_home",
@@ -104,14 +101,5 @@
     "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
     "ToolCall.args_json",
     "ToolCall.provider_call_id"
-  ],
-  "proto/vibesys/orchestrator/v1/sidecar.proto": [
-    "ConversationOpened.provider_conversation_id",
-    "ConversationOpened.worktree",
-    "SidecarCommand",
-    "SidecarDelta",
-    "SidecarEvent",
-    "SidecarItem",
-    "SidecarService"
   ]
 }

@@ -1,4 +1,4 @@
-"""The shared conformance suite for ``SidecarService``.
+"""The shared conformance suite for ``AgentSessionService``.
 
 ``conformance/scenarios/*.json`` say what to send and which properties the resulting event log
 must have; ``conformance/README.md`` defines each check by name. This module runs a scenario
@@ -16,31 +16,48 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from google.protobuf import json_format
 
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-SCENARIOS = Path(__file__).resolve().parent.parent / "conformance" / "scenarios"
+ROOT = Path(__file__).resolve().parent.parent / "conformance"
+SCENARIOS = ROOT / "scenarios"
 
 
 class Client(Protocol):
-    """What a scenario needs from a sidecar."""
+    """What a scenario needs from an implementation of the service."""
 
-    def send(self, command: sc.SidecarCommand) -> None:
+    def hello(self, client: orch.BuildVersions) -> sc.SessionHelloResponse:
+        """Say who is asking and hear who answers."""
+        ...
+
+    def open(self, request: sc.OpenSessionRequest) -> sc.OpenSessionResponse:
+        """Ask for the session. Raises what ``refused`` steps read."""
+        ...
+
+    def code_of_refusal(self, call: Callable[[], object]) -> tuple[str, str]:
+        """Make *call*, which must be refused; return the status code's name and its message."""
+        ...
+
+    def agents_started(self) -> int:
+        """How many agents this process has started."""
+        ...
+
+    def send(self, command: sc.SessionCommand) -> None:
         """Deliver a command."""
         ...
 
     def follow(
-        self, after_offset: int, until: Callable[[Sequence[sc.SidecarEvent]], bool]
-    ) -> list[sc.SidecarEvent]:
+        self, after_offset: int, until: Callable[[Sequence[sc.SessionEvent]], bool]
+    ) -> list[sc.SessionEvent]:
         """The events after an offset, read until *until* accepts what has been read (or the
         stream ends), within a bound that only guards against a hang."""
         ...
 
     def restart(self) -> None:
-        """Kill the sidecar where it stands and start another on the state the first left."""
+        """Kill the process where it stands and start another on the state the first left."""
         ...
 
 
@@ -68,13 +85,13 @@ def names() -> list[str]:
     return sorted(path.stem for path in SCENARIOS.glob("*.json"))
 
 
-def command(raw: Mapping[str, Any]) -> sc.SidecarCommand:
-    """A ``SidecarCommand`` from its protobuf JSON."""
-    return json_format.ParseDict(dict(raw), sc.SidecarCommand())
+def command(raw: Mapping[str, Any]) -> sc.SessionCommand:
+    """A ``SessionCommand`` from its protobuf JSON."""
+    return json_format.ParseDict(dict(raw), sc.SessionCommand())
 
 
-def _reached(condition: Mapping[str, Any]) -> Callable[[Sequence[sc.SidecarEvent]], bool]:
-    def done(events: Sequence[sc.SidecarEvent]) -> bool:
+def _reached(condition: Mapping[str, Any]) -> Callable[[Sequence[sc.SessionEvent]], bool]:
+    def done(events: Sequence[sc.SessionEvent]) -> bool:
         for event in events:
             if "turn_ended" in condition and event.turn_ended.turn_id == condition["turn_ended"]:
                 return True
@@ -100,19 +117,70 @@ def _reached(condition: Mapping[str, Any]) -> Callable[[Sequence[sc.SidecarEvent
     return done
 
 
-def run(scenario: Scenario, client: Client) -> list[sc.SidecarEvent]:
+def open_request(overrides: Mapping[str, Any]) -> sc.OpenSessionRequest:
+    """``open_request.json`` with *overrides* replacing its top-level fields."""
+    base = json.loads((ROOT / "open_request.json").read_text())
+    return json_format.ParseDict(base | dict(overrides), sc.OpenSessionRequest())
+
+
+def current_versions() -> orch.BuildVersions:
+    """The versions of a peer of this build."""
+    current = sc.SESSION_PROTOCOL_VERSION_CURRENT
+    return orch.BuildVersions(protocol_version=current, min_protocol_version=current)
+
+
+def opens_itself(scenario: Scenario) -> bool:
+    """Whether the runner opens the session: a scenario with no step about opening leaves it to it."""
+    return not any({"open", "hello", "refused"} & set(step) for step in scenario.steps)
+
+
+def _hello(step: Mapping[str, Any], client: Client) -> None:
+    versions = current_versions()
+    if "client" in step:
+        json_format.ParseDict(dict(step["client"]), versions)
+    answer = client.hello(versions)
+    assert orch.Compatibility.Name(answer.compatibility) == step["compatibility"]
+    assert answer.versions.protocol_version == sc.SESSION_PROTOCOL_VERSION_CURRENT
+    if step["session"] is None:
+        assert not answer.HasField("session"), "nothing was opened, so nothing is held"
+    else:
+        wanted = json_format.ParseDict(dict(step["session"]), type(answer.session)())
+        assert answer.session == wanted
+
+
+def _refused(step: Mapping[str, Any], client: Client) -> None:
+    calls: dict[str, Callable[[], object]] = {
+        "open": lambda: client.open(open_request(step["open"])),
+        "send": lambda: client.send(command(step["send"])),
+        "follow": lambda: client.follow(0, lambda _events: True),
+    }
+    kind = next(name for name in calls if name in step)
+    code, message = client.code_of_refusal(calls[kind])
+    assert code == step["code"], f"{kind} answered {code}: {message}"
+    assert step.get("names", "") in message, f"{message!r} does not name {step['names']}"
+
+
+def run(scenario: Scenario, client: Client) -> list[sc.SessionEvent]:
     """Play *scenario*'s steps and return the whole event log."""
     for step in scenario.steps:
         if "send" in step:
             client.send(command(step["send"]))
         elif "restart" in step:
             client.restart()
+        elif "hello" in step:
+            _hello(step["hello"], client)
+        elif "open" in step:
+            client.open(open_request(step["open"]))
+        elif "refused" in step:
+            _refused(step["refused"], client)
         else:
             client.follow(0, _reached(step["await"]))
+    if not any("await" in step for step in scenario.steps):
+        return []
     return client.follow(0, lambda events: _settled(events, scenario))
 
 
-def _settled(events: Sequence[sc.SidecarEvent], scenario: Scenario) -> bool:
+def _settled(events: Sequence[sc.SessionEvent], scenario: Scenario) -> bool:
     waits = [step["await"] for step in scenario.steps if "await" in step]
     return bool(waits) and _reached(waits[-1])(events)
 
@@ -120,7 +188,7 @@ def _settled(events: Sequence[sc.SidecarEvent], scenario: Scenario) -> bool:
 # -- checks: each takes the log, the scenario and the client, and raises AssertionError
 
 
-def check(name: str, events: Sequence[sc.SidecarEvent], scenario: Scenario, client: Client) -> None:
+def check(name: str, events: Sequence[sc.SessionEvent], scenario: Scenario, client: Client) -> None:
     """Run the check called *name*."""
     CHECKS[name](events, scenario, client)
 
@@ -133,24 +201,24 @@ def _turn_ids(scenario: Scenario) -> set[str]:
     }
 
 
-def _opened_first(events: Sequence[sc.SidecarEvent], *_: object) -> None:
-    assert events[0].HasField("opened"), "the first event must be ConversationOpened"
+def _opened_first(events: Sequence[sc.SessionEvent], *_: object) -> None:
+    assert events[0].HasField("opened"), "the first event must be SessionOpened"
     assert sum(e.HasField("opened") for e in events) == 1
 
 
-def _offsets_increase(events: Sequence[sc.SidecarEvent], *_: object) -> None:
+def _offsets_increase(events: Sequence[sc.SessionEvent], *_: object) -> None:
     offsets = [e.offset for e in events]
     assert offsets[0] >= 1
     assert all(a < b for a, b in itertools.pairwise(offsets)), offsets
 
 
-def _one_end_per_turn(events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object) -> None:
+def _one_end_per_turn(events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object) -> None:
     ends = [e.turn_ended.turn_id for e in events if e.HasField("turn_ended")]
     for turn in _turn_ids(scenario):
         assert ends.count(turn) == 1, f"turn {turn} ended {ends.count(turn)} times"
 
 
-def _items_precede_end(events: Sequence[sc.SidecarEvent], *_: object) -> None:
+def _items_precede_end(events: Sequence[sc.SessionEvent], *_: object) -> None:
     ended: set[str] = set()
     for event in events:
         if event.HasField("turn_ended"):
@@ -159,7 +227,7 @@ def _items_precede_end(events: Sequence[sc.SidecarEvent], *_: object) -> None:
             assert event.item.turn_id not in ended, f"item {event.item.id} after its turn ended"
 
 
-def _no_running_item_after_end(events: Sequence[sc.SidecarEvent], *_: object) -> None:
+def _no_running_item_after_end(events: Sequence[sc.SessionEvent], *_: object) -> None:
     status: dict[str, int] = {}
     for event in events:
         if event.HasField("item"):
@@ -168,7 +236,7 @@ def _no_running_item_after_end(events: Sequence[sc.SidecarEvent], *_: object) ->
 
 
 def _usage_is_the_turn_result(
-    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+    events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object
 ) -> None:
     for turn, wanted in scenario.expect["usage"].items():
         reports = [e.usage.usage for e in events if e.HasField("usage") and e.usage.turn_id == turn]
@@ -189,7 +257,7 @@ def _usage_is_the_turn_result(
 
 
 def _session_lost_after_restart(
-    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+    events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object
 ) -> None:
     lost = [i for i, e in enumerate(events) if e.HasField("failed")]
     assert len(lost) == 1, "the loss is reported once"
@@ -205,18 +273,18 @@ def _session_lost_after_restart(
 
 
 def _effect_repeat_dropped(
-    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+    events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object
 ) -> None:
     sends = [step["send"]["effectId"] for step in scenario.steps if "send" in step]
     assert len(sends) > len(set(sends)), "the scenario must repeat an effect"
     _one_end_per_turn(events, scenario)
 
 
-def _at_least(count: int) -> Callable[[Sequence[sc.SidecarEvent]], bool]:
+def _at_least(count: int) -> Callable[[Sequence[sc.SessionEvent]], bool]:
     return lambda seen: len(seen) >= count
 
 
-def _follow_resumes(events: Sequence[sc.SidecarEvent], _scenario: Scenario, client: Client) -> None:
+def _follow_resumes(events: Sequence[sc.SessionEvent], _scenario: Scenario, client: Client) -> None:
     last = events[-1].offset
     for after in sorted({0, events[len(events) // 2].offset, last}):
         wanted = [e for e in events if e.offset > after]
@@ -226,7 +294,7 @@ def _follow_resumes(events: Sequence[sc.SidecarEvent], _scenario: Scenario, clie
         assert got == wanted, f"follow after {after}"
 
 
-def _late_steer_refused(events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object) -> None:
+def _late_steer_refused(events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object) -> None:
     for message_id, accepted in scenario.expect["steer"].items():
         at = next(
             i
@@ -240,7 +308,7 @@ def _late_steer_refused(events: Sequence[sc.SidecarEvent], scenario: Scenario, *
 
 
 def _start_failure_is_typed(
-    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+    events: Sequence[sc.SessionEvent], scenario: Scenario, *_: object
 ) -> None:
     assert [e.WhichOneof("body") for e in events] == ["failed"], (
         "a session that cannot start says only that it failed"
@@ -251,7 +319,15 @@ def _start_failure_is_typed(
     assert events[0].failed.detail.startswith("could not start the agent: ")
 
 
-def _close_is_last(events: Sequence[sc.SidecarEvent], *_: object) -> None:
+def _one_agent_started(_events: Sequence[sc.SessionEvent], _s: Scenario, client: Client) -> None:
+    assert client.agents_started() == 1
+
+
+def _no_agent_started(_events: Sequence[sc.SessionEvent], _s: Scenario, client: Client) -> None:
+    assert client.agents_started() == 0
+
+
+def _close_is_last(events: Sequence[sc.SessionEvent], *_: object) -> None:
     assert events[-1].HasField("closed")
     assert sum(e.HasField("closed") for e in events) == 1
 
@@ -269,4 +345,6 @@ CHECKS: dict[str, Callable[..., None]] = {
     "late_steer_refused": _late_steer_refused,
     "close_is_last": _close_is_last,
     "start_failure_is_typed": _start_failure_is_typed,
+    "one_agent_started": _one_agent_started,
+    "no_agent_started": _no_agent_started,
 }

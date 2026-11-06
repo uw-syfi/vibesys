@@ -23,123 +23,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Compatibility is the answer to a handshake, from the daemon's side.
-type Compatibility int32
-
-const (
-	Compatibility_COMPATIBILITY_UNSPECIFIED    Compatibility = 0
-	Compatibility_COMPATIBILITY_COMPATIBLE     Compatibility = 1
-	Compatibility_COMPATIBILITY_CLIENT_TOO_OLD Compatibility = 2
-	Compatibility_COMPATIBILITY_DAEMON_TOO_OLD Compatibility = 3
-)
-
-// Enum value maps for Compatibility.
-var (
-	Compatibility_name = map[int32]string{
-		0: "COMPATIBILITY_UNSPECIFIED",
-		1: "COMPATIBILITY_COMPATIBLE",
-		2: "COMPATIBILITY_CLIENT_TOO_OLD",
-		3: "COMPATIBILITY_DAEMON_TOO_OLD",
-	}
-	Compatibility_value = map[string]int32{
-		"COMPATIBILITY_UNSPECIFIED":    0,
-		"COMPATIBILITY_COMPATIBLE":     1,
-		"COMPATIBILITY_CLIENT_TOO_OLD": 2,
-		"COMPATIBILITY_DAEMON_TOO_OLD": 3,
-	}
-)
-
-func (x Compatibility) Enum() *Compatibility {
-	p := new(Compatibility)
-	*p = x
-	return p
-}
-
-func (x Compatibility) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (Compatibility) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_service_proto_enumTypes[0].Descriptor()
-}
-
-func (Compatibility) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_service_proto_enumTypes[0]
-}
-
-func (x Compatibility) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use Compatibility.Descriptor instead.
-func (Compatibility) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{0}
-}
-
-// BuildVersions is what one build carries.
-type BuildVersions struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The release version, or "dev". Display only: callers never compare it.
-	BinaryVersion string `protobuf:"bytes,1,opt,name=binary_version,json=binaryVersion,proto3" json:"binary_version,omitempty"`
-	// The revision of this contract's behavior. It increases only when a change breaks a peer.
-	ProtocolVersion uint32 `protobuf:"varint,2,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
-	// The oldest protocol_version this build still serves.
-	MinProtocolVersion uint32 `protobuf:"varint,3,opt,name=min_protocol_version,json=minProtocolVersion,proto3" json:"min_protocol_version,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
-}
-
-func (x *BuildVersions) Reset() {
-	*x = BuildVersions{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BuildVersions) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BuildVersions) ProtoMessage() {}
-
-func (x *BuildVersions) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BuildVersions.ProtoReflect.Descriptor instead.
-func (*BuildVersions) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *BuildVersions) GetBinaryVersion() string {
-	if x != nil {
-		return x.BinaryVersion
-	}
-	return ""
-}
-
-func (x *BuildVersions) GetProtocolVersion() uint32 {
-	if x != nil {
-		return x.ProtocolVersion
-	}
-	return 0
-}
-
-func (x *BuildVersions) GetMinProtocolVersion() uint32 {
-	if x != nil {
-		return x.MinProtocolVersion
-	}
-	return 0
-}
-
 type DispatchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Command       *Command               `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
@@ -149,7 +32,7 @@ type DispatchRequest struct {
 
 func (x *DispatchRequest) Reset() {
 	*x = DispatchRequest{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -161,7 +44,7 @@ func (x *DispatchRequest) String() string {
 func (*DispatchRequest) ProtoMessage() {}
 
 func (x *DispatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -174,7 +57,7 @@ func (x *DispatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchRequest.ProtoReflect.Descriptor instead.
 func (*DispatchRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *DispatchRequest) GetCommand() *Command {
@@ -193,7 +76,7 @@ type DispatchResponse struct {
 
 func (x *DispatchResponse) Reset() {
 	*x = DispatchResponse{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -205,7 +88,7 @@ func (x *DispatchResponse) String() string {
 func (*DispatchResponse) ProtoMessage() {}
 
 func (x *DispatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -218,7 +101,7 @@ func (x *DispatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchResponse.ProtoReflect.Descriptor instead.
 func (*DispatchResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *DispatchResponse) GetReceipt() *Receipt {
@@ -237,7 +120,7 @@ type HelloRequest struct {
 
 func (x *HelloRequest) Reset() {
 	*x = HelloRequest{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -249,7 +132,7 @@ func (x *HelloRequest) String() string {
 func (*HelloRequest) ProtoMessage() {}
 
 func (x *HelloRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -262,7 +145,7 @@ func (x *HelloRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloRequest.ProtoReflect.Descriptor instead.
 func (*HelloRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *HelloRequest) GetClient() *BuildVersions {
@@ -282,7 +165,7 @@ type HelloResponse struct {
 
 func (x *HelloResponse) Reset() {
 	*x = HelloResponse{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -294,7 +177,7 @@ func (x *HelloResponse) String() string {
 func (*HelloResponse) ProtoMessage() {}
 
 func (x *HelloResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -307,7 +190,7 @@ func (x *HelloResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloResponse.ProtoReflect.Descriptor instead.
 func (*HelloResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *HelloResponse) GetDaemon() *BuildVersions {
@@ -334,7 +217,7 @@ type WatchRunsRequest struct {
 
 func (x *WatchRunsRequest) Reset() {
 	*x = WatchRunsRequest{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -346,7 +229,7 @@ func (x *WatchRunsRequest) String() string {
 func (*WatchRunsRequest) ProtoMessage() {}
 
 func (x *WatchRunsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -359,7 +242,7 @@ func (x *WatchRunsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunsRequest.ProtoReflect.Descriptor instead.
 func (*WatchRunsRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *WatchRunsRequest) GetAfterSequence() uint64 {
@@ -390,7 +273,7 @@ type RunsSnapshot struct {
 
 func (x *RunsSnapshot) Reset() {
 	*x = RunsSnapshot{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -402,7 +285,7 @@ func (x *RunsSnapshot) String() string {
 func (*RunsSnapshot) ProtoMessage() {}
 
 func (x *RunsSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -415,7 +298,7 @@ func (x *RunsSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunsSnapshot.ProtoReflect.Descriptor instead.
 func (*RunsSnapshot) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RunsSnapshot) GetRuns() []*Run {
@@ -481,7 +364,7 @@ type WatchRunsResponse struct {
 
 func (x *WatchRunsResponse) Reset() {
 	*x = WatchRunsResponse{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -493,7 +376,7 @@ func (x *WatchRunsResponse) String() string {
 func (*WatchRunsResponse) ProtoMessage() {}
 
 func (x *WatchRunsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -506,7 +389,7 @@ func (x *WatchRunsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunsResponse.ProtoReflect.Descriptor instead.
 func (*WatchRunsResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *WatchRunsResponse) GetBody() isWatchRunsResponse_Body {
@@ -578,7 +461,7 @@ type WatchAgentRequest struct {
 
 func (x *WatchAgentRequest) Reset() {
 	*x = WatchAgentRequest{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +473,7 @@ func (x *WatchAgentRequest) String() string {
 func (*WatchAgentRequest) ProtoMessage() {}
 
 func (x *WatchAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +486,7 @@ func (x *WatchAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchAgentRequest.ProtoReflect.Descriptor instead.
 func (*WatchAgentRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *WatchAgentRequest) GetAgentId() string {
@@ -640,7 +523,7 @@ type ItemsPage struct {
 
 func (x *ItemsPage) Reset() {
 	*x = ItemsPage{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +535,7 @@ func (x *ItemsPage) String() string {
 func (*ItemsPage) ProtoMessage() {}
 
 func (x *ItemsPage) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +548,7 @@ func (x *ItemsPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemsPage.ProtoReflect.Descriptor instead.
 func (*ItemsPage) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ItemsPage) GetItems() []*Item {
@@ -709,7 +592,7 @@ type WatchAgentResponse struct {
 
 func (x *WatchAgentResponse) Reset() {
 	*x = WatchAgentResponse{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -721,7 +604,7 @@ func (x *WatchAgentResponse) String() string {
 func (*WatchAgentResponse) ProtoMessage() {}
 
 func (x *WatchAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +617,7 @@ func (x *WatchAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchAgentResponse.ProtoReflect.Descriptor instead.
 func (*WatchAgentResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WatchAgentResponse) GetBody() isWatchAgentResponse_Body {
@@ -827,7 +710,7 @@ type ListItemsRequest struct {
 
 func (x *ListItemsRequest) Reset() {
 	*x = ListItemsRequest{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -839,7 +722,7 @@ func (x *ListItemsRequest) String() string {
 func (*ListItemsRequest) ProtoMessage() {}
 
 func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -852,7 +735,7 @@ func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsRequest.ProtoReflect.Descriptor instead.
 func (*ListItemsRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListItemsRequest) GetAgentId() string {
@@ -885,7 +768,7 @@ type ListItemsResponse struct {
 
 func (x *ListItemsResponse) Reset() {
 	*x = ListItemsResponse{}
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +780,7 @@ func (x *ListItemsResponse) String() string {
 func (*ListItemsResponse) ProtoMessage() {}
 
 func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +793,7 @@ func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsResponse.ProtoReflect.Descriptor instead.
 func (*ListItemsResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListItemsResponse) GetPage() *ItemsPage {
@@ -956,11 +839,7 @@ var File_vibesys_orchestrator_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a$vibesys/orchestrator/v1/search.proto\"\x93\x01\n" +
-	"\rBuildVersions\x12%\n" +
-	"\x0ebinary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n" +
-	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x120\n" +
-	"\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\"U\n" +
+	"%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a$vibesys/orchestrator/v1/search.proto\"U\n" +
 	"\x0fDispatchRequest\x12B\n" +
 	"\acommand\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.CommandB\x06\xbaH\x03\xc8\x01\x01R\acommand\"V\n" +
 	"\x10DispatchResponse\x12B\n" +
@@ -1008,12 +887,7 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\tpage_size\x18\x03 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\xe8\a \x00R\bpageSize\"S\n" +
 	"\x11ListItemsResponse\x12>\n" +
-	"\x04page\x18\x01 \x01(\v2\".vibesys.orchestrator.v1.ItemsPageB\x06\xbaH\x03\xc8\x01\x01R\x04page*\x90\x01\n" +
-	"\rCompatibility\x12\x1d\n" +
-	"\x19COMPATIBILITY_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18COMPATIBILITY_COMPATIBLE\x10\x01\x12 \n" +
-	"\x1cCOMPATIBILITY_CLIENT_TOO_OLD\x10\x02\x12 \n" +
-	"\x1cCOMPATIBILITY_DAEMON_TOO_OLD\x10\x032\x81\x04\n" +
+	"\x04page\x18\x01 \x01(\v2\".vibesys.orchestrator.v1.ItemsPageB\x06\xbaH\x03\xc8\x01\x01R\x04page2\x81\x04\n" +
 	"\x13OrchestratorService\x12V\n" +
 	"\x05Hello\x12%.vibesys.orchestrator.v1.HelloRequest\x1a&.vibesys.orchestrator.v1.HelloResponse\x12_\n" +
 	"\bDispatch\x12(.vibesys.orchestrator.v1.DispatchRequest\x1a).vibesys.orchestrator.v1.DispatchResponse\x12d\n" +
@@ -1036,25 +910,24 @@ func file_vibesys_orchestrator_v1_service_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_service_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_vibesys_orchestrator_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
-	(Compatibility)(0),               // 0: vibesys.orchestrator.v1.Compatibility
-	(*BuildVersions)(nil),            // 1: vibesys.orchestrator.v1.BuildVersions
-	(*DispatchRequest)(nil),          // 2: vibesys.orchestrator.v1.DispatchRequest
-	(*DispatchResponse)(nil),         // 3: vibesys.orchestrator.v1.DispatchResponse
-	(*HelloRequest)(nil),             // 4: vibesys.orchestrator.v1.HelloRequest
-	(*HelloResponse)(nil),            // 5: vibesys.orchestrator.v1.HelloResponse
-	(*WatchRunsRequest)(nil),         // 6: vibesys.orchestrator.v1.WatchRunsRequest
-	(*RunsSnapshot)(nil),             // 7: vibesys.orchestrator.v1.RunsSnapshot
-	(*WatchRunsResponse)(nil),        // 8: vibesys.orchestrator.v1.WatchRunsResponse
-	(*WatchAgentRequest)(nil),        // 9: vibesys.orchestrator.v1.WatchAgentRequest
-	(*ItemsPage)(nil),                // 10: vibesys.orchestrator.v1.ItemsPage
-	(*WatchAgentResponse)(nil),       // 11: vibesys.orchestrator.v1.WatchAgentResponse
-	(*ListItemsRequest)(nil),         // 12: vibesys.orchestrator.v1.ListItemsRequest
-	(*ListItemsResponse)(nil),        // 13: vibesys.orchestrator.v1.ListItemsResponse
-	(*Command)(nil),                  // 14: vibesys.orchestrator.v1.Command
-	(*Receipt)(nil),                  // 15: vibesys.orchestrator.v1.Receipt
+	(*DispatchRequest)(nil),          // 0: vibesys.orchestrator.v1.DispatchRequest
+	(*DispatchResponse)(nil),         // 1: vibesys.orchestrator.v1.DispatchResponse
+	(*HelloRequest)(nil),             // 2: vibesys.orchestrator.v1.HelloRequest
+	(*HelloResponse)(nil),            // 3: vibesys.orchestrator.v1.HelloResponse
+	(*WatchRunsRequest)(nil),         // 4: vibesys.orchestrator.v1.WatchRunsRequest
+	(*RunsSnapshot)(nil),             // 5: vibesys.orchestrator.v1.RunsSnapshot
+	(*WatchRunsResponse)(nil),        // 6: vibesys.orchestrator.v1.WatchRunsResponse
+	(*WatchAgentRequest)(nil),        // 7: vibesys.orchestrator.v1.WatchAgentRequest
+	(*ItemsPage)(nil),                // 8: vibesys.orchestrator.v1.ItemsPage
+	(*WatchAgentResponse)(nil),       // 9: vibesys.orchestrator.v1.WatchAgentResponse
+	(*ListItemsRequest)(nil),         // 10: vibesys.orchestrator.v1.ListItemsRequest
+	(*ListItemsResponse)(nil),        // 11: vibesys.orchestrator.v1.ListItemsResponse
+	(*Command)(nil),                  // 12: vibesys.orchestrator.v1.Command
+	(*Receipt)(nil),                  // 13: vibesys.orchestrator.v1.Receipt
+	(*BuildVersions)(nil),            // 14: vibesys.orchestrator.v1.BuildVersions
+	(Compatibility)(0),               // 15: vibesys.orchestrator.v1.Compatibility
 	(*Run)(nil),                      // 16: vibesys.orchestrator.v1.Run
 	(*Agent)(nil),                    // 17: vibesys.orchestrator.v1.Agent
 	(*Turn)(nil),                     // 18: vibesys.orchestrator.v1.Turn
@@ -1066,37 +939,37 @@ var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
 	(*descriptorpb.FileOptions)(nil), // 24: google.protobuf.FileOptions
 }
 var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
-	14, // 0: vibesys.orchestrator.v1.DispatchRequest.command:type_name -> vibesys.orchestrator.v1.Command
-	15, // 1: vibesys.orchestrator.v1.DispatchResponse.receipt:type_name -> vibesys.orchestrator.v1.Receipt
-	1,  // 2: vibesys.orchestrator.v1.HelloRequest.client:type_name -> vibesys.orchestrator.v1.BuildVersions
-	1,  // 3: vibesys.orchestrator.v1.HelloResponse.daemon:type_name -> vibesys.orchestrator.v1.BuildVersions
-	0,  // 4: vibesys.orchestrator.v1.HelloResponse.compatibility:type_name -> vibesys.orchestrator.v1.Compatibility
+	12, // 0: vibesys.orchestrator.v1.DispatchRequest.command:type_name -> vibesys.orchestrator.v1.Command
+	13, // 1: vibesys.orchestrator.v1.DispatchResponse.receipt:type_name -> vibesys.orchestrator.v1.Receipt
+	14, // 2: vibesys.orchestrator.v1.HelloRequest.client:type_name -> vibesys.orchestrator.v1.BuildVersions
+	14, // 3: vibesys.orchestrator.v1.HelloResponse.daemon:type_name -> vibesys.orchestrator.v1.BuildVersions
+	15, // 4: vibesys.orchestrator.v1.HelloResponse.compatibility:type_name -> vibesys.orchestrator.v1.Compatibility
 	16, // 5: vibesys.orchestrator.v1.RunsSnapshot.runs:type_name -> vibesys.orchestrator.v1.Run
 	17, // 6: vibesys.orchestrator.v1.RunsSnapshot.agents:type_name -> vibesys.orchestrator.v1.Agent
 	18, // 7: vibesys.orchestrator.v1.RunsSnapshot.turns:type_name -> vibesys.orchestrator.v1.Turn
 	19, // 8: vibesys.orchestrator.v1.RunsSnapshot.messages:type_name -> vibesys.orchestrator.v1.Message
 	20, // 9: vibesys.orchestrator.v1.RunsSnapshot.searches:type_name -> vibesys.orchestrator.v1.SearchState
-	7,  // 10: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
+	5,  // 10: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
 	21, // 11: vibesys.orchestrator.v1.WatchRunsResponse.event:type_name -> vibesys.orchestrator.v1.Event
 	20, // 12: vibesys.orchestrator.v1.WatchRunsResponse.search:type_name -> vibesys.orchestrator.v1.SearchState
 	22, // 13: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
-	10, // 14: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	8,  // 14: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
 	22, // 15: vibesys.orchestrator.v1.WatchAgentResponse.item:type_name -> vibesys.orchestrator.v1.Item
 	23, // 16: vibesys.orchestrator.v1.WatchAgentResponse.delta:type_name -> vibesys.orchestrator.v1.Delta
 	18, // 17: vibesys.orchestrator.v1.WatchAgentResponse.turn:type_name -> vibesys.orchestrator.v1.Turn
-	10, // 18: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	8,  // 18: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
 	24, // 19: vibesys.orchestrator.v1.protocol_version:extendee -> google.protobuf.FileOptions
 	24, // 20: vibesys.orchestrator.v1.min_protocol_version:extendee -> google.protobuf.FileOptions
-	4,  // 21: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
-	2,  // 22: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
-	6,  // 23: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
-	9,  // 24: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
-	12, // 25: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
-	5,  // 26: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
-	3,  // 27: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
-	8,  // 28: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
-	11, // 29: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
-	13, // 30: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
+	2,  // 21: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
+	0,  // 22: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
+	4,  // 23: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
+	7,  // 24: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
+	10, // 25: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
+	3,  // 26: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
+	1,  // 27: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
+	6,  // 28: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
+	9,  // 29: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
+	11, // 30: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
 	26, // [26:31] is the sub-list for method output_type
 	21, // [21:26] is the sub-list for method input_type
 	21, // [21:21] is the sub-list for extension type_name
@@ -1112,12 +985,12 @@ func file_vibesys_orchestrator_v1_service_proto_init() {
 	file_vibesys_orchestrator_v1_events_proto_init()
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
 	file_vibesys_orchestrator_v1_search_proto_init()
-	file_vibesys_orchestrator_v1_service_proto_msgTypes[7].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_service_proto_msgTypes[6].OneofWrappers = []any{
 		(*WatchRunsResponse_Snapshot)(nil),
 		(*WatchRunsResponse_Event)(nil),
 		(*WatchRunsResponse_Search)(nil),
 	}
-	file_vibesys_orchestrator_v1_service_proto_msgTypes[10].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_service_proto_msgTypes[9].OneofWrappers = []any{
 		(*WatchAgentResponse_Page)(nil),
 		(*WatchAgentResponse_Item)(nil),
 		(*WatchAgentResponse_Delta)(nil),
@@ -1128,14 +1001,13 @@ func file_vibesys_orchestrator_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_service_proto_rawDesc), len(file_vibesys_orchestrator_v1_service_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   13,
+			NumEnums:      0,
+			NumMessages:   12,
 			NumExtensions: 2,
 			NumServices:   1,
 		},
 		GoTypes:           file_vibesys_orchestrator_v1_service_proto_goTypes,
 		DependencyIndexes: file_vibesys_orchestrator_v1_service_proto_depIdxs,
-		EnumInfos:         file_vibesys_orchestrator_v1_service_proto_enumTypes,
 		MessageInfos:      file_vibesys_orchestrator_v1_service_proto_msgTypes,
 		ExtensionInfos:    file_vibesys_orchestrator_v1_service_proto_extTypes,
 	}.Build()

@@ -19,11 +19,8 @@ var scrapingSpellings = []string{"pgrep", "pkill", "/cmdline"}
 var scrapingTools = map[string]bool{"ps": true}
 
 // scrapingAllowed are the files that still read a process command line, with the number of
-// literals. The session holder's pid check is the one left; it ends when the session process says
-// who it is through its own typed contract.
-var scrapingAllowed = map[string]int{
-	moduleDir + "internal/production/sidecars.go": 1,
-}
+// literals. There are none: the session holder says who it is through its own typed contract.
+var scrapingAllowed = map[string]int{}
 
 // processScraping reports a string literal in product code that names a process-table tool or a
 // process command line file, beyond what scrapingAllowed holds.
