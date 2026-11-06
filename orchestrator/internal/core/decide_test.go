@@ -294,10 +294,10 @@ func TestDecideAppliesTheRoleTable(t *testing.T) {
 		{"an unknown agent", stranger, core.PostHandoff{}},
 		{"a worker stopping the run", workerCaller, core.StopRun{Run: run}},
 		{"a worker spawning", workerCaller, core.SpawnAgent{Run: run, Role: core.RoleWorker, Brief: "b"}},
-		{"a worker posting a report", workerCaller, core.PostReport{Report: core.Report{Headline: "h"}}},
+		{"a worker posting a report", workerCaller, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "h"}}},
 		{"the lead posting a handoff", core.AgentCaller{Agent: leadID}, core.PostHandoff{}},
 		{"the operator posting a handoff", operator, core.PostHandoff{}},
-		{"the operator posting a report", operator, core.PostReport{Report: core.Report{Headline: "h"}}},
+		{"the operator posting a report", operator, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "h"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -349,6 +349,7 @@ func TestDeliveryByAgentStateAndCapability(t *testing.T) {
 		{"idle starts a turn", func(t *testing.T) (*script, core.AgentID) {
 			w, run, leadID := started(t, 1, steers)
 			a := w.spawn(run, leadID, steers)
+			w.endTurn(a, core.TurnCompleted) // the reminder to hand off starts another turn
 			w.endTurn(a, core.TurnCompleted)
 			return w, a
 		}, core.DeliveryNewTurn, []string{"StartTurn"}},
@@ -490,7 +491,10 @@ func TestAHandoffWakesTheLeadOnce(t *testing.T) {
 
 func TestASubagentThatStopsWithoutAHandoffWakesTheLead(t *testing.T) {
 	ends := map[string]func(w *script, a core.AgentID){
-		"idle":   func(w *script, a core.AgentID) { w.endTurn(a, core.TurnCompleted) },
+		"idle": func(w *script, a core.AgentID) {
+			w.endTurn(a, core.TurnCompleted) // the reminder to hand off starts another turn
+			w.endTurn(a, core.TurnCompleted)
+		},
 		"failed": func(w *script, a core.AgentID) { w.fact(a, core.SessionFailed{Detail: "boom"}) },
 		"closed": func(w *script, a core.AgentID) { w.fact(a, core.SessionClosed{}) },
 		"lost":   func(w *script, a core.AgentID) { w.step(core.SidecarLost{Session: core.Session{Agent: a, N: 1}}) },

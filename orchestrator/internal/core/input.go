@@ -187,6 +187,15 @@ type JobUpdate struct {
 
 func (JobUpdate) inputBody() {}
 
+// JobsRunning is how many of a run's jobs the job tool reports as queued or running. The shell sends
+// it after every poll that read the jobs, so it is level-triggered: a repeat changes nothing.
+type JobsRunning struct {
+	Run   RunID
+	Count uint32
+}
+
+func (JobsRunning) inputBody() {}
+
 // TimerFired says a timer an ArmTimer asked for is due. A timer can outlive what it was armed for,
 // and then it does nothing.
 type TimerFired struct{ Timer ArmTimer }

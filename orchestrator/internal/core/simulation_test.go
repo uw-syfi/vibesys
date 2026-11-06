@@ -416,8 +416,64 @@ func (w *sim) pollJobs() {
 	if err != nil {
 		return
 	}
+	var going uint32
 	for _, u := range updates {
 		w.decide(u)
+		if !u.State.Final() {
+			going++
+		}
+	}
+	w.decide(core.JobsRunning{Run: run.ID, Count: going})
+}
+
+// report has a lead post a report of either kind.
+func (w *sim) report() {
+	run, ok := pick(w, w.liveRuns())
+	if !ok {
+		return
+	}
+	kind := pb.ReportKind(1 + w.r.IntN(2))
+	w.command(core.AgentCaller{Agent: run.Lead}, &pb.Command{Body: &pb.Command_PostReport{PostReport: &pb.PostReport{
+		Report: &pb.Report{Kind: kind, Headline: "h"},
+	}}})
+}
+
+// pause lets a long time pass with nothing happening, which is what a stall needs, and then fires
+// the timers that came due.
+func (w *sim) pause() {
+	w.now = w.now.Add(time.Duration(1+w.r.IntN(15)) * time.Minute)
+	for range 3 {
+		w.fireTimer(false)
+	}
+}
+
+// lull lets everything in flight finish, so that agents rest and mail is delivered, and then pauses
+// for longer than a lead may be left alone. Runs that were busy only because of what was in flight
+// are standing still, which a random mix of actions seldom leaves for long.
+func (w *sim) lull() {
+	for range 300 {
+		switch {
+		case len(w.outbox) > 0:
+			w.work()
+		case w.readSidecar():
+		default:
+			ended := false
+			for _, s := range w.openSessions() {
+				if s.turn != "" {
+					w.endTurn(s, core.TurnCompleted)
+					ended = true
+				}
+			}
+			if !ended {
+				w.reapSidecars()
+				w.now = w.now.Add(core.LeadIdleAfter + time.Duration(w.r.IntN(60))*time.Second)
+				for range 3 {
+					w.fireTimer(false)
+				}
+				return
+			}
+		}
+		w.reapSidecars()
 	}
 }
 
@@ -683,7 +739,8 @@ func (w *sim) drawPlan() []action {
 	fault := func(weight int) int { return weight * w.r.IntN(3) }
 	w.slowStarts = w.r.IntN(2) == 0
 	return []action{
-		{40, w.finishStart}, {20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs},
+		{40, w.finishStart}, {20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs}, {20, w.report},
+		{fault(10), w.pause}, {fault(8), w.lull},
 		{fault(10), w.stopSubagent}, {fault(2), w.stopRun}, {fault(15), w.retry}, {fault(5), w.crash},
 		{fault(20), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
 		{200, w.work}, {160, w.act}, {230, func() { w.readSidecar() }},

@@ -6,6 +6,9 @@ import (
 	"math/rand"
 	"testing"
 	"testing/quick"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -15,6 +18,11 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
+
+// submitters says the run submitted a job.
+func submitters(run core.RunID) []*cli.Submitter {
+	return []*cli.Submitter{{RunId: string(run), At: timestamppb.New(time.Unix(1, 0))}}
+}
 
 func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 	property := func(history []uint8) bool {
@@ -31,7 +39,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 		defer w.Close()
 		latest := client.WatchRunsSnapshot(first[0]).Searches[0]
 		for i, n := range history {
-			v := search.Fold(search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1", CancelReason: string(rune(n + 32))}}}})
+			v := search.Fold(search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1", Submitters: submitters(run.ID), CancelReason: string(rune(n + 32))}}}})
 			if n%2 == 0 {
 				v.Reason = core.CLINotInstalled
 				v.Detail = "configured CLI is missing"
@@ -144,7 +152,7 @@ func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 	store := new(search.Store)
 	r.Daemon.Search = store
 	run, lead := beginRun(t, r)
-	store.Put(run.ID, search.View{Reason: core.CLINotInstalled, Detail: "configured CLI is missing", Facts: search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1"}}}}})
+	store.Put(run.ID, search.View{Reason: core.CLINotInstalled, Detail: "configured CLI is missing", Facts: search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1", Submitters: submitters(run.ID)}}}}})
 	r.Settle(t)
 	w, first, err := r.AgentService.WatchRunsFrom(core.AgentCaller{Agent: lead.ID}, 0)
 	if err != nil {

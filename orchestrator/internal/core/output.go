@@ -111,8 +111,13 @@ func (e ArmTimer) ID() EffectID { return EffectID("timer/" + string(e.Timer())) 
 
 // Timer is the timer's identity.
 func (e ArmTimer) Timer() TimerID {
-	if e.Kind == TimerRunDeadline {
+	switch e.Kind {
+	case TimerRunDeadline:
 		return TimerID(fmt.Sprintf("%s/%s", e.Kind, e.Run))
+	case TimerLeadIdle:
+		// Each stall is its own timer: a stall that ended and began again must not be answered by
+		// the timer of the first.
+		return TimerID(fmt.Sprintf("%s/%s/%d", e.Kind, e.Run, e.FireAt.UnixNano()))
 	}
 	return TimerID(fmt.Sprintf("%s/%s/%d", e.Kind, e.Session.Agent, e.Session.N))
 }

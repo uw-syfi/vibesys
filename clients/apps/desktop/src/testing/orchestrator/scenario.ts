@@ -27,6 +27,7 @@ import {
   MessageSchema,
   type Plan,
   ReceiptSchema,
+  ReportKind,
   ReportSchema,
   RunStatus,
   type Turn,
@@ -426,6 +427,8 @@ function operatorMessage(builder: Builder, target: Agent, atMs: number): void {
 
 function finishRun(builder: Builder, atMs: number): void {
   const report = create(ReportSchema, {
+    kind: ReportKind.FINAL,
+    sequence: 1,
     headline: 'Batching the decode steps made it 18 percent faster.',
     changed: 'Decode steps now run in batches of eight.',
     decisions: 'We kept the batching idea and dropped the cache idea.',

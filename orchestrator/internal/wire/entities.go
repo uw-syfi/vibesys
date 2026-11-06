@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"time"
+
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -12,7 +14,8 @@ func runOut(r core.Run) *pb.Run {
 		Id: string(r.ID), Repository: r.Repository, Task: r.Task, Status: runStatuses.out(r.Status),
 		LeadAgentId: string(r.Lead), FanoutLimit: r.FanoutLimit, Deadline: when(r.Deadline),
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
-		CliLocation: locationOut(r.Location),
+		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, StalledSince: when(r.StalledSince),
+		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 	}
 }
 
@@ -34,6 +37,8 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		FanoutLimit: r.GetFanoutLimit(), Deadline: moment(r.GetDeadline(), errs),
 		CreatedAt: moment(r.GetCreatedAt(), errs), StopReason: stopReasons.in(r.GetStopReason(), errs),
 		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
+		ReportsPosted: r.GetReportsPosted(), StalledSince: moment(r.GetStalledSince(), errs),
+		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 	}
 }
 
@@ -56,8 +61,8 @@ func agentOut(a core.Agent) *pb.Agent {
 		Status: agentStatuses.out(a.Status), ProviderConversationId: a.ConversationID,
 		Capabilities: capabilitiesOut(a.Capabilities), StartedAt: when(a.StartedAt), EndedAt: when(a.EndedAt),
 		Session: a.Session, StopStage: stopStages.out(a.Stop), HandedOff: a.HandedOff,
-		SessionFailures: a.SessionFailures, EndDetail: a.EndDetail,
-		StartFailureReason: startFailures.out(a.StartFailure),
+		SessionFailures: a.SessionFailures, EndDetail: a.EndDetail, HandoffReminded: a.HandoffReminded,
+		StartFailureReason: startFailures.out(a.StartFailure), Usage: usageOut(a.Usage),
 	}
 }
 
@@ -73,7 +78,7 @@ func agentIn(a *pb.Agent, errs *errorList) core.Agent {
 		ConversationID: a.GetProviderConversationId(), Capabilities: capabilitiesIn(a.GetCapabilities()),
 		StartedAt: moment(a.GetStartedAt(), errs), EndedAt: moment(a.GetEndedAt(), errs), Session: a.GetSession(),
 		Stop: stopStages.in(a.GetStopStage(), errs), HandedOff: a.GetHandedOff(), SessionFailures: a.GetSessionFailures(),
-		EndDetail: a.GetEndDetail(), StartFailure: startFailures.in(a.GetStartFailureReason(), errs),
+		EndDetail: a.GetEndDetail(), StartFailure: startFailures.in(a.GetStartFailureReason(), errs), HandoffReminded: a.GetHandoffReminded(), Usage: usageIn(a.GetUsage()),
 	}
 }
 
@@ -183,14 +188,14 @@ func handoffIn(h *pb.Handoff) core.Handoff {
 
 func reportOut(r core.Report) *pb.Report {
 	return &pb.Report{
-		Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions,
+		Kind: reportKinds.out(r.Kind), Sequence: r.Sequence, Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions,
 		OpenForUser: r.OpenForUser,
 	}
 }
 
-func reportIn(r *pb.Report) core.Report {
+func reportIn(r *pb.Report, errs *errorList) core.Report {
 	return core.Report{
-		Headline: r.GetHeadline(), Changed: r.GetChanged(), InFlight: r.GetInFlight(), Decisions: r.GetDecisions(),
+		Kind: reportKinds.in(r.GetKind(), errs), Sequence: r.GetSequence(), Headline: r.GetHeadline(), Changed: r.GetChanged(), InFlight: r.GetInFlight(), Decisions: r.GetDecisions(),
 		OpenForUser: r.GetOpenForUser(),
 	}
 }
@@ -217,6 +222,10 @@ func messageOut(m core.Message) *pb.Message {
 			JobId: string(b.Job), Outcome: jobOutcomes.out(b.Outcome),
 			SubmittedByAgentId: string(b.SubmittedBy), Detail: b.Detail,
 		}}
+	case core.HandoffReminder:
+		out.Body = &pb.Message_HandoffReminder{HandoffReminder: &pb.HandoffReminder{}}
+	case core.LeadIdleReminder:
+		out.Body = &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{IdleSeconds: uint32(b.Idle / time.Second)}}
 	case core.SubagentSettled:
 		out.Body = &pb.Message_SubagentSettled{SubagentSettled: &pb.SubagentSettled{
 			AgentId: string(b.Agent), Status: agentStatuses.out(b.Status), Detail: b.Detail,
@@ -241,12 +250,16 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 	case *pb.Message_Handoff:
 		out.Body = handoffIn(b.Handoff)
 	case *pb.Message_Report:
-		out.Body = reportIn(b.Report)
+		out.Body = reportIn(b.Report, errs)
 	case *pb.Message_JobFinished:
 		out.Body = core.JobFinished{
 			Job: core.JobID(b.JobFinished.GetJobId()), Outcome: jobOutcomes.in(b.JobFinished.GetOutcome(), errs),
 			SubmittedBy: core.AgentID(b.JobFinished.GetSubmittedByAgentId()), Detail: b.JobFinished.GetDetail(),
 		}
+	case *pb.Message_HandoffReminder:
+		out.Body = core.HandoffReminder{}
+	case *pb.Message_LeadIdleReminder:
+		out.Body = core.LeadIdleReminder{Idle: time.Duration(b.LeadIdleReminder.GetIdleSeconds()) * time.Second}
 	case *pb.Message_SubagentSettled:
 		out.Body = core.SubagentSettled{
 			Agent: core.AgentID(b.SubagentSettled.GetAgentId()), Status: agentStatuses.in(b.SubagentSettled.GetStatus(), errs),

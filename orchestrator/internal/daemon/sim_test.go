@@ -311,7 +311,37 @@ func (s *sim) checkDelivered() {
 			s.fail("effect %s was committed for %s/%d, which is still live, and never reached its sidecar", e.ID(), session.Agent, session.N)
 		}
 	}
+	s.checkJobCount()
 	s.tally["delivery checked"]++
+}
+
+// checkJobCount holds each live run's count of running jobs to what the job source reports. The
+// daemon polls on a timer, and a poll that failed leaves the last count, so the clock moves for two
+// polls: the second is the first that nothing fails.
+func (s *sim) checkJobCount() {
+	for range 2 {
+		s.rig.Clock.Advance(daemontest.PollEvery)
+		s.settle()
+	}
+	for _, run := range s.rig.Daemon.State().Runs() {
+		if !run.Status.Live() {
+			continue
+		}
+		updates, err := s.rig.Jobs.Jobs(context.Background(), run)
+		if err != nil {
+			continue
+		}
+		var going uint32
+		for _, u := range updates {
+			if !u.State.Final() {
+				going++
+			}
+		}
+		if run.ActiveJobs != going {
+			s.fail("run %s counts %d jobs going, and the job source reports %d", run.ID, run.ActiveJobs, going)
+		}
+		s.tally["job count checked"]++
+	}
 }
 
 func (s *sim) liveAgents() []core.Agent {
@@ -408,6 +438,12 @@ func (s *sim) step() {
 	case roll < 96:
 		s.note("settle and check delivery")
 		s.checkDelivered()
+	case roll < 98:
+		// A quiet longer than a lead may be left alone: runs that are stalled remind their leads.
+		s.note("everything settles and a long quiet follows")
+		s.settle()
+		s.rig.Clock.Advance(core.LeadIdleAfter + time.Second)
+		s.settle()
 	default:
 		s.note("settle")
 		s.settle()
@@ -476,7 +512,7 @@ func (s *sim) agentAct(a core.Agent) {
 			RunId: string(a.Run), Role: pb.AgentRole(2 + s.pick(5)), Brief: "work", PlanNumber: uint32(s.pick(3)),
 		}}}
 	case a.Role == core.RoleLead && s.pick(2) == 0:
-		cmd = &pb.Command{Id: id, Body: &pb.Command_PostReport{PostReport: &pb.PostReport{Report: &pb.Report{Headline: "h"}}}}
+		cmd = &pb.Command{Id: id, Body: &pb.Command_PostReport{PostReport: &pb.PostReport{Report: &pb.Report{Kind: pb.ReportKind_REPORT_KIND_PROGRESS, Headline: "h"}}}}
 	case a.Role == core.RoleLead:
 		live := s.liveAgents()
 		cmd = &pb.Command{Id: id, Body: &pb.Command_StopAgent{StopAgent: &pb.StopAgent{AgentId: string(live[s.pick(len(live))].ID)}}}
@@ -814,13 +850,16 @@ func TestDaemonSimulation(t *testing.T) {
 			}
 		}
 		s.finish()
+		for _, run := range s.rig.Daemon.State().Runs() {
+			s.tally["lead reminder"] += int(run.LeadReminders)
+		}
 		s.tally["input changed nothing"] += s.noops
 		for k, v := range s.tally {
 			total[k] += v
 		}
 	}
 	if len(seeds()) > 1 {
-		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing", "stalled call", "restart alone checked", "delivery checked", "crash " + daemontest.CrashAfterClaim, "crash " + daemontest.CrashBeforeComplete, "crash after send"} {
+		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing", "stalled call", "restart alone checked", "delivery checked", "job count checked", "lead reminder", "crash " + daemontest.CrashAfterClaim, "crash " + daemontest.CrashBeforeComplete, "crash after send"} {
 			if total[k] == 0 {
 				t.Errorf("no seed reached %q: the simulation never exercised it (reached: %v)", k, total)
 			}

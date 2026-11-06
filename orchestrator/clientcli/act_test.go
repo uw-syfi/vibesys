@@ -70,6 +70,42 @@ func TestSteerARejectedMessageNamesTheReason(t *testing.T) {
 	contains(t, "stderr", got.stderr, "did not take the message", "run stopping")
 }
 
+// The answer to a steer is the message as the log records it. A receipt that says a turn started
+// while the log, up to that receipt, says the message was refused is not believed.
+func TestSteerAnswersFromTheMessageTheLogRecords(t *testing.T) {
+	refused := &pb.Message{Id: "m1", RunId: "run-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_REJECTED, Rejection: pb.Rejection_REJECTION_RUN_STOPPING, At: at(2),
+		Body: &pb.Message_Text{Text: "hello"}}
+	f := &fakeService{
+		frames: []*pb.WatchRunsResponse{
+			snapshotFrame(5, false, []*pb.Run{runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}),
+			messageEvent(6, refused, 2),
+		},
+		dispatch: func(cmd *pb.Command) (*pb.DispatchResponse, error) {
+			return &pb.DispatchResponse{Receipt: &pb.Receipt{CommandId: cmd.GetId(), Delivery: pb.Delivery_DELIVERY_NEW_TURN, MessageId: "m1", Sequence: 6}}, nil
+		},
+	}
+	w := newWorld(t, serveFake(t, f))
+	got := w.run(context.Background(), "run", "steer", "hello")
+	if got.code != 1 || strings.Contains(got.stdout, "started a new turn") {
+		t.Fatalf("exit %d, stdout %q, stderr %q: the steer was told as delivered", got.code, got.stdout, got.stderr)
+	}
+	contains(t, "stderr", got.stderr, "did not take the message", "run stopping")
+}
+
+// A steer that began a turn and was cut short by a stop is told apart from one that was refused.
+func TestAttachTellsASteerCutShortFromOneRefused(t *testing.T) {
+	cut := &pb.Message{Id: "m1", RunId: "run-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_REJECTED, Rejection: pb.Rejection_REJECTION_RUN_STOPPING, Attempts: 1, At: at(2),
+		Body: &pb.Message_Text{Text: "hello"}}
+	refused := &pb.Message{Id: "m2", RunId: "run-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_REJECTED, Rejection: pb.Rejection_REJECTION_RUN_STOPPING, At: at(3),
+		Body: &pb.Message_Text{Text: "again"}}
+	ended := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
+	ended.EndedAt = at(4)
+	frame := snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ENDED)}, cut, refused)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.run(context.Background(), "run", "attach", "run-1")
+	contains(t, "attach", got.stdout, "was cut short after its turn started: run stopping", "was rejected: run stopping")
+}
+
 func TestStopIsRefusedForARunThatIsOver(t *testing.T) {
 	l := newLive(t, nil)
 	run, _ := l.startRun(t, "/work/repo", "alpha")

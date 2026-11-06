@@ -19,6 +19,11 @@ const (
 	LaunchTimeout = 5 * time.Minute
 	// MaxLeadResumes is how many sessions in a row the lead may lose before its run fails.
 	MaxLeadResumes = 3
+	// LeadIdleAfter is how long a run may stand still before its lead is reminded.
+	LeadIdleAfter = 10 * time.Minute
+	// MaxLeadReminders is how many reminders a run's lead gets in all. A lead that does not act on
+	// three is confused, and each further reminder would only cost money; the stall stays visible.
+	MaxLeadReminders = 3
 )
 
 // The harnesses. The empty harness means "the lead's", on a spawn only.
@@ -110,6 +115,16 @@ const (
 	TriggerSchedule        TurnTrigger = "schedule"
 	TriggerMessage         TurnTrigger = "message"
 	TriggerSubagentSettled TurnTrigger = "subagent_settled"
+	TriggerReminder        TurnTrigger = "reminder"
+)
+
+// ReportKind says what a report is for.
+type ReportKind string
+
+// The report kinds. A final report is the lead's last word on what it was asked to do.
+const (
+	ReportProgress ReportKind = "progress"
+	ReportFinal    ReportKind = "final"
 )
 
 // TurnStatus is where a turn is.
@@ -217,4 +232,5 @@ const (
 	TimerStopGrace   TimerKind = "stop_grace"
 	// TimerLaunchDeadline ends a session that has not opened within LaunchTimeout.
 	TimerLaunchDeadline TimerKind = "launch_deadline"
+	TimerLeadIdle       TimerKind = "lead_idle"
 )

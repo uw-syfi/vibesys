@@ -221,7 +221,7 @@ func (w *Workload) newCommand() core.InputBody {
 	case n < 84:
 		return w.command(core.Operator{}, core.StopRun{Run: run.ID})
 	case n < 90:
-		return w.command(core.AgentCaller{Agent: run.Lead}, core.PostReport{Report: core.Report{Headline: "status"}})
+		return w.command(core.AgentCaller{Agent: run.Lead}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "status"}})
 	default:
 		// A command the core refuses: a receipt is still committed, and with no run.
 		return w.command(core.Operator{}, core.StopRun{Run: "run-none"})

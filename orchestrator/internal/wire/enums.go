@@ -76,6 +76,7 @@ var (
 		core.TriggerSchedule:        pb.TurnTrigger_TURN_TRIGGER_SCHEDULE,
 		core.TriggerMessage:         pb.TurnTrigger_TURN_TRIGGER_MESSAGE,
 		core.TriggerSubagentSettled: pb.TurnTrigger_TURN_TRIGGER_SUBAGENT_SETTLED,
+		core.TriggerReminder:        pb.TurnTrigger_TURN_TRIGGER_REMINDER,
 	})
 	turnStatuses = newEnum(map[core.TurnStatus]pb.TurnStatus{
 		core.TurnRunning:     pb.TurnStatus_TURN_STATUS_RUNNING,
@@ -137,9 +138,14 @@ var (
 		core.StartTimedOut:              pb.StartFailureReason_START_FAILURE_REASON_TIMED_OUT,
 		core.StartOther:                 pb.StartFailureReason_START_FAILURE_REASON_OTHER,
 	})
+	reportKinds = newEnum(map[core.ReportKind]pb.ReportKind{
+		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
+		core.ReportFinal:    pb.ReportKind_REPORT_KIND_FINAL,
+	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,
 		core.TimerStopGrace:      pb.TimerKind_TIMER_KIND_STOP_GRACE,
 		core.TimerLaunchDeadline: pb.TimerKind_TIMER_KIND_LAUNCH_DEADLINE,
+		core.TimerLeadIdle:       pb.TimerKind_TIMER_KIND_LEAD_IDLE,
 	})
 )

@@ -47,7 +47,7 @@ func TestCapFullListsWithLongFields(t *testing.T) {
 	var facts search.Facts
 	for i := 0; i < 500; i++ {
 		id := fmt.Sprint(i)
-		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, CancelReason: strings.Repeat("x", 2048), SubmittedAt: &timestamppb.Timestamp{Seconds: int64(i)}}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id, Task: strings.Repeat("y", 2048), RecordedAt: &timestamppb.Timestamp{Seconds: int64(i)}}}})
+		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Submitters: ours, Id: id, CancelReason: strings.Repeat("x", 2048), SubmittedAt: &timestamppb.Timestamp{Seconds: int64(i)}}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id, Task: strings.Repeat("y", 2048), RecordedAt: &timestamppb.Timestamp{Seconds: int64(i)}}}})
 	}
 	s := search.Cap(search.Fold(facts), &pb.SearchState{RunId: "r", Revision: 1})
 	if proto.Size(s) > search.MaxStateBytes || !s.Truncated {

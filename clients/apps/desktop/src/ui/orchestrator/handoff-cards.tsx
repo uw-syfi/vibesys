@@ -26,6 +26,8 @@ export function verdictOf(
         subagentSettled: true,
         brief: true,
         leadBrief: true,
+        handoffReminder: true,
+        leadIdleReminder: true,
       }) && message.body.value.submittedByAgentId === from,
   );
   if (
@@ -37,6 +39,8 @@ export function verdictOf(
       subagentSettled: true,
       brief: true,
       leadBrief: true,
+      handoffReminder: true,
+      leadIdleReminder: true,
     }) &&
     job.body.value.outcome !== JobOutcome.UNSPECIFIED
   ) {
@@ -124,6 +128,8 @@ export function HandoffCards(props: {
           subagentSettled: true,
           brief: true,
           leadBrief: true,
+          handoffReminder: true,
+          leadIdleReminder: true,
         }) ||
         oneofIs(message.body, 'report', {
           text: true,
@@ -132,6 +138,8 @@ export function HandoffCards(props: {
           subagentSettled: true,
           brief: true,
           leadBrief: true,
+          handoffReminder: true,
+          leadIdleReminder: true,
         }),
     )
     .sort((a, b) => (ms(a.at) ?? 0) - (ms(b.at) ?? 0));
@@ -151,6 +159,8 @@ export function HandoffCards(props: {
           subagentSettled: true,
           brief: true,
           leadBrief: true,
+          handoffReminder: true,
+          leadIdleReminder: true,
         }) ? (
           <HandoffCard
             key={message.id}
@@ -166,6 +176,8 @@ export function HandoffCards(props: {
             subagentSettled: true,
             brief: true,
             leadBrief: true,
+            handoffReminder: true,
+            leadIdleReminder: true,
           }) ? (
           <ReportCard key={message.id} message={message} report={message.body.value} />
         ) : null,

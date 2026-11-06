@@ -554,8 +554,19 @@ func (d *Daemon) pollJobs(ctx context.Context) (bool, error) {
 			errs = append(errs, fmt.Errorf("jobs of run %s: %w", run.ID, err))
 			continue
 		}
+		var going uint32
+		inputs := make([]core.InputBody, 0, len(updates)+1)
 		for _, u := range updates {
-			applied, err := d.Apply(u)
+			inputs = append(inputs, u)
+			if !u.State.Final() {
+				going++
+			}
+		}
+		// The count follows the updates, so a job that finished tells the lead before the run counts as
+		// having nothing going.
+		inputs = append(inputs, core.JobsRunning{Run: run.ID, Count: going})
+		for _, in := range inputs {
+			applied, err := d.Apply(in)
 			if err != nil {
 				errs = append(errs, err)
 				break

@@ -115,14 +115,16 @@ enum TimerKind {
   TIMER_KIND_STOP_GRACE = 2;
   // How long a session has to open before it is written off as failed to start.
   TIMER_KIND_LAUNCH_DEADLINE = 3;
+  // How long a run's lead may sit idle with nothing outstanding before it is reminded.
+  TIMER_KIND_LEAD_IDLE = 4;
 }
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 message ArmTimer {
   option (buf.validate.message).cel = {
     id: "arm_timer.session"
-    message: "a stop grace and a launch deadline name a session and a run deadline does not"
-    expression: "has(this.session) == (this.kind != 1)"
+    message: "a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not"
+    expression: "has(this.session) == (this.kind == 2 || this.kind == 3)"
   };
 
   TimerKind kind = 1 [(buf.validate.field).enum = {

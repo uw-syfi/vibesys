@@ -57,6 +57,7 @@ const TRIGGER: Readonly<Record<TurnTrigger, string>> = {
   [TurnTrigger.SCHEDULE]: 'Started on a schedule',
   [TurnTrigger.MESSAGE]: 'Started by a message from another agent',
   [TurnTrigger.SUBAGENT_SETTLED]: 'Woken because its helpers finished',
+  [TurnTrigger.REMINDER]: 'Reminded of what it still owes',
 };
 
 function toolItem(shown: ShownItem, call: ToolCall): ThreadItem {
@@ -194,6 +195,8 @@ function SentMessages(props: {
               subagentSettled: true,
               brief: true,
               leadBrief: true,
+              handoffReminder: true,
+              leadIdleReminder: true,
             })
               ? message.body.value
               : ''
@@ -312,6 +315,8 @@ export function AgentPanel(props: {
               subagentSettled: true,
               brief: true,
               leadBrief: true,
+              handoffReminder: true,
+              leadIdleReminder: true,
             }),
         )}
         send={props.send}

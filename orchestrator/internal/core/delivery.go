@@ -42,6 +42,7 @@ func (t *tx) route(m *Message, a agentState) {
 // resume opens a new session on an agent whose last one is over.
 func (t *tx) resume(a agentState) {
 	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff, a.EndDetail, a.StartFailure = AgentLaunching, StopNone, a.Session+1, time.Time{}, false, "", ""
+	a.HandoffReminded = false
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
@@ -71,6 +72,7 @@ func (t *tx) sweep(id RunID) {
 			t.restStatus(a)
 		}
 	}
+	t.markStall(id)
 	t.finishRun(id)
 }
 
@@ -181,6 +183,7 @@ func (t *tx) endTurn(a agentState, status TurnStatus, usage Usage) {
 	turn := *a.turn
 	turn.Status, turn.EndedAt, turn.Usage = status, t.in.At, turn.Usage.merged(usage)
 	t.emit(a.Run, turn)
+	t.rollUp(a, turn.Usage)
 
 	m := t.s.messages[turn.Message]
 	switch {
@@ -192,6 +195,20 @@ func (t *tx) endTurn(a agentState, status TurnStatus, usage Usage) {
 		m.Delivery = DeliveryQueued
 	}
 	t.emit(a.Run, m)
+}
+
+// rollUp adds a finished turn's cost to its agent's and its run's. A turn that reported nothing
+// adds nothing and writes nothing.
+func (t *tx) rollUp(a agentState, u Usage) {
+	if u == (Usage{}) {
+		return
+	}
+	a = t.s.agents[a.ID]
+	a.Usage = a.Usage.plus(u)
+	t.emit(a.Run, a.Agent)
+	run := t.s.runs[a.Run]
+	run.Usage = run.Usage.plus(u)
+	t.emit(run.ID, run)
 }
 
 // sessionOver records the end of a session. The lead of a live run comes back if it can, because a

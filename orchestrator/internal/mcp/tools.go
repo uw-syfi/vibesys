@@ -15,6 +15,8 @@ var roleNames = map[string]pb.AgentRole{
 	"profiler": pb.AgentRole_AGENT_ROLE_PROFILER,
 }
 
+var reportKindNames = map[string]pb.ReportKind{"progress": pb.ReportKind_REPORT_KIND_PROGRESS, "final": pb.ReportKind_REPORT_KIND_FINAL}
+
 var harnessNames = map[string]pb.Harness{"claude_code": pb.Harness_HARNESS_CLAUDE_CODE, "codex": pb.Harness_HARNESS_CODEX}
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -167,8 +169,9 @@ var allTools = []tool{
 	},
 	{
 		name: "post_report", action: core.ActionPostReport,
-		description: "Send the operator a progress report.",
-		schema: object([]string{"headline"}, map[string]any{
+		description: "Send the operator a report. Use kind progress for a note along the way and kind final once, when you have finished what you were asked to do or cannot go on.",
+		schema: object([]string{"kind", "headline"}, map[string]any{
+			"kind":          map[string]any{"type": "string", "enum": []string{"progress", "final"}, "description": "progress for a note along the way; final for your last word."},
 			"headline":      str("One line."),
 			"changed":       str("What changed since the last report."),
 			"in_flight":     str("What is running now."),
@@ -177,14 +180,18 @@ var allTools = []tool{
 		}),
 		run: func(ctx context.Context, s *Server, args json.RawMessage, id string) (string, error) {
 			var a struct {
-				Headline, Changed, Decisions string
-				InFlight                     string `json:"in_flight"`
-				OpenForUser                  string `json:"open_for_user"`
+				Kind, Headline, Changed, Decisions string
+				InFlight                           string `json:"in_flight"`
+				OpenForUser                        string `json:"open_for_user"`
 			}
 			if err := decode(args, &a); err != nil {
 				return "", err
 			}
-			r := &pb.Report{Headline: a.Headline, Changed: a.Changed, InFlight: a.InFlight, Decisions: a.Decisions, OpenForUser: a.OpenForUser}
+			kind, ok := reportKindNames[a.Kind]
+			if !ok {
+				return "", fmt.Errorf("kind %q is not progress or final: call again with one of them", a.Kind)
+			}
+			r := &pb.Report{Kind: kind, Headline: a.Headline, Changed: a.Changed, InFlight: a.InFlight, Decisions: a.Decisions, OpenForUser: a.OpenForUser}
 			return s.send(ctx, &pb.Command{Id: id, Body: &pb.Command_PostReport{PostReport: &pb.PostReport{Report: r}}},
 				func(*pb.Receipt) string { return "report sent to the operator." })
 		},

@@ -17,6 +17,7 @@ type coverage struct {
 	handoffs, handoffTurns, steers, resumes, refusedSpawns, stops, lost, rejected, jobs int
 	retriedDeliveries, operatorStops, deadlineStops, runsFailed, leadsOutOfResumes      int
 	startsFailed, startsTimedOut                                                        int
+	stalls, leadReminders, handoffReminders, reports                                    int
 }
 
 func (c *coverage) add(o coverage) {
@@ -36,6 +37,10 @@ func (c *coverage) add(o coverage) {
 	c.leadsOutOfResumes += o.leadsOutOfResumes
 	c.startsFailed += o.startsFailed
 	c.startsTimedOut += o.startsTimedOut
+	c.stalls += o.stalls
+	c.leadReminders += o.leadReminders
+	c.handoffReminders += o.handoffReminders
+	c.reports += o.reports
 }
 
 func (c coverage) require(t *testing.T) {
@@ -47,6 +52,8 @@ func (c coverage) require(t *testing.T) {
 		"finished jobs": c.jobs, "redelivered messages": c.retriedDeliveries, "operator stops": c.operatorStops,
 		"deadline stops": c.deadlineStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
 		"sessions that failed to start": c.startsFailed, "sessions that timed out opening": c.startsTimedOut,
+		"stalled runs": c.stalls, "reminders to a lead": c.leadReminders, "reminders to hand off": c.handoffReminders,
+		"reports": c.reports,
 	} {
 		if n == 0 {
 			t.Errorf("the simulation never reached: %s", name)
@@ -84,6 +91,7 @@ type monitor struct {
 	agents   map[core.AgentID]core.Agent
 	runs     map[core.RunID]core.Run
 	messages map[core.MessageID]*messageRecord
+	stalled  map[core.RunID]bool
 	jobs     map[toldJob]core.MessageID
 	receipts map[core.CommandID]core.Receipt
 	offsets  map[core.Session]uint64
@@ -91,6 +99,11 @@ type monitor struct {
 	handed map[core.AgentID]bool
 	// failures counts each agent's sessions lost in a row, with no completed turn between them.
 	failures map[core.AgentID]uint32
+	// leadReminders counts the reminders each run's lead got, handoffReminders those each session got,
+	// and reports the reports each run recorded.
+	leadReminders    map[core.RunID]int
+	handoffReminders map[core.Session]int
+	reports          map[core.RunID]uint32
 
 	// The rest lasts one transaction.
 	refusedSteer core.MessageID
@@ -106,7 +119,8 @@ func newMonitor() *monitor {
 		items: map[core.AgentID]uint32{}, open: map[core.TurnID]map[core.ItemID]bool{}, agents: map[core.AgentID]core.Agent{},
 		runs: map[core.RunID]core.Run{}, messages: map[core.MessageID]*messageRecord{}, jobs: map[toldJob]core.MessageID{},
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
-		failures: map[core.AgentID]uint32{},
+		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
+		reports: map[core.RunID]uint32{}, stalled: map[core.RunID]bool{},
 	}
 }
 
@@ -187,6 +201,9 @@ func (m *monitor) settled() error {
 			return fmt.Errorf("agent %s stopped working (%s) with no handoff, and the lead heard %d times", agent, a.Status, m.noticed[agent])
 		}
 	}
+	if err := m.stalls(); err != nil {
+		return err
+	}
 	for agent := range m.resumed {
 		for id, record := range m.messages {
 			if record.to == agent && record.last == core.DeliverySteered {
@@ -195,6 +212,49 @@ func (m *monitor) settled() error {
 		}
 	}
 	return nil
+}
+
+// stalls holds each run's StalledSince to the monitor's own account of when a run stands still: it
+// is running, no job is going, no message is owed to one of its agents, and every live agent rests,
+// the lead included.
+func (m *monitor) stalls() error {
+	for id, run := range m.runs {
+		want := run.Status == core.RunRunning && run.ActiveJobs == 0 && m.restingRun(id) && !m.mailInRun(id)
+		if got := !run.StalledSince.IsZero(); got != want {
+			return fmt.Errorf("run %s has stalled since %v, but standing still is %t", id, run.StalledSince, want)
+		}
+		if want && !m.stalled[id] {
+			m.stalled[id] = true
+			m.covered.stalls++
+		} else if !want {
+			delete(m.stalled, id)
+		}
+	}
+	return nil
+}
+
+// restingRun says every live agent of the run rests with no stop under way, and its lead is live.
+func (m *monitor) restingRun(run core.RunID) bool {
+	lead, ok := m.agents[m.runs[run].Lead]
+	if !ok || !lead.Status.Resting() {
+		return false
+	}
+	for _, a := range m.agents {
+		if a.Run == run && !a.Status.Over() && (!a.Status.Resting() || a.Stop != core.StopNone) {
+			return false
+		}
+	}
+	return true
+}
+
+// mailInRun says a message addressed to an agent of the run is still on its way.
+func (m *monitor) mailInRun(run core.RunID) bool {
+	for _, record := range m.messages {
+		if record.to != "" && !record.last.Final() && m.agents[record.to].Run == run {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *monitor) owedMail(agent core.AgentID) bool {
@@ -387,6 +447,23 @@ func (m *monitor) message(msg core.Message) error {
 			m.handed[msg.From] = true
 		case core.SubagentSettled:
 			m.noticed[b.Agent]++
+		case core.LeadIdleReminder:
+			if err := m.leadReminder(msg); err != nil {
+				return err
+			}
+		case core.HandoffReminder:
+			if err := m.handoffReminder(msg); err != nil {
+				return err
+			}
+		case core.Report:
+			m.covered.reports++
+			if b.Kind != core.ReportProgress && b.Kind != core.ReportFinal {
+				return fmt.Errorf("report %s has kind %q", msg.ID, b.Kind)
+			}
+			m.reports[msg.Run]++
+			if b.Sequence != m.reports[msg.Run] || m.runs[msg.Run].ReportsPosted != b.Sequence {
+				return fmt.Errorf("report %s is number %d, the run counts %d, want %d", msg.ID, b.Sequence, m.runs[msg.Run].ReportsPosted, m.reports[msg.Run])
+			}
 		case core.JobFinished:
 			m.covered.jobs++
 			key := toldJob{run: msg.Run, job: b.Job}
@@ -421,6 +498,52 @@ func (m *monitor) message(msg core.Message) error {
 		return fmt.Errorf("message %s took %d attempts", msg.ID, msg.Attempts)
 	}
 	record.previous, record.last = record.last, msg.Delivery
+	return nil
+}
+
+// leadReminder holds a reminder to the lead to its rules, at the moment it is written, before the
+// turn it starts changes anything: the run is running and has stood still for the whole time it
+// was meant to, nothing is going on in it, and the lead has not had more than the limit.
+func (m *monitor) leadReminder(msg core.Message) error {
+	run := m.runs[msg.Run]
+	m.covered.leadReminders++
+	m.leadReminders[msg.Run]++
+	switch {
+	case run.Status != core.RunRunning:
+		return fmt.Errorf("lead reminder %s in a run that is %s", msg.ID, run.Status)
+	case m.leadReminders[msg.Run] > core.MaxLeadReminders || run.LeadReminders != uint32(m.leadReminders[msg.Run]):
+		return fmt.Errorf("reminder %s is number %d of run %s, which counts %d", msg.ID, m.leadReminders[msg.Run], run.ID, run.LeadReminders)
+	case run.ActiveJobs != 0 || !m.restingRun(run.ID) || !m.onlyThis(run.ID, msg.ID):
+		return fmt.Errorf("lead reminder %s while the run was not standing still: %+v", msg.ID, run)
+	case run.StalledSince.IsZero() || msg.At.Sub(run.StalledSince) < core.LeadIdleAfter:
+		return fmt.Errorf("lead reminder %s at %v, but the run has stalled since %v", msg.ID, msg.At, run.StalledSince)
+	}
+	return nil
+}
+
+// onlyThis says the one message on its way to the run's agents is this one.
+func (m *monitor) onlyThis(run core.RunID, id core.MessageID) bool {
+	for mid, record := range m.messages {
+		if mid != id && record.to != "" && !record.last.Final() && m.agents[record.to].Run == run {
+			return false
+		}
+	}
+	return true
+}
+
+// handoffReminder holds the reminder to hand off to once per session, and to an agent that is not
+// the lead and has not handed off.
+func (m *monitor) handoffReminder(msg core.Message) error {
+	a := m.agents[msg.To]
+	session := core.Session{Agent: a.ID, N: a.Session}
+	m.covered.handoffReminders++
+	m.handoffReminders[session]++
+	switch {
+	case a.Role == core.RoleLead || m.handed[a.ID]:
+		return fmt.Errorf("handoff reminder %s to %s, a lead or an agent that handed off", msg.ID, a.ID)
+	case m.handoffReminders[session] > 1:
+		return fmt.Errorf("session %v was reminded twice", session)
+	}
 	return nil
 }
 

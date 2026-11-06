@@ -26,7 +26,7 @@ func goldenScript() []*pb.WatchRunsResponse {
 		Runs: []*pb.Run{run}, Agents: []*pb.Agent{lead, worker}, Messages: []*pb.Message{handoff}, Sequence: 10,
 		Turns: []*pb.Turn{
 			{Id: "t1", AgentId: "lead-run-1", Ordinal: 1, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, StartedAt: at(0), EndedAt: at(2), Usage: &pb.Usage{CostUsd: ptr(0.0421)}},
-			{Id: "t2", AgentId: "worker-1", Ordinal: 1, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, StartedAt: at(1), EndedAt: at(4)},
+			{Id: "t2", AgentId: "worker-1", Ordinal: 1, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, StartedAt: at(1), EndedAt: at(4), Usage: &pb.Usage{InputTokens: ptr(uint64(12345)), OutputTokens: ptr(uint64(1_420_000))}},
 		},
 	}}}
 	failing := agentOf("run-1", "worker-2", pb.AgentRole_AGENT_ROLE_WORKER, pb.AgentStatus_AGENT_STATUS_LOST, 5)
@@ -37,6 +37,9 @@ func goldenScript() []*pb.WatchRunsResponse {
 		Body: &pb.Message_JobFinished{JobFinished: &pb.JobFinished{JobId: "job-9", Outcome: pb.JobOutcome_JOB_OUTCOME_FAILED, Detail: "exit 2"}}}
 	rejected := &pb.Message{Id: "m5", RunId: "run-1", ToAgentId: "worker-2", Delivery: pb.Delivery_DELIVERY_REJECTED, Rejection: pb.Rejection_REJECTION_AGENT_GONE, At: at(9),
 		Body: &pb.Message_Text{Text: "hello"}}
+	stalled := stalledRun("run-1", 9)
+	reminder := &pb.Message{Id: "m7", RunId: "run-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_QUEUED, At: at(9),
+		Body: &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{IdleSeconds: 600}}}
 	stopping := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_STOPPING, 0)
 	stopping.StopReason = pb.RunStopReason_RUN_STOP_REASON_OPERATOR
 	ended := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
@@ -53,8 +56,11 @@ func goldenScript() []*pb.WatchRunsResponse {
 		searchFrame("run-1", 2, jobOf("job-1", cliv1.JobState_JOB_STATE_SUCCEEDED, true)),
 		messageEvent(15, reportMessage("run-1", "m6", "plan 2 won:  3% faster", 9), 9),
 		messageEvent(16, rejected, 9),
-		runEvent(17, stopping, 10),
-		runEvent(18, ended, 12),
+		runEvent(17, stalled, 9),
+		messageEvent(18, reminder, 9),
+		runEvent(19, runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0), 9),
+		runEvent(20, stopping, 10),
+		runEvent(21, ended, 12),
 	}
 }
 

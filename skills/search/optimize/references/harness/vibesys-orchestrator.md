@@ -42,10 +42,22 @@ measure before they hand off.
 
 ## Schedule periodic work
 
-There is no scheduler. Send the hourly report with `post_report` (`headline`, `changed`,
+There is no scheduler. Send the hourly report with `post_report` (`kind`, `headline`, `changed`,
 `in_flight`, `decisions`, `open_for_user`) when a handoff wakes you and an hour has passed since
 the last, and after each promotion. The operator reads it in the run; it is not a question and
 needs no reply.
+
+Every report has a `kind`. Use `progress` for the hourly report and the note after a promotion:
+the run goes on. Use `final` once, as your last report, when you have finished what you were
+asked to do, or when you cannot go on and say why in its headline. An operator or a script that
+waits for the result waits for the `final` report; a `progress` report never satisfies it, so do
+not mark a note along the way `final`, and do not end the work without one.
+
+Do not end a turn with a provider wake-up or timer of your own (such as `ScheduleWakeup`) as a way
+to wait: the run wakes you on every handoff, finished job and operator message. A run whose lead
+rests with no agent working, no job running and no message waiting is a stalled run. It shows as
+stalled to the operator, and after ten minutes you are sent a reminder, at most three times in
+all. Act on a reminder: start the next step, or send a `final` report saying why there is none.
 
 ## Wait for work without polling
 
@@ -54,7 +66,8 @@ learned and what is left arrive as a message that wakes you. When no handoff is 
 turn; the run starts your next turn on the next handoff or operator message. Do not loop on
 `list_agents`, `sleep` or `vibesys-cli jobs`. While you wait, a subagent cannot reach you except
 by its handoff, so a worker that must end early has to hand off with what it has. If you are
-a subagent, call `post_handoff` once, last, and end your turn.
+a subagent, call `post_handoff` once, last, and end your turn. A subagent that ends a turn without
+a handoff is reminded once to send one, and its lead is told if it does not.
 
 ## Packaging
 

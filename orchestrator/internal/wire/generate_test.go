@@ -59,11 +59,21 @@ func set(r *rand.Rand, m protoreflect.Message, fd protoreflect.FieldDescriptor) 
 	}
 }
 
+// absolutePathFields are the string fields the contract requires to be absolute paths. Generating
+// them as anything else would leave a message that holds one rejected unless the generator happened
+// to skip the field, so whether a body was ever accepted would depend on the seed.
+var absolutePathFields = map[string]bool{
+	"marketplace": true, "home": true, "cli": true, "xdg_runtime_dir": true, "xdg_state_home": true,
+}
+
 func scalar(r *rand.Rand, fd protoreflect.FieldDescriptor) protoreflect.Value {
 	switch fd.Kind() {
 	case protoreflect.BoolKind:
 		return protoreflect.ValueOfBool(true)
 	case protoreflect.StringKind:
+		if absolutePathFields[string(fd.Name())] {
+			return protoreflect.ValueOfString(fmt.Sprintf("/v%d", r.IntN(1000)))
+		}
 		if strings.HasSuffix(string(fd.Name()), "_digest") {
 			return protoreflect.ValueOfString(fmt.Sprintf("%064x", r.Uint64()))
 		}

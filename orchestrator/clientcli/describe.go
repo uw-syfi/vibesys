@@ -57,12 +57,19 @@ func (v *View) text(c Change) string {
 		a := c.Agent
 		return fmt.Sprintf("%s %s%s", agentLabel(a, ""), statusWord(a.GetStatus().String(), "AGENT_STATUS_"), withPrefix(": ", endDetail(a, 300)))
 	case TurnEnded:
-		return fmt.Sprintf("%s turn %d %s%s", agentLabel(c.Agent, c.Turn.GetAgentId()), c.Turn.GetOrdinal(), statusWord(c.Turn.GetStatus().String(), "TURN_STATUS_"), cost(c.Turn.GetUsage()))
+		return fmt.Sprintf("%s turn %d %s%s", agentLabel(c.Agent, c.Turn.GetAgentId()), c.Turn.GetOrdinal(), statusWord(c.Turn.GetStatus().String(), "TURN_STATUS_"), withPrefix(", ", usageWords(c.Turn.GetUsage())))
 	case HandoffPosted:
 		h := c.Message.GetHandoff()
 		return fmt.Sprintf("%s handed off plan %d%s", agentLabel(c.Agent, c.Message.GetFromAgentId()), h.GetPlanNumber(), withPrefix(": ", oneLine(h.GetClaim(), 200)))
 	case ReportPosted:
-		return fmt.Sprintf("%s reported: %s", agentLabel(c.Agent, c.Message.GetFromAgentId()), oneLine(c.Message.GetReport().GetHeadline(), 300))
+		r := c.Message.GetReport()
+		return fmt.Sprintf("%s reported (%s, number %d): %s", agentLabel(c.Agent, c.Message.GetFromAgentId()), reportWord(r.GetKind()), r.GetSequence(), oneLine(r.GetHeadline(), 300))
+	case RunStalled:
+		return "run stalled: its lead is idle and nothing else is going on"
+	case RunResumed:
+		return "run is no longer stalled"
+	case ReminderSent:
+		return v.reminderText(c)
 	case JobFinishedMessage:
 		j := c.Message.GetJobFinished()
 		return fmt.Sprintf("job %s %s%s", j.GetJobId(), statusWord(j.GetOutcome().String(), "JOB_OUTCOME_"), withPrefix(": ", oneLine(j.GetDetail(), 200)))
@@ -70,7 +77,7 @@ func (v *View) text(c Change) string {
 		s := c.Message.GetSubagentSettled()
 		return fmt.Sprintf("%s settled without a handoff (%s)%s", agentLabel(v.Agents[s.GetAgentId()], s.GetAgentId()), statusWord(s.GetStatus().String(), "AGENT_STATUS_"), withPrefix(": ", oneLine(s.GetDetail(), 200)))
 	case MessageRejected:
-		return fmt.Sprintf("your message to %s was rejected: %s", agentLabel(v.Agents[c.Message.GetToAgentId()], c.Message.GetToAgentId()), statusWord(c.Message.GetRejection().String(), "REJECTION_"))
+		return v.rejectedText(c.Message)
 	case JobMoved:
 		return fmt.Sprintf("%s job %s %s", jobKind(c.Job), c.Job.GetId(), statusWord(c.Job.GetState().String(), "JOB_STATE_"))
 	case Measured:
@@ -78,6 +85,32 @@ func (v *View) text(c Change) string {
 		return fmt.Sprintf("measured %s: %s = %g", shortCommit(c.Result.GetCommit()), m.GetMetric().GetName(), m.GetValue())
 	}
 	return ""
+}
+
+// reportWord says what kind a report is.
+func reportWord(k pb.ReportKind) string {
+	return statusWord(k.String(), "REPORT_KIND_")
+}
+
+// reminderText is the line for a reminder the orchestrator sent.
+func (v *View) reminderText(c Change) string {
+	switch b := c.Message.GetBody().(type) {
+	case *pb.Message_LeadIdleReminder:
+		return fmt.Sprintf("%s was reminded: the run had stood still for %s", agentLabel(c.Agent, c.Message.GetToAgentId()), time.Duration(b.LeadIdleReminder.GetIdleSeconds())*time.Second)
+	}
+	return fmt.Sprintf("%s was reminded to post a handoff", agentLabel(c.Agent, c.Message.GetToAgentId()))
+}
+
+// rejectedText is the line for a message that did not get delivered. A message that already started
+// a turn before it was refused reached the agent, so it is said to have been cut short, which is
+// what happened to a steer when the run stopped under it.
+func (v *View) rejectedText(m *pb.Message) string {
+	to := agentLabel(v.Agents[m.GetToAgentId()], m.GetToAgentId())
+	reason := statusWord(m.GetRejection().String(), "REJECTION_")
+	if m.GetAttempts() > 0 {
+		return fmt.Sprintf("your message to %s was cut short after its turn started: %s", to, reason)
+	}
+	return fmt.Sprintf("your message to %s was rejected: %s", to, reason)
 }
 
 func (v *View) runText(r *pb.Run) string {
@@ -133,11 +166,37 @@ func withPrefix(prefix, text string) string {
 	return prefix + text
 }
 
-func cost(u *pb.Usage) string {
-	if u == nil || u.CostUsd == nil {
+// usageWords says what a usage cost: the dollars when the provider reports them, and the tokens when
+// it reports those. What a provider does not report is left out, never shown as zero, and a usage
+// with nothing in it is the empty string.
+func usageWords(u *pb.Usage) string {
+	if u == nil {
 		return ""
 	}
-	return fmt.Sprintf(", cost $%.4f", u.GetCostUsd())
+	var parts []string
+	if u.CostUsd != nil {
+		parts = append(parts, fmt.Sprintf("cost $%.4f", u.GetCostUsd()))
+	}
+	for _, t := range []struct {
+		n    *uint64
+		word string
+	}{{u.InputTokens, "in"}, {u.CacheReadTokens, "cached"}, {u.OutputTokens, "out"}} {
+		if t.n != nil {
+			parts = append(parts, tokenWords(*t.n)+" "+t.word)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// tokenWords is a token count in the fewest digits that keep it readable: 950, 12.3k, 1.42M.
+func tokenWords(n uint64) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprint(n)
+	case n < 1_000_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	}
+	return fmt.Sprintf("%.2fM", float64(n)/1e6)
 }
 
 func jobKind(j *cliv1.Job) string {

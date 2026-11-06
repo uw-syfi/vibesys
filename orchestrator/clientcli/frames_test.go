@@ -54,11 +54,31 @@ func messageEvent(seq uint64, m *pb.Message, minutes int) *pb.WatchRunsResponse 
 	return eventFrame(seq, m.GetRunId(), minutes, func(ev *pb.Event) { ev.Body = &pb.Event_MessageUpdated{MessageUpdated: m} })
 }
 
+// reportMessage is the first progress report of a run.
 func reportMessage(run, id, headline string, minutes int) *pb.Message {
+	return reportOf(run, id, headline, minutes, 1, pb.ReportKind_REPORT_KIND_PROGRESS)
+}
+
+// reportOf is a report of a kind, numbered within its run.
+func reportOf(run, id, headline string, minutes int, sequence uint32, kind pb.ReportKind) *pb.Message {
 	return &pb.Message{
 		Id: id, RunId: run, FromAgentId: "lead-" + run, Delivery: pb.Delivery_DELIVERY_CONSUMED, At: at(minutes),
-		Body: &pb.Message_Report{Report: &pb.Report{Headline: headline}},
+		Body: &pb.Message_Report{Report: &pb.Report{Kind: kind, Sequence: sequence, Headline: headline}},
 	}
+}
+
+// reported is a running run whose lead has posted this many reports.
+func reported(run string, posted uint32) *pb.Run {
+	r := runOf(run, "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
+	r.ReportsPosted = posted
+	return r
+}
+
+// stalledRun is a running run that has stood still since the given minute.
+func stalledRun(run string, since int) *pb.Run {
+	r := runOf(run, "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
+	r.StalledSince = at(since)
+	return r
 }
 
 func runIDs(n int) []string {
