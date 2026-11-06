@@ -193,3 +193,41 @@ func TestTheQueueGroupsJobsByPlanAndSaysWhyEachWaits(t *testing.T) {
 		t.Fatalf("queue --json: %+v\n%s", resp, j.stdout)
 	}
 }
+
+// A job of a run submitted with no plan is submitted as before, exit 0 and the same output, with a
+// warning on stderr that names it; with a plan, or with no run, there is no warning. --json and
+// --wait warn too: every kind of submission sends through one path.
+func TestASubmissionOfARunWithNoPlanIsWarnedAndNotRefused(t *testing.T) {
+	c := newCLI(t)
+	c.taskWithAJob("kv")
+	c.planOK("create", "--title", "p")
+	for _, tc := range []struct {
+		run, plan string
+		extra     []string
+		warn      bool
+	}{
+		{run: "run-a", warn: true},
+		{run: "run-a", extra: []string{"--json"}, warn: true},
+		{run: "run-a", extra: []string{"--wait"}, warn: true},
+		{run: "run-a", plan: "1"},
+		{plan: ""},
+	} {
+		c.env["VIBESYS_RUN"] = tc.run
+		args := withTask("submit", "command", "HEAD", "--env", "host")
+		if tc.plan != "" {
+			args = append(args, "--plan", tc.plan)
+		}
+		args = append(append(args, tc.extra...), "--", "exit", "0")
+		r := c.run(args...)
+		if r.code != exitOK {
+			t.Fatalf("%+v: %+v", tc, r)
+		}
+		warned := strings.Contains(r.stderr, "has no --plan") && strings.Contains(r.stderr, "of run run-a")
+		if warned != tc.warn || (!tc.warn && r.stderr != "") {
+			t.Fatalf("%+v: stderr %q, want a warning: %v", tc, r.stderr, tc.warn)
+		}
+		if strings.Contains(r.stdout, "warning") {
+			t.Fatalf("%+v: the warning went to stdout: %q", tc, r.stdout)
+		}
+	}
+}
