@@ -515,23 +515,10 @@ jobs:
           cache-dependency-path: |
             support/repoctl/go.sum
             resources/evaluators/queue/go.sum
-            resources/evaluators/microservice/go.sum
             resources/evaluators/ordered-map/go.sum
             resources/evaluators/priority-queue/go.sum
             resources/evaluators/stack/go.sum
             resources/evaluators/unordered-map/go.sum
-
-      - name: Install managed-candidate containment dependency
-        if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
-        timeout-minutes: 3
-        uses: ./.github/actions/setup-runner-apt
-        with:
-          packages: bubblewrap
-
-      - name: Enable runner user namespaces
-        if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Rust
         if: contains(fromJSON(needs.changes.outputs.native_languages), 'rust')
@@ -752,8 +739,7 @@ jobs:
   # submodule clone.
   #
   # Data-driven over .gitmodules and over each external repository's own tasks, so a new
-  # example repository or a new task needs no edit here. The `servicebench`
-  # workload checks below stay explicit because their flags differ per task.
+  # example repository or a new task needs no edit here.
   validate-examples:
     needs: changes
     if: (github.event_name != 'pull_request' || needs.changes.outputs.example_pointers == 'true') && needs.changes.outputs.examples == 'true'
@@ -773,9 +759,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: support/repoctl/go.mod
-          cache-dependency-path: |
-            support/repoctl/go.sum
-            resources/evaluators/microservice/go.sum
+          cache-dependency-path: support/repoctl/go.sum
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -791,9 +775,6 @@ jobs:
 
       - name: Check registered examples and input contracts
         run: ./support/repoctl/repoctl run-checks --group examples_tests
-
-      - name: Validate microservice workloads
-        run: ./support/repoctl/repoctl run-checks --group microservice_workload_checks
 
   # The example evaluators' build-and-run tests: each compiles an example's native
   # code (cargo, make, go) and runs the real Go evaluator on it, ~5 worker-minutes in

@@ -18,13 +18,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import functools
-import importlib.util
 import io
 import json
 from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 import pytest
@@ -78,7 +75,7 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from types import ModuleType
+    from pathlib import Path
 
 _VALID = (b'{"ok": true}',)
 _CASES = hostile_json_frames(_VALID)
@@ -122,26 +119,6 @@ def _benchmark_result(contract: TrustedBenchmarkContract) -> _Decoder:
         assert decoded.passed is False
 
     return _Decoder(decode)
-
-
-@functools.cache
-def _otel_server() -> ModuleType:
-    """The otel profiler's MCP server, loaded from its file as the profiler bundle runs it."""
-    path = Path(__file__).parents[2] / "resources" / "profilers" / "otel" / "server.py"
-    spec = importlib.util.spec_from_file_location("_hostile_json_otel_server", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _otel_artifacts(frame: bytes, directory: Path) -> None:
-    """A candidate's workspace JSON that the otel profiler scans for reports and graphs."""
-    (directory / "artifact.json").write_bytes(frame)
-    server = _otel_server()
-    assert server.find_reports(str(directory)) == []
-    assert server.find_trace_graphs(str(directory)) == []
 
 
 _capture_runtime = analyze_rocprof.capture_runtime
@@ -326,7 +303,6 @@ _DECODERS = {
     "agent-tool-result": _Decoder(_tool_result),
     "local-validation-report": _Decoder(_validation_report),
     "local-validation-recipes": _Decoder(_validation_recipes, (LocalValidationRecipeError,)),
-    "otel-artifact-discovery": _Decoder(_otel_artifacts),
     "capture-manifest": _Decoder(_capture_manifest, (ValueError,)),
     "capture-listing": _Decoder(_capture_listing),
     "rocprof-capture-manifest": _Decoder(_rocprof_capture_manifest),

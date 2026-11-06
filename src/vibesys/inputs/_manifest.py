@@ -934,20 +934,6 @@ class InputBundle(BaseModel):
         return benchmark_output_argument(self.benchmark_result, self.benchmark_result_protocol)
 
     @property
-    def provisions_trace_telemetry(self) -> bool:
-        """Whether the benchmark command captures a distributed trace graph.
-
-        OTel profiling is only meaningful when the task itself provisions
-        instrumentation and a collector and emits the two artifacts the
-        profiler reads. A benchmark that names both ``--telemetry-output`` and
-        ``--trace-graph-json`` is making exactly that declaration, so this is
-        the capability signal ``auto`` profiler resolution keys off rather than
-        a separate hand-maintained flag that could drift from the command.
-        """
-        arguments = set(self.resolved_benchmark_command)
-        return {"--telemetry-output", "--trace-graph-json"} <= arguments
-
-    @property
     def docker_in_docker(self) -> bool:
         """Return whether the task declared that its candidate needs a Docker daemon."""
         environment = self.manifest.environment

@@ -11,8 +11,6 @@ from entrypoints.cli.constants import _STANDALONE_INPUT_DESTS
 from entrypoints.cli.environment import _validate_run_environment_profiler
 from entrypoints.cli.errors import _cause_error, _configuration_error
 from vibesys.api import (
-    DomainName,
-    ProfilerKind,
     TaskNeedsProvisioning,
     TaskNotFound,
     TaskUnusable,
@@ -194,8 +192,6 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
     except (FileNotFoundError, ProjectLayoutError, ValueError) as exc:
         _cause_error(TaskUnusable(task=task_name, problem=str(exc)))
 
-    _apply_bundle_profiler_default(args)
-
     if args.resume is None and args.runs_dir is None:
         _require_project_provisioned(args.input_bundle)
 
@@ -209,26 +205,6 @@ def _require_project_provisioned(bundle: InputBundle) -> None:
     workspace = bundle.manifest.workspace
     if workspace is not None and workspace.sources:
         _cause_error(TaskNeedsProvisioning(task=bundle.task_name))
-
-
-def _apply_bundle_profiler_default(args: argparse.Namespace) -> None:
-    """Upgrade ``--profiler auto`` to OTel when the task provisions tracing.
-
-    ``resolve_profiler_kind`` keeps bare microservice ``auto`` on ``none``
-    because OTel needs instrumentation and a collector that only the task can
-    provide. A benchmark command that emits a normalized telemetry report and a
-    trace graph has provided exactly that, so honoring it here is what makes an
-    instrumented task profile out of the box. An explicit ``--profiler`` always
-    wins: this only ever replaces ``auto``.
-    """
-    bundle = getattr(args, "input_bundle", None)
-    if bundle is None or getattr(args, "profiler", None) is not ProfilerKind.AUTO:
-        return
-    if bundle.domain is not DomainName.MICROSERVICES:
-        return
-    if not bundle.provisions_trace_telemetry:
-        return
-    args.profiler = ProfilerKind.OTEL
 
 
 def _resolve_implicit_input(args: argparse.Namespace, standalone: list[str]) -> Path:

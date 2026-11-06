@@ -48,7 +48,6 @@ from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.environment import TaskImageBuild, run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
-    _apply_bundle_profiler_default,
     _run_validate,
     _validate_agent,
     _validate_target_inputs,
@@ -95,7 +94,6 @@ __all__ = [
     "RunArgumentParser",
     "_RunArgumentParser",
     "_add_common_args",
-    "_apply_bundle_profiler_default",
     "_build_agent_parser",
     "_build_evolve_parser",
     "_build_input_check_parser",

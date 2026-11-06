@@ -1114,13 +1114,13 @@ def test_cli_backend_accepts_active_profiler_configuration(
     evaluator = _write_project(project)
     manifest = task_path(project) / "vibesys.input.toml"
     manifest.write_text(
-        manifest.read_text().replace('domain = "generic"', 'domain = "microservices"')
+        manifest.read_text().replace('domain = "generic"', 'domain = "llm-serving"')
     )
     configuration = _options().model_copy(
         update={
             "agent_backend": "cli",
             "cli_provider": "codex",
-            "profiler": "otel",
+            "profiler": "headroom",
         }
     )
 
@@ -1134,10 +1134,10 @@ def test_cli_backend_accepts_active_profiler_configuration(
                 "agent": {"backend": "cli", "cli_provider": "codex"},
             }
         ),
-        profiler_kind=ProfilerKind.OTEL,
+        profiler_kind=ProfilerKind.HEADROOM,
         agent_backend=None,
     ) as context:
-        assert context.facts.profiler_id == ProfilerKind.OTEL.value
+        assert context.facts.profiler_id == ProfilerKind.HEADROOM.value
 
 
 def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> None:

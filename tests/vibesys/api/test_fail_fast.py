@@ -58,7 +58,6 @@ def _request(root: Path, domain: str) -> RunRequest:
                 ProfilerKind.NSYS,
                 ProfilerKind.NCU,
                 ProfilerKind.ROCPROF,
-                ProfilerKind.OTEL,
                 ProfilerKind.TORCH,
                 ProfilerKind.NEURON,
                 ProfilerKind.HEADROOM,

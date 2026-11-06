@@ -1306,8 +1306,6 @@
  "tests/vibesys/test_hypothesis_ledger_contract.py": 0.07,
  "tests/vibesys/test_in_place_project_policy.py": 0.01,
  "tests/vibesys/test_input_sources.py": 1.73,
- "tests/vibesys/test_kubernetes_inputs.py": 0.0,
- "tests/vibesys/test_kubernetes_runtime.py": 3.91,
  "tests/vibesys/test_logger.py": 0.03,
  "tests/vibesys/test_metrics_readings.py": 0.03,
  "tests/vibesys/test_metrics_readings_binding.py": 0.06,

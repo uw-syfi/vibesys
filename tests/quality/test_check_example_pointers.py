@@ -86,8 +86,8 @@ def test_a_mention_that_is_not_a_whole_line_trailer_declares_nothing(path: str) 
 
 
 def test_a_path_is_an_example_repository_only_at_the_one_depth() -> None:
-    assert is_example_repository("examples/microservices/repositories/masa")
-    assert not is_example_repository("examples/microservices/repositories/masa/sub")
+    assert is_example_repository("examples/microservices/repositories/train-ticket")
+    assert not is_example_repository("examples/microservices/repositories/train-ticket/sub")
     assert not is_example_repository("examples/microservices/repositories")
     assert not is_example_repository("third_party/serving-repos/vllm")
 
@@ -126,7 +126,7 @@ def test_the_check_asks_git_for_gitlinks_between_the_merge_base_and_head() -> No
 def test_the_command_names_the_pin_and_the_fix_and_writes_the_ci_output(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    pin = "examples/family/repositories/masa"
+    pin = "examples/family/repositories/app"
     output = tmp_path / "github-output"
     arguments = ["--base-ref", "origin/main", "--github-output", str(output)]
 
@@ -140,4 +140,4 @@ def test_the_command_names_the_pin_and_the_fix_and_writes_the_ci_output(
     assert f"Example-Bump: {pin}" in report
     assert output.read_text().endswith("example_pointers=true\n")
 
-    assert main(arguments, git=_FakeGit(moved, f"bump masa\n\nExample-Bump: {pin}\n")) == 0
+    assert main(arguments, git=_FakeGit(moved, f"bump app\n\nExample-Bump: {pin}\n")) == 0

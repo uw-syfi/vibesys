@@ -4,24 +4,24 @@ version = "0.1"
 domain = "microservices"
 
 [evaluator]
-name = "vibesys-evaluator-microservice"
+name = "vibesys-evaluator-queue"
 version = "0.1.0"
 
 [accuracy]
-entrypoint = "servicebench"
+entrypoint = "vibesys-queue"
 args = [
-  "--mode", "accuracy",
+  "check",
   "--candidate-dir", "${PROJECT_ROOT}/service",
   "--run-command-json", "[\"docker\",\"compose\",\"up\",\"-d\",\"--build\"]",
 ]
 timeout_seconds = 300
 
 [benchmark]
-entrypoint = "servicebench"
+entrypoint = "vibesys-queue"
 args = [
-  "trace",
+  "bench",
   "--candidate-dir", "${PROJECT_ROOT}/service",
-  "--run-command-json", "[\"sh\",\"-c\",\"go -C \\\"$1\\\" run ./cmd/otelinject --compose \\\"$2\\\" --config \\\"$3\\\"\",\"vibesys-nested-run\",\"${PACKAGE_ROOT}\",\"${PROJECT_ROOT}/service/docker-compose.yml\",\"${PROJECT_ROOT}/.vibesys/tasks/nested-shell/telemetry.toml\"]",
+  "--run-command-json", "[\"sh\",\"-c\",\"go -C \\\"$1\\\" run ./cmd/compose-up --compose \\\"$2\\\" --config \\\"$3\\\"\",\"vibesys-nested-run\",\"${PACKAGE_ROOT}\",\"${PROJECT_ROOT}/service/docker-compose.yml\",\"${PROJECT_ROOT}/.vibesys/tasks/nested-shell/telemetry.toml\"]",
 ]
 timeout_seconds = 360
 

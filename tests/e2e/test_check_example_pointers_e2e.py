@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     import pytest
 
-_PIN = "examples/family/repositories/masa"
+_PIN = "examples/family/repositories/app"
 _GITLINK = "160000"
 
 
@@ -56,5 +56,5 @@ def test_a_change_that_commits_the_checked_out_pin_fails_unless_it_declares_the_
     assert main(["--base-ref", "main"], git=git) == 1
     assert _PIN in capsys.readouterr().out
 
-    _commit_pin(tmp_path, "3" * 40, f"change: bump masa\n\nExample-Bump: {_PIN}")
+    _commit_pin(tmp_path, "3" * 40, f"change: bump app\n\nExample-Bump: {_PIN}")
     assert main(["--base-ref", "main"], git=git) == 0

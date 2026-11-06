@@ -1463,17 +1463,18 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
         )
 
 
-def test_microservice_package_does_not_install_rust(
+def test_go_only_package_does_not_install_rust(
     tmp_path: Path,
     fake_agent_image: list[dict[str, Any]],
 ) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
-    package = resolve_evaluator_package(
-        EvaluatorPackageRequirement(
-            name="vibesys-evaluator-microservice",
-            version="0.1.0",
-        )
+    package_root = tmp_path / "packages" / "go-only"
+    package_root.mkdir(parents=True)
+    (package_root / "vibesys.evaluator.toml").write_text(
+        'schema_version = 1\nname = "vibesys-evaluator-go-only"\nversion = "0.1.0"\n'
+        'protocol_version = 1\ntoolchains = ["go"]\n\n[entrypoints]\ncheck = ["go", "version"]\n',
+        encoding="utf-8",
     )
 
     _open(
@@ -1483,7 +1484,7 @@ def test_microservice_package_does_not_install_rust(
             backend,
             accuracy_command="true",
             benchmark_command="true",
-            evaluator_package_root=package.root,
+            evaluator_package_root=package_root,
         ),
     )
 

@@ -1,7 +1,0 @@
-version = 1
-collector_service_name = "jaeger"
-sample_ratio = 0.1
-
-[services]
-frontend = "jaeger-native"
-search = "jaeger-native"

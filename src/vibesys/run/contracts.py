@@ -64,7 +64,6 @@ class ProfilerKind(StrEnum):
     FLASHINFER = "flashinfer"
     NCU_FLASHINFER = "ncu_flashinfer"
     ROCPROF = "rocprof"
-    OTEL = "otel"
     TORCH = "torch"
     NEURON = "neuron"
     MACOS_CPU = "macos_cpu"

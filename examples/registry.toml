@@ -61,18 +61,20 @@ path = "examples/database/kv-store"
 path = "examples/microservices/repositories/deathstarbench"
 external_repo = true
 skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
-
-[[example]]
-path = "examples/microservices/repositories/masa"
-external_repo = true
-
-[[example]]
-path = "examples/microservices/repositories/rpcstack"
-external_repo = true
+known_failing = [
+  { check = "validate", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+  { check = "candidate-build", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+  { check = "backend", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+]
 
 [[example]]
 path = "examples/microservices/repositories/train-ticket"
 external_repo = true
+known_failing = [
+  { check = "validate", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+  { check = "candidate-build", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+  { check = "backend", reason = "its pinned tasks name the removed vibesys-evaluator-microservice package", tracking = "#4007" },
+]
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"

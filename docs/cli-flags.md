@@ -219,7 +219,7 @@ Several flags look independent, but they combine into one execution contract:
 | Agents | `--agent-backend`, `[agent].scripted_seed` | `cli` (the default) drives a coding-agent CLI. `scripted` is the agent-less mode: the real backend with scripted agents and no model (see [Agent-less runs](contributing/development.md#agent-less-runs)). |
 | Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
 | Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
@@ -634,7 +634,6 @@ supported by this CLI.
 | `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. Selected by `auto` for ROCm LLM-serving and kernel-writing tasks when the run environment supports it. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
-| `otel` | OpenTelemetry service, span, datastore, and critical-path latency for microservice benchmarks. Needs an input bundle that provisions instrumentation and a collector; `auto` selects it when the bundle's benchmark command declares both `--telemetry-output` and `--trace-graph-json`, and resolves to `none` otherwise. |
 | `macos_cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 | `linux_cpu` | Linux `perf` profiler for native and mixed-language CPU workloads. |
 
