@@ -5,7 +5,11 @@ requires-python = ">=3.12"
 [[package]]
 name = "agentshim"
 version = "0.27.0"
-source = { git = "https://github.com/vic-lsh/agentshim?rev=1bd3b407f6bc5c9594c5b349e2f400e854bd7210#1bd3b407f6bc5c9594c5b349e2f400e854bd7210" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/9f/9160edf7de9b5c15e055af6d0845b688ee4aa200cc3fb042a9d5b58540bb/agentshim-0.27.0.tar.gz", hash = "sha256:3e07f79fe1bc7a150672babc68221a2a147602747ddf476960b024c91b29b2b5", size = 358030, upload-time = "2026-11-06T06:15:05.333Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/bb/08fe2f41f2e23553468bfb1aefff5e9fbb61bbda57c05ede9a53475a044a/agentshim-0.27.0-py3-none-any.whl", hash = "sha256:4e04bc8d601f74304fa0a4affd31d0180d67bd507523bfa374ad1cf5fa01b533", size = 407136, upload-time = "2026-11-06T06:15:03.489Z" },
+]
 
 [[package]]
 name = "colorama"
@@ -587,7 +591,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=1bd3b407f6bc5c9594c5b349e2f400e854bd7210" },
+    { name = "agentshim", specifier = "==0.27.0" },
     { name = "grpcio", specifier = "==1.76.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "protobuf", specifier = "==6.33.5" },
