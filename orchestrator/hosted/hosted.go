@@ -4,12 +4,13 @@
 //
 // Exactly one process holds the orchestrator's state directory, through the store's lock. A process
 // that cannot take it, or whose state directory is refused, still starts: every orchestrator call
-// it receives answers UNAVAILABLE with the reason, naming the holder's pid and version when there
-// is one.
+// it receives answers UNAVAILABLE with the reason, and HostControlService, which is served either
+// way, says so as a typed Unserved, naming the holder's release when there is one.
 package hosted
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -35,38 +36,45 @@ type Options struct {
 	// Getenv and Home resolve the state directory and the sidecar setting.
 	Getenv func(string) string
 	Home   string
+	// Stop ends the host process. HostControlService calls it, after the reply, when asked to stop.
+	Stop func()
 }
 
 // Orchestrator is one opened orchestrator, or the reason there is none in this process.
 type Orchestrator struct {
 	d      *production.Daemon
 	reason string
-	live   chan bool
-	done   chan error
+	// why says why d is nil, in the form HostControlService reports it.
+	why     *pb.Unserved
+	control pb.HostControlServiceServer
+	live    chan bool
+	done    chan error
 }
 
 // Start opens the orchestrator and runs it until ctx ends. It never fails: a process that cannot
 // hold the orchestrator serves UNAVAILABLE and says why.
 func Start(ctx context.Context, o Options) *Orchestrator {
 	x := &Orchestrator{live: make(chan bool, 1), done: make(chan error, 1)}
+	// The parts are resolved when a run is started and when a session is launched, and when
+	// HostControlService is asked, never here: a part that is missing now is not missing for good.
+	parts := production.Parts{Getenv: o.Getenv, Find: release.FinderFor(o.Executable), Files: production.OSFiles{}, Home: o.Home}
+	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop})
 	layout, err := production.LayoutFor(o.Getenv, o.Home)
 	if err != nil {
-		return x.unavailable(o.Log, "the orchestrator's state directory is refused: "+err.Error())
+		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
 	}
-	find := release.FinderFor(o.Executable)
-	sidecars, err := production.SidecarsFor(o.Getenv, filepath.Join(layout.State.Path(), "sessions"), o.Executable, find, o.Log)
+	sidecars, err := production.SidecarsFor(parts, filepath.Join(layout.State.Path(), "sessions"), o.Executable, o.Log)
 	if err != nil {
-		return x.unavailable(o.Log, err.Error())
+		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", err.Error())
 	}
-	cli, err := production.ResolveCLI(o.Getenv, find, production.OSFiles{})
-	if err != nil {
-		return x.unavailable(o.Log, err.Error())
-	}
-	o.Log.Info("agents are told to run this vibesys-cli", "path", cli)
 	searches := production.SearchFor()
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Tree: production.OSTree{}, Version: o.Version, Location: production.LocationFor(o.Getenv, o.Home, cli)}, o.Log)
+	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts}, o.Log)
 	if err != nil {
-		return x.unavailable(o.Log, "the orchestrator is not served by this process: "+err.Error())
+		var held *production.HeldError
+		if errors.As(err, &held) {
+			return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE, held.Holder.GetRelease(), "the orchestrator is not served by this process: "+err.Error())
+		}
+		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator is not served by this process: "+err.Error())
 	}
 	x.d = d
 	go func() {
@@ -77,12 +85,25 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	return x
 }
 
-func (x *Orchestrator) unavailable(log *slog.Logger, reason string) *Orchestrator {
+func (x *Orchestrator) unavailable(log *slog.Logger, kind pb.UnservedReason, heldBy, reason string) *Orchestrator {
 	log.Warn("orchestrator unavailable", "reason", reason)
 	x.reason = reason
+	x.why = &pb.Unserved{Reason: kind, HeldByRelease: heldBy, Detail: reason}
 	close(x.done)
 	return x
 }
+
+// LiveRuns implements Source: the runs that have not reached their end, none when the orchestrator
+// is not served here.
+func (x *Orchestrator) LiveRuns() uint32 {
+	if x.d == nil {
+		return 0
+	}
+	return x.d.LiveRuns()
+}
+
+// Unserved implements Source.
+func (x *Orchestrator) Unserved() *pb.Unserved { return x.why }
 
 // Reason is why this process does not serve the orchestrator, or empty when it does.
 func (x *Orchestrator) Reason() string { return x.reason }
@@ -115,9 +136,11 @@ func (x *Orchestrator) watchLive(ctx context.Context) {
 	}
 }
 
-// Register adds the operator's OrchestratorService to a host's gRPC server. Calls that reach it
-// carry no agent credentials; agents use the agent-only socket the orchestrator serves itself.
+// Register adds HostControlService, always, and the operator's OrchestratorService to a host's gRPC
+// server. Calls that reach the latter carry no agent credentials; agents use the agent-only socket
+// the orchestrator serves itself.
 func (x *Orchestrator) Register(server grpc.ServiceRegistrar) error {
+	pb.RegisterHostControlServiceServer(server, x.control)
 	if x.d == nil {
 		registerUnavailable(server, x.reason)
 		return nil

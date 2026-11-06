@@ -80,11 +80,16 @@ func stat(path string) (os.FileInfo, bool) {
 
 // StartChecks is the daemon's refusal of a start that cannot work. It is a daemon.StartChecks.
 type StartChecks struct {
-	// Sidecars is the launcher the daemon was wired with. A launcher that refuses every launch
-	// (SidecarsFor gives one when a part is missing) refuses every start, with its own reason.
+	// Sidecars is the launcher the daemon was wired with.
 	Sidecars daemon.Sidecars
-	Tree     Tree
+	// Parts says whether every part a run is started with can be used now. It is asked on every
+	// start, so a start refused for a missing part goes through once the install is repaired.
+	Parts PartsCheck
+	Tree  Tree
 }
+
+// PartsCheck is nil when every part can be used now, and otherwise says which cannot and why.
+type PartsCheck interface{ Check() error }
 
 // CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
 // repository path that is not absolute, does not exist or is not the root of a git work tree, a
@@ -94,11 +99,11 @@ type StartChecks struct {
 // committed are the lead's to judge, as its skill says. It returns the repository with its
 // symbolic links resolved.
 func (c StartChecks) CheckStart(repository, task string) (string, error) {
-	switch launcher := c.Sidecars.(type) {
-	case refusedSidecars:
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + launcher.reason, NotReady: true}
-	case NoSidecars:
+	if _, none := c.Sidecars.(NoSidecars); none {
 		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
+	}
+	if err := c.Parts.Check(); err != nil {
+		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + err.Error(), NotReady: true}
 	}
 	refuse := func(format string, args ...any) (string, error) {
 		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}

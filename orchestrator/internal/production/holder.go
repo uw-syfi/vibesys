@@ -5,31 +5,70 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"buf.build/go/protovalidate"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// ErrHeld says another process holds the orchestrator's state directory. Its message names that
-// process's pid and version, from the holder file it wrote.
+// ErrHeld says another process holds the orchestrator's state directory. The error wrapping it is
+// a *HeldError.
 var ErrHeld = errors.New("another process holds the orchestrator")
 
 const holderFile = "holder"
 
-// writeHolder records this process as the holder of the state directory. It is written only while
-// the store's lock is held, so the file names the holder whenever the lock is taken.
-func writeHolder(dir, version string) error {
+// HeldError is the refusal of a state directory another process holds.
+type HeldError struct {
+	Dir string
+	// Holder is the record the holding process wrote, or nil when there is none to read.
+	Holder *pb.HostLock
+	// Unreadable says why Holder is nil.
+	Unreadable error
+}
+
+func (e *HeldError) Error() string {
+	if e.Holder == nil {
+		return fmt.Sprintf("%v: the holder of %s is unknown: %v", ErrHeld, e.Dir, e.Unreadable)
+	}
+	return fmt.Sprintf("%v: held by pid %d, release %s, in %s", ErrHeld, e.Holder.GetPid(), e.Holder.GetRelease(), e.Dir)
+}
+
+// Is makes a *HeldError an ErrHeld.
+func (e *HeldError) Is(target error) bool { return target == ErrHeld }
+
+// writeHolder records this process as the holder of the state directory, as a HostLock. It is
+// written only while the store's lock is held, so the file names the holder whenever the lock is
+// taken.
+func writeHolder(dir, release string) error {
+	data, err := protojson.Marshal(&pb.HostLock{Pid: uint32(os.Getpid()), Release: release})
+	if err != nil {
+		return err
+	}
 	tmp := filepath.Join(dir, holderFile+".tmp")
-	text := fmt.Sprintf("pid %d version %s\n", os.Getpid(), version)
-	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write the holder file: %w", err)
 	}
 	return os.Rename(tmp, filepath.Join(dir, holderFile))
 }
 
-// ReadHolder describes the holder of a state directory for an error message.
-func ReadHolder(dir string) string {
+// ReadHolder says who holds a state directory, from the record its holder wrote.
+func ReadHolder(dir string) *HeldError {
+	held := &HeldError{Dir: dir}
 	data, err := os.ReadFile(filepath.Join(dir, holderFile))
 	if err != nil {
-		return "the holder of " + dir + " is unknown: " + err.Error()
+		held.Unreadable = err
+		return held
 	}
-	return "held by " + strings.TrimSpace(string(data)) + " in " + dir
+	var lock pb.HostLock
+	if err := protojson.Unmarshal(data, &lock); err != nil {
+		held.Unreadable = err
+		return held
+	}
+	if err := protovalidate.Validate(&lock); err != nil {
+		held.Unreadable = err
+		return held
+	}
+	held.Holder = &lock
+	return held
 }

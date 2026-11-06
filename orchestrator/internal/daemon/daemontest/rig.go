@@ -99,7 +99,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Sidecars.mu.Unlock()
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Location: r.Location,
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Locate: func() core.CliLocation { return r.Location },
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:

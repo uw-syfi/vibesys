@@ -73,6 +73,7 @@ var testRules = map[string][]string{
 	// localfs's own tests run its checks against the fake.
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
+	"hosted":           {"release/releasetest", "gen/vibesys/orchestrator/"},
 	// The verbs are tested against a whole daemon in memory, as the client library is.
 	"clientcli":       {"release/releasetest", "internal/core", "internal/daemon", "internal/daemon/daemontest", "gen/vibesys/orchestrator/"},
 	"internal/core":   {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},

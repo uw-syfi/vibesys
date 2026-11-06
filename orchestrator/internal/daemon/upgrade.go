@@ -9,14 +9,18 @@ import (
 // upgradeLocations records the current choice once for pre-location runs. The typed Run event
 // makes recovery and projections agree; the log identifies the compatibility migration.
 func (e *Engine) upgradeLocations() error {
-	if e.Location.CLI == "" {
+	if e.Locate == nil {
+		return nil
+	}
+	location := e.Locate()
+	if location.CLI == "" {
 		return nil
 	}
 	for _, run := range e.state.Runs() {
 		if run.Status.Final() || run.Location != (core.CliLocation{}) {
 			continue
 		}
-		run.Location = e.Location
+		run.Location = location
 		event := core.Event{Run: run.ID, At: e.Clock.Now(), Body: run}
 		committed, err := e.Store.Commit(store.Result{Events: []core.Event{event}})
 		if err != nil {

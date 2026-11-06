@@ -38,22 +38,15 @@ import (
 // is used (see release.Release.SessionHolderCommand).
 const EnvSidecar = "VIBESYS_ORCHESTRATOR_SIDECAR"
 
-// SidecarsFor gives the sidecar launcher the environment and the host's release, or the launcher
-// that refuses every launch with the reason when a setting is missing or wrong. Sessions keep their
-// files under root. executable is the host binary, which each agent's tool server runs.
-func SidecarsFor(getenv func(string) string, root, executable string, find release.Finder, log *slog.Logger) (daemon.Sidecars, error) {
-	argv, err := sidecarCommand(getenv, find)
-	if err == nil {
-		var plugin Plugin
-		if plugin, err = PluginFor(getenv, find); err == nil {
-			if err = os.MkdirAll(root, 0o700); err != nil {
-				return nil, err
-			}
-			return &ProcessSidecars{Root: root, Command: argv, Plugin: plugin, Executable: executable, Log: log}, nil
-		}
+// SidecarsFor gives the sidecar launcher. Sessions keep their files under root. executable is the
+// host binary, which each agent's tool server runs. The launcher resolves its parts on every
+// launch, so a part that is missing refuses that launch with the reason, and the next launch, after
+// the install is repaired, goes through.
+func SidecarsFor(parts Parts, root, executable string, log *slog.Logger) (*ProcessSidecars, error) {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
 	}
-	log.Warn("no sidecar launcher", "reason", err)
-	return refusedSidecars{reason: err.Error()}, nil
+	return &ProcessSidecars{Root: root, Parts: parts, Executable: executable, Log: log}, nil
 }
 
 // sidecarCommand is EnvSidecar when it is set, whatever it holds, and otherwise the release's
@@ -82,27 +75,16 @@ func sidecarSetting(setting string) ([]string, error) {
 	return strings.Fields(setting), nil
 }
 
-type refusedSidecars struct{ reason string }
-
-func (r refusedSidecars) Launch(context.Context, core.LaunchSession, daemon.LaunchEnv) (daemon.Sidecar, error) {
-	return nil, errors.New(r.reason)
-}
-
-func (refusedSidecars) Attach(context.Context, core.Session) (daemon.Sidecar, error) {
-	return nil, daemon.ErrSidecarGone
-}
-
 // ProcessSidecars starts one detached sidecar process per session and reaches it over the Unix
 // socket in the session's directory, ROOT/AGENT/N, where AGENT is a digest of the agent id that
 // keeps the socket path short. A sidecar outlives the daemon; a daemon that restarts finds it by
 // that directory. When a sidecar is gone, the agent processes it left are killed through the
 // process groups it recorded in agent.pgids, before any new session of that agent starts.
 type ProcessSidecars struct {
-	Root    string
-	Command []string
-	// Plugin is what every session loads. It has no default: a launcher without one is refused
-	// at SidecarsFor.
-	Plugin     Plugin
+	Root string
+	// Parts gives the command that holds a session and the plugin every session loads. A launch
+	// with a part that cannot be resolved is refused.
+	Parts      Parts
 	Executable string
 	Log        *slog.Logger
 
@@ -132,6 +114,14 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	if sc, err := s.Attach(ctx, l.Session); err == nil {
 		return sc, nil
 	}
+	command, _, err := s.Parts.SessionHolder()
+	if err != nil {
+		return nil, err
+	}
+	plugin, _, err := s.Parts.Skills()
+	if err != nil {
+		return nil, err
+	}
 	dir := s.sessionDir(l.Session)
 	if sock := filepath.Join(dir, "sock"); len(sock) > maxSocketPath {
 		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter VIBESYS_ORCHESTRATOR_STATE_DIR", sock, maxSocketPath)
@@ -140,7 +130,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	launch, err := s.launchSpec(ctx, l)
+	launch, err := s.launchSpec(ctx, l, plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -162,11 +152,11 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 		_ = os.Remove(filepath.Join(dir, name))
 	}
 	var out bytes.Buffer
-	cmd := s.command(ctx, dir)
+	cmd := s.command(ctx, command, dir)
 	cmd.Stdout, cmd.Stderr = &out, &out
 	// The sidecar detaches itself (it forks twice), so this returns once it is on its own.
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("start the agent session with %s: %w: %s", strings.Join(s.Command, " "), err, strings.TrimSpace(out.String()))
+		return nil, fmt.Errorf("start the agent session with %s: %w: %s", strings.Join(command, " "), err, strings.TrimSpace(out.String()))
 	}
 	return s.awaitReady(ctx, l.Session, dir)
 }
@@ -175,7 +165,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 // its first session), and the plugin the session loads. The plugin home is kept with the agent, not
 // the session, so a resume finds the one the first session installed into, which also holds the
 // provider's conversation.
-func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession) (*pb.LaunchSession, error) {
+func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession, plugin Plugin) (*pb.LaunchSession, error) {
 	launch, err := launchMessage(l)
 	if err != nil {
 		return nil, err
@@ -189,15 +179,15 @@ func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession) 
 	if !filepath.IsAbs(home) {
 		return nil, fmt.Errorf("launch.plugin.home %s is not absolute: set VIBESYS_ORCHESTRATOR_STATE_DIR to an absolute path", home)
 	}
-	launch.Plugin = &pb.SessionPlugin{Marketplace: s.Plugin.Marketplace, Name: s.Plugin.Name, Home: home}
+	launch.Plugin = &pb.SessionPlugin{Marketplace: plugin.Marketplace, Name: plugin.Name, Home: home}
 	return launch, nil
 }
 
 // command is the process that starts a session's sidecar in dir. It inherits the daemon's
 // environment and nothing of the launch environment: what the agent's shell sees is built by the
 // sidecar from the launch message, not from this process.
-func (s *ProcessSidecars) command(ctx context.Context, dir string) *exec.Cmd {
-	argv := append(append([]string(nil), s.Command...),
+func (s *ProcessSidecars) command(ctx context.Context, command []string, dir string) *exec.Cmd {
+	argv := append(append([]string(nil), command...),
 		"--launch", filepath.Join(dir, "launch.json"), "--state-dir", dir, "--socket", filepath.Join(dir, "sock"),
 		"--mcp-config", filepath.Join(dir, "mcp.json"), "--detach")
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)

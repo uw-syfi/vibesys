@@ -10,7 +10,7 @@ import (
 )
 
 // realChecks is StartChecks over the real file system and real git.
-var realChecks = StartChecks{Sidecars: readyLauncher{}, Tree: OSTree{}}
+var realChecks = StartChecks{Sidecars: readyLauncher{}, Parts: readyParts{}, Tree: OSTree{}}
 
 // Any name for a repository, through any chain of links and with parts of the path that are links,
 // resolves to the one real directory: that is what keeps one repository to one run.

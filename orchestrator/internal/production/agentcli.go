@@ -85,7 +85,7 @@ func ResolveCLI(getenv func(string) string, find release.Finder, files Files) (s
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("no vibesys-cli found beside the daemon or on its PATH; set %s to the absolute path of the one to use", EnvCLI)
+	return "", fmt.Errorf("no vibesys-cli: %w, and none on the daemon's PATH; set %s to the absolute path of the one to use", err, EnvCLI)
 }
 
 // LocationFor is the CliLocation the daemon records on each run it starts: the vibesys-cli it

@@ -26,6 +26,15 @@ func (t fakeTree) CommittedDir(string, string) (bool, error) { return true, nil 
 // readyLauncher is a launcher that is wired in; what it launches does not matter here.
 type readyLauncher struct{ NoSidecars }
 
+// readyParts has every part, and brokenParts lacks one, with a reason.
+type readyParts struct{}
+
+func (readyParts) Check() error { return nil }
+
+type brokenParts string
+
+func (b brokenParts) Check() error { return errors.New(string(b)) }
+
 // everythingIsADir answers yes to every question, so that only the rules of StartChecks themselves
 // can refuse.
 type everythingIsADir struct{}
@@ -48,7 +57,7 @@ func refusal(t *testing.T, err error) *daemon.StartRefusal {
 
 func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 	tree := fakeTree{"/repo/.git": true, "/repo/.vibesys/tasks/demo": true, "/wt/.git": false, "/wt/.vibesys/tasks/demo": true, "/nogit/.vibesys/tasks/demo": true, "/notask/.git": true, "/notask/.vibesys/tasks/file": false}
-	checks := StartChecks{Sidecars: readyLauncher{}, Tree: tree}
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: readyParts{}, Tree: tree}
 	cases := []struct {
 		name, repository, task string
 		want                   []string // words the refusal names; none means accepted
@@ -85,10 +94,10 @@ func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 	}
 }
 
-// A daemon whose launcher refuses every launch refuses every start, with the launcher's own
-// reason, before it looks at the repository.
-func TestADaemonWithNoLauncherRefusesEveryStartWithItsReason(t *testing.T) {
-	checks := StartChecks{Sidecars: refusedSidecars{reason: "VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release"}, Tree: everythingIsADir{}}
+// A daemon with a part missing refuses every start, with the part's own reason, before it looks at
+// the repository.
+func TestADaemonWithAPartMissingRefusesEveryStartWithItsReason(t *testing.T) {
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: brokenParts("VIBESYS_ORCHESTRATOR_SIDECAR is not set and there is no release"), Tree: everythingIsADir{}}
 	for _, repository := range []string{"/repo", "relative", ""} {
 		_, err := checks.CheckStart(repository, "demo")
 		r := refusal(t, err)
@@ -110,7 +119,7 @@ func TestATaskNameNeverLeavesTheTasksFolder(t *testing.T) {
 			name.WriteString(pieces[rng.IntN(len(pieces))])
 		}
 		task := name.String()
-		_, err := StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}.CheckStart("/repo", task)
+		_, err := StartChecks{Sidecars: readyLauncher{}, Parts: readyParts{}, Tree: everythingIsADir{}}.CheckStart("/repo", task)
 		if err != nil {
 			refusal(t, err)
 			continue
@@ -121,7 +130,7 @@ func TestATaskNameNeverLeavesTheTasksFolder(t *testing.T) {
 		}
 	}
 	for _, escape := range []string{"..", "../x", "a/../../x", "x/..", "/etc", "a/b", ".", ""} {
-		if _, err := (StartChecks{Sidecars: readyLauncher{}, Tree: everythingIsADir{}}).CheckStart("/repo", escape); err == nil {
+		if _, err := (StartChecks{Sidecars: readyLauncher{}, Parts: readyParts{}, Tree: everythingIsADir{}}).CheckStart("/repo", escape); err == nil {
 			t.Errorf("task %q was accepted", escape)
 		}
 	}
