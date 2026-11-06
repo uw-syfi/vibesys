@@ -43,14 +43,17 @@ func untilNames() string {
 }
 
 // reportBaseline is the number of the last report that a wait does not count. --after names it. With
-// no --after, a wait counts the reports posted after it began, so that a report the caller has
-// already read does not end it; a run that has ended posts no more, so there the baseline is zero
-// and the wait returns the report it already has.
-func reportBaseline(v *View, after int) uint32 {
+// no --after, a wait for any report counts those posted after it began, so that a progress note the
+// caller has already read does not end it. A wait for the final report counts the one the run already
+// has, since there is only that one to wait for: a caller that joins late gets it, and so does one
+// that waits on a run that has ended. A run with no final report yet is waited on from now.
+func reportBaseline(v *View, after int, finalOnly bool) uint32 {
 	switch {
 	case after >= 0:
 		return uint32(after)
 	case v.Over():
+		return 0
+	case finalOnly && v.ReportAfter(0, true) != nil:
 		return 0
 	}
 	return v.Run.GetReportsPosted()
@@ -91,7 +94,7 @@ func wait(ctx context.Context, c *call, args []string) error {
 		return c.interrupted(ctx, expired, g, *timeout, nil, c.Clock.Now(), err)
 	}
 	defer s.Close()
-	baseline := reportBaseline(s.view, *after)
+	baseline := reportBaseline(s.view, *after, *until == "report")
 	// The caller is told what is being waited for and what state the run is in, on stderr: stdout is
 	// the result, and an unattended caller sees at once that the wait began and on which run.
 	fmt.Fprintf(c.Stderr, "waiting for %s on run %s (%s)\n", g.words, s.view.RunID, statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_")+stallWords(s.view, c.Clock.Now()))
@@ -104,7 +107,7 @@ func wait(ctx context.Context, c *call, args []string) error {
 		}
 	}
 	if *until == "ended" && s.view.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED {
-		return failed("run %s failed: %s", s.view.RunID, orUnknown(s.view.failureDetail(s.view.Run)))
+		return c.runFailed(s.view)
 	}
 	if *asJSON {
 		return printJSON(c.Stdout, s.view.Snapshot())

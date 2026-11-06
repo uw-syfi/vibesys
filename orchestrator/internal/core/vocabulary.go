@@ -226,6 +226,8 @@ const (
 	StartOther                 StartFailure = "other"
 	// StartIncompatibleVersions says what holds the session and this host share no protocol.
 	StartIncompatibleVersions StartFailure = "incompatible_versions"
+	// StartStateLocationTooLong says the place the host keeps sessions in is too long to reach one.
+	StartStateLocationTooLong StartFailure = "state_location_too_long"
 )
 
 // TimerKind says what a timer is for.

@@ -37,6 +37,7 @@ var boundaries = map[string]allowance{
 	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; tool schemas move to descriptors, see process-boundaries.md, tool schemas", json: 17},
 	"internal/mcp/tools.go":                      {reason: "hand tool schemas beside the protos; process-boundaries.md, tool schemas", json: 7},
 	"internal/production/agentcli.go":            {reason: "checks that the chosen vibesys-cli is an executable file", reads: 1},
+	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, and keeps the others; process-boundaries.md, session lock", reads: 2, exec: 2},
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
 	"internal/production/cli_transport.go":       {reason: "the callee-owned discovery contract requires inspecting socket directory metadata", reads: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
@@ -52,6 +53,7 @@ var boundaries = map[string]allowance{
 
 // execFiles may import os/exec; their start counts are in boundaries.
 var execFiles = map[string]string{
+	"internal/production/checkouts.go":   "removing the git worktrees agents made, as holders.go made them",
 	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
 	"internal/production/holders.go":     "the lifetime of a session's process, ps for a group leader's start time, and git worktree creation",
 	"internal/production/startchecks.go": "start checks read the repository's history with git",

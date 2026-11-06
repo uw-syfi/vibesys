@@ -120,6 +120,8 @@ func generatedEffect(r *rand.Rand) *pb.Effect {
 		e = core.CloseSession{Session: ref(b.CloseSession.GetSession()), Force: b.CloseSession.GetForce()}
 	case *pb.Effect_ArmTimer:
 		e = armed(b.ArmTimer, ref(b.ArmTimer.GetSession()))
+	case *pb.Effect_ReleaseCheckouts:
+		e = core.ReleaseCheckouts{Run: core.RunID(b.ReleaseCheckouts.GetRunId())}
 	}
 	in.Id = string(e.ID())
 	return in

@@ -163,6 +163,8 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 		out.Body = &pb.Effect_Interrupt{Interrupt: &pb.Interrupt{Session: sessionRef(b.Session), TurnId: string(b.Turn)}}
 	case core.CloseSession:
 		out.Body = &pb.Effect_CloseSession{CloseSession: &pb.CloseSession{Session: sessionRef(b.Session), Force: b.Force}}
+	case core.ReleaseCheckouts:
+		out.Body = &pb.Effect_ReleaseCheckouts{ReleaseCheckouts: &pb.ReleaseCheckouts{RunId: string(b.Run)}}
 	case core.ArmTimer:
 		timer := &pb.ArmTimer{
 			Kind: timerKinds.out(b.Kind), RunId: string(b.Run), FireAt: when(b.FireAt),
@@ -211,6 +213,8 @@ func DecodeEffect(data []byte) (core.Effect, error) {
 		e = core.Interrupt{Session: session(b.Interrupt.GetSession()), Turn: core.TurnID(b.Interrupt.GetTurnId())}
 	case *pb.Effect_CloseSession:
 		e = core.CloseSession{Session: session(b.CloseSession.GetSession()), Force: b.CloseSession.GetForce()}
+	case *pb.Effect_ReleaseCheckouts:
+		e = core.ReleaseCheckouts{Run: core.RunID(b.ReleaseCheckouts.GetRunId())}
 	case *pb.Effect_ArmTimer:
 		t := b.ArmTimer
 		timer := core.ArmTimer{Kind: timerKinds.in(t.GetKind(), &errs), Run: core.RunID(t.GetRunId()), FireAt: moment(t.GetFireAt(), &errs)}

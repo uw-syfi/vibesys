@@ -19,10 +19,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
@@ -115,7 +115,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, start daemon.SessionStart)
 	session := start.Launch.Session
 	place := s.place(session)
 	if len(place.Socket) > maxSocketPath {
-		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", place.Socket, maxSocketPath, localfs.Remedy)
+		return nil, &daemon.LaunchError{Reason: core.StartStateLocationTooLong, Err: fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold", place.Socket, maxSocketPath)}
 	}
 	request, err := s.openRequest(start, plugin)
 	if err != nil {
@@ -326,6 +326,16 @@ func (s *ProcessSidecars) forgetConn(session core.Session) {
 	}
 }
 
+// secretEnv names the entries of a session's tool environment that are credentials. The token is the
+// only one: the rest says where the daemon is and who is asking. The name is the one the credentials
+// message encodes its token under, so there is one definition of it.
+func secretEnv(tools *pb.ToolServerCredentials) []string {
+	if tools.GetToken() == "" {
+		return nil
+	}
+	return []string{envcodec.NameOf(tools, "token")}
+}
+
 // openRequest is what a session is opened with. The plugin's home is kept with the agent, not the
 // session, so a resume finds the one the first session installed into, which also holds what the
 // agent needs to continue. It does no I/O.
@@ -350,8 +360,10 @@ func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) 
 	return &pb.OpenSessionRequest{
 		Session: launch.GetSession(), Harness: launch.GetHarness(), Model: launch.GetModel(), ReasoningEffort: launch.GetReasoningEffort(),
 		WorkingDirectory: workdir, AgentDataDirectory: filepath.Join(s.agentDir(l.Session.Agent), "plugin-home"), ResumeToken: launch.GetResumeToken(),
-		Skills:      &pb.SessionSkills{Directory: plugin.Marketplace, Name: plugin.Name},
-		Tools:       []*pb.ToolServer{{Name: ToolServerName, Argv: []string{s.Executable, "mcp"}, Env: toolEnv}},
+		Skills: &pb.SessionSkills{Directory: plugin.Marketplace, Name: plugin.Name},
+		Tools: []*pb.ToolServer{{
+			Name: ToolServerName, Argv: []string{s.Executable, "mcp"}, Env: toolEnv, SecretEnv: secretEnv(start.Tools),
+		}},
 		Environment: environment,
 	}, nil
 }

@@ -36,7 +36,7 @@ func TestASessionThatNeverOpensFailsWhenItsLaunchTimerFires(t *testing.T) {
 	if agent.Status != core.AgentFailed || agent.StartFailure != core.StartTimedOut || agent.EndDetail == "" {
 		t.Fatalf("lead %+v, want failed as timed out with a detail", agent)
 	}
-	w.wantEffects("CloseSession")
+	w.wantEffects("CloseSession", "ReleaseCheckouts")
 	if got, _ := w.s.Run(r.Run); got.Status != core.RunFailed || got.StopReason != core.StopLeadGone {
 		t.Fatalf("run %+v, want failed because its lead is gone", got)
 	}

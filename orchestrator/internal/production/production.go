@@ -234,7 +234,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 				}
 			},
 		},
-		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Reconcile: reconcile(wiring.Search), Authority: authority, Bounds: Timeouts{},
+		Sidecars: wiring.Sidecars, Checkouts: checkoutsOf(wiring.Sidecars), Jobs: wiring.Jobs, Reconcile: reconcile(wiring.Search), Authority: authority, Bounds: Timeouts{},
 		AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
 	})
 	if err != nil {

@@ -39,6 +39,14 @@ func (s State) Violations() []string {
 		if stalled := s.stalled(run); stalled != !run.StalledSince.IsZero() {
 			bad("run %s is %s with stalled since %v, but its stall is %t", run.ID, run.Status, run.StalledSince, stalled)
 		}
+		if len(run.Kept) > 0 && !run.Status.Final() {
+			bad("run %s is %s and already keeps checkouts %v", run.ID, run.Status, run.Kept)
+		}
+		for _, c := range run.Kept {
+			if a, ok := s.agents[c.Agent]; !ok || a.Run != run.ID || a.Role == RoleLead {
+				bad("run %s keeps a checkout of %s, which is not one of its subagents", run.ID, c.Agent)
+			}
+		}
 		if run.LeadReminders > MaxLeadReminders {
 			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)
 		}

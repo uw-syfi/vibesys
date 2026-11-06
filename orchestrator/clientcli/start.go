@@ -170,7 +170,7 @@ func (c *call) followUntilLive(ctx context.Context, s *session, run string) ([]C
 	}
 	switch {
 	case s.view.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED:
-		return nil, failed("run %s failed: %s", run, orUnknown(s.view.failureDetail(s.view.Run)))
+		return nil, c.runFailed(s.view)
 	case !s.view.Started():
 		return nil, failed("run %s ended before its lead was live", run)
 	}

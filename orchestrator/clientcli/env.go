@@ -39,6 +39,9 @@ type Env struct {
 	Terminal bool
 	// Dir is the working directory, absolute.
 	Dir string
+	// Home is the user's home directory, where a host started by this client looks for programs
+	// (in .local/bin) unless its configuration names directories. Empty when there is none.
+	Home string
 	// FS is the file system rooted at "/", used to look for a repository's .git.
 	FS fs.FS
 	// Canonical returns the path with every symbolic link resolved, or the path unchanged when it

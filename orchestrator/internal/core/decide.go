@@ -28,6 +28,8 @@ func Decide(s State, in Input) (State, []Event, []Effect) {
 		t.jobsRunning(b)
 	case TimerFired:
 		t.timer(b)
+	case CheckoutsReleased:
+		t.checkoutsReleased(b)
 	default:
 		panic(fmt.Sprintf("core: unknown input %T", in.Body))
 	}

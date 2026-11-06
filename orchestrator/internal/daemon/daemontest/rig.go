@@ -34,8 +34,10 @@ type Rig struct {
 	Sidecars *Sidecars
 	Jobs     *jobstest.FakeJobSource
 	Starts   *StartChecks
-	Hub      *hub.Hub
-	Daemon   *daemon.Daemon
+	// Checkouts is the Fake of the agents' working copies, given to every daemon.
+	Checkouts *Checkouts
+	Hub       *hub.Hub
+	Daemon    *daemon.Daemon
 	// Service is the operator's service, and AgentService the agent socket's.
 	Service      *daemon.Service
 	AgentService *daemon.Service
@@ -67,7 +69,7 @@ func NewRig(tb testing.TB) *Rig {
 	}
 	r := &Rig{
 		Store: store.NewMemory(), Clock: NewClock(), Nonces: &Nonces{}, Sidecars: NewSidecars(),
-		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Auth: auth, Bounds: &Bounds{},
+		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
 		Log: slog.New(slog.DiscardHandler), Limits: hub.DefaultLimits, Wake: make(chan struct{}, 1),
 	}
 	r.Sidecars.Elapse = r.Bounds.Expire
@@ -112,7 +114,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: host, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
+		Sidecars: host, Checkouts: r.Checkouts, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

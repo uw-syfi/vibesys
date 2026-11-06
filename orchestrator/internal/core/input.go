@@ -201,6 +201,15 @@ type JobsRunning struct {
 
 func (JobsRunning) inputBody() {}
 
+// CheckoutsReleased says a ReleaseCheckouts was carried out, and which working copies it kept. The
+// answer to a run that is not over, or one already recorded, changes nothing.
+type CheckoutsReleased struct {
+	Run  RunID
+	Kept []Checkout
+}
+
+func (CheckoutsReleased) inputBody() {}
+
 // TimerFired says a timer an ArmTimer asked for is due. A timer can outlive what it was armed for,
 // and then it does nothing.
 type TimerFired struct{ Timer ArmTimer }

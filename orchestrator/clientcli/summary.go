@@ -44,6 +44,12 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		row("measures", "%s", measures)
 	}
 	b.WriteString(usageRows(v))
+	if kept := v.Run.GetKeptCheckouts(); len(kept) > 0 {
+		row("kept", "%d working copies hold work git lacks; remove them once it is saved:", len(kept))
+		for _, k := range kept {
+			fmt.Fprintf(&b, "    %s  %s\n", k.GetAgentId(), k.GetLocation())
+		}
+	}
 	row("best", "%s", best(v.Search))
 	row("last report", "%s", lastReport(v, zone))
 	return b.String()

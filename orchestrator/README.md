@@ -233,9 +233,15 @@ takes the lead's harness and the first allowed model on it; a spawn outside the 
 `run get` prints it as "may use". `run get` also counts the agents that ended without a measured cost, since
 their spend is missing from the usage total.
 
+When a run is over (and never before), the orchestrator removes the working copy of each subagent that holds
+nothing git lacks; commits made there stay in the repository. A copy with modified or untracked files is
+kept, and `Run.kept_checkouts` names it, which `run get` prints as "kept". The lead works in the repository
+itself and has no copy to remove.
+
 A report is a `progress` note or a `final` report, numbered from 1 within its run. `wait --until report`
-returns for a final report and `--until progress` for any report, counting those posted after the wait began
-(or numbered above `--after N`; an ended run counts the one it has). A run is stalled when its lead is idle
+returns for a final report, at once with the one the run already has however late the wait begins, and
+`--until progress` for any report, counting those posted after the wait began (an ended run counts the one it
+has). `--after N` counts only reports numbered above N, for either. A run is stalled when its lead is idle
 and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
 orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
 has had no new input since is finished, not stalled: it is not reminded, and `run get` says so. A wait for a report on a
@@ -321,6 +327,7 @@ begins "could not start the agent:".
 | `WORKING_DIRECTORY_UNAVAILABLE` | the agent's directory could not be made or entered | the daemon (a worktree that cannot be created), or the sidecar |
 | `TIMED_OUT` | the session did not open within `core.LaunchTimeout` | the core |
 | `INCOMPATIBLE_VERSIONS` | the process holding the session and this host share no protocol (`Hello`); it is ended, and nothing was opened on it | the host |
+| `STATE_LOCATION_TOO_LONG` | the place the host keeps sessions in is too long for a session's socket (`maxSocketPath` bytes); no session can start there | the host |
 | `OTHER` | none of these, including a process that could not be started or reached, and a start refused by a field's name | the daemon or the sidecar |
 
 The time limit is a timer the core arms through `Decide` with every `LaunchSession` (`TimerLaunchDeadline`,

@@ -96,6 +96,7 @@ type Effect struct {
 	//	*Effect_Interrupt
 	//	*Effect_CloseSession
 	//	*Effect_ArmTimer
+	//	*Effect_ReleaseCheckouts
 	Body          isEffect_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -199,6 +200,15 @@ func (x *Effect) GetArmTimer() *ArmTimer {
 	return nil
 }
 
+func (x *Effect) GetReleaseCheckouts() *ReleaseCheckouts {
+	if x != nil {
+		if x, ok := x.Body.(*Effect_ReleaseCheckouts); ok {
+			return x.ReleaseCheckouts
+		}
+	}
+	return nil
+}
+
 type isEffect_Body interface {
 	isEffect_Body()
 }
@@ -227,6 +237,10 @@ type Effect_ArmTimer struct {
 	ArmTimer *ArmTimer `protobuf:"bytes,15,opt,name=arm_timer,json=armTimer,proto3,oneof"`
 }
 
+type Effect_ReleaseCheckouts struct {
+	ReleaseCheckouts *ReleaseCheckouts `protobuf:"bytes,16,opt,name=release_checkouts,json=releaseCheckouts,proto3,oneof"`
+}
+
 func (*Effect_LaunchSession) isEffect_Body() {}
 
 func (*Effect_StartTurn) isEffect_Body() {}
@@ -238,6 +252,8 @@ func (*Effect_Interrupt) isEffect_Body() {}
 func (*Effect_CloseSession) isEffect_Body() {}
 
 func (*Effect_ArmTimer) isEffect_Body() {}
+
+func (*Effect_ReleaseCheckouts) isEffect_Body() {}
 
 // SessionRef names one session of one agent. The program holding a session refuses a stale one.
 type SessionRef struct {
@@ -615,6 +631,52 @@ func (x *CloseSession) GetForce() bool {
 	return false
 }
 
+// ReleaseCheckouts asks for the working copies the agents of an ended run made to be removed, except
+// those that hold work git does not have. The answer comes back as the run's kept_checkouts.
+type ReleaseCheckouts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseCheckouts) Reset() {
+	*x = ReleaseCheckouts{}
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseCheckouts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseCheckouts) ProtoMessage() {}
+
+func (x *ReleaseCheckouts) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseCheckouts.ProtoReflect.Descriptor instead.
+func (*ReleaseCheckouts) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ReleaseCheckouts) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 type ArmTimer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -629,7 +691,7 @@ type ArmTimer struct {
 
 func (x *ArmTimer) Reset() {
 	*x = ArmTimer{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +703,7 @@ func (x *ArmTimer) String() string {
 func (*ArmTimer) ProtoMessage() {}
 
 func (x *ArmTimer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +716,7 @@ func (x *ArmTimer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArmTimer.ProtoReflect.Descriptor instead.
 func (*ArmTimer) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ArmTimer) GetKind() TimerKind {
@@ -689,7 +751,7 @@ var File_vibesys_orchestrator_v1_effects_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\n" +
-	"%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xd2\x03\n" +
+	"%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xac\x04\n" +
 	"\x06Effect\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12O\n" +
 	"\x0elaunch_session\x18\n" +
@@ -699,7 +761,8 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\x05steer\x18\f \x01(\v2\x1e.vibesys.orchestrator.v1.SteerH\x00R\x05steer\x12B\n" +
 	"\tinterrupt\x18\r \x01(\v2\".vibesys.orchestrator.v1.InterruptH\x00R\tinterrupt\x12L\n" +
 	"\rclose_session\x18\x0e \x01(\v2%.vibesys.orchestrator.v1.CloseSessionH\x00R\fcloseSession\x12@\n" +
-	"\tarm_timer\x18\x0f \x01(\v2!.vibesys.orchestrator.v1.ArmTimerH\x00R\barmTimerB\r\n" +
+	"\tarm_timer\x18\x0f \x01(\v2!.vibesys.orchestrator.v1.ArmTimerH\x00R\barmTimer\x12X\n" +
+	"\x11release_checkouts\x18\x10 \x01(\v2).vibesys.orchestrator.v1.ReleaseCheckoutsH\x00R\x10releaseCheckoutsB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"S\n" +
 	"\n" +
 	"SessionRef\x12\"\n" +
@@ -728,7 +791,9 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\aturn_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06turnId\"k\n" +
 	"\fCloseSession\x12E\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\xa0\x03\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"2\n" +
+	"\x10ReleaseCheckouts\x12\x1e\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xa0\x03\n" +
 	"\bArmTimer\x12B\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.TimerKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n" +
@@ -756,7 +821,7 @@ func file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_effects_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(TimerKind)(0),                // 0: vibesys.orchestrator.v1.TimerKind
 	(*Effect)(nil),                // 1: vibesys.orchestrator.v1.Effect
@@ -766,11 +831,12 @@ var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(*Steer)(nil),                 // 5: vibesys.orchestrator.v1.Steer
 	(*Interrupt)(nil),             // 6: vibesys.orchestrator.v1.Interrupt
 	(*CloseSession)(nil),          // 7: vibesys.orchestrator.v1.CloseSession
-	(*ArmTimer)(nil),              // 8: vibesys.orchestrator.v1.ArmTimer
-	(AgentRole)(0),                // 9: vibesys.orchestrator.v1.AgentRole
-	(Harness)(0),                  // 10: vibesys.orchestrator.v1.Harness
-	(*Message)(nil),               // 11: vibesys.orchestrator.v1.Message
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*ReleaseCheckouts)(nil),      // 8: vibesys.orchestrator.v1.ReleaseCheckouts
+	(*ArmTimer)(nil),              // 9: vibesys.orchestrator.v1.ArmTimer
+	(AgentRole)(0),                // 10: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 11: vibesys.orchestrator.v1.Harness
+	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	3,  // 0: vibesys.orchestrator.v1.Effect.launch_session:type_name -> vibesys.orchestrator.v1.LaunchSession
@@ -778,24 +844,25 @@ var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	5,  // 2: vibesys.orchestrator.v1.Effect.steer:type_name -> vibesys.orchestrator.v1.Steer
 	6,  // 3: vibesys.orchestrator.v1.Effect.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
 	7,  // 4: vibesys.orchestrator.v1.Effect.close_session:type_name -> vibesys.orchestrator.v1.CloseSession
-	8,  // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
-	2,  // 6: vibesys.orchestrator.v1.LaunchSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	9,  // 7: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	10, // 8: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
-	2,  // 9: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	11, // 10: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 11: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	11, // 12: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 13: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	2,  // 14: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	0,  // 15: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
-	2,  // 16: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	12, // 17: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	9,  // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
+	8,  // 6: vibesys.orchestrator.v1.Effect.release_checkouts:type_name -> vibesys.orchestrator.v1.ReleaseCheckouts
+	2,  // 7: vibesys.orchestrator.v1.LaunchSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	10, // 8: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	11, // 9: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
+	2,  // 10: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	12, // 11: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 12: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	12, // 13: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 14: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	2,  // 15: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	0,  // 16: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
+	2,  // 17: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	13, // 18: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_effects_proto_init() }
@@ -811,6 +878,7 @@ func file_vibesys_orchestrator_v1_effects_proto_init() {
 		(*Effect_Interrupt)(nil),
 		(*Effect_CloseSession)(nil),
 		(*Effect_ArmTimer)(nil),
+		(*Effect_ReleaseCheckouts)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -818,7 +886,7 @@ func file_vibesys_orchestrator_v1_effects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_effects_proto_rawDesc), len(file_vibesys_orchestrator_v1_effects_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

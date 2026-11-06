@@ -133,7 +133,8 @@ start. The daemon's own timer (`core.LaunchTimeout`) ends a session that never s
   closes) are settled `FAILED`.
 - **Raw log.** `raw.log` has every line crossing the provider pipe with the offset it followed,
   written without a sync and never under the engine's lock. It is for inspection and fixtures; no
-  test replays it into the event log.
+  test replays it into the event log. The file is private (mode 0600), and a credential the open
+  request names in `secret_env` is replaced by `[redacted]` before any line is written.
 
 ## Process lifetime
 

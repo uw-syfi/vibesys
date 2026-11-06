@@ -35,8 +35,10 @@ All worktrees of the repository share one store per task, so any agent sees the 
   a remote branch at the same commit, delete it (`git branch -d vibesys`); otherwise stop and
   report the collision. Never rename the result branch.
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
-- Worktrees: the lead picks one directory outside the repository's working tree and puts every
-  worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief
+- Worktrees: the lead puts every worktree in `<repository>.worktrees/`, a directory beside the
+  repository's working tree and never under `/tmp` (`git worktree add`), one per plan, one per
+  judge or profile question. The run does not remove these when it ends, so the lead removes the
+  ones of closed plans (see Housekeeping). Each brief
   names its worktree. `git worktree list` is the truth about which exist. A new worktree has its
   submodules empty: when the repository has any (`.gitmodules`), run
   `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can

@@ -165,6 +165,9 @@ enum StartFailureReason {
   // The program that holds the session and this host cannot work together: they are of different
   // releases that do not share a protocol.
   START_FAILURE_REASON_INCOMPATIBLE_VERSIONS = 8;
+  // The place where the host keeps its sessions is too long for a session to be reached there, so
+  // none can start. A shorter root or state location fixes it.
+  START_FAILURE_REASON_STATE_LOCATION_TOO_LONG = 9;
 }
 
 // ReportKind says what a report is for. A final report says the lead has finished what it was asked
@@ -224,6 +227,19 @@ message Run {
   // The agents this run may spend on, set when it starts and never changed. A subagent is launched
   // only on one of these.
   repeated AllowedAgent allowed_agents = 18;
+  // Working copies of the repository that agents made and that were not removed when the run ended
+  // because they hold changes git does not have. Empty while the run is live, and for a run that left
+  // none. The run's operator decides what becomes of them.
+  repeated KeptCheckout kept_checkouts = 19;
+}
+
+// KeptCheckout is one agent's working copy of the run's repository, left in place because removing
+// it would lose work.
+message KeptCheckout {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Where the working copy is: the client shows it so the operator can look at it, and remove it
+  // when done.
+  string location = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
 }
 
 // AllowedAgent is one harness and model a run may use. An empty model means the harness's own

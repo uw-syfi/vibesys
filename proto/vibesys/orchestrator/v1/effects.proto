@@ -20,6 +20,7 @@ message Effect {
     Interrupt interrupt = 13;
     CloseSession close_session = 14;
     ArmTimer arm_timer = 15;
+    ReleaseCheckouts release_checkouts = 16;
   }
 }
 
@@ -72,6 +73,12 @@ message CloseSession {
   SessionRef session = 1 [(buf.validate.field).required = true];
   // Kill the session without waiting for it. Its stop grace ran out, so nothing listens for more.
   bool force = 2;
+}
+
+// ReleaseCheckouts asks for the working copies the agents of an ended run made to be removed, except
+// those that hold work git does not have. The answer comes back as the run's kept_checkouts.
+message ReleaseCheckouts {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 // TimerKind says what a timer is for.
