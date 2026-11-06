@@ -5,7 +5,7 @@
    each public module's ``__all__`` with its signature, and each class's public
    members. ``--write`` regenerates it; otherwise a difference fails with the diff.
 2. ``griffe check`` against the last release (the newest
-   ``sdk/vibesys-evaluator/loadgen/vX.Y.Z`` tag) reports breaking changes;
+   ``sdk/vibesys-evaluator/go/vX.Y.Z`` tag) reports breaking changes;
    skipped, with a note, until a release exists. Breaks the user approved
    are recorded in ``api/approved-breaks.toml`` against that release tag; they
    are printed but do not fail, until the next release makes the file stale.
@@ -14,7 +14,7 @@
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
    against the package.
 5. The Go SDK's snapshot ``api/go-workload.txt`` (``go doc -all`` of
-   ``loadgen/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
+   ``go/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
    to the code) loses no line of the last release's: a removed or changed
    declaration is a break. Skipped, with a note, until a release has it.
 
@@ -57,7 +57,7 @@ PUBLIC_MODULES = (
     "vibesys_evaluator.llm_serving.agentx",
     "vibesys_evaluator.llm_serving.golden",
 )
-RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/loadgen/v"
+RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/go/v"
 #: The user's approval of the breaking changes since one release (AGENTS.md, "Public API rule").
 #: It names that release, so it stops applying once the next release is tagged.
 APPROVED_BREAKS = SDK / "api" / "approved-breaks.toml"

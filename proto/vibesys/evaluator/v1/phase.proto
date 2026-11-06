@@ -12,7 +12,7 @@ package vibesys.evaluator.v1;
 import "buf/validate/validate.proto";
 import "vibesys/evaluator/v1/loadgen.proto";
 
-option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1";
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
 
 // PhaseInput is everything a phase pod needs besides the task image.
 message PhaseInput {

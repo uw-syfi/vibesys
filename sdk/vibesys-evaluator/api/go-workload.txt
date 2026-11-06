@@ -1,4 +1,4 @@
-package workload // import "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/workload"
+package workload // import "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 
 Package workload is the Go front end of vibesys-evaluator: a task's
 request generator written in Go. It has the concepts of the Python SDK's

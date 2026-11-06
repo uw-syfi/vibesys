@@ -71,7 +71,7 @@ The microservices domain:
   seed, the phase and the requests before it (the model as the planned writes
   left it), never on timing; timing decides only how many are consumed.
 - Front ends: the Python SDK (`vibesys_evaluator.microservices`) and the Go SDK
-  (`loadgen/workload`) are two languages for one contract (the generator
+  (`go/workload`) are two languages for one contract (the generator
   command line and the stream); the same workload writes the same stream in
   both, and checks run in the front end's language.
 - loadgen never draws randomness that changes what is sent; Poisson arrival
@@ -121,7 +121,7 @@ The microservices domain:
 
 The diagram is the microservices domain. Dependencies point one way:
 `bench.py` imports `vibesys_evaluator.microservices`; a Go generator imports
-`loadgen/workload`; the phase pod runs loadgen and the generator as
+`go/workload`; the phase pod runs loadgen and the generator as
 subprocesses that speak the `.proto`; loadgen knows nothing of operations,
 models or tasks.
 
@@ -131,7 +131,7 @@ models or tasks.
  bench.py ──▶ vibesys_evaluator.microservices ──┐
           └─▶ vibesys_evaluator.llm_serving ────┼──▶ vibesys_evaluator (core)
           └─▶ vibesys_evaluator (core) ─────────┘
- a Go generator ──▶ loadgen/workload (the microservices domain's Go SDK)
+ a Go generator ──▶ go/workload (the microservices domain's Go SDK)
 ```
 
 The core owns one concern per seam, each a private module behind the public
@@ -281,16 +281,16 @@ The microservices names:
   `Run.report(values)` and `Run.phase(name)`. `PhaseResult` has
   `ops_per_sec`, `p50_ms`, `p99_ms`.
 - `Generator(command)`: a workload whose requests and checks are another
-  program (a Go generator built on `loadgen/workload`, in the task image),
+  program (a Go generator built on `go/workload`, in the task image),
   run as `command + ["generate", ...]` and `command + ["check", ...]`
   ("Generator command line"); `microservices.main(workload=Generator([...]))`.
 - `main(dataset, system, workload, benchmark, metrics, validity)`.
 
 ## The Go SDK
 
-`github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/workload`, a package
+`github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload`, a package
 of loadgen's module, so it has the one version and tag
-(`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and shares the generated schema
+(`sdk/vibesys-evaluator/go/vX.Y.Z`) and shares the generated schema
 types; it imports only the protobuf runtime (no cgo), so a task's own Go
 module (with its reference model) imports it cheaply. Listing:
 [`api/go-workload.txt`](../api/go-workload.txt). The concepts are the Python
@@ -556,7 +556,7 @@ repository, and [`examples/agentx-llm/bench.py`](../examples/agentx-llm/bench.py
 ## Versioning
 
 One version `X.Y.Z` for the Python package, the Go module
-(`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the images, one per domain:
+(`sdk/vibesys-evaluator/go/vX.Y.Z`) and the images, one per domain:
 `vibesys-evaluator-microservices:X.Y.Z` (the package and loadgen) and
 `vibesys-evaluator-llm-serving:X.Y.Z` (the package and `agentx-harness`,
 installed from a hash-pinned lock in `image/llm-serving/`; task writers never
@@ -570,7 +570,7 @@ breaking it needs the user's approval ([`AGENTS.md`](../AGENTS.md)), and
 an approved Python break is recorded in `api/approved-breaks.toml` against
 the release it breaks, which the check then accepts for that release only.
 The public Go API is `api/go-workload.txt` (`go doc -all` of
-`loadgen/workload`), checked against the code (a Go test) and against the last
+`go/workload`), checked against the code (a Go test) and against the last
 release (no declaration of it may change or go away).
 `Rand`'s algorithms are part of the API: changing a stream is a break.
 

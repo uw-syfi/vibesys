@@ -4,7 +4,7 @@ A ``Workload`` is a model and a weighted mix of ``Operation``s. Each
 operation's ``build(model, rand)`` returns a ``Request`` of one or more
 ``Step``s (``get``, ``post``, ``put``); a later step can send a value an
 earlier one captured (``ref``, a ``Template``). A ``Generator`` stands for a
-workload written in another language (the Go SDK, ``loadgen/workload``). Checks and applies see each
+workload written in another language (the Go SDK, ``go/workload``). Checks and applies see each
 operation as a ``Call`` with its ``Response``s; ``Versions`` says what a read
 may show. The task's ``benchmark(run)`` composes load phases
 (``Run.closed_loop``, ``Run.open_loop``), each returning a ``PhaseResult``.

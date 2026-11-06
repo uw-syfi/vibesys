@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // What a phase's request generator and loadgen (the native load generator,
-// sdk/vibesys-evaluator/loadgen) exchange, and the files loadgen writes for the
+// sdk/vibesys-evaluator/go) exchange, and the files loadgen writes for the
 // vibesys-evaluator front ends: the request stream (a generator's standard
 // output, read by loadgen while the phase runs), the results file and the
 // summary file. See sdk/vibesys-evaluator/docs/spec.md.
@@ -25,7 +25,7 @@ package vibesys.evaluator.v1;
 
 import "buf/validate/validate.proto";
 
-option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1";
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
 
 // FileKind says what a file holds after its header.
 enum FileKind {

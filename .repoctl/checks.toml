@@ -481,8 +481,8 @@ root = "sdk/vs-evaluator/vseval"
 assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval" }]
 
 [[native_check_overrides]]
-root = "sdk/vibesys-evaluator/loadgen"
-assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen" }]
+root = "sdk/vibesys-evaluator/go"
+assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go" }]
 
 [[native_check_overrides]]
 root = "resources/evaluators/microservice"

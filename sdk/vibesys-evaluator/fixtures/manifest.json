@@ -1,5 +1,5 @@
 {
-  "about": "Conformance fixtures of proto/vibesys/evaluator/v1: every file kind in both formats (binpb: length-delimited; json: proto3 JSON lines), and files a reader must reject. Written by `go test ./internal/conformance -update` in sdk/vibesys-evaluator/loadgen; read by the Go and Python tests.",
+  "about": "Conformance fixtures of proto/vibesys/evaluator/v1: every file kind in both formats (binpb: length-delimited; json: proto3 JSON lines), and files a reader must reject. Written by `go test ./internal/conformance -update` in sdk/vibesys-evaluator/go; read by the Go and Python tests.",
   "entries": [
     {
       "file": "requests.binpb",
