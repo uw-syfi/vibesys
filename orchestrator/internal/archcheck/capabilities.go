@@ -29,7 +29,6 @@ var fsReads = map[string]allowance{
 }
 var execFiles = map[string]string{
 	"internal/production/cli_ensure.go": "the callee owns shared daemon startup through daemon ensure",
-	"internal/production/production.go": "the command dialer owns its child process",
 	"internal/production/sidecars.go":   "sidecar lifetime and git worktree creation",
 }
 

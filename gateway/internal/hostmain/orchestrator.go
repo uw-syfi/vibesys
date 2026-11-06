@@ -4,13 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
-	"time"
 
-	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
-	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
@@ -62,38 +58,4 @@ func holdWhileLive(ctx context.Context, live <-chan bool, monitor *lifecycle.Mon
 func gatewayRoot(flag string) (string, error) {
 	getenv, home := hosted.Environ()
 	return gatewayroot.For(flag, getenv, home)
-}
-
-// orchestratorVerb says whether args name an orchestrator verb, after an optional leading
-// `--root PATH` that names the gateway the client verbs reach.
-func orchestratorVerb(args []string) (bool, string, []string) {
-	root := ""
-	if len(args) >= 2 && args[0] == "--root" {
-		root, args = args[1], args[2:]
-	}
-	if len(args) == 0 || !hosted.IsCommand(args[0]) {
-		return false, "", nil
-	}
-	return true, root, args
-}
-
-// orchestratorCommand runs mcp, run or send. The client verbs reach this host's gateway through its
-// socket, starting a gateway when none serves, as connect does; with --host they run
-// `ssh HOST vibesys-host connect`, so the remote vibesys-host must be on that host's PATH.
-func orchestratorCommand(ctx context.Context, root string, args []string) int {
-	root, err := gatewayRoot(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	local := func(ctx context.Context) (net.Conn, error) {
-		binary, err := os.Executable()
-		if err != nil {
-			return nil, err
-		}
-		startup, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		return connect.Dial(startup, lifecycle.SocketPath(root, schema.APISchemaHash), binary, []string{"serve", "--root", root}, os.Stderr)
-	}
-	return hosted.Command(ctx, version, args, local, hosted.SSH, os.Stdin, os.Stdout, os.Stderr)
 }
