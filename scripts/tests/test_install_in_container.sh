@@ -33,7 +33,20 @@ check() {
 }
 die() {
   echo "FAIL: $*" >&2
+  diagnose >&2
   exit 1
+}
+
+# diagnose: what the host and the scripted agents wrote, for whoever reads the log of a failure.
+diagnose() {
+  local file
+  echo "--- the end of the host's log"
+  tail -n 40 "$home/host.log" 2>/dev/null || true
+  for file in "$state"/sessions/*/*/peer-failure.txt; do
+    [ -f "$file" ] || continue
+    echo "--- $file"
+    cat "$file"
+  done
 }
 install() {
   VIBESYS_INSTALL_BUNDLE="$1" sh "$install_sh" "${@:2}"
@@ -58,9 +71,13 @@ until_true() {
   done
 }
 
+# physical DIR: DIR with its symlinks resolved. A process's command line holds the path the program
+# was started by after the system resolved it: on a Mac /tmp is /private/tmp.
+physical() { (cd "$1" 2>/dev/null && pwd -P) || echo "$1"; }
+
 # host_process: the process of an installed release's host, if any. Only the check that nothing is
 # left after a refused start looks at the process list; everything else asks the host.
-host_process() { pgrep -f "^$home/releases/[^ ]*/bin/vibesys-host " || true; }
+host_process() { pgrep -f "^($home|$(physical "$home"))/releases/[^ ]*/bin/vibesys-host " || true; }
 no_host_process() { [ -z "$(host_process)" ]; }
 
 # host_answers: a host serves this root, asked the way every client asks.
@@ -229,7 +246,7 @@ none_live() {
   # shellcheck disable=SC2086 # a list of pids
   [ -z "$(live $watched)" ]
 }
-leftover_pattern() { echo "$scripted/e2e/scripted_sidecar|$home/releases/[^ ]*/bin/vibesys-host mcp"; }
+leftover_pattern() { echo "($scripted|$(physical "$scripted"))/e2e/scripted_sidecar|($home|$(physical "$home"))/releases/[^ ]*/bin/vibesys-host mcp"; }
 no_leftovers() { [ -z "$(pgrep -f "$(leftover_pattern)" || true)" ]; }
 
 # run_pids: the sidecar and process-group pids the run's sessions recorded in their SessionProcesses.
@@ -482,6 +499,7 @@ phase_client() {
   until_true 30 has_live_session || die "no session process recorded a process group for its agent"
   before="$(live_session)"
   holder="${before%% *}"
+  [ -n "$(host_process)" ] || die "the host's process is not found by its command line: $(ps -axo pid=,command= | grep vibesys-host | grep -v grep)"
   kill -KILL "$(host_process)"
   until_true 30 no_host_process || die "the killed host is still running"
   snapshot_says "[r['status'] for r in snapshot['runs']] == ['RUN_STATUS_RUNNING']" || die "the run did not survive the host: $(vibesys-client run get 2>&1)"
