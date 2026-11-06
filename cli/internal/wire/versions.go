@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"fmt"
+
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -15,8 +17,8 @@ func BuildVersions(binaryVersion string, v core.Versions) *cliv1.BuildVersions {
 	}
 }
 
-// ToVersions returns the versions a peer sent. The release version is display only and is
-// dropped.
+// ToVersions returns the versions a peer sent. The build identity is not a version to order and is
+// dropped; DecideDaemon compares it.
 func ToVersions(b *cliv1.BuildVersions) core.Versions {
 	return core.Versions{Protocol: b.GetProtocolVersion(), MinProtocol: b.GetMinProtocolVersion(), Schema: b.GetSchemaVersion()}
 }
@@ -74,4 +76,42 @@ func ToCompatibility(c cliv1.Compatibility) core.Compatibility {
 		}
 	}
 	return core.ClientTooOld
+}
+
+// DaemonDecision is what a command line does with a daemon whose protocol it can speak.
+type DaemonDecision = core.DaemonDecision
+
+// The decisions, as core defines them.
+const (
+	UseDaemon     = core.UseDaemon
+	ReplaceDaemon = core.ReplaceDaemon
+	RefuseDaemon  = core.RefuseDaemon
+)
+
+// SameBuild says the daemon that answered a handshake is the build of the command line. The
+// identity is compared as the message carries it.
+func SameBuild(clientBuild string, daemon *cliv1.BuildVersions) bool {
+	return core.DecideDaemon(clientBuild, daemon.GetBinaryVersion(), 0) == core.UseDaemon
+}
+
+// DecideDaemon applies core.DecideDaemon to the daemon's handshake versions and its status.
+func DecideDaemon(clientBuild string, daemon *cliv1.BuildVersions, st *cliv1.StatusResponse) DaemonDecision {
+	return core.DecideDaemon(clientBuild, daemon.GetBinaryVersion(), st.GetQueuedJobs()+st.GetRunningJobs())
+}
+
+// OtherBuildFailure is the refusal of a daemon of another build that has jobs. It names both
+// builds, the daemon, and what to do, so that a reader who knows nothing of daemons can act on it.
+func OtherBuildFailure(clientBuild string, st *cliv1.StatusResponse) error {
+	name := func(b string) string {
+		if b == "" {
+			return "unknown"
+		}
+		return b
+	}
+	return &core.Failure{Kind: core.FailureDaemonOtherBuild, Message: fmt.Sprintf(
+		"a vibesys-cli daemon of another build already runs for you: this vibesys-cli is build %s, the daemon "+
+			"(pid %d) is build %s. The daemon has %d queued and %d running job(s), so it was not replaced and was "+
+			"not used. Wait for the jobs to finish and run the command again, or run `vibesys-cli daemon restart` "+
+			"to replace it now; its running jobs keep running under their own supervisors",
+		name(clientBuild), st.GetPid(), name(st.GetVersions().GetBinaryVersion()), st.GetQueuedJobs(), st.GetRunningJobs())}
 }

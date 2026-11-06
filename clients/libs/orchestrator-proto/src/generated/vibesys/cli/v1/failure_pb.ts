@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/failure.proto.
  */
 export const file_vibesys_cli_v1_failure: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9mYWlsdXJlLnByb3RvEg52aWJlc3lzLmNsaS52MSJFCgdGYWlsdXJlEikKBGtpbmQYASABKA4yGy52aWJlc3lzLmNsaS52MS5GYWlsdXJlS2luZBIPCgdtZXNzYWdlGAIgASgJKqACCgtGYWlsdXJlS2luZBIcChhGQUlMVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIeChpGQUlMVVJFX0tJTkRfSU5WQUxJRF9JTlBVVBABEhoKFkZBSUxVUkVfS0lORF9OT1RfRk9VTkQQAhIZChVGQUlMVVJFX0tJTkRfQ09ORkxJQ1QQAxIcChhGQUlMVVJFX0tJTkRfVU5BVkFJTEFCTEUQBBIdChlGQUlMVVJFX0tJTkRfSU5DT01QQVRJQkxFEAUSJQohRkFJTFVSRV9LSU5EX0VOVklST05NRU5UX01JU01BVENIEAYSHQoZRkFJTFVSRV9LSU5EX05PVF9NRUFTVVJFRBAHEhkKFUZBSUxVUkVfS0lORF9JTlRFUk5BTBAIQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw");
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9mYWlsdXJlLnByb3RvEg52aWJlc3lzLmNsaS52MSJFCgdGYWlsdXJlEikKBGtpbmQYASABKA4yGy52aWJlc3lzLmNsaS52MS5GYWlsdXJlS2luZBIPCgdtZXNzYWdlGAIgASgJKsUCCgtGYWlsdXJlS2luZBIcChhGQUlMVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIeChpGQUlMVVJFX0tJTkRfSU5WQUxJRF9JTlBVVBABEhoKFkZBSUxVUkVfS0lORF9OT1RfRk9VTkQQAhIZChVGQUlMVVJFX0tJTkRfQ09ORkxJQ1QQAxIcChhGQUlMVVJFX0tJTkRfVU5BVkFJTEFCTEUQBBIdChlGQUlMVVJFX0tJTkRfSU5DT01QQVRJQkxFEAUSJQohRkFJTFVSRV9LSU5EX0VOVklST05NRU5UX01JU01BVENIEAYSHQoZRkFJTFVSRV9LSU5EX05PVF9NRUFTVVJFRBAHEhkKFUZBSUxVUkVfS0lORF9JTlRFUk5BTBAIEiMKH0ZBSUxVUkVfS0lORF9EQUVNT05fT1RIRVJfQlVJTEQQCUI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM");
 
 /**
  * Failure is a typed error. Callers branch on kind; message is display text and may change.
@@ -99,6 +99,14 @@ export enum FailureKind {
    * @generated from enum value: FAILURE_KIND_INTERNAL = 8;
    */
   INTERNAL = 8,
+
+  /**
+   * The daemon that runs for this user is another build than the command line and has jobs queued
+   * or running, so the command line did not replace it. The message names both builds and the jobs.
+   *
+   * @generated from enum value: FAILURE_KIND_DAEMON_OTHER_BUILD = 9;
+   */
+  DAEMON_OTHER_BUILD = 9,
 }
 
 /**

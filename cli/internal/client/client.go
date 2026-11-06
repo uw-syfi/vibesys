@@ -108,6 +108,26 @@ type Client struct {
 	opts Options
 	conn *grpc.ClientConn
 	rpc  cliv1.DaemonServiceClient
+	// daemon is what the daemon reported of its build in the handshake.
+	daemon *cliv1.BuildVersions
+}
+
+// judge decides what to do with a daemon whose handshake said COMPATIBLE: use it when it is this
+// build, and otherwise replace it when it has no job, or refuse it when it has one. The status
+// that decided is returned with a refusal.
+func (c *Client) judge(ctx context.Context) (wire.DaemonDecision, error) {
+	if wire.SameBuild(c.opts.Version, c.daemon) {
+		return wire.UseDaemon, nil
+	}
+	st, err := c.Status(ctx)
+	if err != nil {
+		return "", err
+	}
+	decision := wire.DecideDaemon(c.opts.Version, c.daemon, st)
+	if decision == wire.RefuseDaemon {
+		return decision, wire.OtherBuildFailure(c.opts.Version, st)
+	}
+	return decision, nil
 }
 
 // Dial connects to a running daemon and does not start one. It fails with ErrNoDaemon when none
@@ -117,6 +137,8 @@ func Dial(ctx context.Context, opts Options) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Dial addresses the daemon that runs, whatever its build: status and stop are about it. The
+	// build is judged where a command is about to use the daemon (Connect).
 	if err := wire.CompatibilityError(answer); err != nil {
 		c.Close()
 		return nil, err
@@ -127,13 +149,27 @@ func Dial(ctx context.Context, opts Options) (*Client, error) {
 // Connect connects to the daemon and starts one when none runs. Clients that find none at once
 // start a single daemon between them. A daemon older than this client is stopped and replaced;
 // the jobs it was running keep running under their supervisors. A client older than the daemon
-// is refused, since it is the one to upgrade.
+// is refused, since it is the one to upgrade. A daemon of another build that speaks the protocol
+// is replaced when it has no job and refused, with failure kind DaemonOtherBuild, when it has one;
+// it is never used.
 func Connect(ctx context.Context, opts Options) (*Client, error) {
 	opts = opts.withDefaults()
 	c, answer, err := dial(ctx, opts)
 	switch {
 	case err == nil && answer == cliv1.Compatibility_COMPATIBILITY_COMPATIBLE:
-		return c, nil
+		decision, err := c.judge(ctx)
+		switch {
+		case decision == wire.UseDaemon:
+			return c, nil
+		case decision == wire.ReplaceDaemon && opts.Starter != nil:
+			c.Close()
+		default:
+			c.Close()
+			if err == nil {
+				err = wire.Unavailable("a daemon of another build runs and this command may not replace it")
+			}
+			return nil, err
+		}
 	case err == nil && wire.DaemonTooOld(answer) && opts.Starter != nil:
 		c.Close()
 	case err == nil:
@@ -162,7 +198,20 @@ func start(ctx context.Context, opts Options) (*Client, error) {
 		c, answer, err := dial(ctx, opts)
 		switch {
 		case err == nil && answer == cliv1.Compatibility_COMPATIBILITY_COMPATIBLE:
-			return c, nil
+			decision, err := c.judge(ctx)
+			switch {
+			case decision == wire.UseDaemon:
+				return c, nil
+			case decision == wire.ReplaceDaemon:
+				err = c.stopAndWait(ctx)
+				c.Close()
+				if err != nil {
+					return nil, err
+				}
+			default:
+				c.Close()
+				return nil, err
+			}
 		case err == nil && wire.DaemonTooOld(answer):
 			err := c.stopAndWait(ctx)
 			c.Close()
@@ -254,6 +303,7 @@ func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, erro
 		}
 		return nil, 0, c.fail(err)
 	}
+	c.daemon = resp.GetVersions()
 	return c, resp.GetCompatibility(), nil
 }
 

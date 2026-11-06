@@ -1,8 +1,10 @@
 package production
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +16,8 @@ import (
 // ensureArgv pins the only command used to start the shared CLI daemon.
 const ensureArgv = "daemon ensure"
 
-// Runner runs an argv with an explicit environment and returns only its status.
+// Runner runs an argv with an explicit environment and returns its status, with what the command
+// said on stderr when it failed.
 type Runner interface {
 	Run(context.Context, string, []string, []string) error
 }
@@ -23,7 +26,16 @@ type ExecRunner struct{}
 func (ExecRunner) Run(ctx context.Context, program string, args, env []string) error {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Env = env
-	return cmd.Run()
+	// The CLI says why it did not start a daemon on stderr (a daemon of another build with jobs, for
+	// one), and the exit status alone would hide that from whoever reads the failure. The text is
+	// display only: the decision is the exit status.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil && strings.TrimSpace(stderr.String()) != "" {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return err
 }
 
 // ExecEnsurer runs the recorded absolute CLI binary, never a PATH lookup.

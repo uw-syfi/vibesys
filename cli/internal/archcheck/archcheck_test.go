@@ -606,7 +606,7 @@ func f(k cliv1.FailureKind) int {
 `}
 	}
 	all := []string{}
-	for _, v := range []string{"UNSPECIFIED", "INVALID_INPUT", "NOT_FOUND", "CONFLICT", "UNAVAILABLE", "INCOMPATIBLE", "ENVIRONMENT_MISMATCH", "NOT_MEASURED", "INTERNAL"} {
+	for _, v := range []string{"UNSPECIFIED", "INVALID_INPUT", "NOT_FOUND", "CONFLICT", "UNAVAILABLE", "INCOMPATIBLE", "ENVIRONMENT_MISMATCH", "NOT_MEASURED", "DAEMON_OTHER_BUILD", "INTERNAL"} {
 		all = append(all, "cliv1.FailureKind_FAILURE_KIND_"+v)
 	}
 	if found := archcheck.Violations(switchOver(strings.Join(all, ", "))); hasSwitchViolation(found, "FailureKind") {

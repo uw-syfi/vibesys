@@ -774,3 +774,20 @@ func TestAnInvalidObjectiveNoiseFloorIsRefusedNamingTheObjective(t *testing.T) {
 		}
 	}
 }
+
+// A manifest the reader cannot parse is refused with the manifest's file and the task's directory,
+// so that its reader can open the file: the live finding named neither.
+func TestAnUnreadableManifestNamesItsFileAndDirectory(t *testing.T) {
+	for _, manifest := range []string{"version = 1\n", "version = \"0.1\"\nbackends = \n", "not toml at all"} {
+		_, err := task.Read(repo(taskFiles("t", manifest, objectives)), "t")
+		var f *core.Failure
+		if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
+			t.Fatalf("manifest %q: %v, want an invalid input failure", manifest, err)
+		}
+		for _, want := range []string{task.ManifestName, task.TasksDir + "/t", `"t"`} {
+			if !strings.Contains(f.Message, want) {
+				t.Errorf("manifest %q: %q does not name %q", manifest, f.Message, want)
+			}
+		}
+	}
+}

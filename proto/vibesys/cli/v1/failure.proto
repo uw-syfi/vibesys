@@ -19,6 +19,9 @@ enum FailureKind {
   // A commit has no measurement the command could use.
   FAILURE_KIND_NOT_MEASURED = 7;
   FAILURE_KIND_INTERNAL = 8;
+  // The daemon that runs for this user is another build than the command line and has jobs queued
+  // or running, so the command line did not replace it. The message names both builds and the jobs.
+  FAILURE_KIND_DAEMON_OTHER_BUILD = 9;
 }
 
 // Failure is a typed error. Callers branch on kind; message is display text and may change.

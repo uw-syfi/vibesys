@@ -304,7 +304,7 @@ command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind o
 | 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote or frontier add; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
 | 2 | invalid input | usage errors; `INVALID_INPUT`, `NOT_FOUND` |
 | 3 | timed out | `TIMED_OUT` |
-| 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` or `daemon ensure` |
+| 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `DAEMON_OTHER_BUILD`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` or `daemon ensure` |
 
 Exit `4` says nothing about the jobs: they may still succeed. A value from a newer daemon that this
 build cannot read is `4`, never `0`. `TestTheReadmeExitTableIsTheCode` holds this table to the code.
@@ -388,6 +388,18 @@ A command that needs the daemon connects and, if none runs, starts one and waits
 signal. A daemon that fails to start closes the signal without it, so the client reports the failure
 at once and does not wait out a timeout. The client and the daemon exchange their versions when they
 connect, and a mismatch is a refusal that says which side is older and what to run: `daemon restart` for an old daemon, an upgrade for an old client.
+
+A daemon of the same protocol but another build is never used silently. The handshake carries each
+build's identity (`BuildVersions.binary_version`: the release version, or `dev`), compared for
+equality and never parsed, so a release build and a local build are treated alike. When the
+identities differ, the command line asks the daemon for its status. A daemon with no queued or
+running job is stopped and replaced by the command line's own build, with no step for the user.
+A daemon with a job is left alone, and the command ends with `DAEMON_OTHER_BUILD` (exit 4), whose
+message names both builds, the daemon's pid and its jobs, and says to wait for them to finish or
+to run `daemon restart`, which replaces the daemon while its jobs keep running under their
+supervisors. `daemon status` and `daemon stop` address whichever daemon runs and do not apply this
+rule. A daemon older than the protocol the command line needs is replaced as before, jobs or not,
+since its jobs outlive it.
 
 `daemon ensure` is that same start protocol as a command: it holds `start.lock`, so any number of
 `ensure` commands and other commands that run at once start one daemon between them. A new client
