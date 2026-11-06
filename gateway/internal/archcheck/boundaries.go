@@ -27,7 +27,7 @@ type allowance struct {
 var boundaries = map[string]allowance{
 	"gateway/cmd/vibesys-client/main.go":              {reason: "a program's own argument vector", args: 1},
 	"gateway/cmd/vibesys-host/main.go":                {reason: "a program's own argument vector", args: 1},
-	"gateway/internal/clientmain/clientmain.go":       {reason: "the client finds the host program beside itself and takes its root from the environment; process-boundaries.md, release manifest and host control", env: 1, reads: 1},
+	"gateway/internal/clientmain/clientmain.go":       {reason: "the client finds the host program beside itself and takes its root from the environment; process-boundaries.md, release manifest and host control", env: 1},
 	"gateway/internal/connect/connect.go":             {reason: "the client starts a host and reports its serve.log; process-boundaries.md, host control", exec: 1, reads: 3, writes: 3},
 	"gateway/internal/hostcommand/runner.go":          {reason: "external:runs the host's own child commands; the env value has no reader", env: 1, exec: 1},
 	"gateway/internal/lifecycle/socket.go":            {reason: "the host's socket path, lock and stale socket handling; process-boundaries.md, host control", reads: 2, writes: 5},

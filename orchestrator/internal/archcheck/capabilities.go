@@ -25,6 +25,8 @@ type allowance struct {
 
 // boundaries holds the baseline, keyed by the file's path under orchestrator/.
 var boundaries = map[string]allowance{
+	"cmd/release-manifest/main.go":               {reason: "the build-time tool takes its output path from the command line and writes the release manifest; process-boundaries.md, release manifest", args: 1, writes: 1},
+	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 2},
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
 	"hosted/command.go":                          {reason: "the tool server reads its identity from the environment; process-boundaries.md, environment codec", env: 1},
 	"hosted/hosted.go":                           {reason: "the host reads its settings from the environment; process-boundaries.md, host control", env: 1},
