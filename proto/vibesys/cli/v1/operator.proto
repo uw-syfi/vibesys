@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
+import "vibesys/cli/v1/job.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -80,6 +81,19 @@ message Placement {
   Resources resources = 5;
   // How a batch allocation is submitted and Apptainer run, for the apptainer kind.
   ApptainerSettings apptainer = 6;
+  // The kinds of job the placement runs, such as ["check", "command"] (a profile is a command job)
+  // for a partition whose time limit is shorter than a measure takes. A job of another kind never
+  // starts on it, and a job restricted to it with --placement is refused when it is submitted.
+  // Empty means every kind.
+  repeated JobKind job_kinds = 7 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
 }
 
 // RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node
@@ -116,6 +130,15 @@ message SlurmSettings {
   // Zero means the default.
   double poll_interval_seconds = 8 [(buf.validate.field).double.gte = 0];
   double queue_timeout_seconds = 9 [(buf.validate.field).double.gte = 0];
+  // The longest time limit an allocation asks Slurm for, in seconds, such as the MaxTime of a
+  // partition: the CLI asks for a job's own time limit and a margin, which it caps at this, in
+  // whole minutes. A job that runs longer is ended by Slurm and fails, so a placement with a
+  // short cap names the job_kinds that fit in it. At least 60, and at most a year. Unset means no
+  // cap.
+  optional double max_time_seconds = 10 [(buf.validate.field).double = {
+    gte: 60
+    lte: 31536000
+  }];
 }
 
 // ApptainerSettings is how the apptainer kind makes an allocation and runs a container in it.

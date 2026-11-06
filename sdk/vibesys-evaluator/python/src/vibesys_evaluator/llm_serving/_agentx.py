@@ -60,8 +60,33 @@ class AgentxError(SampleError):
 
 
 @dataclass(frozen=True, kw_only=True)
+class Explore:
+    """The load of an exploratory replay, which the recipes of ``full`` and ``smoke`` fix."""
+
+    duration_secs: int
+    warmup_requests_per_lane: int
+    dataset_entries: int | None = None
+    seed: int = 42
+
+    def __post_init__(self) -> None:
+        """Refuse a load AIPerf would refuse, naming the field."""
+        for name, least in (("duration_secs", 1), ("warmup_requests_per_lane", 0), ("seed", 0)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < least:
+                msg = f"agentx.explore {name} must be an int >= {least}, got {value!r}"
+                raise ValueError(msg)
+        entries = self.dataset_entries
+        if entries is not None and (isinstance(entries, bool) or not isinstance(entries, int) or entries < 1):
+            msg = f"agentx.explore dataset_entries must be None or an int >= 1, got {entries!r}"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, kw_only=True)
 class Replay:
-    """One AgentX replay: the task's policy (model, load) and where the server is."""
+    """One AgentX replay: the task's policy (model, load) and where the server is.
+
+    ``explore`` is set exactly for the mode ``explore``, whose load it is.
+    """
 
     model: str
     tokenizer: str
@@ -69,8 +94,9 @@ class Replay:
     url: str
     concurrency: int
     max_context_length: int
-    mode: Literal["full", "smoke"]
+    mode: Literal["full", "smoke", "explore"]
     timeout_secs: float
+    explore: Explore | None = None
 
     def __post_init__(self) -> None:
         """Refuse a replay the harness would run with a meaning the task did not intend."""
@@ -95,8 +121,11 @@ class Replay:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 msg = f"agentx.replay {name} must be an int >= 1, got {value!r}"
                 raise ValueError(msg)
-        if self.mode not in ("full", "smoke"):
-            msg = f"agentx.replay mode is 'full' or 'smoke', got {self.mode!r}"
+        if self.mode not in ("full", "smoke", "explore"):
+            msg = f"agentx.replay mode is 'full' or 'smoke' (or 'explore'), got {self.mode!r}"
+            raise ValueError(msg)
+        if (self.mode == "explore") != (self.explore is not None):
+            msg = "agentx.replay takes an explore load exactly for the mode 'explore'"
             raise ValueError(msg)
         if (
             isinstance(self.timeout_secs, bool)
@@ -111,8 +140,15 @@ class Replay:
 
 
 def command(replay: Replay, artifacts: Path, *, python: str = sys.executable) -> list[str]:
-    """The fixed AgentX recipe; only smoke shortens it and relaxes its validity rules."""
+    """The fixed AgentX recipe; smoke and explore relax its validity rules.
+
+    Smoke shortens the recipe, and explore runs the load it is given.
+    """
     full = replay.mode == "full"
+    duration, warmup, seed, entries = ("900", "10", "42", None) if full else ("60", "1", "42", 2)
+    if (load := replay.explore) is not None:
+        duration, warmup = str(load.duration_secs), str(load.warmup_requests_per_lane)
+        seed, entries = str(load.seed), load.dataset_entries
     argv = [
         python,
         "-I",
@@ -136,15 +172,15 @@ def command(replay: Replay, artifacts: Path, *, python: str = sys.executable) ->
         "--max-context-length",
         str(replay.max_context_length),
         "--benchmark-duration",
-        "900" if full else "60",
+        duration,
         "--random-seed",
-        "42",
+        seed,
         "--trajectory-start-min-ratio",
         "0.25",
         "--trajectory-start-max-ratio",
         "0.75",
         "--warmup-requests-per-lane",
-        "10" if full else "1",
+        warmup,
         "--warmup-grace-period",
         "900",
         "--benchmark-grace-period",
@@ -155,8 +191,10 @@ def command(replay: Replay, artifacts: Path, *, python: str = sys.executable) ->
         "--ui",
         "simple",
     ]
+    if entries is not None:
+        argv.extend(["--num-dataset-entries", str(entries)])
     if not full:
-        argv.extend(["--num-dataset-entries", "2", "--unsafe-override"])
+        argv.append("--unsafe-override")
     return argv
 
 
@@ -332,6 +370,6 @@ def run(
     argv: Sequence[str] = command(replay, artifacts, python=python)
     log(f"agentx: {replay.mode} replay of {replay.model} at {replay.url}")
     runner(argv, timeout_secs=replay.timeout_secs, cwd=artifacts)
-    values = summary_metrics(read_export(artifacts), smoke=replay.mode == "smoke")
+    values = summary_metrics(read_export(artifacts), smoke=replay.mode != "full")
     log("agentx: " + ", ".join(f"{name} {value:.3f}" for name, value in values.items()))
     return values

@@ -48,6 +48,16 @@ func describe(j *cliv1.Job) string {
 	}
 	fmt.Fprintf(&b, "\t%s", commit)
 	switch spec := j.GetSpec(); {
+	case spec.GetCommand().GetLab() != nil:
+		fmt.Fprintf(&b, "\tlab for %v", spec.GetCommand().GetTimeout().AsDuration())
+		for _, p := range j.GetPlans() {
+			fmt.Fprintf(&b, ", plan #%d", p)
+		}
+		for _, s := range j.GetSubmitters() {
+			if s.GetAgent() != "" {
+				fmt.Fprintf(&b, ", by %s", s.GetAgent())
+			}
+		}
 	case spec.GetCommand() != nil:
 		fmt.Fprintf(&b, "\t%s", commandSummary(spec.GetCommand().GetArgv()))
 	case spec.GetCheck() != nil:
@@ -57,6 +67,12 @@ func describe(j *cliv1.Job) string {
 	}
 	if p := placementOf(j.GetEnvironment()); p != "" {
 		fmt.Fprintf(&b, "\ton %s", p)
+	}
+	if p := j.GetPriority(); p != cliv1.Priority_PRIORITY_UNSPECIFIED {
+		fmt.Fprintf(&b, "\tpriority %s", priorityName(p))
+	}
+	if h := j.GetHold(); h != nil && j.GetState() == cliv1.JobState_JOB_STATE_QUEUED {
+		fmt.Fprintf(&b, "\n\t  %s", describeHold(h))
 	}
 	for _, n := range j.GetNotes() {
 		fmt.Fprintf(&b, "\n\t  note: %s", n.GetText())

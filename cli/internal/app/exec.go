@@ -359,6 +359,15 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, 
 	if placement != "" {
 		spec.Placement = placement
 	}
+	// A lab lasts no longer than its placement runs a command (core.PlacementOffer.LabTime).
+	if c, ok := spec.Settings.(core.CommandSettings); ok && c.Lab != nil {
+		for _, o := range a.cfg.Placements {
+			if o.Name == spec.Placement {
+				c.Timeout = o.LabTime(c.Timeout)
+			}
+		}
+		spec.Settings = c
+	}
 	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
 		Repository: string(scope.Repository()), Commit: spec.Commit, Task: string(scope.Task()), Placement: spec.Placement,
 	})
@@ -826,6 +835,10 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 		return lifecycle.StoreAway{}
 	}
 	job, err := st.Job(ctx, ref.Job)
+	var plans []core.Plan
+	if err == nil {
+		plans, err = st.Plans(ctx, core.PlanFilter{})
+	}
 	var f *core.Failure
 	switch {
 	case err == nil:
@@ -836,7 +849,7 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 				a.cfg.Logf("job %s: reading which jobs its store gave up: %v", ref, err)
 			}
 		}
-		return a.jobIn(ctx, scope, job, presence, given)
+		return a.jobIn(ctx, scope, job, plans, presence, given)
 	case errors.As(err, &f) && f.Kind == core.FailureNotFound && !errors.Is(err, store.ErrAway):
 		return lifecycle.NoSuchJob{}
 	}
@@ -846,10 +859,10 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 // jobIn is what a store has of a job, whose run was found as presence, given the jobs the store gave
 // up. A running job the user gave up is given up only when no run of it is found here: a run found
 // here is this daemon's, so the job is taken back first.
-func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
+func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, plans []core.Plan, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
 	in := lifecycle.JobIn{
 		State: job.State, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
-		Work: a.workOf(job),
+		Work: a.workOf(job), Steering: steeringOf(job, plans),
 	}
 	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
 		return in

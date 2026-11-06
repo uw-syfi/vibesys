@@ -78,6 +78,9 @@ type CommandSettings struct {
 	// Candidate is set by the daemon for a job of a task of two images: how the job's candidate image
 	// is built, and the server the command runs against for a profile. It is never the caller's.
 	Candidate *CommandCandidate
+	// Lab, when set, makes the job a lab (lab.go): it has no Argv, Service or Profile, and holds its
+	// containers for Timeout once they are up.
+	Lab *LabSpec
 }
 
 // ProfileRequest is what a profile submission asks for.
@@ -200,6 +203,12 @@ type Job struct {
 	// Submitters are the callers that submitted the job, one for each distinct (Run, Agent), oldest
 	// first. A submission that joins or reuses the job adds its caller, also once the job is final.
 	Submitters []Submitter
+	// Hold is set while the job is held (Job.Control): it keeps its place in the queue and is not
+	// started. Only a queued job is held, and a job that leaves the queue is not held any more.
+	Hold *JobHold
+	// Priority is the job's own priority, which overrides its plans' (EffectivePriority). Empty
+	// inherits.
+	Priority Priority
 }
 
 // MaxAttempts is the most attempts a job gets. A job whose supervisor is proved gone is queued again

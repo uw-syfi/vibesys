@@ -63,6 +63,7 @@ func Run(t *testing.T, rig Rig) {
 	}{
 		{"an image that is not there is not an error", caseNoImage},
 		{"a built image is found by its tag and by its ID", caseBuildAndFind},
+		{"a built image has one content digest by its tag, by its ID and built again", caseContent},
 		{"a cancelled context fails the call with its error", caseCancelled},
 		{"a started container is listed by its labels", caseListed},
 		{"a command runs in the working directory with its output in order", caseOutput},
@@ -289,6 +290,23 @@ func caseBuildAndFind(h *harness) {
 	}
 	if _, ok, err := h.engine.Image(h.ctx, imageTag); err != nil || !ok {
 		h.t.Fatalf("Image after a second Build: %v, %v", ok, err)
+	}
+}
+
+func caseContent(h *harness) {
+	id := h.ensureImage()
+	byID, err := h.engine.Content(h.ctx, id)
+	if err != nil || !core.ValidImageDigest(byID) {
+		h.t.Fatalf("Content by ID: %q, %v; want sha256: and 64 hexadecimal digits", byID, err)
+	}
+	if byTag, err := h.engine.Content(h.ctx, imageTag); err != nil || byTag != byID {
+		h.t.Fatalf("Content by tag: %q, %v; want %q", byTag, err, byID)
+	}
+	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Context: h.context()}, io.Discard); err != nil {
+		h.t.Fatalf("second Build: %v", err)
+	}
+	if again, err := h.engine.Content(h.ctx, imageTag); err != nil || again != byID {
+		h.t.Fatalf("Content after building the same context again: %q, %v; want %q", again, err, byID)
 	}
 }
 

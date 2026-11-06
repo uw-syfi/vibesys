@@ -151,6 +151,9 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		LeaseConflicts:    leaseConflicts(st.Conflicts),
 		OtherDaemons:      s.otherDaemons(),
 	}
+	if st.Drain != nil {
+		out.Drain = wire.DaemonDrain(*st.Drain)
+	}
 	if s.machine != nil {
 		out.Sandbox = s.machine.Sandbox()
 		sandboxes, err := s.machine.Sandboxes()
@@ -322,6 +325,28 @@ func (s *Server) ReadLogs(req *cliv1.ReadLogsRequest, stream cliv1.DaemonService
 	}
 	err = s.app.ReadLogs(ctx, call.Scope, core.JobID(req.GetJobId()), req.GetOffset(), req.GetFollow(), func(c core.LogChunk) error {
 		return stream.Send(wire.LogChunk(c))
+	})
+	return wire.Error(err)
+}
+
+// Lab implements cliv1.DaemonServiceServer. A call that streams, such as an exec in the
+// foreground, ends with the daemon: a command it started is ended when its caller is gone.
+func (s *Server) Lab(req *cliv1.LabRequest, stream cliv1.DaemonService_LabServer) error {
+	ctx, cancel := s.bound(stream.Context())
+	defer cancel()
+	if err := protovalidate.Validate(req); err != nil {
+		return wire.Error(&core.Failure{Kind: core.FailureInvalidInput, Message: err.Error()})
+	}
+	labCall, err := wire.ToLabCall("call", req.GetCall())
+	if err != nil {
+		return wire.Error(err)
+	}
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	err = s.app.Lab(ctx, call, core.JobID(req.GetJobId()), labCall, func(r core.LabReply) error {
+		return stream.Send(&cliv1.LabResponse{Reply: wire.LabReply(r)})
 	})
 	return wire.Error(err)
 }

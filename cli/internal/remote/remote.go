@@ -107,7 +107,7 @@ func quoteWord(w string) string {
 
 // Output runs argv on the machine to its end and returns what it wrote to standard output. A
 // program that exits non-zero is an error that carries the end of what it wrote to standard error;
-// one the transport lost is unavailable.
+// one the transport lost is unavailable, and wraps ErrLost.
 func Output(ctx context.Context, sh Shell, argv []string, stdin io.Reader) (string, error) {
 	cmd := sh.Command(ctx, argv)
 	var out, errb bytes.Buffer
@@ -127,12 +127,22 @@ func Output(ctx context.Context, sh Shell, argv []string, stdin io.Reader) (stri
 	msg := clip(strings.TrimSpace(errb.String()))
 	switch {
 	case errors.As(err, &exit) && sh.Lost(exit.ExitCode()):
-		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}
+		return "", lostError{&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}}
 	case errors.As(err, &exit):
 		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s on %s exited with %d: %s", what, sh.Where(), exit.ExitCode(), msg)}
 	}
 	return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot run %s on %s: %v", what, sh.Where(), err)}
 }
+
+// ErrLost is wrapped by the error of a program whose end the transport lost (Shell.Lost), such as
+// one ssh could not connect for, or whose connection dropped: nobody saw the program end, or start.
+var ErrLost = errors.New("remote: the connection to the machine was lost")
+
+// lostError is a failure of a program the transport lost: a *core.Failure, as errors.As finds it,
+// that wraps ErrLost, with the failure's own text.
+type lostError struct{ *core.Failure }
+
+func (e lostError) Unwrap() []error { return []error{e.Failure, ErrLost} }
 
 func clip(s string) string {
 	const max = 600

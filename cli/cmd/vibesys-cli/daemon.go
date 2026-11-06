@@ -15,11 +15,11 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 )
 
-// daemonCommand is `daemon status|ensure|stop|restart|forget`, and `daemon run`, which is the daemon
+// daemonCommand is `daemon status|ensure|stop|restart|drain|resume|forget`, and `daemon run`, which is the daemon
 // process itself and is what a client starts.
 func daemonCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, d.jsonErrors, usagef("daemon: status, ensure, stop, restart or forget"))
+		return fail(d, d.jsonErrors, usagef("daemon: status, ensure, stop, restart, drain, resume or forget"))
 	}
 	switch args[0] {
 	case "status":
@@ -32,12 +32,16 @@ func daemonCommand(ctx context.Context, d deps, args []string) int {
 		return daemonRestart(ctx, d, args[1:])
 	case "forget":
 		return daemonForget(ctx, d, args[1:])
+	case "drain":
+		return daemonDrain(ctx, d, args[1:])
+	case "resume":
+		return daemonResume(ctx, d, args[1:])
 	case "run":
 		return daemonRun(ctx, d)
 	case "install":
 		return fail(d, d.jsonErrors, usagef("daemon install is not available in this build; the daemon starts when a command needs it"))
 	default:
-		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, ensure, stop, restart or forget)", args[0]))
+		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, ensure, stop, restart, drain, resume or forget)", args[0]))
 	}
 }
 
@@ -82,6 +86,9 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 	// that holds the machine, so none runs unseen.
 	if st.GetSandbox() {
 		fmt.Fprintln(d.stdout, "role\tsandbox")
+	}
+	if st.GetDrain() != nil {
+		fmt.Fprintln(d.stdout, describeDrain(st.GetDrain()))
 	}
 	for _, sb := range st.GetSandboxes() {
 		fmt.Fprintf(d.stdout, "sandbox\tpid %d\truntime %s\tversion %s\n", sb.GetPid(), sb.GetRuntimeDir(), sb.GetVersion())

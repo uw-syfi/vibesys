@@ -18,7 +18,20 @@
 //
 // Around those rules it applies what it is given: a Policy orders the waiting jobs, a Placer ranks
 // where each may run, and Filters may hold a job back. A buggy policy, placer or filter can be
-// unfair, never unsafe. A job that waits keeps its turn on every place it may run: a later job does
+// unfair, never unsafe.
+//
+// Priority orders the waiting jobs before the policy does: the jobs that are not First are
+// considered by the priority each counts as now (core.AgedPriority of Candidate.Priority, for how
+// long it has waited by State.Now), highest first, and the policy's order holds among jobs of one
+// priority. So priority picks among the jobs the rules let start, never past them: a measure still
+// runs alone, capacity and claims still hold, a waiting job still keeps its turn (now its turn in
+// this order), and no job that runs is stopped.
+//
+// An operator steers the queue on top of that. A held job (Candidate.Hold) waits, and a draining
+// daemon (State.Drain) starts no job but the First ones, which its stores have running already;
+// each such job waits as core.WaitHeld, naming the hold or the drain. A job held back this way, by a
+// filter included, keeps no turn: it stands in no other job's way, and takes its place in the order
+// again when it is released. A job that waits keeps its turn on every place it may run: a later job does
 // not take a resource an earlier one waits for, so a job that needs a resource for itself alone is
 // not starved by a stream of jobs that share it.
 //
@@ -101,6 +114,10 @@ type Candidate struct {
 	// an option that claims that resource, keeping its turn there, until the caller clears it to
 	// try again; it may start on another option.
 	Leased *LeasedOut
+	// Hold, when set, says the job is held: it does not start, and keeps no turn.
+	Hold *core.JobHold
+	// Priority is the job's priority before aging: its own or its plans'. None is normal.
+	Priority core.Priority
 }
 
 // LeasedOut is a lease a job was refused: the resource, and who held its lease, or, when the place
@@ -128,6 +145,20 @@ type State struct {
 	Waiting []Candidate
 	// Recent is the last grants, oldest first, as Remember keeps them.
 	Recent []Grant
+	// Drain, when set, says the daemon is draining: no job starts but the First ones.
+	Drain *core.Drain
+	// Now is when Step decides, which a job's wait since it was submitted ages its priority by. The
+	// zero time ages nothing.
+	Now time.Time
+}
+
+// Rank is the priority a waiting job counts as at a moment: its priority, aged by how long it has
+// waited since it was submitted.
+func Rank(c Candidate, now time.Time) core.Priority {
+	if now.IsZero() {
+		return c.Priority.OrNormal()
+	}
+	return core.AgedPriority(c.Priority, now.Sub(c.Submitted))
 }
 
 // Remember returns the recent grants with the started ones added, keeping the last RecentGrants.
@@ -312,8 +343,8 @@ func ArrivalOrder(cs []Candidate) []Candidate {
 }
 
 // Step decides, for every waiting job, whether it starts now and where. The decisions come in the
-// order the jobs were considered: the First ones in arrival order, then the rest in the policy's
-// order.
+// order the jobs were considered: the First ones in arrival order, then the rest by priority, and
+// in the policy's order within one priority.
 func Step(s State, rules Rules) []Decision {
 	arrived := ArrivalOrder(s.Waiting)
 	var first, rest []Candidate
@@ -327,15 +358,29 @@ func Step(s State, rules Rules) []Decision {
 	if rules.Policy != nil && len(rest) > 0 {
 		rest = permutation(rest, rules.Policy.Order(slices.Clone(rest), UsageOf(s)), func(c Candidate) ID { return c.ID })
 	}
+	// Priority first; the policy's order within one priority, as the sort is stable.
+	slices.SortStableFunc(rest, func(a, b Candidate) int { return cmp.Compare(Rank(b, s.Now).Level(), Rank(a, s.Now).Level()) })
 	if rules.Placer == nil {
 		rules.Placer = LeastLoaded{}
 	}
 	b := newBook(s)
 	out := make([]Decision, 0, len(arrived))
 	for _, c := range append(first, rest...) {
-		out = append(out, b.decide(c, rules))
+		out = append(out, b.decide(c, rules, steered(s, c)))
 	}
 	return out
+}
+
+// steered is why an operator holds a job back, or "": the daemon drains, which holds back every
+// job but a First one, or the job is held.
+func steered(s State, c Candidate) string {
+	switch {
+	case s.Drain != nil && !c.First:
+		return s.Drain.WaitDetail()
+	case c.Hold != nil:
+		return c.Hold.WaitDetail()
+	}
+	return ""
 }
 
 // permutation returns what a policy or a placer ordered, held to being the items it was given: each
@@ -420,10 +465,10 @@ func (b *book) hold(id ID, claims []Claim) {
 	}
 }
 
-func (b *book) decide(c Candidate, rules Rules) Decision {
+func (b *book) decide(c Candidate, rules Rules, steered string) Decision {
 	// The options the resources can ever grant, in the job's order, one for each placement.
 	var options []Option
-	refusal := "it may run on no placement that gives what its task needs"
+	refusal := "it may run on no placement that runs its kind of job and gives what its task needs"
 	for i, o := range c.Options {
 		if slices.ContainsFunc(c.Options[:i], func(p Option) bool { return p.Placement == o.Placement }) {
 			continue
@@ -438,6 +483,9 @@ func (b *book) decide(c Candidate, rules Rules) Decision {
 	}
 	if len(options) == 0 {
 		return Refuse{ID: c.ID, Detail: refusal}
+	}
+	if steered != "" {
+		return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitHeld, Detail: steered}}
 	}
 	placement := func(o Option) string { return o.Placement }
 	ranked := permutation(options, rules.Placer.Rank(cloneOptions(options), b.load), placement)

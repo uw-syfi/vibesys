@@ -136,3 +136,29 @@ func (c *Client) Follow(ctx context.Context, offset uint64, emit func([]byte) er
 		}
 	}
 }
+
+// Lab implements supervisor.Handle.
+func (c *Client) Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := c.rpc.LabCall(ctx, &cliv1.LabCallRequest{Call: wire.LabCall(call)})
+	if err != nil {
+		return mapError(ctx, err)
+	}
+	for {
+		msg, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return mapError(ctx, err)
+		}
+		reply, err := wire.ToLabReply("reply", msg.GetReply())
+		if err != nil {
+			return err
+		}
+		if err := emit(reply); err != nil {
+			return err
+		}
+	}
+}

@@ -111,6 +111,9 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 			Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service),
 			Profile: profileRequest(settings.Profile), Candidate: commandCandidate(settings.Candidate),
 		}
+		if settings.Lab != nil {
+			command.Lab = &cliv1.LabSpec{}
+		}
 		if settings.Timeout != 0 {
 			command.Timeout = durationpb.New(settings.Timeout)
 		}
@@ -168,8 +171,13 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	if err != nil {
 		return core.CommandSettings{}, err
 	}
-	// A profile is submitted without a command, which the daemon takes from the task.
-	if (len(c.GetArgv()) == 0 && profile == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
+	var lab *core.LabSpec
+	if c.GetLab() != nil {
+		lab = &core.LabSpec{}
+	}
+	// A profile is submitted without a command, which the daemon takes from the task, and a lab
+	// runs none: it runs what its calls ask (app.labOf refuses one that names a command).
+	if (len(c.GetArgv()) == 0 && profile == nil && lab == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
 		return core.CommandSettings{}, invalid("%s.argv: a command needs a program to run", field)
 	}
 	if svc := c.GetService(); svc != nil && (len(svc.GetArgv()) == 0 || svc.GetArgv()[0] == "") {
@@ -190,7 +198,7 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	}
 	return core.CommandSettings{
 		Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout,
-		Profile: profile, Candidate: candidate,
+		Profile: profile, Candidate: candidate, Lab: lab,
 	}, nil
 }
 
@@ -232,7 +240,38 @@ func Job(j core.Job) *cliv1.Job {
 		out.Needs = append(out.Needs, ResourceKind(k))
 	}
 	out.TaskVersion = j.TaskVersion
+	if j.Hold != nil {
+		out.Hold = JobHold(*j.Hold)
+	}
+	out.Priority = Priority(j.Priority)
 	return out
+}
+
+// JobHold returns the contract's message for a job's hold.
+func JobHold(h core.JobHold) *cliv1.JobHold {
+	return &cliv1.JobHold{Agent: h.Agent, Reason: h.Reason, At: timestamppb.New(h.At)}
+}
+
+// ToJobHold returns the domain hold for the contract's message, and nil for none.
+func ToJobHold(h *cliv1.JobHold) *core.JobHold {
+	if h == nil {
+		return nil
+	}
+	return &core.JobHold{Agent: h.GetAgent(), Reason: h.GetReason(), At: toTime(h.GetAt())}
+}
+
+// DaemonDrain returns the contract's message for a daemon's drain.
+func DaemonDrain(d core.Drain) *cliv1.DaemonDrain {
+	return &cliv1.DaemonDrain{Agent: d.Agent, Reason: d.Reason, Since: timestamppb.New(d.Since)}
+}
+
+// ToDaemonDrain returns the domain drain for the contract's message, which must be valid: a drain
+// has a time it began.
+func ToDaemonDrain(d *cliv1.DaemonDrain) (core.Drain, error) {
+	if err := protovalidate.Validate(d); err != nil {
+		return core.Drain{}, fmt.Errorf("drain: %w", err)
+	}
+	return core.Drain{Agent: d.GetAgent(), Reason: d.GetReason(), Since: toTime(d.GetSince())}, nil
 }
 
 // Attempt returns the contract's message for an attempt that was cut off.
@@ -337,6 +376,10 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		out.Needs = append(out.Needs, kind)
 	}
 	out.TaskVersion = j.GetTaskVersion()
+	out.Hold = ToJobHold(j.GetHold())
+	if out.Priority, err = ToPriority("job.priority", j.GetPriority()); err != nil {
+		return core.Job{}, err
+	}
 	return out, nil
 }
 

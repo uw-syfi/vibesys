@@ -82,6 +82,11 @@ type JobStore interface {
 
 	// AddNote appends a note to a job in any state.
 	AddNote(ctx context.Context, id core.JobID, note core.Note) (core.Job, error)
+
+	// ControlJob changes how a job waits in the queue, such as a hold, with the note that records
+	// the change, as one change. What a change may do is the decision of core.Job.Control, and a
+	// change it refuses changes nothing and fails as it does.
+	ControlJob(ctx context.Context, id core.JobID, control core.JobControl) (core.Job, error)
 }
 
 // ResultStore reads saved results and keeps the promotion record they are judged against.

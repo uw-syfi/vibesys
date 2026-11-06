@@ -55,6 +55,9 @@ type world struct {
 	// leasing is how they share what they hold alone with other daemons; the zero value leases
 	// nothing.
 	leasing app.Leasing
+	// drains is where every daemon of the world keeps whether it drains, as a runtime directory
+	// does across restarts.
+	drains *app.MemoryDrainRecord
 	// timers and slowPeriod, when set, replace the instant timers and the slow period of an hour.
 	timers     clock.Timers
 	slowPeriod time.Duration
@@ -78,6 +81,7 @@ func newWorld(t *testing.T) *world {
 		checkouts: &fakeenv.Checkouts{},
 		survivors: supervisor.NewSurvivors(),
 		git:       gitrepo.NewFake(),
+		drains:    &app.MemoryDrainRecord{},
 	}
 	t.Cleanup(func() {
 		for _, a := range w.apps {
@@ -122,6 +126,7 @@ func (w *world) newApp() *app.App {
 		Repositories: w.git,
 		Scheduler:    w.scheduler,
 		Leasing:      w.leasing,
+		Drains:       w.drains,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	})
 	if w.timers != nil {

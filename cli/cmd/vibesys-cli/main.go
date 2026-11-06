@@ -77,7 +77,11 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"wait":       waitCommand,
 	"cancel":     cancelCommand,
 	"note":       noteCommand,
+	"hold":       holdCommand,
+	"release":    releaseCommand,
+	"job":        jobCommand,
 	"jobs":       jobsCommand,
+	"queue":      queueCommand,
 	"logs":       logsCommand,
 	"show":       showCommand,
 	"compare":    compareCommand,
@@ -85,6 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"result":     resultCommand,
 	"frontier":   frontierCommand,
 	"plan":       planCommand,
+	"lab":        labCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
@@ -102,10 +107,23 @@ commands:
                                                  queue a command and print the job
   submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
                                                  candidate's server started under the prefix
+  lab start <commit> [--for 30m] [--wait]        hold a placement's containers for profiling and
+                                                 exploring: nothing a lab runs is scored
+  lab exec <lab> [--in candidate|task] [--detach] [--env K=V] -- <argv...>
+                                                 run a command in the lab; exits with its code
+  lab ps|end <lab>, lab kill <lab> <pN>, lab checkout <lab> <commit>, lab list
+  lab cp <lab>:<path> <local> | <local> <lab>:<path>
+                                                 copy out of or into the lab's artifacts directory
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job
+  hold <job> [--reason text]                     keep a queued job from starting; it keeps its place
+  release <job>                                  let a held job start in its turn
+  job priority <job> high|normal|low|inherit --reason text
+                                                 a queued job's own priority, over its plans'
   jobs [--commit rev] [--state s] [--note-contains text]
+  queue                                          queued and running jobs by plan, why each waits,
+                                                 its priority, age and estimated duration
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit
   compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive
@@ -116,6 +134,7 @@ commands:
   plan create|list|view|edit|comment|close       store and find plans
   plan check-gain --under <share>                say whether every open or parked plan's gain bound is below it
   daemon status|stop|restart                     manage the daemon
+  daemon drain [--reason text] | daemon resume   start no queued job until resumed, across restarts
   upgrade                                        replace this binary with the newest release
 
 Every job and daemon command takes --json, and --repo, --task, --run, --harness, --agent and

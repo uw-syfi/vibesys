@@ -203,7 +203,7 @@ func (t *tail) last() string {
 	return strings.ToValidUTF8(clipEnd(strings.Join(lines, "\n"), maxError), "")
 }
 
-// Content implements apptainer.Exporter: the digest of what `docker image inspect` says a
+// Content implements docker.Engine and apptainer.Exporter: the digest of what `docker image inspect` says a
 // container of the image runs (ContentDigest).
 func (e *Engine) Content(ctx context.Context, image string) (string, error) {
 	if image == "" || strings.HasPrefix(image, "-") {

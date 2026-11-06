@@ -151,7 +151,7 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("jobs", d)
 	var states stateList
 	commit := fs.String("commit", "", "only jobs of this commit (any revision)")
-	kind := fs.String("kind", "", "only jobs of this kind: check, command or measure")
+	kind := fs.String("kind", "", "only jobs of this kind: check, command, measure, or lab (a command job that is a lab)")
 	contains := fs.String("note-contains", "", "only jobs with a note that contains this text")
 	fs.Var(&states, "state", "only jobs in this state; repeat or separate with commas")
 	positional, err := parse(fs, args)
@@ -160,6 +160,10 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	}
 	if len(positional) != 0 {
 		return fail(d, c.json, usagef("jobs: unexpected argument %q", positional[0]))
+	}
+	labsOnly := *kind == "lab"
+	if labsOnly {
+		*kind = "command"
 	}
 	jobKind, err := jobKindOf(*kind)
 	if err != nil {
@@ -186,10 +190,19 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
+	if labsOnly {
+		resp = onlyLabs(resp)
+	}
 	if c.json {
 		printJSON(d, resp)
 		return exitOK
 	}
+	printJobs(d, resp, callCtx.GetTask())
+	return exitOK
+}
+
+// printJobs prints a listing of jobs, each with why it waits when it is queued.
+func printJobs(d deps, resp *cliv1.ListJobsResponse, task string) {
 	waits := map[string]*cliv1.WaitReason{}
 	for _, w := range resp.GetWaits() {
 		waits[w.GetJobId()] = w.GetReason()
@@ -197,11 +210,10 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	for _, j := range resp.GetJobs() {
 		line := describe(j)
 		if w, ok := waits[j.GetId()]; ok {
-			line += "\n\t  waiting: " + describeWait(w, callCtx.GetTask())
+			line += "\n\t  waiting: " + describeWait(w, task)
 		}
 		fmt.Fprintln(d.stdout, line)
 	}
-	return exitOK
 }
 
 // jobKindNames maps what a user writes to job kinds. It is read from the contract's enum, so a

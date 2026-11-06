@@ -4,6 +4,7 @@ package dockercli_test
 
 import (
 	"context"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,7 +78,7 @@ func providerOver(t *testing.T, scope string, engine docker.Engine) *docker.Prov
 	t.Helper()
 	p, err := docker.New(docker.Config{
 		Engine: engine, Source: gitSource{t}, Backend: cpuBackend(), Timers: clock.System{},
-		IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default", User: docker.User{UID: os.Getuid(), GID: os.Getgid()},
+		IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default", User: docker.User{UID: os.Getuid(), GID: os.Getgid()}, Builds: (&fakelease.Place{}).Daemon(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +156,8 @@ func TestATaskRunsFromACleanCheckoutOfItsCommitInItsPinnedImage(t *testing.T) {
 	}
 	// The image is this test's own, with a line no other run has: remove it, so that the tests
 	// leave one image of each fixed Dockerfile and not one for every run.
-	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp3.ImageDigest).Run() })
+	image := taskImageOf(t, fp3)
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", image).Run() })
 	if fp1.Equal(fp3) || fp1.ImageDigest == fp3.ImageDigest {
 		t.Errorf("a changed Dockerfile gave the same environment %s", fp3)
 	}

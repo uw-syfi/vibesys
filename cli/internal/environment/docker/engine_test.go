@@ -111,7 +111,9 @@ func TestTheFakeEngineRefusesWhatValidateRefuses(t *testing.T) {
 }
 
 // Every call of the engine can fail, before or after it does its work, and the fingerprint fails
-// with it instead of pinning a guess; once the engine works again it is the same fingerprint.
+// with it instead of pinning a guess; once the engine works again it is the same fingerprint. A
+// build whose reply is lost after it made the image is the exception: the engine has the image
+// under the tag, which names what was asked for, so the fingerprint pins it.
 func TestTheFingerprintFailsWithTheEngineAndRecovers(t *testing.T) {
 	for _, op := range dockerfake.Ops {
 		for _, late := range []bool{false, true} {
@@ -122,8 +124,13 @@ func TestTheFingerprintFailsWithTheEngineAndRecovers(t *testing.T) {
 				}
 				return nil
 			})
-			_, err := s.env.Fingerprint(context.Background())
-			if op == dockerfake.OpImage || op == dockerfake.OpBuild {
+			first, err := s.env.Fingerprint(context.Background())
+			switch {
+			case op == dockerfake.OpBuild && late:
+				if err != nil {
+					t.Errorf("%s late=%v: %v, want the image the build made", op, late, err)
+				}
+			case op == dockerfake.OpImage || op == dockerfake.OpBuild:
 				if !errors.Is(err, boom) {
 					t.Errorf("%s late=%v: got %v, want the engine's failure", op, late, err)
 				}
@@ -135,6 +142,9 @@ func TestTheFingerprintFailsWithTheEngineAndRecovers(t *testing.T) {
 			}
 			if f2, err := s.env.Fingerprint(context.Background()); err != nil || !f1.Equal(f2) {
 				t.Errorf("%s late=%v: the fingerprint changed: %v, %v", op, late, f2, err)
+			}
+			if op == dockerfake.OpBuild && late && !first.Equal(f1) {
+				t.Errorf("%s late=%v: the fingerprint changed: %v, %v", op, late, first, f1)
 			}
 		}
 	}

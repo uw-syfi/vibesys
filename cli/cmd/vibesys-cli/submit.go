@@ -242,10 +242,23 @@ func send(ctx context.Context, d deps, asJSON, wait bool, req *cliv1.SubmitReque
 	} else {
 		fmt.Fprintln(d.stdout, describeSubmitted(resp))
 	}
+	warnNoPlan(d, req, resp.GetJob())
 	if !wait {
 		return exitOK
 	}
 	return waitFor(ctx, d, cl, req.GetContext(), []string{resp.GetJob().GetId()}, client.WaitOptions{}, asJSON)
+}
+
+// warnNoPlan says on stderr, as plain text even with --json, that a job of an optimization run was
+// submitted with no plan: whoever reads the queue cannot tell what it is for, and it takes no plan's
+// priority. It refuses nothing and changes no exit code; a person at a terminal, who names no run,
+// is not warned.
+func warnNoPlan(d deps, req *cliv1.SubmitRequest, job *cliv1.Job) {
+	if req.GetContext().GetRunId() == "" || req.GetPlan() != 0 {
+		return
+	}
+	fmt.Fprintf(d.stderr, "vibesys-cli: warning: job %s of run %s has no --plan; link every job of a run to the plan it serves (--plan <n>), so the queue says what it is for and it takes the plan's priority\n",
+		job.GetId(), req.GetContext().GetRunId())
 }
 
 // refuseHostPlacement refuses a --placement given on the command line beside --env host: a host job

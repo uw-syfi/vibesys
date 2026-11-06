@@ -32,6 +32,10 @@ type Checkouts interface {
 	// removes it. It fails with core.FailureNotFound for a commit the repository does not have
 	// and core.FailureUnavailable for a repository it cannot reach.
 	Checkout(ctx context.Context, repository string, commit core.Commit) (core.Checkout, func(), error)
+
+	// Switch replaces a checkout it made, in place, with a clean checkout of another commit of the
+	// repository, as a lab's checkout is replaced: the directory stays. It fails as Checkout does.
+	Switch(ctx context.Context, repository string, checkout core.Checkout, commit core.Commit) error
 }
 
 // Handle is the daemon's end of one job's supervisor. Every method but Follow returns when the
@@ -62,6 +66,12 @@ type Handle interface {
 	// for a running command, which is cancelled first and released after its outcome is recorded.
 	// Releasing a parked supervisor aborts a job that never started. It is idempotent.
 	Release(ctx context.Context) error
+
+	// Lab makes one call on the lab the job is (core.LabSpec), and passes its replies to emit, the
+	// answer last. It waits while the lab is starting, and fails with core.FailureInvalidInput for
+	// a job that is not a lab, with core.FailureConflict for a lab that ended, and as the other
+	// methods do when the supervisor is gone.
+	Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error
 
 	// Close lets go of the connection and nothing else: the supervisor is not told, and goes on.
 	// It is idempotent, and a call in flight fails.

@@ -125,8 +125,16 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	hold, err := p.daemonMachine(dir, clk)
+	if err != nil {
+		return err
+	}
+	scope, err := leaseScopeOf(hold.Sandbox(), dir, func() (string, error) { return runtimedir.ResolveLeases(runtimedir.System()) })
+	if err != nil {
+		return err
+	}
 	// The daemon runs no container: it only fingerprints the environments.
-	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
+	machines, err := p.machineEnvironments(op, clk, dir, dir.Path(), scope)
 	if err != nil {
 		return err
 	}
@@ -139,14 +147,6 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	}
 	if here := filestore.StateHome(p.Getenv, p.Home); here != places.GetStateHome() {
 		logf("this daemon keeps its state in %s, as %s records; this environment alone would say %s", places.GetStateHome(), dir.Path(), here)
-	}
-	hold, err := p.daemonMachine(dir, clk)
-	if err != nil {
-		return err
-	}
-	scope, err := leaseScopeOf(hold.Sandbox(), dir, func() (string, error) { return runtimedir.ResolveLeases(runtimedir.System()) })
-	if err != nil {
-		return err
 	}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
@@ -193,7 +193,8 @@ var policies = map[string]func() schedule.Policy{
 const hostResource schedule.ResourceID = "host"
 
 // schedulerOf is how the operator config shares the machines: the named policy, a demand that lets
-// a docker job run on every placement that gives what its task needs (offers says what each gives),
+// a docker job run on every placement that runs its kind of job and gives what its task needs
+// (offers says what each runs and gives),
 // a resource of max_jobs slots for each placement, and one for each resource the placements'
 // resources claim, with room for every job of the placements that claim it, so that it bounds only
 // the claims that take it whole: a measure's, and those a resource makes exclusive, such as a
@@ -216,7 +217,7 @@ func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims 
 		resources = append(resources, schedule.Resource{ID: schedule.PlacementOf(name), Capacity: slots})
 		var offered schedule.Offered
 		if i := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == name }); i >= 0 {
-			offered.Resources = offers[i].Resources
+			offered.Resources, offered.Jobs = offers[i].Resources, offers[i].Jobs
 		}
 		for _, c := range claims[name] {
 			id := schedule.ResourceID(c.Resource)
@@ -258,7 +259,13 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	}
 	// The containers of this run are a scope of their own: the daemon may run other jobs beside it,
 	// and a run removes the containers of its scope that it does not own.
-	machines, err := p.machineEnvironments(op, clk, dir, runDir)
+	// Its builds take turns with those of the daemon's other jobs, and of every daemon that shares
+	// an engine's machine, in the daemon's leases.
+	scope, err := p.leaseScope(dir)
+	if err != nil {
+		return err
+	}
+	machines, err := p.machineEnvironments(op, clk, dir, runDir, scope)
 	if err != nil {
 		return err
 	}

@@ -62,13 +62,17 @@ type Config struct {
 	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time,
 	// the oldest first.
 	Scheduler Scheduler
+	// Drains keeps whether the daemon drains across its restarts. Nil keeps it in memory, for the
+	// App's life only.
+	Drains DrainRecord
 	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
 	// leases nothing.
 	Leasing Leasing
 
 	// Placements are the placements of the operator config a docker job can run on, with the kinds
-	// of resource each gives. A submission is refused unless one of them gives what its task needs,
-	// or the one it is restricted to does (core.EligiblePlacements); which of them the job runs on
+	// of resource each gives and the kinds of job each runs. A submission is refused unless one of
+	// them runs its kind and gives what its task needs, or the one it is restricted to does
+	// (core.EligiblePlacements); which of them the job runs on
 	// is the scheduler's choice when it starts (Scheduler.Demand). Empty leaves a job's restriction
 	// as it is.
 	Placements []core.PlacementOffer
@@ -120,6 +124,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxNoteBytes <= 0 {
 		c.MaxNoteBytes = DefaultMaxNoteBytes
+	}
+	if c.Drains == nil {
+		c.Drains = &MemoryDrainRecord{}
 	}
 	if c.Scheduler.Demand == nil {
 		c.Scheduler.Demand = schedule.DefaultDemand{}

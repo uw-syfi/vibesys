@@ -28,8 +28,9 @@ func (a *App) openTask(ctx context.Context, scope core.Scope) (taskStore, error)
 // task's measurements carry their own floor, the [pareto] relative_noise, which core uses for them.
 const noDeclaredNoise = 0
 
-// Show returns every result saved for a commit, checks and measurements, oldest first. A commit
-// with none is not an error.
+// Show returns every result saved for a commit, checks and measurements, oldest first, each docker
+// fingerprint naming its image by content as compare sees it (withImageContents). A commit with
+// none is not an error.
 func (a *App) Show(ctx context.Context, scope core.Scope, commit core.Commit) ([]core.Result, error) {
 	if !commit.Valid() {
 		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
@@ -41,7 +42,11 @@ func (a *App) Show(ctx context.Context, scope core.Scope, commit core.Commit) ([
 	if err != nil {
 		return nil, err
 	}
-	return t.store.Results(ctx, core.ResultFilter{Commit: commit})
+	results, err := t.store.Results(ctx, core.ResultFilter{Commit: commit})
+	if err != nil {
+		return nil, err
+	}
+	return a.withImageContents(ctx, results), nil
 }
 
 // Compare says how a commit's saved measurements compare with another commit's, which is the
@@ -66,7 +71,7 @@ func (a *App) Compare(ctx context.Context, c core.CallContext, commit, against c
 			return core.Comparison{}, err
 		}
 	}
-	results, err := resultsOf(ctx, t, commit, against)
+	results, err := a.resultsOf(ctx, t, commit, against)
 	if err != nil {
 		return core.Comparison{}, err
 	}
@@ -98,7 +103,7 @@ func (a *App) judgeAgainstHead(ctx context.Context, t taskStore, commits []core.
 			distinct = append(distinct, c)
 		}
 	}
-	results, err := resultsOf(ctx, t, distinct...)
+	results, err := a.resultsOf(ctx, t, distinct...)
 	if err != nil {
 		a.cfg.Logf("task %s in %s: reading results to judge against the result branch: %v", string(t.scope.Task()), string(t.scope.Repository()), err)
 		return nil
@@ -172,7 +177,7 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 	if err != nil {
 		return nil, nil, err
 	}
-	results, err := resultsOf(ctx, t, commit, head)
+	results, err := a.resultsOf(ctx, t, commit, head)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -262,7 +267,7 @@ func (a *App) offerToFrontier(ctx context.Context, t taskStore, commit, head cor
 	for _, m := range frontier.Members {
 		commits = append(commits, m.Commit)
 	}
-	results, err := resultsOf(ctx, t, commits...)
+	results, err := a.resultsOf(ctx, t, commits...)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +303,7 @@ func (a *App) Frontier(ctx context.Context, c core.CallContext) ([]core.Frontier
 	for _, m := range frontier.Members {
 		commits = append(commits, m.Commit)
 	}
-	results, err := resultsOf(ctx, t, commits...)
+	results, err := a.resultsOf(ctx, t, commits...)
 	if err != nil {
 		return nil, err
 	}
@@ -384,15 +389,17 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 	if err != nil {
 		return nil, err
 	}
-	results, err := t.store.Results(ctx, core.ResultFilter{Commit: head})
+	results, err := a.resultsOf(ctx, t, head)
 	if err != nil {
 		return nil, err
 	}
 	return core.CurrentResultAt(head, results), nil
 }
 
-// resultsOf returns the saved results of the commits.
-func resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core.Result, error) {
+// resultsOf returns the saved results of the commits, with the image IDs of earlier versions'
+// fingerprints resolved to the content of their images where the images are still there
+// (withImageContents), so that they compare with results that pin the content.
+func (a *App) resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core.Result, error) {
 	var out []core.Result
 	var seen []core.Commit
 	for _, commit := range commits {
@@ -406,7 +413,7 @@ func resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core
 		}
 		out = append(out, rs...)
 	}
-	return out, nil
+	return a.withImageContents(ctx, out), nil
 }
 
 // branchOf names the task's result branch, or fails as unavailable when the daemon has no

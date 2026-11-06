@@ -313,7 +313,9 @@ type Plan struct {
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// The bound on the plan's possible gain. Absent when the plan states none.
-	GainBound     *PlanGainBound `protobuf:"bytes,8,opt,name=gain_bound,json=gainBound,proto3" json:"gain_bound,omitempty"`
+	GainBound *PlanGainBound `protobuf:"bytes,8,opt,name=gain_bound,json=gainBound,proto3" json:"gain_bound,omitempty"`
+	// The priority of the plan's queued jobs that set none of their own. Unspecified is normal.
+	Priority      Priority `protobuf:"varint,9,opt,name=priority,proto3,enum=vibesys.cli.v1.Priority" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -402,6 +404,13 @@ func (x *Plan) GetGainBound() *PlanGainBound {
 		return x.GainBound
 	}
 	return nil
+}
+
+func (x *Plan) GetPriority() Priority {
+	if x != nil {
+		return x.Priority
+	}
+	return Priority_PRIORITY_UNSPECIFIED
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -669,7 +678,7 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\vPlanComment\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
-	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xe9\x02\n" +
+	"\x05agent\x18\x03 \x01(\tR\x05agent\"\x9f\x03\n" +
 	"\x04Plan\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
@@ -681,7 +690,8 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12<\n" +
 	"\n" +
-	"gain_bound\x18\b \x01(\v2\x1d.vibesys.cli.v1.PlanGainBoundR\tgainBound\"e\n" +
+	"gain_bound\x18\b \x01(\v2\x1d.vibesys.cli.v1.PlanGainBoundR\tgainBound\x124\n" +
+	"\bpriority\x18\t \x01(\x0e2\x18.vibesys.cli.v1.PriorityR\bpriority\"e\n" +
 	"\tLinkedJob\x12%\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\x121\n" +
 	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"c\n" +
@@ -745,8 +755,9 @@ var file_vibesys_cli_v1_plan_proto_goTypes = []any{
 	(*PlanGainCheck)(nil),         // 8: vibesys.cli.v1.PlanGainCheck
 	(*PlanGainBlocker)(nil),       // 9: vibesys.cli.v1.PlanGainBlocker
 	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
-	(*Job)(nil),                   // 11: vibesys.cli.v1.Job
-	(*Verdict)(nil),               // 12: vibesys.cli.v1.Verdict
+	(Priority)(0),                 // 11: vibesys.cli.v1.Priority
+	(*Job)(nil),                   // 12: vibesys.cli.v1.Job
+	(*Verdict)(nil),               // 13: vibesys.cli.v1.Verdict
 }
 var file_vibesys_cli_v1_plan_proto_depIdxs = []int32{
 	1,  // 0: vibesys.cli.v1.PlanGainBound.relative_to:type_name -> vibesys.cli.v1.PlanGainReference
@@ -756,19 +767,20 @@ var file_vibesys_cli_v1_plan_proto_depIdxs = []int32{
 	10, // 4: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
 	10, // 5: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
 	3,  // 6: vibesys.cli.v1.Plan.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	11, // 7: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
-	12, // 8: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
-	5,  // 9: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
-	6,  // 10: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
-	2,  // 11: vibesys.cli.v1.PlanGainCheck.answer:type_name -> vibesys.cli.v1.PlanGainAnswer
-	9,  // 12: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
-	0,  // 13: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
-	3,  // 14: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	11, // 7: vibesys.cli.v1.Plan.priority:type_name -> vibesys.cli.v1.Priority
+	12, // 8: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
+	13, // 9: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
+	5,  // 10: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
+	6,  // 11: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
+	2,  // 12: vibesys.cli.v1.PlanGainCheck.answer:type_name -> vibesys.cli.v1.PlanGainAnswer
+	9,  // 13: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
+	0,  // 14: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
+	3,  // 15: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_plan_proto_init() }

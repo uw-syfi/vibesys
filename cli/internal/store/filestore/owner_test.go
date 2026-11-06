@@ -267,7 +267,7 @@ func TestADamagedOwnerRecordIsRefusedWithItsName(t *testing.T) {
 	}
 	t.Run("a newer format", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(ownerRecord, []byte(`{"format":6}`))
+		mem.Put(ownerRecord, []byte(`{"format":9}`))
 		_, err := openAs(mem, daemonA)
 		wantFailure(t, "Open", err, core.FailureIncompatible, ownerRecord)
 	})

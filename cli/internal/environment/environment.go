@@ -32,11 +32,20 @@ type Environment interface {
 	MachineReader
 
 	// Fingerprint returns the environment's identity: what a result's comparability and a check
-	// pass's reuse are judged by (core.Fingerprint.Equal). For docker it pins the exact image
-	// digest; where the container ran is recorded among its facts and does not count. It returns the same
+	// pass's reuse are judged by (core.Fingerprint.Equal). For docker it pins the digest of the
+	// image's content, which two builds of one content share whatever their IDs; where the
+	// container ran is recorded among its facts and does not count. It returns the same
 	// value for the same environment, and fails with core.FailureUnavailable when the
 	// environment cannot be reached.
 	Fingerprint(ctx context.Context) (core.Fingerprint, error)
+
+	// ImageContent returns the content digest, as Fingerprint pins it, of the image of an ID that
+	// the environment still has, so that a fingerprint an earlier version recorded with the
+	// image's ID can be compared with one that pins its content. It reports false, and no error,
+	// for an ID it has no image of, for anything that is not an image ID, and in an environment
+	// that runs no images, such as the host. It fails when it cannot ask, as when the engine
+	// cannot be reached.
+	ImageContent(ctx context.Context, id string) (content string, found bool, err error)
 
 	// Run executes one command in the checkout, with its service if the execution names one,
 	// writing the combined output to out as it appears. An environment that waits before the
@@ -55,12 +64,24 @@ type Environment interface {
 
 	// Candidate returns the candidate's image of a task of two images, as the target's commit has
 	// its Dockerfile and build context, building it when the environment does not have an image of
-	// the same Dockerfile and context already. The build's output goes to log. It fails with
+	// the same Dockerfile and context already, with its content when the environment can say it
+	// (core.CandidateImage.Content). The build's output goes to log. It fails with
 	// core.FailureInvalidInput naming the path for a Dockerfile or a context the commit lacks, or a
 	// base the task does not allow, with the end of the build's output for a build that failed, and
 	// with core.FailureInvalidInput for an environment that runs no images, such as the host: a
 	// task of two images runs only where images do.
 	Candidate(ctx context.Context, build core.CandidateBuild, log io.Writer) (core.CandidateImage, error)
+
+	// Lab holds a lab (core.LabSpec): it starts the containers a run of the execution would have,
+	// with nothing in them but what keeps them up, and calls hold with them (Bench) once they are
+	// up and what their resources ask them to check passed. For an execution with a candidate's
+	// image the rooms are the candidate's, with the placement's GPUs, and the task's beside it in
+	// its network, as for a profile; otherwise the one room is the task's image. The lab's time is
+	// the execution's Timeout, armed when hold is called. Once hold returns, Lab removes the
+	// containers and brings the artifacts back, on every path, and says what the attempt did as
+	// Run does: core.Ended with hold's ending. The execution passes ValidateLab. An environment
+	// that holds no labs, such as the host, answers NoLab.
+	Lab(ctx context.Context, execution core.Execution, out io.Writer, hold HoldLab) core.Attempt
 }
 
 // NoImages is what an environment that runs no images answers Candidate with.

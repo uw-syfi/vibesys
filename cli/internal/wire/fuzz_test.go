@@ -234,15 +234,19 @@ func FuzzDecodePlan(f *testing.F) {
 		&cliv1.Plan{Number: 1, Title: "t", Body: "b", Status: cliv1.PlanStatus_PLAN_STATUS_OPEN},
 		&cliv1.Plan{Number: 2, Status: cliv1.PlanStatus_PLAN_STATUS_WON, Comments: []*cliv1.PlanComment{{Text: "c", Agent: "a"}}},
 		&cliv1.Plan{Status: 99},
+		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_CHOSEN, Priority: cliv1.Priority_PRIORITY_HIGH},
+		&cliv1.Plan{Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Priority: 99},
 		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_PARKED, GainBound: &cliv1.PlanGainBound{Share: 0.05, RelativeTo: cliv1.PlanGainReference_PLAN_GAIN_REFERENCE_HEADLINE}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
 		decode(t, data, message)
 		_, statusErr := wire.ToPlanStatus("status", message.GetStatus())
+		_, priorityErr := wire.ToPriority("priority", message.GetPriority())
 		first, err := wire.ToPlan(message)
-		if (err != nil) != (statusErr != nil) {
-			t.Fatalf("a plan with status %s: ToPlan error %v, ToPlanStatus error %v; they must agree", message.GetStatus(), err, statusErr)
+		if (err != nil) != (statusErr != nil || priorityErr != nil) {
+			t.Fatalf("a plan with status %s and priority %s: ToPlan error %v, ToPlanStatus error %v, ToPriority error %v; they must agree",
+				message.GetStatus(), message.GetPriority(), err, statusErr, priorityErr)
 		}
 		if err != nil {
 			return
@@ -261,6 +265,34 @@ func FuzzDecodePlan(f *testing.F) {
 		}
 		if !reflect.DeepEqual(again, first) {
 			t.Fatalf("a decoded plan changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+// A daemon's drain, as its runtime directory keeps it, decodes to a drain with a time it began, and
+// that drain survives being encoded and decoded again unchanged.
+func FuzzDecodeDaemonDrain(f *testing.F) {
+	seedMessages(f,
+		&cliv1.DaemonDrain{},
+		wire.DaemonDrain(core.Drain{Agent: "lead", Reason: "a new CLI", Since: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)}),
+		&cliv1.DaemonDrain{Reason: strings.Repeat("x", core.MaxReasonBytes+1)},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.DaemonDrain{}
+		decode(t, data, message)
+		first, err := wire.ToDaemonDrain(message)
+		if err != nil {
+			return
+		}
+		if first.Since.IsZero() && message.GetSince() == nil {
+			t.Fatalf("a drain with no time it began was accepted: %+v", first)
+		}
+		again, err := wire.ToDaemonDrain(wire.DaemonDrain(first))
+		if err != nil {
+			t.Fatalf("a decoded drain %+v is refused once encoded again: %v", first, err)
+		}
+		if !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded drain changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
 		}
 	})
 }
@@ -468,6 +500,88 @@ func FuzzDecodeNodeReadingJSON(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if _, out, err := wire.DecodeNodeReading(data); err != nil && (out != nil || !wire.IsInvalidInput(err)) {
 			t.Fatalf("%q refused as %v with %v", data, err, out)
+		}
+	})
+}
+
+// labCallSeeds are a call of each kind, the shapes a command line sends.
+func labCallSeeds() []proto.Message {
+	calls := []core.LabCall{
+		core.LabExec{Room: core.LabTask, Argv: []string{"sh", "-c", "echo hi"}, Env: map[string]string{"A": "1"}, Detach: true},
+		core.LabStatusCall{Wait: true}, core.LabKillCall{Handle: "p3", Signal: core.LabKill},
+		core.LabCheckoutCall{Commit: "0123456789abcdef0123456789abcdef01234567"},
+		core.LabPull{Path: "out/trace"}, core.LabPush{Path: "in/x", Offset: 3, Data: []byte("abc"), Executable: true, Last: true},
+		core.LabEndCall{},
+	}
+	out := make([]proto.Message, len(calls))
+	for i, c := range calls {
+		out[i] = wire.LabCall(c)
+	}
+	return out
+}
+
+// A call on a lab decodes to one the lab can take, or is refused as invalid input: a path never
+// climbs out of the artifacts directory, and a command always has a program.
+func FuzzDecodeLabCall(f *testing.F) {
+	seedMessages(f, labCallSeeds()...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.LabCall{}
+		decode(t, data, message)
+		first, err := wire.ToLabCall("call", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused call gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		var p core.LabPath
+		switch c := first.(type) {
+		case core.LabExec:
+			if len(c.Argv) == 0 || c.Argv[0] == "" {
+				t.Fatalf("a decoded exec %+v has no program", c)
+			}
+		case core.LabPull:
+			p = c.Path
+		case core.LabPush:
+			p = c.Path
+		}
+		if got, err := core.ParseLabPath(string(p), "/a"); err != nil || got != p || strings.HasPrefix(string(p), "/") {
+			t.Fatalf("a decoded path %q is not clean and inside: %q, %v", p, got, err)
+		}
+		again, err := wire.ToLabCall("call", wire.LabCall(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded call changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}
+
+// A reply of a lab decodes to a reply or is refused as invalid input, and survives encoding.
+func FuzzDecodeLabReply(f *testing.F) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	proc := core.LabProcess{Handle: "p1", Room: core.LabCandidate, Argv: []string{"x"}, StartedAt: at, End: &core.LabExit{Code: 2}}
+	var seeds []proto.Message
+	for _, r := range []core.LabReply{
+		core.LabOutput{Data: []byte("out")}, core.LabFile{Path: "a/b", Offset: 4, Data: []byte("x"), Executable: true},
+		core.LabExit{Code: 3}, core.LabExit{Lost: "gone"}, proc, core.LabPulled{Files: 2, Bytes: 9}, core.LabPushed{Size: 5},
+		core.LabStatus{Phase: core.LabReady, Commit: "0123456789abcdef0123456789abcdef01234567", Port: 20001, Until: at,
+			Rooms: []core.LabRoom{core.LabCandidate, core.LabTask}, Processes: []core.LabProcess{proc}, Artifacts: "/vibesys/artifacts"},
+	} {
+		seeds = append(seeds, wire.LabReply(r))
+	}
+	seedMessages(f, seeds...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.LabReply{}
+		decode(t, data, message)
+		first, err := wire.ToLabReply("reply", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused reply gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		again, err := wire.ToLabReply("reply", wire.LabReply(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded reply changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
 		}
 	})
 }

@@ -67,6 +67,7 @@ type Daemon struct {
 	gates        fakeenv.Gates
 	reproducible bool
 	attested     bool
+	held         bool
 
 	mu       sync.Mutex
 	faults   Faults
@@ -95,6 +96,14 @@ func NonReproducibleBuilds() Option { return func(d *Daemon) { d.reproducible = 
 // another build of the same Dockerfile, as BuildKit's attestations do under the containerd image
 // store, where an image's ID is the digest of its index.
 func AttestedBuilds() Option { return func(d *Daemon) { d.attested = true } }
+
+// HeldBuilds makes each build wait, before it stores its image, at the gate BuildGate(n), n being
+// how many builds the daemon had started before it, counting this one, so that a test can hold a
+// build while another one of the same tag runs and ends.
+func HeldBuilds() Option { return func(d *Daemon) { d.held = true } }
+
+// BuildGate names the gate the nth build waits at under HeldBuilds.
+func BuildGate(n int) string { return fmt.Sprintf("build %d", n) }
 
 // NewDaemon returns an empty daemon whose containers run scripts that wait at the gates.
 func NewDaemon(gates fakeenv.Gates, opts ...Option) *Daemon {
@@ -132,6 +141,20 @@ func (d *Daemon) Load(ref, content string) docker.Image {
 	defer d.mu.Unlock()
 	d.images[ref] = img
 	return img
+}
+
+// Images returns the IDs of the images the daemon has under a reference, sorted, each once.
+func (c *Client) Images() []string {
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	var out []string
+	for _, img := range c.d.images {
+		if !slices.Contains(out, img.ID) {
+			out = append(out, img.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Prune removes every image, as an image prune does.
@@ -289,20 +312,37 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	}
 	c.d.mu.Lock()
 	c.d.builds++
+	n := c.d.builds
+	_, existed := c.d.images[spec.Tag]
+	c.d.mu.Unlock()
+	if c.d.held && !c.d.gates.Wait(ctx, BuildGate(n)) {
+		return ctx.Err()
+	}
+	c.d.mu.Lock()
+	// A build stores its image under its tag at its end. Docker's containerd image store refuses
+	// that when another build made an image of the tag while this one ran.
+	if _, now := c.d.images[spec.Tag]; now && !existed {
+		c.d.mu.Unlock()
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("docker: building the task's image failed (exit 1); "+
+			"the end of the build's output:\nERROR: failed to build: failed to solve: image %q: already exists", "docker.io/library/"+spec.Tag)}
+	}
 	// The image is what its context makes on the daemon's local image of each base, as docker
 	// builds FROM a local image when it has one.
-	seed := slices.Clone(spec.Context)
+	// Its content is what of the context the Dockerfile copies into it, as docker's layer cache
+	// makes the same layers of the same copied files, while its ID is of the whole context.
+	var bases []byte
 	for _, ref := range fromRefs(spec.Context) {
 		if img, ok := c.d.images[ref]; ok {
-			seed = fmt.Appendf(seed, "\nFROM %s", img.ID)
+			bases = fmt.Appendf(bases, "\nFROM %s", img.ID)
 		}
 	}
 	if !c.d.reproducible {
-		seed = fmt.Appendf(seed, "\nbuild %d", c.d.builds)
+		bases = fmt.Appendf(bases, "\nbuild %d", n)
 	}
-	content := sha256.Sum256(append([]byte("content of "), seed...))
+	seed := append(slices.Clone(spec.Context), bases...)
+	content := sha256.Sum256(append(append([]byte("content of "), copiedOf(spec.Context)...), bases...))
 	if c.d.attested {
-		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", c.d.builds)
+		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", n)
 	}
 	sum := sha256.Sum256(seed)
 	id := "sha256:" + hex.EncodeToString(sum[:])
@@ -368,8 +408,9 @@ func (c *Client) Sizes(ctx context.Context, image string) (unpacked, stored int6
 	return 0, 0, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
 }
 
-// Content returns the digest of the content of the image, found by its ID or a tag: of its build
-// context, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
+// Content implements docker.Engine: the digest of the content of the image, found by its ID or a
+// tag: of its Dockerfile, of the files of its build context that the Dockerfile copies (COPY or
+// ADD), of its bases, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
 func (c *Client) Content(ctx context.Context, image string) (string, error) {
 	fault, err := c.enter(ctx, Call{OpSave, image})
 	if err != nil {

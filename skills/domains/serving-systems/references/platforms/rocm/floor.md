@@ -26,7 +26,7 @@ Never run naive `softmax(QKᵀ)V`. On CDNA the options are:
 
 ## 3. HIP graphs
 
-The launch-overhead problem and its remedy are the same as CUDA's; the API is `hipGraph`. `torch.compile(mode="reduce-overhead")` drives it through the same PyTorch path used on NVIDIA.
+The launch-overhead problem and its remedy are the same as CUDA's; the API is `hipGraph`. The capture pitfalls in [CUDA Graph](../cuda/cuda-graph.md#capture-pitfalls-that-fault-or-corrupt-only-at-replay) apply unchanged. `torch.compile(mode="reduce-overhead")` drives it through the same PyTorch path used on NVIDIA.
 
 Capture decode, keep prefill eager or bucketed. The shape-stability and address-stability requirements carry over unchanged.
 

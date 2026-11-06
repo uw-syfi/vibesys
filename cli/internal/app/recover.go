@@ -25,8 +25,22 @@ import (
 // its jobs starts, a run of it is not released and its outcome is not discarded, the store is tried
 // again, and when it returns the run is taken up. The same goes for a store another daemon has.
 func (a *App) Start(ctx context.Context) error {
-	var scopes []core.Scope
+	// A daemon that drained when it stopped drains still: the machine hears of it before any job,
+	// and it launches nothing before RecoveryDone, so not one queued job starts in between.
+	var drain *core.Drain
 	err := a.retry(ctx, func(ctx context.Context) error {
+		var err error
+		drain, err = a.cfg.Drains.Load(ctx)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("reading whether the daemon drains: %w", err)
+	}
+	if err := a.post(message{event: lifecycle.Drained{Drain: drain}}); err != nil {
+		return err
+	}
+	var scopes []core.Scope
+	err = a.retry(ctx, func(ctx context.Context) error {
 		var err error
 		scopes, err = a.cfg.Stores.Known(ctx)
 		return err
@@ -136,13 +150,17 @@ func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lif
 	if err != nil {
 		return err
 	}
+	plans, err := st.Plans(ctx, core.PlanFilter{})
+	if err != nil {
+		return err
+	}
 	for _, job := range jobs {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		run := runOf(ref)
 		presence := a.presenceOf(run)
 		a.postEffect(ctx, message{
 			event: lifecycle.Recovered{
-				Ref: ref, Finding: a.jobIn(ctx, scope, job, presence, given),
+				Ref: ref, Finding: a.jobIn(ctx, scope, job, plans, presence, given),
 				Supervisor: presence, At: a.now(),
 			},
 			handle: handleOf(run), scope: &scope,
@@ -154,10 +172,10 @@ func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lif
 func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving) }
 
 // admittedOf is the event that a queued job wants to run.
-func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
+func (a *App) admittedOf(ref lifecycle.Ref, job core.Job, plans []core.Plan) lifecycle.Admitted {
 	return lifecycle.Admitted{
 		Ref: ref, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
-		Work: a.workOf(job),
+		Work: a.workOf(job), Steering: steeringOf(job, plans),
 	}
 }
 
@@ -236,8 +254,12 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 	ctx = a.observationContext(ctx, storeIDOf(scope))
 	st, err := a.cfg.Stores.Find(ctx, scope)
 	var jobs []core.Job
+	var plans []core.Plan
 	if err == nil {
 		jobs, err = st.Jobs(ctx, core.JobFilter{States: []core.JobState{core.JobQueued, core.JobRunning}})
+	}
+	if err == nil {
+		plans, err = st.Plans(ctx, core.PlanFilter{})
 	}
 	if err != nil {
 		if ctx.Err() == nil {
@@ -254,7 +276,7 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		switch {
 		case job.State == core.JobQueued:
-			a.postEffect(ctx, message{event: a.admittedOf(ref, job), scope: &scope})
+			a.postEffect(ctx, message{event: a.admittedOf(ref, job, plans), scope: &scope})
 		case !held[ref]:
 			run := a.look(ctx, ref)
 			presence := a.presenceOf(run)

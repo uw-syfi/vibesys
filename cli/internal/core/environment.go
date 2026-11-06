@@ -43,7 +43,7 @@ func (b BackendKind) Known() bool {
 // check pass reusable, only when their fingerprints are equal (Equal), and a fingerprint takes part
 // in the cache key by what Equal compares.
 //
-// What identifies an environment depends on its kind. A docker environment is its exact image
+// What identifies an environment depends on its kind. A docker environment is its image's content
 // digest and backend: the image pins every program the job runs, so where its container ran (the
 // machine, the placement, what the placement's resources gave it) is recorded in Facts for
 // diagnosis and compared by nothing, which is what lets a job run on any placement that gives its
@@ -52,7 +52,12 @@ func (b BackendKind) Known() bool {
 type Fingerprint struct {
 	Kind    EnvironmentKind
 	Backend BackendKind
-	// ImageDigest is the exact image digest for the docker environment and empty for host.
+	// ImageDigest is, for the docker environment, the digest of the content of the task's image:
+	// of its config, platform and layers (docker.Engine.Content), and not its ID, which under
+	// Docker's containerd image store differs from one build of the same content to the next. It
+	// is empty for host. Results recorded before the content digest was pinned carry the image's
+	// ID here instead; the daemon resolves such an ID to its content while the image is still on
+	// its placement's engine, and one it cannot resolve equals no content digest.
 	ImageDigest string
 	// Facts are what the environment pinned, by name: operating system, architecture, toolchains.
 	// A docker environment's facts also name the placement it ran on (FactPlacement) and what

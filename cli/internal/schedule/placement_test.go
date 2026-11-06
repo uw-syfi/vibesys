@@ -5,14 +5,16 @@ import (
 	"math/rand/v2"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
-// randomDemand is a config of up to four placements, each giving a random set of resource kinds
-// and claiming up to two resources besides its slot.
+// randomDemand is a config of up to four placements, each giving a random set of resource kinds,
+// running a random set of job kinds (often every kind), and claiming up to two resources besides
+// its slot.
 func randomDemand(r *rand.Rand) schedule.PlacementDemand {
 	d := schedule.PlacementDemand{Placements: map[string]schedule.Offered{}, Host: "host"}
 	for _, name := range []string{"p0", "p1", "p2", "p3"}[:r.IntN(5)] {
@@ -20,6 +22,11 @@ func randomDemand(r *rand.Rand) schedule.PlacementDemand {
 		for _, k := range core.ResourceKinds() {
 			if r.IntN(2) == 0 {
 				o.Resources = append(o.Resources, k)
+			}
+		}
+		for _, k := range []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure} {
+			if r.IntN(3) == 0 {
+				o.Jobs = append(o.Jobs, k)
 			}
 		}
 		for i := range r.IntN(3) {
@@ -40,13 +47,14 @@ func randomKinds(r *rand.Rand) []core.ResourceKind {
 	return out
 }
 
-// For any config and job: a queued docker job may run on exactly the placements that give every
-// resource its task needs, or on the one it is restricted to when that one does, each once and by
-// name; a placement that lacks a need is never one of its options. On each it claims a slot of the
+// For any config and job: a queued docker job may run on exactly the placements that run its kind of
+// job and give every resource its task needs, or on the one it is restricted to when that one does,
+// each once and by name; a placement that lacks a need, or that names job kinds without the job's,
+// is never one of its options. On each it claims a slot of the
 // placement first and then what the placement's resources claim, and a measure claims every one of
 // them whole. A docker job that started may run only where it started, and any other job claims a
 // slot of the host.
-func TestAJobMayRunOnEveryPlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
+func TestAJobMayRunOnEveryPlacementThatRunsItsKindAndGivesWhatItsTaskNeeds(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	envs := []core.EnvironmentKind{core.EnvironmentDocker, core.EnvironmentDocker, core.EnvironmentHost}
 	settings := []core.Settings{core.CheckSettings{}, core.MeasureSettings{}, core.CommandSettings{Argv: []string{"true"}}}
@@ -74,7 +82,8 @@ func TestAJobMayRunOnEveryPlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 		default:
 			for name, o := range d.Placements {
 				gives := !slices.ContainsFunc(job.Needs, func(k core.ResourceKind) bool { return !slices.Contains(o.Resources, k) })
-				if gives && (job.Spec.Placement == "" || job.Spec.Placement == name) {
+				runs := len(o.Jobs) == 0 || slices.Contains(o.Jobs, job.Spec.Settings.Kind())
+				if gives && runs && (job.Spec.Placement == "" || job.Spec.Placement == name) {
 					want = append(want, name)
 				}
 			}
@@ -191,5 +200,46 @@ func TestMeasuresSpreadOverIdlePlacements(t *testing.T) {
 	w, ok := ds[2].(schedule.Wait)
 	if !ok || w.Reason.Kind != core.WaitHeldExclusively || !slices.Equal(w.Reason.Blockers, []schedule.ID{"m1"}) {
 		t.Fatalf("the third measure: %+v, want it to wait for the placement m1 holds alone", ds[2])
+	}
+}
+
+// A placement of a short partition runs checks and commands and no measure. A measure never starts
+// there, even when it is idle and the placement that runs measures is busy: it waits for the busy
+// one, naming what holds it, and never for the short one. A check starts on the idle short one. A
+// measure restricted to the short placement, or with only short placements in the config, has no
+// option, so it is refused rather than queued forever.
+func TestAMeasureNeverStartsOnAPlacementThatRunsNoMeasure(t *testing.T) {
+	short := []core.JobKind{core.JobCheck, core.JobCommand}
+	d := schedule.PlacementDemand{Placements: map[string]schedule.Offered{"batch": {}, "devel": {Jobs: short}}, Host: "host"}
+	busy := func(waiting ...schedule.Candidate) schedule.State {
+		return schedule.State{
+			Resources: []schedule.Resource{{ID: schedule.PlacementOf("batch"), Capacity: 1}, {ID: schedule.PlacementOf("devel"), Capacity: 1}},
+			Holdings:  []schedule.Holding{{ID: "running", Claims: []schedule.Claim{{Resource: schedule.PlacementOf("batch"), Amount: 1}}}},
+			Waiting:   waiting,
+		}
+	}
+	docker := func(s core.Settings, placement string) core.Job {
+		return core.Job{Spec: core.JobSpec{Environment: core.EnvironmentDocker, Settings: s, Placement: placement}}
+	}
+	measure := docker(core.MeasureSettings{}, "")
+	ds := schedule.Step(busy(schedule.Candidate{ID: "m", Options: d.Options(measure)}), schedule.Rules{})
+	w, ok := ds[0].(schedule.Wait)
+	if !ok || !slices.Equal(w.Reason.Blockers, []schedule.ID{"running"}) || w.Reason.Resource != schedule.PlacementOf("batch") {
+		t.Fatalf("a measure with batch busy and devel idle: %+v, want it to wait for batch", ds[0])
+	}
+	for _, s := range []core.Settings{core.CheckSettings{}, core.CommandSettings{Argv: []string{"true"}}} {
+		ds = schedule.Step(busy(schedule.Candidate{ID: "c", Options: d.Options(docker(s, ""))}), schedule.Rules{})
+		if st, ok := ds[0].(schedule.Start); !ok || st.Option.Placement != "devel" {
+			t.Fatalf("a %s with batch busy: %+v, want a start on devel", s.Kind(), ds[0])
+		}
+	}
+	ds = schedule.Step(busy(schedule.Candidate{ID: "m", Options: d.Options(docker(core.MeasureSettings{}, "devel"))}), schedule.Rules{})
+	if _, ok := ds[0].(schedule.Refuse); !ok {
+		t.Fatalf("a measure restricted to devel: %+v, want it refused", ds[0])
+	}
+	only := schedule.PlacementDemand{Placements: map[string]schedule.Offered{"devel": {Jobs: short}}, Host: "host"}
+	ds = schedule.Step(busy(schedule.Candidate{ID: "m", Options: only.Options(measure)}), schedule.Rules{})
+	if r, ok := ds[0].(schedule.Refuse); !ok || !strings.Contains(r.Detail, "runs its kind of job") {
+		t.Fatalf("a measure with only devel: %+v, want it refused, saying why", ds[0])
 	}
 }

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/job.proto.
  */
 export const file_vibesys_cli_v1_job: GenFile = /*@__PURE__*/
-  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSLdAQoPQ29tbWFuZFNldHRpbmdzEgwKBGFyZ3YYASADKAkSLAoHc2VydmljZRgCIAEoCzIbLnZpYmVzeXMuY2xpLnYxLlNlcnZpY2VTcGVjEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoHcHJvZmlsZRgEIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlByb2ZpbGVSZXF1ZXN0EjEKCWNhbmRpZGF0ZRgFIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNldHVwIiwKDlByb2ZpbGVSZXF1ZXN0EhoKBHdyYXAYASADKAlCDLpICZIBBiIEcgIQASJMCg5DYW5kaWRhdGVCdWlsZBISCgpkb2NrZXJmaWxlGAEgASgJEg8KB2NvbnRleHQYAiABKAkSFQoNYWxsb3dlZF9iYXNlcxgDIAMoCSJhCg5DYW5kaWRhdGVTZXJ2ZRIMCgRhcmd2GAEgAygJEg0KBXJlYWR5GAIgASgJEjIKD3N0YXJ0dXBfdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiJuCg5DYW5kaWRhdGVTZXR1cBItCgVidWlsZBgBIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZUJ1aWxkEi0KBXNlcnZlGAIgASgLMh4udmliZXN5cy5jbGkudjEuQ2FuZGlkYXRlU2VydmUiMwoPTWVhc3VyZVNldHRpbmdzEg8KB3NhbXBsZXMYASABKA0SDwoHcmVjaGVjaxgCIAEoCCKsAgoHSm9iU3BlYxIOCgZjb21taXQYASABKAkSNAoLZW52aXJvbm1lbnQYAiABKA4yHy52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEtpbmQSNwoJcGxhY2VtZW50GAMgASgJQiS6SCFyHzIdXihbYS16MC05XVthLXowLTlfLV17MCw2Mn0pPyQSLgoFY2hlY2sYCiABKAsyHS52aWJlc3lzLmNsaS52MS5DaGVja1NldHRpbmdzSAASMgoHY29tbWFuZBgLIAEoCzIfLnZpYmVzeXMuY2xpLnYxLkNvbW1hbmRTZXR0aW5nc0gAEjIKB21lYXN1cmUYDCABKAsyHy52aWJlc3lzLmNsaS52MS5NZWFzdXJlU2V0dGluZ3NIAEIKCghzZXR0aW5ncyJLCgROb3RlEgwKBHRleHQYASABKAkSJgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg0KBWFnZW50GAMgASgJInkKCVN1Ym1pdHRlchIOCgZydW5faWQYASABKAkSDQoFYWdlbnQYAiABKAkSTQoCYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQiW6SCLIAQGyARwiDQj/gtH/rwcQ/5Pr3AMyCwiAkrjDmP7///8BItkBCgdBdHRlbXB0Ei4KCnN0YXJ0ZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCGVuZGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0ChBjdXRfYmVmb3JlX3N0YXJ0GAMgASgOMhgudmliZXN5cy5jbGkudjEuQ3V0Q2F1c2VIABIzCg9jdXRfbWlkX2NvbW1hbmQYBCABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAQgUKA2VuZCKoBQoDSm9iEgoKAmlkGAEgASgJEiUKBHNwZWMYAiABKAsyFy52aWJlc3lzLmNsaS52MS5Kb2JTcGVjEicKBXN0YXRlGAMgASgOMhgudmliZXN5cy5jbGkudjEuSm9iU3RhdGUSCwoDa2V5GAQgASgJEjsKC2Vudmlyb25tZW50GAUgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIjCgVub3RlcxgGIAMoCzIULnZpYmVzeXMuY2xpLnYxLk5vdGUSDQoFcGxhbnMYByADKA0SMAoMc3VibWl0dGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpzdGFydGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNY2FuY2VsX3JlYXNvbhgLIAEoCRIWCglleGl0X2NvZGUYDCABKAVIAIgBARIVCg1yZXN1bHRfam9iX2lkGA0gASgJEhQKDGNoZWNrX2pvYl9pZBgOIAEoCRIQCghub19jYWNoZRgPIAEoCBIpCghhdHRlbXB0cxgQIAMoCzIXLnZpYmVzeXMuY2xpLnYxLkF0dGVtcHQSLQoKc3VibWl0dGVycxgRIAMoCzIZLnZpYmVzeXMuY2xpLnYxLlN1Ym1pdHRlchI+CgVuZWVkcxgSIAMoDjIcLnZpYmVzeXMuY2xpLnYxLlJlc291cmNlS2luZEIRukgOkgELGAEiB4IBBBABIAASHgoMdGFza192ZXJzaW9uGBMgASgJQgi6SAVyAxiAAkIMCgpfZXhpdF9jb2RlInEKC0xlYXNlSG9sZGVyEgwKBHVzZXIYASABKAkSDAoEaG9zdBgCIAEoCRILCgNwaWQYAyABKA0SDgoGam9iX2lkGAQgASgJEikKBXNpbmNlGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJqCgpXYWl0SG9sZGVyEhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIMCgR0YXNrGAIgASgJEiUKBGtpbmQYAyABKA4yFy52aWJlc3lzLmNsaS52MS5Kb2JLaW5kEg4KBnJ1bl9pZBgEIAEoCSK1BAoKV2FpdFJlYXNvbhIyCgRraW5kGAEgASgOMhgudmliZXN5cy5jbGkudjEuV2FpdEtpbmRCCrpIB4IBBBABIAASEAoIcmVzb3VyY2UYAiABKAkSKwoHaG9sZGVycxgDIAMoCzIaLnZpYmVzeXMuY2xpLnYxLldhaXRIb2xkZXISDgoGZGV0YWlsGAQgASgJEi4KCWVsc2V3aGVyZRgFIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkxlYXNlSG9sZGVyOvMCukjvAhrsAgoRd2FpdF9yZWFzb24uc2hhcGUSlAFhIHdhaXQgb24gYSByZXNvdXJjZSBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXJzLCBhIGhlbGQgb3IgdHJvdWJsZSB3YWl0IHNheXMgd2h5LCBhbmQgYSBsZWFzZWQgd2FpdCBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXIgb3Igd2h5Gr8BdGhpcy5raW5kID09IDUgfHwgdGhpcy5raW5kID09IDYgPyB0aGlzLmRldGFpbCAhPSAnJyA6ICh0aGlzLmtpbmQgPT0gNyA/ICh0aGlzLnJlc291cmNlICE9ICcnICYmIChoYXModGhpcy5lbHNld2hlcmUpIHx8IHRoaXMuZGV0YWlsICE9ICcnKSkgOiAodGhpcy5yZXNvdXJjZSAhPSAnJyAmJiBzaXplKHRoaXMuaG9sZGVycykgPiAwKSkiVgoHSm9iV2FpdBIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESMgoGcmVhc29uGAIgASgLMhoudmliZXN5cy5jbGkudjEuV2FpdFJlYXNvbkIGukgDyAEBKmMKB0pvYktpbmQSGAoUSk9CX0tJTkRfVU5TUEVDSUZJRUQQABISCg5KT0JfS0lORF9DSEVDSxABEhQKEEpPQl9LSU5EX0NPTU1BTkQQAhIUChBKT0JfS0lORF9NRUFTVVJFEAMqrgEKCEpvYlN0YXRlEhkKFUpPQl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEEpPQl9TVEFURV9RVUVVRUQQARIVChFKT0JfU1RBVEVfUlVOTklORxACEhcKE0pPQl9TVEFURV9TVUNDRUVERUQQAxIUChBKT0JfU1RBVEVfRkFJTEVEEAQSFwoTSk9CX1NUQVRFX0NBTkNFTExFRBAFEhIKDkpPQl9TVEFURV9MT1NUEAYqXAoIQ3V0Q2F1c2USGQoVQ1VUX0NBVVNFX1VOU1BFQ0lGSUVEEAASHQoZQ1VUX0NBVVNFX1NVUEVSVklTT1JfRElFRBABEhYKEkNVVF9DQVVTRV9SRUJPT1RFRBACKsYBCghXYWl0S2luZBIZChVXQUlUX0tJTkRfVU5TUEVDSUZJRUQQABISCg5XQUlUX0tJTkRfRlVMTBABEh4KGldBSVRfS0lORF9IRUxEX0VYQ0xVU0lWRUxZEAISFAoQV0FJVF9LSU5EX0lOX1VTRRADEhQKEFdBSVRfS0lORF9CRUhJTkQQBBISCg5XQUlUX0tJTkRfSEVMRBAFEhUKEVdBSVRfS0lORF9UUk9VQkxFEAYSFAoQV0FJVF9LSU5EX0xFQVNFRBAHQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSKDAgoPQ29tbWFuZFNldHRpbmdzEgwKBGFyZ3YYASADKAkSLAoHc2VydmljZRgCIAEoCzIbLnZpYmVzeXMuY2xpLnYxLlNlcnZpY2VTcGVjEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoHcHJvZmlsZRgEIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlByb2ZpbGVSZXF1ZXN0EjEKCWNhbmRpZGF0ZRgFIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNldHVwEiQKA2xhYhgGIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkxhYlNwZWMiCQoHTGFiU3BlYyIsCg5Qcm9maWxlUmVxdWVzdBIaCgR3cmFwGAEgAygJQgy6SAmSAQYiBHICEAEiTAoOQ2FuZGlkYXRlQnVpbGQSEgoKZG9ja2VyZmlsZRgBIAEoCRIPCgdjb250ZXh0GAIgASgJEhUKDWFsbG93ZWRfYmFzZXMYAyADKAkiYQoOQ2FuZGlkYXRlU2VydmUSDAoEYXJndhgBIAMoCRINCgVyZWFkeRgCIAEoCRIyCg9zdGFydHVwX3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24ibgoOQ2FuZGlkYXRlU2V0dXASLQoFYnVpbGQYASABKAsyHi52aWJlc3lzLmNsaS52MS5DYW5kaWRhdGVCdWlsZBItCgVzZXJ2ZRgCIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNlcnZlIjMKD01lYXN1cmVTZXR0aW5ncxIPCgdzYW1wbGVzGAEgASgNEg8KB3JlY2hlY2sYAiABKAgirAIKB0pvYlNwZWMSDgoGY29tbWl0GAEgASgJEjQKC2Vudmlyb25tZW50GAIgASgOMh8udmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRLaW5kEjcKCXBsYWNlbWVudBgDIAEoCUIkukghch8yHV4oW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9KT8kEi4KBWNoZWNrGAogASgLMh0udmliZXN5cy5jbGkudjEuQ2hlY2tTZXR0aW5nc0gAEjIKB2NvbW1hbmQYCyABKAsyHy52aWJlc3lzLmNsaS52MS5Db21tYW5kU2V0dGluZ3NIABIyCgdtZWFzdXJlGAwgASgLMh8udmliZXN5cy5jbGkudjEuTWVhc3VyZVNldHRpbmdzSABCCgoIc2V0dGluZ3MiSwoETm90ZRIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSJ5CglTdWJtaXR0ZXISDgoGcnVuX2lkGAEgASgJEg0KBWFnZW50GAIgASgJEk0KAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIlukgiyAEBsgEcIg0I/4LR/68HEP+T69wDMgsIgJK4w5j+////ASLZAQoHQXR0ZW1wdBIuCgpzdGFydGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCghlbmRlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNAoQY3V0X2JlZm9yZV9zdGFydBgDIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSAASMwoPY3V0X21pZF9jb21tYW5kGAQgASgOMhgudmliZXN5cy5jbGkudjEuQ3V0Q2F1c2VIAEIFCgNlbmQihQYKA0pvYhIKCgJpZBgBIAEoCRIlCgRzcGVjGAIgASgLMhcudmliZXN5cy5jbGkudjEuSm9iU3BlYxInCgVzdGF0ZRgDIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkpvYlN0YXRlEgsKA2tleRgEIAEoCRI7CgtlbnZpcm9ubWVudBgFIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSIwoFbm90ZXMYBiADKAsyFC52aWJlc3lzLmNsaS52MS5Ob3RlEg0KBXBsYW5zGAcgAygNEjAKDHN1Ym1pdHRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKc3RhcnRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZmluaXNoZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDWNhbmNlbF9yZWFzb24YCyABKAkSFgoJZXhpdF9jb2RlGAwgASgFSACIAQESFQoNcmVzdWx0X2pvYl9pZBgNIAEoCRIUCgxjaGVja19qb2JfaWQYDiABKAkSEAoIbm9fY2FjaGUYDyABKAgSKQoIYXR0ZW1wdHMYECADKAsyFy52aWJlc3lzLmNsaS52MS5BdHRlbXB0Ei0KCnN1Ym1pdHRlcnMYESADKAsyGS52aWJlc3lzLmNsaS52MS5TdWJtaXR0ZXISPgoFbmVlZHMYEiADKA4yHC52aWJlc3lzLmNsaS52MS5SZXNvdXJjZUtpbmRCEbpIDpIBCxgBIgeCAQQQASAAEh4KDHRhc2tfdmVyc2lvbhgTIAEoCUIIukgFcgMYgAISJQoEaG9sZBgUIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYkhvbGQSNAoIcHJpb3JpdHkYFSABKA4yGC52aWJlc3lzLmNsaS52MS5Qcmlvcml0eUIIukgFggECEAFCDAoKX2V4aXRfY29kZSJ3CgdKb2JIb2xkEg0KBWFnZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEicQoLTGVhc2VIb2xkZXISDAoEdXNlchgBIAEoCRIMCgRob3N0GAIgASgJEgsKA3BpZBgDIAEoDRIOCgZqb2JfaWQYBCABKAkSKQoFc2luY2UYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImoKCldhaXRIb2xkZXISFwoGam9iX2lkGAEgASgJQge6SARyAhABEgwKBHRhc2sYAiABKAkSJQoEa2luZBgDIAEoDjIXLnZpYmVzeXMuY2xpLnYxLkpvYktpbmQSDgoGcnVuX2lkGAQgASgJIrUECgpXYWl0UmVhc29uEjIKBGtpbmQYASABKA4yGC52aWJlc3lzLmNsaS52MS5XYWl0S2luZEIKukgHggEEEAEgABIQCghyZXNvdXJjZRgCIAEoCRIrCgdob2xkZXJzGAMgAygLMhoudmliZXN5cy5jbGkudjEuV2FpdEhvbGRlchIOCgZkZXRhaWwYBCABKAkSLgoJZWxzZXdoZXJlGAUgASgLMhsudmliZXN5cy5jbGkudjEuTGVhc2VIb2xkZXI68wK6SO8CGuwCChF3YWl0X3JlYXNvbi5zaGFwZRKUAWEgd2FpdCBvbiBhIHJlc291cmNlIG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlcnMsIGEgaGVsZCBvciB0cm91YmxlIHdhaXQgc2F5cyB3aHksIGFuZCBhIGxlYXNlZCB3YWl0IG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlciBvciB3aHkavwF0aGlzLmtpbmQgPT0gNSB8fCB0aGlzLmtpbmQgPT0gNiA/IHRoaXMuZGV0YWlsICE9ICcnIDogKHRoaXMua2luZCA9PSA3ID8gKHRoaXMucmVzb3VyY2UgIT0gJycgJiYgKGhhcyh0aGlzLmVsc2V3aGVyZSkgfHwgdGhpcy5kZXRhaWwgIT0gJycpKSA6ICh0aGlzLnJlc291cmNlICE9ICcnICYmIHNpemUodGhpcy5ob2xkZXJzKSA+IDApKSJWCgdKb2JXYWl0EhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIyCgZyZWFzb24YAiABKAsyGi52aWJlc3lzLmNsaS52MS5XYWl0UmVhc29uQga6SAPIAQEqYwoHSm9iS2luZBIYChRKT0JfS0lORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9LSU5EX0NIRUNLEAESFAoQSk9CX0tJTkRfQ09NTUFORBACEhQKEEpPQl9LSU5EX01FQVNVUkUQAypeCghQcmlvcml0eRIYChRQUklPUklUWV9VTlNQRUNJRklFRBAAEhAKDFBSSU9SSVRZX0xPVxABEhMKD1BSSU9SSVRZX05PUk1BTBACEhEKDVBSSU9SSVRZX0hJR0gQAyquAQoISm9iU3RhdGUSGQoVSk9CX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQSk9CX1NUQVRFX1FVRVVFRBABEhUKEUpPQl9TVEFURV9SVU5OSU5HEAISFwoTSk9CX1NUQVRFX1NVQ0NFRURFRBADEhQKEEpPQl9TVEFURV9GQUlMRUQQBBIXChNKT0JfU1RBVEVfQ0FOQ0VMTEVEEAUSEgoOSk9CX1NUQVRFX0xPU1QQBipcCghDdXRDYXVzZRIZChVDVVRfQ0FVU0VfVU5TUEVDSUZJRUQQABIdChlDVVRfQ0FVU0VfU1VQRVJWSVNPUl9ESUVEEAESFgoSQ1VUX0NBVVNFX1JFQk9PVEVEEAIqxgEKCFdhaXRLaW5kEhkKFVdBSVRfS0lORF9VTlNQRUNJRklFRBAAEhIKDldBSVRfS0lORF9GVUxMEAESHgoaV0FJVF9LSU5EX0hFTERfRVhDTFVTSVZFTFkQAhIUChBXQUlUX0tJTkRfSU5fVVNFEAMSFAoQV0FJVF9LSU5EX0JFSElORBAEEhIKDldBSVRfS0lORF9IRUxEEAUSFQoRV0FJVF9LSU5EX1RST1VCTEUQBhIUChBXQUlUX0tJTkRfTEVBU0VEEAdCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.CheckSettings
@@ -95,6 +95,16 @@ export type CommandSettings = Message<"vibesys.cli.v1.CommandSettings"> & {
    * @generated from field: vibesys.cli.v1.CandidateSetup candidate = 5;
    */
   candidate?: CandidateSetup | undefined;
+
+  /**
+   * Set for a lab: the job holds its containers, with nothing running in them, for the timeout,
+   * and runs in them what a lab call asks (lab.proto). A lab is submitted with no argv, service or
+   * profile. For a task of two images the daemon sets the candidate's build, and the lab holds the
+   * candidate's container and the task's beside it.
+   *
+   * @generated from field: vibesys.cli.v1.LabSpec lab = 6;
+   */
+  lab?: LabSpec | undefined;
 };
 
 /**
@@ -103,6 +113,22 @@ export type CommandSettings = Message<"vibesys.cli.v1.CommandSettings"> & {
  */
 export const CommandSettingsSchema: GenMessage<CommandSettings> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_job, 2);
+
+/**
+ * LabSpec says a command job is a lab. It has no settings of its own yet: the job's timeout is how
+ * long the lab lasts once its containers are up.
+ *
+ * @generated from message vibesys.cli.v1.LabSpec
+ */
+export type LabSpec = Message<"vibesys.cli.v1.LabSpec"> & {
+};
+
+/**
+ * Describes the message vibesys.cli.v1.LabSpec.
+ * Use `create(LabSpecSchema)` to create a new message.
+ */
+export const LabSpecSchema: GenMessage<LabSpec> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 3);
 
 /**
  * ProfileRequest is what a profile submission asks for.
@@ -124,7 +150,7 @@ export type ProfileRequest = Message<"vibesys.cli.v1.ProfileRequest"> & {
  * Use `create(ProfileRequestSchema)` to create a new message.
  */
 export const ProfileRequestSchema: GenMessage<ProfileRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 3);
+  messageDesc(file_vibesys_cli_v1_job, 4);
 
 /**
  * CandidateBuild is how a task of two images builds the candidate's image from its commit.
@@ -159,7 +185,7 @@ export type CandidateBuild = Message<"vibesys.cli.v1.CandidateBuild"> & {
  * Use `create(CandidateBuildSchema)` to create a new message.
  */
 export const CandidateBuildSchema: GenMessage<CandidateBuild> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 4);
+  messageDesc(file_vibesys_cli_v1_job, 5);
 
 /**
  * CandidateServe is the candidate's server.
@@ -195,7 +221,7 @@ export type CandidateServe = Message<"vibesys.cli.v1.CandidateServe"> & {
  * Use `create(CandidateServeSchema)` to create a new message.
  */
 export const CandidateServeSchema: GenMessage<CandidateServe> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 5);
+  messageDesc(file_vibesys_cli_v1_job, 6);
 
 /**
  * CandidateSetup is how a job of a task of two images uses the candidate's image: it builds it,
@@ -221,7 +247,7 @@ export type CandidateSetup = Message<"vibesys.cli.v1.CandidateSetup"> & {
  * Use `create(CandidateSetupSchema)` to create a new message.
  */
 export const CandidateSetupSchema: GenMessage<CandidateSetup> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 6);
+  messageDesc(file_vibesys_cli_v1_job, 7);
 
 /**
  * @generated from message vibesys.cli.v1.MeasureSettings
@@ -247,7 +273,7 @@ export type MeasureSettings = Message<"vibesys.cli.v1.MeasureSettings"> & {
  * Use `create(MeasureSettingsSchema)` to create a new message.
  */
 export const MeasureSettingsSchema: GenMessage<MeasureSettings> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 7);
+  messageDesc(file_vibesys_cli_v1_job, 8);
 
 /**
  * JobSpec is what a submission asks for. The job kind is the settings case, so it cannot disagree
@@ -309,7 +335,7 @@ export type JobSpec = Message<"vibesys.cli.v1.JobSpec"> & {
  * Use `create(JobSpecSchema)` to create a new message.
  */
 export const JobSpecSchema: GenMessage<JobSpec> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 8);
+  messageDesc(file_vibesys_cli_v1_job, 9);
 
 /**
  * Note is free text attached to a job. It never takes part in a cache key, a verdict or a
@@ -339,7 +365,7 @@ export type Note = Message<"vibesys.cli.v1.Note"> & {
  * Use `create(NoteSchema)` to create a new message.
  */
 export const NoteSchema: GenMessage<Note> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 9);
+  messageDesc(file_vibesys_cli_v1_job, 10);
 
 /**
  * Submitter is one caller that submitted a job: a submission that created it, joined it or was
@@ -372,7 +398,7 @@ export type Submitter = Message<"vibesys.cli.v1.Submitter"> & {
  * Use `create(SubmitterSchema)` to create a new message.
  */
 export const SubmitterSchema: GenMessage<Submitter> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 10);
+  messageDesc(file_vibesys_cli_v1_job, 11);
 
 /**
  * Attempt is one earlier attempt at a job that was cut off, after which the job was queued again.
@@ -422,7 +448,7 @@ export type Attempt = Message<"vibesys.cli.v1.Attempt"> & {
  * Use `create(AttemptSchema)` to create a new message.
  */
 export const AttemptSchema: GenMessage<Attempt> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 11);
+  messageDesc(file_vibesys_cli_v1_job, 12);
 
 /**
  * @generated from message vibesys.cli.v1.Job
@@ -555,6 +581,22 @@ export type Job = Message<"vibesys.cli.v1.Job"> & {
    * @generated from field: string task_version = 19;
    */
   taskVersion: string;
+
+  /**
+   * Set while the job is held: it keeps its place in the queue and is not started until it is
+   * released. Only a queued job is held, and a job that starts is not held any more.
+   *
+   * @generated from field: vibesys.cli.v1.JobHold hold = 20;
+   */
+  hold?: JobHold | undefined;
+
+  /**
+   * The job's own priority, set by `job priority`, which overrides that of its plans. Unspecified
+   * inherits: the highest priority of the plans it is linked to, and normal with none.
+   *
+   * @generated from field: vibesys.cli.v1.Priority priority = 21;
+   */
+  priority: Priority;
 };
 
 /**
@@ -562,7 +604,38 @@ export type Job = Message<"vibesys.cli.v1.Job"> & {
  * Use `create(JobSchema)` to create a new message.
  */
 export const JobSchema: GenMessage<Job> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 12);
+  messageDesc(file_vibesys_cli_v1_job, 13);
+
+/**
+ * JobHold says who held a queued job, when and why. A held job keeps its place in the queue, holds
+ * back no other job, and is not started until it is released. The agent is the caller's own word
+ * for who it is: nothing checks it.
+ *
+ * @generated from message vibesys.cli.v1.JobHold
+ */
+export type JobHold = Message<"vibesys.cli.v1.JobHold"> & {
+  /**
+   * @generated from field: string agent = 1;
+   */
+  agent: string;
+
+  /**
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp at = 3;
+   */
+  at?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.JobHold.
+ * Use `create(JobHoldSchema)` to create a new message.
+ */
+export const JobHoldSchema: GenMessage<JobHold> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 14);
 
 /**
  * LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
@@ -602,7 +675,7 @@ export type LeaseHolder = Message<"vibesys.cli.v1.LeaseHolder"> & {
  * Use `create(LeaseHolderSchema)` to create a new message.
  */
 export const LeaseHolderSchema: GenMessage<LeaseHolder> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 13);
+  messageDesc(file_vibesys_cli_v1_job, 15);
 
 /**
  * WaitHolder is a job that stands in a queued job's way.
@@ -641,7 +714,7 @@ export type WaitHolder = Message<"vibesys.cli.v1.WaitHolder"> & {
  * Use `create(WaitHolderSchema)` to create a new message.
  */
 export const WaitHolderSchema: GenMessage<WaitHolder> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 14);
+  messageDesc(file_vibesys_cli_v1_job, 16);
 
 /**
  * WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
@@ -689,7 +762,7 @@ export type WaitReason = Message<"vibesys.cli.v1.WaitReason"> & {
  * Use `create(WaitReasonSchema)` to create a new message.
  */
 export const WaitReasonSchema: GenMessage<WaitReason> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 15);
+  messageDesc(file_vibesys_cli_v1_job, 17);
 
 /**
  * JobWait is why one queued job waits.
@@ -713,7 +786,7 @@ export type JobWait = Message<"vibesys.cli.v1.JobWait"> & {
  * Use `create(JobWaitSchema)` to create a new message.
  */
 export const JobWaitSchema: GenMessage<JobWait> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 16);
+  messageDesc(file_vibesys_cli_v1_job, 18);
 
 /**
  * @generated from enum vibesys.cli.v1.JobKind
@@ -751,6 +824,42 @@ export enum JobKind {
  */
 export const JobKindSchema: GenEnum<JobKind> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_job, 0);
+
+/**
+ * Priority orders the queued jobs that may start: one of a higher priority is considered first,
+ * and among jobs of one priority the scheduler's policy orders them. A job that has waited long
+ * counts a level higher (aging), so no job waits for ever. No running job is ever stopped for one
+ * of a higher priority.
+ *
+ * @generated from enum vibesys.cli.v1.Priority
+ */
+export enum Priority {
+  /**
+   * @generated from enum value: PRIORITY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: PRIORITY_LOW = 1;
+   */
+  LOW = 1,
+
+  /**
+   * @generated from enum value: PRIORITY_NORMAL = 2;
+   */
+  NORMAL = 2,
+
+  /**
+   * @generated from enum value: PRIORITY_HIGH = 3;
+   */
+  HIGH = 3,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.Priority.
+ */
+export const PrioritySchema: GenEnum<Priority> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_job, 1);
 
 /**
  * JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
@@ -802,7 +911,7 @@ export enum JobState {
  * Describes the enum vibesys.cli.v1.JobState.
  */
 export const JobStateSchema: GenEnum<JobState> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 1);
+  enumDesc(file_vibesys_cli_v1_job, 2);
 
 /**
  * CutCause is how an attempt's supervisor was proved gone.
@@ -834,7 +943,7 @@ export enum CutCause {
  * Describes the enum vibesys.cli.v1.CutCause.
  */
 export const CutCauseSchema: GenEnum<CutCause> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 2);
+  enumDesc(file_vibesys_cli_v1_job, 3);
 
 /**
  * WaitKind is why a queued job has not started.
@@ -876,7 +985,8 @@ export enum WaitKind {
   BEHIND = 4,
 
   /**
-   * A rule of the daemon's scheduler holds the job back; the detail says which.
+   * The daemon holds the job back, and the detail says why: a rule of its scheduler, the job is
+   * held (Job.hold), or the daemon is draining (StatusResponse.drain).
    *
    * @generated from enum value: WAIT_KIND_HELD = 5;
    */
@@ -903,5 +1013,5 @@ export enum WaitKind {
  * Describes the enum vibesys.cli.v1.WaitKind.
  */
 export const WaitKindSchema: GenEnum<WaitKind> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 3);
+  enumDesc(file_vibesys_cli_v1_job, 4);
 

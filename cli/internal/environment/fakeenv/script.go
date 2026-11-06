@@ -138,6 +138,19 @@ func splitOutput(argv []string) (script []string, file string) {
 	return argv, ""
 }
 
+// withoutEnv is the script env runs: what follows `env` and its NAME=value words. A script reads no
+// variable, so they set nothing it sees.
+func withoutEnv(argv []string) []string {
+	if len(argv) == 0 || argv[0] != "env" {
+		return argv
+	}
+	rest := argv[1:]
+	for len(rest) > 0 && strings.Contains(rest[0], "=") {
+		rest = rest[1:]
+	}
+	return rest
+}
+
 // run runs the steps as one process of the group g, writing to out, and to file for `emit`. It
 // returns when the process ends: by its own steps, or because the group ended.
 func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (core.ExecOutcome, error) {
@@ -288,7 +301,7 @@ var _ environment.Launcher = (*launcher)(nil)
 // Start implements environment.Launcher. The script's own outcomes that are not an exit, such as
 // `timeout`, end the process with that outcome as the execution's.
 func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, error) {
-	argv, file := splitOutput(argv)
+	argv, file := splitOutput(withoutEnv(argv))
 	steps, ok := parse(argv)
 	if !ok {
 		steps = []step{{words: []string{"malformed"}}} // exits 127, as a shell does for a command it cannot run

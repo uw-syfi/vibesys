@@ -22,13 +22,20 @@ const (
 	DaemonService_Hello_FullMethodName            = "/vibesys.cli.v1.DaemonService/Hello"
 	DaemonService_Status_FullMethodName           = "/vibesys.cli.v1.DaemonService/Status"
 	DaemonService_Stop_FullMethodName             = "/vibesys.cli.v1.DaemonService/Stop"
+	DaemonService_Drain_FullMethodName            = "/vibesys.cli.v1.DaemonService/Drain"
+	DaemonService_Resume_FullMethodName           = "/vibesys.cli.v1.DaemonService/Resume"
 	DaemonService_Submit_FullMethodName           = "/vibesys.cli.v1.DaemonService/Submit"
 	DaemonService_Watch_FullMethodName            = "/vibesys.cli.v1.DaemonService/Watch"
 	DaemonService_Wait_FullMethodName             = "/vibesys.cli.v1.DaemonService/Wait"
 	DaemonService_WatchTask_FullMethodName        = "/vibesys.cli.v1.DaemonService/WatchTask"
 	DaemonService_Cancel_FullMethodName           = "/vibesys.cli.v1.DaemonService/Cancel"
 	DaemonService_AddNote_FullMethodName          = "/vibesys.cli.v1.DaemonService/AddNote"
+	DaemonService_HoldJob_FullMethodName          = "/vibesys.cli.v1.DaemonService/HoldJob"
+	DaemonService_ReleaseJob_FullMethodName       = "/vibesys.cli.v1.DaemonService/ReleaseJob"
+	DaemonService_SetJobPriority_FullMethodName   = "/vibesys.cli.v1.DaemonService/SetJobPriority"
 	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
+	DaemonService_Queue_FullMethodName            = "/vibesys.cli.v1.DaemonService/Queue"
+	DaemonService_Lab_FullMethodName              = "/vibesys.cli.v1.DaemonService/Lab"
 	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
 	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
 	DaemonService_Show_FullMethodName             = "/vibesys.cli.v1.DaemonService/Show"
@@ -60,6 +67,11 @@ type DaemonServiceClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	// Stop ends the daemon. Running jobs have their own supervisors and are not affected.
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
+	// Drain makes the daemon start no queued job until Resume; the jobs that run go on. It is kept
+	// across a restart of the daemon. Protocol 5.
+	Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error)
+	// Resume ends a drain: the queued jobs start in their turn again. Protocol 5.
+	Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error)
 	// Submit queues a job, or returns the queued or running job with the same key, or answers from
 	// a reusable result.
 	Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
@@ -80,7 +92,24 @@ type DaemonServiceClient interface {
 	// job. A cancelled measure saves nothing.
 	Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error)
 	AddNote(ctx context.Context, in *AddNoteRequest, opts ...grpc.CallOption) (*AddNoteResponse, error)
+	// HoldJob holds a queued job: it keeps its place in the queue and is not started until
+	// ReleaseJob. A job the daemon had begun to start already starts, and is not held. Protocol 5.
+	HoldJob(ctx context.Context, in *HoldJobRequest, opts ...grpc.CallOption) (*HoldJobResponse, error)
+	// ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
+	// Protocol 5.
+	ReleaseJob(ctx context.Context, in *ReleaseJobRequest, opts ...grpc.CallOption) (*ReleaseJobResponse, error)
+	// SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+	// its plans' again. A reason is required, and the change is kept as a note on the job.
+	// Protocol 6.
+	SetJobPriority(ctx context.Context, in *SetJobPriorityRequest, opts ...grpc.CallOption) (*SetJobPriorityResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
+	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+	Queue(ctx context.Context, in *QueueRequest, opts ...grpc.CallOption) (*QueueResponse, error)
+	// Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+	// streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+	// that ended is CONFLICT. Protocol 8.
+	Lab(ctx context.Context, in *LabRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabResponse], error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error)
@@ -138,6 +167,26 @@ func (c *daemonServiceClient) Stop(ctx context.Context, in *StopRequest, opts ..
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StopResponse)
 	err := c.cc.Invoke(ctx, DaemonService_Stop_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DrainResponse)
+	err := c.cc.Invoke(ctx, DaemonService_Drain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeResponse)
+	err := c.cc.Invoke(ctx, DaemonService_Resume_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +280,36 @@ func (c *daemonServiceClient) AddNote(ctx context.Context, in *AddNoteRequest, o
 	return out, nil
 }
 
+func (c *daemonServiceClient) HoldJob(ctx context.Context, in *HoldJobRequest, opts ...grpc.CallOption) (*HoldJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HoldJobResponse)
+	err := c.cc.Invoke(ctx, DaemonService_HoldJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ReleaseJob(ctx context.Context, in *ReleaseJobRequest, opts ...grpc.CallOption) (*ReleaseJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseJobResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ReleaseJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) SetJobPriority(ctx context.Context, in *SetJobPriorityRequest, opts ...grpc.CallOption) (*SetJobPriorityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetJobPriorityResponse)
+	err := c.cc.Invoke(ctx, DaemonService_SetJobPriority_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListJobsResponse)
@@ -240,6 +319,35 @@ func (c *daemonServiceClient) ListJobs(ctx context.Context, in *ListJobsRequest,
 	}
 	return out, nil
 }
+
+func (c *daemonServiceClient) Queue(ctx context.Context, in *QueueRequest, opts ...grpc.CallOption) (*QueueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueueResponse)
+	err := c.cc.Invoke(ctx, DaemonService_Queue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) Lab(ctx context.Context, in *LabRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[3], DaemonService_Lab_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LabRequest, LabResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_LabClient = grpc.ServerStreamingClient[LabResponse]
 
 func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -253,7 +361,7 @@ func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRe
 
 func (c *daemonServiceClient) ReadLogs(ctx context.Context, in *ReadLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadLogsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[3], DaemonService_ReadLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[4], DaemonService_ReadLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +513,11 @@ type DaemonServiceServer interface {
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	// Stop ends the daemon. Running jobs have their own supervisors and are not affected.
 	Stop(context.Context, *StopRequest) (*StopResponse, error)
+	// Drain makes the daemon start no queued job until Resume; the jobs that run go on. It is kept
+	// across a restart of the daemon. Protocol 5.
+	Drain(context.Context, *DrainRequest) (*DrainResponse, error)
+	// Resume ends a drain: the queued jobs start in their turn again. Protocol 5.
+	Resume(context.Context, *ResumeRequest) (*ResumeResponse, error)
 	// Submit queues a job, or returns the queued or running job with the same key, or answers from
 	// a reusable result.
 	Submit(context.Context, *SubmitRequest) (*SubmitResponse, error)
@@ -425,7 +538,24 @@ type DaemonServiceServer interface {
 	// job. A cancelled measure saves nothing.
 	Cancel(context.Context, *CancelRequest) (*CancelResponse, error)
 	AddNote(context.Context, *AddNoteRequest) (*AddNoteResponse, error)
+	// HoldJob holds a queued job: it keeps its place in the queue and is not started until
+	// ReleaseJob. A job the daemon had begun to start already starts, and is not held. Protocol 5.
+	HoldJob(context.Context, *HoldJobRequest) (*HoldJobResponse, error)
+	// ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
+	// Protocol 5.
+	ReleaseJob(context.Context, *ReleaseJobRequest) (*ReleaseJobResponse, error)
+	// SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+	// its plans' again. A reason is required, and the change is kept as a note on the job.
+	// Protocol 6.
+	SetJobPriority(context.Context, *SetJobPriorityRequest) (*SetJobPriorityResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
+	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+	Queue(context.Context, *QueueRequest) (*QueueResponse, error)
+	// Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+	// streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+	// that ended is CONFLICT. Protocol 8.
+	Lab(*LabRequest, grpc.ServerStreamingServer[LabResponse]) error
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error)
@@ -468,6 +598,12 @@ func (UnimplementedDaemonServiceServer) Status(context.Context, *StatusRequest) 
 func (UnimplementedDaemonServiceServer) Stop(context.Context, *StopRequest) (*StopResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Stop not implemented")
 }
+func (UnimplementedDaemonServiceServer) Drain(context.Context, *DrainRequest) (*DrainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Drain not implemented")
+}
+func (UnimplementedDaemonServiceServer) Resume(context.Context, *ResumeRequest) (*ResumeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Resume not implemented")
+}
 func (UnimplementedDaemonServiceServer) Submit(context.Context, *SubmitRequest) (*SubmitResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Submit not implemented")
 }
@@ -486,8 +622,23 @@ func (UnimplementedDaemonServiceServer) Cancel(context.Context, *CancelRequest) 
 func (UnimplementedDaemonServiceServer) AddNote(context.Context, *AddNoteRequest) (*AddNoteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddNote not implemented")
 }
+func (UnimplementedDaemonServiceServer) HoldJob(context.Context, *HoldJobRequest) (*HoldJobResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HoldJob not implemented")
+}
+func (UnimplementedDaemonServiceServer) ReleaseJob(context.Context, *ReleaseJobRequest) (*ReleaseJobResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseJob not implemented")
+}
+func (UnimplementedDaemonServiceServer) SetJobPriority(context.Context, *SetJobPriorityRequest) (*SetJobPriorityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetJobPriority not implemented")
+}
 func (UnimplementedDaemonServiceServer) ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJobs not implemented")
+}
+func (UnimplementedDaemonServiceServer) Queue(context.Context, *QueueRequest) (*QueueResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Queue not implemented")
+}
+func (UnimplementedDaemonServiceServer) Lab(*LabRequest, grpc.ServerStreamingServer[LabResponse]) error {
+	return status.Error(codes.Unimplemented, "method Lab not implemented")
 }
 func (UnimplementedDaemonServiceServer) ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForgetRepository not implemented")
@@ -606,6 +757,42 @@ func _DaemonService_Stop_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_Drain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DrainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).Drain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_Drain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).Drain(ctx, req.(*DrainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_Resume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).Resume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_Resume_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).Resume(ctx, req.(*ResumeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_Submit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SubmitRequest)
 	if err := dec(in); err != nil {
@@ -693,6 +880,60 @@ func _DaemonService_AddNote_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_HoldJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HoldJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).HoldJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_HoldJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).HoldJob(ctx, req.(*HoldJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ReleaseJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ReleaseJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ReleaseJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ReleaseJob(ctx, req.(*ReleaseJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_SetJobPriority_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetJobPriorityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).SetJobPriority(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_SetJobPriority_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).SetJobPriority(ctx, req.(*SetJobPriorityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_ListJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListJobsRequest)
 	if err := dec(in); err != nil {
@@ -710,6 +951,35 @@ func _DaemonService_ListJobs_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _DaemonService_Queue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).Queue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_Queue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).Queue(ctx, req.(*QueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_Lab_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LabRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServiceServer).Lab(m, &grpc.GenericServerStream[LabRequest, LabResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_LabServer = grpc.ServerStreamingServer[LabResponse]
 
 func _DaemonService_ForgetRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ForgetRepositoryRequest)
@@ -976,6 +1246,14 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonService_Stop_Handler,
 		},
 		{
+			MethodName: "Drain",
+			Handler:    _DaemonService_Drain_Handler,
+		},
+		{
+			MethodName: "Resume",
+			Handler:    _DaemonService_Resume_Handler,
+		},
+		{
 			MethodName: "Submit",
 			Handler:    _DaemonService_Submit_Handler,
 		},
@@ -988,8 +1266,24 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonService_AddNote_Handler,
 		},
 		{
+			MethodName: "HoldJob",
+			Handler:    _DaemonService_HoldJob_Handler,
+		},
+		{
+			MethodName: "ReleaseJob",
+			Handler:    _DaemonService_ReleaseJob_Handler,
+		},
+		{
+			MethodName: "SetJobPriority",
+			Handler:    _DaemonService_SetJobPriority_Handler,
+		},
+		{
 			MethodName: "ListJobs",
 			Handler:    _DaemonService_ListJobs_Handler,
+		},
+		{
+			MethodName: "Queue",
+			Handler:    _DaemonService_Queue_Handler,
 		},
 		{
 			MethodName: "ForgetRepository",
@@ -1058,6 +1352,11 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WatchTask",
 			Handler:       _DaemonService_WatchTask_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Lab",
+			Handler:       _DaemonService_Lab_Handler,
 			ServerStreams: true,
 		},
 		{

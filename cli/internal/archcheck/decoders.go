@@ -22,6 +22,8 @@ var unfuzzedDecoders = map[string]string{
 	"ToNote":               "decoded inside ToJob, which FuzzDecodeJob fuzzes",
 	"ToAttempt":            "decoded inside ToJob, which FuzzDecodeJob fuzzes",
 	"ToSubmitter":          "decoded inside ToJob, which FuzzDecodeJob fuzzes",
+	"ToJobHold":            "decoded inside ToJob, which FuzzDecodeJob fuzzes",
+	"ToPriority":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 	"ToResourceKind":       "decoded inside ToJob, which FuzzDecodeJob fuzzes; TestAResourceKindIsItsContractValueAndBack holds it total over every contract value",
 	"ToCutCause":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 	"ToVersions":           "copies three integers and refuses nothing; a copy has no input to fuzz",
@@ -39,6 +41,8 @@ var unfuzzedDecoders = map[string]string{
 	"ToCommand":            "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToCommandOutcome":     "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToCompatibility":      "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToLabRoom":            "decoded inside ToLabCall and ToLabReply, which FuzzDecodeLabCall and FuzzDecodeLabReply fuzz",
+	"ToLabStatus":          "decoded inside ToLabReply, which FuzzDecodeLabReply fuzzes",
 }
 
 // UnfuzzedDecoders returns the decoders excused from having a fuzz target, with the reason.

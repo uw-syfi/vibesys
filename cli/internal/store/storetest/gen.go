@@ -128,6 +128,7 @@ func (g *gen) settings() core.Settings {
 				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
 				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},
 			},
+			Lab: &core.LabSpec{},
 		}
 	}
 	return core.MeasureSettings{Samples: 1 + g.r.Uint32(), Recheck: true}
@@ -235,6 +236,7 @@ func (g *gen) plan() core.Plan {
 		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(),
 		Status:   []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)],
 		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
+		Priority:  core.Priorities()[g.pick(3)],
 		GainBound: &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
 	}
 }
@@ -247,7 +249,8 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
-		Needs: g.needs(), TaskVersion: g.name(),
+		Needs: g.needs(), TaskVersion: g.name(), Hold: &core.JobHold{Agent: g.text(), Reason: g.text(), At: g.instant()},
+		Priority: core.Priorities()[g.pick(3)],
 	}
 }
 

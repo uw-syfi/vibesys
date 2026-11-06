@@ -21,10 +21,11 @@ import (
 // task version it is for. Everything is decided here and not by the store or the supervisor, which
 // only keep what they are given.
 //
-// A docker job may run on any placement that gives what its task needs, and where it runs is no
-// part of its key, so it is fingerprinted on the first of them by name. The scheduler chooses where
-// it runs when it starts, and an engine there that builds the image to another digest gives the job
-// the key of that digest then (flow.Prepare). A host job runs on this machine, whatever placement
+// A docker job may run on any placement that runs its kind of job and gives what its task needs,
+// and is refused when none does. Where it runs is no part of its key, so it is fingerprinted on the
+// first of them by name. The scheduler chooses where it runs when it starts, and an engine there
+// that builds the image to another digest gives the job the key of that digest then
+// (flow.Prepare). A host job runs on this machine, whatever placement
 // it was restricted to, so it is restricted to none.
 func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission, error) {
 	c, spec := sub.Context, sub.Spec
@@ -39,7 +40,7 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 	if err != nil {
 		return sub, err
 	}
-	eligible, err := a.eligibleOf(kind, t.Needs, spec.Placement)
+	eligible, err := a.eligibleOf(kind, spec.Settings.Kind(), t.Needs, spec.Placement)
 	if err != nil {
 		return sub, err
 	}
@@ -67,8 +68,8 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 // command that leaves its environment to the task runs where the task's check and measure run
 // (core.ChooseEnvironment), so on a task with a Dockerfile it is a docker job in the task's image
 // and waits behind a measure of its placement like any other docker job there. A docker job may
-// run on any placement that gives what its task needs, or on the one it is restricted to, and is
-// refused when none does; it records the needs, which the scheduler starts it on a placement by. A
+// run on any placement that runs command jobs and gives what its task needs, or on the one it is
+// restricted to, and is refused when none does; it records the needs, which the scheduler starts it on a placement by. A
 // host job runs on no placement, whatever was asked, as for a check or a measure. The submission
 // records the environment, the restriction and the needs. A command job has no key, so nothing is
 // fingerprinted, and a host one names no task to read.
@@ -83,7 +84,7 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	var t task.Task
 	read := spec.Environment == core.EnvironmentAuto ||
 		spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 ||
-		command.Profile != nil
+		command.Profile != nil || command.Lab != nil
 	if read {
 		var err error
 		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
@@ -99,10 +100,15 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	if err != nil {
 		return sub, err
 	}
+	if command.Lab != nil {
+		if command, err = labOf(command, spec.Environment, t); err != nil {
+			return sub, err
+		}
+	}
 	if _, ok := spec.Settings.(core.CommandSettings); ok {
 		spec.Settings = command
 	}
-	if _, err := a.eligibleOf(spec.Environment, needs, spec.Placement); err != nil {
+	if _, err := a.eligibleOf(spec.Environment, core.JobCommand, needs, spec.Placement); err != nil {
 		return sub, err
 	}
 	if spec.Environment != core.EnvironmentDocker {
@@ -143,6 +149,27 @@ func commandOfTwoImages(c core.CommandSettings, t task.Task) (core.CommandSettin
 	}
 	c.Timeout = limit + cand.StartupTimeout
 	c.Candidate = &core.CommandCandidate{Build: cand.Build, Serve: &serve}
+	return c, nil
+}
+
+// labOf is a lab's settings as the daemon queues it: in docker, where its containers are, for the
+// time it asked for (core.DefaultLabTime when it asked for none), at most core.MaxLabTime. A
+// placement whose allocations are capped shortens it when it starts (core.PlacementOffer.LabTime).
+func labOf(c core.CommandSettings, env core.EnvironmentKind, t task.Task) (core.CommandSettings, error) {
+	if len(c.Argv) > 0 || c.Service != nil || c.Profile != nil {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: "a lab runs what lab exec asks, and takes no command, service or profile of its own"}
+	}
+	if env != core.EnvironmentDocker {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"task %q runs in the %s environment, and a lab holds the containers of a placement: it needs a task with a Dockerfile, run in docker", t.Name, env)}
+	}
+	if c.Timeout == 0 {
+		c.Timeout = core.DefaultLabTime
+	}
+	if c.Timeout > core.MaxLabTime {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"a lab lasts at most %v, and %v was asked for", core.MaxLabTime, c.Timeout)}
+	}
 	return c, nil
 }
 
@@ -240,19 +267,20 @@ func (a *App) taskAt(ctx context.Context, repository string, commit core.Commit,
 	return a.cfg.Tasks.Task(ctx, repository, commit, name)
 }
 
-// eligibleOf is the placements a job of the kind may run on, by name, from the placement it is
-// restricted to and what its task needs (core.EligiblePlacements), and never empty. Only a docker
+// eligibleOf is the placements a job of the environment kind and the job kind may run on, by name,
+// from the placement it is restricted to and what its task needs (core.EligiblePlacements), and
+// never empty: a job no placement runs is refused when it is submitted. Only a docker
 // job runs on one: a host job runs on this machine, whatever it is restricted to, which is the
 // placement "". A daemon configured with no placements, as a test's may be, leaves the restriction
 // as it is, and the environment refuses a placement it does not have.
-func (a *App) eligibleOf(kind core.EnvironmentKind, needs []core.ResourceKind, restriction string) ([]string, error) {
+func (a *App) eligibleOf(kind core.EnvironmentKind, job core.JobKind, needs []core.ResourceKind, restriction string) ([]string, error) {
 	if kind != core.EnvironmentDocker {
 		return []string{""}, nil
 	}
 	if len(a.cfg.Placements) == 0 {
 		return []string{restriction}, nil
 	}
-	return core.EligiblePlacements(a.cfg.Placements, needs, restriction)
+	return core.EligiblePlacements(a.cfg.Placements, job, needs, restriction)
 }
 
 // fingerprintOf fingerprints the environment of a kind for the target the job runs. The kind is

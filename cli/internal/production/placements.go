@@ -26,6 +26,7 @@ import (
 	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/slurm"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/locallease"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
@@ -61,7 +62,7 @@ type machines struct {
 // scope it does not own, which are what an earlier attempt of the same job left. Another machine
 // runs one job of the daemon at a time (operator.Parse refuses more), so there the containers and
 // the Slurm allocations stay in the daemon's scope, which a run sweeps whole.
-func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string) (machines, error) {
+func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string, scope leaseScope) (machines, error) {
 	local := cpu.New(cpu.Host(), clk)
 	providers := map[string]*docker.Provider{}
 	out := machines{claims: map[string][]core.Claim{}}
@@ -69,12 +70,15 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
 	for _, name := range names {
-		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name], grace)
+		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name], grace, scope)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		providers[name] = provider
-		out.offers = append(out.offers, provider.Offer())
+		offer := provider.Offer()
+		offer.Jobs = operator.JobKinds(op.GetPlacements()[name])
+		offer.LongestRun = longestRun(op.GetPlacements()[name])
+		out.offers = append(out.offers, offer)
 		out.claims[name] = provider.Claims()
 	}
 	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk, Grace: grace})
@@ -90,6 +94,21 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 		},
 	}
 	return out, nil
+}
+
+// longestRun is how long a command may run on a placement before Slurm ends what it runs in: the
+// allocation's cap ([slurm] max_time_seconds, in whole minutes) less the margin the kind asks for
+// the stop, and at least a minute. A placement with no cap has none.
+func longestRun(pl *cliv1.Placement) time.Duration {
+	ceiling := seconds(pl.GetSlurm().GetMaxTimeSeconds(), 0).Truncate(time.Minute)
+	if ceiling <= 0 {
+		return 0
+	}
+	margin := slurm.Margin
+	if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+		margin = apptainer.StopMargin
+	}
+	return max(ceiling-margin, time.Minute)
 }
 
 // probe is the program a local placement's containers probe a candidate's server with: this
@@ -131,13 +150,17 @@ func scopeOf(key, name string) string {
 	return docker.ScopeFor(key + "\x00placement\x00" + name)
 }
 
-// placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
+// placement makes the docker environments of one placement. Its builds of one image take turns
+// in the leases of the machine whose Docker builds it (leases): this machine's for a local or an
+// apptainer placement, and the engine's machine, reached over ssh, for an ssh or a Slurm one, so
+// that the processes of every daemon that build there build one image once.
+func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration, leases leaseScope) (*docker.Provider, error) {
 	scope := scopeOf(dir.Path(), name)
 	cfg := docker.Config{
 		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
 		Candidates: docker.CandidateFiles{Files: gitwork.Tasks{}},
+		Builds:     locallease.Dir{Path: leases.local}, Holder: p.holder(),
 	}
 	engineCfg := dockercli.Config{Timers: clk}
 	var shell remote.Shell = remote.Local{}
@@ -151,6 +174,9 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		r := pl.GetRemote()
 		ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
 		shell, where, engineCfg.Shell = ssh, r.GetHost(), ssh
+		if pl.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+			cfg.Builds = leases.remote(ssh)
+		}
 		cfg.Backend = cpu.New(&remote.CPU{Shell: ssh, Timers: clk, Timeout: machine.CallTimeout}, clk)
 		cfg.Machine = &machine.Remote{
 			Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: orDefault(r.GetRsyncCommand(), "rsync")},
@@ -166,6 +192,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		engineCfg.Allocator = slurm.Allocator{
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive, CPUs: int(s.GetCpus()),
 			Memory: s.GetMemory(), Arguments: s.GetSrunArguments(), Builder: slurm.BuilderName(scope),
+			MaxTime: seconds(s.GetMaxTimeSeconds(), 0),
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
 	}
@@ -227,6 +254,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: cfg.Scope,
 		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
+		MaxTime:      seconds(s.GetMaxTimeSeconds(), 0),
 		Sizing: apptainer.Sizing{
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),

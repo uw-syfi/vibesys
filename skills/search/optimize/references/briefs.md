@@ -25,7 +25,9 @@ Rules:
 - No stub, special case or shortcut that makes a check pass or a number rise without the
   program really doing the work. Obey every rule in OBJECTIVE.md.
 - All measurement and all load go through vibesys-cli jobs (vibesys:measure); report only numbers
-  it printed.
+  it printed. Pass `--plan <n>` to every submit.
+- Never change a job's or a plan's priority, and never hold, release or cancel a job you did not
+  submit: the lead steers the queue. If a job of yours should go first, say so in your handoff.
 - Implement and combine workers commit as vibesys:commit says before reporting (the candidate is a
   full commit with `Checks: pass`; the branch name and `Plan: N` come from the brief); judge and
   profile workers edit nothing.

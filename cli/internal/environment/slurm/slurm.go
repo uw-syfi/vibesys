@@ -98,6 +98,10 @@ type Allocator struct {
 	// Builder names the BuildKit builder of the daemon's builds: its state, the layer cache and
 	// every RUN --mount=type=cache, is kept between builds under that name.
 	Builder string
+	// MaxTime, when set, is the longest time limit an allocation asks for, such as the MaxTime of
+	// the partition, in whole minutes: a command that runs longer is ended by Slurm and fails. Zero
+	// is no cap.
+	MaxTime time.Duration
 }
 
 var _ dockercli.Allocator = Allocator{}
@@ -111,6 +115,9 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 		if x.Limit > 0 {
 			limit += x.Limit
 		}
+	}
+	if ceiling := a.MaxTime.Truncate(time.Minute); ceiling > 0 {
+		limit = min(limit, ceiling)
 	}
 	minutes := int((limit + time.Minute - 1) / time.Minute)
 	out := []string{
@@ -243,6 +250,11 @@ var _ docker.Engine = Engine{}
 // Image implements docker.Engine.
 func (e Engine) Image(ctx context.Context, ref string) (docker.Image, bool, error) {
 	return e.Inner.Image(ctx, ref)
+}
+
+// Content implements docker.Engine.
+func (e Engine) Content(ctx context.Context, image string) (string, error) {
+	return e.Inner.Content(ctx, image)
 }
 
 // Build implements docker.Engine. A build that did not finish has its allocation cancelled, so a

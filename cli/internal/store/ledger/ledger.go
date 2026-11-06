@@ -15,6 +15,7 @@ package ledger
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -312,6 +313,35 @@ func (l *Ledger) AddNote(id core.JobID, note core.Note) (Change, core.Job, error
 	return PutJob{Job: job}, Copy(job), nil
 }
 
+// ControlJob decides a change to how a job waits, as core.Job.Control says. A change that changes
+// nothing, such as releasing a job that is not held, yields a nil Change.
+func (l *Ledger) ControlJob(id core.JobID, control core.JobControl) (Change, core.Job, error) {
+	var none core.Job
+	if control == nil {
+		return nil, none, invalid("control", "is nil")
+	}
+	control, err := Hold("control", control)
+	if err != nil {
+		return nil, none, err
+	}
+	i, ok := l.jobIndex[id]
+	if !ok {
+		return nil, none, notFound("job %s", id)
+	}
+	job, err := l.jobs[i].Control(control)
+	if err != nil {
+		return nil, none, err
+	}
+	if reflect.DeepEqual(job, l.jobs[i]) {
+		return nil, Copy(job), nil
+	}
+	job, err = Hold("job", job)
+	if err != nil {
+		return nil, none, err
+	}
+	return PutJob{Job: job}, Copy(job), nil
+}
+
 // RecordPromotion decides appending a promotion to the record.
 func (l *Ledger) RecordPromotion(approved core.Approved) (Change, error) {
 	if !approved.Valid() {
@@ -405,6 +435,12 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	}
 	if edit.Status != nil {
 		plan.Status = *edit.Status
+	}
+	if edit.Priority != nil {
+		if !edit.Priority.Valid() {
+			return nil, none, invalid("edit.Priority", fmt.Sprintf("%q is not a priority", *edit.Priority))
+		}
+		plan.Priority = *edit.Priority
 	}
 	if edit.GainBound != nil {
 		plan.GainBound = edit.GainBound

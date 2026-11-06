@@ -18,6 +18,17 @@ enum JobKind {
   JOB_KIND_MEASURE = 3;
 }
 
+// Priority orders the queued jobs that may start: one of a higher priority is considered first,
+// and among jobs of one priority the scheduler's policy orders them. A job that has waited long
+// counts a level higher (aging), so no job waits for ever. No running job is ever stopped for one
+// of a higher priority.
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+}
+
 // JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
@@ -55,7 +66,16 @@ message CommandSettings {
   // Set by the daemon for a job of a task of two images, never by a caller: how the candidate's
   // image is built, and for a profile the server the command runs against.
   CandidateSetup candidate = 5;
+  // Set for a lab: the job holds its containers, with nothing running in them, for the timeout,
+  // and runs in them what a lab call asks (lab.proto). A lab is submitted with no argv, service or
+  // profile. For a task of two images the daemon sets the candidate's build, and the lab holds the
+  // candidate's container and the task's beside it.
+  LabSpec lab = 6;
 }
+
+// LabSpec says a command job is a lab. It has no settings of its own yet: the job's timeout is how
+// long the lab lasts once its containers are up.
+message LabSpec {}
 
 // ProfileRequest is what a profile submission asks for.
 message ProfileRequest {
@@ -219,6 +239,30 @@ message Job {
   // task is still at it when the job starts. Empty for a command job, and for a job saved before
   // this field was, which runs the task as it is when it starts.
   string task_version = 19 [(buf.validate.field).string.max_len = 256];
+  // Set while the job is held: it keeps its place in the queue and is not started until it is
+  // released. Only a queued job is held, and a job that starts is not held any more.
+  JobHold hold = 20;
+  // The job's own priority, set by `job priority`, which overrides that of its plans. Unspecified
+  // inherits: the highest priority of the plans it is linked to, and normal with none.
+  Priority priority = 21 [(buf.validate.field).enum.defined_only = true];
+}
+
+// JobHold says who held a queued job, when and why. A held job keeps its place in the queue, holds
+// back no other job, and is not started until it is released. The agent is the caller's own word
+// for who it is: nothing checks it.
+message JobHold {
+  string agent = 1;
+  string reason = 2;
+  google.protobuf.Timestamp at = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).timestamp = {
+      gte: {seconds: -62135596800}
+      lte: {
+        seconds: 253402300799
+        nanos: 999999999
+      }
+    }
+  ];
 }
 
 // WaitKind is why a queued job has not started.
@@ -232,7 +276,8 @@ enum WaitKind {
   WAIT_KIND_IN_USE = 3;
   // An earlier job waits for the resource and keeps its turn; the holders are those jobs.
   WAIT_KIND_BEHIND = 4;
-  // A rule of the daemon's scheduler holds the job back; the detail says which.
+  // The daemon holds the job back, and the detail says why: a rule of its scheduler, the job is
+  // held (Job.hold), or the daemon is draining (StatusResponse.drain).
   WAIT_KIND_HELD = 5;
   // The job waits for a job's or its store's trouble to pass, or can never start; the detail says
   // why. A wait on the job ends with this as its failure.

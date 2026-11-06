@@ -24,6 +24,8 @@ func Validate(x core.Execution) error {
 		return invalid("no command to run")
 	case x.Timeout <= 0:
 		return invalid("the timeout must be positive, got %v", x.Timeout)
+	case x.Later < 0:
+		return invalid("the later executions' time must not be negative, got %v", x.Later)
 	case x.Checkout.Dir == "" || x.Checkout.Dir[0] != '/':
 		return invalid("the checkout directory must be an absolute path, got %q", x.Checkout.Dir)
 	case x.Scratch != "" && x.Scratch[0] != '/':
@@ -71,9 +73,6 @@ func ResolvePort(argv []string, port int) []string {
 	}
 	return out
 }
-
-// ServiceURL is where the commands of the task's image reach the candidate's server.
-func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
 
 // overlap reports whether one absolute directory is the other or inside it.
 func overlap(a, b string) bool {

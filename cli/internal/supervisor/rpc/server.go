@@ -77,3 +77,21 @@ func (s *Server) Release(context.Context, *cliv1.ReleaseRequest) (*cliv1.Release
 	}
 	return &cliv1.ReleaseResponse{}, nil
 }
+
+// LabCall implements cliv1.SupervisorServiceServer.
+func (s *Server) LabCall(req *cliv1.LabCallRequest, stream cliv1.SupervisorService_LabCallServer) error {
+	call, err := wire.ToLabCall("call", req.GetCall())
+	if err != nil {
+		return wire.Error(err)
+	}
+	err = s.supervisor.Lab(stream.Context(), call, func(r core.LabReply) error {
+		return stream.Send(&cliv1.LabCallResponse{Reply: wire.LabReply(r)})
+	})
+	switch {
+	case errors.Is(err, supervisor.ErrReleased):
+		return status.Error(codes.Unavailable, err.Error())
+	case err != nil:
+		return wire.Error(err)
+	}
+	return nil
+}

@@ -47,15 +47,17 @@ type TB interface {
 // properties are the contract's properties, by name.
 func properties(c Contract) map[string]func(TB, Contract) {
 	out := map[string]func(TB, Contract){
-		"the policy orders the jobs it is given, each once":                orderIsPermutation,
-		"no resource is given past its capacity":                           neverOverCapacity,
-		"an exclusive claim shares its resource with no other":             exclusiveIsAlone,
-		"every waiting job starts, waits for a true reason or is refused":  everyJobDecided,
-		"the decisions are a function of the state":                        deterministic,
-		"every job starts once the holders end and nothing more arrives":   eventuallyStarts,
-		"a job that waits for a resource keeps its turn on it":             keepsTurn,
-		"a job refused a lease waits for it, naming its holder":            leasedWaits,
-		"a job starts on one of its options, and never one it cannot hold": startsOnItsOwnOption,
+		"the policy orders the jobs it is given, each once":                                    orderIsPermutation,
+		"no resource is given past its capacity":                                               neverOverCapacity,
+		"an exclusive claim shares its resource with no other":                                 exclusiveIsAlone,
+		"every waiting job starts, waits for a true reason or is refused":                      everyJobDecided,
+		"the decisions are a function of the state":                                            deterministic,
+		"every job starts once the holders end and nothing more arrives":                       eventuallyStarts,
+		"a job that waits for a resource keeps its turn on it":                                 keepsTurn,
+		"a job refused a lease waits for it, naming its holder":                                leasedWaits,
+		"a job starts on one of its options, and never one it cannot hold":                     startsOnItsOwnOption,
+		"a held job, and any but a First one while the daemon drains, waits and keeps no turn": steeredWaits,
+		"jobs are considered by aged priority, and in the policy's order within one":           byPriority,
 	}
 	if c.Fair {
 		out["a run with work waiting starts within one turn of every run"] = boundedStarvation
@@ -179,6 +181,14 @@ func (g gen) state() schedule.State {
 	for range g.r.IntN(schedule.RecentGrants + 4) {
 		s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: runs[g.r.IntN(len(runs))], Claims: g.claims(s.Resources)})
 	}
+	// Mostly the scheduler knows the time, which ages the priorities of the jobs that wait.
+	if g.r.IntN(4) != 0 {
+		s.Now = epoch.Add(time.Duration(g.r.IntN(4*60)) * time.Minute)
+	}
+	// Sometimes the daemon drains.
+	if g.r.IntN(10) == 0 {
+		s.Drain = &core.Drain{Agent: "lead", Reason: "a new build", Since: epoch}
+	}
 	return s
 }
 
@@ -189,6 +199,11 @@ func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
 	c := schedule.Candidate{
 		ID: schedule.ID(fmt.Sprintf("w%d", i)), Run: runs[g.r.IntN(len(runs))],
 		Submitted: epoch.Add(time.Duration(g.r.IntN(4)) * time.Second), Seq: uint64(100 + i), First: g.r.IntN(8) == 0,
+		Priority: []core.Priority{"", core.PriorityLow, core.PriorityNormal, core.PriorityHigh}[g.r.IntN(4)],
+	}
+	// Some have waited long enough for their priority to age.
+	if g.r.IntN(3) == 0 {
+		c.Submitted = c.Submitted.Add(-time.Duration(g.r.IntN(3*60)) * time.Minute)
 	}
 	n := 1
 	switch g.r.IntN(12) {
@@ -204,6 +219,10 @@ func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
 	if n > 0 && g.r.IntN(10) == 0 {
 		o := c.Options[g.r.IntN(n)]
 		c.Leased = &schedule.LeasedOut{Resource: o.Claims[0].Resource, Holder: core.LeaseHolder{User: "other", Host: "host-b", PID: 7}}
+	}
+	// Some are held.
+	if g.r.IntN(8) == 0 {
+		c.Hold = &core.JobHold{Agent: "lead", Reason: "after the integration check", At: epoch}
 	}
 	return c
 }
@@ -482,10 +501,12 @@ func eventuallyStarts(t TB, c Contract) {
 		waiting := len(s.Waiting)
 		for round := 0; len(s.Waiting) > 0; round++ {
 			if round > 0 {
-				// The other daemons give back the leases they held.
+				// The other daemons give back the leases they held, and the operator lets every held
+				// job go and stops draining.
 				for i := range s.Waiting {
-					s.Waiting[i].Leased = nil
+					s.Waiting[i].Leased, s.Waiting[i].Hold = nil, nil
 				}
+				s.Drain = nil
 			}
 			if round > 2*(waiting+len(s.Holdings))+2 {
 				t.Fatalf("seed %d: %d jobs still wait after %d rounds: %+v", seed, len(s.Waiting), round, c.Step(s, c.rules()))
@@ -565,6 +586,83 @@ func boundedStarvation(t TB, c Contract) {
 			}
 		}
 	}
+}
+
+// steeredWaits: an operator's word holds a job back whatever the resources allow. A held job, and
+// while the daemon drains every job but a First one, waits as held, naming the hold or the drain,
+// unless it can never start; and it keeps no turn: no other job waits behind it.
+func steeredWaits(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		why := map[schedule.ID]string{}
+		for _, w := range s.Waiting {
+			switch {
+			case s.Drain != nil && !w.First:
+				why[w.ID] = s.Drain.WaitDetail()
+			case w.Hold != nil:
+				why[w.ID] = w.Hold.WaitDetail()
+			}
+		}
+		for _, d := range c.Step(s, c.rules()) {
+			if w, ok := d.(schedule.Wait); ok && w.Reason.Kind == core.WaitBehind {
+				for _, b := range w.Reason.Blockers {
+					if _, steered := why[b]; steered {
+						t.Fatalf("seed %d: %s waits behind %s, which an operator holds back and which keeps no turn", seed, w.ID, b)
+					}
+				}
+			}
+			want, steered := why[d.Target()]
+			if !steered {
+				continue
+			}
+			switch d := d.(type) {
+			case schedule.Start:
+				t.Fatalf("seed %d: %s started though %s", seed, d.ID, want)
+			case schedule.Wait:
+				if d.Reason.Kind != core.WaitHeld || d.Reason.Detail != want {
+					t.Fatalf("seed %d: %s waits as %+v, want held, saying %q", seed, d.ID, d.Reason, want)
+				}
+			case schedule.Refuse:
+				// It can never start, which says more than why it may not now.
+			}
+		}
+	})
+}
+
+// byPriority: after the First jobs, Step considers the waiting jobs by the priority each counts as
+// now, aged by its wait (schedule.Rank), highest first; among jobs of one priority, in the order the
+// policy gives them. The decisions come in the order the jobs were considered.
+func byPriority(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		byID := map[schedule.ID]schedule.Candidate{}
+		var rest []schedule.Candidate
+		for _, w := range schedule.ArrivalOrder(s.Waiting) {
+			byID[w.ID] = w
+			if !w.First {
+				rest = append(rest, w)
+			}
+		}
+		policy := c.New().Order(slices.Clone(rest), schedule.UsageOf(s))
+		place := map[schedule.ID]int{}
+		for i, w := range policy {
+			place[w.ID] = i
+		}
+		var considered []schedule.Candidate
+		for _, d := range c.Step(s, c.rules()) {
+			if w := byID[d.Target()]; !w.First {
+				considered = append(considered, w)
+			}
+		}
+		for i := 1; i < len(considered); i++ {
+			a, b := considered[i-1], considered[i]
+			ra, rb := schedule.Rank(a, s.Now).Level(), schedule.Rank(b, s.Now).Level()
+			if ra < rb {
+				t.Fatalf("seed %d: %s (%s) was considered before %s (%s) at %v", seed, a.ID, schedule.Rank(a, s.Now), b.ID, schedule.Rank(b, s.Now), s.Now)
+			}
+			if ra == rb && place[a.ID] > place[b.ID] {
+				t.Fatalf("seed %d: %s was considered before %s, of one priority, which the policy orders the other way", seed, a.ID, b.ID)
+			}
+		}
+	})
 }
 
 // keepsTurn: once a job waits for a resource, no job considered after it in the same step starts on

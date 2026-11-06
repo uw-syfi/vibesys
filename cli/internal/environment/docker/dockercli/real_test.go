@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"io"
 	"os"
 	"os/exec"
@@ -63,6 +64,24 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// taskImageOf is the ID of the local task image whose content the fingerprint pins: what a test
+// starts a container of, or removes.
+func taskImageOf(t *testing.T, fp core.Fingerprint) string {
+	t.Helper()
+	out, err := exec.Command("docker", "image", "ls", "--no-trunc", "--quiet", "--filter", "reference=vibesys-cli-task").Output()
+	if err != nil {
+		t.Fatalf("docker image ls: %v", err)
+	}
+	engine := newEngine()
+	for _, id := range strings.Fields(string(out)) {
+		if content, err := engine.Content(context.Background(), id); err == nil && content == fp.ImageDigest {
+			return id
+		}
+	}
+	t.Fatalf("no task image has the content %s the fingerprint pins", fp.ImageDigest)
+	return ""
+}
+
 func newEngine() *dockercli.Engine {
 	e, err := dockercli.New(dockercli.Config{Timers: clock.System{}})
 	if err != nil {
@@ -108,7 +127,7 @@ func newProvider(timers clock.Timers, scope string, engine docker.Engine, docker
 	}
 	p, err := docker.New(docker.Config{
 		Engine: engine, Source: source{docker.Spec{Dockerfile: []byte(dockerfile)}}, Backend: cpuBackend(),
-		Timers: timers, IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default",
+		Timers: timers, IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 		User: docker.User{UID: os.Getuid(), GID: os.Getgid()},
 	})
 	if err != nil {
@@ -305,7 +324,7 @@ func TestALeftoverContainerIsRemovedByTheNextRun(t *testing.T) {
 	}
 	dir := t.TempDir()
 	leftover := docker.ContainerSpec{
-		Name: "vibesys-cli-" + randomHex(8), Image: fp.ImageDigest,
+		Name: "vibesys-cli-" + randomHex(8), Image: taskImageOf(t, fp),
 		Labels: docker.Labels{docker.LabelOwner: docker.Owner, docker.LabelScope: scope, docker.LabelRun: randomHex(8)},
 		User:   docker.User{UID: os.Getuid(), GID: os.Getgid()}, Dir: dir, Mounts: []docker.Mount{{Host: dir, Container: dir}},
 	}
@@ -407,11 +426,12 @@ func TestRemovingAContainerRemovesItsAnonymousVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp.ImageDigest).Run() })
+	image := taskImageOf(t, fp)
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", image).Run() })
 	dir := t.TempDir()
 	name := "vibesys-cli-" + randomHex(8)
 	spec := docker.ContainerSpec{
-		Name: name, Image: fp.ImageDigest,
+		Name: name, Image: image,
 		Labels: docker.Labels{docker.LabelOwner: docker.Owner, docker.LabelScope: scope, docker.LabelRun: randomHex(8)},
 		User:   docker.User{UID: os.Getuid(), GID: os.Getgid()}, Dir: dir, Mounts: []docker.Mount{{Host: dir, Container: dir}},
 	}

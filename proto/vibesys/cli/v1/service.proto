@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/lab.proto";
 import "vibesys/cli/v1/machine.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
@@ -27,6 +28,11 @@ service DaemonService {
   rpc Status(StatusRequest) returns (StatusResponse);
   // Stop ends the daemon. Running jobs have their own supervisors and are not affected.
   rpc Stop(StopRequest) returns (StopResponse);
+  // Drain makes the daemon start no queued job until Resume; the jobs that run go on. It is kept
+  // across a restart of the daemon. Protocol 5.
+  rpc Drain(DrainRequest) returns (DrainResponse);
+  // Resume ends a drain: the queued jobs start in their turn again. Protocol 5.
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
 
   // Submit queues a job, or returns the queued or running job with the same key, or answers from
   // a reusable result.
@@ -48,7 +54,24 @@ service DaemonService {
   // job. A cancelled measure saves nothing.
   rpc Cancel(CancelRequest) returns (CancelResponse);
   rpc AddNote(AddNoteRequest) returns (AddNoteResponse);
+  // HoldJob holds a queued job: it keeps its place in the queue and is not started until
+  // ReleaseJob. A job the daemon had begun to start already starts, and is not held. Protocol 5.
+  rpc HoldJob(HoldJobRequest) returns (HoldJobResponse);
+  // ReleaseJob lets a held job start in its turn. A job that is not held is returned as it is.
+  // Protocol 5.
+  rpc ReleaseJob(ReleaseJobRequest) returns (ReleaseJobResponse);
+  // SetJobPriority sets a queued job's own priority, or with PRIORITY_UNSPECIFIED lets it inherit
+  // its plans' again. A reason is required, and the change is kept as a note on the job.
+  // Protocol 6.
+  rpc SetJobPriority(SetJobPriorityRequest) returns (SetJobPriorityResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+  // the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+  rpc Queue(QueueRequest) returns (QueueResponse);
+  // Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+  // streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+  // that ended is CONFLICT. Protocol 8.
+  rpc Lab(LabRequest) returns (stream LabResponse);
   // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
   // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
   rpc ForgetRepository(ForgetRepositoryRequest) returns (ForgetRepositoryResponse);
@@ -147,6 +170,8 @@ message StatusResponse {
   repeated LeaseConflict lease_conflicts = 11;
   // The other vibesysd processes of this machine, of any user.
   repeated DaemonProcess other_daemons = 12;
+  // Set while the daemon is draining: it starts no queued job until it is told to resume.
+  DaemonDrain drain = 13;
 }
 
 // HeldLease is a lease a job of the daemon holds.
@@ -187,6 +212,20 @@ message InheritedVariable {
 message StopRequest {}
 
 message StopResponse {}
+
+message DrainRequest {
+  // Who asks, in the caller's own words.
+  string agent = 1 [(buf.validate.field).string.max_len = 4096];
+  string reason = 2 [(buf.validate.field).string.max_len = 4096];
+}
+
+message DrainResponse {
+  DaemonDrain drain = 1 [(buf.validate.field).required = true];
+}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
 
 message ForgetRepositoryRequest {
   // The absolute path the repository had.
@@ -306,6 +345,38 @@ message AddNoteResponse {
   Job job = 1;
 }
 
+message HoldJobRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  string reason = 3 [(buf.validate.field).string.max_len = 4096];
+}
+
+message HoldJobResponse {
+  Job job = 1 [(buf.validate.field).required = true];
+}
+
+message ReleaseJobRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message ReleaseJobResponse {
+  Job job = 1 [(buf.validate.field).required = true];
+}
+
+message SetJobPriorityRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  // The job's own priority; unspecified inherits its plans'.
+  Priority priority = 3 [(buf.validate.field).enum.defined_only = true];
+  // Why, required.
+  string reason = 4;
+}
+
+message SetJobPriorityResponse {
+  Job job = 1 [(buf.validate.field).required = true];
+}
+
 message ListJobsRequest {
   CallContext context = 1;
   // Filters combine with AND; an empty one matches everything.
@@ -318,11 +389,62 @@ message ListJobsRequest {
   string note_contains = 5;
 }
 
+message LabRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  LabCall call = 3 [(buf.validate.field).required = true];
+}
+
+message LabResponse {
+  LabReply reply = 1 [(buf.validate.field).required = true];
+}
+
 message ListJobsResponse {
   repeated Job jobs = 1;
   // Why each listed queued job that has not started waits. A queued job that is about to start has
   // none.
   repeated JobWait waits = 2;
+}
+
+message QueueRequest {
+  CallContext context = 1 [(buf.validate.field).required = true];
+}
+
+message QueueResponse {
+  // The plans that have a queued or running job, by number, then the group of the jobs linked to
+  // no plan, which has no plan. A job linked to several plans is in the group of the first.
+  repeated QueueGroup groups = 1 [(buf.validate.field).repeated.max_items = 100000];
+  // Set while the daemon is draining.
+  DaemonDrain drain = 2;
+}
+
+// QueueGroup is the queued and running jobs of one plan: the running ones first, then the queued
+// ones by the priority they count as now and then by submit time.
+message QueueGroup {
+  // Unset for the jobs linked to no plan.
+  Plan plan = 1;
+  repeated QueuedJob jobs = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+// QueuedJob is a queued or running job, with what a lead decides by.
+message QueuedJob {
+  option (buf.validate.message).cel = {
+    id: "queued_job.estimate_has_a_basis"
+    message: "estimated_from counts the jobs behind an estimate: positive with one, zero without"
+    expression: "has(this.estimate) == (this.estimated_from > 0u)"
+  };
+  Job job = 1 [(buf.validate.field).required = true];
+  // The priority the job counts as now: its own or its plans', aged by how long it has waited.
+  Priority priority = 2;
+  // Why a queued job has not started, as the scheduler last decided. Unset for a running job and
+  // for one about to start.
+  WaitReason wait = 3;
+  // How long since the job was submitted.
+  google.protobuf.Duration age = 4;
+  // The median time a job of its kind ran in this task, from start to end, over estimated_from
+  // succeeded jobs. Unset when none has: the estimate is unknown.
+  google.protobuf.Duration estimate = 5;
+  uint32 estimated_from = 6;
 }
 
 message ReadLogsRequest {
@@ -444,8 +566,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body, status or gain_bound"
-    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound)"
+    message: "set at least one of title, body, status, gain_bound or priority"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound) || has(this.priority)"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
@@ -458,6 +580,11 @@ message EditPlanRequest {
   }];
   // Replaces the plan's bound. A plan's bound is replaced and never cleared.
   PlanGainBound gain_bound = 6;
+  // A new priority for the plan's queued jobs that set none of their own. Protocol 6.
+  optional Priority priority = 7 [(buf.validate.field).enum.defined_only = true];
+  // Why the priority changes: required with priority, and refused without it. The change and the
+  // reason are kept as a comment on the plan.
+  string reason = 8;
 }
 
 message EditPlanResponse {

@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"github.com/uw-syfi/vibesys/cli/envcodec"
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +30,8 @@ import (
 type candidateFiles struct {
 	mu    sync.Mutex
 	files map[string]string // by the Dockerfile's path: its text
+	// context is the build context's other files, by their path in it: their text.
+	context map[string]string
 }
 
 func (c *candidateFiles) Candidate(_ context.Context, _ environment.Target, b core.CandidateBuild) (task.CandidateContext, error) {
@@ -36,8 +41,14 @@ func (c *candidateFiles) Candidate(_ context.Context, _ environment.Target, b co
 	if !ok {
 		return task.CandidateContext{}, &core.Failure{Kind: core.FailureInvalidInput, Message: "candidate.dockerfile: there is no file " + b.Dockerfile + " at this commit"}
 	}
-	sum := sha256.Sum256([]byte(text))
-	return task.CandidateContext{Dockerfile: []byte(text), Files: task.Tree{"Dockerfile": {Data: []byte(text)}}, Digest: hex.EncodeToString(sum[:])}, nil
+	files := task.Tree{"Dockerfile": {Data: []byte(text)}}
+	digest := sha256.New()
+	digest.Write([]byte(text))
+	for _, name := range slices.Sorted(maps.Keys(c.context)) {
+		files[name] = task.File{Data: []byte(c.context[name])}
+		fmt.Fprintf(digest, "\x00%s\x00%s", name, c.context[name])
+	}
+	return task.CandidateContext{Dockerfile: []byte(text), Files: files, Digest: hex.EncodeToString(digest.Sum(nil))}, nil
 }
 
 const (
@@ -160,6 +171,36 @@ func TestACandidatesImageIsBuiltOnceForWhatBuildsItAndNamedByItsDigest(t *testin
 	s.files.mu.Unlock()
 	if changed := s.candidate(); changed.Tag == first.Tag || s.daemon.Builds() != before+2 {
 		t.Fatalf("changed files gave %+v after %+v, %d builds", changed, first, s.daemon.Builds())
+	}
+}
+
+// A commit that changes only files of the build context its Dockerfile does not copy builds an
+// image of another tag, and maybe of another ID, of the same content: what a container of it runs
+// is the same, which a lab checks before it takes the commit. A change to a copied file is another
+// content.
+func TestACandidateOfAChangeItsDockerfileDoesNotCopyHasTheSameContent(t *testing.T) {
+	s := newCandidateScene(t)
+	s.files.mu.Lock()
+	s.files.files["serve/Dockerfile"] = "FROM busybox:1.36.1\nCOPY requirements.txt /srv/\n"
+	s.files.context = map[string]string{"requirements.txt": "numpy\n", "app.py": "print(1)\n"}
+	s.files.mu.Unlock()
+	first := s.candidate()
+	if !core.ValidImageDigest(first.Content) {
+		t.Fatalf("the candidate %+v has no content digest", first)
+	}
+	set := func(name, text string) {
+		s.files.mu.Lock()
+		s.files.context[name] = text
+		s.files.mu.Unlock()
+	}
+	set("app.py", "print(2)\n")
+	code := s.candidate()
+	if code.Tag == first.Tag || code.Content != first.Content || !code.SameAs(first) {
+		t.Fatalf("a change the Dockerfile does not copy gave %+v after %+v; want another tag of the same content", code, first)
+	}
+	set("requirements.txt", "numpy\nscipy\n")
+	if deps := s.candidate(); deps.Content == first.Content || deps.SameAs(first) {
+		t.Fatalf("a change to a copied file gave %+v after %+v; want another content", deps, first)
 	}
 }
 

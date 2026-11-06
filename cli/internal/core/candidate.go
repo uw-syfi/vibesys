@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -25,6 +26,9 @@ func ResolveProjectRoot(argv []string, root string) []string {
 // environment chooses for each execution: machines are shared, so no port is fixed.
 const PortPlaceholder = "${PORT}"
 
+// ServiceURL is where the commands of the task's image reach the candidate's server on the port.
+func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
+
 // CandidateBuild is how a candidate's image is built from its commit.
 type CandidateBuild struct {
 	// Dockerfile is the path of the Dockerfile in the checkout of the commit.
@@ -41,6 +45,16 @@ type CandidateImage struct {
 	ID string
 	// Tag names the image by the task and the digest of what built it.
 	Tag string
+	// Content is the digest of what a container of the image runs (docker.Engine.Content), the
+	// same for two images of one content whatever their IDs, or empty when the environment cannot
+	// say it.
+	Content string
+}
+
+// SameAs reports whether a container of the image runs what a container of o runs: they are one
+// image, or two of one known content.
+func (i CandidateImage) SameAs(o CandidateImage) bool {
+	return i.ID == o.ID || (i.Content != "" && i.Content == o.Content)
 }
 
 // ValidImageDigest reports whether s is an exact image digest.

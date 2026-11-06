@@ -2,6 +2,7 @@ package docker_test
 
 import (
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"math/rand/v2"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestAScopeFromAKeyIsStableDistinctAndAcceptedByTheProvider(t *testing.T) {
 		seen[scope] = key
 		_, err := docker.New(docker.Config{
 			Engine: dockerfake.NewDaemon(w.MemoryGates).Connect(), Source: dockerfake.Fixed(docker.Spec{}), Backend: cpuBackend(),
-			Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: scope, Placement: "default",
+			Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: scope, Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 		})
 		if err != nil {
 			t.Fatalf("the provider refused the scope %q of %q: %v", scope, key, err)

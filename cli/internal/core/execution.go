@@ -35,6 +35,11 @@ type Execution struct {
 	// environment that shares a machine with other work gives a measured command the whole
 	// machine, and an unmeasured one only its share.
 	Measured bool
+	// Later is the summed Timeout of the job's executions like this one that follow it, such as
+	// the benchmark samples of a measure after this one: an environment that waits in a queue for
+	// what it runs a command in, as for a cluster's allocation, may ask for it long enough for them
+	// too and keep it for them. Zero says none follows. It is never negative.
+	Later time.Duration
 }
 
 // ExecKind is how an execution that the environment saw end ended. The set is closed.

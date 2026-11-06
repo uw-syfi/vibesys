@@ -39,6 +39,12 @@ type World struct {
 	// it a task. A benchmark's `emit` writes into Files, where the job reads its result from.
 	Tasks *task.MemorySource
 	Files *hostfs.Memory
+	// Docker is the World's docker environment, on the same gates and files as Env: a task with a
+	// Dockerfile runs its jobs, and holds its labs, there.
+	Docker *fakeenv.Environment
+	// Artifacts, when set before a daemon starts, is where its jobs keep their artifacts, which a
+	// lab needs. Nil keeps none.
+	Artifacts func(repository, task string, job core.JobID) string
 }
 
 // Machine is what the World's environment reads of the machine its commands run on.
@@ -55,10 +61,11 @@ func NewWorld(t testing.TB) *World {
 		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files), fakeenv.WithMachine(machine)), Checkouts: &fakeenv.Checkouts{},
 		Stores: memstores.New(app.Rules(task.DefaultSamples)), Survivors: supervisor.NewSurvivors(),
 		Branches: gitrepo.NewFakeBranches(), Git: gitrepo.NewFake(), Tasks: task.NewMemorySource(), Files: files,
+		Docker: fakeenv.New(core.EnvironmentDocker, gates, fakeenv.WithFiles(files), fakeenv.WithMachine(machine)),
 	}
 	t.Cleanup(func() {
 		w.Survivors.Close()
-		if n := w.Env.Active(); n != 0 {
+		if n := w.Env.Active() + w.Docker.Active(); n != 0 {
 			t.Errorf("%d commands still run after the test", n)
 		}
 		if n := w.Checkouts.Open(); n != 0 {
@@ -70,9 +77,9 @@ func NewWorld(t testing.TB) *World {
 
 // Runtime returns what a daemon on this World runs on.
 func (w *World) Runtime() daemon.Runtime {
-	envs := fakeenv.Environments{core.EnvironmentHost: w.Env}
+	envs := fakeenv.Environments{core.EnvironmentHost: w.Env, core.EnvironmentDocker: w.Docker}
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
-	host := supervisor.Host{Files: w.Files, Clock: clk}
+	host := supervisor.Host{Files: w.Files, Clock: clk, Artifacts: w.Artifacts}
 	return daemon.Runtime{
 		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),

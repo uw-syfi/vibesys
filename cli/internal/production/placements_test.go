@@ -23,7 +23,7 @@ func TestEveryPlacementKindIsWired(t *testing.T) {
 	p := withApptainer(t)
 	for _, text := range configs {
 		op := parse(t, text)
-		m, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+		m, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 		if err != nil {
 			t.Fatalf("config %q: %v", text, err)
 		}
@@ -88,7 +88,7 @@ exclusive = false
 // excludes every other job of its own placement, and waits for one that runs there.
 func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
 	op := parse(t, twoSlices)
-	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
 func TestAnApptainerPlacementNeedsApptainerHere(t *testing.T) {
 	p := Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: func(string) string { return "" }}
 	op := parse(t, configs[len(configs)-2])
-	_, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	_, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 	if err == nil || !strings.Contains(err.Error(), "install Apptainer") {
 		t.Errorf("without apptainer: %v", err)
 	}
@@ -162,4 +162,58 @@ func sameClaims(a, b map[string][]core.Claim) bool {
 		}
 	}
 	return true
+}
+
+// shortAndLong is an operator config of two apptainer placements on one cluster: a devel partition
+// whose MaxTime fits a check or a command and not a measure, and a batch partition.
+const shortAndLong = `
+[placements.batch]
+kind = "apptainer"
+[placements.batch.remote]
+host = "host-a"
+remote_workspace_root = "/w"
+[placements.batch.slurm]
+partition = "batch"
+[placements.devel]
+kind = "apptainer"
+job_kinds = ["check", "command"]
+[placements.devel.remote]
+host = "host-a"
+remote_workspace_root = "/w"
+[placements.devel.slurm]
+partition = "devel"
+max_time_seconds = 1800
+`
+
+// The job kinds a placement's section names reach the daemon's scheduler and its submissions: a
+// measure may run on the batch partition alone, and a check or a command on either.
+func TestTheJobKindsOfAPlacementReachTheScheduler(t *testing.T) {
+	op := parse(t, shortAndLong)
+	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := schedulerOf(op, m.offers, m.claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		settings core.Settings
+		want     []string
+	}{
+		{core.MeasureSettings{}, []string{"batch"}},
+		{core.CheckSettings{}, []string{"batch", "devel"}},
+		{core.CommandSettings{Argv: []string{"true"}}, []string{"batch", "devel"}},
+	} {
+		var got []string
+		for _, o := range s.Demand.Options(core.Job{Spec: core.JobSpec{Environment: core.EnvironmentDocker, Settings: c.settings}}) {
+			got = append(got, o.Placement)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("a %s job may run on %v, want %v", c.settings.Kind(), got, c.want)
+		}
+		if names, err := core.EligiblePlacements(m.offers, c.settings.Kind(), nil, ""); err != nil || !slices.Equal(names, c.want) {
+			t.Errorf("a %s job is submitted to %v, %v; want %v", c.settings.Kind(), names, err, c.want)
+		}
+	}
 }

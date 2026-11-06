@@ -485,6 +485,20 @@ the resources, the stop) hold unchanged; only how a container exists differs.
   daemon dies and its ssh connection with it; the run also cancels by name and
   confirms with `squeue` then `sacct`, and a run sweeps its scope's leftovers
   by name.
+- A measure's benchmark samples share one allocation, so a busy partition
+  queues the job once and not before every sample. The flow tells each
+  sample how long the samples after it may run (`Execution.Later`); the first
+  asks for all of it, and a sample that exits 0 with samples after it hands
+  the allocation on (`docker.Keeper`): its container's processes are killed,
+  confirmed gone (the SIGKILL script waits for them), and the next sample
+  starts fresh containers in it. Every other ending, the last sample, and a
+  wait longer than `KeepTimeout` cancel it, and the holder still cancels it
+  when the supervisor dies. The engine is the job's supervisor's, so the
+  allocation is never another job's; a kept allocation is not a leftover to
+  the sweep of its own process, and is one to the next job's. A kept
+  allocation Slurm ended fails the next sample instead of queueing again.
+  The cost is a longer time limit on the first allocation, which a partition
+  with a shorter `MaxTime` refuses.
 - A container's processes carry a variable naming it, set inside the container
   only, by which SIGTERM and SIGKILL reach every one of them; the step itself is
   not signalled, so the grace works as under Docker.
@@ -523,7 +537,11 @@ built from the task directory, as before, and the candidate image from the
 candidate's commit, never from a working tree. It is named
 `vibesys-candidate:<task>-<digest>`, the digest being that of its Dockerfile
 and the files of its context that its `.dockerignore` keeps, and is built only
-when the engine lacks it. A failed build fails the job before anything runs,
+when the engine lacks it. The processes that build on one engine take turns at
+a tag, under a lease in the leases of the engine's machine, so two jobs of one
+commit started together build its image once; a build that loses a race with
+a builder that takes no such lease uses the image the winner made under the
+tag. A failed build fails the job before anything runs,
 with the end of the build's output. The image's id is recorded with each result
 (`Result.candidate_image`) and is not part of the result's key: the commit
 already names the candidate, and a rebuild of the same commit that makes
@@ -558,6 +576,37 @@ mode. The decisions live in the pure flow (`flow.BuildCandidate`, then each
 specs; a Slurm or Apptainer placement implements the same `Environment`
 (`Candidate`, and a run of two containers in one allocation that share a
 network namespace) without a change to the flow.
+
+### A lab holds a run's containers for work that is never scored
+
+Profiling and exploring are never scored, so describing them to the CLI in a
+configuration language (a profile's wrapper, a load's flags) only constrains
+the agent. A lab gives the agent the containers a run of its task has, for a
+while, and runs whatever it asks there: a server under any profiler, the
+task's own load generator with any arguments, a shell. The constraints that
+remain are the ones that protect scoring and the machine:
+
+- A lab is a command job (`CommandSettings.lab`), so it saves no result:
+  nothing it runs is compared, promoted or added to the frontier. The scored
+  check and benchmark still run in jobs of their own, from a clean checkout,
+  in the images the task and the candidate's commit build; a lab changes
+  neither image, and its checkout moves only to a commit whose task version
+  and candidate build are the lab's.
+- It is scheduled as a command job: it holds a slot of its placement and what
+  its resources claim, so a measure, which holds its placement alone, never
+  runs beside it. Its time is the job's timeout, capped where the placement
+  caps an allocation (`PlacementOffer.LongestRun`).
+- Its containers are a run's (`Environment.Lab`), staged, placed and removed
+  as a run's are, with the same trust boundary as a `submit command` job.
+
+The lab lives in its job's supervisor (`internal/lab`), which already
+outlives the daemon, so a daemon that restarts adopts a running lab as it
+adopts any running job and reaches it again; nothing about a lab is kept in
+the store but the job. A call reaches the lab through the daemon
+(`DaemonService.Lab`) and a connection of its own to the supervisor
+(`SupervisorService.LabCall`). Files cross into and out of the lab only
+through its artifacts directory, which the runs already bring back from
+another machine; anything else is copied there with a command in the lab.
 
 ### Task schema versions are MAJOR.MINOR, and 0.x may change freely
 
@@ -594,8 +643,9 @@ later; until then the check covers 1.0 and every later schema.
 ## What is not done
 
 - Tasks of two images on `ssh` and `slurm` placements: they have no probe
-  program and refuse such tasks. The `apptainer` placement has one (the binary
-  is copied to the cluster) and runs both containers in one allocation.
+  program and refuse such tasks, and labs of such tasks. The `apptainer`
+  placement has one (the binary is copied to the cluster) and runs both
+  containers in one allocation.
 - Schema 0.1 as a proto message (above).
 
 - Multi-node Slurm clusters with Docker on the compute nodes, where the ssh

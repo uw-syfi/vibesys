@@ -193,6 +193,25 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 	return nil
 }
 
+// JobKinds returns the kinds of job a placement of a parsed config runs (job_kinds), or nil for
+// every kind.
+func JobKinds(p *cliv1.Placement) []core.JobKind {
+	var out []core.JobKind
+	for _, k := range p.GetJobKinds() {
+		switch k {
+		case cliv1.JobKind_JOB_KIND_CHECK:
+			out = append(out, core.JobCheck)
+		case cliv1.JobKind_JOB_KIND_COMMAND:
+			out = append(out, core.JobCommand)
+		case cliv1.JobKind_JOB_KIND_MEASURE:
+			out = append(out, core.JobMeasure)
+		case cliv1.JobKind_JOB_KIND_UNSPECIFIED:
+			// Parse refuses it (protovalidate's not_in), so a parsed config holds none.
+		}
+	}
+	return out
+}
+
 // kindName is how the file spells a placement kind.
 func kindName(k cliv1.PlacementKind) string {
 	return strings.ToLower(strings.TrimPrefix(k.String(), "PLACEMENT_KIND_"))

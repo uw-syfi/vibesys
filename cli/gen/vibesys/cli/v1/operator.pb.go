@@ -254,7 +254,12 @@ type Placement struct {
 	// What the placement gives every container it runs.
 	Resources *Resources `protobuf:"bytes,5,opt,name=resources,proto3" json:"resources,omitempty"`
 	// How a batch allocation is submitted and Apptainer run, for the apptainer kind.
-	Apptainer     *ApptainerSettings `protobuf:"bytes,6,opt,name=apptainer,proto3" json:"apptainer,omitempty"`
+	Apptainer *ApptainerSettings `protobuf:"bytes,6,opt,name=apptainer,proto3" json:"apptainer,omitempty"`
+	// The kinds of job the placement runs, such as ["check", "command"] (a profile is a command job)
+	// for a partition whose time limit is shorter than a measure takes. A job of another kind never
+	// starts on it, and a job restricted to it with --placement is refused when it is submitted.
+	// Empty means every kind.
+	JobKinds      []JobKind `protobuf:"varint,7,rep,packed,name=job_kinds,json=jobKinds,proto3,enum=vibesys.cli.v1.JobKind" json:"job_kinds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -327,6 +332,13 @@ func (x *Placement) GetResources() *Resources {
 func (x *Placement) GetApptainer() *ApptainerSettings {
 	if x != nil {
 		return x.Apptainer
+	}
+	return nil
+}
+
+func (x *Placement) GetJobKinds() []JobKind {
+	if x != nil {
+		return x.JobKinds
 	}
 	return nil
 }
@@ -427,8 +439,14 @@ type SlurmSettings struct {
 	// Zero means the default.
 	PollIntervalSeconds float64 `protobuf:"fixed64,8,opt,name=poll_interval_seconds,json=pollIntervalSeconds,proto3" json:"poll_interval_seconds,omitempty"`
 	QueueTimeoutSeconds float64 `protobuf:"fixed64,9,opt,name=queue_timeout_seconds,json=queueTimeoutSeconds,proto3" json:"queue_timeout_seconds,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The longest time limit an allocation asks Slurm for, in seconds, such as the MaxTime of a
+	// partition: the CLI asks for a job's own time limit and a margin, which it caps at this, in
+	// whole minutes. A job that runs longer is ended by Slurm and fails, so a placement with a
+	// short cap names the job_kinds that fit in it. At least 60, and at most a year. Unset means no
+	// cap.
+	MaxTimeSeconds *float64 `protobuf:"fixed64,10,opt,name=max_time_seconds,json=maxTimeSeconds,proto3,oneof" json:"max_time_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SlurmSettings) Reset() {
@@ -520,6 +538,13 @@ func (x *SlurmSettings) GetPollIntervalSeconds() float64 {
 func (x *SlurmSettings) GetQueueTimeoutSeconds() float64 {
 	if x != nil {
 		return x.QueueTimeoutSeconds
+	}
+	return 0
+}
+
+func (x *SlurmSettings) GetMaxTimeSeconds() float64 {
+	if x != nil && x.MaxTimeSeconds != nil {
+		return *x.MaxTimeSeconds
 	}
 	return 0
 }
@@ -933,7 +958,7 @@ var File_vibesys_cli_v1_operator_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xa1\x04\n" +
+	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18vibesys/cli/v1/job.proto\"\xa1\x04\n" +
 	"\x0eOperatorConfig\x12v\n" +
 	"\n" +
 	"placements\x18\x01 \x03(\v2..vibesys.cli.v1.OperatorConfig.PlacementsEntryB&\xbaH#\x9a\x01 \"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\n" +
@@ -952,7 +977,7 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\bmax_jobs\x18\x02 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80\b(\x01H\x01R\amaxJobs\x88\x01\x01B\t\n" +
 	"\a_policyB\v\n" +
-	"\t_max_jobs\"\xd6\x02\n" +
+	"\t_max_jobs\"\x9f\x03\n" +
 	"\tPlacement\x12=\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.PlacementKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12#\n" +
@@ -960,13 +985,14 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x06remote\x18\x03 \x01(\v2\x1e.vibesys.cli.v1.RemoteSettingsR\x06remote\x123\n" +
 	"\x05slurm\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.SlurmSettingsR\x05slurm\x127\n" +
 	"\tresources\x18\x05 \x01(\v2\x19.vibesys.cli.v1.ResourcesR\tresources\x12?\n" +
-	"\tapptainer\x18\x06 \x01(\v2!.vibesys.cli.v1.ApptainerSettingsR\tapptainer\"\xf4\x01\n" +
+	"\tapptainer\x18\x06 \x01(\v2!.vibesys.cli.v1.ApptainerSettingsR\tapptainer\x12G\n" +
+	"\tjob_kinds\x18\a \x03(\x0e2\x17.vibesys.cli.v1.JobKindB\x11\xbaH\x0e\x92\x01\v\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\bjobKinds\"\xf4\x01\n" +
 	"\x0eRemoteSettings\x128\n" +
 	"\x04host\x18\x01 \x01(\tB$\xbaH!r\x1f2\x1d^[A-Za-z0-9][A-Za-z0-9_.@-]*$R\x04host\x12-\n" +
 	"\vssh_command\x18\x02 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\n" +
 	"sshCommand\x121\n" +
 	"\rrsync_command\x18\x03 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\frsyncCommand\x12F\n" +
-	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\x91\x04\n" +
+	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\xee\x04\n" +
 	"\rSlurmSettings\x12;\n" +
 	"\tpartition\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\tpartition\x121\n" +
 	"\x04gres\x18\x02 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\x04gres\x12>\n" +
@@ -977,10 +1003,13 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x06memory\x18\x06 \x01(\tB\x1d\xbaH\x1ar\x182\x16^([1-9][0-9]*[KMGT])?$R\x06memory\x125\n" +
 	"\x0esrun_arguments\x18\a \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\rsrunArguments\x12B\n" +
 	"\x15poll_interval_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13pollIntervalSeconds\x12B\n" +
-	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSecondsB\f\n" +
+	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSeconds\x12F\n" +
+	"\x10max_time_seconds\x18\n" +
+	" \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x008\x13~A)\x00\x00\x00\x00\x00\x00N@H\x02R\x0emaxTimeSeconds\x88\x01\x01B\f\n" +
 	"\n" +
 	"_exclusiveB\a\n" +
-	"\x05_cpus\"\xc2\x02\n" +
+	"\x05_cpusB\x13\n" +
+	"\x11_max_time_seconds\"\xc2\x02\n" +
 	"\x11ApptainerSettings\x123\n" +
 	"\x0esubmit_command\x18\x01 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\rsubmitCommand\x129\n" +
 	"\x10submit_arguments\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\x0fsubmitArguments\x124\n" +
@@ -1053,6 +1082,7 @@ var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	nil,                        // 12: vibesys.cli.v1.OperatorConfig.PlacementsEntry
 	nil,                        // 13: vibesys.cli.v1.Resources.MountsEntry
 	nil,                        // 14: vibesys.cli.v1.LegacyDocker.MountsEntry
+	(JobKind)(0),               // 15: vibesys.cli.v1.JobKind
 }
 var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
 	12, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
@@ -1065,18 +1095,19 @@ var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
 	5,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
 	7,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
 	6,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
-	9,  // 10: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
-	10, // 11: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	13, // 12: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	8,  // 13: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
-	0,  // 14: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
-	14, // 15: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
-	3,  // 16: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	15, // 10: vibesys.cli.v1.Placement.job_kinds:type_name -> vibesys.cli.v1.JobKind
+	9,  // 11: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
+	10, // 12: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	13, // 13: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	8,  // 14: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
+	0,  // 15: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
+	14, // 16: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
+	3,  // 17: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
@@ -1084,6 +1115,7 @@ func file_vibesys_cli_v1_operator_proto_init() {
 	if File_vibesys_cli_v1_operator_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_job_proto_init()
 	file_vibesys_cli_v1_operator_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[4].OneofWrappers = []any{}

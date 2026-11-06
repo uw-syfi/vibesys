@@ -24,6 +24,7 @@ from vibesys_evaluator.llm_serving import agentx
 from vibesys_evaluator.llm_serving._agentx import (
     HF_DATASET,
     AgentxError,
+    Explore,
     Replay,
     command,
     datasets_cache,
@@ -31,6 +32,7 @@ from vibesys_evaluator.llm_serving._agentx import (
     run,
     summary_metrics,
 )
+from vibesys_evaluator.llm_serving._explore_cli import main as explore_main
 from vs_evaluator_protocol.api import parse_records, read_measurement
 
 if TYPE_CHECKING:
@@ -402,3 +404,112 @@ def test_a_read_only_cache_without_the_corpus_is_refused_naming_it(tmp_path: Pat
         harness_environment({"HF_DATASETS_CACHE": str(cache)}, tmp_path, writable=_read_only),
     ):
         pass
+
+
+def _explored(**load: int | None) -> Replay:
+    fields: dict[str, Any] = {"duration_secs": 120, "warmup_requests_per_lane": 2, **load}
+    return _replay("explore", explore=Explore(**fields))
+
+
+@given(
+    duration=st.integers(1, 86400),
+    warmup=st.integers(0, 100),
+    entries=st.none() | st.integers(1, 10**4),
+    seed=st.integers(0, 2**31),
+)
+def test_an_exploration_runs_the_load_it_is_given(
+    duration: int, warmup: int, entries: int | None, seed: int
+) -> None:
+    argv = command(
+        _explored(duration_secs=duration, warmup_requests_per_lane=warmup, dataset_entries=entries, seed=seed),
+        Path("/a"),
+        python="py",
+    )
+    assert argv[argv.index("--benchmark-duration") + 1] == str(duration)
+    assert argv[argv.index("--warmup-requests-per-lane") + 1] == str(warmup)
+    assert argv[argv.index("--random-seed") + 1] == str(seed)
+    assert ("--num-dataset-entries" in argv) == (entries is not None)
+    if entries is not None:
+        assert argv[argv.index("--num-dataset-entries") + 1] == str(entries)
+    assert argv[-1] == "--unsafe-override"
+
+
+def test_an_exploration_is_not_held_to_submission_validity(tmp_path: Path) -> None:
+    export = _export()
+    export["metadata"]["submission_valid"] = False
+    values = run(_explored(), tmp_path / "agentx", runner=FakeHarness(export), installed="1.0.7")
+    assert values == EXPECTED
+
+
+@pytest.mark.parametrize(
+    ("replay", "named"),
+    [
+        pytest.param(lambda: _replay("explore"), "exactly for the mode 'explore'", id="no-load"),
+        pytest.param(
+            lambda: _replay("full", explore=Explore(duration_secs=1, warmup_requests_per_lane=0)),
+            "exactly",
+            id="full-with-load",
+        ),
+        pytest.param(lambda: _explored(duration_secs=0), "duration_secs", id="duration"),
+        pytest.param(lambda: _explored(warmup_requests_per_lane=-1), "warmup_requests_per_lane", id="warmup"),
+        pytest.param(lambda: _explored(dataset_entries=0), "dataset_entries", id="entries"),
+        pytest.param(lambda: _explored(seed=True), "seed", id="seed"),
+    ],
+)
+def test_an_exploration_the_caller_did_not_mean_is_refused(
+    replay: Callable[[], Replay], named: str
+) -> None:
+    with pytest.raises(ValueError, match=named):
+        replay()
+
+
+class FakeExplore:
+    """Records what the command line asked ``explore`` for, and answers or fails as told."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, **kwargs: object) -> dict[str, float]:
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return dict(EXPECTED)
+
+
+_FLAGS = [
+    "explore", "--model", "m", "--tokenizer", "t", "--tokenizer-revision", REVISION,
+    "--max-context-length", "4096", "--concurrency", "8", "--duration-secs", "90",
+    "--artifacts", "/out",
+]
+
+
+def test_the_command_line_explores_and_prints_the_metrics(capsys: pytest.CaptureFixture[str]) -> None:
+    fake = FakeExplore()
+    assert explore_main([*_FLAGS, "--dataset-entries", "3"], explore=fake) == 0
+    assert json.loads(capsys.readouterr().out) == EXPECTED
+    (call,) = fake.calls
+    assert call["concurrency"] == 8
+    assert call["duration_secs"] == 90
+    assert call["dataset_entries"] == 3
+    assert call["warmup_requests_per_lane"] == 1
+    assert call["artifacts"] == Path("/out")
+    assert call["url"] is None
+
+
+@pytest.mark.parametrize(
+    ("argv", "error", "code"),
+    [
+        pytest.param(["explore", "--model", "m"], None, 2, id="missing-flags"),
+        pytest.param(_FLAGS, ValueError("agentx.explore seed must be"), 2, id="refused"),
+        pytest.param(_FLAGS, AgentxError("AgentX run was cancelled"), 1, id="failed"),
+        pytest.param(_FLAGS, HarnessError("exited 3"), 1, id="harness"),
+    ],
+)
+def test_the_command_line_says_why_it_failed(
+    argv: list[str], error: Exception | None, code: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert explore_main(argv, explore=FakeExplore(error)) == code
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err

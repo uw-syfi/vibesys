@@ -13,11 +13,13 @@ after decision, and a profile to choose what to try next.
 Both are in this skill's `scripts/` directory; how to find it depends on your harness:
 read `references/harness/<harness>.md` for the harness you are running in.
 
-- `capture.py` runs inside the candidate's container, as the argv prefix of a profiling job. It
-  checks that the profiler can trace what the job runs, records what it found in `capture.json`,
-  then replaces itself with the profiler. It needs only `python3` (3.8 or newer). Copy it into the
-  candidate repository (for example as `tools/capture.py`) and commit it: a job runs a commit, in
-  the candidate's own image.
+- `capture.py` runs inside the candidate's container, as the argv prefix of what it profiles: a
+  server started in a lab, or a profiling job. It checks that the profiler can trace what runs,
+  records what it found in `capture.json`, then replaces itself with the profiler. It needs only
+  `python3` (3.8 or newer). In a lab, copy it in with `vibesys-cli lab cp capture.py
+  <lab>:capture.py` and run `/vibesys/artifacts/capture.py`; for a job, commit it into the
+  candidate repository (for example as `tools/capture.py`): a job runs a commit, in the
+  candidate's own image.
 - `analyze.py` runs on your machine, on the files a job copied back. It needs Python 3.10 or newer
   and nothing else: no GPU, no ROCm. `analyze.py <group> --help` lists each group's commands.
 
@@ -34,7 +36,9 @@ read `references/harness/<harness>.md` for the harness you are running in.
 ## Capture in three steps
 
 Each step costs more and perturbs timing more than the one before, so take the next step only when
-the previous one named a target. Recipes, job forms, costs and capture windows are in
+the previous one named a target. Take them in a lab (`vibesys:measure`, Labs): one lab holds the
+server's container for every step, so you restart the server under the next recipe and drive it
+again without queueing. Recipes, the lab and job forms, costs and capture windows are in
 [capture.md](references/capture.md).
 
 1. **Timeline.** `capture.py timeline` records every kernel dispatch and memory copy. Under a long

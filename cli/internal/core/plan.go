@@ -101,6 +101,8 @@ type Plan struct {
 	UpdatedAt time.Time
 	// GainBound is the plan's bound on its possible gain, nil when it states none.
 	GainBound *GainBound
+	// Priority is that of the plan's queued jobs that have none of their own. Empty is normal.
+	Priority Priority
 }
 
 // NewPlan is a request to create a plan. The store assigns the number and the open status.
@@ -118,8 +120,10 @@ type PlanEdit struct {
 	Status *PlanStatus
 	// GainBound replaces the plan's bound. A bound is replaced and never cleared.
 	GainBound *GainBound
-	Comment   *PlanComment
-	At        time.Time
+	// Priority, when set, is a new priority for the plan; Comment then records the change.
+	Priority *Priority
+	Comment  *PlanComment
+	At       time.Time
 }
 
 // PlanFilter selects plans. Fields combine with AND and the zero value matches every plan.

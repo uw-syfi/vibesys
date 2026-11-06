@@ -24,6 +24,7 @@ const (
 	SupervisorService_Attach_FullMethodName    = "/vibesys.cli.v1.SupervisorService/Attach"
 	SupervisorService_CancelJob_FullMethodName = "/vibesys.cli.v1.SupervisorService/CancelJob"
 	SupervisorService_Release_FullMethodName   = "/vibesys.cli.v1.SupervisorService/Release"
+	SupervisorService_LabCall_FullMethodName   = "/vibesys.cli.v1.SupervisorService/LabCall"
 )
 
 // SupervisorServiceClient is the client API for SupervisorService service.
@@ -58,6 +59,9 @@ type SupervisorServiceClient interface {
 	// since a running job is cancelled first and released after its outcome is recorded. A parked
 	// supervisor is released to abort a job that never started.
 	Release(ctx context.Context, in *ReleaseRequest, opts ...grpc.CallOption) (*ReleaseResponse, error)
+	// LabCall makes one call on the lab the supervisor runs (lab.proto). A supervisor of a job that
+	// is not a lab refuses it with INVALID_INPUT.
+	LabCall(ctx context.Context, in *LabCallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabCallResponse], error)
 }
 
 type supervisorServiceClient struct {
@@ -127,6 +131,25 @@ func (c *supervisorServiceClient) Release(ctx context.Context, in *ReleaseReques
 	return out, nil
 }
 
+func (c *supervisorServiceClient) LabCall(ctx context.Context, in *LabCallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabCallResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &SupervisorService_ServiceDesc.Streams[1], SupervisorService_LabCall_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LabCallRequest, LabCallResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type SupervisorService_LabCallClient = grpc.ServerStreamingClient[LabCallResponse]
+
 // SupervisorServiceServer is the server API for SupervisorService service.
 // All implementations must embed UnimplementedSupervisorServiceServer
 // for forward compatibility.
@@ -159,6 +182,9 @@ type SupervisorServiceServer interface {
 	// since a running job is cancelled first and released after its outcome is recorded. A parked
 	// supervisor is released to abort a job that never started.
 	Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error)
+	// LabCall makes one call on the lab the supervisor runs (lab.proto). A supervisor of a job that
+	// is not a lab refuses it with INVALID_INPUT.
+	LabCall(*LabCallRequest, grpc.ServerStreamingServer[LabCallResponse]) error
 	mustEmbedUnimplementedSupervisorServiceServer()
 }
 
@@ -183,6 +209,9 @@ func (UnimplementedSupervisorServiceServer) CancelJob(context.Context, *CancelJo
 }
 func (UnimplementedSupervisorServiceServer) Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Release not implemented")
+}
+func (UnimplementedSupervisorServiceServer) LabCall(*LabCallRequest, grpc.ServerStreamingServer[LabCallResponse]) error {
+	return status.Error(codes.Unimplemented, "method LabCall not implemented")
 }
 func (UnimplementedSupervisorServiceServer) mustEmbedUnimplementedSupervisorServiceServer() {}
 func (UnimplementedSupervisorServiceServer) testEmbeddedByValue()                           {}
@@ -288,6 +317,17 @@ func _SupervisorService_Release_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SupervisorService_LabCall_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LabCallRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SupervisorServiceServer).LabCall(m, &grpc.GenericServerStream[LabCallRequest, LabCallResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type SupervisorService_LabCallServer = grpc.ServerStreamingServer[LabCallResponse]
+
 // SupervisorService_ServiceDesc is the grpc.ServiceDesc for SupervisorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -316,6 +356,11 @@ var SupervisorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Attach",
 			Handler:       _SupervisorService_Attach_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "LabCall",
+			Handler:       _SupervisorService_LabCall_Handler,
 			ServerStreams: true,
 		},
 	},

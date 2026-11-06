@@ -48,7 +48,19 @@ import (
 // and keeps the version it was written with. Results of one image taken on two placements, which
 // had two keys, then answer the same key. The migration of a store of 2 to 4 is the one before,
 // writing the format file at version 5 last.
-const formatVersion = 5
+//
+// Version 6 adds a job's hold (core.JobHold), which a version 5 program would refuse as unknown.
+// It only adds, so this program reads versions 2 to 6 and migrates a store of 2 to 5 the same way,
+// writing the format file at version 6 last.
+//
+// Version 7 adds a job's own priority and a plan's priority, which a version 6 program would refuse
+// as unknown. It only adds, and is migrated the same way, writing the format file at version 7
+// last.
+//
+// Version 8 adds that a command job is a lab (CommandSettings.lab), which a version 7 program would
+// refuse as unknown. It only adds, and a store of 2 to 7 is migrated the same way, writing the
+// format file at version 8 last.
+const formatVersion = 8
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -246,6 +258,9 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
 			return nil, err
 		}
+		if settings.Command.GetLab() != nil {
+			out.Lab = &core.LabSpec{}
+		}
 		return out, nil
 	case *cliv1.JobSpec_Measure:
 		return core.MeasureSettings{Samples: settings.Measure.GetSamples(), Recheck: settings.Measure.GetRecheck()}, nil
@@ -315,6 +330,18 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		j.Needs = append(j.Needs, kind)
 	}
 	j.TaskVersion = m.GetTaskVersion()
+	if h := m.GetHold(); h != nil {
+		if err := h.GetAt().CheckValid(); err != nil {
+			return fail(fmt.Errorf("hold.at: %w", err))
+		}
+		j.Hold = wire.ToJobHold(h)
+		j.Hold.At = instant(h.GetAt())
+	}
+	priority, err := wire.ToPriority("priority", m.GetPriority())
+	if err != nil {
+		return fail(err)
+	}
+	j.Priority = priority
 	return j, nil
 }
 
@@ -520,13 +547,17 @@ func planFromMessage(m *cliv1.Plan) (core.Plan, error) {
 	if err != nil {
 		return core.Plan{}, err
 	}
+	priority, err := wire.ToPriority("plan.priority", m.GetPriority())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	bound, err := wire.ToGainBound("plan.gain_bound", m.GetGainBound())
 	if err != nil {
 		return core.Plan{}, err
 	}
 	p := core.Plan{
 		Number: core.PlanNumber(m.GetNumber()), Title: m.GetTitle(), Body: m.GetBody(), Status: status,
-		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()), GainBound: bound,
+		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()), Priority: priority, GainBound: bound,
 	}
 	for _, c := range m.GetComments() {
 		p.Comments = append(p.Comments, core.PlanComment{Text: c.GetText(), At: instant(c.GetAt()), Agent: c.GetAgent()})

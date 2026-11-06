@@ -52,6 +52,8 @@ type App struct {
 	tasksChanged changed.Signal
 	// epoch names this boot of the daemon, for the streams that report a task's state.
 	epoch string
+	// images is what the engines said of the image IDs older results' fingerprints carry.
+	images imageContents
 }
 
 // storeReadiness separates a successful write from a complete recovery read.
@@ -103,6 +105,8 @@ type view struct {
 	// store the machine knows, to name the jobs in a wait's way.
 	queue map[lifecycle.Ref]lifecycle.Queued
 	tasks map[lifecycle.StoreID]core.TaskName
+	// drain is the drain the machine applies, or nil.
+	drain *core.Drain
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
@@ -216,6 +220,8 @@ func (a *App) loop() {
 			continue
 		}
 		var reqs []lifecycle.Request
+		// The machine ages the priority of the jobs that wait by the time it is told.
+		state = state.At(a.now())
 		before := state
 		if m.readiness != storeNotObserved {
 			a.generations.advance(m.generation)
@@ -341,6 +347,7 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 		next.tasks[id] = scope.Task()
 	}
 	next.queued, next.running = s.Counts()
+	next.drain = s.Draining()
 	for _, t := range s.Troubled() {
 		next.trouble[t.Ref] = t.Failure
 	}
@@ -445,11 +452,13 @@ type Status struct {
 	Running   int
 	Leases    []HeldLease
 	Conflicts []LeaseConflict
+	// Drain is set while the daemon drains.
+	Drain *core.Drain
 }
 
 // Status returns the machine's counts and leases.
 func (a *App) Status() Status {
 	v := a.view.Load()
 	held, conflicts := a.leases.snapshot(v.tasks)
-	return Status{StartedAt: a.startedAt, Queued: v.queued, Running: v.running, Leases: held, Conflicts: conflicts}
+	return Status{StartedAt: a.startedAt, Queued: v.queued, Running: v.running, Leases: held, Conflicts: conflicts, Drain: v.drain}
 }

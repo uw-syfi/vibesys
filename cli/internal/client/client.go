@@ -477,6 +477,23 @@ func (c *Client) Logs(ctx context.Context, req *cliv1.ReadLogsRequest, emit func
 	}
 }
 
+// Lab makes one call on a lab and passes each reply to emit, the answer last.
+func (c *Client) Lab(ctx context.Context, req *cliv1.LabRequest, emit func(*cliv1.LabReply) error) error {
+	stream, err := c.rpc.Lab(ctx, req)
+	if err != nil {
+		return c.fail(err)
+	}
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return streamEnd(c, err)
+		}
+		if err := emit(resp.GetReply()); err != nil {
+			return err
+		}
+	}
+}
+
 // streamEnd is the error of a finished stream: nothing when it ended well.
 func streamEnd(c *Client, err error) error {
 	if errors.Is(err, io.EOF) {

@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 4 is migrated to version 5 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, and version 5 a job's needs and task version); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 7 is migrated to version 8 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, version 6 a job's hold, version 7 a job's and a plan's priority, and version 8 a command job's lab); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -108,7 +108,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
-| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
+| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. It considers the waiting jobs by aged priority first and in the policy's order within one, and holds back a held job and, while the daemon drains, every job. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
 | `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
 | `internal/lease/` | `Leases`: where the daemons that share a resource take turns at holding it alone, and `Book`, where each resource is leased, which only `production` fills. |
@@ -148,6 +148,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/supervisor/rpc/` | The supervisor's gRPC server and client, over the additive `supervisor.proto`. |
 | `internal/supervisor/host/` | Starting supervisor processes, finding the ones still alive after a daemon restart, and serving a supervisor on its socket. |
 | `internal/supervisor/suptest/` | The contract suite every supervisor implementation passes. Tests only. |
+| `internal/lab/` | A running lab as its supervisor holds it (see "Labs"): the containers its environment handed over, the processes it started in them, and the calls on it. |
 | `internal/app/` | The daemon's job flows (submit, cancel, watch, logs, recovery on start) over `Store`, `Supervisors` and `Environments`, with no transport. |
 | `internal/app/filestores/` | `app.Stores` over `filestore`: one store per repository and task, and the per-user index that names them. The shipped binary's stores. |
 | `internal/app/memstores/` | `app.Stores` over `memstore`, standing for the disk. Tests only: `production` does not import it, so the binary ships no in-memory store. |
@@ -187,7 +188,8 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
   place of leases `lease`, `core` and what reaches it (`remote`, `clock`); only `production` names
   one, and `app` takes them through a `lease.Book`. `app` imports no transport:
   `daemon` and `supervisor/rpc` are the shells around it, and neither imports the other's peer
-  (`client` and `daemon` do not import each other, `app` does not import `daemon`).
+  (`client` and `daemon` do not import each other, `app` does not import `daemon`). `lab` imports
+  `core`, `environment`, `hostfs`, `clock` and `owned`, and only `supervisor` imports it.
 - Packages that exist for tests (`fakeenv`, `suptest`, `daemontest`, `storetest`) are imported by
   test files only. `production` is imported by `cmd/vibesys-cli` only.
 - Storage layout (state directory names, file names, the per-user index location) appears only in
@@ -262,14 +264,26 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 
 | Command | What it does |
 | --- | --- |
-| `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
+| `submit check <commit> [flags]` | Queue the task's check. A submission of a run (`--run` or `VIBESYS_RUN` set) with no `--plan`, of any kind, is queued as usual and warned on stderr, in plain text even with `--json`, naming the job: a job of a run should name the plan it serves, so `queue` says what it is for and it takes the plan's priority. The exit code is unchanged. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
 | `submit measure <commit> [--samples n] [--recheck] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. |
 | `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. `--wrap` is put in front of `--service` when it is given, and of the command otherwise. For a task of two images the command runs in the candidate's image. |
 | `submit profile <commit> [--wrap prefix] [flags]` | For a task of two images: start the candidate's server under the prefix (such as a profiler's command line) and drive it with the task's `[profile]` command. A command job: never cached or scored, its artifacts kept with it. Also `--timeout`, `--note`, `--plan`, `--wait`. |
+| `lab start <commit> [--for d] [--wait] [--note t] [--plan n]` | Queue a lab (see "Labs") and print it: a command job that holds the containers of a run of the task, for profiling and exploring, for `--for` (30 minutes by default, at most 24 hours, shortened by a placement whose allocations are capped) once they are up. `--wait` blocks until it is ready and prints `lab ps`; a lab that ended first exits `1`. Takes `--placement` as `submit` does. |
+| `lab exec <lab> [--in candidate\|task] [--detach] [--env K=V]... -- <argv...>` | Run a command in a container of the lab, as the invoking user, in the checkout. In the foreground it streams the command's output (standard output and standard error as one stream) and exits with its exit code, or `4` when how it ended is not known; with `--detach` it prints the process's handle (`p1`, `p2`, ...) and the process's lines go to the lab's log (`logs <lab>`), each under its handle. A shell is a command: `-- sh -c '...'`. |
+| `lab ps <lab> [--wait]` | Where the lab is (`queued`, `starting`, `ready`, `ended`), its commit, until when it lasts, its containers, the port free for a server (and, for a task of two images, the `VIBESYS_SERVICE_URL` the task's container reaches that port at, as `service: VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`), and every process it started with how it ended. |
+| `lab kill <lab> <pN> [--signal term\|kill]` | Send SIGTERM (the default) to a process the lab started, or SIGKILL to it and every process it started; no other process of the lab is touched. It waits for the process to end, for at most the stop's grace (`stop_grace_seconds`), and prints it as `lab ps` does: how it ended, or still running when it outlived the grace, as one that ignores SIGTERM does. Another signal: `lab exec <lab> -- kill -s <signal> <pid>`. |
+| `lab checkout <lab> <commit>` | Replace the lab's checkout, in place, with a clean checkout of another commit, while no process of the lab runs. A commit whose task differs from the lab's, or whose candidate image holds something other than what the lab's runs, is refused (`1`): start a new lab for it. A commit that changes only files of the candidate's build context its Dockerfile does not copy, such as the candidate's code, is taken (see "Labs"). |
+| `lab cp <lab>:<path> <local>`, `lab cp <local> <lab>:<path>` | Copy a file or a directory out of or into the lab's artifacts directory, which both containers see at `/vibesys/artifacts`. `<path>` is relative to it or absolute under it, and a path outside it is refused (`2`). |
+| `lab end <lab>` | End the lab now and print its job once it has ended, its artifacts kept. Ending a queued lab cancels it. |
+| `lab list [--state s]` | The task's labs, oldest first, as `jobs --kind lab` lists them. |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
-| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits. |
+| `hold <job> [--reason text]` | Keep a queued job from starting: it keeps its place in the queue, stands in no other job's way, and `jobs` shows `held since <time> by <agent>: <reason>` under it and the hold as its wait. Only a queued job is held (a running or final one is `CONFLICT`, exit `1`). The hold and its release are kept as notes on the job. See "Steering the queue". |
+| `release <job>` | Let a held job start in its turn, which is its place by submit time as if it had never been held. Releasing a job that is not held prints it unchanged. |
+| `job priority <job> high\|normal\|low\|inherit --reason text` | Set a queued job's own priority, which overrides its plans', or with `inherit` let it take theirs again. `--reason` is required, and the change is kept as a note on the job (`priority <from> -> <to>: <reason>`, with the agent and the time). A job that is not queued is `CONFLICT` (exit `1`). See "Steering the queue". |
+| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits, and who held a held one and why. |
+| `queue` | The task's queued and running jobs grouped by plan: a line per plan (`plan <n>`, status, priority, title) and a last group `no plan`; in each, running jobs first, then queued ones in the order the scheduler considers them. Each job's line has its id, state, kind, commit, where it runs (running) or the priority it counts as now (queued), its first submitter's agent, its age, and `est <d> (of <n>)`, the median run time of the task's `n` succeeded jobs of its kind, or `est unknown`; under it why it waits (held, draining, or the resources) and its notes. A first line says the daemon is draining. A job linked to several plans is in the group of the first. With `--json`, the `QueueResponse`. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
@@ -280,11 +294,13 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan create --title t [--body text \| --body-file path] [--gain-bound share]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. `--gain-bound` states the most the plan could gain, as a share (`0.05` or `5%`) of the headline; `--gain-bound-of` names what it is a share of (`headline` is the only value, and the default). |
 | `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. A plan that states a gain bound prints it after the title (`gain <= 5% of headline`). |
 | `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
-| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share] [--priority p --reason text]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. `--priority high\|normal\|low` sets the priority of the plan's queued jobs that set none of their own (a new plan is `normal`); it needs `--reason`, and the change is kept as a comment on the plan in the same edit. A plan whose priority is not normal says it at the end of its line. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `plan check-gain --under share` | Whether every plan that is `open` or `parked` states a gain bound below the share (`0.1` or `10%`). It prints `yes: ...` or `no: ...` followed by one line for each plan that is not under (a plan that states no bound is not under), and exits `0` for either answer. With `--json` the answer is `answer` (`PLAN_GAIN_ANSWER_ALL_UNDER` or `PLAN_GAIN_ANSWER_NOT_ALL_UNDER`), `counted` and `blockers`. A bound equal to the share is not below it. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or with `--json` a `DaemonEnsureResponse`: the socket, the build, and the runtime directory. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this with `--json` and rebuilds no path. |
+| `daemon drain [--reason text]` | Make the daemon that runs start no queued job until `daemon resume`: running jobs go on, queued jobs stay queued, and `daemon status` and every queued job's wait say the daemon is draining, by whom and why. The drain is kept in the runtime directory, so `daemon restart` keeps draining. It starts no daemon: with none running it prints `not running` and exits `4`. See "Steering the queue". |
+| `daemon resume` | End a drain: queued jobs start in their turn again. Exit `4` with no daemon running, as for `drain`. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` also says what every job inherits from the daemon: the directory clean checkouts are made in (`checkouts`, from the daemon's `TMPDIR`), and one `env` line per environment variable, sorted, with its value only for `PATH`, `HOME`, `TMPDIR` and a `VIBESYS_` variable whose name has none of `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` (with `--json`, `environment` and `checkout_directory`). Jobs see the environment the daemon was started with, so a variable set later reaches them only after `daemon restart` from a shell that has it. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
@@ -322,8 +338,8 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
-`frontier` subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
+`note`, `hold`, `release`, `job priority`, `jobs`, `queue`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`frontier` subcommands, `daemon drain` and `daemon resume`. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
 `wait` that gave up. The `Failure` the daemon sent is printed as it was sent, a kind this build does
@@ -338,6 +354,64 @@ Text output rounds numbers to four significant digits. `--json` and the verdicts
 the exact values.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
+
+## Steering the queue
+
+The scheduler decides from the resources which queued job starts next. An operator, or the lead
+agent of a run, steers it without cancelling anything:
+
+- `hold <job> [--reason t]` keeps one queued job from starting and `release <job>` lets it go. A held
+  job keeps its place: once released it starts in its turn by submit time. While held it stands in
+  no other job's way (it reserves nothing, so the jobs after it may start), and it waits as `held`,
+  naming who held it and why. Only a queued job can be held, and a job that starts, or ends, is not
+  held any more. A job the daemon had already begun to start when the hold arrived (its launch was
+  under way, its store still said queued) starts anyway, and the hold is dropped when it does.
+- Priority orders the jobs that may start. A job's priority is its own (`job priority`), or else
+  the highest of the plans it is linked to (`plan edit --priority`), or else `normal`. Among the
+  queued jobs the scheduler would start, those of a higher priority are considered first, and
+  among jobs of one priority the policy (`[scheduler] policy`) orders them as before: `fifo` by
+  submit time, `fair-share` by the run that used least of what the job claims lately. So with
+  `fair-share`, priority comes first and fairness between runs holds within each priority. A job
+  that waits ages: it counts one level higher for each hour it has waited (`core.PriorityAging`),
+  so a low job counts as normal after an hour and as high after two, and a normal job as high after
+  an hour. Under `fifo`, a job that has waited two hours is therefore considered before every job
+  submitted after it, whatever their priority, and no job is starved. Priority never preempts: a
+  job that runs is never stopped. It changes nothing else either: a measure still runs alone on
+  its placement, capacity, claims, leases and holds still apply, and a job that waits for a
+  resource still keeps its turn on it, its turn now coming from this order (so a high measure
+  waiting for its placement keeps the normal checks after it off that placement). A job that its
+  store already has running (a parked supervisor) goes first, as before.
+- `daemon drain [--reason t]` makes the daemon start no queued job: jobs that run finish, queued
+  jobs keep their places, and each says it waits because the daemon is draining. A job whose store
+  already has it running (a parked supervisor found after a crash) still starts, as it has started
+  already. `daemon resume` ends the drain. The drain is kept in `drain.json` of the runtime
+  directory, so it outlives `daemon restart` and a daemon crash, but not a reboot that empties the
+  runtime directory.
+
+`queue` shows all of it in one place: per plan, its priority, and each job's priority now, why it
+waits, how long it has waited and how long its kind usually takes.
+
+To roll out a new `vibesys-cli` while jobs are queued, without cancelling and resubmitting them
+(which would lose their place):
+
+```sh
+vibesys-cli daemon drain --reason "rolling out a new CLI"
+vibesys-cli daemon status          # wait until it says running 0; queued jobs stay queued
+# install the new binary over the old one
+vibesys-cli daemon restart         # the new daemon reads drain.json and starts nothing
+vibesys-cli daemon status          # still draining, every queued job still there
+vibesys-cli daemon resume          # queued jobs start in their turn
+```
+
+A restart of a draining daemon is safe with jobs running too: running jobs have their own
+supervisors and the new daemon adopts them, as any restart does; draining only keeps it from
+starting new ones. A new command line whose protocol is newer than the daemon's replaces the daemon
+on its first command (see "The daemon and the supervisors"); a drain the old daemon wrote is read by
+the new one the same way.
+
+Who asks is the caller's own word (`--agent`, `VIBESYS_AGENT`): the daemon checks no right to hold,
+release, set a priority, drain or resume. The optimization skills carry the convention: the lead steers, workers do
+not hold other agents' jobs.
 
 ## Who submitted a job
 
@@ -366,6 +440,7 @@ sockets and locks are not reliable there. The directory holds:
 | `start.lock` | Held by a client while it starts a daemon, so clients that find none at once start one. |
 | `daemon.log` | The diagnostics of a daemon a client started. |
 | `sup/` | One directory per running job, with its supervisor's socket and output spool. |
+| `drain.json` | Present while the daemon drains: the protojson of a `DaemonDrain` (who, why, since when). A daemon that starts reads it before it starts any job; a damaged file stops the daemon from starting, naming the file. |
 
 The runtime directory moves with `XDG_RUNTIME_DIR`, so its lock alone cannot keep one daemon per
 user per machine. The daemon also holds `machine.lock` in the user's machine directory, which
@@ -476,7 +551,8 @@ queued jobs start from `schedule`:
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
-  submitted it) that used least of what the job claims lately. A job that waits keeps its turn: a
+  submitted it) that used least of what the job claims lately, each within one priority, after
+  the jobs of a higher priority (see "Steering the queue"). A job that waits keeps its turn: a
   later job does not take what an earlier one waits for, so a measure is not starved by checks.
 - A job whose supervisor is parked goes first. A job in doubt holds its claims while its command
   can run; one whose work the daemon could not read holds every resource. Recovery adopts running
@@ -666,9 +742,38 @@ refused with the reason.
   build cache. A reference that names a variable with no default is not looked up, and a change of
   its image is not seen. The candidate's image of a task of two images is named the same way, by
   the digest of its files and its Dockerfile's bases (`vibesys-candidate:<task>-<key>`). The first `submit` of a task builds the image before the
-  job is queued, so that submission takes as long as the build. The image digest is recorded with
-  each result and is what makes two docker results comparable, with the backend, so results from
-  different images are never mixed.
+  job is queued, so that submission takes as long as the build.
+- Two jobs that need one image build it once, whichever processes run them. A process that finds
+  no image under the tag takes a lease for the tag's builds in the directory of leases of the
+  machine whose Docker builds it (`vibesys-image-build-<nn>`, one of 256 the tags share): this
+  machine's for a `local` or `apptainer` placement, the engine's machine, over ssh, for an `ssh`
+  or Slurm one. One that finds the lease held says in its log who holds it, tries again every 5
+  seconds for as long as it would itself build, then uses the image the holder built, or builds it
+  when the holder did not. Builders that share no directory of leases, such as a sandbox daemon and
+  the real one, or two machines whose Docker builds on a third without a lease there, can still
+  build one tag at once; under the containerd image store the build that ends second fails with
+  `already exists`. A build that fails while the engine then has an image under its tag uses that
+  image, which is of the same files and bases, so losing that race fails no job.
+- The image is recorded with each result by the digest of its content, the same SHA-256 over what
+  `docker image inspect` says a container of it runs (its `Config` with keys sorted, `Os`,
+  `Architecture`, `Variant` and `RootFS` layer diff IDs) that names an apptainer SIF, and not by its
+  ID. That digest, with the backend, is what makes two docker results comparable, so results from
+  images of different content are never mixed, and two builds of one content are one environment.
+  Under Docker's containerd image store an image's ID is the digest of its manifest or index, which
+  BuildKit's attestations make differ from one build of one content to the next: an image built
+  again, as when a release changes the image's tag, would otherwise make every later result
+  incomparable with every earlier one.
+- Results of builds before this one carry the image's ID in that place. Nothing in the store is
+  rewritten: when `compare`, `promote`, the frontier, `result` and `show` read such a result, the
+  daemon asks the engine of the placement it was taken on (its `placement` fact) for the image of
+  that ID, and when the engine still has it, the result is compared by the digest of its content.
+  An ID is only ever replaced by the content of the image it names, so two contents never compare as
+  one. When the image is gone, the placement is no longer in the operator config or its engine
+  cannot be asked, the result keeps its ID, which equals no content digest: it stays another
+  environment, and `compare` refuses with the two environments named, as before; measure that
+  commit again. The answer is kept for the daemon's life, so an image loaded back after the daemon
+  found it gone is seen after a restart. The cache key of such a result is still the one of its ID,
+  so a job of the same commit takes its samples and its check again once.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
@@ -779,10 +884,12 @@ hf = "/shared/hf-cache"
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
 | `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
+| `[placements.<name>] job_kinds` | The kinds of job the placement runs, of `check`, `measure` and `command` (a profile and a lab are command jobs), such as `["check", "command"]` for a partition too short for a measure. Unset or empty runs every kind. The scheduler never starts a job on a placement that excludes its kind, even when that placement is the least loaded, and `jobs` names only the placements a job may start on when it says why it waits. `submit --placement <name>` of an excluded kind is refused, naming the placement and the kind; so is a job no placement runs, rather than queued forever. |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[placements.<name>.slurm] max_time_seconds` | For `slurm` and `apptainer`, optional: the longest time limit an allocation asks Slurm for, such as the partition's `MaxTime` (at least 60, at most a year; whole minutes are asked for). Unset asks for what the job needs: the command's limit and a margin, and for an `apptainer` measure every sample's limit. A job that runs longer than the cap is ended by Slurm and fails, so pair it with `job_kinds`. |
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
@@ -858,15 +965,42 @@ start without it, saying to install it.
 - A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
   site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
   container and commented with the daemon's scope. Its time limit is the command's limit and 10
-  minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
-  and its ssh connection with it, the holder cancels the allocation.
-- A run is one command of a job, so each command has an allocation of its own: a check job's
-  stages, and a measure's check and each of its benchmark samples, each wait in Slurm's queue
-  again. On a busy partition a measure can wait between its samples. While an allocation waits, the
-  run says why in the job's log, before its command's output: Slurm's state of the allocation, its
-  reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait begins and each time
-  one of them changes, and the node and how long it waited once it runs. A run whose allocation
-  runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
+  minutes for the stop, and, for a measure's benchmark sample, the limits of the samples after it
+  too. A holder step keeps it for the run: when the run ends, or the job's supervisor dies and its
+  ssh connection with it, the holder cancels the allocation.
+- A measure's benchmark samples wait in Slurm's queue once. A sample whose command exits 0, with
+  samples after it, has its container's processes killed, confirmed gone from the node, and keeps
+  the allocation for the next sample, which runs in a fresh container there (a fresh server, for a
+  task of two images) and says so in the job's log. The last sample cancels it, and so does a
+  sample that fails, times out or is cancelled. A kept allocation that no sample takes within 10
+  minutes is cancelled, and the next job's run cancels any its scope left. A kept allocation serves
+  only a container that asks for the same (`[slurm]` sizing of a measured container) and has its
+  limit and the 10 minutes left; another asks for one of its own. A kept allocation that Slurm
+  ended between two samples (preempted, its node failed) fails the job before the next sample,
+  saying that it lost its place, rather than wait in the queue again. Because the first sample asks for
+  the time of all of them, a partition whose `MaxTime` is shorter than the samples' limits together
+  refuses the allocation; the submit's error says so. With `[slurm] max_time_seconds` set, every
+  allocation asks for no more than it, and a sample asks for an allocation of its own when the kept
+  one has less than its limit and the 10 minutes left.
+- Every other command has an allocation of its own: a check job's stages, and a measure's build and
+  check, each wait in Slurm's queue, and a measure's first sample waits again after its check,
+  since only samples hand their allocation on (a check asks for less: no whole node). While an
+  allocation waits, the run says why in the job's log, before its command's output: Slurm's state
+  of the allocation, its reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait
+  begins and each time one of them changes, and the node and how long it waited once it runs. A
+  run whose allocation runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
+- A cluster that cannot be reached does not end a wait on it. A call whose ssh connection fails (it
+  cannot connect, the login node resets it, or ssh exits 255), or that does not answer within 2
+  minutes, is made again every `[slurm] poll_interval_seconds` while the run waits for its
+  allocation in the queue, checks the allocation a sample kept, starts the step that holds its
+  allocation, or reads its node, and the allocation keeps its place in the queue. The job's log
+  says once when the cluster stops answering (`the cluster is unreachable since <time>`) and once
+  when it answers again. The run fails, before its command, only when the cluster stays
+  unreachable for 30 minutes in a row, saying so with the last failure; the queue's own bound
+  still applies. A lost read is never a reason to cancel the allocation: the run's end cancels it,
+  trying again on the poll for up to 2 minutes, and an allocation the cluster could not be reached
+  to cancel is cancelled by the next run of the daemon's scope. A call that fails otherwise, such
+  as `squeue` reporting an error, fails the run at once.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
   a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
   placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the
@@ -897,12 +1031,38 @@ start without it, saying to install it.
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
 
+A short partition, such as a `devel` partition whose `MaxTime` is 30 minutes and that is often idle,
+is a placement of its own that runs checks and commands and no measure, with its allocations capped
+at the partition's limit:
+
+```toml
+[placements.mi210-devel]
+kind = "apptainer"
+job_kinds = ["check", "command"]
+[placements.mi210-devel.remote]
+host = "host-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi210-devel.slurm]
+partition = "devel"
+max_time_seconds = 1800
+[placements.mi210-devel.apptainer]
+submit_arguments = ["--account=acct-a"]
+[placements.mi210-devel.resources.rocm]
+```
+
+A measure submitted without `--placement` then never starts there, though it is the least loaded
+placement, and waits for a placement that runs measures; `submit measure --placement mi210-devel`
+is refused. Without `max_time_seconds`, the CLI asks for the job's limits and the stop's margin,
+such as 70 minutes for a check of an hour, and a partition of 30 minutes refuses the allocation. A
+check or a command that runs longer than the cap is ended by Slurm and fails. Every allocation asks
+for one node (`--nodes=1 --ntasks=1`), which a site that requires an explicit node count accepts.
+
 ### Placements are interchangeable
 
 Where a sample ran does not decide which results are compared, pooled or reused. Comparison,
 promotion, the frontier, check-pass and sample reuse and the cache key all go by what defines the
 measurement: the commit, the task version, the schema version, and the environment's kind, backend
-and image digest. The placement, the machine and the resources' facts are recorded with each result
+and the digest of its image's content. The placement, the machine and the resources' facts are recorded with each result
 and take no part. A difference between placements is noise that the noise floor and repeated
 samples absorb; a task whose number depends on the hardware pins it through its needs, or an
 operator through `VIBESYS_PLACEMENT`.
@@ -921,6 +1081,75 @@ operating system, architecture, CPU model and CPU count.
 A sandbox daemon (see "The daemon and the supervisors") also takes its own `XDG_STATE_HOME` and
 `VIBESYS_CLI_CONFIG` when it should not share the first daemon's index or operator config. Stores
 live in the repository, so it must use another clone of a repository the first one uses.
+
+## Labs
+
+Profiling and exploring are never scored, so the CLI does not ask an agent to describe them in a
+configuration language. A lab gives it the containers a run of its task has, on a placement, for a
+while, and runs in them whatever it asks; it copies files in and out, and ends. A lab is a command
+job (`spec.command.lab` with `--json`) and is listed by `jobs` as `lab for <time>`.
+
+What it holds:
+
+- The candidate's container: the candidate's image (for a task of one image, the task's) over a
+  clean checkout of the lab's commit, with the placement's GPUs and mounts, as a run's. For a task
+  of two images, the task's container beside it, in its network and with the read-only mounts, as
+  a profile's run has it: a server started in the candidate's container on the port `lab ps`
+  names is at `http://127.0.0.1:<port>` in the task's, which also has `VIBESYS_SERVICE_URL`.
+- An artifacts directory both containers share at `/vibesys/artifacts`, kept with the job
+  (`.vibesys-state/.artifacts/<task>/<job>/01-lab/`), copied back from another machine when the lab
+  ends and on each `lab cp` out of it.
+- Nothing else runs in the containers. A command a lab call starts runs as the invoking user in
+  the checkout, under `/bin/sh`, which says the command's process id first so that `lab kill`,
+  and a foreground `lab exec` whose caller went away, signal that process alone (a container's
+  own stop reaches all of its processes); when the lab ends, at its time or on `lab end`, every process still running is sent
+  SIGTERM and given the grace (`stop_grace_seconds`) before the containers are removed, so a
+  profiler under it writes what it gathered.
+
+How it is scheduled, and what it may not do:
+
+- A lab is scheduled as a command job: it waits for its turn, holds a slot of its placement and
+  what its resources claim while it runs, and a measure, which holds its placement alone, never
+  runs beside it; a lab waits while a measure runs. It runs on a placement whose `job_kinds` run
+  command jobs. It is steered as any queued job (see "Steering the queue"): `queue` lists it as
+  `lab for <time>`, it takes its plans' priority or its own, a held lab keeps its place, and a
+  draining daemon starts no lab. A call that would wait for a lab that is held or behind a drain
+  (`lab start --wait`, `lab ps --wait`, `lab exec`) exits `1` at once saying so, while `lab ps`
+  says it is `queued`; a lab already running goes on through a drain.
+- A lab saves no result, as no command job does, so nothing it runs can be compared, promoted or
+  added to the frontier, and its numbers are never official. The task's scored commands and images
+  are the task's: a lab runs the task's image and the candidate's as a run builds them, and changes
+  neither. `lab checkout` keeps them. It refuses, before building anything, a commit whose task
+  version differs, or whose candidate's Dockerfile or build context is another path. For any other
+  commit of a task of two images it builds the commit's candidate image as `lab start` built the
+  lab's, by the same placement's engine (for `local` and `apptainer`, the only placements that hold
+  a lab of two images, the operator machine's Docker), and compares what a container of each runs:
+  its config, platform and layers, not its ID, which BuildKit's attestations make differ between
+  two builds of one content. A commit that changes only files the Dockerfile does not copy, such as
+  code a container reads from the checkout, finds every layer in the build cache and builds the
+  same image in moments, and is taken; one that changes what the image holds (the Dockerfile, or a
+  copied file such as `requirements.txt`) is refused. The build's lines go to the lab's log.
+- A lab's time is capped at a placement's `[slurm] max_time_seconds` less the stop's margin (10
+  minutes), so that Slurm does not end its allocation under it.
+
+The trust boundary is the job's: a lab runs on the placements and with the resources the operator
+configured, in containers that see the checkout, the cache, the artifacts directory and the
+operator's mounts (read-only), as the agent's own `submit command` jobs do. It reaches nothing a
+command job cannot, and writes nothing the scoring reads: the scored check and benchmark run in
+jobs of their own, from a clean checkout, after the lab.
+
+Where each placement kind holds a lab: `local`, a lab of one or two images; `apptainer`, a lab of
+one or two images, the two in one batch allocation on one node, each command a step of it, its
+time asked for once; `ssh` and `slurm`, a lab of one image (a lab of two images is refused there,
+as a run of two images is, since the placement has no probe program, and a `slurm` placement would
+hold two allocations for it). A host job, and so a task without a Dockerfile or `--env host`, holds
+no lab.
+
+A lab outlives its daemon, as any running job does: its supervisor holds it, and the next daemon
+adopts it, so `lab exec` after a `daemon restart` reaches the same containers and processes. A
+command run in the foreground ends with the daemon that streams it; a detached one goes on. A lab
+whose supervisor died is lost, as a command job whose command may have started is, and is not run
+again; its containers stop with their supervisor.
 
 ## The result branch
 

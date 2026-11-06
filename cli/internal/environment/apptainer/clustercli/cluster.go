@@ -102,9 +102,18 @@ func (c *Cluster) sh(ctx context.Context, d time.Duration, script string, args .
 	defer done()
 	out, err := remote.Output(bounded, c.cfg.Shell, append([]string{"/bin/sh", "-c", script, "vs-apptainer"}, args...), nil)
 	if err != nil && ctx.Err() == nil && bounded.Err() != nil {
-		return "", unavailable("%s did not answer within %v", c.cfg.Shell.Where(), d)
+		return "", fmt.Errorf("%w (%w)", unavailable("%s did not answer within %v", c.cfg.Shell.Where(), d), apptainer.ErrConnectionLost)
 	}
-	return out, err
+	return out, lost(err)
+}
+
+// lost makes the error of a call whose connection to the cluster failed (remote.ErrLost) wrap
+// apptainer.ErrConnectionLost, which is how the engine knows the call may succeed if made again.
+func lost(err error) error {
+	if errors.Is(err, remote.ErrLost) && !errors.Is(err, apptainer.ErrConnectionLost) {
+		return fmt.Errorf("%w (%w)", err, apptainer.ErrConnectionLost)
+	}
+	return err
 }
 
 func checkPath(p string) error {
@@ -243,7 +252,7 @@ func (c *Cluster) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	defer done()
 	out, err := remote.Output(bounded, c.cfg.Shell, argv, nil)
 	if err != nil {
-		return "", fmt.Errorf("submitting the allocation %s: %w", a.Name, err)
+		return "", fmt.Errorf("submitting the allocation %s: %w", a.Name, lost(err))
 	}
 	return ParseJobID(out)
 }
@@ -361,7 +370,7 @@ func ParseJobs(out, scope string) []string {
 
 // Cancel implements apptainer.Cluster: Slurm's cancel by name, confirmed by squeue and then sacct.
 func (c *Cluster) Cancel(ctx context.Context, name string) error {
-	return slurm.CLI{Shell: c.cfg.Shell, Timers: c.cfg.Timers, Poll: c.cfg.Poll}.Cancel(ctx, name)
+	return lost(slurm.CLI{Shell: c.cfg.Shell, Timers: c.cfg.Timers, Poll: c.cfg.Poll}.Cancel(ctx, name))
 }
 
 // Node implements apptainer.Cluster.

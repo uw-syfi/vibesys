@@ -269,7 +269,11 @@ func testCancelled(t *testing.T, newStore New) {
 				_, err := e.s.Transition(ctx, core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: e.now()})
 				return err
 			},
-			"AddNote":         func() error { _, err := e.s.AddNote(ctx, job.ID, *e.note("n")); return err },
+			"AddNote": func() error { _, err := e.s.AddNote(ctx, job.ID, *e.note("n")); return err },
+			"ControlJob": func() error {
+				_, err := e.s.ControlJob(ctx, job.ID, core.HoldJob{Hold: core.JobHold{At: e.now()}})
+				return err
+			},
 			"Results":         func() error { _, err := e.s.Results(ctx, core.ResultFilter{}); return err },
 			"RecordPromotion": func() error { return e.s.RecordPromotion(ctx, core.AssumeApproved(g.promotion())) },
 			"Promotions":      func() error { _, err := e.s.Promotions(ctx); return err },

@@ -94,6 +94,7 @@ vibesys_evaluator.microservices.k8s.attach(app: App[Any], *, namespace: str | No
 vibesys_evaluator.llm_serving.endpoint() -> str
 vibesys_evaluator.llm_serving.agentx.HARNESS_VERSION: Final[str]
 vibesys_evaluator.llm_serving.agentx.METRICS: Final[Mapping[str, Metric]]
+vibesys_evaluator.llm_serving.agentx.explore(*, model: str, tokenizer: str, tokenizer_revision: str, concurrency: int, max_context_length: int, artifacts: Path, duration_secs: int, warmup_requests_per_lane: int = 1, dataset_entries: int | None = None, seed: int = 42, url: str | None = None, timeout_secs: float = 3300.0) -> dict[str, float]
 vibesys_evaluator.llm_serving.agentx.replay(*, model: str, tokenizer: str, tokenizer_revision: str, concurrency: int, max_context_length: int, artifacts: Path, url: str | None = None, mode: Literal['full', 'smoke'] = 'full', timeout_secs: float = 3300.0) -> dict[str, float]
 class vibesys_evaluator.llm_serving.golden.Thresholds  (*, near_tie_margin: float = 0.5, max_decisive_flips: int = 0, max_mean_abs_dlogprob: float = 0.05, max_p99_abs_dlogprob: float = 0.25, min_mean_prefix_fraction: float = 0.5) -> None
 vibesys_evaluator.llm_serving.golden.Thresholds.max_decisive_flips: int

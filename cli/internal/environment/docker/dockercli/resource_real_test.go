@@ -5,6 +5,7 @@ package dockercli_test
 import (
 	"bytes"
 	"context"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,7 +42,7 @@ func TestARealContainerGetsAResourcesFileVariablesAndNetwork(t *testing.T) {
 	}
 	p, err := docker.New(docker.Config{
 		Engine: newEngine(), Source: source{docker.Spec{Dockerfile: []byte(dockerfile)}}, Backend: cpuBackend(),
-		Timers: clock.System{}, IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "local",
+		Timers: clock.System{}, IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "local", Builds: (&fakelease.Place{}).Daemon(),
 		User: docker.User{UID: os.Getuid(), GID: os.Getgid()}, Resources: []resource.Resource{cluster},
 	})
 	if err != nil {
@@ -57,7 +58,8 @@ func TestARealContainerGetsAResourcesFileVariablesAndNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp.ImageDigest).Run() })
+	image := taskImageOf(t, fp)
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", image).Run() })
 	if fp.Facts["placement"] != "local" || fp.Facts["kubernetes_server"] != "https://127.0.0.1:6443" {
 		t.Errorf("fingerprint facts %v lack the placement and the cluster", fp.Facts)
 	}

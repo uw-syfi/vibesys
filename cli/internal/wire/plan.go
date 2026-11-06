@@ -39,6 +39,37 @@ func ToPlanStatus(field string, s cliv1.PlanStatus) (core.PlanStatus, error) {
 	return "", invalid("%s: %s is not a plan status", field, s)
 }
 
+var priorities = []struct {
+	domain core.Priority
+	wire   cliv1.Priority
+}{
+	{"", cliv1.Priority_PRIORITY_UNSPECIFIED},
+	{core.PriorityLow, cliv1.Priority_PRIORITY_LOW},
+	{core.PriorityNormal, cliv1.Priority_PRIORITY_NORMAL},
+	{core.PriorityHigh, cliv1.Priority_PRIORITY_HIGH},
+}
+
+// Priority returns the contract's value for a priority, unspecified for none of its own.
+func Priority(p core.Priority) cliv1.Priority {
+	for _, q := range priorities {
+		if q.domain == p {
+			return q.wire
+		}
+	}
+	return cliv1.Priority_PRIORITY_UNSPECIFIED
+}
+
+// ToPriority returns the domain priority for the contract's value, none for unspecified, or
+// invalid_input naming field for a value this build does not know.
+func ToPriority(field string, p cliv1.Priority) (core.Priority, error) {
+	for _, q := range priorities {
+		if q.wire == p {
+			return q.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not a priority", field, p)
+}
+
 // gainReferences pairs each domain reference with its contract value.
 var gainReferences = []struct {
 	domain core.GainReference
@@ -113,6 +144,7 @@ func Plan(p core.Plan) *cliv1.Plan {
 		Status:    PlanStatus(p.Status),
 		CreatedAt: timestamp(p.CreatedAt),
 		UpdatedAt: timestamp(p.UpdatedAt),
+		Priority:  Priority(p.Priority),
 		GainBound: GainBound(p.GainBound),
 	}
 	for _, c := range p.Comments {
@@ -136,13 +168,17 @@ func ToPlan(p *cliv1.Plan) (core.Plan, error) {
 	if err != nil {
 		return core.Plan{}, err
 	}
+	priority, err := ToPriority("plan.priority", p.GetPriority())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	bound, err := ToGainBound("plan.gain_bound", p.GetGainBound())
 	if err != nil {
 		return core.Plan{}, err
 	}
 	out := core.Plan{
 		Number: core.PlanNumber(p.GetNumber()), Title: p.GetTitle(), Body: p.GetBody(), Status: status,
-		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()), GainBound: bound,
+		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()), Priority: priority, GainBound: bound,
 	}
 	for _, c := range p.GetComments() {
 		out.Comments = append(out.Comments, ToPlanComment(c))

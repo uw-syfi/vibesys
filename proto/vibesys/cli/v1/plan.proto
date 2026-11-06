@@ -61,6 +61,8 @@ message Plan {
   google.protobuf.Timestamp updated_at = 7;
   // The bound on the plan's possible gain. Absent when the plan states none.
   PlanGainBound gain_bound = 8;
+  // The priority of the plan's queued jobs that set none of their own. Unspecified is normal.
+  Priority priority = 9;
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result

@@ -136,7 +136,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 5, Event: event}
+			want := &cliv1.EventFile{Format: 8, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)
@@ -186,7 +186,7 @@ func seedFrom(f *testing.F, name string) {
 	f.Add(data)
 	f.Add(withVersion(data, "1"))
 	f.Add(withVersion(data, "2"))
-	f.Add(withVersion(data, "6"))
+	f.Add(withVersion(data, "8"))
 	f.Add([]byte(`{"format": 2}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`[]`))

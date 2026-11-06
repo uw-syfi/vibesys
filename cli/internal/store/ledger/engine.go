@@ -151,6 +151,11 @@ func (e *Engine) AddNote(ctx context.Context, id core.JobID, note core.Note) (co
 	return write(e, ctx, func(l *Ledger) (Change, core.Job, error) { return l.AddNote(id, note) })
 }
 
+// ControlJob implements store.JobStore.
+func (e *Engine) ControlJob(ctx context.Context, id core.JobID, control core.JobControl) (core.Job, error) {
+	return write(e, ctx, func(l *Ledger) (Change, core.Job, error) { return l.ControlJob(id, control) })
+}
+
 // Results implements store.ResultStore.
 func (e *Engine) Results(ctx context.Context, filter core.ResultFilter) ([]core.Result, error) {
 	return read(e, ctx, func(l *Ledger) ([]core.Result, error) { return l.Results(filter), nil })

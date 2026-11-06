@@ -10,15 +10,17 @@ import (
 func PlacementOf(name string) ResourceID { return ResourceID("placement:" + name) }
 
 // Offered is a placement of the operator config as a demand sees it: the kinds of resource it gives
-// a container, and what a job on it claims of them besides the placement's slot.
+// a container, the kinds of job it runs (empty is every kind, core.PlacementOffer.Jobs), and what a
+// job on it claims of them besides the placement's slot.
 type Offered struct {
 	Resources []core.ResourceKind
+	Jobs      []core.JobKind
 	Claims    []Claim
 }
 
 // PlacementDemand is the demand of a daemon whose config names placements. Placements are
-// interchangeable: a queued docker job may run on every placement that gives each resource its
-// task needs (core.EligiblePlacements), or on the one its submission restricted it to, and Step
+// interchangeable: a queued docker job may run on every placement that runs its kind of job and
+// gives each resource its task needs (core.EligiblePlacements), or on the one its submission restricted it to, and Step
 // chooses among them when it starts. On a placement it claims a slot of it and what that
 // placement's resources claim. A job that runs on no placement, a host job, claims a slot of Host.
 // A measure job, whose benchmark samples must not be disturbed, claims each of them whole, so it
@@ -40,9 +42,15 @@ type PlacementDemand struct {
 // before placements were recorded claims a slot of Host as such a job did then.
 //
 // A queued docker job that no placement of the config fits, or restricted to one the config does not
-// have or that lacks a need, has no option, so Step refuses it.
+// have, that runs no job of its kind or that lacks a need, has no option, so Step refuses it. A
+// placement that runs no job of its kind is never an option, so the reason it waits names only
+// placements it may start on.
 func (d PlacementDemand) Options(job core.Job) []Option {
-	measure := job.Spec.Settings != nil && job.Spec.Settings.Kind() == core.JobMeasure
+	var kind core.JobKind
+	if job.Spec.Settings != nil {
+		kind = job.Spec.Settings.Kind()
+	}
+	measure := kind == core.JobMeasure
 	if job.Spec.Environment != core.EnvironmentDocker {
 		return Only(Claim{Resource: d.Host, Amount: 1, Exclusive: measure})
 	}
@@ -58,9 +66,9 @@ func (d PlacementDemand) Options(job core.Job) []Option {
 	}
 	offers := make([]core.PlacementOffer, 0, len(d.Placements))
 	for name, o := range d.Placements {
-		offers = append(offers, core.PlacementOffer{Name: name, Resources: o.Resources})
+		offers = append(offers, core.PlacementOffer{Name: name, Resources: o.Resources, Jobs: o.Jobs})
 	}
-	names, err := core.EligiblePlacements(offers, job.Needs, job.Spec.Placement)
+	names, err := core.EligiblePlacements(offers, kind, job.Needs, job.Spec.Placement)
 	if err != nil {
 		return nil
 	}

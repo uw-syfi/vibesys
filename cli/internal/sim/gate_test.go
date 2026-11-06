@@ -259,6 +259,11 @@ func (h gatedHandle) Follow(ctx context.Context, off uint64, emit func([]byte) e
 	return out, err
 }
 
+// Lab passes a lab call through: the simulation submits no labs, so none reaches it.
+func (h gatedHandle) Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error {
+	return h.call(ctx, "sup.Lab", func() error { return h.inner.Lab(ctx, call, emit) })
+}
+
 // gatedSupervisors is the Supervisors of a daemon.
 type gatedSupervisors struct {
 	inner supervisor.Supervisors
