@@ -563,8 +563,9 @@ the same sequence.
 
 ## Install for managed runs
 
-Status: the installer and the release workflow exist, but no release has been published yet, so the
-command below does not work until the first `vibesys-v*` tag is pushed.
+A stable release is published, and the command below installs the newest stable one. To install a
+named version instead, pass `--version X` (for example `--version 0.1.0`, or a pre-release such as
+`0.2.0-rc.1`); see the list below.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/install.sh | sh
@@ -607,8 +608,7 @@ Every binary in the bundle reports the bundle's version: `vibesys-client --versi
   do. `--force` skips the question. Old
   releases are kept.
 - With no version named, the installer reads the newest stable version from `vibesys-latest`. A
-  pre-release (a version with a suffix, such as `0.2.0-rc.1`) never moves that tag, and while only
-  pre-releases are published it does not exist, and the installer says to name the version. Name one
+  pre-release (a version with a suffix, such as `0.2.0-rc.1`) never moves that tag. Name a version
   with `--version`, which is how a pre-release is installed:
   `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/install.sh | sh -s -- --version 0.2.0-rc.1`.
   A stable release published after it becomes what an install with no version gets.
@@ -657,6 +657,13 @@ directory (`vibesys-client host configure --state-directory`), use those instead
    A job that is running has its own supervisor process and goes on after the daemon stops, so
    read `daemon status` first if you have submitted jobs outside a run.
 
+   One job daemon serves a user on a machine. A second build of `vibesys-cli` refuses to start a
+   daemon while another build's holds the machine, and the error names the holder. To try a second
+   build beside one that is busy, start it as a sandbox daemon: set `VIBESYS_CLI_SANDBOX=1` and an
+   `XDG_RUNTIME_DIR` of its own, not the holder's. Where `/tmp` is on a network file system, the job
+   daemon needs `XDG_RUNTIME_DIR` set to an absolute path on local disk. Details are in
+   [The daemon and the supervisors](../cli/README.md#the-daemon-and-the-supervisors).
+
 3. Delete what the install made:
 
    | Path | Holds |
@@ -664,13 +671,15 @@ directory (`vibesys-client host configure --state-directory`), use those instead
    | `~/.local/bin/vibesys-client` | The link to the client. |
    | `~/.vibesys/` | Every release, the `current` link, the host's socket, lock, log and `host-config.json`, and `uv` if the installer put it there. |
    | `~/.local/state/vibesys/` | The orchestrator's state under `orchestrator/`: the record of every run, and each agent's session files and working copy. This is where most of the disk goes. It also holds the job tool's task index, so keep it if you use `vibesys-cli` on its own. |
+   | `~/.cache/vibesys-cli/` (or `vibesys-cli/` under `XDG_CACHE_HOME`) | A cache of the job tool, such as the docker jobs' caches. It may remain after removal; delete it if you want the space back. |
 
    uv keeps its cache and the Python it fetched in its own places, outside `~/.vibesys`; `uv cache dir`
    and `uv python dir` print them if you want those gone too.
 
 Not removed, and yours to keep or delete: in each repository where you ran a task, the
 `.vibesys-state` directory (plans, measurements and scratch output) and the result branches
-`vibesys/result/<task>` that hold the best commits. Deleting VibeSys touches neither, and a result
+`vibesys/result/<task>` that hold the best commits and the worker branches `vibesys-work/<task>/*`.
+Deleting VibeSys touches neither, and a result
 branch you delete cannot be recovered once nothing else refers to its commits.
 
 ## Testing
