@@ -86,11 +86,6 @@
 {"path": "tests/vibesys/sandbox/test_container_runtime_environment.py", "rule": "subprocess", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "subprocess", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "interpreter", "count": 2}
-{"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "signal", "count": 14}
-{"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "socket", "count": 18}
-{"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "subprocess", "count": 13}
-{"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "threading", "count": 10}
-{"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-agent/tests/test_session_launch.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_import.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_docker_workspace.py", "rule": "interpreter", "count": 1}

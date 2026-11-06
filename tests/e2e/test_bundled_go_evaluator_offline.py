@@ -55,13 +55,8 @@ def _make_cache_tree_deletable(root: Path) -> None:
             path.chmod(0o755)
 
 
-def _successful_entrypoint_arguments(
-    package_name: str,
-    workspace: Path,
-) -> tuple[str, ...]:
+def _successful_entrypoint_arguments(workspace: Path) -> tuple[str, ...]:
     """Return a bounded successful invocation for each manifest-declared Go gate."""
-    if package_name == "microservice":
-        return ("-h",)
     return (
         "check",
         "--use-reference",
@@ -421,7 +416,7 @@ wait "$owner"
 
 
 @pytest.mark.native_build
-def test_manifest_declared_go_gates_and_hotel_composition_run_from_prepared_offline_cache(
+def test_manifest_declared_go_gates_run_from_prepared_offline_cache(
     tmp_path: Path,
     request: pytest.FixtureRequest,
 ) -> None:
@@ -432,7 +427,6 @@ def test_manifest_declared_go_gates_and_hotel_composition_run_from_prepared_offl
 
     declared = _go_entrypoints()
     assert declared == {
-        "microservice": ("servicebench", "otelinject", "otelcapture"),
         "ordered-map": ("vibesys-ordered-map",),
         "priority-queue": ("vibesys-priority-queue",),
         "queue": ("vibesys-queue",),
@@ -479,7 +473,7 @@ def test_manifest_declared_go_gates_and_hotel_composition_run_from_prepared_offl
                     accuracy_command=shlex.join(
                         package.command(
                             entrypoint,
-                            *_successful_entrypoint_arguments(package_name, tmp_path),
+                            *_successful_entrypoint_arguments(tmp_path),
                         )
                     )
                 ),
@@ -520,7 +514,7 @@ def test_manifest_declared_go_gates_and_hotel_composition_run_from_prepared_offl
             accuracy_command=shlex.join(
                 stack.command(
                     "vibesys-stack",
-                    *_successful_entrypoint_arguments("stack", remote_stage),
+                    *_successful_entrypoint_arguments(remote_stage),
                 )
             )
         ),

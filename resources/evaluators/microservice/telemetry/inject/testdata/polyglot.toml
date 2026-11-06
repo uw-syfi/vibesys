@@ -1,8 +1,0 @@
-version = 1
-sample_ratio = 0.25
-java_agent_path = "agents/opentelemetry-javaagent.jar"
-
-[services]
-api = "java"
-worker = "python"
-web = "node"

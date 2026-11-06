@@ -218,7 +218,6 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
                 }
             ),
         ),
-        ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
             ProfilerKind.TORCH,
             frozenset({DomainName.LLM_SERVING}),
@@ -434,12 +433,6 @@ def _resolve_auto_profiler(
     if domain is DomainName.GENERIC:
         return _resolve_generic_profiler(
             allowed, environment_default, environment_supported, backend
-        )
-
-    # OTel requires an instrumented input bundle; bare microservices use none.
-    if domain is DomainName.MICROSERVICES:
-        return ProfilerChoice(
-            ProfilerKind.NONE, "microservices profiling needs an instrumented input"
         )
 
     if domain is DomainName.KERNEL_WRITING:

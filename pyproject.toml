@@ -261,7 +261,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/src", "sdk/vibesys-evaluator/python/tests"]
+src = ["src", "tests", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/src", "sdk/vibesys-evaluator/python/tests"]
 # skills/domains/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -285,8 +285,6 @@ extend-exclude = [
     "third_party/serving-repos",
     "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
     "examples/microservices/repositories/deathstarbench",
-    "examples/microservices/repositories/masa",
-    "examples/microservices/repositories/rpcstack",
     "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/sglang",
     "examples/model-serving/repositories/vllm",
@@ -470,7 +468,6 @@ root = [
     "packaging",
     "src",
     "tests",
-    "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-decode/src",
     "libs/vs-redaction/src",
@@ -510,7 +507,6 @@ exclude = ["libs/vs-proto/src/vs_proto/_generated", "sdk/vibesys-evaluator/pytho
 include = [
     "src",
     "tests",
-    "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
     "libs/vs-decode/src",

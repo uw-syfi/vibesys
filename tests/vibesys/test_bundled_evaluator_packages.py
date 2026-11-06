@@ -34,10 +34,6 @@ def test_framework_resolver_finds_bundled_queue_package() -> None:
     [
         ("vibesys-evaluator-queue", {"vibesys-queue"}),
         (
-            "vibesys-evaluator-microservice",
-            {"kubernetes-runtime", "otelcapture", "otelinject", "python", "servicebench"},
-        ),
-        (
             "vibesys-evaluator-request-factory",
             {
                 "request-factory-adapter",
@@ -56,10 +52,8 @@ def test_bundled_evaluator_package_metadata(name: str, entrypoints: set[str]) ->
 
 def test_bundled_evaluator_packages_declare_only_required_toolchains() -> None:
     queue = _resolve_bundled_package("vibesys-evaluator-queue")
-    microservice = _resolve_bundled_package("vibesys-evaluator-microservice")
 
     assert queue.metadata.toolchains == ("go", "rust")
-    assert microservice.metadata.toolchains == ("go",)
 
 
 def test_every_bundled_go_run_entrypoint_declares_one_complete_package_module() -> None:
@@ -81,7 +75,6 @@ def test_every_bundled_go_run_entrypoint_declares_one_complete_package_module() 
         declared[package.root.name] = go_entrypoints
 
     assert declared == {
-        "microservice": {"otelcapture", "otelinject", "servicebench"},
         "ordered-map": {"vibesys-ordered-map"},
         "priority-queue": {"vibesys-priority-queue"},
         "queue": {"vibesys-queue"},

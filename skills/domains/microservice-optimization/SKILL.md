@@ -37,24 +37,21 @@ critical-path contribution are different quantities, and the expensive service
 is frequently not the one holding the request open. When the summary names no
 edge, plan a profiling round rather than guessing one.
 
-**Implementer.** You can read the graph. Confirm the edge or the structure
-before editing:
-
-1. `trace_graphs()` to locate schema-v2 graphs.
-2. `critical_path(path=..., telemetry_path=...)` for wall-clock attribution.
-3. Read `nodes_by_contribution` for ranked contributors, and the representative
-   segments for the order in which calls actually occur.
+**Implementer.** You can read the code and the per-request timing evidence
+the run has: traces the deployment exports, if it exports any, or timings you
+add around the calls in a profiling round. Confirm the edge or the structure
+before editing: which calls a request makes, in what order, and which of them
+hold the request open.
 
 Overlapping sibling calls are not additive. Two calls each showing 10ms of
 inclusive latency may cost 10ms together, not 20ms, in which case
-parallelizing them gains nothing. Representative segments distinguish
-sequential work from overlapping work; flat span aggregates do not.
+parallelizing them gains nothing. Per-request timelines distinguish sequential
+work from overlapping work; flat per-span aggregates do not.
 
-Critical-path scope is `synchronous_request`. Async and linked relationships
-are excluded and counted in `async_relationships_excluded`. Work moved off the
-synchronous path leaves the critical path by construction, so a before/after
-critical-path comparison cannot by itself show that the work got cheaper.
-Confirm every claim against the benchmark's `primary_value`.
+Work moved off the synchronous request path leaves the critical path by
+construction, so a before/after critical-path comparison cannot by itself show
+that the work got cheaper. Confirm every claim against the benchmark's
+objectives.
 
 ## Strategy 1: change when work happens
 
@@ -96,7 +93,7 @@ is evidence against the steps above it.
 
 Step 1 changes the callee's internal API and is usually the largest win per
 unit of risk when a call is issued in a loop or once per result row. Look for
-N+1 patterns in the representative segments before reaching for step 3.
+N+1 patterns in the per-request timelines before reaching for step 3.
 
 Step 2 is worth measuring on its own because it separates two causes that get
 conflated: network transit and serialization cost versus the process boundary
@@ -115,21 +112,22 @@ service decomposition, storage systems, caches, RPC mechanisms, deployment
 topology, and internal APIs.
 
 This means step 3 and step 4 are legitimate optimizations, not contract
-violations. It also means the accuracy oracle, which exercises the external
-contract with randomized cases, is the check that matters. A restructuring that
-passes the benchmark and fails accuracy has not found anything.
+violations. It also means the accuracy check, which judges a recorded history
+of the external API against a model of the application, is the check that
+matters. A restructuring that passes the benchmark and fails accuracy has not
+found anything.
 
 ## Verification
 
 For any change from either strategy:
 
-- The benchmark's `primary_value` is the result. Critical-path contribution,
-  span latency, and trace graphs are diagnostic evidence for choosing the
-  change, never evidence that it worked.
+- The benchmark's objectives are the result. Critical-path contribution,
+  span latency, and traces are diagnostic evidence for choosing the change,
+  never evidence that it worked.
 - Re-read the critical path after the change. A restructuring that moves the
   bottleneck to a different edge is a partial result worth recording, and it
   names the next round's target.
-- Compare graphs only across matching workload identity and window count. The
-  `critical_path` tool rejects mismatched pairs; do not work around it.
+- Compare timings only across the same workload and load. Evidence from a
+  different request mix or load level says nothing about this change.
 - When a step in the strategy 2 ladder produces no measurable gain, record that
   and stop climbing. The remaining steps cost more and are less reversible.

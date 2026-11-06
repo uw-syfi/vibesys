@@ -646,7 +646,7 @@ loadgen --capabilities [--format binpb|json]
   or the open loop's in-flight slot, that ran the operation (the accuracy
   capture's; two operations of one client never overlap).
 - `--arrivals` defaults to `poisson`; `uniform` spaces arrivals `1/rate`
-  apart, as the servicebench engine does, and the yardsticks keep it.
+  apart, as the yardsticks do.
   `--min-sustained` defaults to 0.95 (the default `min_sustained_ratio`).
 - Latency is end minus scheduled in both loops; a closed-loop operation is
   scheduled when its client takes it, so it differs from end minus start only

@@ -312,8 +312,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "PMC counters, ATT, kernel-altitude counters), "
             "'torch' for torch.profiler (works under the Modal run environment), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
-            "'otel' for OpenTelemetry service/span/datastore latency on "
-            "microservice benchmarks (opt-in; needs an instrumented input bundle), "
             "'macos_cpu' for Instruments Time Profiler with a sample fallback, "
             "'linux_cpu' for Linux perf on native CPU workloads, "
             "'auto' picks a domain/backend/environment-appropriate profiler. "

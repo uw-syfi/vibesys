@@ -47,7 +47,6 @@ selected_roots = [
   "examples/data-structures/repositories/queue-rs",
   "examples/data-structures/stack",
   "examples/data-structures/unordered-map",
-  "resources/evaluators/microservice",
   "resources/evaluators/ordered-map",
   "resources/evaluators/ordered-map/native_runner",
   "resources/evaluators/priority-queue",
@@ -195,7 +194,7 @@ class = "manual"
 job = "examples"
 roots = ["examples", "docs"]
 files = [".gitmodules", "README.md"]
-depends_on = ["example_validation", "microservice_evaluator", "native_evaluator_examples"]
+depends_on = ["example_validation", "native_evaluator_examples"]
 # CI still selects the examples job for a docs change. Locally those files are
 # documentation: `repoctl test` ignores this root and runs only the always-on
 # scripts. The root stays on the component, so the CI plan does not change.
@@ -203,7 +202,7 @@ local_ignore_roots = ["docs"]
 
 [[components]]
 id = "example_validation"
-files = ["src/entrypoints/headless.py", "src/entrypoints/example_catalog.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
+files = ["src/entrypoints/headless.py", "src/entrypoints/example_catalog.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
 roots = ["src/vibesys/inputs"]
 
 # The build-and-run tests of the example evaluators (the `native_build` marker) run in the
@@ -278,14 +277,6 @@ files = [
   "scripts/ci_registry_image_cache.sh",
   ".github/actions/docker-image-cache/action.yml",
 ]
-
-[[components]]
-id = "microservice_evaluator"
-roots = ["resources/evaluators/microservice"]
-
-[[edges]]
-from = "native:sdk/vs-evaluator/vseval"
-to = "native:resources/evaluators/microservice"
 
 [[edges]]
 from = "native:sdk/vs-evaluator/vseval"

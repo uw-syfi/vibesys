@@ -138,7 +138,7 @@ def _verify_resources() -> None:
     evaluator_packages = BUNDLED_RESOURCES.directory("evaluators")
     if evaluator_packages is None:
         _fail("Installed evaluator package resources did not resolve")
-    for name in ("vibesys-evaluator-microservice", "vibesys-evaluator-queue"):
+    for name in ("vibesys-evaluator-queue", "vibesys-evaluator-request-factory"):
         package = resolve_evaluator_package(
             evaluator_packages,
             EvaluatorPackageRequirement(name=name, version="0.1.0"),

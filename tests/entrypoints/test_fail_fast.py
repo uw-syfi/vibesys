@@ -69,7 +69,6 @@ def test_headless_invalid_profiler_prints_flag_diagnostic_without_traceback(
         ProfilerKind.NSYS,
         ProfilerKind.NCU,
         ProfilerKind.ROCPROF,
-        ProfilerKind.OTEL,
         ProfilerKind.TORCH,
         ProfilerKind.NEURON,
         ProfilerKind.HEADROOM,

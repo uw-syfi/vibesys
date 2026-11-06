@@ -406,13 +406,6 @@ If the host's Docker daemon does not register the `sysbox-runc` runtime, the
 run fails before building any image, naming the missing runtime and the key.
 There is no fallback to the host socket or to a plain container.
 
-A benchmark command that names both `--telemetry-output` and
-`--trace-graph-json` declares that the task provisions instrumentation and a
-collector. `--profiler auto` selects the OpenTelemetry profiler for such a task,
-which gives the loop service, span, datastore, critical-path, and trace
-breakdown evidence. Tasks without those flags stay on `none`, since OTel
-profiling has nothing to read.
-
 ## Compute Backend
 
 A task declares the compute backends it targets, as a top-level key of its

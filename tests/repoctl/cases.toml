@@ -17,7 +17,7 @@ jobs = ["evaluators", "examples", "proto", "python"]
 [cases.collections]
 native_languages = ["go"]
 dockerfile_contexts = []
-native_targets = ["resources/evaluators/microservice", "resources/evaluators/queue", "sdk/vs-evaluator/vseval"]
+native_targets = ["resources/evaluators/queue", "sdk/vs-evaluator/vseval"]
 pnpm_packages = []
 
 [[cases]]

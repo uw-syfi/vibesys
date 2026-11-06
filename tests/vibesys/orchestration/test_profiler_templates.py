@@ -14,7 +14,7 @@ from vibesys.prompts import render_template
 from vs_sim.api.testing import examples
 
 _TEMPLATE_DIR = Path(multi_templates.__file__).parent
-_KINDS = ("linux_cpu", "macos_cpu", "otel")
+_KINDS = ("linux_cpu", "macos_cpu")
 
 
 def _render(kind: str, benchmark_command: str | None) -> str:

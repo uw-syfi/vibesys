@@ -420,10 +420,7 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(
                 assert manifest_path.relative_to(source_root).as_posix() in members
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
-    assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
-    assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
-    assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
-    assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
+    assert "resources/evaluators/request-factory/fixed_text.py" in members
     client_root = source_root / "clients"
     workspace_packages = sorted(
         manifest_path.parent
