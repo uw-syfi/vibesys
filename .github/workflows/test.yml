@@ -170,6 +170,12 @@ jobs:
       - name: Check agent skills
         run: python3 -m scripts.check_skills
 
+      # Process boundaries stay typed messages: environment names and mechanism words in the
+      # managed-run contracts are ratcheted (docs/contributing/process-boundaries.md). Stdlib
+      # only, under a second; the Go ratchets run in the gateway and orchestrator jobs.
+      - name: Check process boundaries
+        run: python3 scripts/check_boundaries.py
+
       # The Claude Code plugin manifest lists every skill under `skills/`; a change to either
       # side must keep them in step, and `.claude-plugin/` selects no job of its own.
       - name: Check published skills and plugin manifest
