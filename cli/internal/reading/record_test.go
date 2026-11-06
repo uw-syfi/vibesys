@@ -13,8 +13,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	evaluatorv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/reading"
+	evaluatorv1 "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 )
 
 // write is what an SDK writes a record as: the generated message in proto3 JSON with the proto

@@ -110,8 +110,7 @@ var rules = map[string][]string{
 	"internal/task":                          {"gen/", "internal/core", "internal/tomlproto"},
 	"internal/task/tasktest":                 {"internal/core", "internal/task"},
 	"internal/gitwork":                       {"internal/core", "internal/task"},
-	// Reads a benchmark's output through the evaluator result record, the one definition of it.
-	"internal/reading": {"gen/vibesys/evaluator/"},
+	"internal/reading":                       {},
 	"internal/flow":                          {"internal/core", "internal/reading", "internal/task"},
 	"internal/hostfs":                        {},
 	"internal/flowrun": {

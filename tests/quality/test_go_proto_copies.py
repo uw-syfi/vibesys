@@ -8,6 +8,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# A module that is published on its own cannot require a local module (a `replace` does not reach
+# its dependents) and has no released module to require instead, so it keeps a private copy in an
+# internal package. Evaluators use that module alone, never beside the module the copy comes from.
+STANDALONE_COPIES = {
+    ("github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval", "vibesys/evaluator/v1"),
+}
+
 
 def proto_copy_violations(files: dict[str, str]) -> list[str]:
     """Check module-local generation and transitive local module requirements."""
@@ -20,7 +27,8 @@ def proto_copy_violations(files: dict[str, str]) -> list[str]:
     owners: dict[str, set[str]] = defaultdict(set)
     for module, packages in copies.items():
         for package in packages:
-            owners[package].add(module)
+            if (module, package) not in STANDALONE_COPIES:
+                owners[package].add(module)
     return [
         f"{package} generated in {sorted(found)}"
         for package, found in owners.items()

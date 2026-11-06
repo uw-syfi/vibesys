@@ -10,7 +10,7 @@ import (
 
 	"buf.build/go/protovalidate"
 
-	evaluatorv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/evaluator/v1"
+	evaluatorv1 "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 )
 
 // Protocol2 reads the record stream a benchmark wrote under evaluator protocol 2 and returns the

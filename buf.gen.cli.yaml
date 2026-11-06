@@ -1,22 +1,15 @@
 # Go bindings for vibesys-cli's contract, generated into its own module. The other templates
 # exclude this package (see buf.gen.yaml), so the gateway's bindings are unaffected.
-#
-# The evaluator result record is generated here as well, from the same file the SDKs generate, so
-# the reader of a benchmark's output and the SDK that writes it share one definition. The M option
-# only moves that file's Go import path into this module (the file keeps its go_package, so its
-# embedded descriptor is the SDK's); every other file keeps the package it names.
 version: v2
 clean: true
 inputs:
   - directory: proto
-    paths: [proto/vibesys/cli, proto/vibesys/evaluator/v1/records.proto]
+    paths: [proto/vibesys/cli]
 plugins:
   - local: [go, -C, cli, tool, protoc-gen-go]
     strategy: all
     out: cli/gen
-    opt:
-      - paths=source_relative
-      - Mvibesys/evaluator/v1/records.proto=github.com/uw-syfi/vibesys/cli/gen/vibesys/evaluator/v1;evaluatorv1
+    opt: paths=source_relative
   - local: [go, -C, cli, tool, protoc-gen-go-grpc]
     strategy: all
     out: cli/gen
