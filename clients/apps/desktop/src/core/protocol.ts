@@ -14,7 +14,7 @@ import {
 export const PROTOCOL_VERSION = getOption(file_vibesys_orchestrator_v1_service, protocol_version);
 
 /** The oldest revision the app still speaks, from the same options. */
-export const MIN_PROTOCOL_VERSION = getOption(
+const MIN_PROTOCOL_VERSION = getOption(
   file_vibesys_orchestrator_v1_service,
   min_protocol_version,
 );
