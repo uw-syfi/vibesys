@@ -406,7 +406,7 @@ func (d *Daemon) releaseCheckouts(ctx context.Context, e core.ReleaseCheckouts) 
 		}
 		var err error
 		kept, err = bound(d.cfg.Bounds, ctx, func(c context.Context) ([]core.Checkout, error) {
-			return d.cfg.Checkouts.Release(c, run.Repository, agents)
+			return d.cfg.Checkouts.Release(c, run.Repository, run.ID, agents)
 		})
 		if err != nil {
 			return fmt.Errorf("release the checkouts of run %s: %w", run.ID, err)

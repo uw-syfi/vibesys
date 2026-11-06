@@ -16,7 +16,7 @@ type Checkouts struct {
 }
 
 // Release implements daemon.Checkouts.
-func (c *Checkouts) Release(_ context.Context, _ string, agents []core.AgentID) ([]core.Checkout, error) {
+func (c *Checkouts) Release(_ context.Context, _ string, _ core.RunID, agents []core.AgentID) ([]core.Checkout, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.released = append(c.released, append([]core.AgentID(nil), agents...))

@@ -234,7 +234,9 @@ takes the lead's harness and the first allowed model on it; a spawn outside the 
 their spend is missing from the usage total.
 
 When a run is over (and never before), the orchestrator removes the working copy of each subagent that holds
-nothing git lacks; commits made there stay in the repository. A copy with modified or untracked files is
+nothing git lacks. A commit made there that no branch holds is first kept under
+`refs/vibesys/runs/<run>/<agent>` in the repository (`git log refs/vibesys/runs/<run>/<agent>`), so
+`git gc` does not prune it; if that ref cannot be written the copy stays. A copy with modified or untracked files is
 kept, and `Run.kept_checkouts` names it, which `run get` prints as "kept". The lead works in the repository
 itself and has no copy to remove.
 

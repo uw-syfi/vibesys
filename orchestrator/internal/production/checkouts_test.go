@@ -64,7 +64,7 @@ func TestReleasingCheckoutsRemovesTheCleanOnesAndKeepsTheOthers(t *testing.T) {
 			want[agent] = state
 		}
 
-		kept, err := s.Release(context.Background(), repository, agents)
+		kept, err := s.Release(context.Background(), repository, "run-1", agents)
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
@@ -85,7 +85,7 @@ func TestReleasingCheckoutsRemovesTheCleanOnesAndKeepsTheOthers(t *testing.T) {
 		if !slices.Equal(kept, wantKept) {
 			t.Fatalf("seed %d: kept %v, want %v", seed, kept, wantKept)
 		}
-		again, err := s.Release(context.Background(), repository, agents)
+		again, err := s.Release(context.Background(), repository, "run-1", agents)
 		if err != nil || !slices.Equal(again, wantKept) {
 			t.Fatalf("seed %d: a second release gave %v, %v; want the same %v", seed, again, err, wantKept)
 		}
@@ -111,10 +111,52 @@ func TestACommitMadeInARemovedCheckoutIsStillInTheRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept, err := s.Release(context.Background(), repository, []core.AgentID{"agent-1"}); err != nil || len(kept) != 0 {
+	if kept, err := s.Release(context.Background(), repository, "run-1", []core.AgentID{"agent-1"}); err != nil || len(kept) != 0 {
 		t.Fatalf("a committed copy was kept or failed: %v, %v", kept, err)
 	}
-	if err := exec.Command("git", "-C", repository, "cat-file", "-e", strings.TrimSpace(string(head))+"^{commit}").Run(); err != nil {
-		t.Fatalf("the commit made in the removed copy is gone: %v", err)
+	// The copy was detached, so the commit is on no branch: it survives only because the run holds a
+	// ref to it, and a garbage collection that prunes everything unreachable must leave it.
+	gitIn(t, repository, "reflog", "expire", "--expire=now", "--all")
+	gitIn(t, repository, "gc", "--prune=now", "-q")
+	sha := strings.TrimSpace(string(head))
+	if err := exec.Command("git", "-C", repository, "cat-file", "-e", sha+"^{commit}").Run(); err != nil {
+		t.Fatalf("the commit made in the removed copy is gone after gc: %v", err)
+	}
+	ref, err := exec.Command("git", "-C", repository, "rev-parse", CommitRefPrefix+"run-1/agent-1").Output()
+	if err != nil || strings.TrimSpace(string(ref)) != sha {
+		t.Fatalf("the kept ref is %q, %v; want %s", ref, err, sha)
+	}
+}
+
+// An agent that made no commit leaves no ref: its HEAD is the commit a branch already holds.
+func TestACheckoutWithNoCommitOfItsOwnLeavesNoRef(t *testing.T) {
+	repository := newRepository(t)
+	commitAll(t, repository)
+	s := &ProcessSidecars{Root: t.TempDir()}
+	leave(t, s, repository, "agent-1", leftClean)
+	if kept, err := s.Release(context.Background(), repository, "run-1", []core.AgentID{"agent-1"}); err != nil || len(kept) != 0 {
+		t.Fatalf("a clean copy was kept or failed: %v, %v", kept, err)
+	}
+	refs, err := exec.Command("git", "-C", repository, "for-each-ref", CommitRefPrefix).Output()
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("refs were written for an agent with no commit: %q, %v", refs, err)
+	}
+}
+
+// When the ref cannot be written the copy stays and is reported, since removing it would let the
+// commit be pruned.
+func TestACheckoutWhoseCommitCannotBeKeptStays(t *testing.T) {
+	repository := newRepository(t)
+	commitAll(t, repository)
+	s := &ProcessSidecars{Root: t.TempDir()}
+	leave(t, s, repository, "agent-1", leftCommitted)
+	// A file where the run's ref directory would go makes the ref unwritable.
+	write(t, filepath.Join(repository, ".git", "refs", "vibesys", "runs", "run-1"), "not a directory\n")
+	kept, err := s.Release(context.Background(), repository, "run-1", []core.AgentID{"agent-1"})
+	if err != nil || len(kept) != 1 || kept[0].Agent != "agent-1" {
+		t.Fatalf("kept %v, %v; want the copy of agent-1", kept, err)
+	}
+	if _, err := os.Stat(s.checkoutDir("agent-1")); err != nil {
+		t.Fatalf("the copy was removed although its commit was not kept: %v", err)
 	}
 }
