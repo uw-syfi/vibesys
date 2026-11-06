@@ -39,7 +39,7 @@ func (r *rig) useCLI() {
 	}
 	// The rig's daemon is a sandbox daemon: with the runtime directory of its own, it must not meet
 	// the one daemon per user that a developer's machine may already run.
-	r.env = append(r.env, "VIBESYS_CLI_SANDBOX=1", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	r.env = append(r.env, "VIBESYS_CLI_SANDBOX=1", "PATH="+bin+string(os.PathListSeparator)+r.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
 }
 

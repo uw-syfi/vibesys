@@ -14,7 +14,6 @@ import (
 type fakeFiles map[string]bool
 
 func (f fakeFiles) Executable(path string) bool { return f[path] }
-func (f fakeFiles) Regular(path string) bool    { return f[path] }
 
 func cliTestEnv(kv ...string) func(string) string {
 	m := map[string]string{}
@@ -26,7 +25,7 @@ func cliTestEnv(kv ...string) func(string) string {
 
 func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 	files := fakeFiles{"/pick/vibesys-cli": true, "/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
-	got, err := ResolveCLI(cliTestEnv(EnvCLI, "/pick/vibesys-cli", "PATH", "/usr/bin"), "/install/vibesys-host", files)
+	got, err := ResolveCLI(cliTestEnv(EnvCLI, "/pick/vibesys-cli", "PATH", "/usr/bin"), developerBuild, files)
 	if err != nil || got != "/pick/vibesys-cli" {
 		t.Fatalf("got %q, %v, want the chosen build", got, err)
 	}
@@ -37,7 +36,7 @@ func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 func TestAnExplicitCLIThatCannotBeUsedIsRefusedAndNeverReplaced(t *testing.T) {
 	files := fakeFiles{"/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
 	for _, setting := range []string{"vibesys-cli", "./vibesys-cli", "/missing/vibesys-cli", "/usr/bin"} {
-		got, err := ResolveCLI(cliTestEnv(EnvCLI, setting, "PATH", "/usr/bin"), "/install/vibesys-host", files)
+		got, err := ResolveCLI(cliTestEnv(EnvCLI, setting, "PATH", "/usr/bin"), developerBuild, files)
 		if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
 			t.Errorf("%q gave %q, %v, want an error naming %s", setting, got, err, EnvCLI)
 		}
@@ -60,17 +59,18 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 		}
 		files["bin/vibesys-cli"] = true // reachable only through a relative PATH entry
 		beside := rng.IntN(2) == 0
+		find := developerBuild
 		if beside {
-			files["/inst/vibesys-cli"] = true
+			find = memoryRelease(t, "/inst")
 		}
 		order := slices.Clone(dirs)
 		rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 		path := strings.Join(slices.Concat([]string{"bin"}, order), ":")
-		got, err := ResolveCLI(cliTestEnv("PATH", path), "/inst/vibesys-host", files)
+		got, err := ResolveCLI(cliTestEnv("PATH", path), find, files)
 		want := ""
 		switch {
 		case beside:
-			want = "/inst/vibesys-cli"
+			want = "/inst/bin/vibesys-cli"
 		default:
 			for _, d := range filepath.SplitList(path) {
 				if filepath.IsAbs(d) && files[filepath.Join(d, "vibesys-cli")] {
@@ -88,8 +88,18 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 	}
 }
 
+// A release is the daemon's own build: when its tool is missing the error names the file, and the
+// build on PATH is not taken instead.
+func TestAReleaseWithoutItsToolIsAnErrorAndNeverAnotherBuild(t *testing.T) {
+	files := fakeFiles{"/usr/bin/vibesys-cli": true}
+	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin"), memoryRelease(t, "/inst", "bin/vibesys-cli"), files)
+	if err == nil || got != "" || !strings.Contains(err.Error(), "bin/vibesys-cli") {
+		t.Fatalf("got %q, %v, want an error naming the release's tool", got, err)
+	}
+}
+
 func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
-	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin:relative"), "/install/vibesys-host", fakeFiles{"relative/vibesys-cli": true})
+	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin:relative"), developerBuild, fakeFiles{"relative/vibesys-cli": true})
 	if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
 		t.Fatalf("got %q, %v, want an error naming %s", got, err, EnvCLI)
 	}

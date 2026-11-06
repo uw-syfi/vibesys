@@ -25,10 +25,12 @@ import (
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
+	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 const (
-	// hostProgram is the executable that serves the host; it is found beside this program.
+	// hostProgram is the executable that serves the host, looked up on PATH when this program is
+	// in no release.
 	hostProgram = "vibesys-host"
 	// startup bounds how long a connection waits for a host it has started.
 	startup = 10 * time.Second
@@ -100,19 +102,21 @@ func connector(root string) (clientcli.Dial, error) {
 	}, nil
 }
 
-// hostBinary finds the vibesys-host to start: the one beside this program, with symlinks followed
-// (the client is usually linked into ~/.local/bin from its release directory), else the one on
-// PATH, which is how a development build finds it.
+// hostBinary finds the vibesys-host to start: the host program of the release this program is
+// installed in (the client is usually linked into ~/.local/bin from its release directory, and the
+// release's manifest follows the link), else the one on PATH, which is how a development build
+// finds it. A release whose host is damaged is an error naming the file, never another build.
 func hostBinary(self string, lookPath func(string) (string, error)) (string, error) {
-	var beside string
-	if real, err := filepath.EvalSymlinks(self); err == nil {
-		beside = filepath.Join(filepath.Dir(real), hostProgram)
-		if info, err := os.Stat(beside); err == nil && info.Mode().IsRegular() {
-			return beside, nil
-		}
+	rel, err := release.FinderFor(self)()
+	var notInstalled *release.NotInstalledError
+	switch {
+	case err == nil:
+		return rel.HostProgram()
+	case !errors.As(err, &notInstalled):
+		return "", err
 	}
 	if found, err := lookPath(hostProgram); err == nil {
 		return found, nil
 	}
-	return "", errors.New("no " + hostProgram + " beside " + self + " or on PATH: install it next to " + clientcli.Program)
+	return "", errors.New("no " + hostProgram + ": " + err.Error() + ", and none on PATH")
 }

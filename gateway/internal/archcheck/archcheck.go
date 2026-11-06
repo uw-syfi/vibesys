@@ -3,6 +3,7 @@ package archcheck
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"path"
@@ -35,7 +36,7 @@ var commands = []command{
 	}},
 	{ClientDirectory, "gateway/internal/clientmain", []string{
 		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
-		module + "gateway/schemahash", module + "orchestrator/clientcli", module + "orchestrator/gatewayroot",
+		module + "gateway/schemahash", module + "orchestrator/clientcli", module + "orchestrator/gatewayroot", module + "orchestrator/release",
 		"github.com/mattn/go-isatty",
 	}},
 }
@@ -47,7 +48,41 @@ func Violations(files map[string]string) []string {
 	for _, c := range commands {
 		found = append(found, c.violations(files)...)
 	}
+	for name, source := range files {
+		if strings.HasPrefix(name, "gateway/") && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") && !strings.Contains(name, "/gen/") && !strings.HasPrefix(name, "gateway/internal/archcheck/") {
+			found = append(found, releaseLayoutLiterals(name, source)...)
+		}
+	}
 	sort.Strings(found)
+	return found
+}
+
+// releaseLayoutSpellings are spellings of the release layout that only orchestrator/release may
+// write. The host and the client learn where a part is from the release's manifest.
+var releaseLayoutSpellings = []string{"release.json", ".venv"}
+
+func releaseLayoutLiterals(name, source string) []string {
+	file, err := parser.ParseFile(token.NewFileSet(), name, source, 0)
+	if err != nil {
+		return nil // the command check reports unparseable files.
+	}
+	var found []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		text, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		for _, s := range releaseLayoutSpellings {
+			if strings.Contains(text, s) {
+				found = append(found, fmt.Sprintf("%s: spells the release layout (%q); read release.json through orchestrator/release", name, s))
+			}
+		}
+		return true
+	})
 	return found
 }
 

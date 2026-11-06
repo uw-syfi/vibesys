@@ -32,8 +32,8 @@ const (
 var rules = map[string][]string{
 	"internal/clidaemon":               {"gen/vibesys/cli/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "gen/vibesys/cli/"},
-	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "gen/vibesys/orchestrator/"},
-	"internal/production":              {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "release", "gen/vibesys/orchestrator/"},
+	"internal/production":              {"release", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
@@ -44,7 +44,10 @@ var rules = map[string][]string{
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
 	"internal/localfs":                 {},
 	"gatewayroot":                      {"internal/localfs"},
-	"clientcli":                        {"internal/client", "gen/vibesys/orchestrator/"},
+	"release":                          {"gen/vibesys/orchestrator/"},
+	"release/releasetest":              {"release"},
+	"cmd/release-manifest":             {"release"},
+	"clientcli":                        {"internal/client", "release", "gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
@@ -60,8 +63,9 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	"internal/search": {"internal/clidaemon", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/wire", "gen/vibesys/orchestrator/"},
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
-	"internal/production": {"internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
+	"internal/production": {"release/releasetest", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
+	"release":             {"release/releasetest"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
 	// no non-test file may import.
@@ -70,7 +74,7 @@ var testRules = map[string][]string{
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
 	// The verbs are tested against a whole daemon in memory, as the client library is.
-	"clientcli":       {"internal/core", "internal/daemon", "internal/daemon/daemontest", "gen/vibesys/orchestrator/"},
+	"clientcli":       {"release/releasetest", "internal/core", "internal/daemon", "internal/daemon/daemontest", "gen/vibesys/orchestrator/"},
 	"internal/core":   {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/wire":   {"internal/core", "internal/client"},
 	"internal/daemon": {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
@@ -126,6 +130,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, purity(name, source)...)
 			found = append(found, confinement(name, source)...)
 			found = append(found, capabilities(name, source)...)
+			found = append(found, layoutLiterals(name, source)...)
 		}
 	}
 	sort.Strings(found)

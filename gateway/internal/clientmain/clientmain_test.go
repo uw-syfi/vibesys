@@ -6,55 +6,59 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-func write(t *testing.T, path string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
+	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
+)
 
 func noPath(string) (string, error) { return "", errors.New("not found") }
 
-// A client linked into ~/.local/bin starts the vibesys-host beside the file the link points to,
-// not one next to the link.
-func TestHostBesideTheClientIsFoundThroughASymlink(t *testing.T) {
+func onPath(t *testing.T, found string) func(string) (string, error) {
+	return func(name string) (string, error) {
+		if name != "vibesys-host" {
+			t.Errorf("looked up %q", name)
+		}
+		return found, nil
+	}
+}
+
+// installed lays an installed release in a folder reached through a link, as ~/.vibesys/current is,
+// and links the client into a bin folder, as the installer does. It returns the link.
+func installed(t *testing.T, options ...releasetest.Option) (link, release string) {
+	t.Helper()
 	dir := t.TempDir()
-	release := filepath.Join(dir, "release")
-	write(t, filepath.Join(release, "vibesys-client"))
-	write(t, filepath.Join(release, "vibesys-host"))
+	release = filepath.Join(dir, "releases", "1.0.0")
+	releasetest.Write(t, release, options...)
+	if err := os.Symlink(filepath.Join("releases", "1.0.0"), filepath.Join(dir, "current")); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(bin, "vibesys-client")
-	if err := os.Symlink(filepath.Join(release, "vibesys-client"), link); err != nil {
+	link = filepath.Join(bin, "vibesys-client")
+	if err := os.Symlink(filepath.Join(dir, "current", "bin", "vibesys-client"), link); err != nil {
 		t.Fatal(err)
 	}
-	got, err := hostBinary(link, func(string) (string, error) { return "/elsewhere/vibesys-host", nil })
+	return link, release
+}
+
+// A client linked into ~/.local/bin starts the host the release's manifest names, in the release
+// the link leads to.
+func TestHostOfTheReleaseIsFoundThroughSymlinks(t *testing.T) {
+	link, release := installed(t)
+	got, err := hostBinary(link, onPath(t, "/elsewhere/vibesys-host"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The directory may itself be reached through a link, so compare what both name.
-	want, _ := filepath.EvalSymlinks(filepath.Join(release, "vibesys-host"))
+	want, _ := filepath.EvalSymlinks(filepath.Join(release, "bin", "vibesys-host"))
 	if gotReal, _ := filepath.EvalSymlinks(got); gotReal != want {
 		t.Errorf("host = %s, want the one in %s", got, release)
 	}
 }
 
-func TestWithNoSiblingTheHostOnPathIsUsed(t *testing.T) {
+func TestWithNoReleaseTheHostOnPathIsUsed(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "vibesys-client"))
-	got, err := hostBinary(filepath.Join(dir, "vibesys-client"), func(name string) (string, error) {
-		if name != "vibesys-host" {
-			t.Errorf("looked up %q", name)
-		}
-		return "/usr/local/bin/vibesys-host", nil
-	})
+	got, err := hostBinary(filepath.Join(dir, "bin", "vibesys-client"), onPath(t, "/usr/local/bin/vibesys-host"))
 	if err != nil || got != "/usr/local/bin/vibesys-host" {
 		t.Errorf("host = %q, %v", got, err)
 	}
@@ -62,22 +66,19 @@ func TestWithNoSiblingTheHostOnPathIsUsed(t *testing.T) {
 
 func TestWithNoHostAnywhereTheErrorSaysWhereItLooked(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "vibesys-client"))
-	_, err := hostBinary(filepath.Join(dir, "vibesys-client"), noPath)
-	if err == nil || !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "PATH") {
-		t.Errorf("error = %v, want one naming the directory searched and PATH", err)
+	_, err := hostBinary(filepath.Join(dir, "bin", "vibesys-client"), noPath)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(dir, "release.json")) || !strings.Contains(err.Error(), "PATH") {
+		t.Errorf("error = %v, want one naming the manifest looked for and PATH", err)
 	}
 }
 
-// A directory named vibesys-host beside the client is not a host.
-func TestASiblingThatIsNotAFileIsNotAHost(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "vibesys-client"))
-	if err := os.Mkdir(filepath.Join(dir, "vibesys-host"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := hostBinary(filepath.Join(dir, "vibesys-client"), noPath); err == nil {
-		t.Error("a directory was taken for the host")
+// A release whose host is damaged is an error naming the file. The host on PATH is another build,
+// and a repaired install must not be hidden by it.
+func TestAReleaseWithoutItsHostIsAnErrorAndNotAnotherBuild(t *testing.T) {
+	link, _ := installed(t, releasetest.Without("bin/vibesys-host"))
+	got, err := hostBinary(link, onPath(t, "/usr/local/bin/vibesys-host"))
+	if err == nil || got != "" || !strings.Contains(err.Error(), "bin/vibesys-host") {
+		t.Errorf("got %q, %v, want an error naming bin/vibesys-host", got, err)
 	}
 }
 

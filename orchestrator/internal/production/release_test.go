@@ -3,78 +3,70 @@ package production
 import (
 	"context"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/release"
+	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
 
-const (
-	releaseHost    = "/opt/vs/bin/vibesys-host"
-	releasePython  = "/opt/vs/sidecar/.venv/bin/python"
-	releaseProject = "/opt/vs/sidecar/pyproject.toml"
-)
-
-func releaseFiles(paths ...string) fakeFiles {
-	f := fakeFiles{}
-	for _, p := range paths {
-		f[p] = true
-	}
-	return f
+// developerBuild is the Finder of a host that stands in no release.
+var developerBuild release.Finder = func() (*release.Release, error) {
+	return nil, &release.NotInstalledError{Program: "/home/u/.local/bin/vibesys-host", Manifest: "/home/u/.local/release.json", Err: fs.ErrNotExist}
 }
 
-// installedRelease lays out a release's marketplace on disk (PluginFor reads the manifest) and
-// returns its root and the manifest path.
-func installedRelease(t *testing.T, manifest string) (root, manifestPath string) {
+// memoryRelease is a complete installed release at dir, in memory, without the files named in
+// missing (relative to the release).
+func memoryRelease(t *testing.T, dir string, missing ...string) release.Finder {
 	t.Helper()
-	root = t.TempDir()
-	manifestPath = filepath.Join(root, "marketplace", ".claude-plugin", "marketplace.json")
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return root, manifestPath
+	tree := releasetest.Tree(t, dir, releasetest.Without(missing...))
+	return func() (*release.Release, error) { return release.Open(dir, tree) }
 }
 
-// Every combination of the sidecar setting, the release's parts and the host's place: a set value
-// is used as it is and never replaced by the release; an unset one falls to the release; and
-// without either the error names the setting and the path that was looked at.
+// diskRelease lays a release out in a folder of the real file system, with the given marketplace
+// file, and returns its folder and Finder.
+func diskRelease(t *testing.T, marketplaceJSON string) (string, release.Finder) {
+	t.Helper()
+	dir := t.TempDir()
+	releasetest.Write(t, dir, releasetest.Content("marketplace/.claude-plugin/marketplace.json", marketplaceJSON))
+	return dir, func() (*release.Release, error) { return release.OpenDir(dir) }
+}
+
+// Every combination of the sidecar setting and the release: a set value is used as it is and never
+// replaced by the release; an unset one falls to the release; and without either the error names
+// the setting and the file that is missing.
 func TestTheSidecarCommandIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 	checkout := t.TempDir()
 	if err := os.WriteFile(filepath.Join(checkout, "pyproject.toml"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	full := releaseFiles(releasePython, releaseProject)
+	python := "/opt/vs/sidecar/.venv/bin/python"
 	cases := []struct {
-		name       string
-		env        func(string) string
-		executable string
-		files      fakeFiles
-		want       []string
-		wantErr    []string
+		name    string
+		env     func(string) string
+		find    release.Finder
+		want    []string
+		wantErr []string
 	}{
-		{"the release when unset", cliTestEnv(), releaseHost, full, []string{releasePython, "-m", "vs_sidecar"}, nil},
-		{"blank counts as unset", cliTestEnv(EnvSidecar, "  "), releaseHost, full, []string{releasePython, "-m", "vs_sidecar"}, nil},
-		{"a command wins over the release", cliTestEnv(EnvSidecar, "my-sidecar --flag"), releaseHost, full, []string{"my-sidecar", "--flag"}, nil},
-		{"a checkout wins over the release", cliTestEnv(EnvSidecar, checkout), releaseHost, full, []string{"uv", "run", "--frozen", "--quiet", "--project", checkout, "python", "-m", "vs_sidecar"}, nil},
-		{"a wrong checkout is not replaced by the release", cliTestEnv(EnvSidecar, t.TempDir()), releaseHost, full, nil, []string{EnvSidecar, "pyproject.toml"}},
-		{"unset, no python", cliTestEnv(), releaseHost, releaseFiles(releaseProject), nil, []string{EnvSidecar, "is not set", releasePython}},
-		{"unset, no project file", cliTestEnv(), releaseHost, releaseFiles(releasePython), nil, []string{EnvSidecar, releasePython, releaseProject}},
-		{"unset, a host built into a bin folder has no sibling layout", cliTestEnv(), "/home/u/.local/bin/vibesys-host", full, nil, []string{EnvSidecar, "/home/u/.local/sidecar/.venv/bin/python"}},
-		{"unset, host not in a bin folder", cliTestEnv(), "/opt/vs/vibesys-host", full, nil, []string{EnvSidecar, "not in a release's bin folder"}},
-		{"unset, host path unknown", cliTestEnv(), "", full, nil, []string{EnvSidecar, "not absolute"}},
-		{"unset, host path relative", cliTestEnv(), "bin/vibesys-host", full, nil, []string{EnvSidecar, "not absolute"}},
+		{"the release when unset", cliTestEnv(), memoryRelease(t, "/opt/vs"), []string{python, "-m", "vs_sidecar"}, nil},
+		{"blank counts as unset", cliTestEnv(EnvSidecar, "  "), memoryRelease(t, "/opt/vs"), []string{python, "-m", "vs_sidecar"}, nil},
+		{"a command wins over the release", cliTestEnv(EnvSidecar, "my-sidecar --flag"), memoryRelease(t, "/opt/vs"), []string{"my-sidecar", "--flag"}, nil},
+		{"a checkout wins over the release", cliTestEnv(EnvSidecar, checkout), memoryRelease(t, "/opt/vs"), []string{"uv", "run", "--frozen", "--quiet", "--project", checkout, "python", "-m", "vs_sidecar"}, nil},
+		{"a wrong checkout is not replaced by the release", cliTestEnv(EnvSidecar, t.TempDir()), memoryRelease(t, "/opt/vs"), nil, []string{EnvSidecar, "pyproject.toml"}},
+		{"unset, a release without its environment", cliTestEnv(), memoryRelease(t, "/opt/vs", "sidecar/.venv/bin/python"), nil, []string{EnvSidecar, "is not set", "sidecar/.venv/bin/python"}},
+		{"unset, a host in no release", cliTestEnv(), developerBuild, nil, []string{EnvSidecar, "is not set", "/home/u/.local/release.json"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := sidecarCommand(c.env, c.executable, c.files)
+			got, err := sidecarCommand(c.env, c.find)
 			if len(c.wantErr) == 0 {
-				if err != nil || strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+				if err != nil || !slices.Equal(got, c.want) {
 					t.Fatalf("got %q, %v, want %q", got, err, c.want)
 				}
 				return
@@ -92,45 +84,44 @@ func TestTheSidecarCommandIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 }
 
 // The marketplace follows the same order: the setting (checked as before), then the release's
-// folder, then an error naming both. The release's manifest is validated like any other.
+// skills, then an error naming both. The release's marketplace file is validated like any other.
 func TestTheMarketplaceIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 	override := marketplace(t, good)
-	root, manifest := installedRelease(t, good)
-	host := filepath.Join(root, "bin", "vibesys-host")
+	root, find := diskRelease(t, good)
 
 	t.Run("the release when unset", func(t *testing.T) {
-		got, err := PluginFor(cliTestEnv(), host, releaseFiles(manifest))
+		got, err := PluginFor(cliTestEnv(), find)
 		if want := (Plugin{Marketplace: filepath.Join(root, "marketplace"), Name: "vibesys"}); err != nil || got != want {
 			t.Fatalf("got %+v, %v, want %+v", got, err, want)
 		}
 	})
 	t.Run("the setting wins over the release", func(t *testing.T) {
-		got, err := PluginFor(env(override), host, releaseFiles(manifest))
+		got, err := PluginFor(env(override), find)
 		if want := (Plugin{Marketplace: override, Name: "vibesys"}); err != nil || got != want {
 			t.Fatalf("got %+v, %v, want %+v", got, err, want)
 		}
 	})
 	t.Run("a wrong setting is not replaced by the release", func(t *testing.T) {
-		_, err := PluginFor(env("relative"), host, releaseFiles(manifest))
+		_, err := PluginFor(env("relative"), find)
 		if err == nil || !strings.Contains(err.Error(), EnvMarketplace) || !strings.Contains(err.Error(), "not an absolute path") {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("a release without the manifest names both", func(t *testing.T) {
-		_, err := PluginFor(cliTestEnv(), host, releaseFiles())
-		if err == nil || !strings.Contains(err.Error(), EnvMarketplace) || !strings.Contains(err.Error(), manifest) {
-			t.Fatalf("got %v, want an error naming %s and %s", err, EnvMarketplace, manifest)
+	t.Run("a release without its skills names both", func(t *testing.T) {
+		_, err := PluginFor(cliTestEnv(), memoryRelease(t, "/opt/vs", "marketplace/.claude-plugin/marketplace.json"))
+		if err == nil || !strings.Contains(err.Error(), EnvMarketplace) || !strings.Contains(err.Error(), "marketplace") {
+			t.Fatalf("got %v, want an error naming %s and the skills folder", err, EnvMarketplace)
 		}
 	})
-	t.Run("a host outside a bin folder is not in a release", func(t *testing.T) {
-		_, err := PluginFor(cliTestEnv(), filepath.Join(root, "vibesys-host"), releaseFiles(manifest))
+	t.Run("a host in no release has no skills", func(t *testing.T) {
+		_, err := PluginFor(cliTestEnv(), developerBuild)
 		if err == nil || !strings.Contains(err.Error(), EnvMarketplace) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("a release whose manifest lacks the plugin is refused", func(t *testing.T) {
-		bad, badManifest := installedRelease(t, `{"plugins": []}`)
-		_, err := PluginFor(cliTestEnv(), filepath.Join(bad, "bin", "vibesys-host"), releaseFiles(badManifest))
+	t.Run("a release whose marketplace lacks the plugin is refused", func(t *testing.T) {
+		_, bad := diskRelease(t, `{"plugins": []}`)
+		_, err := PluginFor(cliTestEnv(), bad)
 		if err == nil || !strings.Contains(err.Error(), "lists no plugin named vibesys") {
 			t.Fatalf("got %v", err)
 		}
@@ -138,28 +129,27 @@ func TestTheMarketplaceIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 }
 
 // A host installed in a release starts with no setting at all; one outside a release refuses
-// every launch with the reason, naming the setting and the path it looked at.
+// every launch with the reason, naming the setting and the file it looked for.
 func TestAHostWithNoSettingsLaunchesFromItsReleaseOrRefusesWithTheReason(t *testing.T) {
-	root, manifest := installedRelease(t, good)
-	python := filepath.Join(root, "sidecar", ".venv", "bin", "python")
-	files := releaseFiles(manifest, python, filepath.Join(root, "sidecar", "pyproject.toml"))
+	root, find := diskRelease(t, good)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	sidecars, err := SidecarsFor(cliTestEnv(), t.TempDir(), filepath.Join(root, "bin", "vibesys-host"), files, log)
+	sidecars, err := SidecarsFor(cliTestEnv(), t.TempDir(), filepath.Join(root, "bin", "vibesys-host"), find, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	process, ok := sidecars.(*ProcessSidecars)
+	python := filepath.Join(root, "sidecar", ".venv", "bin", "python")
 	if !ok || strings.Join(process.Command, " ") != python+" -m vs_sidecar" || process.Plugin.Marketplace != filepath.Join(root, "marketplace") {
 		t.Fatalf("got %#v, want a launcher of the release's sidecar and marketplace", sidecars)
 	}
 
-	outside, err := SidecarsFor(cliTestEnv(), t.TempDir(), "/home/u/.local/bin/vibesys-host", files, log)
+	outside, err := SidecarsFor(cliTestEnv(), t.TempDir(), "/home/u/.local/bin/vibesys-host", developerBuild, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = outside.Launch(context.Background(), core.LaunchSession{}, nil)
-	if err == nil || !strings.Contains(err.Error(), EnvSidecar) || !strings.Contains(err.Error(), "/home/u/.local/sidecar/.venv/bin/python") {
-		t.Fatalf("Launch = %v, want a refusal naming %s and the path looked at", err, EnvSidecar)
+	if err == nil || !strings.Contains(err.Error(), EnvSidecar) || !strings.Contains(err.Error(), "/home/u/.local/release.json") {
+		t.Fatalf("Launch = %v, want a refusal naming %s and the manifest looked for", err, EnvSidecar)
 	}
 }
