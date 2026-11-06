@@ -42,6 +42,35 @@ func TestASessionThatNeverOpensFailsWhenItsLaunchTimerFires(t *testing.T) {
 	}
 }
 
+// A run that fails before its lead ran anything is marked as a start that never happened, and it
+// does not hold its repository: another run starts there at once. A lead that ran a turn and was
+// then lost is a run that failed, not a start.
+func TestARunWhoseLeadNeverRanIsMarkedNeverOpenedAndDoesNotHoldItsRepository(t *testing.T) {
+	w := newScript(t)
+	r := w.startOnly()
+	w.step(core.TimerFired{Timer: w.launchTimer()})
+	got, _ := w.s.Run(r.Run)
+	if got.Status != core.RunFailed || !got.NeverOpened {
+		t.Fatalf("run %+v, want failed and never opened", got)
+	}
+	again := w.startOnly()
+	if again.Refusal != "" {
+		t.Fatalf("a second start in the repository was refused: %v", again.Refusal)
+	}
+
+	w, run, leadID := started(t, 0, steers)
+	for range core.MaxLeadResumes {
+		a, _ := w.s.Agent(leadID)
+		w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: a.Session}})
+		w.open(leadID, steers)
+	}
+	a, _ := w.s.Agent(leadID)
+	w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: a.Session}})
+	if got, _ := w.s.Run(run); got.Status != core.RunFailed || got.NeverOpened {
+		t.Fatalf("run %+v, want failed after its lead ran a turn, and not never opened", got)
+	}
+}
+
 func TestALaunchTimerChangesNothingOnceTheSessionOpened(t *testing.T) {
 	w := newScript(t)
 	r := w.startOnly()

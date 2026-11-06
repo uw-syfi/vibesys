@@ -36,6 +36,13 @@ func snapshotFrame(seq uint64, truncated bool, runs []*pb.Run, agents []*pb.Agen
 	}}}
 }
 
+// snapshotWithSearch is a snapshot frame that also carries the search view of its run.
+func snapshotWithSearch(seq uint64, runs []*pb.Run, agents []*pb.Agent, search *pb.SearchState) *pb.WatchRunsResponse {
+	return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: &pb.RunsSnapshot{
+		Runs: runs, Agents: agents, Searches: []*pb.SearchState{search}, Sequence: seq,
+	}}}
+}
+
 func eventFrame(seq uint64, run string, minutes int, body func(*pb.RunChange)) *pb.WatchRunsResponse {
 	ev := &pb.RunChange{Sequence: seq, RunId: run, At: at(minutes)}
 	body(ev)

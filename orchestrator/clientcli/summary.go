@@ -21,7 +21,7 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		fmt.Fprintf(&b, "  %-11s %s\n", name, fmt.Sprintf(format, args...))
 	}
 	fmt.Fprintf(&b, "run %s\n", v.RunID)
-	row("status", "%s", statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(v.Run))+stallWords(v, now))
+	row("status", "%s", statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+neverStarted(v.Run)+withPrefix(" by ", stopReason(v.Run))+stallWords(v, now))
 	if v.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED {
 		if detail := endDetail(v.Agents[v.Run.GetLeadAgentId()], 500); detail != "" {
 			row("why", "%s", detail)
@@ -53,6 +53,14 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 	row("best", "%s", best(v.Search))
 	row("last report", "%s", lastReport(v, zone))
 	return b.String()
+}
+
+// neverStarted marks a run whose lead never ran anything.
+func neverStarted(r *pb.Run) string {
+	if r.GetNeverOpened() {
+		return " (never started)"
+	}
+	return ""
 }
 
 // allowedWords lists the agents a run may use: each harness with its model, or "default model" for a
@@ -189,6 +197,12 @@ func jobTotals(s *pb.SearchState) (checks, measures string) {
 	if s.GetTruncated() {
 		return "not counted, the search view was cut", "not counted, the search view was cut"
 	}
+	// An unreadable view with no jobs is a host that has not read the job log yet (it has just
+	// started, or cannot reach it): a count of zero would be a guess that goes up later.
+	unread := s.GetHealth().GetUnreadable()
+	if unread != nil && len(s.GetJobs()) == 0 {
+		return notLoaded(unread), notLoaded(unread)
+	}
 	count := func(kind func(*cliv1.Job) string, name string) string {
 		var finished, broken int
 		for _, j := range s.GetJobs() {
@@ -202,14 +216,29 @@ func jobTotals(s *pb.SearchState) (checks, measures string) {
 				broken++
 			}
 		}
-		return fmt.Sprintf("%d finished, %d failed", finished, broken)
+		counted := fmt.Sprintf("%d finished, %d failed", finished, broken)
+		if unread != nil {
+			counted += " (as last read; the job log cannot be read now)"
+		}
+		return counted
 	}
 	return count(jobKind, "check"), count(jobKind, "measure")
+}
+
+// notLoaded says why a view has no counts yet.
+func notLoaded(u *pb.Unreadable) string {
+	if u.GetReason() == pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON {
+		return "loading, the host is still reading the job log"
+	}
+	return "not loaded, the job log cannot be read: " + statusWord(u.GetReason().String(), "UNREADABLE_REASON_")
 }
 
 func best(s *pb.SearchState) string {
 	current := s.GetHead().GetCurrent()
 	if current == nil {
+		if s.GetHealth().GetUnreadable() != nil {
+			return "not known yet"
+		}
 		return "none yet"
 	}
 	m := current.GetResult().GetMeasure()
