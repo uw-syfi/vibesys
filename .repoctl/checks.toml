@@ -561,11 +561,12 @@ commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2
 [[check_groups]]
 name = "managed_install_tests"
 trigger_job = "managed_install"
-include_in_test = true
+local_skip = "needs Docker and the network; run scripts/tests/test_install.sh"
 language = "docker"
 directory = "."
-# Builds the four binaries for one platform (a cold Go cache costs about a minute), then installs
-# the bundle in a clean Debian container, which downloads uv, Python 3.12 and the sidecar's locked
-# dependencies, then installs a second version and several failures. Measured: about 4 minutes cold.
+# Builds the bundles of two versions for one platform (a cold Go cache costs about a minute), installs
+# one in a clean Debian container, which downloads uv, Python 3.12 and the sidecar's locked
+# dependencies, then starts, checks and stops a run with scripted agents, and installs the second
+# version over the running host. The timeout guards against a hang only.
 timeout_seconds = 600
 commands = [["./scripts/tests/test_install.sh"]]
