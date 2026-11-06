@@ -3,7 +3,7 @@
 The repository's root [`AGENTS.md`](../../AGENTS.md) applies here too. This
 package is what task writers build benchmark evaluators on: the Python
 package `vibesys_evaluator` (a domain-free core and the domains
-`microservices` and `llm_serving`), the Go SDK `loadgen/workload` (request
+`microservices` and `llm_serving`), the Go SDK `go/workload` (request
 generators in Go, for the microservices domain), loadgen (the Go binary in
 `loadgen/` that sends the microservices requests), the schema in
 `proto/vibesys/evaluator/v1/`, and one image per domain,
@@ -16,7 +16,7 @@ The public API is everything listed in [`api/public-api.txt`](api/public-api.txt
 (the names in each public module's `__all__`, their signatures and the
 behaviour documented for them), the Go SDK listed in
 [`api/go-workload.txt`](api/go-workload.txt) (`go doc -all` of
-`loadgen/workload`: its exported names, signatures and documented behaviour),
+`go/workload`: its exported names, signatures and documented behaviour),
 and the schema in `proto/vibesys/evaluator/v1/*.proto`, including the loadgen
 and generator command lines it describes. Task writers depend on them through
 a pinned image and a pinned Go module version.
@@ -79,7 +79,7 @@ a pinned image and a pinned Go module version.
   Python and Go generators must keep writing the same stream (the end-to-end
   test checks it).
 - One version for the Python package, the Go module tag
-  (`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the images.
+  (`sdk/vibesys-evaluator/go/vX.Y.Z`) and the images.
 - The core (`vibesys_evaluator` outside a domain package) imports no domain,
   and a domain imports the core and itself only; mechanisms in the core never
   name a domain. Enforced by `python/tests/test_layering.py`.

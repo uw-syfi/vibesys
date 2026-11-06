@@ -1,7 +1,7 @@
 """A whole sample with the real loadgen: ``benchmark`` in a child process, phases on this machine.
 
 The service is ``KvService`` over HTTP on localhost; loadgen is built from
-``sdk/vibesys-evaluator/loadgen`` with go (or taken from
+``sdk/vibesys-evaluator/go`` with go (or taken from
 ``VIBESYS_EVALUATOR_LOADGEN``). The sample must end with a valid result
 record, and a service that loses writes must fail it by its checks, with the
 Python generator and with the kv-store example's Go generator alike; the two
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 TESTS = Path(__file__).resolve().parents[1]
-LOADGEN_SOURCE = TESTS.parents[1] / "loadgen"
+LOADGEN_SOURCE = TESTS.parents[1] / "go"
 GO_GENERATOR_SOURCE = TESTS.parents[1] / "examples" / "kv-store" / "generator"
 SCRIPT = Path(__file__).with_name("bench_local.py")
 # Bounds that only guard against hangs: a build, a sample of two short phases, a stream read.

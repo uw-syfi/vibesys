@@ -133,7 +133,7 @@ def test_no_release_edit_takes_the_repository_latest_marker() -> None:
 def test_the_go_module_tag_is_the_semver_of_the_release() -> None:
     job = _jobs()["go-tag"]
     assert job["env"]["GO_TAG"] == (
-        "sdk/vibesys-evaluator/loadgen/v${{ needs.verify.outputs.go_version }}"
+        "sdk/vibesys-evaluator/go/v${{ needs.verify.outputs.go_version }}"
     )
     script = next(step["run"] for step in _steps() if step.get("id") == "version")
     assert "--go-module-version" in script

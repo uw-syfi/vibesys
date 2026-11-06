@@ -3,7 +3,7 @@ name: Build and publish vibesys-evaluator release
 # A published GitHub release whose tag is evaluator-v<version> releases vibesys-evaluator: the
 # wheel to PyPI, one image per domain (ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>
 # and ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>), and the Go module tag
-# sdk/vibesys-evaluator/loadgen/v<semver>, all from the same commit of main. The flow and the
+# sdk/vibesys-evaluator/go/v<semver>, all from the same commit of main. The flow and the
 # one-time setup are in docs/contributing/publishing.md, "vibesys-evaluator releases".
 on:
   release:
@@ -194,11 +194,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: sdk/vibesys-evaluator/loadgen/go.mod
+          go-version-file: sdk/vibesys-evaluator/go/go.mod
           cache: false
 
       - name: Test loadgen and its conformance fixtures
-        working-directory: sdk/vibesys-evaluator/loadgen
+        working-directory: sdk/vibesys-evaluator/go
         run: |
           unformatted="$(gofmt -l .)"
           if [[ -n "$unformatted" ]]; then
@@ -420,7 +420,7 @@ jobs:
       # This job has no checkout, so gh cannot infer the repository from a git remote.
       GH_REPO: ${{ github.repository }}
       COMMIT: ${{ needs.verify.outputs.commit }}
-      GO_TAG: sdk/vibesys-evaluator/loadgen/v${{ needs.verify.outputs.go_version }}
+      GO_TAG: sdk/vibesys-evaluator/go/v${{ needs.verify.outputs.go_version }}
     steps:
       - name: Tag the Go module
         run: |

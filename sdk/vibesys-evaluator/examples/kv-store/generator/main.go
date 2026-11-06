@@ -14,7 +14,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/workload"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 )
 
 // Scale is what bench.py's constants and mix say; the dataset itself is read from the file

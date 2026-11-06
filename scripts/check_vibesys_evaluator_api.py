@@ -5,7 +5,7 @@
    each public module's ``__all__`` with its signature, and each class's public
    members. ``--write`` regenerates it; otherwise a difference fails with the diff.
 2. ``griffe check`` against the last release (the newest
-   ``sdk/vibesys-evaluator/loadgen/vX.Y.Z`` tag) reports breaking changes;
+   ``sdk/vibesys-evaluator/go/vX.Y.Z`` tag) reports breaking changes;
    skipped, with a note, until a release exists. Breaks the user approved
    are recorded in ``api/approved-breaks.toml`` against that release tag; they
    are printed but do not fail, until the next release makes the file stale.
@@ -14,7 +14,7 @@
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
    against the package.
 5. The Go SDK's snapshot ``api/go-workload.txt`` (``go doc -all`` of
-   ``loadgen/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
+   ``go/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
    to the code) loses no line of the last release's: a removed or changed
    declaration is a break. Skipped, with a note, until a release has it.
 
@@ -57,7 +57,9 @@ PUBLIC_MODULES = (
     "vibesys_evaluator.llm_serving.agentx",
     "vibesys_evaluator.llm_serving.golden",
 )
-RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/loadgen/v"
+RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/go/v"
+#: Releases before the module moved from ``loadgen`` to ``go`` carry this prefix; they still count.
+LEGACY_RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/loadgen/v"
 #: The user's approval of the breaking changes since one release (AGENTS.md, "Public API rule").
 #: It names that release, so it stops applying once the next release is tagged.
 APPROVED_BREAKS = SDK / "api" / "approved-breaks.toml"
@@ -185,12 +187,27 @@ def _run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  
 
 def _last_release() -> str | None:
     git = shutil.which("git") or "git"
-    tags = _run(
-        [git, "tag", "--list", f"{RELEASE_TAG_PREFIX}*", "--sort=-v:refname"],
-        cwd=REPO,
-        capture_output=True,
-    ).stdout.split()
-    return tags[0] if tags else None
+    newest: list[tuple[str, str]] = []
+    for prefix in (RELEASE_TAG_PREFIX, LEGACY_RELEASE_TAG_PREFIX):
+        tags = _run(
+            [git, "tag", "--list", f"{prefix}*", "--sort=-v:refname"],
+            cwd=REPO,
+            capture_output=True,
+        ).stdout.split()
+        if tags:
+            newest.append((tags[0].removeprefix(prefix), tags[0]))
+    if not newest:
+        return None
+    # A tag of the new prefix wins a tie: the same version was re-cut under the module's new path.
+    versions = sorted(newest, key=lambda pair: (_semver_key(pair[0]), pair[1].startswith(RELEASE_TAG_PREFIX)))
+    return versions[-1][1]
+
+
+def _semver_key(version: str) -> tuple[tuple[int, ...], int, str]:
+    """Order ``0.2.0-rc.1`` before ``0.2.0`` (a release candidate precedes its release)."""
+    core, _, pre = version.partition("-")
+    numbers = tuple(int(part) for part in core.split(".") if part.isdigit())
+    return numbers, 0 if pre else 1, pre
 
 
 def check_release() -> bool:
@@ -261,6 +278,10 @@ def check_go_release() -> bool:
         return True
     print(f"go api: lines of {tag}'s {path} that changed or went away:")
     print("\n".join(f"  {line}" for line in removed))
+    approved = _approved_break(tag)
+    if approved is not None:
+        print(f"go api: the changes above are approved in {APPROVED_BREAKS.relative_to(REPO)}: {approved}")
+        return True
     print(
         "A breaking change of the Go SDK needs the user's approval first "
         "(sdk/vibesys-evaluator/AGENTS.md)."

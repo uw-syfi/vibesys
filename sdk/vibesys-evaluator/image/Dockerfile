@@ -7,7 +7,7 @@
 #   COPY . /task
 #
 # Both hold Python with the vibesys_evaluator package (every domain of it; a task uses its
-# own). microservices adds loadgen and otelcapture (the Go module in ../loadgen), kubectl and
+# own). microservices adds loadgen and otelcapture (the Go module in ../go), kubectl and
 # buildctl: the orchestrator (python /task/bench.py) runs in the container vibesys-cli
 # starts, and its phase, seed and probe pods run the task image in the cluster, so
 # everything a phase needs is in that image. llm-serving adds the AgentX harness (AIPerf)
@@ -39,13 +39,13 @@ ARG KUBECTL_VERSION
 ARG KUBECTL_SHA256
 ARG VIBESYS_EVALUATOR_VERSION
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath
-WORKDIR /src/loadgen
-COPY loadgen/go.mod loadgen/go.sum ./
+WORKDIR /src/go
+COPY go/go.mod go/go.sum ./
 RUN go mod download
-COPY loadgen/ ./
+COPY go/ ./
 RUN stamp="" \
  && if [ -n "${VIBESYS_EVALUATOR_VERSION}" ]; then \
-      stamp="-X github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/version.Version=${VIBESYS_EVALUATOR_VERSION}"; \
+      stamp="-X github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/version.Version=${VIBESYS_EVALUATOR_VERSION}"; \
     fi \
  && go build -ldflags "${stamp}" -o /out/ ./cmd/loadgen ./cmd/otelcapture
 # kubectl, checked against its published sha256 (the version of the clusters' nodes).

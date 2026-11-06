@@ -9,9 +9,9 @@ inputs:
   - directory: proto
     paths: [proto/vibesys/evaluator]
 plugins:
-  - local: [go, -C, sdk/vibesys-evaluator/loadgen, tool, protoc-gen-go]
+  - local: [go, -C, sdk/vibesys-evaluator/go, tool, protoc-gen-go]
     strategy: all
-    out: sdk/vibesys-evaluator/loadgen/gen
+    out: sdk/vibesys-evaluator/go/gen
     opt: paths=source_relative
   - local: protoc-gen-py
     strategy: all

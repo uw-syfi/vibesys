@@ -100,7 +100,7 @@ covers its published parts, all built from one commit of `main`:
   buildctl) and `ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>` (with the AgentX
   harness pinned by `sdk/vibesys-evaluator/image/llm-serving/uv.lock`), each a target of
   `sdk/vibesys-evaluator/image/Dockerfile`;
-- the Go module tag `sdk/vibesys-evaluator/loadgen/v<semver>` for its load generator.
+- the Go module tag `sdk/vibesys-evaluator/go/v<semver>` for its load generator.
 
 `.github/workflows/evaluator-release.yml` releases them. `publish.yml` skips a release whose tag
 starts with `evaluator-`.

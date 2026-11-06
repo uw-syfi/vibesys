@@ -2,7 +2,7 @@
 
 The same task as bench.py (dataset, system, benchmark, metrics, validity);
 only the workload is another program: the Go generator in `generator/`
-(built on the Go SDK, `loadgen/workload`), which writes the same request
+(built on the Go SDK, `go/workload`), which writes the same request
 stream as bench.py's WORKLOAD and checks the responses with the same rules.
 The task image builds it next to this script:
 

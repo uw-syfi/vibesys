@@ -1,6 +1,6 @@
 """Write or check ``rand.json``: the draws of ``vibesys_evaluator.Rand`` the Go SDK must equal.
 
-The Python ``Rand`` is the reference; ``loadgen/workload``'s ``TestRandIsThePythonRand``
+The Python ``Rand`` is the reference; ``go/workload``'s ``TestRandIsThePythonRand``
 replays every case with ``workload.Rand`` and compares bit for bit (floats as their IEEE 754
 bits). ``python fixtures/rand_streams.py`` rewrites the file after a deliberate change of a stream
 (a breaking change, ``AGENTS.md``); ``--check`` fails when the file is not what ``Rand`` draws.
