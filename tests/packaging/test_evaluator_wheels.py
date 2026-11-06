@@ -35,8 +35,8 @@ def _macho(cpu: int) -> bytes:
 
 def _binary(platform: ew.Platform, *, dynamic: bool = False) -> bytes:
     if platform.goos == "linux":
-        return _elf(ew._ELF_MACHINE[platform.goarch], dynamic=dynamic)  # noqa: SLF001
-    return _macho(ew._MACHO_CPU[platform.goarch])  # noqa: SLF001
+        return _elf(ew.ELF_MACHINE[platform.goarch], dynamic=dynamic)
+    return _macho(ew.MACHO_CPU[platform.goarch])
 
 
 def _pure_wheel(path: Path) -> Path:

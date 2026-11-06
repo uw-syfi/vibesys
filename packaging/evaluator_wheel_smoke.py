@@ -39,7 +39,7 @@ def _check(version: str, prefix: str) -> int:
     if reply.get("loadgen_version", reply.get("loadgenVersion")) != version:
         print(f"smoke: the core reports {reply}, not version {version}", file=sys.stderr)
         return 1
-    # lint-waiver: LW-847201 [S603]; argv is the wheel's own loadgen.
+    # lint-waiver: LW-150631 [S603]; argv is the wheel's own loadgen.
     done = subprocess.run(  # noqa: S603
         [core.find_binary("loadgen"), "--capabilities", "--format", "json"],
         capture_output=True,

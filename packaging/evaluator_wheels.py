@@ -176,7 +176,7 @@ def build_binaries(platform: Platform, out_dir: Path, go_version: str) -> dict[s
     """Cross-compile the three binaries for ``platform`` (static, stamped with ``go_version``)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "CGO_ENABLED": "0", "GOOS": platform.goos, "GOARCH": platform.goarch}
-    # lint-waiver: LW-847201 [S603]; argv is the go on PATH building this repository's own module.
+    # lint-waiver: LW-439563 [S603]; argv is the go on PATH building this repository's own module.
     subprocess.run(  # noqa: S603
         [
             _tool("go"),
@@ -202,17 +202,25 @@ def build(out: Path, go_version: str, epoch: int) -> list[Path]:
         msg = f"{out} is not empty"
         raise WheelError(msg)
     built: list[Path] = []
+    # setuptools builds in the source tree and reuses what a previous build left (stale modules
+    # included); start from nothing and leave nothing.
+    scratch = [
+        PACKAGE_ROOT / "python" / "build",
+        *(PACKAGE_ROOT / "python" / "src").glob("*.egg-info"),
+    ]
+    for path in scratch:
+        shutil.rmtree(path, ignore_errors=True)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         env = {**os.environ, "SOURCE_DATE_EPOCH": str(epoch)}
-        # lint-waiver: LW-847201 [S603]; argv is the uv on PATH building this repository's own package.
+        # lint-waiver: LW-258176 [S603]; argv is the uv on PATH building this repository's own package.
         subprocess.run(  # noqa: S603
             [_tool("uv"), "build", "--package", PROJECT, "--sdist", "--out-dir", str(out)],
             cwd=REPO_ROOT,
             env=env,
             check=True,
         )
-        # lint-waiver: LW-847201 [S603]; argv is the uv on PATH building this repository's own package.
+        # lint-waiver: LW-514002 [S603]; argv is the uv on PATH building this repository's own package.
         subprocess.run(  # noqa: S603
             [
                 _tool("uv"),
@@ -231,13 +239,15 @@ def build(out: Path, go_version: str, epoch: int) -> list[Path]:
         for platform in PLATFORMS:
             binaries = build_binaries(platform, work / "bin" / platform.name, go_version)
             built.append(retag(pure, binaries, platform, out, epoch))
+    for path in scratch:
+        shutil.rmtree(path, ignore_errors=True)
     return [*sorted(out.glob("*.tar.gz")), *built]
 
 
 # --- verification -----------------------------------------------------------------------------
 
-_ELF_MACHINE = {"amd64": 62, "arm64": 183}
-_MACHO_CPU = {"amd64": 0x01000007, "arm64": 0x0100000C}
+ELF_MACHINE = {"amd64": 62, "arm64": 183}
+MACHO_CPU = {"amd64": 0x01000007, "arm64": 0x0100000C}
 _ELF_64_LE = (2, 1)
 _MACHO_64_LE = 0xFEEDFACF
 _PT_INTERP = 3
@@ -257,8 +267,8 @@ def _check_elf(data: bytes, platform: Platform) -> None:
         msg = "not a 64-bit little-endian ELF file"
         raise WheelError(msg)
     (machine,) = struct.unpack_from("<H", data, 18)
-    if machine != _ELF_MACHINE[platform.goarch]:
-        msg = f"ELF machine {machine}, not {_ELF_MACHINE[platform.goarch]} ({platform.goarch})"
+    if machine != ELF_MACHINE[platform.goarch]:
+        msg = f"ELF machine {machine}, not {ELF_MACHINE[platform.goarch]} ({platform.goarch})"
         raise WheelError(msg)
     (phoff,) = struct.unpack_from("<Q", data, 32)
     phentsize, phnum = struct.unpack_from("<HH", data, 54)
@@ -274,8 +284,8 @@ def _check_macho(data: bytes, platform: Platform) -> None:
     if magic != _MACHO_64_LE:  # 64-bit little-endian Mach-O
         msg = "not a 64-bit Mach-O file"
         raise WheelError(msg)
-    if cpu != _MACHO_CPU[platform.goarch]:
-        msg = f"Mach-O cpu {cpu:#x}, not {_MACHO_CPU[platform.goarch]:#x} ({platform.goarch})"
+    if cpu != MACHO_CPU[platform.goarch]:
+        msg = f"Mach-O cpu {cpu:#x}, not {MACHO_CPU[platform.goarch]:#x} ({platform.goarch})"
         raise WheelError(msg)
 
 
@@ -348,7 +358,7 @@ def _epoch() -> int:
     env = os.environ.get("SOURCE_DATE_EPOCH")
     if env:
         return int(env)
-    # lint-waiver: LW-847201 [S603]; a fixed git command in this repository.
+    # lint-waiver: LW-782554 [S603]; a fixed git command in this repository.
     done = subprocess.run(  # noqa: S603
         [_tool("git"), "log", "-1", "--format=%ct"],
         cwd=REPO_ROOT,
