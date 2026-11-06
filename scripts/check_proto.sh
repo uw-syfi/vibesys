@@ -28,6 +28,8 @@ generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/inter
   sdk/vibesys-evaluator/go/gen sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto sdk/vs-evaluator/vseval/internal/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
+# The sidecar bindings come from generate.sh, which generate_proto.sh ends with.
+generated+=(orchestrator/sidecar/src/vs_sidecar/gen)
 git diff --exit-code -- "${generated[@]}"
 if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; then
   echo 'Untracked generated bindings; run scripts/generate_proto.sh and commit all outputs.' >&2
