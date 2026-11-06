@@ -462,6 +462,161 @@ func (x *KeptOperation) GetSampled() bool {
 	return false
 }
 
+// HistoryManifest is history.binpb in an accuracy history directory, one
+// message (like PhaseInput): what the accuracy capture recorded besides the
+// phases' own files. The directory holds, for each phase i from 0, the
+// directory phase-<i>/ with loadgen's results.binpb (every body kept) and
+// summary.binpb and the generator's kept.binpb (a KeptOperation for every
+// operation), and the dataset file. See sdk/vibesys-evaluator/docs/spec.md
+// ("Accuracy history").
+type HistoryManifest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The number of phases: directories phase-0 to phase-<phases - 1>.
+	Phases uint32 `protobuf:"varint,1,opt,name=phases,proto3" json:"phases,omitempty"`
+	// The faults injected between phases, in the order they happened.
+	Faults []*FaultEvent `protobuf:"bytes,2,rep,name=faults,proto3" json:"faults,omitempty"`
+	// The dataset file the generator read, relative to the directory; empty
+	// when there is none.
+	Dataset       string `protobuf:"bytes,3,opt,name=dataset,proto3" json:"dataset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryManifest) Reset() {
+	*x = HistoryManifest{}
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryManifest) ProtoMessage() {}
+
+func (x *HistoryManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryManifest.ProtoReflect.Descriptor instead.
+func (*HistoryManifest) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_phase_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HistoryManifest) GetPhases() uint32 {
+	if x != nil {
+		return x.Phases
+	}
+	return 0
+}
+
+func (x *HistoryManifest) GetFaults() []*FaultEvent {
+	if x != nil {
+		return x.Faults
+	}
+	return nil
+}
+
+func (x *HistoryManifest) GetDataset() string {
+	if x != nil {
+		return x.Dataset
+	}
+	return ""
+}
+
+// FaultEvent is one fault the accuracy capture injected at a quiescent point
+// between two phases: no operation was in flight from its start to its end.
+type FaultEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What was done, a task-level name such as "restart", "restart_all" or
+	// "flush"; the task's oracle (check.Spec.Fault) gives it meaning.
+	Kind string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	// What it hit: a Deployment, a pod, a command. For messages only.
+	Target string `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	// When the action started and when it was complete (every replacement
+	// serving), on the clock loadgen stamps its results with (the phase pod's).
+	StartUnixNanos int64 `protobuf:"varint,3,opt,name=start_unix_nanos,json=startUnixNanos,proto3" json:"start_unix_nanos,omitempty"`
+	EndUnixNanos   int64 `protobuf:"varint,4,opt,name=end_unix_nanos,json=endUnixNanos,proto3" json:"end_unix_nanos,omitempty"`
+	// The phase it follows.
+	AfterPhase    uint32 `protobuf:"varint,5,opt,name=after_phase,json=afterPhase,proto3" json:"after_phase,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FaultEvent) Reset() {
+	*x = FaultEvent{}
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FaultEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FaultEvent) ProtoMessage() {}
+
+func (x *FaultEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FaultEvent.ProtoReflect.Descriptor instead.
+func (*FaultEvent) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_phase_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *FaultEvent) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *FaultEvent) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *FaultEvent) GetStartUnixNanos() int64 {
+	if x != nil {
+		return x.StartUnixNanos
+	}
+	return 0
+}
+
+func (x *FaultEvent) GetEndUnixNanos() int64 {
+	if x != nil {
+		return x.EndUnixNanos
+	}
+	return 0
+}
+
+func (x *FaultEvent) GetAfterPhase() uint32 {
+	if x != nil {
+		return x.AfterPhase
+	}
+	return 0
+}
+
 var File_vibesys_evaluator_v1_phase_proto protoreflect.FileDescriptor
 
 const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
@@ -508,7 +663,19 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n" +
 	"\tinfo_json\x18\x03 \x01(\tR\binfoJson\x12\x18\n" +
-	"\asampled\x18\x04 \x01(\bR\asampledBZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
+	"\asampled\x18\x04 \x01(\bR\asampled\"\x90\x01\n" +
+	"\x0fHistoryManifest\x12\x1f\n" +
+	"\x06phases\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\x06phases\x128\n" +
+	"\x06faults\x18\x02 \x03(\v2 .vibesys.evaluator.v1.FaultEventR\x06faults\x12\"\n" +
+	"\adataset\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\adataset\"\xd2\x01\n" +
+	"\n" +
+	"FaultEvent\x121\n" +
+	"\x04kind\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\x04kind\x12 \n" +
+	"\x06target\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x06target\x12(\n" +
+	"\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n" +
+	"\x0eend_unix_nanos\x18\x04 \x01(\x03R\fendUnixNanos\x12\x1f\n" +
+	"\vafter_phase\x18\x05 \x01(\rR\n" +
+	"afterPhaseBZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
 
 var (
 	file_vibesys_evaluator_v1_phase_proto_rawDescOnce sync.Once
@@ -522,31 +689,34 @@ func file_vibesys_evaluator_v1_phase_proto_rawDescGZIP() []byte {
 	return file_vibesys_evaluator_v1_phase_proto_rawDescData
 }
 
-var file_vibesys_evaluator_v1_phase_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_vibesys_evaluator_v1_phase_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_vibesys_evaluator_v1_phase_proto_goTypes = []any{
-	(*PhaseInput)(nil),    // 0: vibesys.evaluator.v1.PhaseInput
-	(*HistoryEntry)(nil),  // 1: vibesys.evaluator.v1.HistoryEntry
-	(*Violation)(nil),     // 2: vibesys.evaluator.v1.Violation
-	(*PhaseOutput)(nil),   // 3: vibesys.evaluator.v1.PhaseOutput
-	(*KeptOperation)(nil), // 4: vibesys.evaluator.v1.KeptOperation
-	(LoadModel)(0),        // 5: vibesys.evaluator.v1.LoadModel
-	(Arrivals)(0),         // 6: vibesys.evaluator.v1.Arrivals
-	(*StepResult)(nil),    // 7: vibesys.evaluator.v1.StepResult
-	(*PhaseSummary)(nil),  // 8: vibesys.evaluator.v1.PhaseSummary
+	(*PhaseInput)(nil),      // 0: vibesys.evaluator.v1.PhaseInput
+	(*HistoryEntry)(nil),    // 1: vibesys.evaluator.v1.HistoryEntry
+	(*Violation)(nil),       // 2: vibesys.evaluator.v1.Violation
+	(*PhaseOutput)(nil),     // 3: vibesys.evaluator.v1.PhaseOutput
+	(*KeptOperation)(nil),   // 4: vibesys.evaluator.v1.KeptOperation
+	(*HistoryManifest)(nil), // 5: vibesys.evaluator.v1.HistoryManifest
+	(*FaultEvent)(nil),      // 6: vibesys.evaluator.v1.FaultEvent
+	(LoadModel)(0),          // 7: vibesys.evaluator.v1.LoadModel
+	(Arrivals)(0),           // 8: vibesys.evaluator.v1.Arrivals
+	(*StepResult)(nil),      // 9: vibesys.evaluator.v1.StepResult
+	(*PhaseSummary)(nil),    // 10: vibesys.evaluator.v1.PhaseSummary
 }
 var file_vibesys_evaluator_v1_phase_proto_depIdxs = []int32{
-	5, // 0: vibesys.evaluator.v1.PhaseInput.model:type_name -> vibesys.evaluator.v1.LoadModel
-	6, // 1: vibesys.evaluator.v1.PhaseInput.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
-	1, // 2: vibesys.evaluator.v1.PhaseInput.history:type_name -> vibesys.evaluator.v1.HistoryEntry
-	7, // 3: vibesys.evaluator.v1.HistoryEntry.steps:type_name -> vibesys.evaluator.v1.StepResult
-	8, // 4: vibesys.evaluator.v1.PhaseOutput.summary:type_name -> vibesys.evaluator.v1.PhaseSummary
-	2, // 5: vibesys.evaluator.v1.PhaseOutput.violations:type_name -> vibesys.evaluator.v1.Violation
-	1, // 6: vibesys.evaluator.v1.PhaseOutput.writes:type_name -> vibesys.evaluator.v1.HistoryEntry
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	7,  // 0: vibesys.evaluator.v1.PhaseInput.model:type_name -> vibesys.evaluator.v1.LoadModel
+	8,  // 1: vibesys.evaluator.v1.PhaseInput.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
+	1,  // 2: vibesys.evaluator.v1.PhaseInput.history:type_name -> vibesys.evaluator.v1.HistoryEntry
+	9,  // 3: vibesys.evaluator.v1.HistoryEntry.steps:type_name -> vibesys.evaluator.v1.StepResult
+	10, // 4: vibesys.evaluator.v1.PhaseOutput.summary:type_name -> vibesys.evaluator.v1.PhaseSummary
+	2,  // 5: vibesys.evaluator.v1.PhaseOutput.violations:type_name -> vibesys.evaluator.v1.Violation
+	1,  // 6: vibesys.evaluator.v1.PhaseOutput.writes:type_name -> vibesys.evaluator.v1.HistoryEntry
+	6,  // 7: vibesys.evaluator.v1.HistoryManifest.faults:type_name -> vibesys.evaluator.v1.FaultEvent
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_evaluator_v1_phase_proto_init() }
@@ -561,7 +731,7 @@ func file_vibesys_evaluator_v1_phase_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_evaluator_v1_phase_proto_rawDesc), len(file_vibesys_evaluator_v1_phase_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

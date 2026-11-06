@@ -100,3 +100,36 @@ message KeptOperation {
   // sampled is kept for the history only.
   bool sampled = 4;
 }
+
+// HistoryManifest is history.binpb in an accuracy history directory, one
+// message (like PhaseInput): what the accuracy capture recorded besides the
+// phases' own files. The directory holds, for each phase i from 0, the
+// directory phase-<i>/ with loadgen's results.binpb (every body kept) and
+// summary.binpb and the generator's kept.binpb (a KeptOperation for every
+// operation), and the dataset file. See sdk/vibesys-evaluator/docs/spec.md
+// ("Accuracy history").
+message HistoryManifest {
+  // The number of phases: directories phase-0 to phase-<phases - 1>.
+  uint32 phases = 1 [(buf.validate.field).uint32.gte = 1];
+  // The faults injected between phases, in the order they happened.
+  repeated FaultEvent faults = 2;
+  // The dataset file the generator read, relative to the directory; empty
+  // when there is none.
+  string dataset = 3 [(buf.validate.field).string.max_len = 256];
+}
+
+// FaultEvent is one fault the accuracy capture injected at a quiescent point
+// between two phases: no operation was in flight from its start to its end.
+message FaultEvent {
+  // What was done, a task-level name such as "restart", "restart_all" or
+  // "flush"; the task's oracle (check.Spec.Fault) gives it meaning.
+  string kind = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_]{0,62}$"];
+  // What it hit: a Deployment, a pod, a command. For messages only.
+  string target = 2 [(buf.validate.field).string.max_len = 1024];
+  // When the action started and when it was complete (every replacement
+  // serving), on the clock loadgen stamps its results with (the phase pod's).
+  int64 start_unix_nanos = 3;
+  int64 end_unix_nanos = 4;
+  // The phase it follows.
+  uint32 after_phase = 5;
+}

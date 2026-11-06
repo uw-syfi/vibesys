@@ -8,6 +8,7 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.9-20250912141014-52f32327d4b0.1
 	buf.build/go/protovalidate v1.0.0
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0
+	github.com/anishathalye/porcupine v1.3.1
 	google.golang.org/protobuf v1.36.12
 )
 

@@ -7,7 +7,8 @@ package `vibesys_evaluator` (a domain-free core and the domains
 generators in Go, for the microservices domain), the Go core `go/evaluator`
 (sample lifecycle, records, histograms; `evaluator.Main` is the Go `main`) with
 its command line `vibesys-evaluator <group> <verb>` that the Python package
-wraps, loadgen (the Go binary in `go/cmd/loadgen` that sends the microservices
+wraps, the Go accuracy checker `go/check` (a task's oracle is written against
+it), loadgen (the Go binary in `go/cmd/loadgen` that sends the microservices
 requests), the schema in
 `proto/vibesys/evaluator/v1/`, and one image per domain,
 `vibesys-evaluator-microservices` and `vibesys-evaluator-llm-serving`. The
@@ -18,8 +19,9 @@ design is [`docs/spec.md`](docs/spec.md).
 The public API is everything listed in [`api/public-api.txt`](api/public-api.txt)
 (the names in each public module's `__all__`, their signatures and the
 behaviour documented for them), the Go SDK listed in
-[`api/go-workload.txt`](api/go-workload.txt) (`go doc -all` of
-`go/workload`: its exported names, signatures and documented behaviour),
+[`api/go-workload.txt`](api/go-workload.txt) and
+[`api/go-check.txt`](api/go-check.txt) (`go doc -all` of `go/workload` and
+`go/check`: their exported names, signatures and documented behaviour),
 and the schema in `proto/vibesys/evaluator/v1/*.proto`, including the loadgen
 and generator command lines it describes. Task writers depend on them through
 a pinned image and a pinned Go module version.
@@ -38,7 +40,8 @@ a pinned image and a pinned Go module version.
   the same one); and any change to the `.proto` files that `buf breaking`
   reports or that changes a field's meaning. Enforced in CI by `griffe check`
   against the last release, by `scripts/check_vibesys_evaluator_api.py`
-  comparing `api/go-workload.txt` with the last release's, and `buf
+  comparing `api/go-workload.txt` and `api/go-check.txt` with the last
+  release's, and `buf
   breaking`; the approval itself is this rule, since no check can ask the
   user. Record an approved Python break in `api/approved-breaks.toml`
   (`against` the last release tag, `approved_by`, `reason`); the API check
@@ -48,10 +51,11 @@ a pinned image and a pinned Go module version.
   one example. Unenforced until the examples run in CI (work package 6); a
   reviewer checks it.
 - **Never hand-edit the snapshots.** `api/public-api.txt` is generated
-  (griffe) from the code and `api/go-workload.txt` by `go doc -all`; CI
-  regenerates both and fails on a difference (the Python script and the Go
-  test `TestAPISnapshotIsCurrent`). Regenerate them (`--write`;
-  `go test ./workload -run APISnapshot -update`) and review the diff.
+  (griffe) from the code and `api/go-workload.txt` and `api/go-check.txt` by
+  `go doc -all`; CI regenerates them and fails on a difference (the Python
+  script and each Go package's test `TestAPISnapshotIsCurrent`). Regenerate
+  them (`--write`; `go test ./workload ./check -run APISnapshot -update`) and
+  review the diff.
 
 ## Working rules
 

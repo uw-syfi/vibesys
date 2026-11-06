@@ -348,9 +348,129 @@ class KeptOperation(Message[_KeptOperationFields]):
         info_json: str
         sampled: bool
 
+_HistoryManifestFields: TypeAlias = Literal["phases", "faults", "dataset"]
+
+class HistoryManifest(Message[_HistoryManifestFields]):
+    """
+    HistoryManifest is history.binpb in an accuracy history directory, one
+    message (like PhaseInput): what the accuracy capture recorded besides the
+    phases' own files. The directory holds, for each phase i from 0, the
+    directory phase-<i>/ with loadgen's results.binpb (every body kept) and
+    summary.binpb and the generator's kept.binpb (a KeptOperation for every
+    operation), and the dataset file. See sdk/vibesys-evaluator/docs/spec.md
+    ("Accuracy history").
+
+    ```proto
+    message vibesys.evaluator.v1.HistoryManifest
+    ```
+
+    Attributes:
+        phases:
+            The number of phases: directories phase-0 to phase-<phases - 1>.
+
+            ```proto
+            uint32 phases = 1;
+            ```
+        faults:
+            The faults injected between phases, in the order they happened.
+
+            ```proto
+            repeated vibesys.evaluator.v1.FaultEvent faults = 2;
+            ```
+        dataset:
+            The dataset file the generator read, relative to the directory; empty
+            when there is none.
+
+            ```proto
+            string dataset = 3;
+            ```
+    """
+
+    __slots__ = ("phases", "faults", "dataset")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            phases: int = 0,
+            faults: list[FaultEvent] | None = None,
+            dataset: str = "",
+        ) -> None:
+            pass
+
+        phases: int
+        faults: list[FaultEvent]
+        dataset: str
+
+_FaultEventFields: TypeAlias = Literal["kind", "target", "start_unix_nanos", "end_unix_nanos", "after_phase"]
+
+class FaultEvent(Message[_FaultEventFields]):
+    """
+    FaultEvent is one fault the accuracy capture injected at a quiescent point
+    between two phases: no operation was in flight from its start to its end.
+
+    ```proto
+    message vibesys.evaluator.v1.FaultEvent
+    ```
+
+    Attributes:
+        kind:
+            What was done, a task-level name such as "restart", "restart_all" or
+            "flush"; the task's oracle (check.Spec.Fault) gives it meaning.
+
+            ```proto
+            string kind = 1;
+            ```
+        target:
+            What it hit: a Deployment, a pod, a command. For messages only.
+
+            ```proto
+            string target = 2;
+            ```
+        start_unix_nanos:
+            When the action started and when it was complete (every replacement
+            serving), on the clock loadgen stamps its results with (the phase pod's).
+
+            ```proto
+            int64 start_unix_nanos = 3;
+            ```
+        end_unix_nanos:
+            ```proto
+            int64 end_unix_nanos = 4;
+            ```
+        after_phase:
+            The phase it follows.
+
+            ```proto
+            uint32 after_phase = 5;
+            ```
+    """
+
+    __slots__ = ("kind", "target", "start_unix_nanos", "end_unix_nanos", "after_phase")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            kind: str = "",
+            target: str = "",
+            start_unix_nanos: int = 0,
+            end_unix_nanos: int = 0,
+            after_phase: int = 0,
+        ) -> None:
+            pass
+
+        kind: str
+        target: str
+        start_unix_nanos: int
+        end_unix_nanos: int
+        after_phase: int
+
 
 _DESC = file_desc(
-    b'\n vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a"vibesys/evaluator/v1/loadgen.proto"\xbc\x03\n\nPhaseInput\x12\x1f\n\x0bsample_seed\x18\x01 \x01(\x04R\nsampleSeed\x12\x1f\n\x0bphase_index\x18\x02 \x01(\rR\nphaseIndex\x12A\n\x05model\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07clients\x18\x04 \x01(\rR\x07clients\x12\x1b\n\x04rate\x18\x06 \x01(\x01R\x04rateB\x07\xbaH\x04\x12\x02@\x01\x12D\n\x08arrivals\x18\x07 \x01(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12$\n\x04secs\x18\x08 \x01(\x01R\x04secsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x0bwarmup_secs\x18\t \x01(\x01R\nwarmupSecsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12<\n\x07history\x18\n \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x07historyJ\x04\x08\x05\x10\x06R\x0fmax_ops_per_sec"\x80\x02\n\x0cHistoryEntry\x12;\n\toperation\x18\x01 \x01(\tR\toperationB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1b\n\tinfo_json\x18\x02 \x01(\tR\x08infoJson\x12(\n\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x04 \x01(\x03R\x0cendUnixNanos\x12\x0e\n\x02ok\x18\x05 \x01(\x08R\x02ok\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps"c\n\tViolation\x12\x1c\n\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n\x05index\x18\x02 \x01(\x04R\x05index\x12"\n\x07message\x18\x03 \x01(\tR\x07messageB\x08\xbaH\x05r\x03\x18\xd0\x0f"\xba\x02\n\x0bPhaseOutput\x12<\n\x07summary\x18\x01 \x01(\x0b2".vibesys.evaluator.v1.PhaseSummaryR\x07summary\x12\x18\n\x07checked\x18\x02 \x01(\x04R\x07checked\x12\x18\n\x07invalid\x18\x03 \x01(\x04R\x07invalid\x12I\n\nviolations\x18\x04 \x03(\x0b2\x1f.vibesys.evaluator.v1.ViolationR\nviolationsB\x08\xbaH\x05\x92\x01\x02\x10\x14\x12:\n\x06writes\x18\x05 \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12\x1d\n\ncheck_secs\x18\x07 \x01(\x01R\tcheckSecsJ\x04\x08\x06\x10\x07R\rgenerate_secs"z\n\rKeptOperation\x12\x14\n\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n\tinfo_json\x18\x03 \x01(\tR\x08infoJson\x12\x18\n\x07sampled\x18\x04 \x01(\x08R\x07sampledBZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
+    b'\n vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a"vibesys/evaluator/v1/loadgen.proto"\xbc\x03\n\nPhaseInput\x12\x1f\n\x0bsample_seed\x18\x01 \x01(\x04R\nsampleSeed\x12\x1f\n\x0bphase_index\x18\x02 \x01(\rR\nphaseIndex\x12A\n\x05model\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07clients\x18\x04 \x01(\rR\x07clients\x12\x1b\n\x04rate\x18\x06 \x01(\x01R\x04rateB\x07\xbaH\x04\x12\x02@\x01\x12D\n\x08arrivals\x18\x07 \x01(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12$\n\x04secs\x18\x08 \x01(\x01R\x04secsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x0bwarmup_secs\x18\t \x01(\x01R\nwarmupSecsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12<\n\x07history\x18\n \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x07historyJ\x04\x08\x05\x10\x06R\x0fmax_ops_per_sec"\x80\x02\n\x0cHistoryEntry\x12;\n\toperation\x18\x01 \x01(\tR\toperationB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1b\n\tinfo_json\x18\x02 \x01(\tR\x08infoJson\x12(\n\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x04 \x01(\x03R\x0cendUnixNanos\x12\x0e\n\x02ok\x18\x05 \x01(\x08R\x02ok\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps"c\n\tViolation\x12\x1c\n\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n\x05index\x18\x02 \x01(\x04R\x05index\x12"\n\x07message\x18\x03 \x01(\tR\x07messageB\x08\xbaH\x05r\x03\x18\xd0\x0f"\xba\x02\n\x0bPhaseOutput\x12<\n\x07summary\x18\x01 \x01(\x0b2".vibesys.evaluator.v1.PhaseSummaryR\x07summary\x12\x18\n\x07checked\x18\x02 \x01(\x04R\x07checked\x12\x18\n\x07invalid\x18\x03 \x01(\x04R\x07invalid\x12I\n\nviolations\x18\x04 \x03(\x0b2\x1f.vibesys.evaluator.v1.ViolationR\nviolationsB\x08\xbaH\x05\x92\x01\x02\x10\x14\x12:\n\x06writes\x18\x05 \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12\x1d\n\ncheck_secs\x18\x07 \x01(\x01R\tcheckSecsJ\x04\x08\x06\x10\x07R\rgenerate_secs"z\n\rKeptOperation\x12\x14\n\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n\tinfo_json\x18\x03 \x01(\tR\x08infoJson\x12\x18\n\x07sampled\x18\x04 \x01(\x08R\x07sampled"\x90\x01\n\x0fHistoryManifest\x12\x1f\n\x06phases\x18\x01 \x01(\rR\x06phasesB\x07\xbaH\x04*\x02(\x01\x128\n\x06faults\x18\x02 \x03(\x0b2 .vibesys.evaluator.v1.FaultEventR\x06faults\x12"\n\x07dataset\x18\x03 \x01(\tR\x07datasetB\x08\xbaH\x05r\x03\x18\x80\x02"\xd2\x01\n\nFaultEvent\x121\n\x04kind\x18\x01 \x01(\tR\x04kindB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12 \n\x06target\x18\x02 \x01(\tR\x06targetB\x08\xbaH\x05r\x03\x18\x80\x08\x12(\n\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x04 \x01(\x03R\x0cendUnixNanos\x12\x1f\n\x0bafter_phase\x18\x05 \x01(\rR\nafterPhaseBZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
     [
         validate_pb.desc(),
         loadgen_pb.desc(),
@@ -361,6 +481,8 @@ _DESC = file_desc(
         "Violation": Violation,
         "PhaseOutput": PhaseOutput,
         "KeptOperation": KeptOperation,
+        "HistoryManifest": HistoryManifest,
+        "FaultEvent": FaultEvent,
     },
 )
 
