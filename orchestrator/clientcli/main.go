@@ -84,12 +84,8 @@ type call struct {
 
 type verb func(ctx context.Context, c *call, args []string) error
 
-var verbs map[string]verb
-
-func init() {
-	verbs = map[string]verb{
-		"start": start, "list": list, "attach": attach, "get": get, "wait": wait, "steer": steer, "stop": stop,
-	}
+var verbs = map[string]verb{
+	"start": start, "list": list, "attach": attach, "get": get, "wait": wait, "steer": steer, "stop": stop,
 }
 
 // open reaches the service and does the version handshake.
@@ -100,10 +96,12 @@ func (c *call) open(ctx context.Context) (*client.Client, error) {
 	}
 	conn, err := client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: c.Version})
 	if err != nil {
-		if exitCodeOf(classify(err)) == ExitFailed && !errors.As(err, new(*client.IncompatibleError)) {
+		// A handshake that fails without a reason of the service's own means no service answered.
+		classified := classify(err)
+		if exitCodeOf(classified) == ExitFailed && ctx.Err() == nil && !errors.As(err, new(*client.IncompatibleError)) {
 			return nil, unavailable("%v", err)
 		}
-		return nil, classify(err)
+		return nil, classified
 	}
 	return conn, nil
 }

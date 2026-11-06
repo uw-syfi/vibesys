@@ -132,7 +132,11 @@ See [Host composition](../docs/contributing/architecture.md#host-composition) fo
 
 - `cmd/vibesys-host` exits with the result of `internal/hostmain.Main`.
 - `internal/hostmain` wires CLI options, process signals, standard streams and typed services.
-- `internal/archcheck` checks the command shape and host composition imports.
+- `cmd/vibesys-client` exits with the result of `internal/clientmain.Main`, which gives the verbs in
+  `orchestrator/clientcli` the real terminal, signals, clock and working directory, and finds the
+  `vibesys-host` beside the client (symlinks followed, else on `PATH`) to start when none serves. It
+  links neither the daemon nor the store; a test holds that.
+- `internal/archcheck` checks each command's shape and its composition package's imports.
 - `internal/runlog` owns framing and filesystem following.
 - `internal/runindex` resolves published run symlinks.
 - `internal/server` implements the HostService reads (Hello, Tail, Skeleton, GetBlobs, TailStream,

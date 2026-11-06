@@ -8,6 +8,8 @@ and command details. The Python module graph is in
 
 The host gateway is `vibesys-host`; deterministic jobs belong to the CLI daemon, `vibesysd`.
 Agents invoke it through the client command `vibesys-cli`.
+People and babysitting agents run the orchestrator through `vibesys-client`, a peer of the desktop app that
+speaks the same typed link.
 
 ## The processes
 
@@ -28,6 +30,7 @@ Agents invoke it through the client command `vibesys-cli`.
 | Process | Owns | Does not own |
 |---|---|---|
 | Desktop app | What the operator sees: screens, local settings, the connection to each host (local, or over ssh) | Any run state. It reads and commands through typed links |
+| `vibesys-client` | A terminal client of one host: start, attach to, check, wait for, steer and stop a run | Any run state or product logic. Everything goes through the orchestrator's service |
 | `vibesys-host` | The front door of one machine: it accepts clients and hands each request to the typed service that answers it | Product logic. It only composes services and serves run records |
 | Orchestrator (inside `vibesys-host`) | The run: its agents, their messages, a durable record of every decision, and the work still owed to the outside world | Running jobs, and the agent processes themselves |
 | Sidecar | One agent session: it starts the agent program, keeps its conversation and writes down everything it does | Decisions about the run. It carries out commands |
