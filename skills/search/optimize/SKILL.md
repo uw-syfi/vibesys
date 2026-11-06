@@ -170,8 +170,7 @@ result you hold is worth more reported than improved forever. A run that stays o
 final report costs nothing, and one that never gives it cannot be waited on. The operator's
 steering note may state another share.
 
-The bounds are text in each plan, so you read them; nothing computes this rule for you. If it is
-to be deterministic, `vibesys-cli plan` needs a structured bound field that a check can read.
+The bounds are text in each plan, so you read them; nothing computes this rule for you.
 
 ## Reporting
 
