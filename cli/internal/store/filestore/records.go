@@ -48,7 +48,11 @@ import (
 // and keeps the version it was written with. Results of one image taken on two placements, which
 // had two keys, then answer the same key. The migration of a store of 2 to 4 is the one before,
 // writing the format file at version 5 last.
-const formatVersion = 5
+//
+// Version 6 adds a job's hold (core.JobHold), which a version 5 program would refuse as unknown.
+// It only adds, so this program reads versions 2 to 6 and migrates a store of 2 to 5 the same way,
+// writing the format file at version 6 last.
+const formatVersion = 6
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -315,6 +319,13 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		j.Needs = append(j.Needs, kind)
 	}
 	j.TaskVersion = m.GetTaskVersion()
+	if h := m.GetHold(); h != nil {
+		if err := h.GetAt().CheckValid(); err != nil {
+			return fail(fmt.Errorf("hold.at: %w", err))
+		}
+		j.Hold = wire.ToJobHold(h)
+		j.Hold.At = instant(h.GetAt())
+	}
 	return j, nil
 }
 

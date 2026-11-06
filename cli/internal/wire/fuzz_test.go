@@ -263,6 +263,34 @@ func FuzzDecodePlan(f *testing.F) {
 	})
 }
 
+// A daemon's drain, as its runtime directory keeps it, decodes to a drain with a time it began, and
+// that drain survives being encoded and decoded again unchanged.
+func FuzzDecodeDaemonDrain(f *testing.F) {
+	seedMessages(f,
+		&cliv1.DaemonDrain{},
+		wire.DaemonDrain(core.Drain{Agent: "lead", Reason: "a new CLI", Since: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)}),
+		&cliv1.DaemonDrain{Reason: strings.Repeat("x", core.MaxReasonBytes+1)},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.DaemonDrain{}
+		decode(t, data, message)
+		first, err := wire.ToDaemonDrain(message)
+		if err != nil {
+			return
+		}
+		if first.Since.IsZero() && message.GetSince() == nil {
+			t.Fatalf("a drain with no time it began was accepted: %+v", first)
+		}
+		again, err := wire.ToDaemonDrain(wire.DaemonDrain(first))
+		if err != nil {
+			t.Fatalf("a decoded drain %+v is refused once encoded again: %v", first, err)
+		}
+		if !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded drain changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
 func FuzzDecodePlanFilter(f *testing.F) {
 	seedMessages(f,
 		&cliv1.ListPlansRequest{},

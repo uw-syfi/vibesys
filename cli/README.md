@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 4 is migrated to version 5 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, and version 5 a job's needs and task version); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 5 is migrated to version 6 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, and version 6 a job's hold); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -266,7 +266,9 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
-| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits. |
+| `hold <job> [--reason text]` | Keep a queued job from starting: it keeps its place in the queue, stands in no other job's way, and `jobs` shows `held since <time> by <agent>: <reason>` under it and the hold as its wait. Only a queued job is held (a running or final one is `CONFLICT`, exit `1`). The hold and its release are kept as notes on the job. See "Steering the queue". |
+| `release <job>` | Let a held job start in its turn, which is its place by submit time as if it had never been held. Releasing a job that is not held prints it unchanged. |
+| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits, and who held a held one and why. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
@@ -281,6 +283,8 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or the daemon's status with `--json`. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this and reads the exit code. |
+| `daemon drain [--reason text]` | Make the daemon that runs start no queued job until `daemon resume`: running jobs go on, queued jobs stay queued, and `daemon status` and every queued job's wait say the daemon is draining, by whom and why. The drain is kept in the runtime directory, so `daemon restart` keeps draining. It starts no daemon: with none running it prints `not running` and exits `4`. See "Steering the queue". |
+| `daemon resume` | End a drain: queued jobs start in their turn again. Exit `4` with no daemon running, as for `drain`. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` also says what every job inherits from the daemon: the directory clean checkouts are made in (`checkouts`, from the daemon's `TMPDIR`), and one `env` line per environment variable, sorted, with its value only for `PATH`, `HOME`, `TMPDIR` and a `VIBESYS_` variable whose name has none of `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` (with `--json`, `environment` and `checkout_directory`). Jobs see the environment the daemon was started with, so a variable set later reaches them only after `daemon restart` from a shell that has it. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
@@ -318,8 +322,8 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
-`frontier` subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
+`note`, `hold`, `release`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`frontier` subcommands, `daemon drain` and `daemon resume`. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
 `wait` that gave up. The `Failure` the daemon sent is printed as it was sent, a kind this build does
@@ -334,6 +338,46 @@ Text output rounds numbers to four significant digits. `--json` and the verdicts
 the exact values.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
+
+## Steering the queue
+
+The scheduler decides from the resources which queued job starts next. An operator, or the lead
+agent of a run, steers it without cancelling anything:
+
+- `hold <job> [--reason t]` keeps one queued job from starting and `release <job>` lets it go. A held
+  job keeps its place: once released it starts in its turn by submit time. While held it stands in
+  no other job's way (it reserves nothing, so the jobs after it may start), and it waits as `held`,
+  naming who held it and why. Only a queued job can be held, and a job that starts, or ends, is not
+  held any more. A job the daemon had already begun to start when the hold arrived (its launch was
+  under way, its store still said queued) starts anyway, and the hold is dropped when it does.
+- `daemon drain [--reason t]` makes the daemon start no queued job: jobs that run finish, queued
+  jobs keep their places, and each says it waits because the daemon is draining. A job whose store
+  already has it running (a parked supervisor found after a crash) still starts, as it has started
+  already. `daemon resume` ends the drain. The drain is kept in `drain.json` of the runtime
+  directory, so it outlives `daemon restart` and a daemon crash, but not a reboot that empties the
+  runtime directory.
+
+To roll out a new `vibesys-cli` while jobs are queued, without cancelling and resubmitting them
+(which would lose their place):
+
+```sh
+vibesys-cli daemon drain --reason "rolling out a new CLI"
+vibesys-cli daemon status          # wait until it says running 0; queued jobs stay queued
+# install the new binary over the old one
+vibesys-cli daemon restart         # the new daemon reads drain.json and starts nothing
+vibesys-cli daemon status          # still draining, every queued job still there
+vibesys-cli daemon resume          # queued jobs start in their turn
+```
+
+A restart of a draining daemon is safe with jobs running too: running jobs have their own
+supervisors and the new daemon adopts them, as any restart does; draining only keeps it from
+starting new ones. A new command line whose protocol is newer than the daemon's replaces the daemon
+on its first command (see "The daemon and the supervisors"); a drain the old daemon wrote is read by
+the new one the same way.
+
+Who asks is the caller's own word (`--agent`, `VIBESYS_AGENT`): the daemon checks no right to hold,
+release, drain or resume. The optimization skills carry the convention: the lead steers, workers do
+not hold other agents' jobs.
 
 ## Who submitted a job
 
@@ -362,6 +406,7 @@ sockets and locks are not reliable there. The directory holds:
 | `start.lock` | Held by a client while it starts a daemon, so clients that find none at once start one. |
 | `daemon.log` | The diagnostics of a daemon a client started. |
 | `sup/` | One directory per running job, with its supervisor's socket and output spool. |
+| `drain.json` | Present while the daemon drains: the protojson of a `DaemonDrain` (who, why, since when). A daemon that starts reads it before it starts any job; a damaged file stops the daemon from starting, naming the file. |
 
 The runtime directory moves with `XDG_RUNTIME_DIR`, so its lock alone cannot keep one daemon per
 user per machine. The daemon also holds `machine.lock` in the user's machine directory, which

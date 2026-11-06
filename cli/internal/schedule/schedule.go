@@ -18,7 +18,13 @@
 //
 // Around those rules it applies what it is given: a Policy orders the waiting jobs, a Placer ranks
 // where each may run, and Filters may hold a job back. A buggy policy, placer or filter can be
-// unfair, never unsafe. A job that waits keeps its turn on every place it may run: a later job does
+// unfair, never unsafe.
+//
+// An operator steers the queue on top of that. A held job (Candidate.Hold) waits, and a draining
+// daemon (State.Drain) starts no job but the First ones, which its stores have running already;
+// each such job waits as core.WaitHeld, naming the hold or the drain. A job held back this way, by a
+// filter included, keeps no turn: it stands in no other job's way, and takes its place in the order
+// again when it is released. A job that waits keeps its turn on every place it may run: a later job does
 // not take a resource an earlier one waits for, so a job that needs a resource for itself alone is
 // not starved by a stream of jobs that share it.
 //
@@ -101,6 +107,8 @@ type Candidate struct {
 	// an option that claims that resource, keeping its turn there, until the caller clears it to
 	// try again; it may start on another option.
 	Leased *LeasedOut
+	// Hold, when set, says the job is held: it does not start, and keeps no turn.
+	Hold *core.JobHold
 }
 
 // LeasedOut is a lease a job was refused: the resource, and who held its lease, or, when the place
@@ -128,6 +136,8 @@ type State struct {
 	Waiting []Candidate
 	// Recent is the last grants, oldest first, as Remember keeps them.
 	Recent []Grant
+	// Drain, when set, says the daemon is draining: no job starts but the First ones.
+	Drain *core.Drain
 }
 
 // Remember returns the recent grants with the started ones added, keeping the last RecentGrants.
@@ -333,9 +343,21 @@ func Step(s State, rules Rules) []Decision {
 	b := newBook(s)
 	out := make([]Decision, 0, len(arrived))
 	for _, c := range append(first, rest...) {
-		out = append(out, b.decide(c, rules))
+		out = append(out, b.decide(c, rules, steered(s, c)))
 	}
 	return out
+}
+
+// steered is why an operator holds a job back, or "": the daemon drains, which holds back every
+// job but a First one, or the job is held.
+func steered(s State, c Candidate) string {
+	switch {
+	case s.Drain != nil && !c.First:
+		return s.Drain.WaitDetail()
+	case c.Hold != nil:
+		return c.Hold.WaitDetail()
+	}
+	return ""
 }
 
 // permutation returns what a policy or a placer ordered, held to being the items it was given: each
@@ -420,7 +442,7 @@ func (b *book) hold(id ID, claims []Claim) {
 	}
 }
 
-func (b *book) decide(c Candidate, rules Rules) Decision {
+func (b *book) decide(c Candidate, rules Rules, steered string) Decision {
 	// The options the resources can ever grant, in the job's order, one for each placement.
 	var options []Option
 	refusal := "it may run on no placement that runs its kind of job and gives what its task needs"
@@ -438,6 +460,9 @@ func (b *book) decide(c Candidate, rules Rules) Decision {
 	}
 	if len(options) == 0 {
 		return Refuse{ID: c.ID, Detail: refusal}
+	}
+	if steered != "" {
+		return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitHeld, Detail: steered}}
 	}
 	placement := func(o Option) string { return o.Placement }
 	ranked := permutation(options, rules.Placer.Rank(cloneOptions(options), b.load), placement)

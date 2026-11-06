@@ -192,7 +192,11 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"jobs bad kind", withTask("jobs", "--kind", "nap"), "--kind"},
 		{"jobs extra argument", withTask("jobs", "j1"), "j1"},
 		{"logs no job", withTask("logs"), "one job"},
-		{"daemon nothing", []string{"daemon"}, "status, ensure, stop, restart or forget"},
+		{"hold no job", withTask("hold"), "one job"},
+		{"hold two jobs", withTask("hold", "j1", "j2"), "one job"},
+		{"release no job", withTask("release"), "one job"},
+		{"hold no task", []string{"hold", "j1"}, "--task"},
+		{"daemon nothing", []string{"daemon"}, "status, ensure, stop, restart, drain, resume or forget"},
 		{"daemon bogus", []string{"daemon", "bogus"}, "bogus"},
 		{"unknown commit", withTask("submit", "command", "no-such-rev", "--", "true"), "no-such-rev"},
 	}

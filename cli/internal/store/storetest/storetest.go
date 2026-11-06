@@ -36,6 +36,7 @@ func Run(t *testing.T, newStore New) {
 		{"submit", testSubmit},
 		{"transition", testTransition},
 		{"notes", testNotes},
+		{"control", testControl},
 		{"jobs", testJobs},
 		{"results", testResults},
 		{"frontier", testFrontier},

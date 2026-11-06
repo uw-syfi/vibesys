@@ -157,6 +157,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Tasks:         named(cfg.Runtime.Tasks, cfg.Version),
 		Scheduler:     cfg.Runtime.Scheduler,
 		Leasing:       cfg.Runtime.Leasing,
+		Drains:        drainFile{dir: cfg.Dir},
 		Logf:          cfg.Logf,
 	})
 	defer a.Close()

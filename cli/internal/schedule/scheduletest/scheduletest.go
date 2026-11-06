@@ -47,15 +47,16 @@ type TB interface {
 // properties are the contract's properties, by name.
 func properties(c Contract) map[string]func(TB, Contract) {
 	out := map[string]func(TB, Contract){
-		"the policy orders the jobs it is given, each once":                orderIsPermutation,
-		"no resource is given past its capacity":                           neverOverCapacity,
-		"an exclusive claim shares its resource with no other":             exclusiveIsAlone,
-		"every waiting job starts, waits for a true reason or is refused":  everyJobDecided,
-		"the decisions are a function of the state":                        deterministic,
-		"every job starts once the holders end and nothing more arrives":   eventuallyStarts,
-		"a job that waits for a resource keeps its turn on it":             keepsTurn,
-		"a job refused a lease waits for it, naming its holder":            leasedWaits,
-		"a job starts on one of its options, and never one it cannot hold": startsOnItsOwnOption,
+		"the policy orders the jobs it is given, each once":                                    orderIsPermutation,
+		"no resource is given past its capacity":                                               neverOverCapacity,
+		"an exclusive claim shares its resource with no other":                                 exclusiveIsAlone,
+		"every waiting job starts, waits for a true reason or is refused":                      everyJobDecided,
+		"the decisions are a function of the state":                                            deterministic,
+		"every job starts once the holders end and nothing more arrives":                       eventuallyStarts,
+		"a job that waits for a resource keeps its turn on it":                                 keepsTurn,
+		"a job refused a lease waits for it, naming its holder":                                leasedWaits,
+		"a job starts on one of its options, and never one it cannot hold":                     startsOnItsOwnOption,
+		"a held job, and any but a First one while the daemon drains, waits and keeps no turn": steeredWaits,
 	}
 	if c.Fair {
 		out["a run with work waiting starts within one turn of every run"] = boundedStarvation
@@ -179,6 +180,10 @@ func (g gen) state() schedule.State {
 	for range g.r.IntN(schedule.RecentGrants + 4) {
 		s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: runs[g.r.IntN(len(runs))], Claims: g.claims(s.Resources)})
 	}
+	// Sometimes the daemon drains.
+	if g.r.IntN(10) == 0 {
+		s.Drain = &core.Drain{Agent: "lead", Reason: "a new build", Since: epoch}
+	}
 	return s
 }
 
@@ -204,6 +209,10 @@ func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
 	if n > 0 && g.r.IntN(10) == 0 {
 		o := c.Options[g.r.IntN(n)]
 		c.Leased = &schedule.LeasedOut{Resource: o.Claims[0].Resource, Holder: core.LeaseHolder{User: "other", Host: "host-b", PID: 7}}
+	}
+	// Some are held.
+	if g.r.IntN(8) == 0 {
+		c.Hold = &core.JobHold{Agent: "lead", Reason: "after the integration check", At: epoch}
 	}
 	return c
 }
@@ -482,10 +491,12 @@ func eventuallyStarts(t TB, c Contract) {
 		waiting := len(s.Waiting)
 		for round := 0; len(s.Waiting) > 0; round++ {
 			if round > 0 {
-				// The other daemons give back the leases they held.
+				// The other daemons give back the leases they held, and the operator lets every held
+				// job go and stops draining.
 				for i := range s.Waiting {
-					s.Waiting[i].Leased = nil
+					s.Waiting[i].Leased, s.Waiting[i].Hold = nil, nil
 				}
+				s.Drain = nil
 			}
 			if round > 2*(waiting+len(s.Holdings))+2 {
 				t.Fatalf("seed %d: %d jobs still wait after %d rounds: %+v", seed, len(s.Waiting), round, c.Step(s, c.rules()))
@@ -565,6 +576,46 @@ func boundedStarvation(t TB, c Contract) {
 			}
 		}
 	}
+}
+
+// steeredWaits: an operator's word holds a job back whatever the resources allow. A held job, and
+// while the daemon drains every job but a First one, waits as held, naming the hold or the drain,
+// unless it can never start; and it keeps no turn: no other job waits behind it.
+func steeredWaits(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		why := map[schedule.ID]string{}
+		for _, w := range s.Waiting {
+			switch {
+			case s.Drain != nil && !w.First:
+				why[w.ID] = s.Drain.WaitDetail()
+			case w.Hold != nil:
+				why[w.ID] = w.Hold.WaitDetail()
+			}
+		}
+		for _, d := range c.Step(s, c.rules()) {
+			if w, ok := d.(schedule.Wait); ok && w.Reason.Kind == core.WaitBehind {
+				for _, b := range w.Reason.Blockers {
+					if _, steered := why[b]; steered {
+						t.Fatalf("seed %d: %s waits behind %s, which an operator holds back and which keeps no turn", seed, w.ID, b)
+					}
+				}
+			}
+			want, steered := why[d.Target()]
+			if !steered {
+				continue
+			}
+			switch d := d.(type) {
+			case schedule.Start:
+				t.Fatalf("seed %d: %s started though %s", seed, d.ID, want)
+			case schedule.Wait:
+				if d.Reason.Kind != core.WaitHeld || d.Reason.Detail != want {
+					t.Fatalf("seed %d: %s waits as %+v, want held, saying %q", seed, d.ID, d.Reason, want)
+				}
+			case schedule.Refuse:
+				// It can never start, which says more than why it may not now.
+			}
+		}
+	})
 }
 
 // keepsTurn: once a job waits for a resource, no job considered after it in the same step starts on

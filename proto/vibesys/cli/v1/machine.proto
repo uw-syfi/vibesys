@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -21,4 +22,14 @@ message MachineDaemon {
   string version = 3;
   // Whether it is a sandbox daemon.
   bool sandbox = 4;
+}
+
+// DaemonDrain says a daemon is draining: it starts no queued job, a job that runs goes on, and every
+// queued job's wait says the daemon is draining. The daemon keeps it in a file of its runtime
+// directory, in protojson, so a daemon that restarts goes on draining until it is told to resume.
+// The agent is the caller's own word for who it is: nothing checks it.
+message DaemonDrain {
+  string agent = 1;
+  string reason = 2;
+  google.protobuf.Timestamp since = 3 [(buf.validate.field).required = true];
 }

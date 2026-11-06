@@ -146,6 +146,11 @@ func (s boundedStore) AddNote(ctx context.Context, id core.JobID, note core.Note
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Job, error) { return st.AddNote(ctx, id, note) })
 }
 
+func (s boundedStore) ControlJob(ctx context.Context, id core.JobID, control core.JobControl) (core.Job, error) {
+	defer touched(s.tasks)
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Job, error) { return st.ControlJob(ctx, id, control) })
+}
+
 func (s boundedStore) Results(ctx context.Context, filter core.ResultFilter) ([]core.Result, error) {
 	return call(s, ctx, func(st store.Store, ctx context.Context) ([]core.Result, error) { return st.Results(ctx, filter) })
 }

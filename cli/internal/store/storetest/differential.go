@@ -116,7 +116,7 @@ func (d *driver) text() string {
 func (d *driver) step(step int) {
 	g, ctx := d.g, context.Background()
 	jobs := d.jobs()
-	switch op := g.pick(17); {
+	switch op := g.pick(18); {
 	case op < 4:
 		sub := core.Submission{Spec: g.spec(), Key: core.JobKey(fmt.Sprintf("k%d", g.pick(5))), NoCache: g.pick(6) == 0, At: d.instant()}
 		sub.Spec.Commit = commit(g.pick(3))
@@ -196,6 +196,13 @@ func (d *driver) step(step int) {
 			admission = core.FrontierAdmission{}
 		}
 		d.do(step, "UpdateFrontier", func(s store.Store) (any, error) { return s.UpdateFrontier(ctx, admission) })
+	case op == 15:
+		id := d.jobID(jobs)
+		var control core.JobControl = core.ReleaseJob{Agent: g.text(), At: d.instant()}
+		if g.pick(2) == 0 {
+			control = core.HoldJob{Hold: core.JobHold{Agent: g.text(), Reason: g.text(), At: d.instant()}}
+		}
+		d.do(step, "ControlJob", func(s store.Store) (any, error) { return s.ControlJob(ctx, id, control) })
 	default:
 		d.read(step, jobs)
 	}

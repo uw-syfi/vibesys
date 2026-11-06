@@ -77,6 +77,8 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"wait":       waitCommand,
 	"cancel":     cancelCommand,
 	"note":       noteCommand,
+	"hold":       holdCommand,
+	"release":    releaseCommand,
 	"jobs":       jobsCommand,
 	"logs":       logsCommand,
 	"show":       showCommand,
@@ -105,6 +107,8 @@ commands:
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job
+  hold <job> [--reason text]                     keep a queued job from starting; it keeps its place
+  release <job>                                  let a held job start in its turn
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit
@@ -115,6 +119,7 @@ commands:
   frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   daemon status|stop|restart                     manage the daemon
+  daemon drain [--reason text] | daemon resume   start no queued job until resumed, across restarts
   upgrade                                        replace this binary with the newest release
 
 Every job and daemon command takes --json, and --repo, --task, --run, --harness, --agent and

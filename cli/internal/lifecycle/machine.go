@@ -106,6 +106,15 @@ type entry struct {
 	// leased is the lease another holder had when the job last tried to take it. The job waits
 	// for a RetryDue to try again.
 	leased *schedule.LeasedOut
+	// steer is what an operator said of how the job waits, as its store or a Steered event said
+	// last.
+	steer Steering
+}
+
+// Steering is what an operator said of how a queued job waits, as its store keeps it: whether it
+// is held. The scheduler applies it to a job while it is queued (schedule.Candidate).
+type Steering struct {
+	Hold *core.JobHold
 }
 
 // Work is what a job asks of the machine, as the shell read it from the job: the places it may run,
@@ -149,6 +158,8 @@ type awayStore struct {
 type State struct {
 	entries []entry
 	seq     uint64
+	// drain, when set, says the daemon is draining: it starts no queued job (schedule.State.Drain).
+	drain *core.Drain
 	// recovering holds every launch back until RecoveryDone, so that a queued job is not started
 	// before the machine has heard of the job that is still running.
 	recovering bool
@@ -280,6 +291,7 @@ type JobIn struct {
 	Attempts    int
 	Policy      core.RerunPolicy
 	Work        Work
+	Steering    Steering
 }
 
 func (StoreAway) finding() {}
@@ -319,6 +331,25 @@ type Admitted struct {
 	Attempts    int
 	Policy      core.RerunPolicy
 	Work        Work
+	// Steering is how the job waits, as its store has it. A job the machine has already keeps the
+	// steering it has: only a Steered event changes it, so a look at the store that is older than a
+	// change cannot undo it.
+	Steering Steering
+}
+
+// Steered says an operator changed how a job waits, and its store has the change: Steering is how it
+// waits now. A job the machine does not have ignores it, and takes its steering from its store when
+// it is admitted.
+type Steered struct {
+	Ref      Ref
+	Steering Steering
+}
+
+// Drained says whether the daemon drains: with Drain set it starts no queued job, and with none it
+// starts them in their turn again. A daemon that starts says it before RecoveryDone, as its runtime
+// directory keeps it, so a daemon that restarts while draining starts nothing.
+type Drained struct {
+	Drain *core.Drain
 }
 
 // Recovered says what a look at one job found: what its store says and what is left of its
@@ -476,6 +507,8 @@ func (StoreRead) event()      {}
 func (StoreForgotten) event() {}
 func (Closed) event()         {}
 func (Requeued) event()       {}
+func (Steered) event()        {}
+func (Drained) event()        {}
 
 // Request is something the machine asks the shell to do. Each names the job it is about, and the
 // shell answers it with an event. The set is closed.
@@ -591,6 +624,11 @@ func (Discard) request()       {}
 //     default, the machine runs one job at a time, the oldest queued first (by the time it was
 //     submitted, then by when the machine heard of it). A job whose claims can never be granted
 //     stays queued, and waits on that as on trouble.
+//   - An operator steers the queue. A held job (Steering.Hold) waits and keeps no turn, and a
+//     machine that drains (Drained) launches no queued job, while what runs goes on and a job with
+//     a parked supervisor, which its store has running, still starts. A job's steering comes with
+//     it when it is admitted or recovered, and changes only by Steered after that, so a look at a
+//     store that is older than a change does not undo it.
 //   - A cancel of a queued job moves it to cancelled at once. A cancel while a queued job's old run
 //     is cleared takes effect when that ends. A cancel during a launch waits for the launch to
 //     end: the supervisor is told before it may start, so the command never runs. A cancel of a
@@ -629,7 +667,7 @@ func (Discard) request()       {}
 func Step(s State, e Event) (State, []Request) {
 	out := State{
 		entries: slices.Clone(s.entries), seq: s.seq, recovering: s.recovering, unread: slices.Clone(s.unread),
-		scheduling: s.scheduling, recent: s.recent,
+		scheduling: s.scheduling, recent: s.recent, drain: s.drain,
 	}
 	var reqs []Request
 	switch e := e.(type) {
@@ -677,6 +715,12 @@ func Step(s State, e Event) (State, []Request) {
 		out.remove(e.Ref)
 	case Requeued:
 		reqs = out.requeued(e.Ref)
+	case Steered:
+		if i := out.find(e.Ref); i >= 0 {
+			out.entries[i].steer = e.Steering
+		}
+	case Drained:
+		out.drain = e.Drain
 	}
 	reqs = append(reqs, out.schedule()...)
 	return out, reqs
@@ -740,7 +784,7 @@ func (s *State) admit(e Admitted) {
 		return
 	}
 	s.seq++
-	s.entries = append(s.entries, entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq, phase: PhaseQueued, attempts: e.Attempts, policy: e.Policy, work: e.Work})
+	s.entries = append(s.entries, entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq, phase: PhaseQueued, attempts: e.Attempts, policy: e.Policy, work: e.Work, steer: e.Steering})
 }
 
 func (s *State) isUnread(id StoreID) bool {
@@ -886,7 +930,7 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 	}
 	if f, ok := e.Finding.(JobIn); ok {
 		// The store keeps the attempts, so its word on them is the latest.
-		kept.attempts, kept.policy = f.Attempts, f.Policy
+		kept.attempts, kept.policy, kept.steer = f.Attempts, f.Policy, f.Steering
 		if f.Work.told() {
 			kept.work = f.Work
 		}
@@ -1295,7 +1339,7 @@ func (s *State) schedule() []Request {
 	if s.recovering {
 		return reqs
 	}
-	st := schedule.State{Resources: s.resources(), Recent: s.recent}
+	st := schedule.State{Resources: s.resources(), Recent: s.recent, Drain: s.drain}
 	for _, e := range s.entries {
 		switch {
 		case e.holdsMachine():
@@ -1342,7 +1386,10 @@ func (s *State) resources() []schedule.Resource {
 func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
 
 func (s *State) candidate(e entry, first bool) schedule.Candidate {
-	return schedule.Candidate{ID: idOf(e.ref), Options: s.optionsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased}
+	return schedule.Candidate{
+		ID: idOf(e.ref), Options: s.optionsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased,
+		Hold: e.steer.Hold,
+	}
 }
 
 // leasesOf is the resources a job holds alone, each once and in order: those whose leases it takes.
@@ -1474,6 +1521,9 @@ func (s State) Troubled() []Trouble {
 	}
 	return out
 }
+
+// Draining is the drain the machine applies, or nil when it starts jobs.
+func (s State) Draining() *core.Drain { return s.drain }
 
 // Counts returns how many jobs wait for the machine and how many are past waiting. A job counts as
 // running from the moment the machine takes it, before its store says so, so that no reader of the

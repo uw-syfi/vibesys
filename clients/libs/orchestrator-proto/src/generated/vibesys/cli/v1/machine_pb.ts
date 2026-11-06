@@ -5,13 +5,15 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/cli/v1/machine.proto.
  */
 export const file_vibesys_cli_v1_machine: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9tYWNoaW5lLnByb3RvEg52aWJlc3lzLmNsaS52MSJnCg1NYWNoaW5lRGFlbW9uEhQKA3BpZBgBIAEoDUIHukgEKgIgABIeCgtydW50aW1lX2RpchgCIAEoCUIJukgGcgQyAl4vEg8KB3ZlcnNpb24YAyABKAkSDwoHc2FuZGJveBgEIAEoCEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9tYWNoaW5lLnByb3RvEg52aWJlc3lzLmNsaS52MSJnCg1NYWNoaW5lRGFlbW9uEhQKA3BpZBgBIAEoDUIHukgEKgIgABIeCgtydW50aW1lX2RpchgCIAEoCUIJukgGcgQyAl4vEg8KB3ZlcnNpb24YAyABKAkSDwoHc2FuZGJveBgEIAEoCCJfCgtEYWVtb25EcmFpbhINCgVhZ2VudBgBIAEoCRIOCgZyZWFzb24YAiABKAkSMQoFc2luY2UYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQFCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * MachineDaemon is a vibesys-cli daemon of a user on a machine. One daemon of each user holds the
@@ -60,4 +62,36 @@ export type MachineDaemon = Message<"vibesys.cli.v1.MachineDaemon"> & {
  */
 export const MachineDaemonSchema: GenMessage<MachineDaemon> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_machine, 0);
+
+/**
+ * DaemonDrain says a daemon is draining: it starts no queued job, a job that runs goes on, and every
+ * queued job's wait says the daemon is draining. The daemon keeps it in a file of its runtime
+ * directory, in protojson, so a daemon that restarts goes on draining until it is told to resume.
+ * The agent is the caller's own word for who it is: nothing checks it.
+ *
+ * @generated from message vibesys.cli.v1.DaemonDrain
+ */
+export type DaemonDrain = Message<"vibesys.cli.v1.DaemonDrain"> & {
+  /**
+   * @generated from field: string agent = 1;
+   */
+  agent: string;
+
+  /**
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp since = 3;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.DaemonDrain.
+ * Use `create(DaemonDrainSchema)` to create a new message.
+ */
+export const DaemonDrainSchema: GenMessage<DaemonDrain> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_machine, 1);
 

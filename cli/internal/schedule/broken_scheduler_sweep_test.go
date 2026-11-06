@@ -99,6 +99,55 @@ func TestTheContractCatchesABrokenScheduler(t *testing.T) {
 			},
 			policy: fifo.New, property: "a job starts on one of its options, and never one it cannot hold",
 		},
+		// A held job starts in its turn, as if no one held it.
+		"ignores a hold": {
+			step: func(s schedule.State, rules schedule.Rules) []schedule.Decision {
+				s.Waiting = slices.Clone(s.Waiting)
+				for i := range s.Waiting {
+					s.Waiting[i].Hold = nil
+				}
+				return schedule.Step(s, rules)
+			},
+			policy: fifo.New, property: "a held job, and any but a First one while the daemon drains, waits and keeps no turn",
+		},
+		// A draining daemon starts jobs as if it were not draining.
+		"ignores a drain": {
+			step: func(s schedule.State, rules schedule.Rules) []schedule.Decision {
+				s.Drain = nil
+				return schedule.Step(s, rules)
+			},
+			policy: fifo.New, property: "a held job, and any but a First one while the daemon drains, waits and keeps no turn",
+		},
+		// A held job keeps its turn, so the jobs after it that need what it would run on wait behind
+		// it.
+		"a held job keeps its turn": {
+			step: func(s schedule.State, rules schedule.Rules) []schedule.Decision {
+				reserved := map[schedule.ResourceID]schedule.ID{}
+				return mapDecisions(schedule.Step(s, rules), func(d schedule.Decision) schedule.Decision {
+					i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == d.Target() })
+					switch d := d.(type) {
+					case schedule.Wait:
+						if s.Waiting[i].Hold != nil && d.Reason.Kind == core.WaitHeld {
+							for _, o := range s.Waiting[i].Options {
+								for _, c := range o.Claims {
+									if _, ok := reserved[c.Resource]; !ok {
+										reserved[c.Resource] = d.ID
+									}
+								}
+							}
+						}
+					case schedule.Start:
+						for _, c := range d.Option.Claims {
+							if held, ok := reserved[c.Resource]; ok {
+								return schedule.Wait{ID: d.ID, Reason: schedule.WaitReason{Kind: core.WaitBehind, Resource: c.Resource, Blockers: []schedule.ID{held}}}
+							}
+						}
+					}
+					return d
+				})
+			},
+			policy: fifo.New, property: "a held job, and any but a First one while the daemon drains, waits and keeps no turn",
+		},
 		// A policy that always serves the run that came first starves the others.
 		"starves a run": {
 			policy: fifo.New, fair: true, property: "a run with work waiting starts within one turn of every run",

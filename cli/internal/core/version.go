@@ -20,7 +20,10 @@ const (
 	//
 	// 4: a submission names the placement its docker job runs on. A daemon of 3 would drop the
 	// field and run the job on its one placement, which is not what was asked.
-	ProtocolVersion uint32 = 4
+	//
+	// 5: a queued job can be held and released, and the daemon drained and resumed. A daemon of 4
+	// has neither call.
+	ProtocolVersion uint32 = 5
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -30,9 +33,10 @@ const (
 	// MinDaemonProtocolVersion is the oldest daemon the command line of this build works with. It
 	// is above MinProtocolVersion because the command line needs what 2 added, while a daemon of
 	// this build still serves older peers. It is at least WatchTaskSince, so a command line of this
-	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 4,
-	// so that it replaces one that would drop the placement of a submission.
-	MinDaemonProtocolVersion uint32 = 4
+	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 5,
+	// so that it replaces one that would drop the placement of a submission or cannot hold a job or
+	// drain.
+	MinDaemonProtocolVersion uint32 = 5
 )
 
 // WatchTaskSince is the protocol version that added WatchTask. It is the one definition of the

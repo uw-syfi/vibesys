@@ -151,6 +151,9 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		LeaseConflicts:    leaseConflicts(st.Conflicts),
 		OtherDaemons:      s.otherDaemons(),
 	}
+	if st.Drain != nil {
+		out.Drain = wire.DaemonDrain(*st.Drain)
+	}
 	if s.machine != nil {
 		out.Sandbox = s.machine.Sandbox()
 		sandboxes, err := s.machine.Sandboxes()

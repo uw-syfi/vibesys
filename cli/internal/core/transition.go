@@ -48,6 +48,7 @@ func (s JobState) CanMoveTo(to JobState) bool {
 //     measurement needs a metric with a direction, finite samples and a check pass to name, so a
 //     measurement exists only for a check that passed;
 //   - a cancel reason goes with cancelled only, and an exit code with succeeded or failed;
+//   - a hold is dropped by every move, since only a queued job is held;
 //   - a cut goes with the move from running back to queued and with nothing else, and only while
 //     the job has had fewer than MaxAttempts attempts counting the one cut off. That move keeps the
 //     attempt in Attempts and unpins the environment, which the next start pins again.
@@ -74,6 +75,8 @@ func (j Job) Apply(t Transition) (Job, error) {
 
 	out := j
 	out.State = t.To
+	// Only a waiting job is held: a job that leaves the queue, to run or to end, is not.
+	out.Hold = nil
 	at := t.At
 	switch t.To {
 	case JobRunning:

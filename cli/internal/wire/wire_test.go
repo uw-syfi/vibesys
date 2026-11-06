@@ -97,6 +97,9 @@ func anyJob(r *rand.Rand) core.Job {
 	}
 	j.CancelReason = pick(r, "", "stop it")
 	j.NoCache = r.IntN(2) == 0
+	if r.IntN(2) == 0 {
+		j.Hold = &core.JobHold{Agent: pick(r, "", "lead"), Reason: pick(r, "", "after the integration check"), At: epoch.Add(3 * time.Hour)}
+	}
 	return j
 }
 

@@ -25,8 +25,22 @@ import (
 // its jobs starts, a run of it is not released and its outcome is not discarded, the store is tried
 // again, and when it returns the run is taken up. The same goes for a store another daemon has.
 func (a *App) Start(ctx context.Context) error {
-	var scopes []core.Scope
+	// A daemon that drained when it stopped drains still: the machine hears of it before any job,
+	// and it launches nothing before RecoveryDone, so not one queued job starts in between.
+	var drain *core.Drain
 	err := a.retry(ctx, func(ctx context.Context) error {
+		var err error
+		drain, err = a.cfg.Drains.Load(ctx)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("reading whether the daemon drains: %w", err)
+	}
+	if err := a.post(message{event: lifecycle.Drained{Drain: drain}}); err != nil {
+		return err
+	}
+	var scopes []core.Scope
+	err = a.retry(ctx, func(ctx context.Context) error {
 		var err error
 		scopes, err = a.cfg.Stores.Known(ctx)
 		return err
@@ -157,7 +171,7 @@ func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving)
 func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
 	return lifecycle.Admitted{
 		Ref: ref, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
-		Work: a.workOf(job),
+		Work: a.workOf(job), Steering: steeringOf(job),
 	}
 }
 

@@ -62,6 +62,9 @@ type Config struct {
 	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time,
 	// the oldest first.
 	Scheduler Scheduler
+	// Drains keeps whether the daemon drains across its restarts. Nil keeps it in memory, for the
+	// App's life only.
+	Drains DrainRecord
 	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
 	// leases nothing.
 	Leasing Leasing
@@ -121,6 +124,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxNoteBytes <= 0 {
 		c.MaxNoteBytes = DefaultMaxNoteBytes
+	}
+	if c.Drains == nil {
+		c.Drains = &MemoryDrainRecord{}
 	}
 	if c.Scheduler.Demand == nil {
 		c.Scheduler.Demand = schedule.DefaultDemand{}

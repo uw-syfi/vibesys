@@ -232,7 +232,37 @@ func Job(j core.Job) *cliv1.Job {
 		out.Needs = append(out.Needs, ResourceKind(k))
 	}
 	out.TaskVersion = j.TaskVersion
+	if j.Hold != nil {
+		out.Hold = JobHold(*j.Hold)
+	}
 	return out
+}
+
+// JobHold returns the contract's message for a job's hold.
+func JobHold(h core.JobHold) *cliv1.JobHold {
+	return &cliv1.JobHold{Agent: h.Agent, Reason: h.Reason, At: timestamppb.New(h.At)}
+}
+
+// ToJobHold returns the domain hold for the contract's message, and nil for none.
+func ToJobHold(h *cliv1.JobHold) *core.JobHold {
+	if h == nil {
+		return nil
+	}
+	return &core.JobHold{Agent: h.GetAgent(), Reason: h.GetReason(), At: toTime(h.GetAt())}
+}
+
+// DaemonDrain returns the contract's message for a daemon's drain.
+func DaemonDrain(d core.Drain) *cliv1.DaemonDrain {
+	return &cliv1.DaemonDrain{Agent: d.Agent, Reason: d.Reason, Since: timestamppb.New(d.Since)}
+}
+
+// ToDaemonDrain returns the domain drain for the contract's message, which must be valid: a drain
+// has a time it began.
+func ToDaemonDrain(d *cliv1.DaemonDrain) (core.Drain, error) {
+	if err := protovalidate.Validate(d); err != nil {
+		return core.Drain{}, fmt.Errorf("drain: %w", err)
+	}
+	return core.Drain{Agent: d.GetAgent(), Reason: d.GetReason(), Since: toTime(d.GetSince())}, nil
 }
 
 // Attempt returns the contract's message for an attempt that was cut off.
@@ -337,6 +367,7 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		out.Needs = append(out.Needs, kind)
 	}
 	out.TaskVersion = j.GetTaskVersion()
+	out.Hold = ToJobHold(j.GetHold())
 	return out, nil
 }
 
