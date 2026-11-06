@@ -57,7 +57,8 @@ Do not end a turn with a provider wake-up or timer of your own (such as `Schedul
 to wait: the run wakes you on every handoff, finished job and operator message. A run whose lead
 rests with no agent working, no job running and no message waiting is a stalled run. It shows as
 stalled to the operator, and after ten minutes you are sent a reminder, at most three times in
-all. Act on a reminder: start the next step, or send a `final` report saying why there is none.
+all. Act on a reminder: start the next step, or send a `final` report saying why there is none. After
+a `final` report you rest without reminders until you are given something new.
 
 ## Wait for work without polling
 

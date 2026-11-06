@@ -321,6 +321,7 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	r.Run, r.Agent = caller.Run, caller.ID
 	run := t.s.runs[caller.Run]
 	run.ReportsPosted++
+	run.FinalReported = b.Report.Kind == ReportFinal
 	t.emit(run.ID, run)
 	report := b.Report
 	report.Sequence = run.ReportsPosted

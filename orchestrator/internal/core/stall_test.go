@@ -247,6 +247,42 @@ func TestASubagentThatHandedOffIsNeverReminded(t *testing.T) {
 }
 
 // Reports are numbered within their run, in the order they are recorded, and carry their kind.
+func TestALeadThatGaveItsFinalReportIsFinishedNotStalled(t *testing.T) {
+	w, run, leadID := started(t, 1, steers)
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
+	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
+	w.endTurn(leadID, core.TurnCompleted)
+	got := w.runOf(run)
+	if !got.FinalReported || !got.StalledSince.IsZero() {
+		t.Fatalf("after a final report and a rest: %+v", got)
+	}
+	if _, armed := w.leadTimer(); armed {
+		t.Fatal("a timer was armed to remind a lead that has finished")
+	}
+
+	// New input puts the lead back to work, and the usual rule applies when it rests again.
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "one more thing"})
+	if got := w.runOf(run); got.FinalReported {
+		t.Fatalf("still finished while it works on new input: %+v", got)
+	}
+	w.endTurn(leadID, core.TurnCompleted)
+	if got := w.runOf(run); got.StalledSince.IsZero() {
+		t.Fatal("a lead that rested without a report is not stalled")
+	}
+}
+
+// A progress report after a final one says the lead is going on.
+func TestAProgressReportAfterAFinalOneReturnsTheRunToTheNormalRule(t *testing.T) {
+	w, run, leadID := started(t, 1, steers)
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
+	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
+	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "more"}})
+	w.endTurn(leadID, core.TurnCompleted)
+	if got := w.runOf(run); got.FinalReported || got.StalledSince.IsZero() {
+		t.Fatalf("a progress report after a final one: %+v", got)
+	}
+}
+
 func TestReportsAreNumberedWithinTheirRun(t *testing.T) {
 	w, run, leadID := started(t, 1, steers)
 	for i, kind := range []core.ReportKind{core.ReportProgress, core.ReportProgress, core.ReportFinal} {
@@ -307,7 +343,7 @@ func TestLeadRemindersObeyTheirRulesOverRandomSequences(t *testing.T) {
 		var worker core.AgentID
 		for range 120 {
 			before := w.runOf(run)
-			switch r.IntN(7) {
+			switch r.IntN(8) {
 			case 0:
 				w.step(core.JobsRunning{Run: run, Count: uint32(r.IntN(2))})
 			case 1:
@@ -335,6 +371,14 @@ func TestLeadRemindersObeyTheirRulesOverRandomSequences(t *testing.T) {
 					w.now = latest(w.now, timers[i].FireAt)
 					w.step(core.TimerFired{Timer: timers[i]})
 				}
+			case 6:
+				if _, running := w.s.ActiveTurn(leadID); running {
+					kind := core.ReportProgress
+					if r.IntN(2) == 0 {
+						kind = core.ReportFinal
+					}
+					w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: kind, Headline: "h"}})
+				}
 			default:
 				if r.IntN(25) == 0 {
 					w.command(operator, core.StopRun{Run: run})
@@ -348,6 +392,9 @@ func TestLeadRemindersObeyTheirRulesOverRandomSequences(t *testing.T) {
 			after := w.runOf(run)
 			if after.LeadReminders > core.MaxLeadReminders {
 				t.Fatalf("seed %d: %d reminders", seed, after.LeadReminders)
+			}
+			if after.FinalReported && (!after.StalledSince.IsZero() || after.LeadReminders > before.LeadReminders) {
+				t.Fatalf("seed %d: a lead that gave its final report is stalled or reminded: %+v", seed, after)
 			}
 			if after.LeadReminders > before.LeadReminders {
 				if before.Status != core.RunRunning || before.ActiveJobs != 0 || before.StalledSince.IsZero() {

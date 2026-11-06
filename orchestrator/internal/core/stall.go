@@ -7,11 +7,11 @@ import "time"
 // it reads: sweep for the stall, a turn's end for the handoff reminder, a timer for the lead's.
 
 // stalled says nothing is left that could move the run: it is running, its lead rests with nothing
-// to do, no other agent is launching or working, and no job is queued or running. Such a run stays
+// to do (and has not just given its final report), no other agent is launching or working, and no job is queued or running. Such a run stays
 // as it is until an operator acts, whatever the lead meant to do next. An agent that is idle
 // without a handoff does not count as working: the lead has been told of it.
 func (s State) stalled(run Run) bool {
-	if run.Status != RunRunning || run.ActiveJobs > 0 {
+	if run.Status != RunRunning || run.ActiveJobs > 0 || run.FinalReported {
 		return false
 	}
 	for _, m := range s.messages {

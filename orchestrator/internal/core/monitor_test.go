@@ -104,6 +104,8 @@ type monitor struct {
 	leadReminders    map[core.RunID]int
 	handoffReminders map[core.Session]int
 	reports          map[core.RunID]uint32
+	// finished holds the runs whose lead's latest report is final and which it has had no new turn since.
+	finished map[core.RunID]bool
 
 	// The rest lasts one transaction.
 	refusedSteer core.MessageID
@@ -120,7 +122,7 @@ func newMonitor() *monitor {
 		runs: map[core.RunID]core.Run{}, messages: map[core.MessageID]*messageRecord{}, jobs: map[toldJob]core.MessageID{},
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
-		reports: map[core.RunID]uint32{}, stalled: map[core.RunID]bool{},
+		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
 	}
 }
 
@@ -219,7 +221,7 @@ func (m *monitor) settled() error {
 // the lead included.
 func (m *monitor) stalls() error {
 	for id, run := range m.runs {
-		want := run.Status == core.RunRunning && run.ActiveJobs == 0 && m.restingRun(id) && !m.mailInRun(id)
+		want := run.Status == core.RunRunning && run.ActiveJobs == 0 && m.restingRun(id) && !m.mailInRun(id) && !m.finished[id]
 		if got := !run.StalledSince.IsZero(); got != want {
 			return fmt.Errorf("run %s has stalled since %v, but standing still is %t", id, run.StalledSince, want)
 		}
@@ -382,6 +384,9 @@ func (m *monitor) turn(t core.Turn) error {
 			return fmt.Errorf("turn %s starts as %+v after ordinal %d", t.ID, t, m.ordinals[t.Agent])
 		}
 		m.ordinals[t.Agent] = t.Ordinal
+		if agent := m.agents[t.Agent]; agent.Role == core.RoleLead {
+			delete(m.finished, agent.Run)
+		}
 		m.running[t.Agent] = t.ID
 		record.turns++
 		record.running++
@@ -461,6 +466,7 @@ func (m *monitor) message(msg core.Message) error {
 				return fmt.Errorf("report %s has kind %q", msg.ID, b.Kind)
 			}
 			m.reports[msg.Run]++
+			m.finished[msg.Run] = b.Kind == core.ReportFinal
 			if b.Sequence != m.reports[msg.Run] || m.runs[msg.Run].ReportsPosted != b.Sequence {
 				return fmt.Errorf("report %s is number %d, the run counts %d, want %d", msg.ID, b.Sequence, m.runs[msg.Run].ReportsPosted, m.reports[msg.Run])
 			}

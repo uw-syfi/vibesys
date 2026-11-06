@@ -67,8 +67,12 @@ func sortedKeys[K ~int32](m map[K]int) []K {
 	return keys
 }
 
-// stallWords says how long a stalled run has stood still, and is empty for one that has not.
+// stallWords says how long a stalled run has stood still, or that its lead has given its final
+// report, and is empty for a run that is neither.
 func stallWords(v *View, now time.Time) string {
+	if v.Run.GetFinalReported() {
+		return ", its lead has given its final report"
+	}
 	if !v.Stalled() {
 		return ""
 	}

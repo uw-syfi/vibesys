@@ -903,7 +903,10 @@ type Run struct {
 	// How many reminders the orchestrator has sent the lead because the run stood still.
 	LeadReminders uint32 `protobuf:"varint,15,opt,name=lead_reminders,json=leadReminders,proto3" json:"lead_reminders,omitempty"`
 	// What every turn of every agent of the run has cost, so far.
-	Usage         *Usage `protobuf:"bytes,16,opt,name=usage,proto3" json:"usage,omitempty"`
+	Usage *Usage `protobuf:"bytes,16,opt,name=usage,proto3" json:"usage,omitempty"`
+	// The lead's latest report is a final one and it has had no new input since: it has finished, so
+	// the run is not stalled and the lead is not reminded.
+	FinalReported bool `protobuf:"varint,17,opt,name=final_reported,json=finalReported,proto3" json:"final_reported,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1048,6 +1051,13 @@ func (x *Run) GetUsage() *Usage {
 		return x.Usage
 	}
 	return nil
+}
+
+func (x *Run) GetFinalReported() bool {
+	if x != nil {
+		return x.FinalReported
+	}
+	return false
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
@@ -2660,7 +2670,7 @@ var File_vibesys_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb0\x06\n" +
+	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd7\x06\n" +
 	"\x03Run\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12'\n" +
 	"\n" +
@@ -2684,7 +2694,8 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\vactive_jobs\x18\x0e \x01(\rR\n" +
 	"activeJobs\x12%\n" +
 	"\x0elead_reminders\x18\x0f \x01(\rR\rleadReminders\x124\n" +
-	"\x05usage\x18\x10 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\"\xdd\x01\n" +
+	"\x05usage\x18\x10 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\x12%\n" +
+	"\x0efinal_reported\x18\x11 \x01(\bR\rfinalReported\"\xdd\x01\n" +
 	"\vCliLocation\x12'\n" +
 	"\x03cli\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x03cli\x12=\n" +
 	"\x0fxdg_runtime_dir\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\rxdgRuntimeDir\x12;\n" +

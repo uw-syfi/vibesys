@@ -85,6 +85,9 @@ type Sidecars struct {
 	// KillFailures makes that many Kill calls fail before any succeeds, as a signal that cannot be
 	// delivered does.
 	KillFailures int
+	// SendError, when set, is what every Send to a session returns, as a sidecar whose socket
+	// vanished does before the daemon has seen its stream end.
+	SendError error
 	// AfterSend, when set, is called after each command a session took, with the session's lock
 	// released. A test crashes the process from it.
 	AfterSend func()
@@ -262,6 +265,9 @@ type conn struct {
 func (c *conn) Send(ctx context.Context, cmd *pb.SidecarCommand) error {
 	if hung, err := c.host.hang(ctx); hung {
 		return err
+	}
+	if c.host.SendError != nil {
+		return c.host.SendError
 	}
 	err := c.send(cmd)
 	if c.host.AfterSend != nil {

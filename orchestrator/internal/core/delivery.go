@@ -89,6 +89,11 @@ func (t *tx) startTurn(a agentState) {
 	a = t.s.agents[a.ID]
 	a.Status, a.HandedOff = AgentActive, false
 	t.emit(a.Run, a.Agent)
+	if run := t.s.runs[a.Run]; run.FinalReported && run.Lead == a.ID {
+		// New input for a lead that had finished: it goes on, and the run is judged as any other.
+		run.FinalReported = false
+		t.emit(run.ID, run)
+	}
 	t.effect(StartTurn{Session: Session{a.ID, a.Session}, Turn: turn.ID, Message: m})
 }
 

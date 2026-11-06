@@ -14,7 +14,7 @@ func runOut(r core.Run) *pb.Run {
 		Id: string(r.ID), Repository: r.Repository, Task: r.Task, Status: runStatuses.out(r.Status),
 		LeadAgentId: string(r.Lead), FanoutLimit: r.FanoutLimit, Deadline: when(r.Deadline),
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
-		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, StalledSince: when(r.StalledSince),
+		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 	}
 }
@@ -37,7 +37,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		FanoutLimit: r.GetFanoutLimit(), Deadline: moment(r.GetDeadline(), errs),
 		CreatedAt: moment(r.GetCreatedAt(), errs), StopReason: stopReasons.in(r.GetStopReason(), errs),
 		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
-		ReportsPosted: r.GetReportsPosted(), StalledSince: moment(r.GetStalledSince(), errs),
+		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 	}
 }

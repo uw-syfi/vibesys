@@ -200,7 +200,8 @@ A report is a `progress` note or a `final` report, numbered from 1 within its ru
 returns for a final report and `--until progress` for any report, counting those posted after the wait began
 (or numbered above `--after N`; an ended run counts the one it has). A run is stalled when its lead is idle
 and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
-orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A wait for a report on a
+orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
+has had no new input since is finished, not stalled: it is not reminded, and `run get` says so. A wait for a report on a
 stalled run goes on to its timeout, which names the stall.
 
 `vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the

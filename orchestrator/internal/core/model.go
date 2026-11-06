@@ -20,6 +20,9 @@ type Run struct {
 	Location CliLocation
 	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
 	ReportsPosted uint32
+	// FinalReported says the lead's latest report is a final one and it has had no new input since: it
+	// has finished what it was asked, so the run is not stalled and the lead is not reminded.
+	FinalReported bool
 	// StalledSince is the zero time unless the run is stalled: see stalled.
 	StalledSince time.Time
 	// ActiveJobs counts the run's jobs the job tool reports as queued or running.

@@ -2,6 +2,7 @@ package clientcli_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -30,8 +31,12 @@ func TestWaitOnARealDaemonTellsReportsApartAndSeesAStall(t *testing.T) {
 		t.Fatalf("wait --until report --after 1: exit %d, stderr %q", got.code, got.stderr)
 	}
 	contains(t, "stdout", got.stdout, "final report 2", "done")
+	// The lead has given its final report: it is finished, not stalled, so no stall is told.
 	got = w.run(context.Background(), "run", "get", run)
-	contains(t, "get", got.stdout, "stalled for")
+	contains(t, "get", got.stdout, "its lead has given its final report")
+	if strings.Contains(got.stdout, "stalled") {
+		t.Errorf("a lead that finished is called stalled: %s", got.stdout)
+	}
 }
 
 // Against a whole daemon: a run that is going has started, a run its lead has reported has a report,

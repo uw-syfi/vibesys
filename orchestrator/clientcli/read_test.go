@@ -133,6 +133,15 @@ func TestGetSaysHowLongARunHasStoodStill(t *testing.T) {
 		t.Fatalf("stalled_since missing from %q: %v", got.stdout, err)
 	}
 
+	finished := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
+	finished.FinalReported = true
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{finished}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)})}}))
+	got = w.run(context.Background(), "run", "get", "run-1")
+	contains(t, "summary", got.stdout, "running, its lead has given its final report")
+	if strings.Contains(got.stdout, "stalled") {
+		t.Errorf("a lead that finished is called stalled: %s", got.stdout)
+	}
+
 	moving := snapshotFrame(5, false, []*pb.Run{runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)})
 	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{moving}}))
 	if got := w.run(context.Background(), "run", "get", "run-1"); strings.Contains(got.stdout, "stalled") {

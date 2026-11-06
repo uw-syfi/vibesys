@@ -215,6 +215,9 @@ message Run {
   uint32 lead_reminders = 15;
   // What every turn of every agent of the run has cost, so far.
   Usage usage = 16;
+  // The lead's latest report is a final one and it has had no new input since: it has finished, so
+  // the run is not stalled and the lead is not reminded.
+  bool final_reported = 17;
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
