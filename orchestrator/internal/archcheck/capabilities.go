@@ -38,9 +38,10 @@ var boundaries = map[string]allowance{
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
 	"internal/production/cli_transport.go":       {reason: "the callee-owned discovery contract requires inspecting socket directory metadata", reads: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
-	"internal/production/holders.go":             {reason: "the holder's log, its pid and process groups until the session lock replaces them, and git worktree creation; process-boundaries.md, session lock", reads: 6, writes: 5, exec: 2},
+	"internal/production/holders.go":             {reason: "the holder's log, the agents' directory listing, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 3, writes: 2, exec: 3},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
 	"internal/production/sidecars.go":            {reason: "where the holder is installed, and its directory; process-boundaries.md, host control", reads: 2, writes: 1},
+	"internal/production/sessionprocesses.go":    {reason: "the lock a session's process holds and the SessionProcesses record it keeps beside it, which the host reads only to end what a gone process left; process-boundaries.md, process identity", reads: 2, writes: 2},
 	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},
 	"internal/store/sqlite.go":                   {reason: "the store's own database file", writes: 1},
@@ -50,7 +51,7 @@ var boundaries = map[string]allowance{
 // execFiles may import os/exec; their start counts are in boundaries.
 var execFiles = map[string]string{
 	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
-	"internal/production/holders.go":     "the lifetime of a session's process and git worktree creation",
+	"internal/production/holders.go":     "the lifetime of a session's process, ps for a group leader's start time, and git worktree creation",
 	"internal/production/startchecks.go": "start checks read the repository's history with git",
 }
 

@@ -183,13 +183,29 @@ not delivery bookkeeping. Names describe roles (`AgentSessionService`,
 
 ### Process identity
 
-A holder takes an exclusive lock on a file for its whole life and replaces a
-`SessionProcesses` message (its pid and the process groups of its agents)
-atomically. The host, to find out whether a holder is alive, tries the lock: if
-it gets it, the holder is dead and the groups are reaped; if not, the pid is
-trustworthy because its writer holds the lock. No `/proc` read, no text pid
-file, and no recycled pid is ever signalled. The daemon and its supervisor
-already work this way.
+A holder takes an exclusive lock on the file `SessionBootstrap.lock_file` names
+for its whole life, before anything else, and replaces a `SessionProcesses`
+message (its pid and the process groups of its agents) atomically at
+`SessionBootstrap.processes_file`. The host, to find out whether a holder is
+alive, tries the lock: if it gets it, the holder is dead and the groups are
+reaped; if not, the pid is trustworthy because its writer holds the lock. No
+`/proc` read, no text pid file, and no recycled pid is ever signalled. The
+daemon and its supervisor already work this way.
+
+Three consequences are held by tests:
+
+- A second holder for a session cannot take the lock and exits (after a few short
+  tries, because the host's own look at the lock lasts an instant), so a
+  host that crashed between starting a holder and the holder's listening starts
+  no second one: it sees the lock held and waits.
+- A command to a holder whose lock is free is a lost session with a reason, not
+  an `Unavailable` that a retry with backoff keeps asking about until a stream
+  ends.
+- A record that cannot be read ends nothing and is reported with its path.
+  The pid in the record is signalled only while the lock is held; the groups
+  only when it is free, and each only if its leader is gone or started when the
+  record says (`ps -o lstart=` as an opaque token, no `/proc`), because a group
+  id may have gone to another program since, as after a reboot.
 
 ### Environment contract
 
@@ -264,7 +280,6 @@ part they wait for.
 | --- | --- | --- |
 | Release manifest | `ReleaseManifest`, `release verify`, the host and installer reading it | hand path lists in the builder, installer and host; the `bin` folder rule |
 | Host control | `HostControlService`, `HostConfig`, host lock, `host status/stop/restart`, stable socket, minimal-environment start, client policy | the `holder` text file, the `ps` scan, the hash in the socket path, `VIBESYS_ORCHESTRATOR_{STATE_DIR,SIDECAR,MARKETPLACE,CLI}` on the host |
-| Session processes | `SessionProcesses` and the holder lock | `sidecar.pid`, `agent.pgids` |
 | Host-side prompts | prompt rendering in the host; text-only `StartTurn` | the sidecar's prompt templates |
 | Environment codec | the `env_name` option, `AgentContext`, `ToolServerCredentials`, `SkillEnvironment` | the Python env table and its golden |
 | Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule |

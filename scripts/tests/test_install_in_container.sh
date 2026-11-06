@@ -210,9 +210,19 @@ none_live() {
 }
 no_leftovers() { [ -z "$(pgrep -f 'scripted_sidecar|vibesys-host mcp' || true)" ]; }
 
-# run_pids: the sidecar and process-group pids the run's sessions recorded.
+# run_pids: the sidecar and process-group pids the run's sessions recorded in their SessionProcesses.
 run_pids() {
-  cat "$state"/sessions/*/*/sidecar.pid "$state"/sessions/*/*/agent.pgids 2>/dev/null | tr -s ' \n' '\n' | grep -E '^[0-9]+$' || true
+  "$home/current/sidecar/.venv/bin/python" - "$state"/sessions/*/*/processes.pb <<'PY' || true
+import sys
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
+
+for path in sys.argv[1:]:
+    try:
+        record = sc.SessionProcesses.FromString(open(path, "rb").read())
+    except OSError:
+        continue
+    print(record.holder_pid, *(g.id for g in record.agent_process_groups), sep="\n")
+PY
 }
 
 phase_product() {

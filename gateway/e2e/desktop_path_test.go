@@ -203,14 +203,10 @@ func running(pid int) bool {
 
 // pgids lists the process groups the sidecars recorded for their agents.
 func (r *rig) pgids() []int {
-	files, _ := filepath.Glob(filepath.Join(r.state, "sessions", "*", "[0-9]*", "agent.pgids"))
 	var out []int
-	for _, f := range files {
-		data, _ := os.ReadFile(f)
-		for _, field := range strings.Fields(string(data)) {
-			if n, err := strconv.Atoi(field); err == nil {
-				out = append(out, n)
-			}
+	for _, record := range r.sessionRecords() {
+		for _, group := range record.GetAgentProcessGroups() {
+			out = append(out, int(group.GetId()))
 		}
 	}
 	return out

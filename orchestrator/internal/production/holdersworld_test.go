@@ -44,9 +44,11 @@ type holderWorld struct {
 	// started counts the agents ever started, by socket.
 	started map[string]int
 
-	spawns, worktrees int
+	spawns, worktrees, reaps int
 	// crashes and deaths are the steps where the host panics and where the holder dies, each once.
 	crashes, deaths map[string]bool
+	// probes are the steps where the host looks at every place's lock, as its detection path does.
+	probes map[string]bool
 	// lateBinds is how many Dials find nothing although a spawned holder is on its way.
 	lateBinds int
 	// failSpawn, when set, is why a spawn fails.
@@ -62,7 +64,7 @@ func newHolderWorld() *holderWorld {
 	current := uint32(pb.SessionProtocolVersion_SESSION_PROTOCOL_VERSION_CURRENT)
 	return &holderWorld{
 		holders: map[string]*worldHolder{}, waiting: map[string]*worldHolder{}, agents: map[string]bool{}, started: map[string]int{},
-		crashes: map[string]bool{}, deaths: map[string]bool{}, protocol: current,
+		crashes: map[string]bool{}, deaths: map[string]bool{}, probes: map[string]bool{}, protocol: current,
 		outcome: func(*pb.OpenSessionRequest) []*pb.SessionEvent {
 			return []*pb.SessionEvent{{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
 				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
@@ -87,9 +89,17 @@ func holderParts(marketplace string) Parts {
 // at spends what is armed at a step: the holders die there, or the host does.
 func (w *holderWorld) at(step string) {
 	w.mu.Lock()
-	dies, crashes := w.deaths[step], w.crashes[step]
+	dies, crashes, probes := w.deaths[step], w.crashes[step], w.probes[step]
 	delete(w.deaths, step)
 	delete(w.crashes, step)
+	delete(w.probes, step)
+	var places []HolderPlace
+	for _, h := range w.waiting {
+		places = append(places, h.place)
+	}
+	for _, h := range w.holders {
+		places = append(places, h.place)
+	}
 	if dies {
 		for socket, h := range w.holders {
 			h.dead = true
@@ -98,6 +108,13 @@ func (w *holderWorld) at(step string) {
 		w.waiting = map[string]*worldHolder{}
 	}
 	w.mu.Unlock()
+	if probes {
+		// The host's detection path looks at the lock of every place, at this very point of a start.
+		for _, place := range places {
+			w.Alive(place)
+			_ = w.Reap(place)
+		}
+	}
 	if crashes {
 		panic(daemontest.Crash{At: step})
 	}
@@ -108,11 +125,15 @@ type worldHolder struct {
 	place    HolderPlace
 	protocol uint32
 	noHello  bool
-	dead     bool
-	opened   *pb.OpenSessionRequest
-	events   []*pb.SessionEvent
-	pending  []*pb.SessionEvent
-	commands []*pb.SessionCommand
+	// dead says the process is gone, so its lock is free. It may still be in the world's holders: a
+	// socket name a dead process left answers nothing, but Dial still finds the name.
+	dead bool
+	// unreachable says the process lives and its calls fail for now.
+	unreachable bool
+	opened      *pb.OpenSessionRequest
+	events      []*pb.SessionEvent
+	pending     []*pb.SessionEvent
+	commands    []*pb.SessionCommand
 }
 
 // bind makes what was spawned at a place listen, unless something already does there.
@@ -124,6 +145,8 @@ func (w *holderWorld) bind(socket string) {
 	delete(w.waiting, socket)
 	if _, taken := w.holders[socket]; !taken {
 		w.holders[socket] = h
+	} else {
+		h.dead = true // it could not take the lock the holder there has, and ended at once.
 	}
 }
 
@@ -151,6 +174,10 @@ func (w *holderWorld) Spawn(place HolderPlace, _ []string, bootstrap *pb.Session
 		defer w.mu.Unlock()
 		return nil, w.failSpawn
 	}
+	if w.aliveAt(place.Socket) {
+		w.mu.Unlock()
+		return nil, ErrHolderLives
+	}
 	w.spawns++
 	if err := protovalidate.Validate(bootstrap); err != nil {
 		w.mu.Unlock()
@@ -175,12 +202,21 @@ func (w *holderWorld) AwaitListening(_ context.Context, place HolderPlace, _ <-c
 	return nil
 }
 
-// Listening implements SessionHolders.
-func (w *holderWorld) Listening(place HolderPlace) bool {
+// aliveAt says a process holds the lock of the place whose socket this is: one that listens, or one
+// that was spawned and has not bound yet, which takes its lock before it binds.
+func (w *holderWorld) aliveAt(socket string) bool {
+	if h, ok := w.holders[socket]; ok && !h.dead {
+		return true
+	}
+	_, ok := w.waiting[socket]
+	return ok
+}
+
+// Alive implements SessionHolders.
+func (w *holderWorld) Alive(place HolderPlace) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, ok := w.holders[place.Socket]
-	return ok
+	return w.aliveAt(place.Socket)
 }
 
 // End implements SessionHolders.
@@ -197,21 +233,26 @@ func (w *holderWorld) End(place HolderPlace) error {
 }
 
 // Reap implements SessionHolders.
-func (w *holderWorld) Reap(place HolderPlace) {
+func (w *holderWorld) Reap(place HolderPlace) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	delete(w.agents, place.Socket)
+	if !w.aliveAt(place.Socket) {
+		delete(w.agents, place.Socket)
+		w.reaps++
+	}
+	return nil
 }
 
 // ReapAgent implements SessionHolders.
-func (w *holderWorld) ReapAgent(agentDirectory string) {
+func (w *holderWorld) ReapAgent(agentDirectory string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for socket := range w.agents {
-		if _, listening := w.holders[socket]; !listening && strings.HasPrefix(socket, agentDirectory+"/") {
+		if !w.aliveAt(socket) && strings.HasPrefix(socket, agentDirectory+"/") {
 			delete(w.agents, socket)
 		}
 	}
+	return nil
 }
 
 // Worktree implements SessionHolders.
@@ -221,9 +262,6 @@ func (w *holderWorld) Worktree(context.Context, string, string) error {
 	w.worktrees++
 	return nil
 }
-
-// Diagnostics implements SessionHolders.
-func (w *holderWorld) Diagnostics(HolderPlace) string { return "" }
 
 func (w *holderWorld) startedAgents() int {
 	w.mu.Lock()
@@ -249,7 +287,7 @@ type worldLink struct {
 }
 
 func (l *worldLink) alive() error {
-	if l.h.dead {
+	if l.h.dead || l.h.unreachable {
 		return status.Error(codes.Unavailable, "connection refused")
 	}
 	return nil

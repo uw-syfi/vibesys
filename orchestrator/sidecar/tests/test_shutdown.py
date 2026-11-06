@@ -8,13 +8,18 @@ import tempfile
 import threading
 from pathlib import Path
 
+import protovalidate
 import pytest
 from agentshim import AssistantText
+from hypothesis import given
+from hypothesis import strategies as st
 
 from tests import helpers as h
 from tests.fakes import FaultyFiles, FileFaultError, ScriptedDriver, TurnScript
 from vs_sidecar.engine import Engine
-from vs_sidecar.main import AgentGroups, agent_groups, child_pids, work
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
+from vs_sidecar.holder import SessionProcessesFile
+from vs_sidecar.main import agent_groups, child_pids, process_started, work
 from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import FileStore, MemoryStore
 
@@ -77,19 +82,83 @@ def test_the_socket_is_for_the_owner_alone_whatever_the_umask() -> None:
     assert held == 0
 
 
-def test_agent_groups_names_the_live_groups_and_is_emptied_when_the_agent_is_closed(
+def _read(path: Path) -> sc.SessionProcesses:
+    return sc.SessionProcesses.FromString(path.read_bytes())
+
+
+def test_the_record_names_the_live_groups_and_is_emptied_when_the_agent_is_closed(
     tmp_path: Path,
 ) -> None:
     live = [41, 42]
-    path = tmp_path / "agent.pgids"
-    groups = AgentGroups(path, lambda: list(live))
+    path = tmp_path / "processes.pb"
+    groups = SessionProcessesFile(path, 7, lambda: list(live), lambda pid: f"started {pid}")
     groups.record()
-    assert path.read_text() == "41\n42\n"
+    assert _read(path) == sc.SessionProcesses(
+        holder_pid=7,
+        agent_process_groups=[
+            sc.AgentProcessGroup(id=41, leader_started="started 41"),
+            sc.AgentProcessGroup(id=42, leader_started="started 42"),
+        ],
+    )
     live.append(43)  # the provider respawned the agent mid-turn
     groups.record()
-    assert path.read_text() == "41\n42\n43\n"
+    assert [g.id for g in _read(path).agent_process_groups] == [41, 42, 43]
     groups.clear()
-    assert path.read_text() == ""
+    assert _read(path) == sc.SessionProcesses(holder_pid=7)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["processes.pb"]
+
+
+@given(live=st.lists(st.integers(min_value=-5, max_value=2**32 - 1), max_size=6))
+def test_the_record_is_always_one_the_host_accepts(live: list[int]) -> None:
+    with tempfile.TemporaryDirectory(prefix="vs") as directory:
+        path = Path(directory) / "processes.pb"
+        SessionProcessesFile(path, 7, lambda: live, lambda pid: f"s{pid}").record()
+        record = _read(path)
+        assert protovalidate.validate(record) is None
+        assert record.holder_pid == 7
+        assert [g.id for g in record.agent_process_groups] == [group for group in live if group > 1]
+        assert all(g.leader_started == f"s{g.id}" for g in record.agent_process_groups)
+
+
+def test_a_leaders_start_time_is_read_once_and_again_only_if_it_could_not_be_read(
+    tmp_path: Path,
+) -> None:
+    reads: list[int] = []
+    answers = iter(["", "t1", "never read again"])
+
+    def started(pid: int) -> str:
+        reads.append(pid)
+        return next(answers)
+
+    path = tmp_path / "processes.pb"
+    groups = SessionProcessesFile(path, 7, lambda: [41], started)
+    groups.record()
+    assert _read(path).agent_process_groups[0].leader_started == ""
+    groups.record()
+    groups.record()
+    assert _read(path).agent_process_groups[0].leader_started == "t1"
+    assert reads == [41, 41]
+
+
+def test_the_start_time_of_this_process_is_the_same_each_time_it_is_read_and_missing_for_none() -> (
+    None
+):
+    first = process_started(os.getpid())
+    assert first
+    assert process_started(os.getpid()) == first
+    assert process_started(2**22 + 12345) == ""
+
+
+def test_without_a_proc_the_children_come_from_the_process_table(tmp_path: Path) -> None:
+    # The form `ps -A -o pid=,ppid=` prints on macOS: padded columns, the parent last.
+    table = f"    1     0\n  300   {os.getpid()}\n  301   300\n  ignored\n{os.getpid() + 1:>5} {os.getpid()}\n"
+    assert child_pids(tmp_path, lambda: table) == sorted([300, os.getpid() + 1])
+
+
+def test_a_proc_that_lists_no_children_is_not_trusted_to_have_none(tmp_path: Path) -> None:
+    (tmp_path / "self" / "task" / "1").mkdir(parents=True)  # no `children` file: an older kernel
+    table = f"  300   {os.getpid()}\n"
+    assert child_pids(tmp_path, lambda: table) == [300]
 
 
 def test_a_store_failure_on_a_command_thread_is_raised_by_the_worker_and_never_closes_in_memory() -> (

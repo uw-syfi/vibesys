@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from collections import deque
 from pathlib import Path
@@ -43,8 +44,8 @@ from vs_sidecar.driver import (
 )
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
+from vs_sidecar.holder import write_atomically
 from vs_sidecar.main import main as holder_main
-from vs_sidecar.main import write_atomically
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,6 +58,9 @@ CONVERSATION = "11111111-1111-4111-8111-111111111111"
 TURNS = 8
 #: The environment variable that turns the scripted agent from a replier into an actor.
 MODE_VARIABLE = "VIBESYS_E2E_SCRIPT"
+#: The environment variable that gives the session a real process in a group of its own, standing in
+#: for the agent, so that a test can kill this process and look for what it leaves behind.
+STAND_IN_VARIABLE = "VIBESYS_E2E_STAND_IN_AGENT"
 #: The provider's config home variable per provider: the one place the plugin must be installed.
 HOMES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 
@@ -95,9 +99,8 @@ def dump_spawns(executor: FakeExecutor, provider: str, path: Path) -> None:
         for spawn in executor.spawns
     ]
     commands = [list(request.argv) for request in executor.requests]
-    write_atomically(
-        path, json.dumps({"provider": provider, "spawns": spawns, "commands": commands}, indent=2)
-    )
+    text = json.dumps({"provider": provider, "spawns": spawns, "commands": commands}, indent=2)
+    write_atomically(path, text.encode())
 
 
 def replying_executor() -> tuple[FakeExecutor, str]:
@@ -180,7 +183,7 @@ def _record_open(request: sc.OpenSessionRequest, state_dir: Path) -> None:
     record.CopyFrom(request)
     for tool in record.tools:
         tool.env.clear()
-    write_atomically(state_dir / "open.json", json_format.MessageToJson(record))
+    write_atomically(state_dir / "open.json", json_format.MessageToJson(record).encode())
 
 
 def scripted_drivers(
@@ -188,6 +191,10 @@ def scripted_drivers(
 ) -> Callable[[Callable[[RawFrame], None]], AgentshimDriver]:
     """Drivers over a scripted provider, in the mode the environment names."""
     _record_open(request, state_dir)
+    if os.environ.get(STAND_IN_VARIABLE):
+        # lint-waiver: LW-770102 [S607]; a fixed program in a test fixture, which is its purpose.
+        # > The stand-in must be a real process in a group of its own, which nothing else here makes.
+        subprocess.Popen(["sleep", "600"], start_new_session=True)  # noqa: S607
     pending: deque[orch.Message] = deque()
     if os.environ.get(MODE_VARIABLE) == "act":
         executor, _provider = acting_executor(request, state_dir, pending)

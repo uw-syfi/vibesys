@@ -56,6 +56,25 @@ func bounded(b Bounds, ctx context.Context, call func(context.Context) error) er
 // ErrSidecarGone says a session's sidecar does not exist: it never started, or it died.
 var ErrSidecarGone = errors.New("daemon: the session's sidecar is gone")
 
+// GoneError is ErrSidecarGone with the reason the sidecar is known to be gone, which the session's
+// loss then carries. A bare ErrSidecarGone says only that it is.
+type GoneError struct{ Reason string }
+
+func (e *GoneError) Error() string { return ErrSidecarGone.Error() + ": " + e.Reason }
+
+// Is makes a *GoneError an ErrSidecarGone.
+func (e *GoneError) Is(target error) bool { return target == ErrSidecarGone }
+
+// lostBecause is what a session's loss says: what the daemon was doing, and the reason the sidecar
+// gave for being gone when it gave one.
+func lostBecause(doing string, err error) string {
+	var gone *GoneError
+	if errors.As(err, &gone) {
+		return doing + ": " + gone.Reason
+	}
+	return doing
+}
+
 // ErrIdle is what an EventStream returns when it has nothing ready. The caller asks again on a
 // later step. A real stream, which blocks in a goroutine of its own, hands the daemon what it has
 // buffered and returns ErrIdle when the buffer is empty, so the daemon never waits on one.

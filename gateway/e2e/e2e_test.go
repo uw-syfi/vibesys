@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 )
@@ -232,18 +234,30 @@ func (r *rig) watchUntil(what string, after uint64, want func(line string) bool)
 	r.t.Fatalf("watch ended without %s within %s; it printed:\n%s\nserve log:\n%s", what, bound, strings.Join(seen, "\n"), r.serveLog())
 }
 
-// sidecarPids lists the sidecar processes the launcher recorded.
-func (r *rig) sidecarPids() []int {
-	files, _ := filepath.Glob(filepath.Join(r.state, "sessions", "*", "*", "sidecar.pid"))
-	var pids []int
+// sessionRecords are the SessionProcesses records the session processes keep.
+func (r *rig) sessionRecords() []*pb.SessionProcesses {
+	files, _ := filepath.Glob(filepath.Join(r.state, "sessions", "*", "[0-9]*", "processes.pb"))
+	var records []*pb.SessionProcesses
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			continue
 		}
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			pids = append(pids, pid)
+		var record pb.SessionProcesses
+		if err := proto.Unmarshal(data, &record); err != nil {
+			r.t.Errorf("%s is not a SessionProcesses: %v", f, err)
+			continue
 		}
+		records = append(records, &record)
+	}
+	return records
+}
+
+// sidecarPids lists the sidecar processes the launcher recorded.
+func (r *rig) sidecarPids() []int {
+	var pids []int
+	for _, record := range r.sessionRecords() {
+		pids = append(pids, int(record.GetHolderPid()))
 	}
 	return pids
 }
@@ -317,6 +331,42 @@ func TestAHostTakesNoConfigurationFromItsEnvironment(t *testing.T) {
 	r.watchUntil("the run ended", 0, func(line string) bool {
 		return strings.Contains(line, started.RunID) && strings.Contains(line, "RUN_STATUS_ENDED")
 	})
+}
+
+// A session process killed without warning cannot end its agent. The host learns it is gone from its
+// lock, with no /proc and no pid it has to trust, ends the agent's process groups, and loses the
+// session with the reason.
+func TestAKilledSessionProcessIsFoundGoneAndItsAgentIsReaped(t *testing.T) {
+	r := newRig(t)
+	// The session process gets a real process in a group of its own, standing in for the agent.
+	r.holderEnv = append(r.holderEnv, "VIBESYS_E2E_STAND_IN_AGENT=1")
+	repository := demoRepository(t)
+
+	r.serve()
+	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello", "--json")
+	r.watchUntil("the lead's first reply", started.Sequence, func(line string) bool { return strings.Contains(line, "reply 1") })
+
+	records := r.sessionRecords()
+	if len(records) != 1 || len(records[0].GetAgentProcessGroups()) == 0 {
+		t.Fatalf("want one session process that recorded its agent's group, found %v", records)
+	}
+	holder, groups := int(records[0].GetHolderPid()), records[0].GetAgentProcessGroups()
+	if err := syscall.Kill(holder, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	r.watchUntil("the session lost, with why", 0, func(line string) bool { return strings.Contains(line, "no longer running") })
+
+	for _, pid := range untilNoneRunning(func() []int {
+		var left []int
+		for _, group := range groups {
+			if running(int(group.GetId())) {
+				left = append(left, int(group.GetId()))
+			}
+		}
+		return left
+	}) {
+		t.Errorf("agent process group %d still runs after its session process was killed", pid)
+	}
 }
 
 func TestARunSurvivesADaemonRestart(t *testing.T) {

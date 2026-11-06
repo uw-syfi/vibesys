@@ -6,15 +6,17 @@ this process in its own session so it outlives the host, says ``Hello``, and sen
 the session did is in the state directory, so a restarted process can tell the host what happened.
 
 The agent is a child of this process and leads a process group of its own. A process that is killed
-without warning cannot stop it, so the state directory names both for the host, which reaps them
-(see the README, "Process lifetime"): ``sidecar.pid`` and ``agent.pgids``.
+without warning cannot stop it, so the process holds an exclusive lock for its whole life and keeps a
+``SessionProcesses`` record of its pid and the agent's groups, both at paths the bootstrap names. The
+host tries the lock to learn whether this process lives, and reaps the groups when it is free (see
+the README, "Process lifetime").
 """
 
 from __future__ import annotations
 
 import os
 import signal
-import socket as sockets
+import subprocess
 import sys
 import threading
 import uuid
@@ -28,7 +30,7 @@ from google.protobuf.message import DecodeError
 from vs_sidecar.driver import AgentshimDriver, build_session
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
-from vs_sidecar.holder import SessionHolder
+from vs_sidecar.holder import HolderLock, HolderLockedError, SessionHolder, SessionProcessesFile
 from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import FileStore
 
@@ -57,9 +59,8 @@ STOP_SECONDS = 30.0
 #: back well within this and opens it; one that does not has left nothing that needs it. It is as long
 #: as the host gives a session to open (``core.LaunchTimeout``).
 OPEN_WAIT_SECONDS = 300.0
-#: The state directory's names for the process ids the host reaps.
-PIDFILE = "sidecar.pid"
-GROUPS_FILE = "agent.pgids"
+#: The program that lists every process and its parent, where there is no ``/proc`` to read.
+PS = "/bin/ps"
 
 
 class BootstrapError(ValueError):
@@ -81,34 +82,75 @@ def read_bootstrap(stream: BinaryIO) -> sc.SessionBootstrap:
     return bootstrap
 
 
-def child_pids(proc: Path = Path("/proc")) -> list[int]:
-    """The process ids of this process's children, read from *proc* (Linux)."""
+def child_pids(proc: Path = Path("/proc"), table: Callable[[], str] | None = None) -> list[int]:
+    """The process ids of this process's children.
+
+    They are read from *proc* when the system has one that lists them (Linux). Otherwise, as on macOS,
+    they come from the process table *table* gives, in the form of ``ps -A -o pid=,ppid=``.
+    """
     found: list[int] = []
+    listed = False
     for children in sorted(proc.glob("self/task/*/children")):
+        listed = True
         try:
             found.extend(int(token) for token in children.read_text().split())
         except (OSError, ValueError):
             continue
-    return sorted(set(found))
+    if listed:
+        return sorted(set(found))
+    return sorted(_children_in(table() if table is not None else _process_table(), os.getpid()))
 
 
-def agent_groups(proc: Path = Path("/proc")) -> list[int]:
+def _process_table() -> str:
+    """Every process and its parent, one ``pid ppid`` pair a line."""
+    # lint-waiver: LW-770101 [S603]; a fixed program with fixed arguments and no input of ours.
+    # > The alternative is a libproc binding through ctypes, which would be the only unchecked foreign
+    # > call in this process; ps is the same table on Linux and macOS and its output is a fixed shape.
+    return subprocess.run(  # noqa: S603
+        [PS, "-A", "-o", "pid=,ppid="], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def process_started(pid: int) -> str:
+    """When the process *pid* started, as ``ps`` prints it in a fixed locale and zone.
+
+    The text is an opaque token the host compares for equality, read the same way on Linux and macOS
+    with no ``/proc``. It is empty when it cannot be read, which the host takes to prove nothing.
+    """
+    # lint-waiver: LW-770104 [S603]; a fixed program with a number for its one argument.
+    # > Same reason as the process table above: ps is the one source that is the same on Linux and macOS.
+    done = subprocess.run(  # noqa: S603
+        [PS, "-o", "lstart=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"LC_ALL": "C", "TZ": "UTC"},
+    )
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _children_in(table: str, parent: int) -> list[int]:
+    children: list[int] = []
+    for line in table.splitlines():
+        try:
+            pid, ppid = line.split()
+        except ValueError:
+            continue
+        if ppid == str(parent):
+            children.append(int(pid))
+    return children
+
+
+def agent_groups(proc: Path = Path("/proc"), table: Callable[[], str] | None = None) -> list[int]:
     """The process groups led by this process's children: the agent, which starts a session."""
     groups: list[int] = []
-    for pid in child_pids(proc):
+    for pid in child_pids(proc, table):
         try:
             if os.getpgid(pid) == pid:
                 groups.append(pid)
         except ProcessLookupError:
             continue
     return groups
-
-
-def write_atomically(path: Path, text: str) -> None:
-    """Replace *path* with *text* so a reader sees the old file or the new one."""
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(text)
-    temporary.replace(path)
 
 
 def real_drivers(request: sc.OpenSessionRequest, _state: Path) -> DriverFactory:
@@ -151,33 +193,7 @@ def work(
         wakeup.wait(seen, IDLE_TICK_SECONDS)
 
 
-class AgentGroups:
-    """Keeps ``agent.pgids`` naming the process groups of this process's children.
-
-    One thread calls ``record``; ``clear`` runs after that thread has stopped.
-    """
-
-    def __init__(self, path: Path, groups: Callable[[], list[int]] = agent_groups) -> None:
-        """Write to *path* the groups *groups* finds."""
-        self._path = path
-        self._groups = groups
-        self._written: str | None = None
-
-    def record(self) -> None:
-        """Rewrite the file if the groups changed."""
-        self._write("".join(f"{pgid}\n" for pgid in self._groups()))
-
-    def clear(self) -> None:
-        """Name no group: the agent is closed, so a later reap must kill nothing."""
-        self._write("")
-
-    def _write(self, text: str) -> None:
-        if text != self._written:
-            write_atomically(self._path, text)
-            self._written = text
-
-
-def keep_recording(groups: AgentGroups, done: threading.Event) -> None:
+def keep_recording(groups: SessionProcessesFile, done: threading.Event) -> None:
     """Record *groups* every tick until *done*.
 
     An agent the provider respawns mid-turn is named within a tick of its start.
@@ -185,16 +201,6 @@ def keep_recording(groups: AgentGroups, done: threading.Event) -> None:
     groups.record()
     while not done.wait(IDLE_TICK_SECONDS):
         groups.record()
-
-
-def listening(socket: Path) -> bool:
-    """Whether a process already listens on *socket*."""
-    with sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM) as probe:
-        try:
-            probe.connect(str(socket))
-        except OSError:
-            return False
-    return True
 
 
 def leave_unopened() -> NoReturn:
@@ -219,18 +225,37 @@ def serve_holder(
     after that cleanup.
     """
     state = Path(bootstrap.state_directory)
-    socket = Path(bootstrap.listen_socket)
     state.mkdir(parents=True, exist_ok=True)
-    if listening(socket):
-        sys.stderr.write(f"vs_sidecar: another process already listens on {socket}\n")
+    # First, and for the whole life of the process: a second process for this session ends here, at once,
+    # whether or not the first one listens yet.
+    try:
+        lock = HolderLock.take(Path(bootstrap.lock_file))
+    except HolderLockedError as error:
+        sys.stderr.write(f"vs_sidecar: another process lives for this session: {error}\n")
         leave()
+    with lock:
+        _serve_locked(bootstrap, drivers, open_wait=open_wait, leave=leave)
+
+
+def _serve_locked(
+    bootstrap: sc.SessionBootstrap,
+    drivers: SessionDrivers,
+    *,
+    open_wait: float,
+    leave: Callable[[], NoReturn],
+) -> None:
+    """Serve while holding the lock, which the caller frees when this returns."""
+    state = Path(bootstrap.state_directory)
+    socket = Path(bootstrap.listen_socket)
     wakeup = Wakeup()
     holder = SessionHolder(
         lambda request: Engine(
             request.session, FileStore.at(state), drivers(request, state), wakeup.notify
         )
     )
-    groups = AgentGroups(state / GROUPS_FILE)
+    groups = SessionProcessesFile(
+        Path(bootstrap.processes_file), os.getpid(), agent_groups, process_started
+    )
     ending = _Ending()
 
     def stopped(*_: object) -> None:
@@ -241,7 +266,7 @@ def serve_holder(
     for number in (signal.SIGTERM, signal.SIGINT):
         signal.signal(number, stopped)
     # Before the socket answers, so whoever reaches this process finds the pid that goes with it.
-    write_atomically(state / PIDFILE, f"{os.getpid()}\n")
+    groups.clear()
     server = serve(holder, wakeup, socket)
     engine = holder.wait_opened(open_wait)
     if engine is None:
@@ -261,7 +286,7 @@ def run_session(
     engine: Engine,
     wakeup: Wakeup,
     server: grpc.Server,
-    groups: AgentGroups,
+    groups: SessionProcessesFile,
     ending: _Ending,
 ) -> None:
     """Run *engine*'s worker until the session ends or it is stopped, then wind down."""

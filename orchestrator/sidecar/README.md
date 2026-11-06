@@ -140,18 +140,30 @@ start. The daemon's own timer (`core.LaunchTimeout`) ends a session that never s
 The agent is a child of the sidecar and leads a process group of its own (agentshim starts it in a
 new session). If the sidecar is stopped with SIGTERM or SIGINT, or fails (a store write error, a
 bug), it interrupts the running turn, closes the agent, and exits. If it is killed with SIGKILL it
-cannot, and the agent runs until its stdin closes, so **the daemon reaps it**. The state
-directory has what it needs:
+cannot, and the agent runs until its stdin closes, so **the daemon reaps it**. The bootstrap names
+two files for this, and the sidecar uses them as follows:
 
-- `sidecar.pid`: the sidecar's process id.
-- `agent.pgids`: one process-group id per line, for each group led by a direct child of the
-  sidecar (the agent). It is checked every 0.25 s, including during a turn, and rewritten when
-  the set changes; a sidecar that exits on its own empties it after closing the agent.
+- `lock_file`: the sidecar takes an exclusive `flock` on it first, before anything else, on a
+  descriptor its children do not inherit, and holds it until the process ends. The system frees it
+  however the process ends, so a free lock means the sidecar is gone, whatever any file says. A
+  second process for the same session cannot take it and exits, whether or not the first one
+  listens yet. The host holds the lock for an instant when it looks, so a busy lock is tried a few
+  times (about half a second) before the process concludes that another really lives.
+- `processes_file`: a `SessionProcesses` message (the sidecar's pid and the process group of each
+  direct child, the agent, each with the start time of its leader as `ps -o lstart=` prints it), replaced atomically while the lock is held. It is written before the
+  socket answers, checked every 0.25 s including during a turn, and rewritten when the set changes;
+  a sidecar that exits on its own empties the groups after closing the agent. Where the system has
+  no `/proc` that lists children (macOS), the children come from `ps -A -o pid=,ppid=`.
 
-To clean up a sidecar that is gone, the daemon sends SIGKILL to each group in `agent.pgids`
-(`kill(-pgid)`) after checking that nothing answers on the session's socket, and before it opens a
-resumed session on the same worktree, so no old agent edits the worktree under the new one.
-Nothing in the sidecar does this; the daemon owns reaping.
+The daemon tries the lock to learn whether the sidecar lives. If it gets it, the sidecar is gone:
+it sends SIGKILL to each group in the record (`kill(-pgid)`) whose leader is gone or started when the
+record says (a leader that started at another time means the id went to another program, for
+instance after a reboot, and the group is left alone and logged), removes the record, and starts the
+next process, or loses the session with the reason, before it opens a resumed session on the same
+worktree, so no old agent edits the worktree under the new one. If the lock is held, the sidecar
+lives and the record's pid is its own, so the daemon may signal that pid and no other. A record that
+cannot be read is reported with its path and ends nothing. Nothing in the sidecar reaps; the daemon
+owns it.
 
 ## Checks
 
