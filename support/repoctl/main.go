@@ -258,7 +258,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 		return runCheckGroup(root, g, *group, *collection, *dryRun, runner)
 	case "test":
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
-		base := fs.String("base", g.DefaultBase, "Base revision")
+		base := fs.String("base", "origin/"+g.DefaultBase, "Base revision (default: the remote default branch, which a worktree keeps current; the local branch of that name is often stale)")
 		head := fs.String("head", "HEAD", "Head revision")
 		event := fs.String("event", "pull_request", "Event type")
 		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
@@ -280,6 +280,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 			return fmt.Errorf("--coverage-only cannot combine with --checks-only; --coverage-test requires --coverage-only")
 		}
 		g = g.forLocalTest()
+		fmt.Printf("repoctl test: comparing %s with %s\n", *head, *base)
 		p, err := localChangePlan(root, configPath, g, *base, *head, *event)
 		if err != nil {
 			return err
