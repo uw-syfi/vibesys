@@ -20,6 +20,9 @@
     "StatusResponse.checkout_directory",
     "StatusResponse.pid"
   ],
+  "proto/vibesys/cli/v1/shared.proto": [
+    "LeaseRecord.pid"
+  ],
   "proto/vibesys/cli/v1/store.proto": [
     "EventFile",
     "FormatFile",
