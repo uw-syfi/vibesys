@@ -260,8 +260,15 @@ type (
 	}
 	// HandoffReminder asks an agent that ended a turn without a handoff to post one.
 	HandoffReminder struct{}
-	// LeadIdleReminder tells the lead its run has stood still for Idle.
-	LeadIdleReminder struct{ Idle time.Duration }
+	// LeadIdleReminder tells the lead its run has stood still for Idle, and how far it has got:
+	// how many subagents it has started in all, and how many of those were workers and judges. The
+	// counts are what the host knows, and they let the words name the step the run is waiting on.
+	LeadIdleReminder struct {
+		Idle      time.Duration
+		Subagents uint32
+		Workers   uint32
+		Judges    uint32
+	}
 	// SubagentSettled tells the lead a subagent stopped working without a handoff.
 	SubagentSettled struct {
 		Agent  AgentID

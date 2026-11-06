@@ -102,7 +102,12 @@ type (
 		Detail string
 	}
 
-	leadIdleReminderData struct{ IdleMinutes uint32 }
+	leadIdleReminderData struct {
+		IdleMinutes uint32
+		Subagents   uint32
+		Workers     uint32
+		Judges      uint32
+	}
 )
 
 // dataOf names the template of m's body and gathers the data it renders.
@@ -135,7 +140,9 @@ func dataOf(m core.Message) (string, any, error) {
 		// Whole seconds in a uint32, as the message is stored, so the minutes do not depend on
 		// whether the message was read back or is still the one that was built.
 		seconds := uint32(b.Idle / time.Second)
-		return "lead_idle_reminder", leadIdleReminderData{IdleMinutes: seconds / 60}, nil
+		return "lead_idle_reminder", leadIdleReminderData{
+			IdleMinutes: seconds / 60, Subagents: b.Subagents, Workers: b.Workers, Judges: b.Judges,
+		}, nil
 	}
 	return "", nil, fmt.Errorf("message %s has no body: %w", m.ID, ErrNoPrompt)
 }

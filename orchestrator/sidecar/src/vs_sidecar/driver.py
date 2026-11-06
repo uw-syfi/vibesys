@@ -419,6 +419,8 @@ def build_session(
         resume_id=request.resume_token.decode() or None,
         partial_text=True,
         disable_subagents=True,
+        # The host starts every turn: a wake-up an agent scheduled would never fire.
+        disable_self_scheduling=True,
         raw_sink=raw_sink,
         new_conversation_id=new_conversation_id,
     )

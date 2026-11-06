@@ -1,0 +1,5 @@
+Nothing has happened in this run for 10 minutes: no agent is working, no job is running and no message is waiting for you. Started so far: subagents 2, workers 0, judges 0.
+
+No worker has been started, so no plan has been tried. A plan goes to a worker; you do not implement it yourself. Call `spawn_agent` with role `worker` for the plan you chose, then end your turn and wait for the handoff.
+
+If the finishing rule of the skill is met, or you cannot go on, send a report of kind `final` with `post_report` that says which. Do not end your turn with open plans and nothing outstanding, and do not end it to wait on a timer: nothing will wake you.

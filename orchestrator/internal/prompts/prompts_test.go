@@ -20,9 +20,10 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
-// The goldens in testdata are what the Python renderer this package replaced wrote for each
-// message.json beside them, so they pin the words agents were sent before the move. Each case is a
-// message as the contract states it (protojson) and the prompt it renders to.
+// The goldens in testdata pin the words agents are sent. Each case is a message as the contract
+// states it (protojson) and the prompt it renders to. The lead idle reminder's were written for
+// this package; the others were written by the Python renderer it replaced, so they also pin the
+// words as they were before the move.
 
 func goldenCases(t *testing.T) []string {
 	t.Helper()
@@ -168,7 +169,9 @@ func bodies(r *rand.Rand) []core.Message {
 			Agent: core.AgentID(text(r, "agent:", 3)), Status: statuses[r.IntN(len(statuses))], Detail: optional(r, "detail:"),
 		}),
 		envelope(core.HandoffReminder{}),
-		envelope(core.LeadIdleReminder{Idle: time.Duration(r.Uint32()) * time.Second}),
+		envelope(core.LeadIdleReminder{
+			Idle: time.Duration(r.Uint32()) * time.Second, Subagents: r.Uint32(), Workers: r.Uint32(), Judges: r.Uint32(),
+		}),
 	}
 }
 
@@ -317,7 +320,8 @@ func TestAMessageRendersTheSameAfterTheRoundTripThroughItsStoredForm(t *testing.
 	for range 500 {
 		for _, m := range bodies(r) {
 			if idle, ok := m.Body.(core.LeadIdleReminder); ok {
-				m.Body = core.LeadIdleReminder{Idle: idle.Idle + time.Duration(r.IntN(1000))*time.Millisecond}
+				idle.Idle += time.Duration(r.IntN(1000)) * time.Millisecond
+				m.Body = idle
 			}
 			want, err := prompts.Render(m)
 			if err != nil {
@@ -344,6 +348,53 @@ func TestTheIdleReminderNamesWholeMinutesOfIdleness(t *testing.T) {
 		}
 		if want := fmt.Sprintf("for %d minutes:", int(idle/time.Minute)); !strings.Contains(got, want) {
 			t.Fatalf("idle %v rendered %q, want it to say %q", idle, got, want)
+		}
+	}
+}
+
+// The reminder names the step the run is waiting on, from what the host counted, and always says
+// how to finish.
+func TestTheIdleReminderNamesTheNextStepFromTheCounts(t *testing.T) {
+	r := rand.New(rand.NewPCG(15, 16))
+	for range 2000 {
+		body := core.LeadIdleReminder{Idle: time.Duration(r.IntN(7200)) * time.Second}
+		switch r.IntN(4) {
+		case 0:
+		case 1:
+			body.Subagents = 1 + r.Uint32N(1000)
+		case 2:
+			body.Workers = 1 + r.Uint32N(1000)
+			body.Subagents = body.Workers + r.Uint32N(1000)
+		case 3:
+			body.Judges = 1 + r.Uint32N(1000)
+			body.Workers = 1 + r.Uint32N(1000)
+			body.Subagents = body.Workers + body.Judges
+		}
+		got, err := prompts.Render(core.Message{Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want string
+		switch {
+		case body.Subagents == 0:
+			want = "You have started no subagent"
+		case body.Workers == 0:
+			want = "No worker has been started"
+		case body.Judges == 0:
+			want = "No judge has been started"
+		default:
+			want = "Workers and judges have reported"
+		}
+		if !strings.Contains(got, want) {
+			t.Fatalf("%+v rendered %q, want it to say %q", body, got, want)
+		}
+		if !strings.Contains(got, fmt.Sprintf("subagents %d, workers %d, judges %d", body.Subagents, body.Workers, body.Judges)) {
+			t.Fatalf("%+v rendered %q without its counts", body, got)
+		}
+		for _, phrase := range []string{"`final`", "open plans and nothing outstanding"} {
+			if !strings.Contains(got, phrase) {
+				t.Fatalf("%+v rendered %q without %q", body, got, phrase)
+			}
 		}
 	}
 }

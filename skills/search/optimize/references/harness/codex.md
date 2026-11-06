@@ -25,7 +25,9 @@ its output and exit code.
 ## Schedule periodic work
 
 Codex CLI has no scheduler a running session can use; scheduled tasks live in the Codex app.
-Instead, report whenever a subagent or background command finishes, and at each wait.
+Instead, give a progress report after a promotion, and at a wait when an hour has passed since
+the last. There is no report tool: a report is a message to the user. Give the final report as
+your last message, start it with the words "Final report", and end the turn.
 
 ## Wait for work without polling
 

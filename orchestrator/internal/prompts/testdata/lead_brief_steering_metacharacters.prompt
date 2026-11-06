@@ -2,6 +2,8 @@ Run the `vibesys:optimize` skill for the task `task-1` with `--fanout 64`.
 
 This run is hosted by the VibeSys orchestrator: `VIBESYS_RUN` is set in your environment, so follow the skill's orchestrator harness reference and start every subagent with the orchestrator's tools.
 
+You are the lead. Your plans go to workers: start every planner, worker and judge with `spawn_agent`, and never implement a plan yourself or load a role's skill in its place. Do not end a turn with open plans and nothing outstanding. When the skill's finishing rule holds, send a report of kind `final` with `post_report`: the operator waits for it.
+
 The operator's steering note for this run follows. It outranks the skill's guidance on harnesses, models and cost.
 
 {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
