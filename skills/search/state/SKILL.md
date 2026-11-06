@@ -29,7 +29,8 @@ All worktrees of the repository share one store per task, so any agent sees the 
 
 - Result branch (the optimization's "main"): `vibesys/result/<task>`. The lead creates it once, at
   the base commit (for a base that fails the check, at the bootstrap commit:
-  `vibesys:optimize`), and never checks it out. Only `vibesys-cli promote` moves it. The CLI
+  `vibesys:optimize`) with `git branch <name> <sha>`, and never checks it out (`git checkout -b`
+  and `git switch -c` would check it out in the user's repository). Only `vibesys-cli promote` moves it. The CLI
   fixes this name. Git cannot create it while a local branch named exactly `vibesys` exists
   (`cannot lock ref ... 'refs/heads/vibesys' exists`). In that case, if `vibesys` only tracks
   a remote branch at the same commit, delete it (`git branch -d vibesys`); otherwise stop and
@@ -40,7 +41,9 @@ All worktrees of the repository share one store per task, so any agent sees the 
   `<name>` is the repository directory's name (for a repository at `/work/kv`, a worktree is
   `/work/kv.worktrees/plan-3`, never `/work/kv/kv.worktrees/plan-3`, which git reports as an
   untracked directory of the user's checkout). Never under `/tmp`. Add with `git worktree add`,
-  one per plan, one per judge or profile question. The run does not remove these when it ends, so
+  one per plan, one per judge or profile question. A judge's or a profile's worktree goes in
+  `<name>.worktrees/` too, never under `.vibesys/` or anywhere else inside the repository. The run
+  does not remove these when it ends, so
   the lead removes a plan's worktree when the plan closes (see Housekeeping). Each brief
   names its worktree. `git worktree list` is the truth about which exist. A new worktree has its
   submodules empty: when the repository has any (`.gitmodules`), run

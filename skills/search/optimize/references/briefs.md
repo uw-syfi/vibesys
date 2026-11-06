@@ -58,7 +58,9 @@ Hand back: claim, commit SHA, job ids and the compare output, what you learned, 
 
 ## Judge
 
-Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.
+Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`,
+with `<path>` in `<name>.worktrees/` beside the repository (`vibesys:state`), never inside it.
+Remove it when the verdict is in.
 When the repository has submodules (`.gitmodules`), run `git -C <path> submodule update --init --recursive`
 too, so the judge can read their source.
 
@@ -83,7 +85,7 @@ Hand back: the commit, the parts you could not apply and why, the checks you ran
 
 ## Profile
 
-Read-only worktree of the revision, as for the judge. When the question needs the program to
+Read-only worktree of the revision, placed and removed as for the judge. When the question needs the program to
 expose something it does not (a profiler endpoint, symbols), create a branch and worktree for
 it at the revision and name it as the instrumentation branch; a profile of an earlier revision
 can be reused on a later one by cherry-picking its instrumentation commit onto a new branch. Profiles that drive load run as

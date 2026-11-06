@@ -63,7 +63,10 @@ It selects a working CLI or installs one only after explicit user approval.
    it). If it fails, the base can never be measured and every promotion would be refused
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
    until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
-   commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
+   commit, made with `git branch vibesys/result/<task> <base>`, never `git checkout -b` or
+   `git switch -c`, which check it out in the user's repository. The user's checkout stays on
+   the branch it was on, and every worktree you or your subagents make goes where `vibesys:state`
+   says (beside the repository, never inside it). A context line you reuse in every brief: `--task <task> --run <run id> --harness
    <harness>`. The run id is `VIBESYS_RUN` when the orchestrator set it; otherwise choose one
    short name for this optimization, keep it on resume, and pass it as `--run` in the context
    line. Never export `VIBESYS_RUN` yourself: its presence is what selects the orchestrator
@@ -110,7 +113,10 @@ It selects a working CLI or installs one only after explicit user approval.
 - Plans may fix bugs, add tests or microbenchmarks, reorganize code, or otherwise change code to make it more robust over time; an optimization must never sacrifice correctness.
 - The result branch moves only through `vibesys-cli promote <sha>`, and only for a candidate whose
   judge verdict is `pass`. Never move it with git (`branch -f`, `update-ref`, `reset`, `push`),
-  and never create it again after it exists. Exit 0 promoted. Exit 1 refused: the reasons are
+  never check it out or create it again after it exists, and never touch the user's checkout:
+  `promote` brings a checkout of the result branch that the user made along with it, or refuses
+  with a `conflict` that names the path when that checkout has local changes. Report such a
+  refusal to the user as printed; do not work around it with git. Exit 0 promoted. Exit 1 refused: the reasons are
   on stdout, one of `unmeasured`, `check_missing`, `worse`, `within_noise`, `inconclusive`, `stale`,
   `environment_mismatch` or `tradeoff`; show the user a refusal as the CLI printed it. A candidate that does
   not contain the head also exits 1, with a `conflict` failure on stderr: dispatch a combine of
