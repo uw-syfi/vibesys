@@ -1,4 +1,6 @@
 Agent agent-w1 handed off plan 1.
 It produced no candidate.
+Claim: 
+Blocker: the compiler rejected the change in kernel.cu
 Learned: l
 Next: n

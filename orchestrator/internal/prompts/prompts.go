@@ -66,19 +66,18 @@ type (
 		Steering    string
 	}
 
+	// handoffData holds the fields of every kind of handoff; Kind says which the template reads.
 	handoffData struct {
-		From         core.AgentID
-		PlanNumber   uint32
-		HasCandidate bool
-		Commit       core.Commit
-		Branch       string
-		ParentCommit core.Commit
-		Claim        string
-		Checks       string
-		Measurement  string
-		Learned      string
-		Next         string
-		OpenItems    string
+		From                                                 core.AgentID
+		PlanNumber                                           uint32
+		Kind                                                 string
+		Claim, Learned, Next, OpenItems                      string
+		Commit, ParentCommit, Revision                       core.Commit
+		Branch, Checks, Measurement, Blocker                 string
+		Plan, Confidence, Unestablished, DecidingMeasurement string
+		Verdict                                              core.Verdict
+		Reasons, Applied, Unapplied                          string
+		Question, Answer, Evidence, Unsupported, Informs     string
 	}
 
 	reportData struct {
@@ -120,11 +119,7 @@ func dataOf(m core.Message) (string, any, error) {
 	case core.LeadBrief:
 		return "lead_brief", leadBriefData(b), nil
 	case core.Handoff:
-		return "handoff", handoffData{
-			From: m.From, PlanNumber: b.PlanNumber, HasCandidate: b.HasCandidate, Commit: b.Commit,
-			Branch: b.Branch, ParentCommit: b.ParentCommit, Claim: b.Claim, Checks: b.Checks,
-			Measurement: b.Measurement, Learned: b.Learned, Next: b.Next, OpenItems: b.OpenItems,
-		}, nil
+		return "handoff", handoffDataOf(m.From, b), nil
 	case core.Report:
 		return "report", reportData{
 			From: m.From, Headline: b.Headline, Changed: b.Changed, InFlight: b.InFlight,
@@ -145,4 +140,23 @@ func dataOf(m core.Message) (string, any, error) {
 		}, nil
 	}
 	return "", nil, fmt.Errorf("message %s has no body: %w", m.ID, ErrNoPrompt)
+}
+
+func handoffDataOf(from core.AgentID, h core.Handoff) handoffData {
+	d := handoffData{From: from, PlanNumber: h.PlanNumber, Claim: h.Claim, Learned: h.Learned, Next: h.Next, OpenItems: h.OpenItems}
+	switch b := h.Body.(type) {
+	case core.WorkerCandidate:
+		d.Kind, d.Commit, d.ParentCommit, d.Branch, d.Checks, d.Measurement = "candidate", b.Commit, b.ParentCommit, b.Branch, b.Checks, b.Measurement
+	case core.WorkerNoCandidate:
+		d.Kind, d.Blocker = "no_candidate", b.Blocker
+	case core.PlannerPlan:
+		d.Kind, d.Plan, d.Confidence, d.Unestablished, d.DecidingMeasurement = "plan", b.Plan, b.Confidence, b.Unestablished, b.DecidingMeasurement
+	case core.JudgeFinding:
+		d.Kind, d.Commit, d.Verdict, d.Reasons = "verdict", b.Commit, b.Verdict, b.Reasons
+	case core.CombinerResult:
+		d.Kind, d.Commit, d.Branch, d.Applied, d.Unapplied, d.Checks, d.Measurement = "combined", b.Commit, b.Branch, b.Applied, b.Unapplied, b.Checks, b.Measurement
+	case core.ProfilerFindings:
+		d.Kind, d.Question, d.Revision, d.Answer, d.Evidence, d.Unsupported, d.Informs = "findings", b.Question, b.Revision, b.Answer, b.Evidence, b.Unsupported, b.Informs
+	}
+	return d
 }

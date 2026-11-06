@@ -27,6 +27,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/names"
 )
 
 // Daemon is what the tools need of the orchestrator. client.Client implements it for a session.
@@ -53,6 +54,11 @@ type Server struct {
 // New returns the server of a session. process is unique to this process, so that the ids of
 // its commands cannot meet those of an earlier server of the same session.
 func New(id Identity, d Daemon, process string) *Server { return &Server{id: id, d: d, proc: process} }
+
+// ServerName is the name the tool server goes by: the host registers it under this name, so an
+// agent's harness shows the tools as mcp__vibesys__spawn_agent and so on, and the skills name the
+// tools through it. The server says the same name of itself.
+const ServerName = "vibesys"
 
 const (
 	latestProtocol = "2025-06-18"
@@ -158,7 +164,7 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 		return map[string]any{
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "vibesys-orchestrator", "version": "1"},
+			"serverInfo":      map[string]any{"name": ServerName, "version": "1"},
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
@@ -185,14 +191,6 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 	return nil, &rpcError{Code: codeNoMethod, Message: "unknown method " + req.Method}
 }
 
-// tool is one tool, with the action that decides who sees it.
-type tool struct {
-	name, description string
-	action            core.Action
-	schema            map[string]any
-	run               func(ctx context.Context, s *Server, args json.RawMessage, commandID string) (string, error)
-}
-
 // tools lists what this session's role may use, in a fixed order.
 func (s *Server) tools() []tool {
 	var out []tool
@@ -205,19 +203,22 @@ func (s *Server) tools() []tool {
 }
 
 func (s *Server) call(ctx context.Context, name string, args json.RawMessage, requestID string) (string, error) {
-	i := slices.IndexFunc(allTools, func(t tool) bool { return t.name == name })
-	if i < 0 {
-		return "", fmt.Errorf("there is no tool %q: the tools you have are %s", name, s.toolNames())
+	t, ok := toolFor(name)
+	if !ok {
+		return "", errors.New(say("no_such_tool", struct{ Name, Tools string }{name, s.toolNames()}))
 	}
-	t := allTools[i]
 	if !core.Allowed(core.Principal(s.id.Role), t.action) {
-		return "", fmt.Errorf("%s is not available to a %s: the tools you have are %s", name, s.id.Role, s.toolNames())
+		return "", errors.New(say("tool_not_for_role", struct{ Name, Role, Tools string }{name, string(s.id.Role), s.toolNames()}))
 	}
-	if len(bytes.TrimSpace(args)) == 0 {
+	if trimmed := bytes.TrimSpace(args); len(trimmed) == 0 || string(trimmed) == "null" { // a tool that takes nothing may be called with none.
 		args = json.RawMessage("{}")
 	}
+	in, err := t.read(s, args)
+	if err != nil {
+		return "", err
+	}
 	commandID := fmt.Sprintf("mcp/%s/%s/%s", s.id.Agent, s.proc, strings.Trim(requestID, `"`))
-	return t.run(ctx, s, args, commandID)
+	return t.run(ctx, s, in, commandID)
 }
 
 func (s *Server) toolNames() string {
@@ -226,16 +227,6 @@ func (s *Server) toolNames() string {
 		names = append(names, t.name)
 	}
 	return strings.Join(names, ", ")
-}
-
-// decode reads a tool's arguments, refusing a key the tool does not define.
-func decode(args json.RawMessage, into any) error {
-	dec := json.NewDecoder(bytes.NewReader(args))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return fmt.Errorf("the arguments are wrong (%v): fix them against the tool's input schema and call again", err)
-	}
-	return nil
 }
 
 // send dispatches a command and turns the receipt, or the failure, into what the agent reads.
@@ -254,7 +245,7 @@ func (s *Server) send(ctx context.Context, cmd *pb.Command, done func(*pb.Receip
 func allowedList(allowed []*pb.AllowedAgent) string {
 	var parts []string
 	for _, c := range allowed {
-		name := harnessName(c.GetHarness())
+		name := names.Spell(c.GetHarness())
 		if c.GetModel() == "" {
 			parts = append(parts, fmt.Sprintf("harness %s with its default model (leave model out)", name))
 		} else {
@@ -265,13 +256,14 @@ func allowedList(allowed []*pb.AllowedAgent) string {
 }
 
 func transportAdvice(err error) error {
+	data := struct{ Message string }{status.Convert(err).Message()}
 	switch status.Code(err) {
 	case codes.Unauthenticated, codes.PermissionDenied:
-		return fmt.Errorf("the orchestrator refused this session (%s): stop and tell the operator; do not retry", status.Convert(err).Message())
+		return errors.New(say("transport_refused", data))
 	case codes.InvalidArgument:
-		return fmt.Errorf("the orchestrator rejected the request (%s): fix the arguments and call again", status.Convert(err).Message())
+		return errors.New(say("transport_rejected", data))
 	}
-	return fmt.Errorf("the orchestrator did not answer (%s): call list_agents to see whether your last call took effect, then repeat it only if it did not", status.Convert(err).Message())
+	return errors.New(say("transport_unanswered", data))
 }
 
 func refusalAdvice(receipt *pb.Receipt) string {

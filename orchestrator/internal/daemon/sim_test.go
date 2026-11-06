@@ -518,7 +518,7 @@ func (s *sim) agentAct(a core.Agent) {
 		live := s.liveAgents()
 		cmd = &pb.Command{Id: id, Body: &pb.Command_StopAgent{StopAgent: &pb.StopAgent{AgentId: string(live[s.pick(len(live))].ID)}}}
 	default:
-		cmd = &pb.Command{Id: id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done"}}}}
+		cmd = &pb.Command{Id: id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}}
 	}
 	switch s.pick(8) {
 	case 0: // a wrong token must change nothing.

@@ -743,6 +743,7 @@ func (x *SpawnAgent) GetBrief() string {
 	return ""
 }
 
+// StopAgent is also the input of the stop_agent tool.
 type StopAgent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
@@ -787,6 +788,7 @@ func (x *StopAgent) GetAgentId() string {
 	return ""
 }
 
+// SendMessage is also the input of the send_message tool.
 type SendMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
@@ -1219,7 +1221,7 @@ var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"w\n" +
+	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"w\n" +
 	"\rSessionSource\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
 	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\x12\x1f\n" +
@@ -1270,12 +1272,15 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x04spec\x18\x03 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecR\x04spec\x12\x1f\n" +
 	"\vplan_number\x18\x04 \x01(\rR\n" +
 	"planNumber\x12\x1d\n" +
-	"\x05brief\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05brief\"/\n" +
-	"\tStopAgent\x12\"\n" +
-	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\"N\n" +
-	"\vSendMessage\x12\"\n" +
-	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12\x1b\n" +
-	"\x04text\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04text\"Q\n" +
+	"\x05brief\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05brief\"\xb3\x01\n" +
+	"\tStopAgent\x12;\n" +
+	"\bagent_id\x18\x01 \x01(\tB \xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x15The subagent to stop.R\aagentId:i\xaa\xbb\x18e\n" +
+	"\n" +
+	"stop_agent\x12WStop one subagent of your run. It is asked to finish its turn, then its session closes.\"\x89\x02\n" +
+	"\vSendMessage\x128\n" +
+	"\bagent_id\x18\x01 \x01(\tB\x1d\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x12The agent to tell.R\aagentId\x12+\n" +
+	"\x04text\x18\x02 \x01(\tB\x17\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\fWhat to say.R\x04text:\x92\x01\xaa\xbb\x18\x8d\x01\n" +
+	"\fsend_message\x12}Send text to one agent of your run. It reaches the agent as steering if it is working, or starts its next turn if it is idle.\"Q\n" +
 	"\vPostHandoff\x12B\n" +
 	"\ahandoff\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.HandoffB\x06\xbaH\x03\xc8\x01\x01R\ahandoff\"M\n" +
 	"\n" +
@@ -1403,6 +1408,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 		return
 	}
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
+	file_vibesys_orchestrator_v1_tool_options_proto_init()
 	file_vibesys_orchestrator_v1_events_proto_msgTypes[1].OneofWrappers = []any{
 		(*Event_RunUpdated)(nil),
 		(*Event_AgentUpdated)(nil),

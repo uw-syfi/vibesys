@@ -5,7 +5,8 @@ package store
 // upgraded (docs/contributing/process-boundaries.md). Version 4 added report kinds and numbers, the
 // stall and usage fields of a run, and the reminders. Version 5 took the worktree off an agent and
 // renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use. Version 7 gave a finished run the working copies it kept.
-const schemaVersion = 7
+// Version 8 gave a handoff the body of its role, so a stored handoff no longer has the flat fields of the version before.
+const schemaVersion = 8
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

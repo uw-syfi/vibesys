@@ -120,18 +120,152 @@ func (x *ToolServerCredentials) GetRole() AgentRole {
 	return AgentRole_AGENT_ROLE_UNSPECIFIED
 }
 
+// SpawnAgentInput is the input of the spawn_agent tool. The run is the caller's own and the server
+// fills it in, so the agent is not offered it.
+type SpawnAgentInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          AgentRole              `protobuf:"varint,1,opt,name=role,proto3,enum=vibesys.orchestrator.v1.AgentRole" json:"role,omitempty"`
+	Brief         string                 `protobuf:"bytes,2,opt,name=brief,proto3" json:"brief,omitempty"`
+	Harness       Harness                `protobuf:"varint,3,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
+	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	Effort        string                 `protobuf:"bytes,5,opt,name=effort,proto3" json:"effort,omitempty"`
+	PlanNumber    uint32                 `protobuf:"varint,6,opt,name=plan_number,json=planNumber,proto3" json:"plan_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpawnAgentInput) Reset() {
+	*x = SpawnAgentInput{}
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpawnAgentInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpawnAgentInput) ProtoMessage() {}
+
+func (x *SpawnAgentInput) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpawnAgentInput.ProtoReflect.Descriptor instead.
+func (*SpawnAgentInput) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SpawnAgentInput) GetRole() AgentRole {
+	if x != nil {
+		return x.Role
+	}
+	return AgentRole_AGENT_ROLE_UNSPECIFIED
+}
+
+func (x *SpawnAgentInput) GetBrief() string {
+	if x != nil {
+		return x.Brief
+	}
+	return ""
+}
+
+func (x *SpawnAgentInput) GetHarness() Harness {
+	if x != nil {
+		return x.Harness
+	}
+	return Harness_HARNESS_UNSPECIFIED
+}
+
+func (x *SpawnAgentInput) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *SpawnAgentInput) GetEffort() string {
+	if x != nil {
+		return x.Effort
+	}
+	return ""
+}
+
+func (x *SpawnAgentInput) GetPlanNumber() uint32 {
+	if x != nil {
+		return x.PlanNumber
+	}
+	return 0
+}
+
+// ListAgentsInput is the input of the list_agents tool, which takes no argument.
+type ListAgentsInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAgentsInput) Reset() {
+	*x = ListAgentsInput{}
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAgentsInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAgentsInput) ProtoMessage() {}
+
+func (x *ListAgentsInput) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAgentsInput.ProtoReflect.Descriptor instead.
+func (*ListAgentsInput) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP(), []int{2}
+}
+
 var File_vibesys_orchestrator_v1_tool_server_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_tool_server_proto_rawDesc = "" +
 	"\n" +
-	")vibesys/orchestrator/v1/tool_server.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18vibesys/cli/v1/env.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xe2\x03\n" +
+	")vibesys/orchestrator/v1/tool_server.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18vibesys/cli/v1/env.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xe2\x03\n" +
 	"\x15ToolServerCredentials\x12P\n" +
 	"\bendpoint\x18\x01 \x01(\tB4\xbaH\x12r\x10(\x80 2\v^/[^\\x00]*$\xa2\xbb\x18\x1bVIBESYS_ORCHESTRATOR_SOCKETR\bendpoint\x12>\n" +
 	"\x05agent\x18\x02 \x01(\tB(\xbaH\ar\x05\x10\x01(\x80\x02\xa2\xbb\x18\x1aVIBESYS_ORCHESTRATOR_AGENTR\x05agent\x12A\n" +
 	"\asession\x18\x03 \x01(\rB'\xbaH\x04*\x02(\x01\xa2\xbb\x18\x1cVIBESYS_ORCHESTRATOR_SESSIONR\asession\x12>\n" +
 	"\x05token\x18\x04 \x01(\tB(\xbaH\ar\x05\x10\x01(\x80 \xa2\xbb\x18\x1aVIBESYS_ORCHESTRATOR_TOKENR\x05token\x128\n" +
 	"\x03run\x18\x05 \x01(\tB&\xbaH\ar\x05\x10\x01(\x80\x02\xa2\xbb\x18\x18VIBESYS_ORCHESTRATOR_RUNR\x03run\x12_\n" +
-	"\x04role\x18\x06 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB'\xbaH\a\x82\x01\x04\x10\x01 \x00\xa2\xbb\x18\x19VIBESYS_ORCHESTRATOR_ROLER\x04role:\x19\xa2\xbb\x18\x15VIBESYS_ORCHESTRATOR_BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x04role\x18\x06 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB'\xbaH\a\x82\x01\x04\x10\x01 \x00\xa2\xbb\x18\x19VIBESYS_ORCHESTRATOR_ROLER\x04role:\x19\xa2\xbb\x18\x15VIBESYS_ORCHESTRATOR_\"\xa7\x06\n" +
+	"\x0fSpawnAgentInput\x12a\n" +
+	"\x04role\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB)\xbaH\t\x82\x01\x06\x10\x01 \x00 \x01\xaa\xbb\x18\x19What the subagent is for.R\x04role\x122\n" +
+	"\x05brief\x18\x02 \x01(\tB\x1c\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x11Its first prompt.R\x05brief\x12j\n" +
+	"\aharness\x18\x03 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB.\xbaH\x05\x82\x01\x02\x10\x01\xaa\xbb\x18\"Optional. The agent CLI to run on.R\aharness\x12.\n" +
+	"\x05model\x18\x04 \x01(\tB\x18\xaa\xbb\x18\x14Optional model name.R\x05model\x126\n" +
+	"\x06effort\x18\x05 \x01(\tB\x1e\xaa\xbb\x18\x1aOptional reasoning effort.R\x06effort\x12L\n" +
+	"\vplan_number\x18\x06 \x01(\rB+\xaa\xbb\x18'Optional. The plan this agent works on.R\n" +
+	"planNumber:\xda\x02\xaa\xbb\x18\xd5\x02\n" +
+	"\vspawn_agent\x12\xc5\x02Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours.\"\x92\x01\n" +
+	"\x0fListAgentsInput:\x7f\xaa\xbb\x18{\n" +
+	"\vlist_agents\x12lList the agents of your run with their role, status and plan, so you can see who is working and who is done.BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_tool_server_proto_rawDescOnce sync.Once
@@ -145,18 +279,23 @@ func file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_tool_server_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_vibesys_orchestrator_v1_tool_server_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_orchestrator_v1_tool_server_proto_goTypes = []any{
 	(*ToolServerCredentials)(nil), // 0: vibesys.orchestrator.v1.ToolServerCredentials
-	(AgentRole)(0),                // 1: vibesys.orchestrator.v1.AgentRole
+	(*SpawnAgentInput)(nil),       // 1: vibesys.orchestrator.v1.SpawnAgentInput
+	(*ListAgentsInput)(nil),       // 2: vibesys.orchestrator.v1.ListAgentsInput
+	(AgentRole)(0),                // 3: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 4: vibesys.orchestrator.v1.Harness
 }
 var file_vibesys_orchestrator_v1_tool_server_proto_depIdxs = []int32{
-	1, // 0: vibesys.orchestrator.v1.ToolServerCredentials.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 0: vibesys.orchestrator.v1.ToolServerCredentials.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	3, // 1: vibesys.orchestrator.v1.SpawnAgentInput.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	4, // 2: vibesys.orchestrator.v1.SpawnAgentInput.harness:type_name -> vibesys.orchestrator.v1.Harness
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_tool_server_proto_init() }
@@ -165,13 +304,14 @@ func file_vibesys_orchestrator_v1_tool_server_proto_init() {
 		return
 	}
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
+	file_vibesys_orchestrator_v1_tool_options_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_tool_server_proto_rawDesc), len(file_vibesys_orchestrator_v1_tool_server_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

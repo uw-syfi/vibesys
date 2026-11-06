@@ -3,17 +3,20 @@
   "delivery": "DELIVERY_NEW_TURN",
   "fromAgentId": "agent-w2",
   "handoff": {
-    "branch": "HEAD",
-    "checks": "passed",
     "claim": "score 17",
-    "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "hasCandidate": true,
     "learned": "Codex is faster here.",
-    "measurement": "{\"value\": 17}",
     "next": "Try batching.",
     "openItems": "Unclear if it holds at scale.",
-    "parentCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "planNumber": 2
+    "planNumber": 2,
+    "worker": {
+      "candidate": {
+        "branch": "HEAD",
+        "checks": "passed",
+        "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "measurement": "{\"value\": 17}",
+        "parentCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

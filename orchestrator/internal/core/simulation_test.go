@@ -372,7 +372,7 @@ func (w *sim) handoff() {
 		return
 	}
 	w.command(core.AgentCaller{Agent: a.ID}, &pb.Command{Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{
-		Handoff: &pb.Handoff{Claim: "done"},
+		Handoff: &pb.Handoff{Claim: "done", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}},
 	}}})
 }
 

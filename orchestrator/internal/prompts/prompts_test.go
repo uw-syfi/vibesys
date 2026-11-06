@@ -77,6 +77,8 @@ func TestTheGoldensCoverEveryBodyAndEveryEnumValueTheWordsName(t *testing.T) {
 	reportKinds := map[pb.ReportKind]bool{}
 	outcomes := map[pb.JobOutcome]bool{}
 	statuses := map[pb.AgentStatus]bool{}
+	verdicts := map[pb.JudgeVerdict]bool{}
+	handoffs := map[string]bool{}
 	for _, path := range goldenCases(t) {
 		m, _ := readCase(t, path)
 		bodies[string(m.ProtoReflect().WhichOneof(m.ProtoReflect().Descriptor().Oneofs().ByName("body")).Name())] = true
@@ -88,6 +90,24 @@ func TestTheGoldensCoverEveryBodyAndEveryEnumValueTheWordsName(t *testing.T) {
 		}
 		if s := m.GetSubagentSettled(); s != nil {
 			statuses[s.GetStatus()] = true
+		}
+		if h := m.GetHandoff(); h != nil {
+			handoffs[string(h.ProtoReflect().WhichOneof(h.ProtoReflect().Descriptor().Oneofs().ByName("body")).Name())] = true
+			if w := h.GetWorker(); w != nil {
+				handoffs[string(w.ProtoReflect().WhichOneof(w.ProtoReflect().Descriptor().Oneofs().ByName("outcome")).Name())] = true
+			}
+			if j := h.GetJudge(); j != nil {
+				verdicts[j.GetVerdict()] = true
+			}
+		}
+	}
+	for _, group := range []protoreflect.OneofDescriptor{
+		(&pb.Handoff{}).ProtoReflect().Descriptor().Oneofs().ByName("body"), (&pb.WorkerHandoff{}).ProtoReflect().Descriptor().Oneofs().ByName("outcome"),
+	} {
+		for i := range group.Fields().Len() {
+			if name := string(group.Fields().Get(i).Name()); !handoffs[name] {
+				t.Errorf("no golden for a handoff with %s", name)
+			}
 		}
 	}
 	fields := (&pb.Message{}).ProtoReflect().Descriptor().Oneofs().ByName("body").Fields()
@@ -105,6 +125,7 @@ func TestTheGoldensCoverEveryBodyAndEveryEnumValueTheWordsName(t *testing.T) {
 	}
 	covered(pb.ReportKind(0).Descriptor(), func(n protoreflect.EnumNumber) bool { return reportKinds[pb.ReportKind(n)] })
 	covered(pb.JobOutcome(0).Descriptor(), func(n protoreflect.EnumNumber) bool { return outcomes[pb.JobOutcome(n)] })
+	covered(pb.JudgeVerdict(0).Descriptor(), func(n protoreflect.EnumNumber) bool { return verdicts[pb.JudgeVerdict(n)] })
 	covered(pb.AgentStatus(0).Descriptor(), func(n protoreflect.EnumNumber) bool { return statuses[pb.AgentStatus(n)] })
 }
 
@@ -140,6 +161,7 @@ func bodies(r *rand.Rand) []core.Message {
 	statuses := []core.AgentStatus{
 		core.AgentLaunching, core.AgentActive, core.AgentWaiting, core.AgentIdle, core.AgentEnded, core.AgentFailed, core.AgentLost,
 	}
+	verdicts := []core.Verdict{core.VerdictPass, core.VerdictFail, core.VerdictUnmeasured}
 	envelope := func(body core.MessageBody) core.Message {
 		return core.Message{
 			ID: "m1", Run: "r1", From: core.AgentID(optional(r, "from:")), To: "agent-a",
@@ -150,12 +172,26 @@ func bodies(r *rand.Rand) []core.Message {
 		envelope(core.Text{Text: text(r, "text:", 8)}),
 		envelope(core.Brief{Text: text(r, "brief:", 8)}),
 		envelope(core.LeadBrief{Task: text(r, "task:", 4), FanoutLimit: r.Uint32(), Steering: optional(r, "steering:")}),
-		envelope(core.Handoff{
-			PlanNumber: r.Uint32(), HasCandidate: r.IntN(2) == 0, Claim: optional(r, "claim:"),
+		envelope(handoff(r, core.WorkerCandidate{
 			Commit: core.Commit(optional(r, "commit:")), ParentCommit: core.Commit(optional(r, "parent:")),
 			Branch: optional(r, "branch:"), Checks: optional(r, "checks:"), Measurement: optional(r, "measurement:"),
-			Learned: optional(r, "learned:"), Next: optional(r, "next:"), OpenItems: optional(r, "open:"),
-		}),
+		})),
+		envelope(handoff(r, core.WorkerNoCandidate{Blocker: optional(r, "blocker:")})),
+		envelope(handoff(r, core.PlannerPlan{
+			Plan: optional(r, "planfile:"), Confidence: optional(r, "confidence:"), Unestablished: optional(r, "unestablished:"),
+			DecidingMeasurement: optional(r, "deciding:"),
+		})),
+		envelope(handoff(r, core.JudgeFinding{
+			Commit: core.Commit(optional(r, "commit:")), Verdict: verdicts[r.IntN(len(verdicts))], Reasons: optional(r, "reasons:"),
+		})),
+		envelope(handoff(r, core.CombinerResult{
+			Commit: core.Commit(optional(r, "commit:")), Branch: optional(r, "branch:"), Applied: optional(r, "applied:"),
+			Unapplied: optional(r, "notdone:"), Checks: optional(r, "checks:"), Measurement: optional(r, "measurement:"),
+		})),
+		envelope(handoff(r, core.ProfilerFindings{
+			Question: optional(r, "question:"), Revision: core.Commit(optional(r, "revision:")), Answer: optional(r, "answer:"),
+			Evidence: optional(r, "evidence:"), Unsupported: optional(r, "unsupported:"), Informs: optional(r, "informs:"),
+		})),
 		envelope(core.Report{
 			Kind: reportKinds[r.IntN(len(reportKinds))], Sequence: r.Uint32(), Headline: text(r, "headline:", 4),
 			Changed: optional(r, "changed:"), InFlight: optional(r, "flight:"), Decisions: optional(r, "decisions:"),
@@ -175,6 +211,14 @@ func bodies(r *rand.Rand) []core.Message {
 	}
 }
 
+// handoff draws the fields every handoff has around the body of a role.
+func handoff(r *rand.Rand, body core.HandoffBody) core.Handoff {
+	return core.Handoff{
+		PlanNumber: r.Uint32(), Claim: optional(r, "claim:"), Learned: optional(r, "learned:"), Next: optional(r, "next:"),
+		OpenItems: optional(r, "open:"), Body: body,
+	}
+}
+
 // fieldsOf lists the strings a message's body holds, which its prompt carries or leaves out.
 func fieldsOf(m core.Message) []string {
 	switch b := m.Body.(type) {
@@ -185,9 +229,20 @@ func fieldsOf(m core.Message) []string {
 	case core.LeadBrief:
 		return []string{b.Task, b.Steering}
 	case core.Handoff:
-		fields := []string{string(m.From), b.Learned, b.Next, b.OpenItems}
-		if b.HasCandidate { // a handoff with no candidate says nothing of one.
-			fields = append(fields, string(b.Commit), string(b.ParentCommit), b.Branch, b.Claim, b.Checks, b.Measurement)
+		fields := []string{string(m.From), b.Claim, b.Learned, b.Next, b.OpenItems}
+		switch k := b.Body.(type) {
+		case core.WorkerCandidate:
+			fields = append(fields, string(k.Commit), string(k.ParentCommit), k.Branch, k.Checks, k.Measurement)
+		case core.WorkerNoCandidate:
+			fields = append(fields, k.Blocker)
+		case core.PlannerPlan:
+			fields = append(fields, k.Plan, k.Confidence, k.Unestablished, k.DecidingMeasurement)
+		case core.JudgeFinding:
+			fields = append(fields, string(k.Commit), k.Reasons)
+		case core.CombinerResult:
+			fields = append(fields, string(k.Commit), k.Branch, k.Applied, k.Unapplied, k.Checks, k.Measurement)
+		case core.ProfilerFindings:
+			fields = append(fields, k.Question, string(k.Revision), k.Answer, k.Evidence, k.Unsupported, k.Informs)
 		}
 		return fields
 	case core.Report:
@@ -255,8 +310,10 @@ func TestAnOptionalFieldIsSaidExactlyWhenItIsSet(t *testing.T) {
 					t.Fatalf("steering %q, rendered %q", b.Steering, got)
 				}
 			case core.Handoff:
-				if said("\nCandidate: commit ") != b.HasCandidate || said("\nIt produced no candidate.") == b.HasCandidate {
-					t.Fatalf("has_candidate %v, rendered %q", b.HasCandidate, got)
+				_, candidate := b.Body.(core.WorkerCandidate)
+				_, none := b.Body.(core.WorkerNoCandidate)
+				if said("\nCandidate: commit ") != candidate || said("\nIt produced no candidate.") != none {
+					t.Fatalf("body %T, rendered %q", b.Body, got)
 				}
 				if said("\nOpen items: ") != (b.OpenItems != "") {
 					t.Fatalf("open items %q, rendered %q", b.OpenItems, got)

@@ -263,11 +263,34 @@ keeps state.
 
 ### Tools the agent calls
 
-The tool server builds each tool's input schema from the message descriptors,
-its protovalidate rules and a tool option on the message, so a field added to a
-message reaches the agent and a missing field is refused before dispatch. Enum
-spellings for people come from one helper. Result text comes from templates.
-`Handoff` says what it means with a `oneof` of candidate or no candidate.
+A message of the contract is a tool's input when it carries the `mcp_tool`
+option (`tool_options.proto`): `SpawnAgentInput`, `ListAgentsInput`,
+`SendMessage`, `StopAgent`, `Handoff` and `Report`. The tool server reads that
+message's descriptor. Its fields are the arguments, a `tool_field_doc` option is
+what the agent reads about each, a `tool_field_hidden` option keeps a field the
+server fills (`Report.sequence`) out of the schema and refuses it in a call, and
+the protovalidate rules say which arguments are required and which enum values
+are allowed. A call is read into the message, so an unknown key, a value of the
+wrong kind, a missing required argument and a bad enum value are each refused
+before anything is sent, in one answer that names every one. The schema uses no
+`oneOf` or `anyOf`, which a client may refuse at the top of a schema: a group of
+which one field is to be given says so in its description and the validation
+holds it.
+
+`Handoff` has the fields every handoff has and a `oneof` body with one message
+per role (`worker`, `planner`, `judge`, `combiner`, `profiler`); a worker's body
+is itself a `oneof` of a candidate or why it has none. The body's field is named
+for the role as the enum spells it (`names.Spell`), so the server finds the
+caller's own body without a table, and a handoff with none or with another
+role's is refused in the tool's answer, naming the field to fill. Enum
+spellings for people and agents (`worker`, `claude_code`) come from the enum
+alone (`internal/names`); the desktop app derives its harness choices from the
+generated enum. What the server says back (a started agent, a delivery, the list
+of agents, each refusal) comes from templates under `internal/mcp/templates/`,
+which receive data and nothing else. The server registers and names itself
+`vibesys` (`mcp.ServerName`), and a test holds the harness skill to it. A golden
+of `tools/list` for the lead and for a worker pins every word an agent reads of
+the schemas.
 
 ### What clients see
 
@@ -318,7 +341,6 @@ part they wait for.
 | Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule, and the `XDG_*` and `VIBESYS_CLI_CONFIG` a host keeps from its starter for the job tool |
 | Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
-| Tool schemas | descriptors to JSON Schema, `Handoff` `oneof`, templates | hand schemas and decode structs in the tool server |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
 | Job environment | `JobEnvironment`, `ResultFormat` as a `oneof` | the SDK's manifest reader and name copies |
 | Manifest 0.1 | `TaskManifestV01`: 48 example tasks and the Python input synthesis still write `version = "0.1"`, so it stays until they move | the hand TOML structs of the single-image reader |
@@ -370,7 +392,7 @@ validated message; the other rows are what the parts above replace.
 | tool server credentials | `VIBESYS_ORCHESTRATOR_*` | `ToolServerCredentials` (`tool_server.proto`) | typed |
 | tool server to host | gRPC metadata for agent, session and token | `service.go` | typed |
 | agent to tool server | MCP over stdio | MCP; framing confined to `internal/mcp` | external |
-| tool arguments and results | hand JSON Schema, hand structs, formatted text | `tools.go` | two definitions: tool schemas |
+| tool arguments and results | JSON Schema and checks generated from the input messages, answers from templates | the `mcp_tool` messages (`tool_options.proto`) | typed |
 
 ### Job tool, daemon and supervisors
 

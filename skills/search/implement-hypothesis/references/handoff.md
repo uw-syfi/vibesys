@@ -15,6 +15,11 @@ Next: <the step you would take, and why>
 Unapplied / open: <anything in the brief you did not do, and why>
 ```
 
+Deliver it with `post_handoff` in a run that has it: `claim`, `learned`, `next` and `open_items`
+are its common fields, and the rest goes in the `worker` field, as `candidate` (`commit`,
+`parent_commit`, `branch`, `checks`, `measurement`) when you produced a commit, or as
+`no_candidate` (`blocker`) when you did not.
+
 ## Rules for what you may claim
 
 - A gain is a `better` verdict. `within_noise` is no gain; say so. `inconclusive` means you

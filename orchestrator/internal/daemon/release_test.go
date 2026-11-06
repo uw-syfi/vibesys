@@ -96,7 +96,7 @@ func (w *world) spawn(kind worker) {
 	w.r.Settle(w.t)
 	if kind == workerHandedOff {
 		session := w.r.Sidecars.Session(core.Session{Agent: agent, N: 1})
-		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Credentials.GetToken()), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done"}}}}})
+		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Credentials.GetToken()), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}}})
 		if err != nil {
 			w.t.Fatalf("handoff: %v", err)
 		}

@@ -1,0 +1,8 @@
+Agent agent-x1 handed off plan 3.
+Plan file: plans/plan-003-fuse.md
+Claim: Fuse the two passes.
+Confidence: medium
+Not established: Whether registers spill.
+Measurement that would most change the view: Register count of the fused kernel.
+Learned: Both passes read the same rows.
+Next: Measure a fused kernel.

@@ -147,6 +147,11 @@ var (
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
 		core.ReportFinal:    pb.ReportKind_REPORT_KIND_FINAL,
 	})
+	verdicts = newEnum(map[core.Verdict]pb.JudgeVerdict{
+		core.VerdictPass:       pb.JudgeVerdict_JUDGE_VERDICT_PASS,
+		core.VerdictFail:       pb.JudgeVerdict_JUDGE_VERDICT_FAIL,
+		core.VerdictUnmeasured: pb.JudgeVerdict_JUDGE_VERDICT_UNMEASURED,
+	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,
 		core.TimerStopGrace:      pb.TimerKind_TIMER_KIND_STOP_GRACE,

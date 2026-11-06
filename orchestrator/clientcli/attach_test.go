@@ -21,7 +21,7 @@ func goldenScript() []*pb.WatchRunsResponse {
 	worker := agentOf("run-1", "worker-1", pb.AgentRole_AGENT_ROLE_WORKER, pb.AgentStatus_AGENT_STATUS_ENDED, 1)
 	worker.EndedAt = at(4)
 	handoff := &pb.Message{Id: "m1", RunId: "run-1", FromAgentId: "worker-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_CONSUMED, At: at(4),
-		Body: &pb.Message_Handoff{Handoff: &pb.Handoff{PlanNumber: 2, Claim: "plan 2 is 3%\nfaster", Commit: "abc"}}}
+		Body: &pb.Message_Handoff{Handoff: &pb.Handoff{PlanNumber: 2, Claim: "plan 2 is 3%\nfaster", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}
 	snapshot := &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: &pb.RunsSnapshot{
 		Runs: []*pb.Run{run}, Agents: []*pb.Agent{lead, worker}, Messages: []*pb.Message{handoff}, Sequence: 10,
 		Turns: []*pb.Turn{

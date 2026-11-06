@@ -177,7 +177,7 @@ func TestAWholeRunFromAClient(t *testing.T) {
 
 	// The worker hands off; the lead wakes for it.
 	workerTools, _ := toolClient(ctx, t, live, core.AgentID(worker), core.RoleWorker, run)
-	callTool(t, workerTools, 1, "post_handoff", map[string]any{"plan_number": 1, "claim": "plan 1 is 3% faster", "has_candidate": true, "commit": "abc123"})
+	callTool(t, workerTools, 1, "post_handoff", map[string]any{"plan_number": 1, "claim": "plan 1 is 3% faster", "worker": map[string]any{"candidate": map[string]any{"commit": "abc123", "parent_commit": "def456", "branch": "HEAD", "checks": "passed", "measurement": "3% faster"}}})
 	feed.until("the lead to wake for the handoff", turnDone(lead, 2))
 	workerSession := rig.Sidecars.Session(core.Session{Agent: core.AgentID(worker), N: 1})
 	var turnID string

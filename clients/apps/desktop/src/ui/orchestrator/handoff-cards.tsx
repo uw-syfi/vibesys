@@ -1,6 +1,7 @@
 import {
   type Handoff,
   JobOutcome,
+  JudgeVerdict,
   type Message,
   oneofIs,
   type Report,
@@ -50,6 +51,91 @@ export function verdictOf(
   return null;
 }
 
+const VERDICT_WORDS: Record<JudgeVerdict, string> = {
+  [JudgeVerdict.UNSPECIFIED]: '',
+  [JudgeVerdict.PASS]: 'The claim holds',
+  [JudgeVerdict.FAIL]: 'The claim does not hold',
+  [JudgeVerdict.UNMEASURED]: 'It could not be checked',
+};
+
+/** What the lead was told beyond the claim: the body of the role that wrote the handoff. */
+function bodyRows(handoff: Handoff): {
+  readonly attempt: boolean;
+  readonly kept: boolean;
+  readonly rows: KeyValueItem[];
+} {
+  const body = handoff.body;
+  switch (body.case) {
+    case 'worker': {
+      const outcome = body.value.outcome;
+      if (outcome.case === 'candidate') {
+        const c = outcome.value;
+        return {
+          attempt: true,
+          kept: true,
+          rows: [
+            {key: 'Checks', value: c.checks},
+            {key: 'Measured (the agent’s words)', value: c.measurement},
+            {key: 'Change', value: `${c.commit} on ${c.branch}`, mono: true},
+          ],
+        };
+      }
+      return {
+        attempt: true,
+        kept: false,
+        rows: [{key: 'What stopped it', value: outcome.value?.blocker ?? ''}],
+      };
+    }
+    case 'planner':
+      return {
+        attempt: false,
+        kept: false,
+        rows: [
+          {key: 'Plan', value: body.value.plan, mono: true},
+          {key: 'Confidence', value: body.value.confidence},
+          {key: 'Not established', value: body.value.unestablished},
+          {key: 'Measurement that would change its view', value: body.value.decidingMeasurement},
+        ],
+      };
+    case 'judge':
+      return {
+        attempt: false,
+        kept: false,
+        rows: [
+          {key: 'Verdict', value: VERDICT_WORDS[body.value.verdict]},
+          {key: 'Reasons', value: body.value.reasons},
+          {key: 'Change judged', value: body.value.commit, mono: true},
+        ],
+      };
+    case 'combiner':
+      return {
+        attempt: true,
+        kept: true,
+        rows: [
+          {key: 'Applied', value: body.value.applied},
+          {key: 'Not applied', value: body.value.unapplied},
+          {key: 'Checks', value: body.value.checks},
+          {key: 'Measured (the agent’s words)', value: body.value.measurement},
+          {key: 'Change', value: `${body.value.commit} on ${body.value.branch}`, mono: true},
+        ],
+      };
+    case 'profiler':
+      return {
+        attempt: false,
+        kept: false,
+        rows: [
+          {key: 'Question', value: body.value.question},
+          {key: 'Answer', value: body.value.answer},
+          {key: 'Evidence', value: body.value.evidence},
+          {key: 'Not answered', value: body.value.unsupported},
+          {key: 'Informs', value: body.value.informs},
+        ],
+      };
+    case undefined:
+      return {attempt: false, kept: false, rows: []};
+  }
+}
+
 function HandoffCard(props: {
   readonly message: Message;
   readonly handoff: Handoff;
@@ -57,19 +143,13 @@ function HandoffCard(props: {
   readonly state: OrchestratorState;
 }): JSX.Element {
   const {handoff, message} = props;
-  // Only an attempt at an idea has a result to judge: a planner or a reviewer hands off words only.
-  const attempt = handoff.planNumber > 0 || handoff.hasCandidate;
+  // Only an attempt at an idea has a result to judge: a planner, a reviewer or a profiler hands off words only.
+  const {attempt, kept, rows: bodyOnly} = bodyRows(handoff);
   const verdict = attempt ? verdictOf(props.state, message.fromAgentId) : null;
   const rows: KeyValueItem[] = [
-    {key: 'Checks', value: handoff.checks},
-    {key: 'Measured (the agent’s words)', value: handoff.measurement},
+    ...bodyOnly,
     {key: 'Learned', value: handoff.learned},
     {key: 'Suggested next', value: handoff.next},
-    {
-      key: 'Change',
-      value: handoff.commit === '' ? '' : `${handoff.commit} on ${handoff.branch}`,
-      mono: true,
-    },
   ].filter(row => row.value !== '');
   return (
     <Card
@@ -84,9 +164,7 @@ function HandoffCard(props: {
             <Chip label={verdict.label} tone={verdict.tone} dot />
           )}
         </Row>
-        {attempt && !handoff.hasCandidate ? (
-          <Text tone="muted">No change was kept from this attempt.</Text>
-        ) : null}
+        {attempt && !kept ? <Text tone="muted">No change was kept from this attempt.</Text> : null}
         <KeyValue items={rows} />
       </Stack>
     </Card>

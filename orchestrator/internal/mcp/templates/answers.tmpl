@@ -1,0 +1,105 @@
+{{- /*
+What the tool server says to an agent, one template per kind of answer. Go passes data and no
+text. A role, a status or a delivery arrives spelled as its enum is (names.Spell), so a template
+branches on the enum's own words.
+*/ -}}
+
+{{- define "oneof" -}}
+Give exactly one of {{list .Fields}}{{if .Doc}} ({{.Doc}}){{end}}.
+{{- end -}}
+
+{{- define "arguments" -}}
+The arguments of {{.Tool}} are wrong:
+{{range .Problems}}- {{template "problem" .}}
+{{end}}Fix them against the tool's input schema and call again.
+{{- end -}}
+
+{{- define "problem" -}}
+{{- if eq .Kind "unknown" -}}
+unknown field `{{.Field}}`: this tool takes only {{.Want}}
+{{- else if eq .Kind "type" -}}
+`{{.Field}}` must be {{.Want}}
+{{- else if eq .Kind "enum" -}}
+{{if .Got}}`{{.Field}}` is `{{.Got}}`, which is not one of: {{.Want}}{{else}}`{{.Field}}` must be one of: {{.Want}}{{end}}
+{{- else if eq .Kind "required" -}}
+`{{.Field}}` is required{{if .Detail}}: {{.Detail}}{{end}}
+{{- else if eq .Kind "group" -}}
+{{if .Field}}`{{.Field}}`: g{{else}}G{{end}}ive exactly one of {{.Want}}{{if .Doc}} ({{.Doc}}){{end}}
+{{- else -}}
+{{if .Field}}`{{.Field}}`: {{end}}{{.Detail}}
+{{- end -}}
+{{- end -}}
+
+{{- define "wrong_role_body" -}}
+You are a {{.Role}}, so your handoff goes in the `{{.Role}}` field and in no other, and you gave `{{.Given}}`: call post_handoff again with the `{{.Role}}` field.
+{{- end -}}
+
+{{- define "missing_role_body" -}}
+Your handoff has no `{{.Role}}` field, which is the body for a {{.Role}}: call post_handoff again with it.
+{{- end -}}
+
+{{- define "spawn_agent" -}}
+started agent {{.Agent}}. It will post a handoff when it is done; list_agents shows where it stands.
+{{- end -}}
+
+{{- define "send_message" -}}
+message {{.Message}} is {{if eq .Delivery "steered"}}steered into the agent's running turn
+{{- else if eq .Delivery "new_turn"}}starting the agent's next turn
+{{- else if eq .Delivery "queued"}}queued until the agent's turn ends
+{{- else if eq .Delivery "rejected"}}rejected
+{{- else}}on its way{{end}}.
+{{- end -}}
+
+{{- define "stop_agent" -}}
+agent {{.Agent}} is being stopped.
+{{- end -}}
+
+{{- define "post_handoff" -}}
+handoff sent to your lead. You are done: end your turn.
+{{- end -}}
+
+{{- define "post_report" -}}
+report sent to the operator.
+{{- end -}}
+
+{{- define "list_agents" -}}
+{{- if not .Agents -}}
+Your run has no agents.
+{{- else -}}
+The agents of your run:
+{{range .Agents}}- {{.ID}}{{if .Self}} (you){{end}}: {{.Role}}{{if .Plan}}, plan {{.Plan}}{{end}}, {{template "status" .Status}}{{if .Parent}}, started by {{.Parent}}{{end}}
+{{end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "status" -}}
+{{- if eq . "launching" -}}starting its session
+{{- else if eq . "active" -}}working on a turn
+{{- else if eq . "waiting" -}}waiting for its subagents
+{{- else if eq . "idle" -}}idle, between turns
+{{- else if eq . "ended" -}}finished, its session closed
+{{- else if eq . "failed" -}}failed
+{{- else if eq . "lost" -}}lost, its session went away
+{{- else -}}in an unknown state
+{{- end -}}
+{{- end -}}
+
+{{- define "transport_refused" -}}
+the orchestrator refused this session ({{.Message}}): stop and tell the operator; do not retry
+{{- end -}}
+
+{{- define "transport_rejected" -}}
+the orchestrator rejected the request ({{.Message}}): fix the arguments and call again
+{{- end -}}
+
+{{- define "transport_unanswered" -}}
+the orchestrator did not answer ({{.Message}}): call list_agents to see whether your last call took effect, then repeat it only if it did not
+{{- end -}}
+
+{{- define "no_such_tool" -}}
+there is no tool `{{.Name}}`: the tools you have are {{.Tools}}
+{{- end -}}
+
+{{- define "tool_not_for_role" -}}
+{{.Name}} is not available to a {{.Role}}: the tools you have are {{.Tools}}
+{{- end -}}

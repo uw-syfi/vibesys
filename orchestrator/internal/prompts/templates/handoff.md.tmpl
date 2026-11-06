@@ -1,11 +1,46 @@
 Agent {{.From}} handed off plan {{.PlanNumber}}.
-{{if .HasCandidate -}}
+{{if eq .Kind "candidate" -}}
 Candidate: commit {{.Commit}} on branch {{.Branch}} (parent {{.ParentCommit}}).
 Claim: {{.Claim}}
 Checks: {{.Checks}}
 Measurement: {{.Measurement}}
-{{else -}}
+{{else if eq .Kind "no_candidate" -}}
 It produced no candidate.
+Claim: {{.Claim}}
+Blocker: {{.Blocker}}
+{{else if eq .Kind "plan" -}}
+Plan file: {{.Plan}}
+Claim: {{.Claim}}
+{{if .Confidence}}Confidence: {{.Confidence}}
+{{end -}}
+{{if .Unestablished}}Not established: {{.Unestablished}}
+{{end -}}
+{{if .DecidingMeasurement}}Measurement that would most change the view: {{.DecidingMeasurement}}
+{{end -}}
+{{else if eq .Kind "verdict" -}}
+Verdict: {{.Verdict}} on commit {{.Commit}}.
+Claim: {{.Claim}}
+Reasons: {{.Reasons}}
+{{else if eq .Kind "combined" -}}
+Combined commit {{.Commit}} on branch {{.Branch}}.
+Claim: {{.Claim}}
+Applied: {{.Applied}}
+{{if .Unapplied}}Not applied: {{.Unapplied}}
+{{end -}}
+{{if .Checks}}Checks: {{.Checks}}
+{{end -}}
+{{if .Measurement}}Measurement: {{.Measurement}}
+{{end -}}
+{{else if eq .Kind "findings" -}}
+Question: {{.Question}} (revision {{.Revision}})
+Claim: {{.Claim}}
+Answer: {{.Answer}}
+{{if .Evidence}}Evidence: {{.Evidence}}
+{{end -}}
+{{if .Unsupported}}Not supported: {{.Unsupported}}
+{{end -}}
+{{if .Informs}}Informs: {{.Informs}}
+{{end -}}
 {{end -}}
 Learned: {{.Learned}}
 Next: {{.Next}}

@@ -118,6 +118,16 @@ const (
 	TriggerReminder        TurnTrigger = "reminder"
 )
 
+// Verdict is what a judge found of a candidate's claim.
+type Verdict string
+
+// The verdicts.
+const (
+	VerdictPass       Verdict = "pass"
+	VerdictFail       Verdict = "fail"
+	VerdictUnmeasured Verdict = "unmeasured"
+)
+
 // ReportKind says what a report is for.
 type ReportKind string
 

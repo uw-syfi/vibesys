@@ -1,0 +1,19 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-x1",
+  "handoff": {
+    "claim": "The claim holds.",
+    "judge": {
+      "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reasons": "compare says better, kernel.cu:40 is on the measured path",
+      "verdict": "JUDGE_VERDICT_PASS"
+    },
+    "learned": "The gain is real.",
+    "next": "Promote it.",
+    "planNumber": 2
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

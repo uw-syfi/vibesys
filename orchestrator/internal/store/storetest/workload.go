@@ -213,7 +213,7 @@ func (w *Workload) newCommand() core.InputBody {
 		return w.command(core.Operator{}, core.SendMessage{Agent: agent.ID, Text: "steer " + w.id("m")})
 	case n < 70 && agent.Role != core.RoleLead:
 		return w.command(core.AgentCaller{Agent: agent.ID}, core.PostHandoff{Handoff: core.Handoff{
-			Claim: "faster", HasCandidate: true, Commit: core.Commit("abc"), ParentCommit: core.Commit("def"),
+			Claim: "faster", Body: core.WorkerCandidate{Commit: core.Commit("abc"), ParentCommit: core.Commit("def"), Branch: "b", Checks: "ok", Measurement: "1"},
 		}})
 	case n < 80 && agent.Role != core.RoleLead:
 		return w.command(core.AgentCaller{Agent: run.Lead}, core.StopAgent{Agent: agent.ID})

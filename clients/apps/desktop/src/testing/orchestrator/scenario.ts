@@ -12,6 +12,7 @@ import {
   AgentSchema,
   AgentStatus,
   AgentStopStage,
+  CandidateSchema,
   CapabilitiesSchema,
   Delivery,
   type Delta,
@@ -23,9 +24,13 @@ import {
   ItemStatus,
   JobFinishedSchema,
   JobOutcome,
+  JudgeHandoffSchema,
+  JudgeVerdict,
   type Message,
   MessageSchema,
+  NoCandidateSchema,
   type Plan,
+  PlannerHandoffSchema,
   ReceiptSchema,
   ReportKind,
   ReportSchema,
@@ -34,6 +39,7 @@ import {
   TurnStatus,
   TurnTrigger,
   type Usage,
+  WorkerHandoffSchema,
 } from '@vibesys/orchestrator-proto';
 import {itemOf, planOf, runOf, turnOf, usageOf} from './builders.js';
 import {EventLog, Rng} from './log.js';
@@ -472,23 +478,63 @@ export function generateScenario(options: ScenarioOptions): Scenario {
 }
 
 function handoffFor(role: AgentRole, planNumber: number, idea: string, index: number) {
-  const worker = role === AgentRole.WORKER;
-  return create(HandoffSchema, {
+  const common = {
     planNumber,
-    hasCandidate: worker && index % 4 !== 3,
-    claim: worker
-      ? `${idea} makes decoding ${6 + index} percent faster.`
-      : role === AgentRole.JUDGE
-        ? 'The batching change holds up under review.'
-        : 'Ideas are written down.',
-    commit: worker ? `c${index}f3a9e1` : '',
-    parentCommit: worker ? 'b81d02a' : '',
-    branch: worker ? `idea-${planNumber}` : '',
-    checks: worker ? 'All unit tests pass.' : '',
-    measurement: worker
-      ? `1182 to ${1182 + 40 * (index + 1)} tokens per second over five runs.`
-      : '',
+    claim:
+      role === AgentRole.WORKER
+        ? `${idea} makes decoding ${6 + index} percent faster.`
+        : role === AgentRole.JUDGE
+          ? 'The batching change holds up under review.'
+          : 'Ideas are written down.',
     learned: 'The step is memory bound.',
     next: 'Try a larger batch.',
+  };
+  if (role === AgentRole.WORKER) {
+    return create(HandoffSchema, {
+      ...common,
+      body: {
+        case: 'worker',
+        value: create(WorkerHandoffSchema, {
+          outcome:
+            index % 4 !== 3
+              ? {
+                  case: 'candidate',
+                  value: create(CandidateSchema, {
+                    commit: `c${index}f3a9e1`,
+                    parentCommit: 'b81d02a',
+                    branch: `idea-${planNumber}`,
+                    checks: 'All unit tests pass.',
+                    measurement: `1182 to ${1182 + 40 * (index + 1)} tokens per second over five runs.`,
+                  }),
+                }
+              : {
+                  case: 'noCandidate',
+                  value: create(NoCandidateSchema, {
+                    blocker: 'The batched kernel did not compile.',
+                  }),
+                },
+        }),
+      },
+    });
+  }
+  if (role === AgentRole.JUDGE) {
+    return create(HandoffSchema, {
+      ...common,
+      body: {
+        case: 'judge',
+        value: create(JudgeHandoffSchema, {
+          commit: 'c0f3a9e1',
+          verdict: JudgeVerdict.PASS,
+          reasons: 'The comparison says better and the change is on the measured path.',
+        }),
+      },
+    });
+  }
+  return create(HandoffSchema, {
+    ...common,
+    body: {
+      case: 'planner',
+      value: create(PlannerHandoffSchema, {plan: `plans/plan-${planNumber}.md`}),
+    },
   });
 }

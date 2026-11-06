@@ -1,0 +1,9 @@
+Agent agent-x1 handed off plan 1.
+Question: Where does the time go? (revision aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+Claim: Time goes to the copy.
+Answer: The copy takes 60 percent.
+Evidence: captures/run1.json from rocprof
+Not supported: Memory bandwidth.
+Informs: Favors an overlap plan.
+Learned: The copy is 60 percent.
+Next: Overlap it.

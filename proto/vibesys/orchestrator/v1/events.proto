@@ -4,6 +4,7 @@ package vibesys.orchestrator.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
@@ -103,13 +104,34 @@ message SpawnAgent {
   string brief = 5 [(buf.validate.field).string.min_len = 1];
 }
 
+// StopAgent is also the input of the stop_agent tool.
 message StopAgent {
-  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  option (mcp_tool) = {
+    name: "stop_agent"
+    description: "Stop one subagent of your run. It is asked to finish its turn, then its session closes."
+  };
+
+  string agent_id = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The subagent to stop."
+  ];
 }
 
+// SendMessage is also the input of the send_message tool.
 message SendMessage {
-  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
-  string text = 2 [(buf.validate.field).string.min_len = 1];
+  option (mcp_tool) = {
+    name: "send_message"
+    description: "Send text to one agent of your run. It reaches the agent as steering if it is working, or starts its next turn if it is idle."
+  };
+
+  string agent_id = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The agent to tell."
+  ];
+  string text = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "What to say."
+  ];
 }
 
 message PostHandoff {
