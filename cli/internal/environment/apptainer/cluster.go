@@ -35,6 +35,7 @@ package apptainer
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -71,8 +72,8 @@ type Cluster interface {
 	Submit(ctx context.Context, a Allocation) (string, error)
 	// State is the job's state now.
 	State(ctx context.Context, job string) (JobState, error)
-	// Jobs returns the names of the user's pending and running jobs whose comment is the scope.
-	Jobs(ctx context.Context, scope string) ([]string, error)
+	// Jobs returns the user's pending and running jobs whose comment is the scope.
+	Jobs(ctx context.Context, scope string) ([]Job, error)
 	// Cancel cancels the user's jobs of the name, and returns once Slurm confirms that none of them
 	// is pending or running. A name no job has is cancelled.
 	Cancel(ctx context.Context, name string) error
@@ -92,6 +93,17 @@ type Allocation struct {
 	// Options are the submit command's options that size the allocation: the partition, the GRES,
 	// the CPUs and the memory, or the whole node.
 	Options []string
+	// Idle, when set, makes the allocation reusable: it ends itself once no container has claimed
+	// it (Node.Claim) for this long, and is never held (Node.Hold).
+	Idle time.Duration
+}
+
+// Job is a job of the user's that Jobs lists.
+type Job struct {
+	ID, Name string
+	Phase    Phase
+	// Left is the time left before the job's time limit, as Slurm says it while the job runs.
+	Left time.Duration
 }
 
 // Phase is where a job is in its life.
@@ -126,6 +138,15 @@ type Node interface {
 	// on the node. Closing what it returns, or the caller's death, makes the process end every
 	// container of the allocation and cancel the allocation.
 	Hold(ctx context.Context) (io.Closer, error)
+	// Claim claims a reusable allocation (Allocation.Idle) for one container, and returns once it
+	// holds the claim, which every caller of every process and machine shares: a claim that another
+	// holds, or of an allocation that is ending, fails with ErrTaken. Before it returns, every
+	// process of a container the allocation ran (what a dead claim left) is killed and gone, and the
+	// containers' homes are removed. Closing what it returns releases the claim the same way, killing
+	// every process of a container and waiting for none to be left, and returns an error when the
+	// release was not confirmed; the caller's death releases it too, or leaves a dead claim that
+	// the allocation counts as released.
+	Claim(ctx context.Context) (io.Closer, error)
 	// Read runs each script with /bin/sh on the node and returns what each printed, by its name.
 	Read(ctx context.Context, scripts map[string]string) (map[string]string, error)
 	// Port returns a TCP port on which no process of the node listens now.
@@ -166,6 +187,9 @@ type Box struct {
 	// it assigned, when it set them.
 	ROCm bool
 }
+
+// ErrTaken says that a reusable allocation is claimed by another container, or is ending.
+var ErrTaken = errors.New("apptainer: the allocation is claimed by another container, or is ending")
 
 // EnvBox names the variable every process of a box carries, whose value is the box's name.
 const EnvBox = "VIBESYS_BOX"

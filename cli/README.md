@@ -786,6 +786,7 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF, or on streaming its files and making its squashfs under `pyxis` (3600 by default). See "The apptainer placement". |
+| `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (`gres`, and `exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (a day by default; at most the partition's). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
 | `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
@@ -861,7 +862,7 @@ start without it, saying to install it.
   container and commented with the daemon's scope. Its time limit is the command's limit and 10
   minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
   and its ssh connection with it, the holder cancels the allocation.
-- A run is one command of a job, so each command has an allocation of its own: a check job's
+- Unless allocations are reused (below), a run is one command of a job, so each command has an allocation of its own: a check job's
   stages, and a measure's check and each of its benchmark samples, each wait in Slurm's queue
   again. On a busy partition a measure can wait between its samples. While an allocation waits, the
   run says why in the job's log, before its command's output: Slurm's state of the allocation, its
@@ -897,6 +898,34 @@ start without it, saying to install it.
   then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
+
+### Reused allocations
+
+On a busy cluster each allocation can wait in the queue for hours, and a measure of five samples asks
+for six. With `idle_release_seconds`, an `apptainer` placement reuses its allocations instead:
+
+- A run's first container claims a running allocation of the daemon's scope that has the run's
+  limit and 10 minutes left, the one with the least time left first, and asks for a new one only
+  when none can be claimed. A new one is named `vibesys-apptainer-pool-<container>`, asks for the
+  whole node as a benchmark sample does, and has `allocation_limit_seconds` (or the run's limit, if
+  longer). The job's log says when an allocation waits in the queue, as before.
+- A claim is a step on the allocation's node that holds a lock file there (`flock`, in
+  `/tmp/vibesys-pool-<job>`). One claim at a time: no other container runs in the allocation
+  beside a measured one, except the one that joined it in a task of two images. Before a claim is
+  held, every process of a container left in the allocation is killed, and the containers' homes
+  are removed.
+- Removing the container releases its claim: its processes are killed, the release waits until
+  none is left, and the allocation waits for the next claim. A release that is not confirmed
+  cancels the allocation instead.
+- The allocation's own batch script looks at its claim every 30 seconds: it clears what a dead
+  claim left (a daemon that died, whose claim step died with its ssh connection), and once no claim
+  has lived for `idle_release_seconds`, it marks the allocation ending, so nothing claims it, and
+  exits, which ends the allocation. So a daemon that stops, or dies, leaves an allocation for at
+  most `idle_release_seconds` and 30 seconds, and a later daemon of the same scope claims it in the
+  meantime.
+- A run's sweep of the leftovers of its scope leaves the reused allocations, which are not
+  containers; a claim clears what they ran. Placements of this kind run one job at a time
+  (`max_jobs` 1), so a daemon's own jobs never wait on each other's claims.
 
 ### The pyxis runtime
 

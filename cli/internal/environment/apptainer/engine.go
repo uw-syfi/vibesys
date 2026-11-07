@@ -142,9 +142,27 @@ type Config struct {
 	// ConvertTimeout bounds an image's conversion and the copy of its SIF, or the stream of its
 	// root file system and its squashfs; zero is DefaultConvertTimeout.
 	ConvertTimeout time.Duration
+	// Idle, when set, makes the allocations reusable: see Engine. It is how long one is kept
+	// without a container before it ends itself. Zero gives each container an allocation of its
+	// own, cancelled with it.
+	Idle time.Duration
+	// AllocationLimit is the time limit of a reusable allocation; zero is NoLimit. A container's
+	// allocation is never shorter than its own limit and StopMargin.
+	AllocationLimit time.Duration
 }
 
 // Engine is the docker.Engine of a cluster. Create it with New. It is safe for concurrent use.
+//
+// With Config.Idle, the allocations are reused. A container that has an allocation of its own
+// claims (Node.Claim) a running reusable allocation of its scope, of any process, with its limit
+// and StopMargin left, the one with the least time left first; with none to claim, it asks for a
+// new one, of AllocationLimit, sized for a measured container, so any container may use it. Its
+// removal kills its processes, waits for none to be left, and releases the claim; the allocation
+// then waits for the next claim, and ends itself after Idle without one. A claim is the
+// allocation's alone, so no other container runs in it beside a measured one (but the container
+// that joined it, of the same run), and a measured container holds the whole node as before. The
+// allocations are not containers: Containers does not list them, and a run's sweep leaves them,
+// since a claim clears what a dead one left.
 type Engine struct {
 	cfg Config
 
@@ -160,7 +178,8 @@ type box struct {
 	name   string
 	labels docker.Labels
 	job    string // the allocation it runs in
-	owner  bool   // the allocation is its own
+	owner  bool   // the allocation is its own, or claimed for it
+	pool   string // the name of the reusable allocation claimed for it, when it is one
 	spec   docker.ContainerSpec
 	sif    string
 	hold   io.Closer
@@ -217,6 +236,10 @@ func JobName(container string) string { return JobPrefix + container }
 // JobPrefix starts the name of every allocation this package asks for.
 const JobPrefix = "vibesys-apptainer-"
 
+// PoolPrefix starts the name of every reusable allocation, which is named by the container it was
+// asked for first.
+const PoolPrefix = JobPrefix + "pool-"
+
 func unavailable(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureUnavailable, Message: "apptainer: " + fmt.Sprintf(format, args...)}
 }
@@ -266,7 +289,11 @@ func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string,
 			return nil, err
 		}
 		for _, job := range jobs {
-			if name, ok := strings.CutPrefix(job, JobPrefix); ok && !slices.Contains(names, name) {
+			if strings.HasPrefix(job.Name, PoolPrefix) {
+				// A reusable allocation is not a container: a claim clears what it ran.
+				continue
+			}
+			if name, ok := strings.CutPrefix(job.Name, JobPrefix); ok && !slices.Contains(names, name) {
 				names = append(names, name)
 			}
 		}
@@ -297,7 +324,15 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	if b != nil && !b.owner {
 		owner = e.ownerOf(b)
 	}
+	var pool string
+	var hold io.Closer
+	if b != nil {
+		pool, hold = b.pool, b.hold
+	}
 	e.mu.Unlock()
+	if pool != "" {
+		return e.release(ctx, b, pool, hold)
+	}
 	if b != nil && !b.owner {
 		if owner != nil && b.job != "" {
 			if err := e.cfg.Cluster.Node(b.job).Signal(ctx, name, SIGKILL); err != nil {
@@ -313,6 +348,23 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	if b != nil {
 		e.forget(b)
 	}
+	return nil
+}
+
+// release releases the claim of a reusable allocation of the box, which kills its processes and
+// waits for none to be left. A release that is not confirmed cancels the allocation, confirmed, so
+// that nothing of the box is left in an allocation another container claims.
+func (e *Engine) release(ctx context.Context, b *box, pool string, hold io.Closer) error {
+	var err error
+	if hold != nil {
+		err = hold.Close()
+	}
+	if hold == nil || err != nil {
+		if cerr := e.cfg.Cluster.Cancel(ctx, pool); cerr != nil {
+			return fmt.Errorf("the allocation %s of %s was neither released (%v) nor confirmed ended: %w", pool, b.name, err, cerr)
+		}
+	}
+	e.forget(b)
 	return nil
 }
 
@@ -383,7 +435,11 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		log = io.Discard
 	}
 	if !joins {
-		if err := e.allocate(ctx, b, log); err != nil {
+		allocate := e.allocate
+		if e.cfg.Idle > 0 {
+			allocate = e.claim
+		}
+		if err := allocate(ctx, b, log); err != nil {
 			// The allocation may exist: the box stays known, so Remove cancels it.
 			return nil, err
 		}
@@ -418,6 +474,76 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	node := e.cfg.Cluster.Node(job)
 	hold, err := node.Hold(ctx)
 	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b.hold = hold
+	e.mu.Unlock()
+	return e.read(ctx, node)
+}
+
+// claim claims a reusable allocation for the box, of those that run with the time it needs left,
+// or asks for a new one, waits for it, and claims it. A new one that fails to run or to be claimed
+// is cancelled.
+func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
+	limit := NoLimit
+	if b.spec.Limit > 0 {
+		limit = b.spec.Limit
+	}
+	need := limit + StopMargin
+	scope := b.labels[docker.LabelScope]
+	jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
+	if err != nil {
+		return err
+	}
+	jobs = slices.DeleteFunc(jobs, func(j Job) bool {
+		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Phase != Running || j.Left < need
+	})
+	// The one with the least time left first, which keeps the longer ones for longer limits.
+	slices.SortStableFunc(jobs, func(a, b Job) int { return int((a.Left - b.Left) / time.Second) })
+	for _, j := range jobs {
+		node := e.cfg.Cluster.Node(j.ID)
+		hold, err := node.Claim(ctx)
+		if errors.Is(err, ErrTaken) {
+			continue
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s could not be claimed, so it is passed over: %v\n", j.ID, err)
+			continue
+		}
+		e.mu.Lock()
+		b.job, b.pool, b.hold = j.ID, j.Name, hold
+		e.mu.Unlock()
+		return e.read(ctx, node)
+	}
+	allocation := e.cfg.AllocationLimit
+	if allocation <= 0 {
+		allocation = NoLimit
+	}
+	name := PoolPrefix + b.name
+	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
+		Name: name, Comment: scope, Limit: max(allocation, need), Options: e.cfg.Sizing.Options(true), Idle: e.cfg.Idle,
+	})
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b.job, b.pool = job, name
+	e.mu.Unlock()
+	node := e.cfg.Cluster.Node(job)
+	err = e.await(ctx, job, log)
+	var hold io.Closer
+	if err == nil {
+		hold, err = node.Claim(ctx)
+	}
+	if err != nil {
+		// No container uses it: what Remove would cancel, cancelled now.
+		cancel, stop := clock.Deadline(context.WithoutCancel(ctx), e.cfg.Timers, CallTimeout)
+		_ = e.cfg.Cluster.Cancel(cancel, name)
+		stop()
 		return err
 	}
 	e.mu.Lock()

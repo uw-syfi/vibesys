@@ -241,6 +241,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 		},
 		NodeScripts: scripts, Runtime: runtime, Converter: converter, LocalDir: localDir,
+		Idle: seconds(a.GetIdleReleaseSeconds(), 0), AllocationLimit: seconds(a.GetAllocationLimitSeconds(), apptainer.NoLimit),
 		ConvertTimeout: seconds(a.GetConvertTimeoutSeconds(), apptainer.DefaultConvertTimeout),
 	})
 	if err != nil {

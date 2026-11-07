@@ -599,9 +599,19 @@ type ApptainerSettings struct {
 	// file system to the login node and making its squashfs there. Zero means an hour.
 	ConvertTimeoutSeconds float64 `protobuf:"fixed64,5,opt,name=convert_timeout_seconds,json=convertTimeoutSeconds,proto3" json:"convert_timeout_seconds,omitempty"`
 	// What runs the containers on the compute nodes. Unset means apptainer.
-	Runtime       ContainerRuntime `protobuf:"varint,6,opt,name=runtime,proto3,enum=vibesys.cli.v1.ContainerRuntime" json:"runtime,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Runtime ContainerRuntime `protobuf:"varint,6,opt,name=runtime,proto3,enum=vibesys.cli.v1.ContainerRuntime" json:"runtime,omitempty"`
+	// When set, allocations are reused: a container's allocation is kept when the container is
+	// removed, for the next container of the scope (of this job or a later one) to claim, and it ends
+	// once it has been idle, claimed by no container, for this long. Each allocation then asks for the
+	// whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
+	// allocation of its own, cancelled with it.
+	IdleReleaseSeconds float64 `protobuf:"fixed64,7,opt,name=idle_release_seconds,json=idleReleaseSeconds,proto3" json:"idle_release_seconds,omitempty"`
+	// The time limit of a reused allocation, at most the partition's: a container claims only an
+	// allocation with its own limit and 10 minutes left. Zero means a day. Only with
+	// idle_release_seconds.
+	AllocationLimitSeconds float64 `protobuf:"fixed64,8,opt,name=allocation_limit_seconds,json=allocationLimitSeconds,proto3" json:"allocation_limit_seconds,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ApptainerSettings) Reset() {
@@ -674,6 +684,20 @@ func (x *ApptainerSettings) GetRuntime() ContainerRuntime {
 		return x.Runtime
 	}
 	return ContainerRuntime_CONTAINER_RUNTIME_UNSPECIFIED
+}
+
+func (x *ApptainerSettings) GetIdleReleaseSeconds() float64 {
+	if x != nil {
+		return x.IdleReleaseSeconds
+	}
+	return 0
+}
+
+func (x *ApptainerSettings) GetAllocationLimitSeconds() float64 {
+	if x != nil {
+		return x.AllocationLimitSeconds
+	}
+	return 0
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
@@ -1046,14 +1070,16 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSecondsB\f\n" +
 	"\n" +
 	"_exclusiveB\a\n" +
-	"\x05_cpus\"\x88\x03\n" +
+	"\x05_cpus\"\x94\x04\n" +
 	"\x11ApptainerSettings\x123\n" +
 	"\x0esubmit_command\x18\x01 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\rsubmitCommand\x129\n" +
 	"\x10submit_arguments\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\x0fsubmitArguments\x124\n" +
 	"\aprogram\x18\x03 \x01(\tB\x1a\xbaH\x17r\x152\x13^[A-Za-z0-9_./+-]*$R\aprogram\x12?\n" +
 	"\x11local_scratch_dir\x18\x04 \x01(\tB\x13\xbaH\x10r\x0e2\f^(/.*[^/])?$R\x0flocalScratchDir\x12F\n" +
 	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\x12D\n" +
-	"\aruntime\x18\x06 \x01(\x0e2 .vibesys.cli.v1.ContainerRuntimeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aruntime\"\xe6\x02\n" +
+	"\aruntime\x18\x06 \x01(\x0e2 .vibesys.cli.v1.ContainerRuntimeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aruntime\x12@\n" +
+	"\x14idle_release_seconds\x18\a \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x12idleReleaseSeconds\x12H\n" +
+	"\x18allocation_limit_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x16allocationLimitSeconds\"\xe6\x02\n" +
 	"\tResources\x12-\n" +
 	"\x03gpu\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.GpuResourceR\x03gpu\x12B\n" +
 	"\n" +

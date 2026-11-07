@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -330,9 +331,43 @@ func TestAQueuedJobsStateSaysWhenSlurmExpectsItToStart(t *testing.T) {
 }
 
 func TestOnlyThisPackagesJobsOfTheScopeAreListed(t *testing.T) {
-	out := "vibesys-apptainer-vibesys-cli-01|d1\nvibesys-apptainer-vibesys-cli-02|d2\nother-job|d1\nvibesys-docker-vibesys-cli-03|d1\n\n"
-	if got := clustercli.ParseJobs(out, "d1"); !slices.Equal(got, []string{"vibesys-apptainer-vibesys-cli-01"}) {
-		t.Errorf("%v", got)
+	out := "vibesys-apptainer-vibesys-cli-01|d1|11|RUNNING|1-02:03:04\nvibesys-apptainer-vibesys-cli-02|d2|12|RUNNING|5:00\n" +
+		"other-job|d1|13|RUNNING|5:00\nvibesys-docker-vibesys-cli-03|d1|14|RUNNING|5:00\nvibesys-apptainer-pool-x|d1|15|PENDING|1-00:00:00\n\n"
+	want := []apptainer.Job{
+		{ID: "11", Name: "vibesys-apptainer-vibesys-cli-01", Phase: apptainer.Running, Left: 26*time.Hour + 3*time.Minute + 4*time.Second},
+		{ID: "15", Name: "vibesys-apptainer-pool-x", Phase: apptainer.Queued},
+	}
+	if got := clustercli.ParseJobs(out, "d1"); !slices.Equal(got, want) {
+		t.Errorf("%+v", got)
+	}
+}
+
+// The time left is read in every form squeue writes it, and what is not a time is none left, so a
+// job whose time left is not known is never taken to have enough.
+func TestTheTimeLeftIsReadAsSqueueWritesIt(t *testing.T) {
+	err := quick.Check(func(days, h, m, sec uint8) bool {
+		d := time.Duration(days%7)*24*time.Hour + time.Duration(h%24)*time.Hour + time.Duration(m%60)*time.Minute + time.Duration(sec%60)*time.Second
+		var text string
+		switch {
+		case d >= 24*time.Hour:
+			text = fmt.Sprintf("%d-%02d:%02d:%02d", days%7, h%24, m%60, sec%60)
+		case d >= time.Hour:
+			text = fmt.Sprintf("%d:%02d:%02d", h%24, m%60, sec%60)
+		default:
+			text = fmt.Sprintf("%d:%02d", m%60, sec%60)
+		}
+		return clustercli.ParseTimeLeft(text) == d
+	}, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, s := range []string{"", "INVALID", "NOT_SET", "1-2:3", "-1:00", "a:b", "1:2:3:4", "1-"} {
+		if got := clustercli.ParseTimeLeft(s); got != 0 {
+			t.Errorf("%q is %v left", s, got)
+		}
+	}
+	if clustercli.ParseTimeLeft("UNLIMITED") < 1000*time.Hour {
+		t.Error("UNLIMITED is not more than any limit")
 	}
 }
 

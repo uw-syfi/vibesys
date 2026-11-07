@@ -34,7 +34,9 @@ import (
 // gives is leased in the cluster itself, as a coordination.k8s.io Lease that kubectl writes on the
 // engine's machine, so the daemons of machines that share the cluster take turns at it. GPUs need
 // no lease of their own: they are a machine's, whose lease a job that holds them alone takes. A
-// Slurm or Apptainer placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes.
+// Slurm or Apptainer placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes;
+// with reused allocations, an allocation's claim, held on its node, keeps every other container out
+// of it, and the placement's max_jobs of 1 keeps a daemon's own jobs from waiting on each other.
 //
 // scope says where each kind of lease is kept, so that a sandbox daemon's are its own. claims are what the resources of each placement claim, by
 // placement name, as the scheduler has them.

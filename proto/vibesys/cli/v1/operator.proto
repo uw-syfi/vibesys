@@ -150,6 +150,16 @@ message ApptainerSettings {
   double convert_timeout_seconds = 5 [(buf.validate.field).double.gte = 0];
   // What runs the containers on the compute nodes. Unset means apptainer.
   ContainerRuntime runtime = 6 [(buf.validate.field).enum.defined_only = true];
+  // When set, allocations are reused: a container's allocation is kept when the container is
+  // removed, for the next container of the scope (of this job or a later one) to claim, and it ends
+  // once it has been idle, claimed by no container, for this long. Each allocation then asks for the
+  // whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
+  // allocation of its own, cancelled with it.
+  double idle_release_seconds = 7 [(buf.validate.field).double.gte = 0];
+  // The time limit of a reused allocation, at most the partition's: a container claims only an
+  // allocation with its own limit and 10 minutes left. Zero means a day. Only with
+  // idle_release_seconds.
+  double allocation_limit_seconds = 8 [(buf.validate.field).double.gte = 0];
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind

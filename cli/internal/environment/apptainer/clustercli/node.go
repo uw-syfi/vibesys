@@ -124,6 +124,121 @@ func (h *hold) Close() error {
 	return nil
 }
 
+// claimScript claims a reusable allocation for the caller, under the claim's lock: it says
+// vibesys-taken when the allocation is ending or another live process holds the claim, and
+// otherwise records itself as the claim, clears what any earlier claim left, says vibesys-held,
+// and holds the claim until its input ends or it is told to stop. Then it releases it: it clears
+// what the containers left, drops the claim, and says vibesys-released when nothing was left.
+const claimScript = cleanFunction + `
+d="` + poolDir + `"
+mkdir -p "$d" || exit 1
+exec 9>>"$d/lock"
+flock 9
+if [ -e "$d/ended" ]; then echo ` + takenMarker + `; exit 0; fi
+c=$(cat "$d/claim" 2>/dev/null)
+if [ -n "$c" ] && kill -0 "$c" 2>/dev/null; then echo ` + takenMarker + `; exit 0; fi
+echo $$ > "$d/claim"
+flock -u 9
+release() {
+  trap '' HUP INT TERM
+  clean; r=$?
+  flock 9; rm -f "$d/claim"; flock -u 9
+  if [ "$r" = 0 ]; then echo ` + releasedMarker + `; fi
+  exit "$r"
+}
+clean || { echo "processes of an earlier claim's containers are left" >&2; release; }
+trap release HUP INT TERM
+echo ` + heldMarker + `
+cat >/dev/null
+release`
+
+// The lines claimScript says.
+const (
+	takenMarker    = "vibesys-taken"
+	releasedMarker = "vibesys-released"
+)
+
+// Claim implements apptainer.Node.
+func (n *node) Claim(ctx context.Context) (io.Closer, error) {
+	cmd := n.c.cfg.Shell.Command(context.Background(), n.step("/bin/sh", "-c", claimScript, "vs-claim"))
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	var errb lockedBuffer
+	cmd.Stderr = &errb
+	if err := cmd.Start(); err != nil {
+		return nil, unavailable("cannot claim the allocation %s: %v", n.job, err)
+	}
+	cl := &claim{hold: hold{n: n, cmd: cmd, in: in, done: make(chan struct{})}, errb: &errb}
+	first := make(chan string, 1)
+	cl.wg.Go(func() {
+		r := bufio.NewReader(out)
+		line, _ := r.ReadString('\n')
+		first <- strings.TrimSpace(line)
+		rest, _ := io.ReadAll(r)
+		cl.rest = string(rest)
+	})
+	cl.wg.Go(func() {
+		cl.waitErr = cmd.Wait()
+		close(cl.done)
+	})
+	limit, stop := n.c.cfg.Timers.Timeout(ctx, CallTimeout)
+	defer stop()
+	select {
+	case line := <-first:
+		switch line {
+		case heldMarker:
+			return cl, nil
+		case takenMarker:
+			_ = cl.Close()
+			return nil, apptainer.ErrTaken
+		}
+		_ = cl.Close()
+		return nil, unavailable("the step that claims the allocation %s did not start: %s", n.job, clip(errb.String()))
+	case <-limit:
+		_ = cl.Close()
+		return nil, unavailable("the step that claims the allocation %s did not start within %v", n.job, CallTimeout)
+	case <-ctx.Done():
+		_ = cl.Close()
+		return nil, ctx.Err()
+	}
+}
+
+// claim is the step that holds the claim of a reusable allocation.
+type claim struct {
+	hold
+	errb *lockedBuffer
+	rest string
+	err  error
+}
+
+// Close ends the claim's input, which makes it release the claim, waits for it as hold.Close does,
+// and returns an error unless it said the release left nothing. Every call returns the first's.
+func (c *claim) Close() error {
+	c.once.Do(func() {
+		_ = c.in.Close()
+		limit, stop := c.n.c.cfg.Timers.Timeout(context.Background(), CallTimeout)
+		select {
+		case <-c.done:
+		case <-limit:
+			if c.cmd.Process != nil {
+				_ = c.cmd.Process.Kill()
+			}
+		}
+		stop()
+		c.wg.Wait()
+		if c.waitErr != nil || !slices.Contains(strings.Fields(c.rest), releasedMarker) {
+			c.err = unavailable("the release of the allocation %s was not confirmed (%v): %s", c.n.job, c.waitErr, clip(c.errb.String()))
+		}
+	})
+	return c.err
+}
+
 // Read implements apptainer.Node.
 func (n *node) Read(ctx context.Context, scripts map[string]string) (map[string]string, error) {
 	names, args := readArgs(scripts)
