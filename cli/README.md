@@ -91,7 +91,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | --- | --- |
 | `cmd/vibesys-cli/` | Argument parsing and output. Nothing else. |
 | `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks, frontier membership): no I/O, no clock, no goroutines. |
-| `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
+| `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, declared bounds, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
 | `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 4 is migrated to version 5 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, and version 5 a job's needs and task version); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
@@ -284,6 +284,8 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `plan check-gain --under share` | Whether every plan that is `open` or `parked` states a gain bound below the share (`0.1` or `10%`). It prints `yes: ...` or `no: ...` followed by one line for each plan that is not under (a plan that states no bound is not under), and exits `0` for either answer. With `--json` the answer is `answer` (`PLAN_GAIN_ANSWER_ALL_UNDER` or `PLAN_GAIN_ANSWER_NOT_ALL_UNDER`), `counted` and `blockers`. A bound equal to the share is not below it. |
+| `bound declare --objective name --value v --unit u (--note text \| --note-file path) [--commit rev]` | State the performance bound of an objective: the best it can reach, derived from first principles (its speed of light). The daemon reads the task at the commit (`HEAD` by default) and refuses an objective the task does not declare, naming it and listing the ones it does; it records which way the objective improves from the task, and who declared the bound and when from the call and its own clock. `v` is a number above 0 in the unit of the objective's own measurements, and the note says how it was derived. A declaration is never replaced: a revision is a new entry. It prints the entry's place in the log, the objective, the number with its unit, and the direction. |
+| `bound list [--objective name]` | Every declared bound of the task, oldest first, one line each (place, objective, number and unit, direction, time, declaring agent and run, `current` or `superseded`) with the note under it. The current bound of an objective is its newest. With `--json`, a `ListBoundsResponse`. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or with `--json` a `DaemonEnsureResponse`: the socket, the build, and the runtime directory. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this with `--json` and rebuilds no path. |
 | `daemon status\|stop\|restart [--force]` | Report on, stop, or restart the daemon. The first line of `daemon status` counts all of the daemon's work: `queued`, `running`, and `submitting`, the submissions it has not answered yet (with `--json`, `submitting_jobs`). A check or measure submission is keyed before its job exists, which for a docker job can build its image and convert it for a cluster for hours, so a daemon with no queued or running job may still be busy. `daemon restart` leaves running jobs running under their supervisors, but a submission in progress starts over on the next daemon, so it refuses with `CONFLICT` (exit `1`) while the daemon has one, unless `--force`. `daemon status` also says what every job inherits from the daemon: the directory clean checkouts are made in (`checkouts`, from the daemon's `TMPDIR`), and one `env` line per environment variable, sorted, with its value only for `PATH`, `HOME`, `TMPDIR` and a `VIBESYS_` variable whose name has none of `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` (with `--json`, `environment` and `checkout_directory`). Jobs see the environment the daemon was started with, so a variable set later reaches them only after `daemon restart` from a shell that has it. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
@@ -298,6 +300,14 @@ head, a commit or the head not measured, or measurements from two environments. 
 run `compare` on a linked job's commit for one. A submission or `plan create` makes a task's store, so a planner can write plans before
 the first job. The other plan commands refuse a task with no store with a "no store" error, and
 `plan list` prints nothing for it.
+
+Bounds belong to a task and are an append-only log, numbered 1, 2, ... by the daemon. Declaring one is
+the agent's choice, early or late, and the daemon only checks that it is well formed and about an
+objective of the task: it never refuses a bound that a measurement has passed, since revising it is the
+agent's to do. Each entry keeps its value, unit, note, direction, and a `RecordOrigin`: the run and agent of
+the call and the time the daemon took. A `bound declare` or `plan create` makes a task's store, and `bound list`
+prints nothing for a task with no store. A store made before bounds existed has no `bounds` directory
+and reads as having none.
 
 Every command ends with one of five exit codes, and which one is a function of one answer: the
 command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind of a `Failure`.
@@ -322,7 +332,7 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`, `bound` and
 `frontier` subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
@@ -423,7 +433,7 @@ releases startup ownership and returns a typed unavailable failure with exit 4.
 ### Watching a task
 
 `WatchTask` is a server-streaming call that tells a program everything it needs to show a task:
-the head of the result branch, plans, promotions, jobs and their results, a judgment of each of the
+the head of the result branch, plans, declared bounds (a fact keyed `bound/<place>`), promotions, jobs and their results, a judgment of each of the
 newest measured commits (`judged_commits`, 0 for 20, at most 100), jobs that are held up and why,
 and whether the task's store is readable. The state is a set of keyed facts. On every wake the
 daemon captures the store under one request lock, checks its revision and lifecycle view after
