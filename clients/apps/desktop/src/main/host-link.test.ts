@@ -36,7 +36,12 @@ import {makeHostSession} from '../core/host-session.js';
 import {Ids} from '../core/ids.js';
 import {defaultReconnect} from '../core/reconnect.js';
 import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
-import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
+import {
+  CONNECTION_LINGER_MS,
+  COPY_STALL_MS,
+  REPLY_STALL_MS,
+  SLOW_ANSWER_BOUND_MS,
+} from '../state/gateway-policy.js';
 import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
 import {HOST_PREREQUISITES} from '../state/host-prerequisites.js';
 import {type HostConnectionState, hostKey, hostStatusOf} from '../state/index.js';
@@ -814,13 +819,17 @@ const expectWhole = (followed: Followed, stream: boolean) =>
     expect(outcomeOf(running)).toMatchObject({_tag: 'Success'});
   });
 
-/** The reply stopped: not cut before a window has passed in silence, and cut within two windows. */
+/**
+ * The reply stopped while the host still answers the link's liveness probes: the link is alive, so
+ * the call is not cut for silence, and is ended once `SLOW_ANSWER_BOUND_MS` has passed with nothing
+ * of its own.
+ */
 const expectCut = (followed: Followed) =>
   Effect.gen(function* () {
     const {world, running} = followed;
-    yield* world.elapse(REPLY_STALL_MS - 1000, 1000);
+    yield* world.elapse(2 * REPLY_STALL_MS, 1000);
     expect(running.pollUnsafe()).toBeUndefined();
-    yield* world.elapse(REPLY_STALL_MS + 2000, 1000);
+    yield* world.elapse(SLOW_ANSWER_BOUND_MS, 5000);
     expect(outcomeOf(running)).toMatchObject({
       _tag: 'Failure',
       failure: {_tag: 'GrpcFailed', code: 4},
