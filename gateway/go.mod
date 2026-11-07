@@ -13,6 +13,7 @@ require (
 
 require (
 	cel.dev/expr v0.25.2 // indirect
+	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/cel-go v0.26.1 // indirect

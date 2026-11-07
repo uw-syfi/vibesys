@@ -9,7 +9,9 @@ type Input struct {
 	// Nonce is unique to this input. Decide builds every new id from it, and a replay reads those
 	// ids from the events, so it is never needed twice.
 	Nonce Nonce
-	Body  InputBody
+	// Models is the host's model policy as it stands, which a start or a spawn is held to.
+	Models ModelPolicy
+	Body   InputBody
 }
 
 // InputBody is what happened. The set is closed.

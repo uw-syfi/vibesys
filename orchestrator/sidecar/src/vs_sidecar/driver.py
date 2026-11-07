@@ -34,6 +34,7 @@ from agentshim import (
     TurnCancelledError,
     TurnFailedError,
     TurnRequest,
+    get_provider,
     interactive_env,
 )
 
@@ -51,6 +52,20 @@ PROVIDERS: Mapping[int, str] = {
     orch.HARNESS_CLAUDE_CODE: "claude",
     orch.HARNESS_CODEX: "codex",
 }
+
+
+def model_catalog() -> orch.ModelCatalog:
+    """The models each harness runs, its default first, as agentshim knows them.
+
+    This is what the host offers when a run is started and resolves an unpinned model from. Only the
+    harnesses in ``PROVIDERS`` are listed, in their order.
+    """
+    return orch.ModelCatalog(
+        harnesses=[
+            orch.HarnessModels(harness=harness, models=get_provider(name).profile.models)
+            for harness, name in PROVIDERS.items()
+        ]
+    )
 
 
 @dataclass(frozen=True)

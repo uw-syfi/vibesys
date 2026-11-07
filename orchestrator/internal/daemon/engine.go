@@ -25,6 +25,8 @@ type EngineDeps struct {
 	Nonces Nonces
 	Hub    *hub.Hub
 	Log    *slog.Logger
+	// Models says the host's model policy. Nil means the host has none.
+	Models ModelPolicySource
 	// OnCommit is called after every commit, with the engine's lock held, so it must not wait. The
 	// daemon's loop uses it to wake up.
 	OnCommit func()
@@ -62,6 +64,24 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	return e, nil
 }
 
+// ModelPolicy is the host's model policy now: the zero value, which restricts nothing, when the host
+// has no source of one.
+func (e *Engine) ModelPolicy() core.ModelPolicy {
+	if e.Models == nil {
+		return core.ModelPolicy{}
+	}
+	return e.Models.ModelPolicy()
+}
+
+// launchesAgents says the command starts an agent, so that is the only input the policy is read for.
+func launchesAgents(c core.Command) bool {
+	switch c.Body.(type) {
+	case core.StartRun, core.SpawnAgent:
+		return true
+	}
+	return false
+}
+
 // Applied says what one input did.
 type Applied struct {
 	// Events are the events committed, with the sequence of the first. Empty when the input changed
@@ -81,6 +101,9 @@ func (e *Engine) Apply(body core.InputBody) (Applied, error) {
 
 func (e *Engine) apply(body core.InputBody) (Applied, error) {
 	in := core.Input{At: e.Clock.Now(), Nonce: e.Nonces.Next(), Body: body}
+	if c, ok := body.(core.Command); ok && launchesAgents(c) {
+		in.Models = e.ModelPolicy()
+	}
 	next, events, effects := core.Decide(e.state, in)
 	if len(events) == 0 && len(effects) == 0 {
 		// Decide records no reason for an input that changes nothing. Most are repeats a feed or a

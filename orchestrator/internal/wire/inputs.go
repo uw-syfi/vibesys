@@ -16,6 +16,22 @@ func specIn(s *pb.AgentSpec, errs *errorList) core.AgentSpec {
 	}
 }
 
+func modelsIn(in []string) []core.ModelName {
+	var out []core.ModelName
+	for _, m := range in {
+		out = append(out, core.ModelName(m))
+	}
+	return out
+}
+
+func modelsOut(in []core.ModelName) []string {
+	var out []string
+	for _, m := range in {
+		out = append(out, string(m))
+	}
+	return out
+}
+
 func choicesIn(in []*pb.AllowedAgent, errs *errorList) []core.AgentChoice {
 	var out []core.AgentChoice
 	for _, c := range in {

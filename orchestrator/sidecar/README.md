@@ -39,7 +39,8 @@ keeps the conversation there too.
 python -m vs_sidecar < bootstrap
 ```
 
-The process takes no arguments. Its standard input is one `SessionBootstrap` in protobuf binary
+The process takes no arguments, except that `python -m vs_sidecar catalog` holds no session: it prints a
+`ModelCatalog`, the models each harness runs from agentshim, as protobuf JSON, and exits. Its standard input is one `SessionBootstrap` in protobuf binary
 form: the socket to listen on and its private state directory. Whoever starts it gives it a session
 of its own, and its log as stdout and stderr; it does not fork. A bad bootstrap exits with code 2
 naming the field.

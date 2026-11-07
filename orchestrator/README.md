@@ -236,6 +236,16 @@ takes the lead's harness and the first allowed model on it; a spawn outside the 
 `run get` prints it as "may use". `run get` also counts the agents that ended without a measured cost, since
 their spend is missing from the usage total.
 
+A host may also limit the models any agent runs on. Its policy is the `allowed_models` list of
+`~/.config/vibesys/host.toml`, the file the Python engine reads for the same key (`tests/corpus/host_settings`
+holds the cases both readers agree on), read afresh at each start. With a list, a start or spawn whose model
+is not in it gets `REFUSAL_MODEL_NOT_ALLOWED`, whose receipt names the model and lists the allowed ones; a
+model left out is resolved before the check, to the first allowed model the harness runs (its catalog comes
+from the session holder's `catalog` argument, so from agentshim), and refused when none can be found. A file
+that cannot be read allows nothing. The daemon looks once more before it opens any session, so a launch
+committed under an older policy fails with `START_FAILURE_REASON_MODEL_NOT_ALLOWED` and never reaches the
+sidecar. The watchers' snapshot carries the `ModelCatalog` a client offers.
+
 A run has no limit unless `run start` is given one, and a start without one prints a line saying so and how
 to set one. `--max-time 30m` is the run's time limit, counted by the host from the start (the host's clock,
 not the client's: the host is usually another machine). `--max-cost 5` is its cost limit in dollars. When

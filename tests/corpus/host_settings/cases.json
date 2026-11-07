@@ -1,0 +1,10 @@
+{
+  "empty_list.toml": {"content": "allowed_models = []\n", "allowed": []},
+  "blank.toml": {"content": "\n", "allowed": []},
+  "two_models.toml": {"content": "allowed_models = [\"model-a\", \"model-b\"]\n", "allowed": ["model-a", "model-b"]},
+  "unknown_key.toml": {"content": "allowed_models = [\"model-a\"]\nextra_key = true\n", "error": "extra_key"},
+  "blank_id.toml": {"content": "allowed_models = [\"model-a\", \"   \"]\n", "error": "allowed_models"},
+  "not_toml.toml": {"content": "allowed_models = [\n", "error": "host.toml"},
+  "wrong_type.toml": {"content": "allowed_models = \"model-a\"\n", "error": "allowed_models"},
+  "non_string_entry.toml": {"content": "allowed_models = [\"model-a\", 3]\n", "error": "allowed_models"}
+}

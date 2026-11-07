@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -18,9 +19,6 @@ from vibesys.api import (
 from vibesys.composition import resolve_agent_specs
 from vs_agent.api import ALLOWED_MODELS_SETTING, SHIPPED_PROVIDERS, AgentBackend
 from vs_runtime.api import AgentRole
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _ROLES = (AgentRole(id="worker", system_prompt="work"),)
 _KEYS = st.from_regex(r"[a-z][a-z0-9_]{0,16}", fullmatch=True).filter(
@@ -169,3 +167,20 @@ def test_a_fallback_model_outside_the_list_is_refused_on_resume() -> None:
         )
     assert "outside-the-set" in str(raised.value)
     assert ALLOWED_MODELS_SETTING in str(raised.value)
+
+
+_CORPUS = Path(__file__).parents[1] / "corpus" / "host_settings" / "cases.json"
+
+
+@pytest.mark.parametrize("name", sorted(json.loads(_CORPUS.read_text())))
+def test_the_host_file_reads_as_the_corpus_the_orchestrator_host_also_passes(
+    name: str, tmp_path: Path
+) -> None:
+    case = json.loads(_CORPUS.read_text())[name]
+    path = tmp_path / "host.toml"
+    path.write_text(case["content"])
+    if "error" in case:
+        with pytest.raises(ValueError, match=case["error"]):
+            load_host_allowed_models(path)
+    else:
+        assert load_host_allowed_models(path) == frozenset(case["allowed"])

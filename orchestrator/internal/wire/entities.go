@@ -443,7 +443,7 @@ func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 		CommandId: string(r.Command), Refusal: refusals.out(r.Refusal),
 		RunId: string(r.Run), AgentId: string(r.Agent), MessageId: string(r.Message),
 		Delivery: deliveries.out(r.Delivery), Sequence: sequence, AllowedAgents: choicesOut(r.Allowed),
-		CheckInId: string(r.CheckIn),
+		CheckInId: string(r.CheckIn), Model: string(r.Model), AllowedModels: modelsOut(r.AllowedModels),
 	}
 }
 
@@ -453,6 +453,7 @@ func receiptIn(r *pb.Receipt, errs *errorList) core.Receipt {
 		Refusal: refusals.in(r.GetRefusal(), errs), Run: core.RunID(r.GetRunId()), Agent: core.AgentID(r.GetAgentId()),
 		Message: core.MessageID(r.GetMessageId()), Delivery: deliveries.in(r.GetDelivery(), errs),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), CheckIn: core.CheckInID(r.GetCheckInId()),
+		Model: core.ModelName(r.GetModel()), AllowedModels: modelsIn(r.GetAllowedModels()),
 	}
 }
 

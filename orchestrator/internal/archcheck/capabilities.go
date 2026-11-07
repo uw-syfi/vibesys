@@ -32,6 +32,7 @@ var boundaries = map[string]allowance{
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
 	"gatewayroot/gatewayroot.go":                 {reason: "says before a host starts whether its state directory can be made, as the host itself would find; process-boundaries.md, host control", reads: 1},
 	"hostconfig/hostconfig.go":                   {reason: "the host's configuration file in its root, a HostConfig message, and whether what it names is there; process-boundaries.md, host control", reads: 3, writes: 5},
+	"hostconfig/hostsettings.go":                 {reason: "the machine's model policy, ~/.config/vibesys/host.toml, which the Python engine reads for the same key; tests/corpus/host_settings holds the cases both readers agree on", reads: 1},
 	"hostlock/hostlock.go":                       {reason: "the state directory's lock and the HostLock record its holder writes, read to name the holder, and only while the lock is held; process-boundaries.md, host control", reads: 2},
 	"hosted/command.go":                          {reason: "the tool server reads its credentials from the environment, through the environment codec (cli/envcodec); process-boundaries.md, environment codec", env: 1},
 	"internal/clidaemon/clidaemontest/corpus.go": {reason: "the conformance corpus is JSON beside the CLI's own", json: 2},

@@ -261,7 +261,8 @@ func (s *Server) refusalAdvice(receipt *pb.Receipt) string {
 		allowed = append(allowed, agent{Harness: names.Spell(c.GetHarness()), Model: c.GetModel()})
 	}
 	return say("refusal", struct {
-		Refusal, Role string
-		Allowed       []agent
-	}{names.Spell(receipt.GetRefusal()), string(s.id.Role), allowed})
+		Refusal, Role, Model string
+		Allowed              []agent
+		AllowedModels        []string
+	}{names.Spell(receipt.GetRefusal()), string(s.id.Role), receipt.GetModel(), allowed, receipt.GetAllowedModels()})
 }

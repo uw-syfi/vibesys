@@ -1,5 +1,8 @@
 """The process that holds one session: ``python -m vs_sidecar``, with no arguments.
 
+With the one argument ``catalog`` it holds nothing: it prints the models each harness runs, as
+protobuf JSON of a ``ModelCatalog``, and exits.
+
 Its one input is a binary ``SessionBootstrap`` on standard input, which says where to listen and
 where its private state is. Everything else arrives over ``AgentSessionService``: the host starts
 this process in its own session so it outlives the host, says ``Hello``, and sends ``Open``. Everything
@@ -25,9 +28,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 import protovalidate
+from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import DecodeError
 
-from vs_sidecar.driver import AgentshimDriver, build_session
+from vs_sidecar.driver import AgentshimDriver, build_session, model_catalog
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.holder import HolderLock, HolderLockedError, SessionHolder, SessionProcessesFile
@@ -332,6 +336,9 @@ def run_session(
 
 def main(drivers: SessionDrivers = real_drivers) -> int:
     """Run one process. Returns its exit code."""
+    if sys.argv[1:] == ["catalog"]:
+        sys.stdout.write(MessageToJson(model_catalog()))
+        return 0
     if sys.argv[1:]:
         sys.stderr.write(f"vs_sidecar takes no arguments: {sys.argv[1:]}\n")
         return 2

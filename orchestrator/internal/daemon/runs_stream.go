@@ -193,7 +193,7 @@ func (st *runsStream) snapshot(state core.State, last uint64) (*pb.WatchRunsResp
 	clear(st.seen)
 	clear(st.held)
 	clear(st.left)
-	snap := &pb.RunsSnapshot{Sequence: last}
+	snap := &pb.RunsSnapshot{Sequence: last, Models: wire.ModelCatalogMessage(st.s.e.ModelPolicy())}
 	var bundles []*pb.RunsSnapshot
 	used := proto.Size(snap)
 	runs := state.Runs()

@@ -81,6 +81,13 @@ func lostBecause(doing string, err error) string {
 // buffered and returns ErrIdle when the buffer is empty, so the daemon never waits on one.
 var ErrIdle = errors.New("daemon: no sidecar event is ready")
 
+// ModelPolicySource reads the host's model policy at the moment it is asked, so that a change to it
+// takes effect on the next start with no restart. A policy that cannot be read is a Closed one, never
+// an empty one.
+type ModelPolicySource interface {
+	ModelPolicy() core.ModelPolicy
+}
+
 // SessionStart is everything a session is started from: the effect the core decided, and what the
 // run says besides. The core does not store the rest with the effect, so a launch retried after a
 // restart reads the run as it is.

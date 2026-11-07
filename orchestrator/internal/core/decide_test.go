@@ -23,6 +23,8 @@ type script struct {
 	effects []core.Effect
 	log     []core.Event
 	offsets map[core.Session]uint64
+	// models is the host's model policy handed to every input.
+	models core.ModelPolicy
 }
 
 func newScript(t *testing.T) *script {
@@ -34,7 +36,7 @@ func (w *script) step(body core.InputBody) {
 	w.steps++
 	w.now = w.now.Add(time.Second)
 	before := w.s
-	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("n%d", w.steps)), Body: body}
+	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("n%d", w.steps)), Models: w.models, Body: body}
 	w.s, w.events, w.effects = core.Decide(w.s, in)
 	w.log = append(w.log, w.events...)
 	if !reflect.DeepEqual(core.Replay(before, w.events), core.Replay(w.s, nil)) {

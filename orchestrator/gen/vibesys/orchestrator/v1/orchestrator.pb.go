@@ -777,21 +777,24 @@ const (
 	// The place where the host keeps its sessions is too long for a session to be reached there, so
 	// none can start. A shorter root or state location fixes it.
 	StartFailureReason_START_FAILURE_REASON_STATE_LOCATION_TOO_LONG StartFailureReason = 9
+	// The host's model policy forbids the model the session was to run on, so no session was started.
+	StartFailureReason_START_FAILURE_REASON_MODEL_NOT_ALLOWED StartFailureReason = 10
 )
 
 // Enum value maps for StartFailureReason.
 var (
 	StartFailureReason_name = map[int32]string{
-		0: "START_FAILURE_REASON_UNSPECIFIED",
-		1: "START_FAILURE_REASON_AGENT_NOT_INSTALLED",
-		2: "START_FAILURE_REASON_NOT_SIGNED_IN",
-		3: "START_FAILURE_REASON_PLUGIN_UNAVAILABLE",
-		4: "START_FAILURE_REASON_TOOLS_UNAVAILABLE",
-		5: "START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
-		6: "START_FAILURE_REASON_TIMED_OUT",
-		7: "START_FAILURE_REASON_OTHER",
-		8: "START_FAILURE_REASON_INCOMPATIBLE_VERSIONS",
-		9: "START_FAILURE_REASON_STATE_LOCATION_TOO_LONG",
+		0:  "START_FAILURE_REASON_UNSPECIFIED",
+		1:  "START_FAILURE_REASON_AGENT_NOT_INSTALLED",
+		2:  "START_FAILURE_REASON_NOT_SIGNED_IN",
+		3:  "START_FAILURE_REASON_PLUGIN_UNAVAILABLE",
+		4:  "START_FAILURE_REASON_TOOLS_UNAVAILABLE",
+		5:  "START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
+		6:  "START_FAILURE_REASON_TIMED_OUT",
+		7:  "START_FAILURE_REASON_OTHER",
+		8:  "START_FAILURE_REASON_INCOMPATIBLE_VERSIONS",
+		9:  "START_FAILURE_REASON_STATE_LOCATION_TOO_LONG",
+		10: "START_FAILURE_REASON_MODEL_NOT_ALLOWED",
 	}
 	StartFailureReason_value = map[string]int32{
 		"START_FAILURE_REASON_UNSPECIFIED":                   0,
@@ -804,6 +807,7 @@ var (
 		"START_FAILURE_REASON_OTHER":                         7,
 		"START_FAILURE_REASON_INCOMPATIBLE_VERSIONS":         8,
 		"START_FAILURE_REASON_STATE_LOCATION_TOO_LONG":       9,
+		"START_FAILURE_REASON_MODEL_NOT_ALLOWED":             10,
 	}
 )
 
@@ -4274,6 +4278,126 @@ func (x *BuildVersions) GetMinProtocolVersion() uint32 {
 	return 0
 }
 
+// ModelCatalog is which models the host runs agents on: what a client offers when it starts a run. The
+// host works it out and a client chooses from it, so no client names a model of its own.
+type ModelCatalog struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The models the host's policy allows, in its order. Empty when the host has no policy, which allows
+	// every model. A host whose policy could not be read allows none, and says so with `unreadable_policy`.
+	AllowedModels []string `protobuf:"bytes,1,rep,name=allowed_models,json=allowedModels,proto3" json:"allowed_models,omitempty"`
+	// Set when the host's policy file could not be read: nothing is allowed until it can.
+	UnreadablePolicy bool `protobuf:"varint,2,opt,name=unreadable_policy,json=unreadablePolicy,proto3" json:"unreadable_policy,omitempty"`
+	// The models each harness runs, its default first, as its tool knows them. A harness the host could
+	// not ask is absent.
+	Harnesses     []*HarnessModels `protobuf:"bytes,3,rep,name=harnesses,proto3" json:"harnesses,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCatalog) Reset() {
+	*x = ModelCatalog{}
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCatalog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCatalog) ProtoMessage() {}
+
+func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCatalog.ProtoReflect.Descriptor instead.
+func (*ModelCatalog) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ModelCatalog) GetAllowedModels() []string {
+	if x != nil {
+		return x.AllowedModels
+	}
+	return nil
+}
+
+func (x *ModelCatalog) GetUnreadablePolicy() bool {
+	if x != nil {
+		return x.UnreadablePolicy
+	}
+	return false
+}
+
+func (x *ModelCatalog) GetHarnesses() []*HarnessModels {
+	if x != nil {
+		return x.Harnesses
+	}
+	return nil
+}
+
+// HarnessModels is the models one harness runs.
+type HarnessModels struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Harness       Harness                `protobuf:"varint,1,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
+	Models        []string               `protobuf:"bytes,2,rep,name=models,proto3" json:"models,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessModels) Reset() {
+	*x = HarnessModels{}
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessModels) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessModels) ProtoMessage() {}
+
+func (x *HarnessModels) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessModels.ProtoReflect.Descriptor instead.
+func (*HarnessModels) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *HarnessModels) GetHarness() Harness {
+	if x != nil {
+		return x.Harness
+	}
+	return Harness_HARNESS_UNSPECIFIED
+}
+
+func (x *HarnessModels) GetModels() []string {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
 var File_vibesys_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
@@ -4558,7 +4682,15 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\rBuildVersions\x12%\n" +
 	"\x0ebinary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x120\n" +
-	"\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion*\x9e\x01\n" +
+	"\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\"\xbd\x01\n" +
+	"\fModelCatalog\x120\n" +
+	"\x0eallowed_models\x18\x01 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\rallowedModels\x12+\n" +
+	"\x11unreadable_policy\x18\x02 \x01(\bR\x10unreadablePolicy\x12N\n" +
+	"\tharnesses\x18\x03 \x03(\v2&.vibesys.orchestrator.v1.HarnessModelsB\b\xbaH\x05\x92\x01\x02\x10\x10R\tharnesses\"z\n" +
+	"\rHarnessModels\x12F\n" +
+	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12!\n" +
+	"\x06models\x18\x02 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\x06models*\x9e\x01\n" +
 	"\tRunStatus\x12\x1a\n" +
 	"\x16RUN_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13RUN_STATUS_STARTING\x10\x01\x12\x16\n" +
@@ -4638,7 +4770,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x16REJECTION_FANOUT_LIMIT\x10\x02\x12\x1c\n" +
 	"\x18REJECTION_AGENT_STOPPING\x10\x03\x12\x1a\n" +
 	"\x16REJECTION_RUN_STOPPING\x10\x04\x12 \n" +
-	"\x1cREJECTION_ATTEMPTS_EXHAUSTED\x10\x05*\xc7\x03\n" +
+	"\x1cREJECTION_ATTEMPTS_EXHAUSTED\x10\x05*\xf3\x03\n" +
 	"\x12StartFailureReason\x12$\n" +
 	" START_FAILURE_REASON_UNSPECIFIED\x10\x00\x12,\n" +
 	"(START_FAILURE_REASON_AGENT_NOT_INSTALLED\x10\x01\x12&\n" +
@@ -4649,7 +4781,9 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x1eSTART_FAILURE_REASON_TIMED_OUT\x10\x06\x12\x1e\n" +
 	"\x1aSTART_FAILURE_REASON_OTHER\x10\a\x12.\n" +
 	"*START_FAILURE_REASON_INCOMPATIBLE_VERSIONS\x10\b\x120\n" +
-	",START_FAILURE_REASON_STATE_LOCATION_TOO_LONG\x10\t*Z\n" +
+	",START_FAILURE_REASON_STATE_LOCATION_TOO_LONG\x10\t\x12*\n" +
+	"&START_FAILURE_REASON_MODEL_NOT_ALLOWED\x10\n" +
+	"*Z\n" +
 	"\n" +
 	"ReportKind\x12\x1b\n" +
 	"\x17REPORT_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -4690,7 +4824,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 18)
-var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(RunStatus)(0),                // 0: vibesys.orchestrator.v1.RunStatus
 	(RunStopReason)(0),            // 1: vibesys.orchestrator.v1.RunStopReason
@@ -4745,41 +4879,43 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*Message)(nil),               // 50: vibesys.orchestrator.v1.Message
 	(*LeadBrief)(nil),             // 51: vibesys.orchestrator.v1.LeadBrief
 	(*BuildVersions)(nil),         // 52: vibesys.orchestrator.v1.BuildVersions
-	(*timestamppb.Timestamp)(nil), // 53: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 54: google.protobuf.Duration
+	(*ModelCatalog)(nil),          // 53: vibesys.orchestrator.v1.ModelCatalog
+	(*HarnessModels)(nil),         // 54: vibesys.orchestrator.v1.HarnessModels
+	(*timestamppb.Timestamp)(nil), // 55: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 56: google.protobuf.Duration
 }
 var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.Run.status:type_name -> vibesys.orchestrator.v1.RunStatus
-	53, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
-	53, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
+	55, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
+	55, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: vibesys.orchestrator.v1.Run.stop_reason:type_name -> vibesys.orchestrator.v1.RunStopReason
-	53, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
-	53, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
+	55, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
+	55, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
 	23, // 6: vibesys.orchestrator.v1.Run.usage:type_name -> vibesys.orchestrator.v1.Usage
 	20, // 7: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
 	19, // 8: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
 	2,  // 9: vibesys.orchestrator.v1.Run.limit_reached:type_name -> vibesys.orchestrator.v1.RunLimit
-	53, // 10: vibesys.orchestrator.v1.Run.limit_reached_at:type_name -> google.protobuf.Timestamp
-	54, // 11: vibesys.orchestrator.v1.Run.summary_every:type_name -> google.protobuf.Duration
-	53, // 12: vibesys.orchestrator.v1.Run.next_summary_at:type_name -> google.protobuf.Timestamp
+	55, // 10: vibesys.orchestrator.v1.Run.limit_reached_at:type_name -> google.protobuf.Timestamp
+	56, // 11: vibesys.orchestrator.v1.Run.summary_every:type_name -> google.protobuf.Duration
+	55, // 12: vibesys.orchestrator.v1.Run.next_summary_at:type_name -> google.protobuf.Timestamp
 	9,  // 13: vibesys.orchestrator.v1.AllowedAgent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	3,  // 14: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	9,  // 15: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	4,  // 16: vibesys.orchestrator.v1.Agent.status:type_name -> vibesys.orchestrator.v1.AgentStatus
 	22, // 17: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
-	53, // 18: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
-	53, // 19: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
+	55, // 18: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
+	55, // 19: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
 	5,  // 20: vibesys.orchestrator.v1.Agent.stop_stage:type_name -> vibesys.orchestrator.v1.AgentStopStage
 	12, // 21: vibesys.orchestrator.v1.Agent.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
 	23, // 22: vibesys.orchestrator.v1.Agent.usage:type_name -> vibesys.orchestrator.v1.Usage
 	6,  // 23: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
 	7,  // 24: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
 	23, // 25: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
-	53, // 26: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
-	53, // 27: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
+	55, // 26: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
+	55, // 27: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
 	8,  // 28: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
-	53, // 29: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
-	53, // 30: vibesys.orchestrator.v1.Item.started_at:type_name -> google.protobuf.Timestamp
+	55, // 29: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
+	55, // 30: vibesys.orchestrator.v1.Item.started_at:type_name -> google.protobuf.Timestamp
 	26, // 31: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
 	26, // 32: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
 	26, // 33: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
@@ -4803,10 +4939,10 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	15, // 51: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
 	4,  // 52: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
 	2,  // 53: vibesys.orchestrator.v1.RunLimitReached.limit:type_name -> vibesys.orchestrator.v1.RunLimit
-	53, // 54: vibesys.orchestrator.v1.CatchUpRequest.since:type_name -> google.protobuf.Timestamp
-	53, // 55: vibesys.orchestrator.v1.CatchUpRequest.until:type_name -> google.protobuf.Timestamp
+	55, // 54: vibesys.orchestrator.v1.CatchUpRequest.since:type_name -> google.protobuf.Timestamp
+	55, // 55: vibesys.orchestrator.v1.CatchUpRequest.until:type_name -> google.protobuf.Timestamp
 	10, // 56: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	53, // 57: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
+	55, // 57: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
 	11, // 58: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
 	34, // 59: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
 	42, // 60: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
@@ -4818,11 +4954,13 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	48, // 66: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
 	47, // 67: vibesys.orchestrator.v1.Message.report_due:type_name -> vibesys.orchestrator.v1.ReportDue
 	49, // 68: vibesys.orchestrator.v1.Message.catch_up_request:type_name -> vibesys.orchestrator.v1.CatchUpRequest
-	69, // [69:69] is the sub-list for method output_type
-	69, // [69:69] is the sub-list for method input_type
-	69, // [69:69] is the sub-list for extension type_name
-	69, // [69:69] is the sub-list for extension extendee
-	0,  // [0:69] is the sub-list for field type_name
+	54, // 69: vibesys.orchestrator.v1.ModelCatalog.harnesses:type_name -> vibesys.orchestrator.v1.HarnessModels
+	9,  // 70: vibesys.orchestrator.v1.HarnessModels.harness:type_name -> vibesys.orchestrator.v1.Harness
+	71, // [71:71] is the sub-list for method output_type
+	71, // [71:71] is the sub-list for method input_type
+	71, // [71:71] is the sub-list for extension type_name
+	71, // [71:71] is the sub-list for extension extendee
+	0,  // [0:71] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_orchestrator_proto_init() }
@@ -4879,7 +5017,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc), len(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc)),
 			NumEnums:      18,
-			NumMessages:   35,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

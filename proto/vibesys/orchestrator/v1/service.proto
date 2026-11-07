@@ -113,6 +113,8 @@ message RunsSnapshot {
   // budget: the oldest finished ones, never a live run before a finished one. Zero when every run is
   // listed.
   uint32 runs_left_out = 10;
+  // The models the host runs agents on and allows, for a client to offer when it starts a run.
+  ModelCatalog models = 11;
 }
 
 // RunSummary is what a client shows of a run without reading its history. The host works every figure
