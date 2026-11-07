@@ -83,6 +83,20 @@ message ObjectiveBounds {
     finite: true
     gt: 0
   }];
+  // The best the run measured on the objective, in the bound's direction: the value of the newest
+  // point of the objective's series that set a best, which is where the series' best line ends. It
+  // is not the head's. The head is the candidate the run last promoted, and for a task of several
+  // objectives it is the best of one of them, so on the others head_value and best_value differ.
+  // Absent when the run measured nothing on the objective, and when its newest measurement says
+  // the objective improves the other way than the bound does.
+  optional double best_value = 6 [(buf.validate.field).double.finite = true];
+  // How close best_value is to the standing bound, in percent, defined as percent_of_bound is for
+  // the head's value (with the same unit caveat). Absent when best_value is, and when either number
+  // is not above zero.
+  optional double best_percent_of_bound = 7 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
 }
 
 // ObjectiveSeries is the measured history of one objective of the run: one point for every measure

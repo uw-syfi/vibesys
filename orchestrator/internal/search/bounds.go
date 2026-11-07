@@ -18,7 +18,9 @@ const (
 
 // Bounds is the view of the performance bounds the agents of one run declared: one entry per
 // objective, by name, with every version of the bound oldest first, so a chart can draw the bound as
-// it stood at each moment, and with how close the head is to the bound that stands.
+// it stood at each moment, and with how close the head, and the best the run measured, are to the
+// bound that stands. The best is the one the series ends at (measurements): the head is the candidate
+// the run last promoted, which on an objective other than the one it was promoted for need not be it.
 //
 // The bounds shown are the run's own and those a person declared outside any run: the store holds
 // those of every run of the task, as it holds their jobs, and a bound declared in an earlier run says
@@ -34,6 +36,7 @@ const (
 func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.ObjectiveBounds, truncated bool) {
 	declared := declaredBounds(facts, run)
 	heads := headReadings(head, standingBounds(declared))
+	bests := bestValues(measurements(facts, run))
 	for objective, versions := range declared {
 		standing := versions[len(versions)-1]
 		kept := slices.DeleteFunc(slices.Clone(versions), func(b *cli.ObjectiveBound) bool { return b.GetDirection() != standing.GetDirection() })
@@ -50,6 +53,13 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 			entry.HeadValue = &value
 			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
 				entry.PercentOfBound = &percent
+			}
+		}
+		if best, ok := bests[objective]; ok && best.direction == standing.GetDirection() {
+			value := best.value
+			entry.BestValue = &value
+			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
+				entry.BestPercentOfBound = &percent
 			}
 		}
 		out = append(out, entry)
