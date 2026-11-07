@@ -3491,8 +3491,9 @@ func (x *ListBoundsRequest) GetContext() *CallContext {
 }
 
 type ListBoundsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Bounds        []*ObjectiveBound      `protobuf:"bytes,1,rep,name=bounds,proto3" json:"bounds,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every declared bound, oldest first: their places count 1, 2, ... without a gap.
+	Bounds        []*ObjectiveBound `protobuf:"bytes,1,rep,name=bounds,proto3" json:"bounds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4723,13 +4724,13 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x05value\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\x05value\x12\x1d\n" +
 	"\x04unit\x18\x05 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x04unit\x12\x1e\n" +
 	"\x04note\x18\x06 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 R\x04note\"L\n" +
-	"\x14DeclareBoundResponse\x124\n" +
-	"\x05bound\x18\x01 \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundR\x05bound\"J\n" +
-	"\x11ListBoundsRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\"L\n" +
-	"\x12ListBoundsResponse\x126\n" +
-	"\x06bounds\x18\x01 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundR\x06bounds\"\xbe\x01\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04note\"T\n" +
+	"\x14DeclareBoundResponse\x12<\n" +
+	"\x05bound\x18\x01 \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\x06\xbaH\x03\xc8\x01\x01R\x05bound\"R\n" +
+	"\x11ListBoundsRequest\x12=\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\"Y\n" +
+	"\x12ListBoundsResponse\x12C\n" +
+	"\x06bounds\x18\x01 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\v\xbaH\b\x92\x01\x05\"\x03\xc8\x01\x01R\x06bounds\"\xbe\x01\n" +
 	"\x10WatchTaskRequest\x12=\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\tR\x05epoch\x12%\n" +

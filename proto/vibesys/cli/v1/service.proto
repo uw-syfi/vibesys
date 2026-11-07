@@ -528,15 +528,16 @@ message DeclareBoundRequest {
 
 message DeclareBoundResponse {
   // The bound as recorded, with its place in the log, its origin and the direction the task gave.
-  ObjectiveBound bound = 1;
+  ObjectiveBound bound = 1 [(buf.validate.field).required = true];
 }
 
 message ListBoundsRequest {
-  CallContext context = 1;
+  CallContext context = 1 [(buf.validate.field).required = true];
 }
 
 message ListBoundsResponse {
-  repeated ObjectiveBound bounds = 1;
+  // Every declared bound, oldest first: their places count 1, 2, ... without a gap.
+  repeated ObjectiveBound bounds = 1 [(buf.validate.field).repeated.items.required = true];
 }
 
 message WatchTaskRequest {
