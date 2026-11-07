@@ -32,7 +32,7 @@ const generators: {
   }),
   'show-ideas': fc.record({
     type: fc.constant('show-ideas' as const),
-    window: fc.record({fromMs: fc.nat(1000), toMs: fc.nat(2000)}),
+    window: fc.record({plans: fc.array(fc.nat(100))}),
   }),
   'pick-agent': fc.record({
     type: fc.constant('pick-agent' as const),

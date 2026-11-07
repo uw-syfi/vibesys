@@ -131,10 +131,13 @@ export function ideasReport(search: SearchState | undefined): IdeasReport | unde
   };
 }
 
-/** The window a Catch me up check-in covers, in milliseconds. */
+/**
+ * The plans a Catch me up check-in counts for its window, by number: the host's own membership
+ * (`WindowFacts.plans_created` and `plans_changed`), the same one its Created and Changed counts
+ * are the sizes of.
+ */
 export interface IdeaWindow {
-  readonly fromMs: number;
-  readonly toMs: number;
+  readonly plans: readonly number[];
 }
 
 /** Display filter: the ideas made in this run, or worked on in it. */
@@ -145,15 +148,11 @@ export const ideasInRun = (ideas: readonly IdeaRow[]): readonly IdeaRow[] =>
 export const ideasOfVerdict = (ideas: readonly IdeaRow[], verdict: Verdict): readonly IdeaRow[] =>
   ideas.filter(idea => idea.verdict === verdict);
 
-/**
- * Display filter: the ideas created or changed after `window.fromMs` and not after `window.toMs`
- * (the span a check-in covers). It reads the plan's own times and decides nothing else.
- */
+/** Display filter: the ideas whose plan the check-in counted (the host's membership, not a time test). */
 export const ideasInWindow = (
   ideas: readonly IdeaRow[],
   window: IdeaWindow,
 ): readonly IdeaRow[] => {
-  const inside = (at: number | null): boolean =>
-    at !== null && at > window.fromMs && at <= window.toMs;
-  return ideas.filter(idea => inside(idea.createdMs) || inside(idea.updatedMs));
+  const counted = new Set(window.plans);
+  return ideas.filter(idea => counted.has(idea.planNumber));
 };

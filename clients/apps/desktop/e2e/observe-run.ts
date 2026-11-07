@@ -54,6 +54,10 @@ const HARNESS_WORD: Readonly<Record<string, string>> = {
 
 const WORLD_KEYS = ['home', 'runId', 'task', 'report', 'agents'];
 
+/** Text as the app shows it: each full commit id (40 hex digits) is cut to its first 8 digits. */
+const shown = (text: string): string =>
+  text.replace(/\b[0-9a-f]{40}\b/g, commit => commit.slice(0, 8));
+
 function readWorld(env: NodeJS.ProcessEnv = process.env): World {
   const raw = env['VIBESYS_E2E_WORLD'];
   if (raw === undefined || raw === '') {
@@ -205,7 +209,7 @@ async function checkTheIdeasAndTheChartLink(page: Page): Promise<void> {
 
 /** A run opens on its report, which carries the lead's latest report as the run's summary. */
 async function checkTheReportShowsTheLeadsSummary(page: Page, world: World): Promise<void> {
-  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(shown(world.report));
   // The report shows no agent's turns and no list of agents: the agents have a page of their own,
   // one press away.
   await expect(page.getByRole('tree')).toHaveCount(0);
@@ -268,7 +272,7 @@ async function checkTheLeadsReportIsShown(page: Page, world: World): Promise<voi
     .getByRole('navigation', {name: 'Where you are'})
     .getByRole('button', {name: world.task})
     .click();
-  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(shown(world.report));
 }
 
 /** The check-ins listed on the catch-up page, newest first. */
@@ -286,7 +290,7 @@ async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<
   await expect(page.getByRole('region', {name: 'Agents', exact: true})).toContainText(
     new RegExp(`Started\\s*${world.agents.length}(?!\\d)`),
   );
-  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(shown(world.report));
   await expect(page.getByText('Writing…')).toHaveCount(0);
   await page.getByRole('button', {name: 'New check-in'}).click();
   await expect(checkIns(page)).toHaveCount(2);

@@ -85,11 +85,12 @@ describe('ages and spans', () => {
 });
 
 describe('figures', () => {
-  it('are three significant digits with a suffix for thousands', () => {
-    expect(formatFigure(11_076)).toBe('11.1k');
+  it('are four significant digits with a suffix for thousands', () => {
+    expect(formatFigure(11_076)).toBe('11.08k');
     expect(formatFigure(15_600)).toBe('15.6k');
     expect(formatFigure(118)).toBe('118');
-    expect(formatFigure(0.5123)).toBe('0.512');
+    expect(formatFigure(17.01)).toBe('17.01');
+    expect(formatFigure(0.5123)).toBe('0.5123');
     expect(formatFigure(2_310_000)).toBe('2.31M');
     expect(formatFigure(-0)).toBe('0');
   });
