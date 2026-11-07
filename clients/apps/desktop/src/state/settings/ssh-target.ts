@@ -25,10 +25,10 @@ export class SshCommandError extends Error {
 
 /** A jump list: hosts joined by commas, never starting with a dash. Held to the proto's rule by a test. */
 export const JUMP_PATTERN = /^[A-Za-z0-9_.@:[][A-Za-z0-9_.@:,[\]-]*$/;
-export const MAX_JUMP = 512;
+const MAX_JUMP = 512;
 /** An identity file path: one line, never starting with a dash. Held to the proto's rule by a test. */
-export const IDENTITY_PATTERN = /^[^\0\r\n-][^\0\r\n]*$/;
-export const MAX_IDENTITY = 1024;
+const IDENTITY_PATTERN = /^[^\0\r\n-][^\0\r\n]*$/;
+const MAX_IDENTITY = 1024;
 /** The user of a destination. */
 const USER_PATTERN = /^[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
 /** A host name or address of a destination, without its user. */

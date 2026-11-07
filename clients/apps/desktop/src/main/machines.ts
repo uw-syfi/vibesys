@@ -27,7 +27,7 @@ import type {SavedHostsStore} from './saved-hosts-store.js';
 import type {SshConfigSource} from './ssh-config.js';
 
 /** What is kept for a host besides its key: the options of its target, when it has any. */
-export function settingsOfTarget(target: SshTarget): DesktopHostSettings {
+function settingsOfTarget(target: SshTarget): DesktopHostSettings {
   const hasOptions =
     target.port !== undefined || target.jump !== undefined || target.identityFile !== undefined;
   return create(DesktopHostSettingsSchema, {

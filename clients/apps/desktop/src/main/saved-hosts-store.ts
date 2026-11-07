@@ -29,7 +29,7 @@ export const savedHostsPath = (userData: string): string => join(userData, BINAR
 const JSON_FILE = 'hosts.json';
 
 /** One saved host: its key and what is kept for it. */
-export interface SavedHost {
+interface SavedHost {
   readonly key: HostKey;
   readonly settings: DesktopHostSettings;
 }
