@@ -21,6 +21,7 @@ import {generateScenario} from '../../testing/orchestrator/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
+import {COST_OVERVIEW_WORDS} from '../orchestrator/cost-words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
@@ -114,7 +115,12 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
                 go={go}
               />
             ) : navigation.destination === 'cost' ? (
-              <CostOverviewScreen />
+              <CostOverviewScreen
+                hosts={[]}
+                words={COST_OVERVIEW_WORDS}
+                open={() => undefined}
+                retry={() => undefined}
+              />
             ) : navigation.destination === 'machines' ? (
               <MachinesScreen rows={machines} />
             ) : (

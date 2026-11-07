@@ -27,6 +27,7 @@ import {CatchUpScreen} from '../catch-up/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
+import {COST_OVERVIEW_WORDS} from '../orchestrator/cost-words.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 
@@ -181,7 +182,16 @@ describe('the pages of a run and the pages of the window', () => {
     settings.unmount();
     for (const [name, page] of [
       ['Machines', <MachinesScreen key="m" rows={[]} />],
-      ['Cost', <CostOverviewScreen key="c" />],
+      [
+        'Cost',
+        <CostOverviewScreen
+          key="c"
+          hosts={[]}
+          words={COST_OVERVIEW_WORDS}
+          open={() => undefined}
+          retry={() => undefined}
+        />,
+      ],
     ] as const) {
       const screen = mount(page);
       expect(frameOf(screen.container), name).toMatchObject({
