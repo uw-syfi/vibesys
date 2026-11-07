@@ -47,7 +47,7 @@ from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
 if TYPE_CHECKING:
     import signal
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from vs_sandbox.docker_states import ContainerLife
     from vs_sandbox.execution import CommandResult
@@ -81,6 +81,8 @@ AGENT_HOME = "/home/agent"
 RUN_ID_LABEL = "vibesys.run-id"
 
 _AGENT_USER = "agent"
+#: The characters ``find -path`` reads as pattern syntax rather than as themselves.
+_FIND_PATTERN_SYNTAX = re.compile(r"[][*?\\]")
 _ROOT_SETUP_TIMEOUT_S = 60
 _CONTAINER_IDENTITY_LINE_COUNT = 2
 _EXEC_STOP_TIMEOUT_S = 30
@@ -220,6 +222,34 @@ def _first_component_below(home: str, destination: str) -> str:
     """
     relative = Path(destination).relative_to(home)
     return str(Path(home) / relative.parts[0])
+
+
+def _agent_ownership_command(top: str, mount_destinations: Iterable[str]) -> str:
+    """Return the shell command that gives *top* and everything below it to the agent.
+
+    Each mount destination at or below *top* is left out, with everything below
+    it: a bind mount is the host's file or directory, so its owner is not ours to
+    change, and ``chown`` fails on a read-only one (#4039). ``-prune`` leaves each
+    one out by path. ``-xdev`` alone would not: it still visits a mounted file,
+    and a bind mount from the file system the container's root is on crosses no
+    device boundary.
+    """
+    pruned = sorted(
+        {
+            str(Path(destination))
+            for destination in mount_destinations
+            if Path(destination).is_relative_to(top)
+        }
+    )
+    # `-path A -o -path B ...`, each path escaped so it matches only itself.
+    tests = [
+        argument
+        for path in pruned
+        for argument in ("-o", "-path", _FIND_PATTERN_SYNTAX.sub(r"\\\g<0>", path))
+    ][1:]
+    prune = ["(", *tests, ")", "-prune", "-o"] if tests else []
+    owner = f"{_AGENT_USER}:{_AGENT_USER}"
+    return shlex.join(["find", top, "-xdev", *prune, "-exec", "chown", "-h", owner, "{}", "+"])
 
 
 def _bind_mounts_for_resources(
@@ -808,6 +838,9 @@ class DockerSandbox(WorkspaceSandbox):
     def _remap_agent_user(self, container_id: str) -> None:
         """Remap the image's ``agent`` user to the configured host uid/gid.
 
+        The image's HOME then goes to the remapped user, except every path
+        mounted below it, which stays the host's.
+
         Skipped when the image's ``agent`` user already carries these ids, so
         a host user that happens to already be uid/gid 1000 (the image's
         baked-in default) pays no extra ``docker exec``.
@@ -818,9 +851,13 @@ class DockerSandbox(WorkspaceSandbox):
         script = (
             f"usermod -o -u {self._agent_uid} {_AGENT_USER} && "
             f"groupmod -o -g {self._agent_gid} {_AGENT_USER} && "
-            f"chown -R {_AGENT_USER}:{_AGENT_USER} {AGENT_HOME}"
+            f"{_agent_ownership_command(AGENT_HOME, self._mount_destinations())}"
         )
         self._run_as_root(container_id, script, what="agent user id remap")
+
+    def _mount_destinations(self) -> list[str]:
+        """Return every container path a host file or directory is mounted at."""
+        return [self._container_root, *(path for _, path, _ in self._bind_mounts)]
 
     def _own_writable_mount_parents(self, container_id: str) -> None:
         """Give the agent the directories Docker created above writable mounts in HOME.
@@ -829,8 +866,10 @@ class DockerSandbox(WorkspaceSandbox):
         CLI keeps its sessions and caches next to a credential file that was
         mounted writable into ``~/.codex``, and a root-owned ``~/.codex``
         would refuse them. Only the directories are chowned, never the mounted
-        path: that is the host's file.
+        path: that is the host's file. A parent at or below another mount is
+        the host's too, so it is left alone.
         """
+        mounted = [Path(path) for path in self._mount_destinations()]
         directories: list[str] = []
         for _, container_path, readonly in self._bind_mounts:
             if readonly or not Path(container_path).is_relative_to(AGENT_HOME):
@@ -838,7 +877,9 @@ class DockerSandbox(WorkspaceSandbox):
             for parent in Path(container_path).parents:
                 if parent == Path(AGENT_HOME):
                     break
-                if str(parent) not in directories:
+                if str(parent) not in directories and not any(
+                    parent.is_relative_to(mount) for mount in mounted
+                ):
                     directories.append(str(parent))
         if directories:
             quoted = " ".join(shlex.quote(directory) for directory in directories)
@@ -863,17 +904,10 @@ class DockerSandbox(WorkspaceSandbox):
         # is the host's file, and its ownership is not ours to change.
         for source, destination in self._auth_files:
             top = _first_component_below(AGENT_HOME, destination)
-            mounted = sorted(
-                container_path
-                for _, container_path, _ in self._bind_mounts
-                if Path(container_path).is_relative_to(top)
-            )
-            skip = "".join(f" ! -path {shlex.quote(path)}" for path in mounted)
             script = (
                 f"mkdir -p {shlex.quote(str(Path(destination).parent))} && "
                 f"cp -a {shlex.quote(source)} {shlex.quote(destination)} && "
-                f"find {shlex.quote(top)} -xdev{skip} "
-                f"-exec chown -h {_AGENT_USER}:{_AGENT_USER} {{}} +"
+                f"{_agent_ownership_command(top, self._mount_destinations())}"
             )
             self._run_as_root(container_id, script, what=f"auth file copy to {destination}")
 
