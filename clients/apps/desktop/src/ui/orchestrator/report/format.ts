@@ -3,7 +3,7 @@
  * people who use the app; the one constant below is the only place that says so.
  */
 
-export const DISPLAY_TIME_ZONE = 'America/Los_Angeles';
+const DISPLAY_TIME_ZONE = 'America/Los_Angeles';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
