@@ -42,6 +42,8 @@ export interface FakeGateway {
   readonly calls: FakeCall[];
   /** Everything the peer received, handshake included, oldest first. */
   readonly methods: string[];
+  /** The request headers of everything the peer received, handshake included, oldest first. */
+  readonly headers: IncomingHttpHeaders[];
   /** A new connection to the peer: the client end of a memory duplex pair. */
   connect(): Duplex;
   /** End every open connection, as a dropped link does. */
@@ -81,8 +83,8 @@ function duplexPair(hold: {held: boolean}, waiting: Set<() => void>): [Duplex, D
 /** What the peer does with each request it receives. */
 interface Serving {
   readonly schemaHash: () => string;
-  /** The peer saw a request for `method` (handshake included). */
-  readonly seen: (method: string) => void;
+  /** The peer saw a request for `method` (handshake included) with these headers. */
+  readonly seen: (method: string, headers: IncomingHttpHeaders) => void;
   /** A call on a scripted method arrived. */
   readonly arrived: (call: FakeCall) => void;
 }
@@ -101,7 +103,7 @@ function serve(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, serving:
   stream.on('end', () => {
     if (stream.destroyed) return;
     const method = String(headers[':path']);
-    serving.seen(method);
+    serving.seen(method, headers);
     stream.respond({':status': 200, 'content-type': 'application/grpc'}, {waitForTrailers: true});
     const finish = (code: number, detail: string): void => {
       if (stream.destroyed || stream.closed) return;
@@ -151,6 +153,7 @@ export function fakeGateway(): FakeGateway {
   const sockets = new Set<Duplex>();
   const calls: FakeCall[] = [];
   const methods: string[] = [];
+  const headersSeen: IncomingHttpHeaders[] = [];
   const waiting = new Set<() => void>();
   const holds = new Set<{held: boolean}>();
   const gateway: FakeGateway = {
@@ -167,6 +170,7 @@ export function fakeGateway(): FakeGateway {
     schemaHash: API_SCHEMA_HASH,
     calls,
     methods,
+    headers: headersSeen,
     connect: () => {
       const hold = {held: false};
       holds.add(hold);
@@ -193,7 +197,10 @@ export function fakeGateway(): FakeGateway {
   server.on('stream', (stream: ServerHttp2Stream, headers) =>
     serve(stream, headers, {
       schemaHash: () => gateway.schemaHash,
-      seen: method => methods.push(method),
+      seen: (method, headers) => {
+        methods.push(method);
+        headersSeen.push(headers);
+      },
       arrived: call => {
         calls.push(call);
         gateway.onCall?.(call);

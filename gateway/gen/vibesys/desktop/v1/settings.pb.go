@@ -456,7 +456,7 @@ func (x *DesktopRunRef) GetRunId() string {
 // a name to show. The main process stamps both on every call to a host as metadata
 // (vibesys-viewer-id and vibesys-viewer-label), where they say whose check-ins a host keeps for Catch
 // me up; nothing authenticates them and they grant nothing. The label travels as an HTTP/2 header
-// value, so it is printable ASCII.
+// value, so it is printable ASCII with no space at either end (a header value does not keep one).
 type DesktopViewer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -909,10 +909,10 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\x04dark\x18\x03 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeB\f\xbaH\t\x82\x01\x06\x18\x04\x18\x05\x18\x06R\x04dark\"\x9c\x01\n" +
 	"\rDesktopRunRef\x12O\n" +
 	"\x04host\x18\x01 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\x12:\n" +
-	"\x06run_id\x18\x02 \x01(\tB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$R\x05runId\"l\n" +
+	"\x06run_id\x18\x02 \x01(\tB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$R\x05runId\"y\n" +
 	"\rDesktopViewer\x12.\n" +
-	"\x02id\x18\x01 \x01(\tB\x1e\xbaH\x1br\x192\x17^[A-Za-z0-9._-]{1,128}$R\x02id\x12+\n" +
-	"\x05label\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[ -~]{1,128}$R\x05label\"\xf8\x02\n" +
+	"\x02id\x18\x01 \x01(\tB\x1e\xbaH\x1br\x192\x17^[A-Za-z0-9._-]{1,128}$R\x02id\x128\n" +
+	"\x05label\x18\x02 \x01(\tB\"\xbaH\x1fr\x1d2\x1b^[!-~]([ -~]{0,126}[!-~])?$R\x05label\"\xf8\x02\n" +
 	"\x12DesktopPreferences\x12!\n" +
 	"\aversion\x18\x01 \x01(\rB\a\xbaH\x04*\x02\b\x01R\aversion\x12M\n" +
 	"\n" +

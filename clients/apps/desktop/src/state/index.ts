@@ -164,3 +164,10 @@ export {
   type NavigationKind,
   navigationReducer,
 } from './shell/navigation.js';
+export {
+  labelFromName,
+  VIEWER_ID_KEY,
+  VIEWER_LABEL_KEY,
+  type Viewer,
+  viewerMetadata,
+} from './viewer.js';

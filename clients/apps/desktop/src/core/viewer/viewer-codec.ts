@@ -6,15 +6,13 @@
  */
 import {create, toBinary} from '@bufbuild/protobuf';
 import {DesktopViewerSchema, validatedExactFromBinary} from '@vibesys/proto';
+import type {Viewer} from '../../state/index.js';
 
 /** The IPC channel the main process serves; the preload repeats it (a test holds the two equal). */
 export const VIEWER_READ_CHANNEL = 'vibesys:viewer:read';
 
 /** An install of the app and the name it shows. */
-export interface ViewerIdentity {
-  readonly id: string;
-  readonly label: string;
-}
+export type ViewerIdentity = Viewer;
 
 /**
  * What the preload exposes on the window: the viewer as bytes. The call ends in exactly one of its

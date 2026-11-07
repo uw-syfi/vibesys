@@ -49,15 +49,46 @@ function world(options: {failing?: ReadonlySet<HostKey>} = {}) {
   return {peer, dials, dialerFor, lines: [] as string[]};
 }
 
-const calls = (w: ReturnType<typeof world>) => {
+const calls = (
+  w: ReturnType<typeof world>,
+  metadata: Effect.Effect<Readonly<Record<string, string>>> = Effect.succeed({}),
+) => {
   const scope = Scope.makeUnsafe();
-  return makeGatewayCalls(w.dialerFor, (host, line) => w.lines.push(`${host}: ${line}`)).pipe(
+  return makeGatewayCalls(
+    w.dialerFor,
+    (host, line) => w.lines.push(`${host}: ${line}`),
+    metadata,
+  ).pipe(
     Effect.provideService(Scope.Scope, scope),
     Effect.map(made => ({made, scope})),
   );
 };
 
 describe('gateway calls', () => {
+  it.effect('carry the metadata they were given on every call to every host', () =>
+    Effect.gen(function* () {
+      const w = world();
+      const {made, scope} = yield* calls(
+        w,
+        Effect.succeed({'vibesys-viewer-id': 'install-1', 'vibesys-viewer-label': 'ana'}),
+      );
+      for (const host of [HOST_A, HOST_B]) {
+        const running = yield* Effect.forkChild(made.unary(host, LIST_ITEMS, request));
+        yield* untilTrue(() => w.peer(host).calls.length === 1);
+        w.peer(host).calls[0]?.send(reply);
+        w.peer(host).calls[0]?.end();
+        yield* Fiber.join(running);
+        // The handshake and the call, both with the viewer.
+        expect(w.peer(host).headers.map(h => h['vibesys-viewer-id'])).toEqual([
+          'install-1',
+          'install-1',
+        ]);
+        expect(w.peer(host).headers.map(h => h['vibesys-viewer-label'])).toEqual(['ana', 'ana']);
+      }
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
   it.effect('answers a unary call and a stream over one connection per host', () =>
     Effect.gen(function* () {
       const w = world();

@@ -2,23 +2,27 @@
  * The person's preferences, kept in the app's user data as `preferences.pb` (a `DesktopPreferences`
  * message of `proto/vibesys/desktop/v1/settings.proto`). The window reads and replaces the
  * appearance only, as `DesktopAppearance` bytes over two IPC channels; the other fields of the
- * file (notifications, archived runs) belong to other features and are kept as they are. A file
- * that cannot be read or is not a valid message is logged and treated as absent, so a damaged
- * file never keeps the window from opening, and the next save replaces it.
+ * file (notifications, archived runs) belong to other features and are kept as they are. The viewer
+ * (who this install is to a host, `viewer.ts`) is one of them: the main process alone reads and
+ * replaces it. A file that cannot be read or is not a valid message is logged and treated as
+ * absent, so a damaged file never keeps the window from opening, and the next save replaces it.
  */
 import {join} from 'node:path';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
   DesktopAppearanceSchema,
   DesktopPreferencesSchema,
+  DesktopViewerSchema,
   validatedExactFromBinary,
   validatedFromBinary,
 } from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import {
+  appearanceToBytes,
   PREFERENCES_READ_CHANNEL,
   PREFERENCES_WRITE_CHANNEL,
 } from '../core/settings/preferences-codec.js';
+import {defaultAppearance} from '../state/index.js';
 import type {ReadFile, WriteFile} from './files.js';
 import {isOwnWindow, type OwnWindows, type PortEvent} from './port-ipc.js';
 
@@ -37,6 +41,14 @@ export interface PreferencesStore {
   readonly read: Effect.Effect<Uint8Array | null, Error>;
   /** Replaces the appearance, keeping the rest of the file. The bytes must be a valid message. */
   readonly write: (appearance: Uint8Array) => Effect.Effect<void, Error>;
+  /** The saved viewer as `DesktopViewer` bytes; null when none is saved. */
+  readonly readViewer: Effect.Effect<Uint8Array | null, Error>;
+  /**
+   * Replaces the viewer, keeping the rest of the file. The bytes must be a valid message. A file
+   * that does not exist yet holds the default appearance beside it, which is what the window
+   * shows when nothing is saved, so saving the viewer first changes nothing the person sees.
+   */
+  readonly writeViewer: (viewer: Uint8Array) => Effect.Effect<void, Error>;
 }
 
 export function makePreferencesStore(
@@ -75,9 +87,35 @@ export function makePreferencesStore(
             appearance: next,
             notificationsEnabled: before?.notificationsEnabled ?? true,
             archived: before?.archived ?? [],
+            ...(before?.viewer === undefined ? {} : {viewer: before.viewer}),
           }),
         );
         // Never write what this app could not read back.
+        yield* attempt(() => validatedFromBinary(DesktopPreferencesSchema, bytes));
+        yield* files.write(path, bytes);
+      }),
+    readViewer: Effect.map(held, preferences =>
+      preferences?.viewer === undefined ? null : toBinary(DesktopViewerSchema, preferences.viewer),
+    ),
+    writeViewer: viewer =>
+      Effect.gen(function* () {
+        const next = yield* attempt(() => validatedExactFromBinary(DesktopViewerSchema, viewer));
+        const before = yield* held;
+        const appearance =
+          before?.appearance ??
+          (yield* attempt(() =>
+            validatedExactFromBinary(DesktopAppearanceSchema, appearanceToBytes(defaultAppearance)),
+          ));
+        const bytes = toBinary(
+          DesktopPreferencesSchema,
+          create(DesktopPreferencesSchema, {
+            version: VERSION,
+            appearance,
+            notificationsEnabled: before?.notificationsEnabled ?? true,
+            archived: before?.archived ?? [],
+            viewer: next,
+          }),
+        );
         yield* attempt(() => validatedFromBinary(DesktopPreferencesSchema, bytes));
         yield* files.write(path, bytes);
       }),

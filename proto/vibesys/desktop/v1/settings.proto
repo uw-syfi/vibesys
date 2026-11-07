@@ -102,10 +102,10 @@ message DesktopRunRef {
 // a name to show. The main process stamps both on every call to a host as metadata
 // (vibesys-viewer-id and vibesys-viewer-label), where they say whose check-ins a host keeps for Catch
 // me up; nothing authenticates them and they grant nothing. The label travels as an HTTP/2 header
-// value, so it is printable ASCII.
+// value, so it is printable ASCII with no space at either end (a header value does not keep one).
 message DesktopViewer {
   string id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9._-]{1,128}$"];
-  string label = 2 [(buf.validate.field).string.pattern = "^[ -~]{1,128}$"];
+  string label = 2 [(buf.validate.field).string.pattern = "^[!-~]([ -~]{0,126}[!-~])?$"];
 }
 
 message DesktopPreferences {

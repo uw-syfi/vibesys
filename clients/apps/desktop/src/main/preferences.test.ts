@@ -10,6 +10,7 @@ import {
   PREFERENCES_READ_CHANNEL,
   PREFERENCES_WRITE_CHANNEL,
 } from '../core/settings/preferences-codec.js';
+import {viewerToBytes} from '../core/viewer/viewer-codec.js';
 import {makeMemoryFiles} from '../testing/main/memory-files.js';
 import {installPreferencesIpc, makePreferencesStore, type PreferencesIpc} from './preferences.js';
 
@@ -93,6 +94,27 @@ describe('the preferences file', () => {
     Effect.gen(function* () {
       const {store, files} = storeOver();
       const error = yield* Effect.flip(store.write(Uint8Array.of(0xff, 0xff)));
+      expect(error).toBeInstanceOf(Error);
+      expect(files.written()).toEqual([]);
+    }),
+  );
+});
+
+describe('the viewer in the preferences file', () => {
+  it.effect('has none saved at first, and gives back the one written', () =>
+    Effect.gen(function* () {
+      const {store} = storeOver();
+      expect(yield* store.readViewer).toBeNull();
+      const viewer = viewerToBytes({id: 'install-1', label: 'ana'});
+      yield* store.writeViewer(viewer);
+      expect(yield* store.readViewer).toEqual(viewer);
+    }),
+  );
+
+  it.effect('refuses bytes that are not a valid viewer and leaves the file alone', () =>
+    Effect.gen(function* () {
+      const {store, files} = storeOver();
+      const error = yield* Effect.flip(store.writeViewer(Uint8Array.of(0xff, 0xff)));
       expect(error).toBeInstanceOf(Error);
       expect(files.written()).toEqual([]);
     }),

@@ -15,7 +15,7 @@ const whoami = (layer: Layer.Layer<Viewer>) =>
 /** Any id and label the contract allows: an id of safe characters, a label of printable ASCII. */
 const viewerArb: fc.Arbitrary<ViewerIdentity> = fc.record({
   id: fc.stringMatching(/^[A-Za-z0-9._-]{1,128}$/),
-  label: fc.stringMatching(/^[ -~]{1,128}$/),
+  label: fc.stringMatching(/^[!-~]([ -~]{0,126}[!-~])?$/),
 });
 
 describe('the viewer', () => {
@@ -35,6 +35,7 @@ describe('the viewer', () => {
       {id: 'x'.repeat(129), label: 'ana'},
       {id: 'install', label: ''},
       {id: 'install', label: 'tab\there'},
+      {id: 'install', label: ' padded '},
       {id: 'install', label: 'café'},
       {id: 'install', label: 'x'.repeat(129)},
     ]) {

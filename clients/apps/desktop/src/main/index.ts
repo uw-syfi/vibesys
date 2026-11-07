@@ -5,6 +5,8 @@
  * per call, and opens the one window on the built UI with the hosts to read in its address.
  * Quitting closes the scope, which ends every call, gateway session and ssh master.
  */
+import {randomUUID} from 'node:crypto';
+import {userInfo} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import * as Effect from 'effect/Effect';
@@ -22,10 +24,11 @@ import {makeGatewayDialers} from './gateway-dialers.js';
 import {makeLinkPool} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
-import {installPreferencesIpc, makePreferencesStore} from './preferences.js';
+import {installPreferencesIpc, makePreferencesStore, type PreferencesStore} from './preferences.js';
 import {NodeProcessSpawner} from './process.js';
 import {quit} from './quit.js';
 import {savedHosts} from './saved-hosts.js';
+import {installViewerIpc, makeViewerStore} from './viewer.js';
 import {trackWindow} from './window-lifetime.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
 
@@ -51,18 +54,29 @@ const hostLog = (host: string, line: string): void => log(`${host}: ${line}`);
 /** The app's lifetime: everything the wiring opens ends when this closes. */
 const lifetime = Scope.makeUnsafe();
 
+/** The name of the person at this machine, or none when the system has no entry for the user. */
+function userName(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return '';
+  }
+}
+
 /** What the app needs from the wiring once it is built. */
-async function wire(userData: string) {
+async function wire(userData: string, preferences: PreferencesStore) {
   const wiring = Effect.gen(function* () {
+    // Who this install is is stamped on every call to a host.
+    const viewer = yield* makeViewerStore(preferences, {newId: randomUUID, userName}, log);
     const controlPath = join(yield* controlDirectory(process.getuid?.() ?? 0), '%C');
     const pool = yield* makeLinkPool(controlPath, log);
     const dialers = yield* makeGatewayDialers(pool, hostLog);
-    const calls = yield* makeGatewayCalls(dialers, hostLog);
+    const calls = yield* makeGatewayCalls(dialers, hostLog, viewer.metadata);
     // This machine's gateway may have to be started, which takes 0.3 s, and the window needs about
     // as long to load before its first call: start it now so that the two run side by side.
     yield* calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM);
     const saved = yield* savedHosts(userData, nodeReadFile, log);
-    return {calls, saved};
+    return {calls, saved, viewer};
   }).pipe(
     Effect.provide(
       Layer.mergeAll(NodeProcessSpawner, NodeLocalHost, NodeGatewayArtifacts(GATEWAY_RESOURCES)),
@@ -127,7 +141,12 @@ async function start(): Promise<void> {
   const asked = hostsFromArgv(process.argv);
   await app.whenReady();
   lockDownSession();
-  const {calls, saved} = await wire(app.getPath('userData'));
+  const preferences = makePreferencesStore(
+    app.getPath('userData'),
+    {read: nodeReadFile, write: nodeWriteFile},
+    log,
+  );
+  const {calls, saved, viewer} = await wire(app.getPath('userData'), preferences);
   const windows = new Set<number>();
   const own = {
     has: (id: number) => windows.has(id),
@@ -139,14 +158,11 @@ async function start(): Promise<void> {
     admits: (event: PortEvent) => isOwnWindow(event, own),
   });
   installPreferencesIpc(ipcMain, {
-    store: makePreferencesStore(
-      app.getPath('userData'),
-      {read: nodeReadFile, write: nodeWriteFile},
-      log,
-    ),
+    store: preferences,
     own,
     run: effect => Effect.runPromise(effect),
   });
+  installViewerIpc(ipcMain, {store: viewer, own, run: effect => Effect.runPromise(effect)});
   app.on('web-contents-created', (_event, contents) => confine(contents));
   const window = openWindow(startupHosts(asked, [...saved]));
   trackWindow(windows, window);
