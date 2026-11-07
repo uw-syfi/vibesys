@@ -28,7 +28,10 @@
 //     one of them is sent SIGTERM to stop and SIGKILL to be removed.
 //   - Removing a run's first container cancels its allocation by name and confirms that it ended
 //     (squeue, then sacct); a run first removes what a dead run of its scope left, which is every
-//     allocation of the scope that no live run owns.
+//     allocation of the scope that no live run owns. Where a placement runs several jobs at once,
+//     each job's runs are a scope of their own under the placement's (Config.Runs), and a run
+//     removes the allocations of its own scope and of the placement's dead runs, never a live
+//     one's.
 //   - An exit code that is the transport's own (ssh's 255), and a step that never started its
 //     command, are not the command's ending: the engine reports them as lost.
 package apptainer
@@ -37,6 +40,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -72,7 +76,8 @@ type Cluster interface {
 	Submit(ctx context.Context, a Allocation) (string, error)
 	// State is the job's state now.
 	State(ctx context.Context, job string) (JobState, error)
-	// Jobs returns the user's pending and running jobs whose comment is the scope.
+	// Jobs returns the user's pending and running jobs of the scope: those whose comment is the
+	// scope, or a run's scope under it (InScope).
 	Jobs(ctx context.Context, scope string) ([]Job, error)
 	// Cancel cancels the user's jobs of the name, and returns once Slurm confirms that none of them
 	// is pending or running. A name no job has is cancelled.
@@ -86,7 +91,7 @@ type Cluster interface {
 type Allocation struct {
 	// Name is the job's name, unique to the container whose allocation it is.
 	Name string
-	// Comment is the scope, which Jobs looks for.
+	// Comment is the scope, or a run's scope under it (RunComment), which Jobs looks for.
 	Comment string
 	// Limit is the job's time limit.
 	Limit time.Duration
@@ -101,7 +106,9 @@ type Allocation struct {
 // Job is a job of the user's that Jobs lists.
 type Job struct {
 	ID, Name string
-	Phase    Phase
+	// Comment is the job's comment: its scope, or a run's scope under it.
+	Comment string
+	Phase   Phase
 	// Left is the time left before the job's time limit, as Slurm says it while the job runs.
 	Left time.Duration
 }
@@ -198,3 +205,26 @@ const EnvBox = "VIBESYS_BOX"
 // does: a box that gets the GPUs gets each that is set where its process starts. None is required,
 // since a partition that does not isolate its nodes' GPUs sets none.
 var AssignedGPUVariables = []string{"ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL", "CUDA_VISIBLE_DEVICES"}
+
+// RunComment is the comment of an allocation of the run of the scope run, of a placement whose
+// scope is scope: the placement's scope and the run's, so that Jobs of the placement's scope finds
+// the allocations of every one of its runs, and each says whose it is.
+func RunComment(scope, run string) string {
+	if run == "" || run == scope {
+		return scope
+	}
+	return scope + runSeparator + run
+}
+
+// runSeparator separates a placement's scope from a run's in a comment. No scope holds it.
+const runSeparator = "."
+
+// InScope reports whether a job's comment is of the scope, and names the run of the scope it
+// belongs to: the scope itself for a comment that is the scope alone.
+func InScope(comment, scope string) (run string, ok bool) {
+	if comment == scope {
+		return scope, true
+	}
+	run, ok = strings.CutPrefix(comment, scope+runSeparator)
+	return run, ok && run != ""
+}

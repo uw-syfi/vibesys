@@ -9,6 +9,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockerfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/machine"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
@@ -129,6 +130,59 @@ func TestARemoteRunHasCopiesOfItsDirectoriesAndItsOutputComesBack(t *testing.T) 
 	}
 	if _, err := os.Stat(staged.Checkout); !os.IsNotExist(err) {
 		t.Errorf("the earlier job's staged checkout is still there (%v)", err)
+	}
+}
+
+// Where a scope's jobs run at once, each run's checkouts are its own: a run removes its own run's
+// earlier checkouts and what the scope's dead runs left, an earlier binary's checkout among them,
+// and never what a live run staged.
+func TestRunsOfOneScopeAtOnceKeepTheirOwnStagedDirectories(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	table := dockerfake.NewRunTable()
+	first, dir := remoteMachine(t)
+	first.Run, first.Runs = "run-a", table.Process()
+	// another is a process of the run of the scope: a machine of its own on the same remote root.
+	another := func(run string) *machine.Remote {
+		return &machine.Remote{Shell: first.Shell, Rsync: first.Rsync, Root: first.Root, Scope: first.Scope, Timers: first.Timers, Run: run, Runs: table.Process()}
+	}
+	second := another("run-b")
+	local := filepath.Join(dir, "local")
+	stage := func(m *machine.Remote, job string) docker.Dirs {
+		t.Helper()
+		d := dirsIn(t, local, job)
+		write(t, filepath.Join(d.Checkout, "src.c"), job)
+		staged, err := m.Stage(ctx, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return staged
+	}
+	exists := func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	}
+	earlierBinary := filepath.Join(first.Root, "staged", first.Scope, "0123456789abcdef", "checkout")
+	write(t, filepath.Join(earlierBinary, "src.c"), "old")
+
+	a := stage(first, "job-a")
+	b := stage(second, "job-b")
+	if !exists(a.Checkout) || !exists(b.Checkout) || a.Checkout == b.Checkout {
+		t.Fatalf("the live runs' checkouts %s and %s are not both there", a.Checkout, b.Checkout)
+	}
+	if exists(earlierBinary) {
+		t.Error("the checkout an earlier binary left is still there")
+	}
+	// The first run's process dies; a later run of the scope removes what it left, and keeps the
+	// second's.
+	first.Runs.(*dockerfake.Runs).Die()
+	c := stage(another("run-c"), "job-c")
+	if exists(a.Checkout) || !exists(b.Checkout) || !exists(c.Checkout) {
+		t.Errorf("after the first run died: its checkout there %v, the live ones' %v and %v; want only the live ones'",
+			exists(a.Checkout), exists(b.Checkout), exists(c.Checkout))
+	}
+	if table.Live("run-a") {
+		t.Error("the dead run is still held after its directories were removed")
 	}
 }
 

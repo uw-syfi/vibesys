@@ -55,21 +55,28 @@ type machines struct {
 // with a message that says so, and host jobs are unaffected. A config that cannot be read stops
 // the daemon, since a job run without what the operator asked for would mislead.
 //
-// What one daemon stages and builds is one scope, named by its runtime directory. On this machine
-// the containers of one run are a scope of their own, named by containerKey, the run's directory,
-// because the daemon may run several jobs at once there: a run sweeps away the containers of its
-// scope it does not own, which are what an earlier attempt of the same job left. Another machine
-// runs one job of the daemon at a time (operator.Parse refuses more), so there the containers and
-// the Slurm allocations stay in the daemon's scope, which a run sweeps whole.
+// What one daemon stages and builds is one scope per placement, named by its runtime directory. On
+// this machine the containers of one run are a scope of their own, named by containerKey, the run's
+// directory, because the daemon may run several jobs at once there: a run sweeps away the
+// containers of its scope it does not own, which are what an earlier attempt of the same job left.
+// An apptainer placement may run several jobs at once too, each in an allocation of its own, so
+// each run is a scope of its own there as well, under the placement's: its staged directories and
+// its allocations are named by both, and runs (in the runtime directory) says which runs live, so
+// that a run clears what a dead job of the placement left and never what a live one uses. Another
+// machine runs one job of the daemon at a time (operator.Parse refuses more), so there the
+// containers and the Slurm allocations stay in the placement's scope, which a run sweeps whole.
 func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string) (machines, error) {
 	local := cpu.New(cpu.Host(), clk)
+	// One per process, shared by its placements' engines and machines: a second one would wait on
+	// the lock the first holds for the same run.
+	runs := runtimedir.NewRuns(dir.PlacementRuns())
 	providers := map[string]*docker.Provider{}
 	out := machines{claims: map[string][]core.Claim{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
 	for _, name := range names {
-		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name], grace)
+		provider, err := p.placement(clk, dir, containerKey, runs, local, name, op.GetPlacements()[name], grace)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
@@ -137,7 +144,7 @@ func scopeOf(key, name string) string {
 }
 
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
+func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, runs docker.Runs, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
 	scope := scopeOf(dir.Path(), name)
 	cfg := docker.Config{
 		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
@@ -157,10 +164,16 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
 		shell, where, engineCfg.Shell = ssh, r.GetHost(), ssh
 		cfg.Backend = cpu.New(&remote.CPU{Shell: ssh, Timers: clk, Timeout: machine.CallTimeout}, clk)
-		cfg.Machine = &machine.Remote{
+		staging := &machine.Remote{
 			Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: orDefault(r.GetRsyncCommand(), "rsync")},
 			Root: r.GetRemoteWorkspaceRoot(), Scope: scope, Timers: clk,
 		}
+		if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+			// Each job's runs are a scope of their own, under the placement's.
+			cfg.Scope = scopeOf(containerKey, name)
+			staging.Run, staging.Runs = cfg.Scope, runs
+		}
+		cfg.Machine = staging
 	}
 	s := pl.GetSlurm()
 	if s != nil {
@@ -175,7 +188,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
 	}
 	if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
-		return p.apptainerPlacement(clk, cfg, pl)
+		return p.apptainerPlacement(clk, cfg, scope, runs, pl)
 	}
 	engine, err := dockercli.New(engineCfg)
 	if err != nil {
@@ -201,7 +214,9 @@ const gpuScript = "gpu"
 // machine's Docker builds and exports the images, the login node stages the runs' directories on
 // the file system the nodes share, and the cluster runs the containers in its allocations. The
 // machine and the GPUs are what the nodes say inside the allocations, never the login node.
-func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cliv1.Placement) (*docker.Provider, error) {
+//
+// cfg.Scope is the run's, and scope the placement's, under which runs says which runs live.
+func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope string, runs docker.Runs, pl *cliv1.Placement) (*docker.Provider, error) {
 	local, err := dockercli.New(dockercli.Config{Timers: clk})
 	if err != nil {
 		return nil, err
@@ -238,7 +253,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 		scripts = map[string]string{gpuScript: amd.Script}
 	}
 	eng, err := apptainer.New(apptainer.Config{
-		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: cfg.Scope,
+		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: scope, Runs: runs,
 		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
 		Sizing: apptainer.Sizing{

@@ -810,7 +810,7 @@ hf = "/shared/hf-cache"
 | `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
-| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
+| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local` or `apptainer`: an `ssh` or `slurm` placement stages and sweeps one job at a time on one shared Docker daemon, while each job of an `apptainer` placement has staged directories and allocations of its own (see below). |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
@@ -930,6 +930,17 @@ start without it, saying to install it.
   then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
+- Several jobs of one placement run at once, up to its `max_jobs`, each in allocations of its own,
+  which Slurm keeps apart (with `exclusive`, the default, a measured container holds its whole
+  node). Each job's runs are a scope of their own under the placement's: its allocations are
+  commented `<placement scope>.<run scope>`, and its checkouts are staged in
+  `staged/<placement scope>/<run scope>/` under `remote_workspace_root`. A job's process holds a
+  lock of its run scope (in `placement-runs/` of the daemon's runtime directory) for as long as it
+  lives, so a run tells a dead job from a live one: before it starts, it cancels the allocations and
+  removes the staged directories its own job's earlier attempts and every dead job of the placement
+  left (an earlier binary's among them), and leaves a live job's alone. A measure job still runs
+  alone on its placement: besides the node, it shares this machine (image builds and conversions)
+  and the login node with whatever runs beside it, and `exclusive` may be off.
 
 ### Reused allocations
 
@@ -956,8 +967,9 @@ for six. With `idle_release_seconds`, an `apptainer` placement reuses its alloca
   most `idle_release_seconds` and 30 seconds, and a later daemon of the same scope claims it in the
   meantime.
 - A run's sweep of the leftovers of its scope leaves the reused allocations, which are not
-  containers; a claim clears what they ran. Placements of this kind run one job at a time
-  (`max_jobs` 1), so a daemon's own jobs never wait on each other's claims.
+  containers; a claim clears what they ran. The reused allocations are the placement's, claimed by
+  any of its jobs, one claim at a time, so a daemon's jobs that run at once never wait on each
+  other's claims: a job that finds none free asks for a new allocation.
 
 ### The pyxis runtime
 

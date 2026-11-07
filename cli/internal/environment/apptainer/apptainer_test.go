@@ -58,6 +58,10 @@ type setup struct {
 	runtime apptainer.Runtime
 	// idle and allocationLimit make the allocations reusable.
 	idle, allocationLimit time.Duration
+	// runs, when set, makes the rig's runs a scope of their own, run, under the rig's scope, which
+	// is then the placement's, as a placement whose jobs run at once has them.
+	runs *dockerfake.Runs
+	run  string
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -92,19 +96,24 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	}
 	local := dockerfake.NewDaemon(w.MemoryGates, o.daemon...).Connect()
 	client := cluster.Connect()
-	eng, err := apptainer.New(apptainer.Config{
+	engineCfg := apptainer.Config{
 		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
 		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
 		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
 		NodeScripts: o.scripts, Runtime: o.runtime, Converter: converter, LocalDir: dir,
 		Idle: o.idle, AllocationLimit: o.allocationLimit,
-	})
+	}
+	runScope := o.scope
+	if o.runs != nil {
+		engineCfg.Runs, runScope = o.runs, o.run
+	}
+	eng, err := apptainer.New(engineCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := docker.Config{
 		Engine: eng, Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(dockerfile)}), Backend: eng.Backend(),
-		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: o.scope, Placement: "default",
+		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: runScope, Placement: "default",
 		User: docker.User{UID: 1000, GID: 1000},
 	}
 	if o.configure != nil {
@@ -344,6 +353,91 @@ func TestARunSweepsTheAllocationsADeadRunOfItsScopeLeft(t *testing.T) {
 	if live := cluster.Live(); !slices.Equal(live, []string{"someone-elses-job", other}) {
 		t.Errorf("live allocations %v, want only what this scope's runs did not leave", live)
 	}
+}
+
+// Where a placement runs several jobs at once, each job's runs are a scope of their own under the
+// placement's, and its allocations say both. A run then cancels what its own job's dead runs left
+// and what every dead job of the placement left, an allocation of an earlier binary's among them,
+// and never the allocation of a job that lives, nor anything of another placement or of anyone
+// else.
+func TestARunOfAPlacementOfJobsAtOnceSweepsOnlyWhatDeadJobsLeft(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	table := dockerfake.NewRunTable()
+	live := table.Process()
+	if err := live.Hold(context.Background(), "run-live"); err != nil {
+		t.Fatal(err)
+	}
+	ofLive := apptainer.JobName("vibesys-cli-11ve000001")
+	cluster.Plant(ofLive, apptainer.RunComment(scope, "run-live"))
+	ofDead := apptainer.JobName("vibesys-cli-dead000001")
+	cluster.Plant(ofDead, apptainer.RunComment(scope, "run-dead"))
+	ofEarlierBinary := apptainer.JobName("vibesys-cli-01d0000001")
+	cluster.Plant(ofEarlierBinary, scope)
+	ofItself := apptainer.JobName("vibesys-cli-5e1f000001")
+	cluster.Plant(ofItself, apptainer.RunComment(scope, "run-self"))
+	ofAnother := apptainer.JobName("vibesys-cli-0th3r00001")
+	cluster.Plant(ofAnother, apptainer.RunComment("other", "run-dead"))
+	cluster.Plant("someone-elses-job", scope)
+
+	r := newRig(t, w, cluster, setup{runs: table.Process(), run: "run-self"})
+	a, _ := run(t, r.env, "exit", "0")
+	exited(t, a, 0)
+	want := []string{"someone-elses-job", ofLive, ofAnother}
+	slices.Sort(want)
+	if got := cluster.Live(); !slices.Equal(got, want) {
+		t.Errorf("live allocations %v, want %v: the live job's, and nothing of another placement or of anyone else", got, want)
+	}
+	if !table.Live("run-live") {
+		t.Error("the live job's run was taken")
+	}
+	sub := cluster.Submitted()
+	if len(sub) != 1 || sub[0].Comment != apptainer.RunComment(scope, "run-self") {
+		t.Errorf("allocations %+v, want one commented with the placement's scope and the run's", sub)
+	}
+
+	// Once the live job dies, the next run of any job of the placement cancels what it left.
+	live.Die()
+	a, _ = run(t, newRig(t, w, cluster, setup{process: 1, runs: table.Process(), run: "run-next"}).env, "exit", "0")
+	exited(t, a, 0)
+	want = []string{"someone-elses-job", ofAnother}
+	slices.Sort(want)
+	if got := cluster.Live(); !slices.Equal(got, want) {
+		t.Errorf("live allocations %v after the job died, want %v", got, want)
+	}
+}
+
+// Two jobs of one placement run at once, each in an allocation of its own, and neither run's sweep
+// touches the other's allocation while it runs.
+func TestJobsOfOnePlacementRunAtOnceInAllocationsOfTheirOwn(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	table := dockerfake.NewRunTable()
+	first := newRig(t, w, cluster, setup{runs: table.Process(), run: "run-a"})
+	second := newRig(t, w, cluster, setup{process: 1, runs: table.Process(), run: "run-b"})
+
+	// The first job's command waits, so its allocation lives while the second job runs.
+	done := make(chan core.Attempt, 1)
+	go func() {
+		a, _ := run(t, first.env, "mark", "first-up", ";", "hold", "first-go")
+		done <- a
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	if !w.Reached(ctx, "first-up") {
+		t.Fatal("the first job never started")
+	}
+	a, _ := run(t, second.env, "exit", "0")
+	exited(t, a, 0)
+	if live := cluster.Live(); len(live) != 1 {
+		t.Errorf("live allocations %v while the first job runs, want its own alone", live)
+	}
+	w.Release("first-go")
+	exited(t, <-done, 0)
+	if sub := cluster.Submitted(); len(sub) != 2 || sub[0].Comment == sub[1].Comment {
+		t.Errorf("allocations %+v, want one per job, each commented with its own run", sub)
+	}
+	nothingLeft(t, cluster)
 }
 
 // An allocation whose end Slurm does not confirm leaves the run's ending unknown.

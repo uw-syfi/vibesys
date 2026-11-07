@@ -58,3 +58,21 @@ func (s Shared) User(context.Context) (User, error) { return s.As, nil }
 
 // Program implements Machine: the engine's machine is the caller's.
 func (Shared) Program(_ context.Context, local string) (string, error) { return local, nil }
+
+// Runs says which runs of a placement live, where the placement runs several jobs at once on
+// another machine, each job's runs in a scope of their own (Config.Scope) under the placement's
+// scope. What a run leaves on that machine, its staged directories and its allocations, is kept
+// under the placement's scope and named by the run's, so a run of one job finds what every job of
+// the placement left: it clears what a dead job left, which only a run that starts after it can
+// clear, and keeps out of what a live one uses. The shipped one is runtimedir.Runs, locks that the
+// system drops when their process dies; dockerfake.Runs keeps them in memory.
+type Runs interface {
+	// Hold marks the run of the scope live for as long as this process lives. A run this process
+	// holds already is held. It waits while another process clears what a dead run of the scope
+	// left, up to ctx. A run holds its scope before it leaves anything under it.
+	Hold(ctx context.Context, scope string) error
+	// Claim reports whether the run of the scope is dead: no process holds it. A dead run is held
+	// for the caller until it calls release, so that no run of the scope starts while the caller
+	// clears what it left. release is nil for a live run; a run this process holds is live.
+	Claim(scope string) (release func(), dead bool, err error)
+}

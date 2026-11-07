@@ -471,8 +471,8 @@ func (cl *Client) Jobs(ctx context.Context, scope string) ([]apptainer.Job, erro
 	defer c.mu.Unlock()
 	var out []apptainer.Job
 	for _, j := range c.jobs {
-		if j.phase != apptainer.Ended && j.comment == scope {
-			job := apptainer.Job{ID: j.id, Name: j.name, Phase: j.phase}
+		if _, ok := apptainer.InScope(j.comment, scope); ok && j.phase != apptainer.Ended {
+			job := apptainer.Job{ID: j.id, Name: j.name, Comment: j.comment, Phase: j.phase}
 			if j.phase == apptainer.Running {
 				job.Left = j.limit - (c.now - j.ran)
 			}
