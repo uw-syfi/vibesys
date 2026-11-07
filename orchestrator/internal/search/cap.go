@@ -65,6 +65,8 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 	var leftOut bool
 	s.Bounds, leftOut = Bounds(v.Facts, s.RunId, s.Head)
 	s.Truncated = s.Truncated || leftOut
+	s.Series, s.Tradeoff, leftOut = Trajectory(v.Facts, s.RunId)
+	s.Truncated = s.Truncated || leftOut
 	boundBytes(s, v)
 	return s
 }

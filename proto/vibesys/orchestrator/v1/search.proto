@@ -32,6 +32,12 @@ message SearchState {
   // The performance bounds the run's agents declared, one entry per objective, by objective name.
   // Kept whole under the byte budget: a few small entries, bounded by construction.
   repeated ObjectiveBounds bounds = 13 [(buf.validate.field).repeated.max_items = 64];
+  // Every measured candidate of the run on each objective, oldest first, with the points that set a new
+  // best marked. Derived from the run's measure results, so a chart draws it and computes nothing.
+  repeated ObjectiveSeries series = 14 [(buf.validate.field).repeated.max_items = 8];
+  // The measured candidates of a task with two or more objectives, each with whether any other
+  // measured candidate beats it. Absent for a task with fewer than two.
+  Tradeoff tradeoff = 15;
 }
 
 // ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
@@ -72,6 +78,96 @@ message ObjectiveBounds {
     finite: true
     gt: 0
   }];
+}
+
+// ObjectiveSeries is the measured history of one objective of the run: one point for every measure
+// job of the run that produced a value for it, in the order they were recorded. Nothing in it is a
+// judgment of the framework: a point is a measurement, and `best_so_far` says only that its value is
+// better than every earlier point's in the objective's direction.
+message ObjectiveSeries {
+  string objective = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // Which way the objective improves, as the newest measurement of it says. A measurement that says
+  // the other way (the task changed its mind) is left out, as a bound of the other way is.
+  vibesys.cli.v1.Direction direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Oldest first, by the time the measurement was recorded. When the run has more than fit, the
+  // oldest are left out and the state is marked truncated.
+  repeated MeasuredPoint points = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 400
+  }];
+}
+
+// MeasuredPoint is one measurement of one candidate on one objective.
+message MeasuredPoint {
+  // The measure job that produced it, which is also the identity of its result in `results`: that
+  // result is there while the state keeps it, and a point whose result was left out is a point still.
+  string job_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // The full commit measured.
+  string commit = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
+  // The headline number of the measurement on the objective, as the job service computed it.
+  double value = 4 [(buf.validate.field).double.finite = true];
+  // The point is better than every earlier point of the objective, in its direction: the best so far
+  // steps here. The first point is always one.
+  bool best_so_far = 5;
+}
+
+// Tradeoff is the measured candidates of a task that declares two or more objectives, placed on all
+// of them at once. A candidate is on the frontier when no other measured candidate is at least as good
+// on every objective and better on one; candidates with equal values are all on it.
+message Tradeoff {
+  option (buf.validate.message).cel = {
+    id: "tradeoff.values_are_of_the_objectives"
+    message: "every point has one value for each objective"
+    expression: "this.points.all(p, size(p.values) == size(this.objectives))"
+  };
+
+  // The task's objectives in the order it declares them, each as the newest measurement says it.
+  repeated TradeoffObjective objectives = 1 [(buf.validate.field).repeated = {
+    min_items: 2
+    max_items: 8
+  }];
+  // Candidates measured on every one of the objectives, oldest first. Over the limit the oldest are
+  // left out and the state is marked truncated.
+  repeated TradeoffPoint points = 2 [(buf.validate.field).repeated.max_items = 400];
+}
+
+message TradeoffObjective {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  vibesys.cli.v1.Direction direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message TradeoffPoint {
+  string job_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  string commit = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
+  // The candidate's value on each objective, in the order of `Tradeoff.objectives`.
+  repeated double values = 4 [(buf.validate.field).repeated.items.double.finite = true];
+  bool on_frontier = 5;
 }
 
 message SearchHealth {

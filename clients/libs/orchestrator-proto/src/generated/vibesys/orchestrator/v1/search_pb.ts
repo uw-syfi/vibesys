@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/search.proto.
  */
 export const file_vibesys_orchestrator_v1_search: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxItsECgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAIvkDCg9PYmplY3RpdmVCb3VuZHMSHQoJb2JqZWN0aXZlGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI8Cgh2ZXJzaW9ucxgDIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZUJvdW5kQgq6SAeSAQQIARBAEiAKCmhlYWRfdmFsdWUYBCABKAFCB7pIBBICQAFIAIgBARIvChBwZXJjZW50X29mX2JvdW5kGAUgASgBQhC6SA0SC0ABIQAAAAAAAAAASAGIAQE61wG6SNMBGtABCi5vYmplY3RpdmVfYm91bmRzLnZlcnNpb25zX2FyZV9vZl90aGVfb2JqZWN0aXZlEkhldmVyeSB2ZXJzaW9uIGRlY2xhcmVzIHRoaXMgb2JqZWN0aXZlLCBpbiB0aGUgZGlyZWN0aW9uIG9mIHRoZSBvYmplY3RpdmUaVHRoaXMudmVyc2lvbnMuYWxsKHYsIHYub2JqZWN0aXZlID09IHRoaXMub2JqZWN0aXZlICYmIHYuZGlyZWN0aW9uID09IHRoaXMuZGlyZWN0aW9uKUINCgtfaGVhZF92YWx1ZUITChFfcGVyY2VudF9vZl9ib3VuZCKLAQoMU2VhcmNoSGVhbHRoEjAKCmxpdmVfc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAASOQoKdW5yZWFkYWJsZRgCIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEioAEKClVucmVhZGFibGUSRQoGcmVhc29uGAEgASgOMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIxCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgKq8DChBVbnJlYWRhYmxlUmVhc29uEiEKHVVOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobVU5SRUFEQUJMRV9SRUFTT05fTk9fREFFTU9OEAESIgoeVU5SRUFEQUJMRV9SRUFTT05fU1RBUlRfRkFJTEVEEAISJwojVU5SRUFEQUJMRV9SRUFTT05fQ0xJX05PVF9JTlNUQUxMRUQQAxIkCiBVTlJFQURBQkxFX1JFQVNPTl9DTElFTlRfVE9PX09MRBAEEiQKIFVOUkVBREFCTEVfUkVBU09OX0RBRU1PTl9UT09fT0xEEAUSKwonVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfT1dORURfRUxTRVdIRVJFEAYSIAocVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfQVdBWRAHEiEKHVVOUkVBREFCTEVfUkVBU09OX1NUUkVBTV9MT1NUEAgSJwojVU5SRUFEQUJMRV9SRUFTT05fTUVTU0FHRV9UT09fTEFSR0UQCRIjCh9VTlJFQURBQkxFX1JFQVNPTl9OT1RfQU5TV0VSSU5HEApCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxItQFCgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAEkIKBnNlcmllcxgOIAMoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZVNlcmllc0IIukgFkgECEAgSMwoIdHJhZGVvZmYYDyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZiL5AwoPT2JqZWN0aXZlQm91bmRzEh0KCW9iamVjdGl2ZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAASPAoIdmVyc2lvbnMYAyADKAsyHi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVCb3VuZEIKukgHkgEECAEQQBIgCgpoZWFkX3ZhbHVlGAQgASgBQge6SAQSAkABSACIAQESLwoQcGVyY2VudF9vZl9ib3VuZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgBiAEBOtcBukjTARrQAQoub2JqZWN0aXZlX2JvdW5kcy52ZXJzaW9uc19hcmVfb2ZfdGhlX29iamVjdGl2ZRJIZXZlcnkgdmVyc2lvbiBkZWNsYXJlcyB0aGlzIG9iamVjdGl2ZSwgaW4gdGhlIGRpcmVjdGlvbiBvZiB0aGUgb2JqZWN0aXZlGlR0aGlzLnZlcnNpb25zLmFsbCh2LCB2Lm9iamVjdGl2ZSA9PSB0aGlzLm9iamVjdGl2ZSAmJiB2LmRpcmVjdGlvbiA9PSB0aGlzLmRpcmVjdGlvbilCDQoLX2hlYWRfdmFsdWVCEwoRX3BlcmNlbnRfb2ZfYm91bmQirwEKD09iamVjdGl2ZVNlcmllcxIdCglvYmplY3RpdmUYASABKAlCCrpIB3IFEAEogAISOAoJZGlyZWN0aW9uGAIgASgOMhkudmliZXN5cy5jbGkudjEuRGlyZWN0aW9uQgq6SAeCAQQQASAAEkMKBnBvaW50cxgDIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lYXN1cmVkUG9pbnRCC7pICJIBBQgBEJADIqQBCg1NZWFzdXJlZFBvaW50EhoKBmpvYl9pZBgBIAEoCUIKukgHcgUQASiAAhIaCgZjb21taXQYAiABKAlCCrpIB3IFEAEogAISLgoCYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESFgoFdmFsdWUYBCABKAFCB7pIBBICQAESEwoLYmVzdF9zb19mYXIYBSABKAgitQIKCFRyYWRlb2ZmEkoKCm9iamVjdGl2ZXMYASADKAsyKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZk9iamVjdGl2ZUIKukgHkgEECAIQCBJBCgZwb2ludHMYAiADKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZlBvaW50Qgm6SAaSAQMQkAM6mQG6SJUBGpIBCiV0cmFkZW9mZi52YWx1ZXNfYXJlX29mX3RoZV9vYmplY3RpdmVzEixldmVyeSBwb2ludCBoYXMgb25lIHZhbHVlIGZvciBlYWNoIG9iamVjdGl2ZRo7dGhpcy5wb2ludHMuYWxsKHAsIHNpemUocC52YWx1ZXMpID09IHNpemUodGhpcy5vYmplY3RpdmVzKSkiZwoRVHJhZGVvZmZPYmplY3RpdmUSGAoEbmFtZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAAiqgEKDVRyYWRlb2ZmUG9pbnQSGgoGam9iX2lkGAEgASgJQgq6SAdyBRABKIACEhoKBmNvbW1pdBgCIAEoCUIKukgHcgUQASiAAhIuCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIcCgZ2YWx1ZXMYBCADKAFCDLpICZIBBiIEEgJAARITCgtvbl9mcm9udGllchgFIAEoCCKLAQoMU2VhcmNoSGVhbHRoEjAKCmxpdmVfc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAASOQoKdW5yZWFkYWJsZRgCIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEioAEKClVucmVhZGFibGUSRQoGcmVhc29uGAEgASgOMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIxCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgKq8DChBVbnJlYWRhYmxlUmVhc29uEiEKHVVOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobVU5SRUFEQUJMRV9SRUFTT05fTk9fREFFTU9OEAESIgoeVU5SRUFEQUJMRV9SRUFTT05fU1RBUlRfRkFJTEVEEAISJwojVU5SRUFEQUJMRV9SRUFTT05fQ0xJX05PVF9JTlNUQUxMRUQQAxIkCiBVTlJFQURBQkxFX1JFQVNPTl9DTElFTlRfVE9PX09MRBAEEiQKIFVOUkVBREFCTEVfUkVBU09OX0RBRU1PTl9UT09fT0xEEAUSKwonVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfT1dORURfRUxTRVdIRVJFEAYSIAocVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfQVdBWRAHEiEKHVVOUkVBREFCTEVfUkVBU09OX1NUUkVBTV9MT1NUEAgSJwojVU5SRUFEQUJMRV9SRUFTT05fTUVTU0FHRV9UT09fTEFSR0UQCRIjCh9VTlJFQURBQkxFX1JFQVNPTl9OT1RfQU5TV0VSSU5HEApCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service]);
 
 /**
  * SearchState is a whole, ephemeral view. Revisions are comparable only within
@@ -99,6 +99,22 @@ export type SearchState = Message<"vibesys.orchestrator.v1.SearchState"> & {
    * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveBounds bounds = 13;
    */
   bounds: ObjectiveBounds[];
+
+  /**
+   * Every measured candidate of the run on each objective, oldest first, with the points that set a new
+   * best marked. Derived from the run's measure results, so a chart draws it and computes nothing.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveSeries series = 14;
+   */
+  series: ObjectiveSeries[];
+
+  /**
+   * The measured candidates of a task with two or more objectives, each with whether any other
+   * measured candidate beats it. Absent for a task with fewer than two.
+   *
+   * @generated from field: vibesys.orchestrator.v1.Tradeoff tradeoff = 15;
+   */
+  tradeoff?: Tradeoff | undefined;
 };
 
 /**
@@ -165,6 +181,185 @@ export const ObjectiveBoundsSchema: GenMessage<ObjectiveBounds> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_search, 1);
 
 /**
+ * ObjectiveSeries is the measured history of one objective of the run: one point for every measure
+ * job of the run that produced a value for it, in the order they were recorded. Nothing in it is a
+ * judgment of the framework: a point is a measurement, and `best_so_far` says only that its value is
+ * better than every earlier point's in the objective's direction.
+ *
+ * @generated from message vibesys.orchestrator.v1.ObjectiveSeries
+ */
+export type ObjectiveSeries = Message<"vibesys.orchestrator.v1.ObjectiveSeries"> & {
+  /**
+   * @generated from field: string objective = 1;
+   */
+  objective: string;
+
+  /**
+   * Which way the objective improves, as the newest measurement of it says. A measurement that says
+   * the other way (the task changed its mind) is left out, as a bound of the other way is.
+   *
+   * @generated from field: vibesys.cli.v1.Direction direction = 2;
+   */
+  direction: Direction;
+
+  /**
+   * Oldest first, by the time the measurement was recorded. When the run has more than fit, the
+   * oldest are left out and the state is marked truncated.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.MeasuredPoint points = 3;
+   */
+  points: MeasuredPoint[];
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.ObjectiveSeries.
+ * Use `create(ObjectiveSeriesSchema)` to create a new message.
+ */
+export const ObjectiveSeriesSchema: GenMessage<ObjectiveSeries> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 2);
+
+/**
+ * MeasuredPoint is one measurement of one candidate on one objective.
+ *
+ * @generated from message vibesys.orchestrator.v1.MeasuredPoint
+ */
+export type MeasuredPoint = Message<"vibesys.orchestrator.v1.MeasuredPoint"> & {
+  /**
+   * The measure job that produced it, which is also the identity of its result in `results`: that
+   * result is there while the state keeps it, and a point whose result was left out is a point still.
+   *
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * The full commit measured.
+   *
+   * @generated from field: string commit = 2;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp at = 3;
+   */
+  at?: Timestamp | undefined;
+
+  /**
+   * The headline number of the measurement on the objective, as the job service computed it.
+   *
+   * @generated from field: double value = 4;
+   */
+  value: number;
+
+  /**
+   * The point is better than every earlier point of the objective, in its direction: the best so far
+   * steps here. The first point is always one.
+   *
+   * @generated from field: bool best_so_far = 5;
+   */
+  bestSoFar: boolean;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.MeasuredPoint.
+ * Use `create(MeasuredPointSchema)` to create a new message.
+ */
+export const MeasuredPointSchema: GenMessage<MeasuredPoint> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 3);
+
+/**
+ * Tradeoff is the measured candidates of a task that declares two or more objectives, placed on all
+ * of them at once. A candidate is on the frontier when no other measured candidate is at least as good
+ * on every objective and better on one; candidates with equal values are all on it.
+ *
+ * @generated from message vibesys.orchestrator.v1.Tradeoff
+ */
+export type Tradeoff = Message<"vibesys.orchestrator.v1.Tradeoff"> & {
+  /**
+   * The task's objectives in the order it declares them, each as the newest measurement says it.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.TradeoffObjective objectives = 1;
+   */
+  objectives: TradeoffObjective[];
+
+  /**
+   * Candidates measured on every one of the objectives, oldest first. Over the limit the oldest are
+   * left out and the state is marked truncated.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.TradeoffPoint points = 2;
+   */
+  points: TradeoffPoint[];
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.Tradeoff.
+ * Use `create(TradeoffSchema)` to create a new message.
+ */
+export const TradeoffSchema: GenMessage<Tradeoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 4);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.TradeoffObjective
+ */
+export type TradeoffObjective = Message<"vibesys.orchestrator.v1.TradeoffObjective"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: vibesys.cli.v1.Direction direction = 2;
+   */
+  direction: Direction;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.TradeoffObjective.
+ * Use `create(TradeoffObjectiveSchema)` to create a new message.
+ */
+export const TradeoffObjectiveSchema: GenMessage<TradeoffObjective> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 5);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.TradeoffPoint
+ */
+export type TradeoffPoint = Message<"vibesys.orchestrator.v1.TradeoffPoint"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string commit = 2;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp at = 3;
+   */
+  at?: Timestamp | undefined;
+
+  /**
+   * The candidate's value on each objective, in the order of `Tradeoff.objectives`.
+   *
+   * @generated from field: repeated double values = 4;
+   */
+  values: number[];
+
+  /**
+   * @generated from field: bool on_frontier = 5;
+   */
+  onFrontier: boolean;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.TradeoffPoint.
+ * Use `create(TradeoffPointSchema)` to create a new message.
+ */
+export const TradeoffPointSchema: GenMessage<TradeoffPoint> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 6);
+
+/**
  * @generated from message vibesys.orchestrator.v1.SearchHealth
  */
 export type SearchHealth = Message<"vibesys.orchestrator.v1.SearchHealth"> & {
@@ -191,7 +386,7 @@ export type SearchHealth = Message<"vibesys.orchestrator.v1.SearchHealth"> & {
  * Use `create(SearchHealthSchema)` to create a new message.
  */
 export const SearchHealthSchema: GenMessage<SearchHealth> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 2);
+  messageDesc(file_vibesys_orchestrator_v1_search, 7);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Unreadable
@@ -220,7 +415,7 @@ export type Unreadable = Message<"vibesys.orchestrator.v1.Unreadable"> & {
  * Use `create(UnreadableSchema)` to create a new message.
  */
 export const UnreadableSchema: GenMessage<Unreadable> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 3);
+  messageDesc(file_vibesys_orchestrator_v1_search, 8);
 
 /**
  * @generated from enum vibesys.orchestrator.v1.UnreadableReason

@@ -78,6 +78,55 @@
         "headValue": 11076,
         "percentOfBound": 71
       }
-    ]
+    ],
+    "series": [
+      {
+        "objective": "tok_s",
+        "direction": "DIRECTION_MAXIMIZE",
+        "points": [
+          {
+            "jobId": "j1",
+            "commit": "abc",
+            "at": "2026-01-01T00:00:00Z",
+            "value": 11076,
+            "bestSoFar": true
+          }
+        ]
+      },
+      {
+        "objective": "p99_ms",
+        "direction": "DIRECTION_MINIMIZE",
+        "points": [
+          {
+            "jobId": "j1",
+            "commit": "abc",
+            "at": "2026-01-01T00:00:00Z",
+            "value": 118,
+            "bestSoFar": true
+          }
+        ]
+      }
+    ],
+    "tradeoff": {
+      "objectives": [
+        {
+          "name": "tok_s",
+          "direction": "DIRECTION_MAXIMIZE"
+        },
+        {
+          "name": "p99_ms",
+          "direction": "DIRECTION_MINIMIZE"
+        }
+      ],
+      "points": [
+        {
+          "jobId": "j1",
+          "commit": "abc",
+          "at": "2026-01-01T00:00:00Z",
+          "values": [11076, 118],
+          "onFrontier": true
+        }
+      ]
+    }
   }
 }
