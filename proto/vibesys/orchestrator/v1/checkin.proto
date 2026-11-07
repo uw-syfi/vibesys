@@ -160,6 +160,8 @@ message ObjectiveMove {
   }];
   BestValue start = 3;
   BestValue end = 4 [(buf.validate.field).required = true];
+  // What the values are counted in, as ObjectiveSeries.unit says it. Empty when unknown.
+  string unit = 5 [(buf.validate.field).string.max_bytes = 64];
 }
 
 // BestValue is the best measurement of an objective up to a time, and the candidate that made it.

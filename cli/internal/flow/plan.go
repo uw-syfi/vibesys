@@ -29,6 +29,9 @@ type Plan struct {
 	Benchmark task.Command
 	Result    task.Result
 	Metric    core.Metric
+	// Others are the metrics the benchmark reports besides the scored one, which the task declares:
+	// the result's observations of them record their units.
+	Others []core.Metric
 	// Objectives is what a measure job of a multi-objective task is judged on: every sample must
 	// report each of them, and the result records them. It is the zero value for any other task.
 	Objectives core.Objectives
@@ -205,6 +208,18 @@ func (p Plan) Record(job core.JobID, commit core.Commit, f Findings, at time.Tim
 	if p.RunsCheck() {
 		checkJob = job
 	}
-	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: f.Observations, CheckJob: checkJob, Objectives: p.Objectives}
+	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: p.withUnits(f.Observations), CheckJob: checkJob, Objectives: p.Objectives}
 	return r
+}
+
+// withUnits returns the observations each with the unit its task declares for it, and leaves the
+// slice it was given as it was. An observation the task declares no objective for has no unit.
+func (p Plan) withUnits(observed []core.Observation) []core.Observation {
+	out := slices.Clone(observed)
+	for i, o := range out {
+		if j := slices.IndexFunc(p.Others, func(m core.Metric) bool { return m.Name == o.Name }); j >= 0 {
+			out[i].Unit = p.Others[j].Unit
+		}
+	}
+	return out
 }

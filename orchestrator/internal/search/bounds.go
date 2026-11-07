@@ -48,20 +48,30 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 		for _, b := range kept {
 			entry.Versions = append(entry.Versions, cloneBound(b))
 		}
+		var checks []pb.BoundUnitCheck
 		if reading, ok := heads[objective]; ok && reading.direction == standing.GetDirection() {
 			value := reading.value
 			entry.HeadValue = &value
-			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
+			check := CheckUnit(standing.GetUnit(), reading.unit)
+			checks = append(checks, check)
+			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok && check != pb.BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH {
 				entry.PercentOfBound = &percent
 			}
+			entry.MeasuredUnit = reading.unit
 		}
 		if best, ok := bests[objective]; ok && best.direction == standing.GetDirection() {
 			value := best.value
 			entry.BestValue = &value
-			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
+			check := CheckUnit(standing.GetUnit(), best.unit)
+			checks = append(checks, check)
+			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok && check != pb.BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH {
 				entry.BestPercentOfBound = &percent
 			}
+			if best.unit != "" || entry.MeasuredUnit == "" {
+				entry.MeasuredUnit = best.unit
+			}
 		}
+		entry.UnitCheck = combineUnitChecks(checks)
 		out = append(out, entry)
 	}
 	if len(out) > maxBoundObjectives {
@@ -73,6 +83,36 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 	}
 	slices.SortFunc(out, func(a, b *pb.ObjectiveBounds) int { return cmp.Compare(a.Objective, b.Objective) })
 	return out, truncated
+}
+
+// CheckUnit says whether a bound counted in boundUnit bounds a value counted in valueUnit. A unit is a
+// label that nothing converts, so they match when their text is the same. An unknown unit (empty,
+// of the bound or of the value) is no match and no mismatch: nothing says either, and it is never
+// taken for a match. Two known units that differ are a mismatch.
+func CheckUnit(boundUnit, valueUnit string) pb.BoundUnitCheck {
+	switch {
+	case boundUnit == "" || valueUnit == "":
+		return pb.BoundUnitCheck_BOUND_UNIT_CHECK_UNKNOWN
+	case boundUnit == valueUnit:
+		return pb.BoundUnitCheck_BOUND_UNIT_CHECK_MATCH
+	default:
+		return pb.BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH
+	}
+}
+
+// combineUnitChecks is the check of an entry from the checks of the values served with it: a mismatch
+// of any is a mismatch, else an unknown of any is unknown, else a match. With no value served there is
+// nothing checked, which is unknown.
+func combineUnitChecks(checks []pb.BoundUnitCheck) pb.BoundUnitCheck {
+	if len(checks) == 0 {
+		return pb.BoundUnitCheck_BOUND_UNIT_CHECK_UNKNOWN
+	}
+	for _, want := range []pb.BoundUnitCheck{pb.BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH, pb.BoundUnitCheck_BOUND_UNIT_CHECK_UNKNOWN} {
+		if slices.Contains(checks, want) {
+			return want
+		}
+	}
+	return pb.BoundUnitCheck_BOUND_UNIT_CHECK_MATCH
 }
 
 func standingSeq(b *pb.ObjectiveBounds) uint64 { return b.Versions[len(b.Versions)-1].GetSeq() }

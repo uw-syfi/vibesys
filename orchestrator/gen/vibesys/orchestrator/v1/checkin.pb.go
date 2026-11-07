@@ -573,11 +573,13 @@ func (x *RoleSpend) GetUsage() *Usage {
 // ObjectiveMove is where one objective stood at the start of a window and at its end, among the
 // measurements the run made. An absent start means nothing was measured before the window.
 type ObjectiveMove struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Metric        string                 `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
-	Direction     ObjectiveDirection     `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.orchestrator.v1.ObjectiveDirection" json:"direction,omitempty"`
-	Start         *BestValue             `protobuf:"bytes,3,opt,name=start,proto3" json:"start,omitempty"`
-	End           *BestValue             `protobuf:"bytes,4,opt,name=end,proto3" json:"end,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Metric    string                 `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
+	Direction ObjectiveDirection     `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.orchestrator.v1.ObjectiveDirection" json:"direction,omitempty"`
+	Start     *BestValue             `protobuf:"bytes,3,opt,name=start,proto3" json:"start,omitempty"`
+	End       *BestValue             `protobuf:"bytes,4,opt,name=end,proto3" json:"end,omitempty"`
+	// What the values are counted in, as ObjectiveSeries.unit says it. Empty when unknown.
+	Unit          string `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -638,6 +640,13 @@ func (x *ObjectiveMove) GetEnd() *BestValue {
 		return x.End
 	}
 	return nil
+}
+
+func (x *ObjectiveMove) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
 }
 
 // BestValue is the best measurement of an objective up to a time, and the candidate that made it.
@@ -761,13 +770,14 @@ const file_vibesys_orchestrator_v1_checkin_proto_rawDesc = "" +
 	"\x05turns\x18\x02 \x01(\rR\x05turns\x12%\n" +
 	"\x0eunpriced_turns\x18\x03 \x01(\rR\runpricedTurns\x124\n" +
 	"\x05usage\x18\x04 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage:g\xbaHd\x1ab\n" +
-	"\x19role_spend.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\"\xff\x01\n" +
+	"\x19role_spend.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\"\x9c\x02\n" +
 	"\rObjectiveMove\x12\x1f\n" +
 	"\x06metric\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06metric\x12U\n" +
 	"\tdirection\x18\x02 \x01(\x0e2+.vibesys.orchestrator.v1.ObjectiveDirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x128\n" +
 	"\x05start\x18\x03 \x01(\v2\".vibesys.orchestrator.v1.BestValueR\x05start\x12<\n" +
-	"\x03end\x18\x04 \x01(\v2\".vibesys.orchestrator.v1.BestValueB\x06\xbaH\x03\xc8\x01\x01R\x03end\"\x96\x01\n" +
+	"\x03end\x18\x04 \x01(\v2\".vibesys.orchestrator.v1.BestValueB\x06\xbaH\x03\xc8\x01\x01R\x03end\x12\x1b\n" +
+	"\x04unit\x18\x05 \x01(\tB\a\xbaH\x04r\x02(@R\x04unit\"\x96\x01\n" +
 	"\tBestValue\x12\x1d\n" +
 	"\x05value\x18\x01 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05value\x12\x1e\n" +
 	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x16\n" +

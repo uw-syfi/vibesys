@@ -92,9 +92,11 @@ func Standings(state *pb.SearchState) []*pb.ObjectiveStanding {
 			}
 			entry.BestPercentOfBound = finiteOptional(b.BestPercentOfBound)
 			if versions := b.GetVersions(); len(versions) > 0 {
-				entry.Unit = versions[len(versions)-1].GetUnit()
+				entry.BoundUnit = versions[len(versions)-1].GetUnit()
+				entry.BoundUnitCheck = b.GetUnitCheck()
 			}
 		}
+		entry.Unit = series[r.name].GetUnit()
 		entry.HeadValue = finiteOptional(entry.HeadValue)
 		out = append(out, entry)
 	}

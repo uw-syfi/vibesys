@@ -386,7 +386,7 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 			return fail(err)
 		}
 		out := core.MeasureOutcome{
-			Metric:  core.Metric{Name: o.Measure.GetMetric().GetName(), Direction: dir},
+			Metric:  core.Metric{Name: o.Measure.GetMetric().GetName(), Direction: dir, Unit: o.Measure.GetMetric().GetUnit()},
 			Samples: slices.Clone(o.Measure.GetSamples()), CheckJob: core.JobID(o.Measure.GetCheckJobId()),
 		}
 		// The headline is derived from the samples and stored beside them for readers of the file; a
@@ -400,7 +400,7 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 			if ob.Value != nil && (len(values) == 0 || ob.GetValue() != core.Headline(values)) {
 				return fail(fmt.Errorf("the headline value %v of its observation %q is not that of its values", ob.GetValue(), ob.GetName()))
 			}
-			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: values})
+			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: values, Unit: ob.GetUnit()})
 		}
 		if out.Objectives, err = objectivesFromMessage("objectives", o.Measure.GetObjectives()); err != nil {
 			return fail(err)
@@ -441,7 +441,7 @@ func objectivesFromMessage(field string, o *cliv1.Objectives) (core.Objectives, 
 		if err != nil {
 			return core.Objectives{}, err
 		}
-		out.Metrics = append(out.Metrics, core.Metric{Name: m.GetName(), Direction: d})
+		out.Metrics = append(out.Metrics, core.Metric{Name: m.GetName(), Direction: d, Unit: m.GetUnit()})
 	}
 	return out, nil
 }
@@ -458,7 +458,7 @@ func objectiveVerdictsFromMessage(field string, vs []*cliv1.ObjectiveVerdict) ([
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, core.ObjectiveVerdict{Metric: core.Metric{Name: v.GetMetric().GetName(), Direction: d}, Verdict: verdict})
+		out = append(out, core.ObjectiveVerdict{Metric: core.Metric{Name: v.GetMetric().GetName(), Direction: d, Unit: v.GetMetric().GetUnit()}, Verdict: verdict})
 	}
 	return out, nil
 }

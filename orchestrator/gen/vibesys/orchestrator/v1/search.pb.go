@@ -83,6 +83,67 @@ func (IdeaVerdict) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{0}
 }
 
+// BoundUnitCheck says whether a declared bound is counted in the unit of the measurements it bounds.
+// A unit is a label for people and nothing converts it, so the two are the same when their text is.
+type BoundUnitCheck int32
+
+const (
+	BoundUnitCheck_BOUND_UNIT_CHECK_UNSPECIFIED BoundUnitCheck = 0
+	// Every measurement served against the bound is counted in the bound's unit.
+	BoundUnitCheck_BOUND_UNIT_CHECK_MATCH BoundUnitCheck = 1
+	// A measurement served against the bound is counted in another unit than the bound's: the bound
+	// is unverified, and no share of it is served for that measurement.
+	BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH BoundUnitCheck = 2
+	// The unit of a measurement is not known (the task declares none, or the result was saved before
+	// units were kept), or there is no measurement to check: nothing says the bound matches, and
+	// nothing says it does not. A share of the bound is served all the same, so a reader must show it
+	// as unverified.
+	BoundUnitCheck_BOUND_UNIT_CHECK_UNKNOWN BoundUnitCheck = 3
+)
+
+// Enum value maps for BoundUnitCheck.
+var (
+	BoundUnitCheck_name = map[int32]string{
+		0: "BOUND_UNIT_CHECK_UNSPECIFIED",
+		1: "BOUND_UNIT_CHECK_MATCH",
+		2: "BOUND_UNIT_CHECK_MISMATCH",
+		3: "BOUND_UNIT_CHECK_UNKNOWN",
+	}
+	BoundUnitCheck_value = map[string]int32{
+		"BOUND_UNIT_CHECK_UNSPECIFIED": 0,
+		"BOUND_UNIT_CHECK_MATCH":       1,
+		"BOUND_UNIT_CHECK_MISMATCH":    2,
+		"BOUND_UNIT_CHECK_UNKNOWN":     3,
+	}
+)
+
+func (x BoundUnitCheck) Enum() *BoundUnitCheck {
+	p := new(BoundUnitCheck)
+	*p = x
+	return p
+}
+
+func (x BoundUnitCheck) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BoundUnitCheck) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_orchestrator_v1_search_proto_enumTypes[1].Descriptor()
+}
+
+func (BoundUnitCheck) Type() protoreflect.EnumType {
+	return &file_vibesys_orchestrator_v1_search_proto_enumTypes[1]
+}
+
+func (x BoundUnitCheck) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BoundUnitCheck.Descriptor instead.
+func (BoundUnitCheck) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{1}
+}
+
 type UnreadableReason int32
 
 const (
@@ -143,11 +204,11 @@ func (x UnreadableReason) String() string {
 }
 
 func (UnreadableReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_search_proto_enumTypes[1].Descriptor()
+	return file_vibesys_orchestrator_v1_search_proto_enumTypes[2].Descriptor()
 }
 
 func (UnreadableReason) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_search_proto_enumTypes[1]
+	return &file_vibesys_orchestrator_v1_search_proto_enumTypes[2]
 }
 
 func (x UnreadableReason) Number() protoreflect.EnumNumber {
@@ -156,7 +217,7 @@ func (x UnreadableReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UnreadableReason.Descriptor instead.
 func (UnreadableReason) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{2}
 }
 
 // SearchState is a whole, ephemeral view. Revisions are comparable only within
@@ -377,7 +438,7 @@ type ObjectiveGain struct {
 	// of the objective (the series' first point). Absent entries: a gain is left out when either number
 	// is not above zero, as a ratio of them would say nothing.
 	Ratio float64 `protobuf:"fixed64,2,opt,name=ratio,proto3" json:"ratio,omitempty"`
-	// The best value itself, in the unit of the measurements.
+	// The best value itself, in the unit of the measurements (ObjectiveSeries.unit).
 	BestValue     float64 `protobuf:"fixed64,3,opt,name=best_value,json=bestValue,proto3" json:"best_value,omitempty"`
 	BaselineValue float64 `protobuf:"fixed64,4,opt,name=baseline_value,json=baselineValue,proto3" json:"baseline_value,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -632,10 +693,7 @@ type ObjectiveBounds struct {
 	// the head has gone past it, which says the bound was too modest. For an objective that is
 	// maximized it is head_value over the bound, and for one that is minimized the bound over
 	// head_value, so more is better for both. Absent when head_value is, and when either number is not
-	// above zero. It takes the bound to be in the unit of the head's measurements, as a bound is
-	// declared (ObjectiveBound.value); the orchestrator cannot check it, because a measurement keeps
-	// no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
-	// another unit gives a wrong percent. The version's unit is served for a reader to judge.
+	// above zero, and when the head's unit is another than the bound's (unit_check says so).
 	PercentOfBound *float64 `protobuf:"fixed64,5,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
 	// The best the run measured on the objective, in the bound's direction: the value of the newest
 	// point of the objective's series that set a best, which is where the series' best line ends. It
@@ -645,11 +703,20 @@ type ObjectiveBounds struct {
 	// the objective improves the other way than the bound does.
 	BestValue *float64 `protobuf:"fixed64,6,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
 	// How close best_value is to the standing bound, in percent, defined as percent_of_bound is for
-	// the head's value (with the same unit caveat). Absent when best_value is, and when either number
-	// is not above zero.
+	// the head's value. Absent when best_value is, when either number is not above zero, and when the
+	// best's unit is another than the bound's.
 	BestPercentOfBound *float64 `protobuf:"fixed64,7,opt,name=best_percent_of_bound,json=bestPercentOfBound,proto3,oneof" json:"best_percent_of_bound,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The unit head_value and best_value are counted in: the unit the measurements of the objective
+	// record. Empty when it is unknown, and when the two are counted in different units, which
+	// unit_check then says (the unit of the best is served first).
+	MeasuredUnit string `protobuf:"bytes,8,opt,name=measured_unit,json=measuredUnit,proto3" json:"measured_unit,omitempty"`
+	// Whether the standing bound's unit (the unit of the last version) is that of head_value and
+	// best_value. MISMATCH when either is counted in another unit, else UNKNOWN when either is counted
+	// in none that is known or neither exists, else MATCH. The bound's unit and measured_unit are both
+	// served, so a reader names both when they differ.
+	UnitCheck     BoundUnitCheck `protobuf:"varint,9,opt,name=unit_check,json=unitCheck,proto3,enum=vibesys.orchestrator.v1.BoundUnitCheck" json:"unit_check,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ObjectiveBounds) Reset() {
@@ -731,6 +798,20 @@ func (x *ObjectiveBounds) GetBestPercentOfBound() float64 {
 	return 0
 }
 
+func (x *ObjectiveBounds) GetMeasuredUnit() string {
+	if x != nil {
+		return x.MeasuredUnit
+	}
+	return ""
+}
+
+func (x *ObjectiveBounds) GetUnitCheck() BoundUnitCheck {
+	if x != nil {
+		return x.UnitCheck
+	}
+	return BoundUnitCheck_BOUND_UNIT_CHECK_UNSPECIFIED
+}
+
 // ObjectiveSeries is the measured history of one objective of the run: one point for every measure
 // job of the run that produced a value for it, in the order they were recorded. Nothing in it is a
 // judgment of the framework: a point is a measurement, and `best_so_far` says only that its value is
@@ -746,7 +827,12 @@ type ObjectiveSeries struct {
 	// and the oldest of each go first, and the state is marked truncated. So a cut series always
 	// holds its newest best-so-far point, which is the best the run reached, and holds every
 	// best-so-far point while there are at most 400 of them.
-	Points        []*MeasuredPoint `protobuf:"bytes,3,rep,name=points,proto3" json:"points,omitempty"`
+	Points []*MeasuredPoint `protobuf:"bytes,3,rep,name=points,proto3" json:"points,omitempty"`
+	// What the points are counted in, as the task declares the objective (a label for people). Empty
+	// when it is unknown: the task declares none, or a point of the series is of a result saved
+	// before units were kept. A point counted in another unit than the newest known one is left out,
+	// as one of the other direction is.
+	Unit          string `protobuf:"bytes,4,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -800,6 +886,13 @@ func (x *ObjectiveSeries) GetPoints() []*MeasuredPoint {
 		return x.Points
 	}
 	return nil
+}
+
+func (x *ObjectiveSeries) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
 }
 
 // MeasuredPoint is one measurement of one candidate on one objective.
@@ -1269,7 +1362,7 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\brejected\x18\x03 \x01(\rR\brejected\x12\x12\n" +
 	"\x04open\x18\x04 \x01(\rR\x04open\x12\x16\n" +
 	"\x06parked\x18\x05 \x01(\rR\x06parked\x12D\n" +
-	"\x04best\x18\x06 \x03(\v2&.vibesys.orchestrator.v1.ObjectiveGainB\b\xbaH\x05\x92\x01\x02\x10\bR\x04best\"\xd4\x05\n" +
+	"\x04best\x18\x06 \x03(\v2&.vibesys.orchestrator.v1.ObjectiveGainB\b\xbaH\x05\x92\x01\x02\x10\bR\x04best\"\xd6\x06\n" +
 	"\x0fObjectiveBounds\x12(\n" +
 	"\tobjective\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +
@@ -1282,18 +1375,23 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01\x12+\n" +
 	"\n" +
 	"best_value\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x02R\tbestValue\x88\x01\x01\x12H\n" +
-	"\x15best_percent_of_bound\x18\a \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x03R\x12bestPercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
+	"\x15best_percent_of_bound\x18\a \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x03R\x12bestPercentOfBound\x88\x01\x01\x12,\n" +
+	"\rmeasured_unit\x18\b \x01(\tB\a\xbaH\x04r\x02(@R\fmeasuredUnit\x12R\n" +
+	"\n" +
+	"unit_check\x18\t \x01(\x0e2'.vibesys.orchestrator.v1.BoundUnitCheckB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tunitCheck:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
 	".objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n" +
 	"\v_head_valueB\x13\n" +
 	"\x11_percent_of_boundB\r\n" +
 	"\v_best_valueB\x18\n" +
-	"\x16_best_percent_of_bound\"\xcd\x01\n" +
+	"\x16_best_percent_of_bound\"\xea\x01\n" +
 	"\x0fObjectiveSeries\x12(\n" +
 	"\tobjective\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +
 	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12K\n" +
-	"\x06points\x18\x03 \x03(\v2&.vibesys.orchestrator.v1.MeasuredPointB\v\xbaH\b\x92\x01\x05\b\x01\x10\x90\x03R\x06points\"\xc9\x01\n" +
+	"\x06points\x18\x03 \x03(\v2&.vibesys.orchestrator.v1.MeasuredPointB\v\xbaH\b\x92\x01\x05\b\x01\x10\x90\x03R\x06points\x12\x1b\n" +
+	"\x04unit\x18\x04 \x01(\tB\a\xbaH\x04r\x02(@R\x04unit\"\xc9\x01\n" +
 	"\rMeasuredPoint\x12!\n" +
 	"\x06job_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\x05jobId\x12\"\n" +
@@ -1341,7 +1439,12 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\x11IDEA_VERDICT_OPEN\x10\x01\x12\x15\n" +
 	"\x11IDEA_VERDICT_KEPT\x10\x02\x12\x19\n" +
 	"\x15IDEA_VERDICT_REJECTED\x10\x03\x12\x17\n" +
-	"\x13IDEA_VERDICT_PARKED\x10\x04*\xaf\x03\n" +
+	"\x13IDEA_VERDICT_PARKED\x10\x04*\x8b\x01\n" +
+	"\x0eBoundUnitCheck\x12 \n" +
+	"\x1cBOUND_UNIT_CHECK_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16BOUND_UNIT_CHECK_MATCH\x10\x01\x12\x1d\n" +
+	"\x19BOUND_UNIT_CHECK_MISMATCH\x10\x02\x12\x1c\n" +
+	"\x18BOUND_UNIT_CHECK_UNKNOWN\x10\x03*\xaf\x03\n" +
 	"\x10UnreadableReason\x12!\n" +
 	"\x1dUNREADABLE_REASON_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bUNREADABLE_REASON_NO_DAEMON\x10\x01\x12\"\n" +
@@ -1368,71 +1471,73 @@ func file_vibesys_orchestrator_v1_search_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_search_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_search_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_orchestrator_v1_search_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_orchestrator_v1_search_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_orchestrator_v1_search_proto_goTypes = []any{
 	(IdeaVerdict)(0),              // 0: vibesys.orchestrator.v1.IdeaVerdict
-	(UnreadableReason)(0),         // 1: vibesys.orchestrator.v1.UnreadableReason
-	(*SearchState)(nil),           // 2: vibesys.orchestrator.v1.SearchState
-	(*ObjectiveGain)(nil),         // 3: vibesys.orchestrator.v1.ObjectiveGain
-	(*IdeaView)(nil),              // 4: vibesys.orchestrator.v1.IdeaView
-	(*WorkstreamView)(nil),        // 5: vibesys.orchestrator.v1.WorkstreamView
-	(*ObjectiveBounds)(nil),       // 6: vibesys.orchestrator.v1.ObjectiveBounds
-	(*ObjectiveSeries)(nil),       // 7: vibesys.orchestrator.v1.ObjectiveSeries
-	(*MeasuredPoint)(nil),         // 8: vibesys.orchestrator.v1.MeasuredPoint
-	(*Tradeoff)(nil),              // 9: vibesys.orchestrator.v1.Tradeoff
-	(*TradeoffObjective)(nil),     // 10: vibesys.orchestrator.v1.TradeoffObjective
-	(*TradeoffPoint)(nil),         // 11: vibesys.orchestrator.v1.TradeoffPoint
-	(*SearchHealth)(nil),          // 12: vibesys.orchestrator.v1.SearchHealth
-	(*Unreadable)(nil),            // 13: vibesys.orchestrator.v1.Unreadable
-	(*v1.Job)(nil),                // 14: vibesys.cli.v1.Job
-	(*v1.Result)(nil),             // 15: vibesys.cli.v1.Result
-	(*v1.Judgment)(nil),           // 16: vibesys.cli.v1.Judgment
-	(*v1.PromotionRecord)(nil),    // 17: vibesys.cli.v1.PromotionRecord
-	(*v1.Plan)(nil),               // 18: vibesys.cli.v1.Plan
-	(*v1.Head)(nil),               // 19: vibesys.cli.v1.Head
-	(*v1.JobTrouble)(nil),         // 20: vibesys.cli.v1.JobTrouble
-	(*v1.Workstream)(nil),         // 21: vibesys.cli.v1.Workstream
-	(v1.Direction)(0),             // 22: vibesys.cli.v1.Direction
-	(*v1.ObjectiveBound)(nil),     // 23: vibesys.cli.v1.ObjectiveBound
-	(*timestamppb.Timestamp)(nil), // 24: google.protobuf.Timestamp
+	(BoundUnitCheck)(0),           // 1: vibesys.orchestrator.v1.BoundUnitCheck
+	(UnreadableReason)(0),         // 2: vibesys.orchestrator.v1.UnreadableReason
+	(*SearchState)(nil),           // 3: vibesys.orchestrator.v1.SearchState
+	(*ObjectiveGain)(nil),         // 4: vibesys.orchestrator.v1.ObjectiveGain
+	(*IdeaView)(nil),              // 5: vibesys.orchestrator.v1.IdeaView
+	(*WorkstreamView)(nil),        // 6: vibesys.orchestrator.v1.WorkstreamView
+	(*ObjectiveBounds)(nil),       // 7: vibesys.orchestrator.v1.ObjectiveBounds
+	(*ObjectiveSeries)(nil),       // 8: vibesys.orchestrator.v1.ObjectiveSeries
+	(*MeasuredPoint)(nil),         // 9: vibesys.orchestrator.v1.MeasuredPoint
+	(*Tradeoff)(nil),              // 10: vibesys.orchestrator.v1.Tradeoff
+	(*TradeoffObjective)(nil),     // 11: vibesys.orchestrator.v1.TradeoffObjective
+	(*TradeoffPoint)(nil),         // 12: vibesys.orchestrator.v1.TradeoffPoint
+	(*SearchHealth)(nil),          // 13: vibesys.orchestrator.v1.SearchHealth
+	(*Unreadable)(nil),            // 14: vibesys.orchestrator.v1.Unreadable
+	(*v1.Job)(nil),                // 15: vibesys.cli.v1.Job
+	(*v1.Result)(nil),             // 16: vibesys.cli.v1.Result
+	(*v1.Judgment)(nil),           // 17: vibesys.cli.v1.Judgment
+	(*v1.PromotionRecord)(nil),    // 18: vibesys.cli.v1.PromotionRecord
+	(*v1.Plan)(nil),               // 19: vibesys.cli.v1.Plan
+	(*v1.Head)(nil),               // 20: vibesys.cli.v1.Head
+	(*v1.JobTrouble)(nil),         // 21: vibesys.cli.v1.JobTrouble
+	(*v1.Workstream)(nil),         // 22: vibesys.cli.v1.Workstream
+	(v1.Direction)(0),             // 23: vibesys.cli.v1.Direction
+	(*v1.ObjectiveBound)(nil),     // 24: vibesys.cli.v1.ObjectiveBound
+	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_search_proto_depIdxs = []int32{
-	12, // 0: vibesys.orchestrator.v1.SearchState.health:type_name -> vibesys.orchestrator.v1.SearchHealth
-	14, // 1: vibesys.orchestrator.v1.SearchState.jobs:type_name -> vibesys.cli.v1.Job
-	15, // 2: vibesys.orchestrator.v1.SearchState.results:type_name -> vibesys.cli.v1.Result
-	16, // 3: vibesys.orchestrator.v1.SearchState.judgments:type_name -> vibesys.cli.v1.Judgment
-	17, // 4: vibesys.orchestrator.v1.SearchState.promotions:type_name -> vibesys.cli.v1.PromotionRecord
-	18, // 5: vibesys.orchestrator.v1.SearchState.plans:type_name -> vibesys.cli.v1.Plan
-	19, // 6: vibesys.orchestrator.v1.SearchState.head:type_name -> vibesys.cli.v1.Head
-	20, // 7: vibesys.orchestrator.v1.SearchState.troubles:type_name -> vibesys.cli.v1.JobTrouble
-	6,  // 8: vibesys.orchestrator.v1.SearchState.bounds:type_name -> vibesys.orchestrator.v1.ObjectiveBounds
-	7,  // 9: vibesys.orchestrator.v1.SearchState.series:type_name -> vibesys.orchestrator.v1.ObjectiveSeries
-	9,  // 10: vibesys.orchestrator.v1.SearchState.tradeoff:type_name -> vibesys.orchestrator.v1.Tradeoff
-	21, // 11: vibesys.orchestrator.v1.SearchState.workstreams:type_name -> vibesys.cli.v1.Workstream
-	4,  // 12: vibesys.orchestrator.v1.SearchState.ideas:type_name -> vibesys.orchestrator.v1.IdeaView
-	5,  // 13: vibesys.orchestrator.v1.SearchState.workstream_views:type_name -> vibesys.orchestrator.v1.WorkstreamView
+	13, // 0: vibesys.orchestrator.v1.SearchState.health:type_name -> vibesys.orchestrator.v1.SearchHealth
+	15, // 1: vibesys.orchestrator.v1.SearchState.jobs:type_name -> vibesys.cli.v1.Job
+	16, // 2: vibesys.orchestrator.v1.SearchState.results:type_name -> vibesys.cli.v1.Result
+	17, // 3: vibesys.orchestrator.v1.SearchState.judgments:type_name -> vibesys.cli.v1.Judgment
+	18, // 4: vibesys.orchestrator.v1.SearchState.promotions:type_name -> vibesys.cli.v1.PromotionRecord
+	19, // 5: vibesys.orchestrator.v1.SearchState.plans:type_name -> vibesys.cli.v1.Plan
+	20, // 6: vibesys.orchestrator.v1.SearchState.head:type_name -> vibesys.cli.v1.Head
+	21, // 7: vibesys.orchestrator.v1.SearchState.troubles:type_name -> vibesys.cli.v1.JobTrouble
+	7,  // 8: vibesys.orchestrator.v1.SearchState.bounds:type_name -> vibesys.orchestrator.v1.ObjectiveBounds
+	8,  // 9: vibesys.orchestrator.v1.SearchState.series:type_name -> vibesys.orchestrator.v1.ObjectiveSeries
+	10, // 10: vibesys.orchestrator.v1.SearchState.tradeoff:type_name -> vibesys.orchestrator.v1.Tradeoff
+	22, // 11: vibesys.orchestrator.v1.SearchState.workstreams:type_name -> vibesys.cli.v1.Workstream
+	5,  // 12: vibesys.orchestrator.v1.SearchState.ideas:type_name -> vibesys.orchestrator.v1.IdeaView
+	6,  // 13: vibesys.orchestrator.v1.SearchState.workstream_views:type_name -> vibesys.orchestrator.v1.WorkstreamView
 	0,  // 14: vibesys.orchestrator.v1.IdeaView.verdict:type_name -> vibesys.orchestrator.v1.IdeaVerdict
-	3,  // 15: vibesys.orchestrator.v1.IdeaView.best:type_name -> vibesys.orchestrator.v1.ObjectiveGain
-	3,  // 16: vibesys.orchestrator.v1.WorkstreamView.best:type_name -> vibesys.orchestrator.v1.ObjectiveGain
-	22, // 17: vibesys.orchestrator.v1.ObjectiveBounds.direction:type_name -> vibesys.cli.v1.Direction
-	23, // 18: vibesys.orchestrator.v1.ObjectiveBounds.versions:type_name -> vibesys.cli.v1.ObjectiveBound
-	22, // 19: vibesys.orchestrator.v1.ObjectiveSeries.direction:type_name -> vibesys.cli.v1.Direction
-	8,  // 20: vibesys.orchestrator.v1.ObjectiveSeries.points:type_name -> vibesys.orchestrator.v1.MeasuredPoint
-	24, // 21: vibesys.orchestrator.v1.MeasuredPoint.at:type_name -> google.protobuf.Timestamp
-	10, // 22: vibesys.orchestrator.v1.Tradeoff.objectives:type_name -> vibesys.orchestrator.v1.TradeoffObjective
-	11, // 23: vibesys.orchestrator.v1.Tradeoff.points:type_name -> vibesys.orchestrator.v1.TradeoffPoint
-	22, // 24: vibesys.orchestrator.v1.TradeoffObjective.direction:type_name -> vibesys.cli.v1.Direction
-	24, // 25: vibesys.orchestrator.v1.TradeoffPoint.at:type_name -> google.protobuf.Timestamp
-	24, // 26: vibesys.orchestrator.v1.SearchHealth.live_since:type_name -> google.protobuf.Timestamp
-	13, // 27: vibesys.orchestrator.v1.SearchHealth.unreadable:type_name -> vibesys.orchestrator.v1.Unreadable
-	1,  // 28: vibesys.orchestrator.v1.Unreadable.reason:type_name -> vibesys.orchestrator.v1.UnreadableReason
-	24, // 29: vibesys.orchestrator.v1.Unreadable.since:type_name -> google.protobuf.Timestamp
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	4,  // 15: vibesys.orchestrator.v1.IdeaView.best:type_name -> vibesys.orchestrator.v1.ObjectiveGain
+	4,  // 16: vibesys.orchestrator.v1.WorkstreamView.best:type_name -> vibesys.orchestrator.v1.ObjectiveGain
+	23, // 17: vibesys.orchestrator.v1.ObjectiveBounds.direction:type_name -> vibesys.cli.v1.Direction
+	24, // 18: vibesys.orchestrator.v1.ObjectiveBounds.versions:type_name -> vibesys.cli.v1.ObjectiveBound
+	1,  // 19: vibesys.orchestrator.v1.ObjectiveBounds.unit_check:type_name -> vibesys.orchestrator.v1.BoundUnitCheck
+	23, // 20: vibesys.orchestrator.v1.ObjectiveSeries.direction:type_name -> vibesys.cli.v1.Direction
+	9,  // 21: vibesys.orchestrator.v1.ObjectiveSeries.points:type_name -> vibesys.orchestrator.v1.MeasuredPoint
+	25, // 22: vibesys.orchestrator.v1.MeasuredPoint.at:type_name -> google.protobuf.Timestamp
+	11, // 23: vibesys.orchestrator.v1.Tradeoff.objectives:type_name -> vibesys.orchestrator.v1.TradeoffObjective
+	12, // 24: vibesys.orchestrator.v1.Tradeoff.points:type_name -> vibesys.orchestrator.v1.TradeoffPoint
+	23, // 25: vibesys.orchestrator.v1.TradeoffObjective.direction:type_name -> vibesys.cli.v1.Direction
+	25, // 26: vibesys.orchestrator.v1.TradeoffPoint.at:type_name -> google.protobuf.Timestamp
+	25, // 27: vibesys.orchestrator.v1.SearchHealth.live_since:type_name -> google.protobuf.Timestamp
+	14, // 28: vibesys.orchestrator.v1.SearchHealth.unreadable:type_name -> vibesys.orchestrator.v1.Unreadable
+	2,  // 29: vibesys.orchestrator.v1.Unreadable.reason:type_name -> vibesys.orchestrator.v1.UnreadableReason
+	25, // 30: vibesys.orchestrator.v1.Unreadable.since:type_name -> google.protobuf.Timestamp
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_search_proto_init() }
@@ -1450,7 +1555,7 @@ func file_vibesys_orchestrator_v1_search_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_search_proto_rawDesc), len(file_vibesys_orchestrator_v1_search_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,

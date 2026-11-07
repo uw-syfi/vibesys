@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/search.proto.
  */
 export const file_vibesys_orchestrator_v1_search: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIqwHCgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAEkIKBnNlcmllcxgOIAMoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZVNlcmllc0IIukgFkgECEAgSMwoIdHJhZGVvZmYYDyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZhI5Cgt3b3Jrc3RyZWFtcxgQIAMoCzIaLnZpYmVzeXMuY2xpLnYxLldvcmtzdHJlYW1CCLpIBZIBAhBkEjsKBWlkZWFzGBEgAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSWRlYVZpZXdCCbpIBpIBAxDIARJLChB3b3Jrc3RyZWFtX3ZpZXdzGBIgAygLMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV29ya3N0cmVhbVZpZXdCCLpIBZIBAhBlEhEKCXVucGxhbm5lZBgTIAEoDSKKAQoNT2JqZWN0aXZlR2FpbhIaCgZtZXRyaWMYASABKAlCCrpIB3IFEAEogAISHwoFcmF0aW8YAiABKAFCELpIDRILQAEhAAAAAAAAAAASGwoKYmVzdF92YWx1ZRgDIAEoAUIHukgEEgJAARIfCg5iYXNlbGluZV92YWx1ZRgEIAEoAUIHukgEEgJAASLqAQoISWRlYVZpZXcSHAoLcGxhbl9udW1iZXIYASABKA1CB7pIBCoCIAASQQoHdmVyZGljdBgCIAEoDjIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLklkZWFWZXJkaWN0Qgq6SAeCAQQQASAAEi0KEWNhbmRpZGF0ZV9qb2JfaWRzGAMgAygJQhK6SA+SAQwQyAEiB3IFEAEogAISPgoEYmVzdBgEIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIEg4KBmluX3J1bhgFIAEoCCKeAQoOV29ya3N0cmVhbVZpZXcSDgoGbnVtYmVyGAEgASgNEgwKBGtlcHQYAiABKA0SEAoIcmVqZWN0ZWQYAyABKA0SDAoEb3BlbhgEIAEoDRIOCgZwYXJrZWQYBSABKA0SPgoEYmVzdBgGIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIIvoECg9PYmplY3RpdmVCb3VuZHMSHQoJb2JqZWN0aXZlGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI8Cgh2ZXJzaW9ucxgDIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZUJvdW5kQgq6SAeSAQQIARBAEiAKCmhlYWRfdmFsdWUYBCABKAFCB7pIBBICQAFIAIgBARIvChBwZXJjZW50X29mX2JvdW5kGAUgASgBQhC6SA0SC0ABIQAAAAAAAAAASAGIAQESIAoKYmVzdF92YWx1ZRgGIAEoAUIHukgEEgJAAUgCiAEBEjQKFWJlc3RfcGVyY2VudF9vZl9ib3VuZBgHIAEoAUIQukgNEgtAASEAAAAAAAAAAEgDiAEBOtcBukjTARrQAQoub2JqZWN0aXZlX2JvdW5kcy52ZXJzaW9uc19hcmVfb2ZfdGhlX29iamVjdGl2ZRJIZXZlcnkgdmVyc2lvbiBkZWNsYXJlcyB0aGlzIG9iamVjdGl2ZSwgaW4gdGhlIGRpcmVjdGlvbiBvZiB0aGUgb2JqZWN0aXZlGlR0aGlzLnZlcnNpb25zLmFsbCh2LCB2Lm9iamVjdGl2ZSA9PSB0aGlzLm9iamVjdGl2ZSAmJiB2LmRpcmVjdGlvbiA9PSB0aGlzLmRpcmVjdGlvbilCDQoLX2hlYWRfdmFsdWVCEwoRX3BlcmNlbnRfb2ZfYm91bmRCDQoLX2Jlc3RfdmFsdWVCGAoWX2Jlc3RfcGVyY2VudF9vZl9ib3VuZCKvAQoPT2JqZWN0aXZlU2VyaWVzEh0KCW9iamVjdGl2ZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAASQwoGcG9pbnRzGAMgAygLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVhc3VyZWRQb2ludEILukgIkgEFCAEQkAMipAEKDU1lYXN1cmVkUG9pbnQSGgoGam9iX2lkGAEgASgJQgq6SAdyBRABKIACEhoKBmNvbW1pdBgCIAEoCUIKukgHcgUQASiAAhIuCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIWCgV2YWx1ZRgEIAEoAUIHukgEEgJAARITCgtiZXN0X3NvX2ZhchgFIAEoCCK1AgoIVHJhZGVvZmYSSgoKb2JqZWN0aXZlcxgBIAMoCzIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRyYWRlb2ZmT2JqZWN0aXZlQgq6SAeSAQQIAhAIEkEKBnBvaW50cxgCIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRyYWRlb2ZmUG9pbnRCCbpIBpIBAxCQAzqZAbpIlQEakgEKJXRyYWRlb2ZmLnZhbHVlc19hcmVfb2ZfdGhlX29iamVjdGl2ZXMSLGV2ZXJ5IHBvaW50IGhhcyBvbmUgdmFsdWUgZm9yIGVhY2ggb2JqZWN0aXZlGjt0aGlzLnBvaW50cy5hbGwocCwgc2l6ZShwLnZhbHVlcykgPT0gc2l6ZSh0aGlzLm9iamVjdGl2ZXMpKSJnChFUcmFkZW9mZk9iamVjdGl2ZRIYCgRuYW1lGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgACKqAQoNVHJhZGVvZmZQb2ludBIaCgZqb2JfaWQYASABKAlCCrpIB3IFEAEogAISGgoGY29tbWl0GAIgASgJQgq6SAdyBRABKIACEi4KAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhwKBnZhbHVlcxgEIAMoAUIMukgJkgEGIgQSAkABEhMKC29uX2Zyb250aWVyGAUgASgIIosBCgxTZWFyY2hIZWFsdGgSMAoKbGl2ZV9zaW5jZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIABI5Cgp1bnJlYWRhYmxlGAIgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZUgAQg4KBXN0YXRlEgW6SAIIASKgAQoKVW5yZWFkYWJsZRJFCgZyZWFzb24YASABKA4yKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnJlYWRhYmxlUmVhc29uQgq6SAeCAQQQASAAEjEKBXNpbmNlGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhgKBmRldGFpbBgDIAEoCUIIukgFcgMogCAqjQEKC0lkZWFWZXJkaWN0EhwKGElERUFfVkVSRElDVF9VTlNQRUNJRklFRBAAEhUKEUlERUFfVkVSRElDVF9PUEVOEAESFQoRSURFQV9WRVJESUNUX0tFUFQQAhIZChVJREVBX1ZFUkRJQ1RfUkVKRUNURUQQAxIXChNJREVBX1ZFUkRJQ1RfUEFSS0VEEAQqrwMKEFVucmVhZGFibGVSZWFzb24SIQodVU5SRUFEQUJMRV9SRUFTT05fVU5TUEVDSUZJRUQQABIfChtVTlJFQURBQkxFX1JFQVNPTl9OT19EQUVNT04QARIiCh5VTlJFQURBQkxFX1JFQVNPTl9TVEFSVF9GQUlMRUQQAhInCiNVTlJFQURBQkxFX1JFQVNPTl9DTElfTk9UX0lOU1RBTExFRBADEiQKIFVOUkVBREFCTEVfUkVBU09OX0NMSUVOVF9UT09fT0xEEAQSJAogVU5SRUFEQUJMRV9SRUFTT05fREFFTU9OX1RPT19PTEQQBRIrCidVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9PV05FRF9FTFNFV0hFUkUQBhIgChxVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9BV0FZEAcSIQodVU5SRUFEQUJMRV9SRUFTT05fU1RSRUFNX0xPU1QQCBInCiNVTlJFQURBQkxFX1JFQVNPTl9NRVNTQUdFX1RPT19MQVJHRRAJEiMKH1VOUkVBREFCTEVfUkVBU09OX05PVF9BTlNXRVJJTkcQCkJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service, file_vibesys_cli_v1_workstream]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIqwHCgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAEkIKBnNlcmllcxgOIAMoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZVNlcmllc0IIukgFkgECEAgSMwoIdHJhZGVvZmYYDyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZhI5Cgt3b3Jrc3RyZWFtcxgQIAMoCzIaLnZpYmVzeXMuY2xpLnYxLldvcmtzdHJlYW1CCLpIBZIBAhBkEjsKBWlkZWFzGBEgAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSWRlYVZpZXdCCbpIBpIBAxDIARJLChB3b3Jrc3RyZWFtX3ZpZXdzGBIgAygLMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV29ya3N0cmVhbVZpZXdCCLpIBZIBAhBlEhEKCXVucGxhbm5lZBgTIAEoDSKKAQoNT2JqZWN0aXZlR2FpbhIaCgZtZXRyaWMYASABKAlCCrpIB3IFEAEogAISHwoFcmF0aW8YAiABKAFCELpIDRILQAEhAAAAAAAAAAASGwoKYmVzdF92YWx1ZRgDIAEoAUIHukgEEgJAARIfCg5iYXNlbGluZV92YWx1ZRgEIAEoAUIHukgEEgJAASLqAQoISWRlYVZpZXcSHAoLcGxhbl9udW1iZXIYASABKA1CB7pIBCoCIAASQQoHdmVyZGljdBgCIAEoDjIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLklkZWFWZXJkaWN0Qgq6SAeCAQQQASAAEi0KEWNhbmRpZGF0ZV9qb2JfaWRzGAMgAygJQhK6SA+SAQwQyAEiB3IFEAEogAISPgoEYmVzdBgEIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIEg4KBmluX3J1bhgFIAEoCCKeAQoOV29ya3N0cmVhbVZpZXcSDgoGbnVtYmVyGAEgASgNEgwKBGtlcHQYAiABKA0SEAoIcmVqZWN0ZWQYAyABKA0SDAoEb3BlbhgEIAEoDRIOCgZwYXJrZWQYBSABKA0SPgoEYmVzdBgGIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIIuMFCg9PYmplY3RpdmVCb3VuZHMSHQoJb2JqZWN0aXZlGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI8Cgh2ZXJzaW9ucxgDIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZUJvdW5kQgq6SAeSAQQIARBAEiAKCmhlYWRfdmFsdWUYBCABKAFCB7pIBBICQAFIAIgBARIvChBwZXJjZW50X29mX2JvdW5kGAUgASgBQhC6SA0SC0ABIQAAAAAAAAAASAGIAQESIAoKYmVzdF92YWx1ZRgGIAEoAUIHukgEEgJAAUgCiAEBEjQKFWJlc3RfcGVyY2VudF9vZl9ib3VuZBgHIAEoAUIQukgNEgtAASEAAAAAAAAAAEgDiAEBEh4KDW1lYXN1cmVkX3VuaXQYCCABKAlCB7pIBHICKEASRwoKdW5pdF9jaGVjaxgJIAEoDjInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJvdW5kVW5pdENoZWNrQgq6SAeCAQQQASAAOtcBukjTARrQAQoub2JqZWN0aXZlX2JvdW5kcy52ZXJzaW9uc19hcmVfb2ZfdGhlX29iamVjdGl2ZRJIZXZlcnkgdmVyc2lvbiBkZWNsYXJlcyB0aGlzIG9iamVjdGl2ZSwgaW4gdGhlIGRpcmVjdGlvbiBvZiB0aGUgb2JqZWN0aXZlGlR0aGlzLnZlcnNpb25zLmFsbCh2LCB2Lm9iamVjdGl2ZSA9PSB0aGlzLm9iamVjdGl2ZSAmJiB2LmRpcmVjdGlvbiA9PSB0aGlzLmRpcmVjdGlvbilCDQoLX2hlYWRfdmFsdWVCEwoRX3BlcmNlbnRfb2ZfYm91bmRCDQoLX2Jlc3RfdmFsdWVCGAoWX2Jlc3RfcGVyY2VudF9vZl9ib3VuZCLGAQoPT2JqZWN0aXZlU2VyaWVzEh0KCW9iamVjdGl2ZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAASQwoGcG9pbnRzGAMgAygLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVhc3VyZWRQb2ludEILukgIkgEFCAEQkAMSFQoEdW5pdBgEIAEoCUIHukgEcgIoQCKkAQoNTWVhc3VyZWRQb2ludBIaCgZqb2JfaWQYASABKAlCCrpIB3IFEAEogAISGgoGY29tbWl0GAIgASgJQgq6SAdyBRABKIACEi4KAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhYKBXZhbHVlGAQgASgBQge6SAQSAkABEhMKC2Jlc3Rfc29fZmFyGAUgASgIIrUCCghUcmFkZW9mZhJKCgpvYmplY3RpdmVzGAEgAygLMioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHJhZGVvZmZPYmplY3RpdmVCCrpIB5IBBAgCEAgSQQoGcG9pbnRzGAIgAygLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHJhZGVvZmZQb2ludEIJukgGkgEDEJADOpkBukiVARqSAQoldHJhZGVvZmYudmFsdWVzX2FyZV9vZl90aGVfb2JqZWN0aXZlcxIsZXZlcnkgcG9pbnQgaGFzIG9uZSB2YWx1ZSBmb3IgZWFjaCBvYmplY3RpdmUaO3RoaXMucG9pbnRzLmFsbChwLCBzaXplKHAudmFsdWVzKSA9PSBzaXplKHRoaXMub2JqZWN0aXZlcykpImcKEVRyYWRlb2ZmT2JqZWN0aXZlEhgKBG5hbWUYASABKAlCCrpIB3IFEAEogAISOAoJZGlyZWN0aW9uGAIgASgOMhkudmliZXN5cy5jbGkudjEuRGlyZWN0aW9uQgq6SAeCAQQQASAAIqoBCg1UcmFkZW9mZlBvaW50EhoKBmpvYl9pZBgBIAEoCUIKukgHcgUQASiAAhIaCgZjb21taXQYAiABKAlCCrpIB3IFEAEogAISLgoCYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESHAoGdmFsdWVzGAQgAygBQgy6SAmSAQYiBBICQAESEwoLb25fZnJvbnRpZXIYBSABKAgiiwEKDFNlYXJjaEhlYWx0aBIwCgpsaXZlX3NpbmNlGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAEjkKCnVucmVhZGFibGUYAiABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnJlYWRhYmxlSABCDgoFc3RhdGUSBbpIAggBIqABCgpVbnJlYWRhYmxlEkUKBnJlYXNvbhgBIAEoDjIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVSZWFzb25CCrpIB4IBBBABIAASMQoFc2luY2UYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESGAoGZGV0YWlsGAMgASgJQgi6SAVyAyiAICqNAQoLSWRlYVZlcmRpY3QSHAoYSURFQV9WRVJESUNUX1VOU1BFQ0lGSUVEEAASFQoRSURFQV9WRVJESUNUX09QRU4QARIVChFJREVBX1ZFUkRJQ1RfS0VQVBACEhkKFUlERUFfVkVSRElDVF9SRUpFQ1RFRBADEhcKE0lERUFfVkVSRElDVF9QQVJLRUQQBCqLAQoOQm91bmRVbml0Q2hlY2sSIAocQk9VTkRfVU5JVF9DSEVDS19VTlNQRUNJRklFRBAAEhoKFkJPVU5EX1VOSVRfQ0hFQ0tfTUFUQ0gQARIdChlCT1VORF9VTklUX0NIRUNLX01JU01BVENIEAISHAoYQk9VTkRfVU5JVF9DSEVDS19VTktOT1dOEAMqrwMKEFVucmVhZGFibGVSZWFzb24SIQodVU5SRUFEQUJMRV9SRUFTT05fVU5TUEVDSUZJRUQQABIfChtVTlJFQURBQkxFX1JFQVNPTl9OT19EQUVNT04QARIiCh5VTlJFQURBQkxFX1JFQVNPTl9TVEFSVF9GQUlMRUQQAhInCiNVTlJFQURBQkxFX1JFQVNPTl9DTElfTk9UX0lOU1RBTExFRBADEiQKIFVOUkVBREFCTEVfUkVBU09OX0NMSUVOVF9UT09fT0xEEAQSJAogVU5SRUFEQUJMRV9SRUFTT05fREFFTU9OX1RPT19PTEQQBRIrCidVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9PV05FRF9FTFNFV0hFUkUQBhIgChxVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9BV0FZEAcSIQodVU5SRUFEQUJMRV9SRUFTT05fU1RSRUFNX0xPU1QQCBInCiNVTlJFQURBQkxFX1JFQVNPTl9NRVNTQUdFX1RPT19MQVJHRRAJEiMKH1VOUkVBREFCTEVfUkVBU09OX05PVF9BTlNXRVJJTkcQCkJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service, file_vibesys_cli_v1_workstream]);
 
 /**
  * SearchState is a whole, ephemeral view. Revisions are comparable only within
@@ -185,7 +185,7 @@ export type ObjectiveGain = Message<"vibesys.orchestrator.v1.ObjectiveGain"> & {
   ratio: number;
 
   /**
-   * The best value itself, in the unit of the measurements.
+   * The best value itself, in the unit of the measurements (ObjectiveSeries.unit).
    *
    * @generated from field: double best_value = 3;
    */
@@ -343,10 +343,7 @@ export type ObjectiveBounds = Message<"vibesys.orchestrator.v1.ObjectiveBounds">
    * the head has gone past it, which says the bound was too modest. For an objective that is
    * maximized it is head_value over the bound, and for one that is minimized the bound over
    * head_value, so more is better for both. Absent when head_value is, and when either number is not
-   * above zero. It takes the bound to be in the unit of the head's measurements, as a bound is
-   * declared (ObjectiveBound.value); the orchestrator cannot check it, because a measurement keeps
-   * no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
-   * another unit gives a wrong percent. The version's unit is served for a reader to judge.
+   * above zero, and when the head's unit is another than the bound's (unit_check says so).
    *
    * @generated from field: optional double percent_of_bound = 5;
    */
@@ -366,12 +363,31 @@ export type ObjectiveBounds = Message<"vibesys.orchestrator.v1.ObjectiveBounds">
 
   /**
    * How close best_value is to the standing bound, in percent, defined as percent_of_bound is for
-   * the head's value (with the same unit caveat). Absent when best_value is, and when either number
-   * is not above zero.
+   * the head's value. Absent when best_value is, when either number is not above zero, and when the
+   * best's unit is another than the bound's.
    *
    * @generated from field: optional double best_percent_of_bound = 7;
    */
   bestPercentOfBound?: number | undefined;
+
+  /**
+   * The unit head_value and best_value are counted in: the unit the measurements of the objective
+   * record. Empty when it is unknown, and when the two are counted in different units, which
+   * unit_check then says (the unit of the best is served first).
+   *
+   * @generated from field: string measured_unit = 8;
+   */
+  measuredUnit: string;
+
+  /**
+   * Whether the standing bound's unit (the unit of the last version) is that of head_value and
+   * best_value. MISMATCH when either is counted in another unit, else UNKNOWN when either is counted
+   * in none that is known or neither exists, else MATCH. The bound's unit and measured_unit are both
+   * served, so a reader names both when they differ.
+   *
+   * @generated from field: vibesys.orchestrator.v1.BoundUnitCheck unit_check = 9;
+   */
+  unitCheck: BoundUnitCheck;
 };
 
 /**
@@ -413,6 +429,16 @@ export type ObjectiveSeries = Message<"vibesys.orchestrator.v1.ObjectiveSeries">
    * @generated from field: repeated vibesys.orchestrator.v1.MeasuredPoint points = 3;
    */
   points: MeasuredPoint[];
+
+  /**
+   * What the points are counted in, as the task declares the objective (a label for people). Empty
+   * when it is unknown: the task declares none, or a point of the series is of a result saved
+   * before units were kept. A point counted in another unit than the newest known one is left out,
+   * as one of the other direction is.
+   *
+   * @generated from field: string unit = 4;
+   */
+  unit: string;
 };
 
 /**
@@ -669,6 +695,50 @@ export const IdeaVerdictSchema: GenEnum<IdeaVerdict> = /*@__PURE__*/
   enumDesc(file_vibesys_orchestrator_v1_search, 0);
 
 /**
+ * BoundUnitCheck says whether a declared bound is counted in the unit of the measurements it bounds.
+ * A unit is a label for people and nothing converts it, so the two are the same when their text is.
+ *
+ * @generated from enum vibesys.orchestrator.v1.BoundUnitCheck
+ */
+export enum BoundUnitCheck {
+  /**
+   * @generated from enum value: BOUND_UNIT_CHECK_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Every measurement served against the bound is counted in the bound's unit.
+   *
+   * @generated from enum value: BOUND_UNIT_CHECK_MATCH = 1;
+   */
+  MATCH = 1,
+
+  /**
+   * A measurement served against the bound is counted in another unit than the bound's: the bound
+   * is unverified, and no share of it is served for that measurement.
+   *
+   * @generated from enum value: BOUND_UNIT_CHECK_MISMATCH = 2;
+   */
+  MISMATCH = 2,
+
+  /**
+   * The unit of a measurement is not known (the task declares none, or the result was saved before
+   * units were kept), or there is no measurement to check: nothing says the bound matches, and
+   * nothing says it does not. A share of the bound is served all the same, so a reader must show it
+   * as unverified.
+   *
+   * @generated from enum value: BOUND_UNIT_CHECK_UNKNOWN = 3;
+   */
+  UNKNOWN = 3,
+}
+
+/**
+ * Describes the enum vibesys.orchestrator.v1.BoundUnitCheck.
+ */
+export const BoundUnitCheckSchema: GenEnum<BoundUnitCheck> = /*@__PURE__*/
+  enumDesc(file_vibesys_orchestrator_v1_search, 1);
+
+/**
  * @generated from enum vibesys.orchestrator.v1.UnreadableReason
  */
 export enum UnreadableReason {
@@ -737,5 +807,5 @@ export enum UnreadableReason {
  * Describes the enum vibesys.orchestrator.v1.UnreadableReason.
  */
 export const UnreadableReasonSchema: GenEnum<UnreadableReason> = /*@__PURE__*/
-  enumDesc(file_vibesys_orchestrator_v1_search, 1);
+  enumDesc(file_vibesys_orchestrator_v1_search, 2);
 

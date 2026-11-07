@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"fmt"
 	"slices"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -47,7 +48,10 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 	if p.Kind == core.JobMeasure {
 		out.Benchmark = planCommand(&p.Benchmark)
 		out.ResultFormat = resultFormat(p.Result)
-		out.Metric = &cliv1.Metric{Name: p.Metric.Name, Direction: direction(p.Metric.Direction)}
+		out.Metric = &cliv1.Metric{Name: p.Metric.Name, Direction: direction(p.Metric.Direction), Unit: p.Metric.Unit}
+		for _, m := range p.Others {
+			out.Others = append(out.Others, &cliv1.Metric{Name: m.Name, Direction: direction(m.Direction), Unit: m.Unit})
+		}
 		out.Objectives = Objectives(p.Objectives)
 	}
 	return out
@@ -97,6 +101,14 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 			return nil, err
 		}
 		out.Metric.Name = m.GetName()
+		out.Metric.Unit = m.GetUnit()
+	}
+	for i, m := range p.GetOthers() {
+		d, err := toDirection(fmt.Sprintf("%s.others[%d].direction", field, i), m.GetDirection())
+		if err != nil {
+			return nil, err
+		}
+		out.Others = append(out.Others, core.Metric{Name: m.GetName(), Direction: d, Unit: m.GetUnit()})
 	}
 	if out.Objectives, err = toObjectives(field+".objectives", p.GetObjectives(), toDirection); err != nil {
 		return nil, err

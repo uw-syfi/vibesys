@@ -177,7 +177,8 @@ message ObjectiveStanding {
   }];
   // The head's value, absent when the head has none for the objective.
   optional double head_value = 2 [(buf.validate.field).double.finite = true];
-  // What the values are counted in, as the agents that declared the bound said; empty with no bound.
+  // What the head and the best are counted in, as the task declares the objective (ObjectiveSeries.unit);
+  // empty when it is not known, which is not the unit of a bound.
   string unit = 3 [(buf.validate.field).string.max_bytes = 256];
   // How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
   // no bound or no head value.
@@ -189,6 +190,10 @@ message ObjectiveStanding {
   // How close best_value is to the standing bound, in percent, as ObjectiveBounds says it
   // (best_percent_of_bound); absent with no bound or no best.
   optional double best_percent_of_bound = 6 [(buf.validate.field).double.finite = true];
+  // The unit the standing bound is counted in, as the agents that declared it said; empty with no bound.
+  string bound_unit = 7 [(buf.validate.field).string.max_bytes = 256];
+  // Whether bound_unit is the unit of the values, as ObjectiveBounds says it. Unspecified with no bound.
+  BoundUnitCheck bound_unit_check = 8 [(buf.validate.field).enum.defined_only = true];
 }
 
 message WatchRunsResponse {

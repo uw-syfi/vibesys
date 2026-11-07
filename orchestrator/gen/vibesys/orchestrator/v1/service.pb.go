@@ -627,7 +627,8 @@ type ObjectiveStanding struct {
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The head's value, absent when the head has none for the objective.
 	HeadValue *float64 `protobuf:"fixed64,2,opt,name=head_value,json=headValue,proto3,oneof" json:"head_value,omitempty"`
-	// What the values are counted in, as the agents that declared the bound said; empty with no bound.
+	// What the head and the best are counted in, as the task declares the objective (ObjectiveSeries.unit);
+	// empty when it is not known, which is not the unit of a bound.
 	Unit string `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
 	// How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
 	// no bound or no head value.
@@ -639,8 +640,12 @@ type ObjectiveStanding struct {
 	// How close best_value is to the standing bound, in percent, as ObjectiveBounds says it
 	// (best_percent_of_bound); absent with no bound or no best.
 	BestPercentOfBound *float64 `protobuf:"fixed64,6,opt,name=best_percent_of_bound,json=bestPercentOfBound,proto3,oneof" json:"best_percent_of_bound,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The unit the standing bound is counted in, as the agents that declared it said; empty with no bound.
+	BoundUnit string `protobuf:"bytes,7,opt,name=bound_unit,json=boundUnit,proto3" json:"bound_unit,omitempty"`
+	// Whether bound_unit is the unit of the values, as ObjectiveBounds says it. Unspecified with no bound.
+	BoundUnitCheck BoundUnitCheck `protobuf:"varint,8,opt,name=bound_unit_check,json=boundUnitCheck,proto3,enum=vibesys.orchestrator.v1.BoundUnitCheck" json:"bound_unit_check,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ObjectiveStanding) Reset() {
@@ -713,6 +718,20 @@ func (x *ObjectiveStanding) GetBestPercentOfBound() float64 {
 		return *x.BestPercentOfBound
 	}
 	return 0
+}
+
+func (x *ObjectiveStanding) GetBoundUnit() string {
+	if x != nil {
+		return x.BoundUnit
+	}
+	return ""
+}
+
+func (x *ObjectiveStanding) GetBoundUnitCheck() BoundUnitCheck {
+	if x != nil {
+		return x.BoundUnitCheck
+	}
+	return BoundUnitCheck_BOUND_UNIT_CHECK_UNSPECIFIED
 }
 
 type WatchRunsResponse struct {
@@ -1728,7 +1747,7 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\x04role\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04role\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\x12\x18\n" +
 	"\aworking\x18\x03 \x01(\rR\aworking:`\xbaH]\x1a[\n" +
-	" role_agents.working_within_total\x12\x1bworking cannot exceed total\x1a\x1athis.working <= this.total\"\xff\x02\n" +
+	" role_agents.working_within_total\x12\x1bworking cannot exceed total\x1a\x1athis.working <= this.total\"\x85\x04\n" +
 	"\x11ObjectiveStanding\x12\x1e\n" +
 	"\x04name\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04name\x12+\n" +
@@ -1738,7 +1757,10 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\x15head_percent_of_bound\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\x12headPercentOfBound\x88\x01\x01\x12+\n" +
 	"\n" +
 	"best_value\x18\x05 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x02R\tbestValue\x88\x01\x01\x12?\n" +
-	"\x15best_percent_of_bound\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x03R\x12bestPercentOfBound\x88\x01\x01B\r\n" +
+	"\x15best_percent_of_bound\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x03R\x12bestPercentOfBound\x88\x01\x01\x12'\n" +
+	"\n" +
+	"bound_unit\x18\a \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\tboundUnit\x12[\n" +
+	"\x10bound_unit_check\x18\b \x01(\x0e2'.vibesys.orchestrator.v1.BoundUnitCheckB\b\xbaH\x05\x82\x01\x02\x10\x01R\x0eboundUnitCheckB\r\n" +
 	"\v_head_valueB\x18\n" +
 	"\x16_head_percent_of_boundB\r\n" +
 	"\v_best_valueB\x18\n" +
@@ -1870,11 +1892,12 @@ var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
 	(*SearchState)(nil),              // 31: vibesys.orchestrator.v1.SearchState
 	(*CheckIn)(nil),                  // 32: vibesys.orchestrator.v1.CheckIn
 	(AgentRole)(0),                   // 33: vibesys.orchestrator.v1.AgentRole
-	(*RunChange)(nil),                // 34: vibesys.orchestrator.v1.RunChange
-	(*Item)(nil),                     // 35: vibesys.orchestrator.v1.Item
-	(*Delta)(nil),                    // 36: vibesys.orchestrator.v1.Delta
-	(*RunCost)(nil),                  // 37: vibesys.orchestrator.v1.RunCost
-	(*descriptorpb.FileOptions)(nil), // 38: google.protobuf.FileOptions
+	(BoundUnitCheck)(0),              // 34: vibesys.orchestrator.v1.BoundUnitCheck
+	(*RunChange)(nil),                // 35: vibesys.orchestrator.v1.RunChange
+	(*Item)(nil),                     // 36: vibesys.orchestrator.v1.Item
+	(*Delta)(nil),                    // 37: vibesys.orchestrator.v1.Delta
+	(*RunCost)(nil),                  // 38: vibesys.orchestrator.v1.RunCost
+	(*descriptorpb.FileOptions)(nil), // 39: google.protobuf.FileOptions
 }
 var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	23, // 0: vibesys.orchestrator.v1.DispatchRequest.command:type_name -> vibesys.orchestrator.v1.Command
@@ -1894,46 +1917,47 @@ var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	8,  // 14: vibesys.orchestrator.v1.RunSummary.roles:type_name -> vibesys.orchestrator.v1.RoleAgents
 	9,  // 15: vibesys.orchestrator.v1.RunSummary.objectives:type_name -> vibesys.orchestrator.v1.ObjectiveStanding
 	33, // 16: vibesys.orchestrator.v1.RoleAgents.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	6,  // 17: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
-	34, // 18: vibesys.orchestrator.v1.WatchRunsResponse.change:type_name -> vibesys.orchestrator.v1.RunChange
-	31, // 19: vibesys.orchestrator.v1.WatchRunsResponse.search:type_name -> vibesys.orchestrator.v1.SearchState
-	7,  // 20: vibesys.orchestrator.v1.WatchRunsResponse.summary:type_name -> vibesys.orchestrator.v1.RunSummary
-	35, // 21: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
-	13, // 22: vibesys.orchestrator.v1.ItemsPage.elisions:type_name -> vibesys.orchestrator.v1.Elision
-	12, // 23: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
-	35, // 24: vibesys.orchestrator.v1.WatchAgentResponse.item:type_name -> vibesys.orchestrator.v1.Item
-	36, // 25: vibesys.orchestrator.v1.WatchAgentResponse.delta:type_name -> vibesys.orchestrator.v1.Delta
-	29, // 26: vibesys.orchestrator.v1.WatchAgentResponse.turn:type_name -> vibesys.orchestrator.v1.Turn
-	12, // 27: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
-	35, // 28: vibesys.orchestrator.v1.GetItemResponse.item:type_name -> vibesys.orchestrator.v1.Item
-	28, // 29: vibesys.orchestrator.v1.GetRunHistoryResponse.agents:type_name -> vibesys.orchestrator.v1.Agent
-	29, // 30: vibesys.orchestrator.v1.GetRunHistoryResponse.turns:type_name -> vibesys.orchestrator.v1.Turn
-	32, // 31: vibesys.orchestrator.v1.GetRunHistoryResponse.check_ins:type_name -> vibesys.orchestrator.v1.CheckIn
-	30, // 32: vibesys.orchestrator.v1.GetRunHistoryResponse.messages:type_name -> vibesys.orchestrator.v1.Message
-	37, // 33: vibesys.orchestrator.v1.WatchRunCostResponse.cost:type_name -> vibesys.orchestrator.v1.RunCost
-	38, // 34: vibesys.orchestrator.v1.protocol_version:extendee -> google.protobuf.FileOptions
-	38, // 35: vibesys.orchestrator.v1.min_protocol_version:extendee -> google.protobuf.FileOptions
-	3,  // 36: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
-	1,  // 37: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
-	5,  // 38: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
-	11, // 39: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
-	15, // 40: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
-	17, // 41: vibesys.orchestrator.v1.OrchestratorService.GetItem:input_type -> vibesys.orchestrator.v1.GetItemRequest
-	19, // 42: vibesys.orchestrator.v1.OrchestratorService.GetRunHistory:input_type -> vibesys.orchestrator.v1.GetRunHistoryRequest
-	21, // 43: vibesys.orchestrator.v1.OrchestratorService.WatchRunCost:input_type -> vibesys.orchestrator.v1.WatchRunCostRequest
-	4,  // 44: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
-	2,  // 45: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
-	10, // 46: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
-	14, // 47: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
-	16, // 48: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
-	18, // 49: vibesys.orchestrator.v1.OrchestratorService.GetItem:output_type -> vibesys.orchestrator.v1.GetItemResponse
-	20, // 50: vibesys.orchestrator.v1.OrchestratorService.GetRunHistory:output_type -> vibesys.orchestrator.v1.GetRunHistoryResponse
-	22, // 51: vibesys.orchestrator.v1.OrchestratorService.WatchRunCost:output_type -> vibesys.orchestrator.v1.WatchRunCostResponse
-	44, // [44:52] is the sub-list for method output_type
-	36, // [36:44] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	34, // [34:36] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	34, // 17: vibesys.orchestrator.v1.ObjectiveStanding.bound_unit_check:type_name -> vibesys.orchestrator.v1.BoundUnitCheck
+	6,  // 18: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
+	35, // 19: vibesys.orchestrator.v1.WatchRunsResponse.change:type_name -> vibesys.orchestrator.v1.RunChange
+	31, // 20: vibesys.orchestrator.v1.WatchRunsResponse.search:type_name -> vibesys.orchestrator.v1.SearchState
+	7,  // 21: vibesys.orchestrator.v1.WatchRunsResponse.summary:type_name -> vibesys.orchestrator.v1.RunSummary
+	36, // 22: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
+	13, // 23: vibesys.orchestrator.v1.ItemsPage.elisions:type_name -> vibesys.orchestrator.v1.Elision
+	12, // 24: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	36, // 25: vibesys.orchestrator.v1.WatchAgentResponse.item:type_name -> vibesys.orchestrator.v1.Item
+	37, // 26: vibesys.orchestrator.v1.WatchAgentResponse.delta:type_name -> vibesys.orchestrator.v1.Delta
+	29, // 27: vibesys.orchestrator.v1.WatchAgentResponse.turn:type_name -> vibesys.orchestrator.v1.Turn
+	12, // 28: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	36, // 29: vibesys.orchestrator.v1.GetItemResponse.item:type_name -> vibesys.orchestrator.v1.Item
+	28, // 30: vibesys.orchestrator.v1.GetRunHistoryResponse.agents:type_name -> vibesys.orchestrator.v1.Agent
+	29, // 31: vibesys.orchestrator.v1.GetRunHistoryResponse.turns:type_name -> vibesys.orchestrator.v1.Turn
+	32, // 32: vibesys.orchestrator.v1.GetRunHistoryResponse.check_ins:type_name -> vibesys.orchestrator.v1.CheckIn
+	30, // 33: vibesys.orchestrator.v1.GetRunHistoryResponse.messages:type_name -> vibesys.orchestrator.v1.Message
+	38, // 34: vibesys.orchestrator.v1.WatchRunCostResponse.cost:type_name -> vibesys.orchestrator.v1.RunCost
+	39, // 35: vibesys.orchestrator.v1.protocol_version:extendee -> google.protobuf.FileOptions
+	39, // 36: vibesys.orchestrator.v1.min_protocol_version:extendee -> google.protobuf.FileOptions
+	3,  // 37: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
+	1,  // 38: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
+	5,  // 39: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
+	11, // 40: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
+	15, // 41: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
+	17, // 42: vibesys.orchestrator.v1.OrchestratorService.GetItem:input_type -> vibesys.orchestrator.v1.GetItemRequest
+	19, // 43: vibesys.orchestrator.v1.OrchestratorService.GetRunHistory:input_type -> vibesys.orchestrator.v1.GetRunHistoryRequest
+	21, // 44: vibesys.orchestrator.v1.OrchestratorService.WatchRunCost:input_type -> vibesys.orchestrator.v1.WatchRunCostRequest
+	4,  // 45: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
+	2,  // 46: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
+	10, // 47: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
+	14, // 48: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
+	16, // 49: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
+	18, // 50: vibesys.orchestrator.v1.OrchestratorService.GetItem:output_type -> vibesys.orchestrator.v1.GetItemResponse
+	20, // 51: vibesys.orchestrator.v1.OrchestratorService.GetRunHistory:output_type -> vibesys.orchestrator.v1.GetRunHistoryResponse
+	22, // 52: vibesys.orchestrator.v1.OrchestratorService.WatchRunCost:output_type -> vibesys.orchestrator.v1.WatchRunCostResponse
+	45, // [45:53] is the sub-list for method output_type
+	37, // [37:45] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	35, // [35:37] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_service_proto_init() }

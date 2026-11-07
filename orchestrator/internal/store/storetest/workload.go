@@ -153,7 +153,7 @@ func (w *Workload) facts() core.WindowFacts {
 			Roles: []core.RoleSpend{{Role: core.RoleLead, Turns: 2, Usage: core.Usage{CostUSD: &cost}}, {Role: core.RoleWorker, Turns: 1, Unpriced: 1, Usage: core.Usage{InputTokens: &tokens}}},
 		},
 		AgentsStarted: uint32(w.r.IntN(4)), AgentsEnded: uint32(w.r.IntN(4)), JobsMeasured: uint32(w.r.IntN(9)),
-		Objectives:   []core.ObjectiveMove{{Metric: "throughput", Direction: core.Maximize, Start: best, End: best}, {Metric: "latency", Direction: core.Minimize, End: best}},
+		Objectives:   []core.ObjectiveMove{{Metric: "throughput", Direction: core.Maximize, Unit: "tok/s", Start: best, End: best}, {Metric: "latency", Direction: core.Minimize, Unit: "ms", End: best}},
 		PlansCreated: []uint32{1, 2}, PlansChanged: []uint32{7}, Reports: []core.MessageID{"m-1"},
 	}
 }

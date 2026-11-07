@@ -866,6 +866,11 @@ type TaskObjective struct {
 	// The relative change below which two measurements of this objective are one, for this objective
 	// alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor.
 	RelativeNoise *float64 `protobuf:"fixed64,3,opt,name=relative_noise,json=relativeNoise,proto3,oneof" json:"relative_noise,omitempty"`
+	// What the quantity is counted in, such as "tok/s" or "ms": a label for people, which nothing
+	// converts. Every measurement of the objective records it, so a bound declared for the objective
+	// can be checked against the unit of the numbers it bounds. Absent declares none, and the
+	// measurements then have an unknown unit. One line, without whitespace at its edges.
+	Unit          string `protobuf:"bytes,4,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -919,6 +924,13 @@ func (x *TaskObjective) GetRelativeNoise() float64 {
 		return *x.RelativeNoise
 	}
 	return 0
+}
+
+func (x *TaskObjective) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
 }
 
 // TaskPareto is `[pareto]`.
@@ -1075,12 +1087,13 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\tobjective\x18\x01 \x03(\v2\x1d.vibesys.cli.v1.TaskObjectiveR\tobjective\x122\n" +
 	"\x06pareto\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.TaskParetoR\x06pareto:\xa7\x04\xbaH\xa3\x04\x1a\xfe\x01\n" +
 	"\x17objectives.names_unique\x1a\xe2\x01this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1).size() == 0 ? '' : 'objective \"' + this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1)[0].name + '\" is declared twice'\x1a\x9f\x02\n" +
-	"\x1dobjectives.noise_needs_pareto\x1a\xfd\x01!this.objective.exists(o, has(o.relative_noise)) || (has(this.pareto) && this.objective.size() > 1) ? '' : 'objective \"' + this.objective.filter(o, has(o.relative_noise))[0].name + '\": relative_noise needs a [pareto] section and more than one objective'\"\xde\x03\n" +
+	"\x1dobjectives.noise_needs_pareto\x1a\xfd\x01!this.objective.exists(o, has(o.relative_noise)) || (has(this.pareto) && this.objective.size() > 1) ? '' : 'objective \"' + this.objective.filter(o, has(o.relative_noise))[0].name + '\": relative_noise needs a [pareto] section and more than one objective'\"\x91\x04\n" +
 	"\rTaskObjective\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12P\n" +
 	"\tdirection\x18\x02 \x01(\x0e2&.vibesys.cli.v1.TaskObjectiveDirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12*\n" +
-	"\x0erelative_noise\x18\x03 \x01(\x01H\x00R\rrelativeNoise\x88\x01\x01:\x9e\x02\xbaH\x9a\x02\x1a\x97\x02\n" +
+	"\x0erelative_noise\x18\x03 \x01(\x01H\x00R\rrelativeNoise\x88\x01\x01\x121\n" +
+	"\x04unit\x18\x04 \x01(\tB\x1d\xbaH\x1ar\x18(@2\x14^([^\\s](.*[^\\s])?)?$R\x04unit:\x9e\x02\xbaH\x9a\x02\x1a\x97\x02\n" +
 	"\x1eobjective.relative_noise_range\x1a\xf4\x01!has(this.relative_noise) || (!this.relative_noise.isNan() && this.relative_noise >= 0.0 && this.relative_noise < 1.0) ? '' : 'objective \"' + this.name + '\": relative_noise must be at least 0 and less than 1, got ' + string(this.relative_noise)B\x11\n" +
 	"\x0f_relative_noise\"N\n" +
 	"\n" +

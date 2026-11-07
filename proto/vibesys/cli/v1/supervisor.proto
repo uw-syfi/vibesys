@@ -140,6 +140,10 @@ message FlowPlan {
   // For a task of two images: how the candidate's image is built, and its server, which the
   // commands run against.
   CandidateSetup candidate = 14;
+  // For a measure job: the metrics the benchmark reports besides the scored one, which the task
+  // declares as objectives, with the unit of each, so the result's observations record it. The
+  // scored metric is `metric`. Empty for a task with no other objective.
+  repeated Metric others = 15 [(buf.validate.field).repeated.max_items = 64];
 }
 
 // ExecutionKind is how a command ended.
