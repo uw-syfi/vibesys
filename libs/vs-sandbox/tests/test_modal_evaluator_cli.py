@@ -6,6 +6,12 @@ and anything the candidate's module writes there. Modal renders the deploy summa
 standard output, wrapping long URLs at the console width; whatever else the run printed,
 the evaluator must target exactly the app Modal deployed.
 
+Only that deploy belongs in the candidate's environment, because it imports the
+candidate's module. The evaluator's own commands (``app logs``, ``app stop``,
+``container list`` and ``container exec``) run on the framework's Modal client, so the
+flags they use work whatever Modal the candidate pins, and a stop that fails is retried
+by the next evaluation instead of forgotten.
+
 The evaluator runs as one standalone file that reads its runtime directory (its lock and
 deployment lease) from ``XDG_RUNTIME_DIR`` when it starts; tests that run it whole load
 that file the same way, with a runtime directory of their own.
@@ -15,11 +21,12 @@ from __future__ import annotations
 
 import json
 import runpy
+import shutil
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
@@ -159,6 +166,35 @@ class _AdvancingClock:
         self._clock.advance(seconds)
 
 
+_StopEnd = Literal["stopped", "refused", "timed_out"]
+"""How one ``modal app stop`` ends: it stops the app, the client rejects ``--yes``, or it hangs."""
+
+_STOP_ENDS = st.sampled_from(["stopped", "refused", "timed_out"])
+
+
+@dataclass(frozen=True)
+class _ModalBehavior:
+    """Whether a deployed app's container ever starts, and how each ``app stop`` ends.
+
+    Stops end as ``stop_ends`` lists them, then as ``stopped``.
+    """
+
+    containers_start: bool = True
+    stop_ends: tuple[_StopEnd, ...] = ()
+
+
+_UNEVENTFUL = _ModalBehavior()
+"""Every container starts and every stop succeeds."""
+
+
+@dataclass(frozen=True)
+class _Call:
+    """One Modal CLI run: the program that ran the CLI, and the CLI's arguments."""
+
+    program: tuple[str, ...]
+    arguments: tuple[str, ...]
+
+
 _DEPLOY_BEGAN = datetime(2026, 11, 7, 20, 59, tzinfo=UTC).timestamp()
 """The host's wall clock, in seconds since the epoch, when the first deploy starts."""
 
@@ -171,47 +207,115 @@ def _modal_start_time(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).isoformat(sep=" ", timespec="seconds")
 
 
-class _ModalCli:
-    """Answers the Modal CLI the way a workspace with one deployable app does.
+class _ModalWorkspace:
+    """A Modal workspace behind the CLI, into which the candidate deploys one app.
 
-    ``wall_clock`` is the host's calendar clock; a deploy takes ``_DEPLOY_SECONDS`` on it,
-    and the app's container starts when the deploy ends.
+    It records every run and keeps which apps are deployed; ``behavior`` says whether a
+    deployed app's container shows in ``container list`` and how each stop ends.
+    ``wall_clock`` is the host's calendar clock: a deploy takes ``_DEPLOY_SECONDS`` on it,
+    and the app's new container starts when the deploy ends.
     """
 
-    def __init__(self, deployment: _Deployment, deploy_stderr: str) -> None:
+    def __init__(
+        self,
+        deployment: _Deployment = _ISSUE_DEPLOYMENT,
+        *,
+        deploy_stderr: str = "",
+        behavior: _ModalBehavior = _UNEVENTFUL,
+    ) -> None:
         """Deploy ``deployment``, printing ``deploy_stderr`` beside Modal's summary."""
         self._deployment = deployment
         self._deploy_stderr = deploy_stderr
-        self._started = _DEPLOY_BEGAN
+        self._containers_start = behavior.containers_start
+        self._stop_ends = iter(behavior.stop_ends)
+        self._started: dict[str, float] = {}
         self.wall_clock = ManualClock(_DEPLOY_BEGAN)
-        self.calls: list[list[str]] = []
+        self.deployed: set[str] = set()
+        self.calls: list[_Call] = []
 
     def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
-        """Record the call and answer it."""
+        """Record the run and answer it as Modal would."""
         del cwd, timeout
-        arguments = list(argv[list(argv).index("modal") + 1 :])
-        self.calls.append(arguments)
-        match arguments[:2]:
-            case ["deploy", _]:
+        split = list(argv).index("modal") + 1
+        call = _Call(tuple(argv[:split]), tuple(argv[split:]))
+        self.calls.append(call)
+        match call.arguments:
+            case ("deploy", _):
                 self.wall_clock.advance(_DEPLOY_SECONDS)
-                self._started = self.wall_clock.now()
+                self.deployed.add(self._deployment.app)
+                self._started[self._deployment.app] = self.wall_clock.now()
                 return ProgramResult(0, self._deployment.stdout, self._deploy_stderr)
-            case ["container", "list"]:
-                started = _modal_start_time(self._started)
+            case ("container", "list", "--json"):
+                running = sorted(self.deployed) if self._containers_start else []
                 listing = [
                     {
-                        "app_name": self._deployment.app,
-                        "container_id": "ta-1",
-                        "start_time": started,
+                        "app_name": app,
+                        "container_id": f"ta-{app}",
+                        "start_time": _modal_start_time(self._started[app]),
                     }
+                    for app in running
                 ]
                 return ProgramResult(0, json.dumps(listing), "")
-            case ["container", "exec"]:
+            case ("container", "exec", *_):
                 return ProgramResult(0, f"{_EXEC_RC_MARKER}0\n", "")
-            case ["app", "stop"]:
-                return ProgramResult(0, "", "")
+            case ("app", "logs", app, *_):
+                return ProgramResult(0, f"{app}: RuntimeError: CUDA error: no kernel image\n", "")
+            case ("app", "stop", app, "--yes"):
+                return self._stop(app)
             case _:
-                raise AssertionError(arguments)
+                raise AssertionError(call)
+
+    def _stop(self, app: str) -> ProgramResult:
+        end = next(self._stop_ends, "stopped")
+        if end == "timed_out":
+            message = "modal timed out after 60 seconds"
+            raise TimeoutError(message)
+        if end == "refused":
+            return ProgramResult(2, "", "No such option: --yes (Possible options: --env)")
+        if app not in self.deployed:
+            return ProgramResult(1, "", f"Could not find a deployed app named '{app}'.")
+        self.deployed.remove(app)
+        return ProgramResult(0, "", "")
+
+
+@dataclass(frozen=True)
+class _Evaluation:
+    """One gate's evaluation: the candidate revision, whether it releases, and readiness."""
+
+    revision: str | None = "rev-1"
+    release: bool = False
+    healthy: bool = True
+
+
+def _evaluate(
+    helper: SimpleNamespace, modal: _ModalWorkspace, workspace: Path, gate: _Evaluation
+) -> int:
+    """Run one trusted evaluation of ``workspace`` against ``modal``; return its status."""
+    host = helper.ModalHost(
+        clock=_AdvancingClock(),
+        wall_clock=modal.wall_clock,
+        programs=modal,
+        health=lambda _url, _timeout: 200 if gate.healthy else 503,
+        keep_warm=lambda _base_url: nullcontext(),
+    )
+    with pytest.MonkeyPatch.context() as environment:
+        if gate.revision is None:
+            environment.delenv("VIBESYS_CANDIDATE_REVISION", raising=False)
+        else:
+            environment.setenv("VIBESYS_CANDIDATE_REVISION", gate.revision)
+        if gate.release:
+            environment.setenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", "1")
+        else:
+            environment.delenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", raising=False)
+        return helper.run_evaluator(["true"], host=host, workspace=str(workspace))
+
+
+def _evaluator(tmp_path_factory: pytest.TempPathFactory) -> tuple[SimpleNamespace, Path]:
+    """A freshly started helper with its own runtime directory, and a candidate workspace."""
+    helper = _standalone_helper(tmp_path_factory.mktemp("runtime"))
+    workspace = tmp_path_factory.mktemp("workspace")
+    (workspace / "main.py").write_text("import modal\n")
+    return helper, workspace
 
 
 @pytest.mark.regression
@@ -225,27 +329,119 @@ def test_the_evaluator_runs_in_and_stops_the_app_modal_deployed(
     Whatever the deploy printed on standard error, the gate runs in a container of the
     deployed app and the release stops that app.
     """
-    helper = _standalone_helper(tmp_path_factory.mktemp("runtime"))
-    workspace = tmp_path_factory.mktemp("workspace")
-    (workspace / "main.py").write_text("import modal\n")
-    modal = _ModalCli(deployment, stderr)
-    host = helper.ModalHost(
-        clock=_AdvancingClock(),
-        wall_clock=modal.wall_clock,
-        programs=modal,
-        health=lambda _url, _timeout: 200,
-        keep_warm=lambda _base_url: nullcontext(),
-    )
+    helper, workspace = _evaluator(tmp_path_factory)
+    modal = _ModalWorkspace(deployment, deploy_stderr=stderr)
 
-    with pytest.MonkeyPatch.context() as environment:
-        environment.delenv("VIBESYS_CANDIDATE_REVISION", raising=False)
-        environment.setenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", "1")
-        status = helper.run_evaluator(["true"], host=host, workspace=str(workspace))
+    status = _evaluate(helper, modal, workspace, _Evaluation(revision=None, release=True))
 
     assert status == 0
-    assert [call[:3] for call in modal.calls if call[:2] == ["container", "exec"]] == [
-        ["container", "exec", "ta-1"]
+    assert [
+        call.arguments[:3] for call in modal.calls if call.arguments[:2] == ("container", "exec")
+    ] == [("container", "exec", f"ta-{deployment.app}")]
+    assert [call.arguments for call in modal.calls if call.arguments[:2] == ("app", "stop")] == [
+        ("app", "stop", deployment.app, "--yes")
     ]
-    assert [call for call in modal.calls if call[:2] == ["app", "stop"]] == [
-        ["app", "stop", deployment.app, "--yes"]
-    ]
+    assert modal.deployed == set()
+
+
+_PROJECT_MODAL = (shutil.which("uv") or "uv", "run", "--quiet", "modal")
+"""The program that runs the candidate project's Modal CLI."""
+
+
+_EVALUATIONS = st.lists(
+    st.builds(
+        _Evaluation,
+        revision=st.sampled_from([None, "rev-1", "rev-2"]),
+        release=st.booleans(),
+        healthy=st.booleans(),
+    ),
+    min_size=1,
+    max_size=3,
+)
+
+
+_BEHAVIORS = st.builds(
+    _ModalBehavior,
+    containers_start=st.booleans(),
+    stop_ends=st.lists(_STOP_ENDS, max_size=4).map(tuple),
+)
+
+
+@pytest.mark.regression
+@given(evaluations=_EVALUATIONS, behavior=_BEHAVIORS)
+@example(evaluations=[_Evaluation(release=True, healthy=False)], behavior=_UNEVENTFUL)
+def test_only_the_deploy_runs_on_the_modal_the_candidate_pins(
+    evaluations: list[_Evaluation],
+    behavior: _ModalBehavior,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Regression (#4041): ``app logs --since`` and ``app stop --yes`` ran on the candidate's pin.
+
+    On every path (deploy, reuse, a readiness or container discovery failure, a release,
+    a stop that fails), each Modal command except ``modal deploy`` runs on the
+    framework's client, and ``modal deploy`` runs in the candidate's project.
+    """
+    helper, workspace = _evaluator(tmp_path_factory)
+    modal = _ModalWorkspace(behavior=behavior)
+
+    for evaluation in evaluations:
+        _evaluate(helper, modal, workspace, evaluation)
+
+    framework = helper.FRAMEWORK_MODAL_CLI
+    assert framework[1:] == ("-I", "-m", "modal")
+    assert any(call.arguments[0] == "deploy" for call in modal.calls)
+    for call in modal.calls:
+        assert call.program == (_PROJECT_MODAL if call.arguments[0] == "deploy" else framework)
+
+
+@pytest.mark.regression
+@given(
+    failure=st.sampled_from(["refused", "timed_out"]),
+    next_revision=st.sampled_from(["rev-1", "rev-2"]),
+)
+@example(failure="refused", next_revision="rev-2")
+def test_an_app_whose_stop_failed_is_stopped_by_the_next_evaluation(
+    failure: _StopEnd, next_revision: str, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Regression (#4041): a failed stop dropped the deployment lease, so nothing retried it.
+
+    The gate's own status does not change. The next evaluation stops the app before it
+    deploys, unless the app still serves that evaluation's revision and is reused.
+    """
+    helper, workspace = _evaluator(tmp_path_factory)
+    app = _ISSUE_DEPLOYMENT.app
+    modal = _ModalWorkspace(behavior=_ModalBehavior(stop_ends=(failure,)))
+
+    released = _evaluate(helper, modal, workspace, _Evaluation(revision="rev-1", release=True))
+    assert released == 0
+    assert modal.deployed == {app}
+    first_call_of_next = len(modal.calls)
+    status = _evaluate(helper, modal, workspace, _Evaluation(revision=next_revision))
+
+    assert status == 0
+    next_calls = [call.arguments for call in modal.calls[first_call_of_next:]]
+    if next_revision == "rev-1":
+        assert all(arguments[0] != "deploy" for arguments in next_calls)
+        assert ("container", "exec", f"ta-{app}") in [arguments[:3] for arguments in next_calls]
+    else:
+        assert next_calls[0] == ("app", "stop", app, "--yes")
+        assert next_calls[1][0] == "deploy"
+
+
+def test_a_container_that_never_starts_shows_the_apps_recent_logs(
+    tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression (#4041): a server that crashed at startup left the agent no reason why."""
+    helper, workspace = _evaluator(tmp_path_factory)
+    app = _ISSUE_DEPLOYMENT.app
+    modal = _ModalWorkspace(behavior=_ModalBehavior(containers_start=False))
+
+    status = _evaluate(helper, modal, workspace, _Evaluation(revision=None, release=True))
+
+    assert status == 1
+    assert [
+        call.arguments[:3] for call in modal.calls if call.arguments[:2] == ("app", "logs")
+    ] == [("app", "logs", app)]
+    shown = capsys.readouterr().err
+    assert f"Recent Modal logs:\n{app}: RuntimeError: CUDA error: no kernel image" in shown
+    assert f"no running container found for Modal app {app}" in shown

@@ -7,7 +7,7 @@
   "options": {
     "requirements": {
       "type": "string",
-      "default": "modal>=0.66",
+      "default": "modal>=1.4.2",
       "description": "Space-separated pip requirement specifiers to install into the base's `pip`."
     }
   },

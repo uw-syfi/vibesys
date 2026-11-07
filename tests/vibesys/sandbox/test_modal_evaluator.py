@@ -47,6 +47,8 @@ from vs_sim.api.testing import HANG_GUARD_S, ManualClock
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 _PROJECT_MODAL = [_UV_EXECUTABLE, "run", "--quiet", "modal"]
 """The program that runs the candidate project's Modal CLI, before the CLI's arguments."""
+_FRAMEWORK_MODAL = list(modal_evaluator.FRAMEWORK_MODAL_CLI)
+"""The program that runs the framework's Modal client, before the CLI's arguments."""
 
 
 if TYPE_CHECKING:
@@ -1139,8 +1141,12 @@ def test_a_readiness_timeout_says_whether_the_app_had_a_running_container(
     assert said in err
     assert ("capacity" in err) == capacity
     assert (
+        ProgramCall([*_FRAMEWORK_MODAL, "container", "list", "--json"], "/workspace", 60)
+        in fake.programs.calls
+    ), "the container state after a readiness timeout is read with the framework's client"
+    assert (
         ProgramCall(
-            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
+            [*_FRAMEWORK_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )
@@ -1483,7 +1489,7 @@ def test_evaluator_execs_in_container_and_returns_sentinel_rc(
 
     exec_argv = next(call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"])
     assert result == 3
-    assert exec_argv[: len(_PROJECT_MODAL)] == _PROJECT_MODAL
+    assert exec_argv[: len(_FRAMEWORK_MODAL)] == _FRAMEWORK_MODAL
     assert _modal_arguments(exec_argv)[:6] == ["container", "exec", "ta-123", "--", "sh", "-c"]
     assert "python checker.py" in _modal_arguments(exec_argv)[6]
 
@@ -1857,7 +1863,7 @@ def test_run_evaluator_releases_reused_deployment_after_final_gate(
 
     assert result == 0
     assert fake.programs.calls[-1] == ProgramCall(
-        [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
+        [*_FRAMEWORK_MODAL, "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1884,7 +1890,7 @@ def test_run_evaluator_releases_new_deployment_after_final_gate(
 
     assert result == 0
     assert fake.programs.calls[-1] == ProgramCall(
-        [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
+        [*_FRAMEWORK_MODAL, "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1919,7 +1925,7 @@ def test_run_evaluator_stops_mismatched_leased_app_before_redeploy(
 
     assert result == 0
     assert fake.programs.calls[0] == ProgramCall(
-        [*_PROJECT_MODAL, "app", "stop", "old-app", "--yes"],
+        [*_FRAMEWORK_MODAL, "app", "stop", "old-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1982,7 +1988,7 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
     assert "RuntimeError: CUDA toolkit mismatch" in capsys.readouterr().err
     assert (
         ProgramCall(
-            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
+            [*_FRAMEWORK_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )
@@ -2201,7 +2207,7 @@ def test_reused_deployment_setup_failure_is_reported_and_released(
     assert "Modal evaluator setup failed: bad setup" in err
     assert fake.programs.calls == [
         ProgramCall(
-            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
+            [*_FRAMEWORK_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )

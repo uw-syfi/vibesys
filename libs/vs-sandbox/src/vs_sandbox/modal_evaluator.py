@@ -96,6 +96,12 @@ _CONTAINER_POLL_SECONDS = 5.0
 _HEALTH_POLL_SECONDS = 2.0
 _HEALTH_PROBE_TIMEOUT_SECONDS = 10.0
 _KEEPWARM_INTERVAL_SECONDS = 30.0
+MODAL_CLIENT_REQUIREMENT = "modal>=1.4.2"
+"""The Modal client this helper's own commands need (:func:`_framework_modal_cli`).
+
+``app logs --since`` and ``--tail`` arrived in Modal 1.4.0, ``app stop --yes`` in 1.4.2.
+The Modal run environment installs this requirement into the editor image.
+"""
 
 
 def _runtime_dir() -> Path:
@@ -327,7 +333,7 @@ class _SubprocessPrograms:
     def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
         """Run ``argv`` with ``subprocess``; a timeout kills it and raises ``TimeoutError``."""
         try:
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010240 [S603]; every caller passes the resolved Modal CLI and fixed argv built by `_modal_cli`.
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010240 [S603]; every caller passes a Modal CLI argv built by `_project_modal_cli` or `_framework_modal_cli`.
                 list(argv), cwd=cwd, capture_output=True, text=True, check=False, timeout=timeout
             )
         except subprocess.TimeoutExpired as exc:
@@ -358,20 +364,41 @@ class ModalHost:
     keep_warm: KeepWarm
 
 
-def _modal_cli(*arguments: str) -> tuple[str, ...]:
-    """The argv that runs the project's Modal CLI with ``arguments``.
+def _project_modal_cli(*arguments: str) -> tuple[str, ...]:
+    """The argv that runs the candidate project's Modal CLI with ``arguments``.
 
-    ``--quiet`` keeps uv's own progress lines (``Using CPython ... interpreter at``,
-    ``Installed N packages``) out of every command's output; uv still prints its errors.
+    Only ``modal deploy`` runs here: it imports the candidate's module, which needs the
+    project's dependencies. ``--quiet`` keeps uv's own progress lines (``Using CPython
+    ... interpreter at``, ``Installed N packages``) out of its output; uv still prints
+    its errors.
     """
     return (shutil.which("uv") or "uv", "run", "--quiet", "modal", *arguments)
 
 
+FRAMEWORK_MODAL_CLI: tuple[str, ...] = (sys.executable, "-I", "-m", "modal")
+"""The program that runs the framework's Modal client, before the CLI's arguments.
+
+The interpreter running this helper holds :data:`MODAL_CLIENT_REQUIREMENT`, which the
+Modal run environment installs into the editor image with the image's ``pip``. ``-I``
+keeps the candidate's working directory, ``PYTHONPATH`` and the user's site-packages
+(where an unprivileged ``pip install modal==...`` lands) from shadowing that client.
+"""
+
+
+def _framework_modal_cli(*arguments: str) -> tuple[str, ...]:
+    """The argv that runs the framework's Modal client (:data:`FRAMEWORK_MODAL_CLI`).
+
+    The evaluator's own commands (logs, stop, container list and exec) run here, so their
+    flags and output keys do not depend on the Modal version the candidate pins.
+    """
+    return (*FRAMEWORK_MODAL_CLI, *arguments)
+
+
 def recent_modal_logs(app_identifier: str, *, workspace: str, programs: Programs) -> str:
-    """Fetch a bounded recent-log excerpt for a failed readiness check."""
+    """Fetch a bounded recent-log excerpt after readiness or container discovery fails."""
     try:
         result = programs.run(
-            _modal_cli(
+            _framework_modal_cli(
                 "app",
                 "logs",
                 app_identifier,
@@ -393,6 +420,18 @@ def recent_modal_logs(app_identifier: str, *, workspace: str, programs: Programs
     if len(output) > _MAX_DIAGNOSTIC_CHARS:
         output = f"[... earlier Modal logs omitted ...]\n{output[-_MAX_DIAGNOSTIC_CHARS:]}"
     return output
+
+
+def _print_recent_modal_logs(app_identifier: str, *, workspace: str, programs: Programs) -> None:
+    """Show the app's recent logs after its deployment never became usable.
+
+    A candidate whose server crashed at startup learns why from these logs.
+    """
+    print(  # noqa: T201  # lint-waiver: LW-000223 [T201]; recent Modal logs are shown to the invoking CLI after readiness or container discovery fails.
+        "Recent Modal logs:\n"
+        f"{recent_modal_logs(app_identifier, workspace=workspace, programs=programs)}",
+        file=sys.stderr,
+    )
 
 
 class WaitClock(Protocol):
@@ -540,7 +579,9 @@ def _stop_modal_app(app_identifier: str, *, workspace: str, programs: Programs) 
     """Stop a deployed app without prompting, returning whether it succeeded."""
     try:
         result = programs.run(
-            _modal_cli("app", "stop", app_identifier, "--yes"), cwd=workspace, timeout=60
+            _framework_modal_cli("app", "stop", app_identifier, "--yes"),
+            cwd=workspace,
+            timeout=60,
         )
     except OSError as exc:
         print(  # noqa: T201  # lint-waiver: LW-000212 [T201]; Modal CLI teardown failure is reported to the user.
@@ -560,9 +601,15 @@ def _stop_modal_app(app_identifier: str, *, workspace: str, programs: Programs) 
 
 
 def _retire_deployment(lease: _DeploymentLease, *, workspace: str, programs: Programs) -> None:
-    """Best-effort stop and forget a lease that must not be reused."""
-    if lease.app_identifier is not None:
-        _stop_modal_app(lease.app_identifier, workspace=workspace, programs=programs)
+    """Stop a lease's app that must not be reused, and forget the lease once it is stopped.
+
+    A failed stop keeps the lease, so the next evaluation stops the app again, unless it
+    can reuse the app because it still serves that evaluation's revision.
+    """
+    if lease.app_identifier is not None and not _stop_modal_app(
+        lease.app_identifier, workspace=workspace, programs=programs
+    ):
+        return
     _DEPLOYMENT_LEASE_PATH.unlink(missing_ok=True)
 
 
@@ -1004,7 +1051,9 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
 def _list_containers(workspace: str, *, programs: Programs) -> ContainerListing | ListingFailed:
     """Run ``modal container list --json`` and parse it, without interpreting the entries."""
     try:
-        result = programs.run(_modal_cli("container", "list", "--json"), cwd=workspace, timeout=60)
+        result = programs.run(
+            _framework_modal_cli("container", "list", "--json"), cwd=workspace, timeout=60
+        )
         if result.returncode != 0:
             return ListingFailed(
                 f"container list exited {result.returncode}: {result.stderr.strip()}"
@@ -1198,16 +1247,20 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
         encoded[offset : offset + _B64_CHUNK_CHARS]
         for offset in range(0, len(encoded), _B64_CHUNK_CHARS)
     ] or [""]
-    container_id = find_app_container(
-        app_identifier,
-        started_since=deployment.started_since,
-        workspace=workspace,
-        base_url=base_url,
-        timeout_seconds=container_discovery_timeout_seconds,
-        clock=host.clock,
-        list_containers=partial(_list_containers, programs=host.programs),
-        warm=partial(_healthy_now, health=host.health),
-    )
+    try:
+        container_id = find_app_container(
+            app_identifier,
+            started_since=deployment.started_since,
+            workspace=workspace,
+            base_url=base_url,
+            timeout_seconds=container_discovery_timeout_seconds,
+            clock=host.clock,
+            list_containers=partial(_list_containers, programs=host.programs),
+            warm=partial(_healthy_now, health=host.health),
+        )
+    except TimeoutError:
+        _print_recent_modal_logs(app_identifier, workspace=workspace, programs=host.programs)
+        raise
     script = _bootstrap_script(
         command,
         plan.output_paths,
@@ -1215,7 +1268,7 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
     )
     with host.keep_warm(base_url):
         result = host.programs.run(
-            _modal_cli(
+            _framework_modal_cli(
                 "container", "exec", container_id, "--", "sh", "-c", script, "vibesys-eval", *chunks
             ),
             cwd=workspace,
@@ -1342,7 +1395,7 @@ def _deploy_and_wait_for_health(
 
     deploy_began = host.wall_clock.now()
     deploy = host.programs.run(
-        _modal_cli("deploy", str(deployment_path)), cwd=workspace, timeout=None
+        _project_modal_cli("deploy", str(deployment_path)), cwd=workspace, timeout=None
     )
     deploy_output = f"{deploy.stdout}\n{deploy.stderr}".strip()
     if deploy_output:
@@ -1375,11 +1428,7 @@ def _deploy_and_wait_for_health(
                     waited_seconds=readiness_timeout_seconds,
                     programs=host.programs,
                 )
-            print(  # noqa: T201  # lint-waiver: LW-000223 [T201]; recent Modal logs are shown to the invoking CLI after readiness failure.
-                "Recent Modal logs:\n"
-                f"{recent_modal_logs(app_identifier, workspace=workspace, programs=host.programs)}",
-                file=sys.stderr,
-            )
+            _print_recent_modal_logs(app_identifier, workspace=workspace, programs=host.programs)
             _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
         return 1
     return _Deployment(base_url, app_identifier, started_since_deploy(deploy_began, deploy.stdout))

@@ -1231,9 +1231,11 @@ class DockerEnvironment(NoCaptureRecovery):
         )
 
 
-#: The Modal client a candidate's ``modal run`` needs inside the editor
-#: container; baked into that environment's agent image.
-_MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = ("modal>=0.66",)
+#: The Modal client baked into the editor container's agent image. The Modal
+#: evaluator helper runs its own commands (logs, stop, container list and exec) on
+#: it, so its floor is the helper's; a candidate's ``modal run`` finds it too when
+#: the project does not install its own.
+_MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = (evaluator_helpers.MODAL_CLIENT_REQUIREMENT,)
 
 MODAL_CONTAINER_WAIT_SECONDS = 1200
 """How long a Modal gate waits for the candidate's container when the operator sets no wait."""
