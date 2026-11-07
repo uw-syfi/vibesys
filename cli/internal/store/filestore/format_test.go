@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
@@ -78,7 +81,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":6}`))
+		mem.Put("state/format", []byte(`{"format":7}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -86,7 +89,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "6"))
+			mem.Put(name, withVersion(file(t, mem, name), "7"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -94,7 +97,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "6"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "7"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -169,6 +172,24 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 			m.Put("state/plans/3.json", regexp.MustCompile(`"number":\s*1`).ReplaceAll(file(t, m, "state/plans/1.json"), []byte(`"number": 3`)))
 		}, []string{"plan 2 is missing"}},
 		{"a plan under another plan's number", func(m *fsys.MemFS) { m.Put("state/plans/2.json", file(t, m, "state/plans/1.json")) }, []string{"state/plans/2.json"}},
+		{"a plan that has the status of no transition", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Status = cliv1.PlanStatus_PLAN_STATUS_REJECTED })
+		}, []string{"state/plans/1.json", "last one"}},
+		{"a plan with an origin and no transitions", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Transitions = nil })
+		}, []string{"plan 1", "starts open"}},
+		{"a plan whose origin is not the one its first transition has", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Origin.Agent = "someone else" })
+		}, []string{"plan 1", "starts open"}},
+		{"a plan whose first transition is not to open", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Transitions[0].Status = cliv1.PlanStatus_PLAN_STATUS_PARKED })
+		}, []string{"plan 1", "starts open"}},
+		{"a plan with a transition to the status it had", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Transitions = append(p.Transitions, p.Transitions[len(p.Transitions)-1]) })
+		}, []string{"plan 1", "already had status"}},
+		{"a plan with a transition that has no time", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Transitions[1].Origin.At = nil })
+		}, []string{"state/plans/1.json"}},
 		{"a missing promotion", func(m *fsys.MemFS) { mustRemove(t, m, "state/promotions/1.json") }, []string{"state/promotions/1.json"}},
 		{"a missing bound", func(m *fsys.MemFS) { mustRemove(t, m, "state/bounds/1.json") }, []string{"state/bounds/1.json"}},
 		{"a bound under another bound's place", func(m *fsys.MemFS) { m.Put("state/bounds/2.json", file(t, m, "state/bounds/1.json")) }, []string{"state/bounds/2.json"}},
@@ -201,6 +222,22 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 			wantFailure(t, tc.name, err, core.FailureInternal, tc.names...)
 		})
 	}
+}
+
+// rewritePlan changes the message of plan 1's file and writes it back as the program does.
+func rewritePlan(t *testing.T, m *fsys.MemFS, mutate func(*cliv1.Plan)) {
+	t.Helper()
+	const name = "state/plans/1.json"
+	var record cliv1.PlanFile
+	if err := protojson.Unmarshal(file(t, m, name), &record); err != nil {
+		t.Fatal(err)
+	}
+	mutate(record.Plan)
+	data, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Put(name, data)
 }
 
 func mustRemove(t *testing.T, f fsys.FS, name string) {
@@ -324,11 +361,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":5}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":6}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 5,
+  "format": 6,
   "job": {
     "id": "j1",
     "spec": {
@@ -366,7 +403,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 5,
+  "format": 6,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -394,6 +431,64 @@ func TestEncodingIsPinned(t *testing.T) {
 	}
 }
 
+// The plan file says who made the plan and each status it took, with who set it and when.
+func TestThePlanFileIsPinned(t *testing.T) {
+	mem := fsys.NewMemFS()
+	s := openOn(t, mem)
+	for _, o := range script() {
+		if o.name == "create a plan" || o.name == "edit the plan" {
+			if err := o.run(t.Context(), s); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	const want = `{
+  "format": 6,
+  "plan": {
+    "number": 1,
+    "title": "tile the loop",
+    "body": "try 8x8",
+    "status": "PLAN_STATUS_CHOSEN",
+    "comments": [
+      {
+        "text": "go",
+        "at": "2026-11-01T00:00:12Z",
+        "agent": "agent-a"
+      }
+    ],
+    "created_at": "2026-11-01T00:00:03Z",
+    "updated_at": "2026-11-01T00:00:12Z",
+    "origin": {
+      "run_id": "run-a",
+      "agent": "lead",
+      "at": "2026-11-01T00:00:03Z"
+    },
+    "transitions": [
+      {
+        "status": "PLAN_STATUS_OPEN",
+        "origin": {
+          "run_id": "run-a",
+          "agent": "lead",
+          "at": "2026-11-01T00:00:03Z"
+        }
+      },
+      {
+        "status": "PLAN_STATUS_CHOSEN",
+        "origin": {
+          "run_id": "run-b",
+          "agent": "lead",
+          "at": "2026-11-01T00:00:12Z"
+        }
+      }
+    ]
+  }
+}
+`
+	if got := unspaced(file(t, mem, "state/plans/1.json")); got != unspaced([]byte(want)) {
+		t.Errorf("plan file =\n%s\nwant\n%s", got, unspaced([]byte(want)))
+	}
+}
+
 // The bound file is protojson of BoundFile with the proto field names, and says who declared the
 // bound and when.
 func TestTheBoundFileIsPinned(t *testing.T) {
@@ -403,7 +498,7 @@ func TestTheBoundFileIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = `{
-  "format": 5,
+  "format": 6,
   "bound": {
     "seq": "1",
     "origin": {

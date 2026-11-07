@@ -236,8 +236,23 @@
                 "body": "b",
                 "createdAt": "T",
                 "number": 1,
+                "origin": {
+                  "agent": "agent-1",
+                  "at": "T",
+                  "runId": "run-1"
+                },
                 "status": "PLAN_STATUS_OPEN",
                 "title": "after the cut",
+                "transitions": [
+                  {
+                    "origin": {
+                      "agent": "agent-1",
+                      "at": "T",
+                      "runId": "run-1"
+                    },
+                    "status": "PLAN_STATUS_OPEN"
+                  }
+                ],
                 "updatedAt": "T"
               }
             }

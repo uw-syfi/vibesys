@@ -78,7 +78,8 @@ func runLifecycleScenario(t *testing.T, sc scenario) [][]map[string]any {
 			_, err = st.Transition(t.Context(), core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobSucceeded, At: at, Result: &result})
 		case "create_plans":
 			for i := uint32(0); i < op.Number; i++ {
-				_, err = st.CreatePlan(t.Context(), core.NewPlan{Title: op.Title, At: at})
+				// The plan is made by the caller the other scenarios have, so a reader's model of a plan is one.
+				_, err = st.CreatePlan(t.Context(), core.NewPlan{Title: op.Title, Origin: core.RecordOrigin{Run: core.RunID(call.GetRunId()), Agent: call.GetAgent(), At: at}})
 				if err != nil {
 					t.Fatal(err)
 				}

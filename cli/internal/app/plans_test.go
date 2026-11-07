@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,8 +122,9 @@ func TestPlansFollowAModelUnderRandomCalls(t *testing.T) {
 				i := rnd.IntN(len(model))
 				n := model[i].Number
 				var (
-					got core.Plan
-					err error
+					got     core.Plan
+					err     error
+					changed *core.PlanStatus // the status the call set, when the plan did not have it
 				)
 				switch op {
 				case 1:
@@ -135,10 +137,16 @@ func TestPlansFollowAModelUnderRandomCalls(t *testing.T) {
 				case 3:
 					status := core.PlanStatuses()[rnd.IntN(5)]
 					got, err = a.EditPlan(ctx, call, n, app.PlanChange{Status: &status})
+					if status != model[i].Status {
+						changed = &status
+					}
 					model[i].Status = status
 				default:
 					status := core.PlanStatuses()[1+rnd.IntN(4)]
 					got, err = a.ClosePlan(ctx, call, n, status, "because")
+					if status != model[i].Status {
+						changed = &status
+					}
 					model[i].Status = status
 					model[i].Comments = append(model[i].Comments, core.PlanComment{Text: "because", Agent: call.Agent})
 				}
@@ -146,6 +154,12 @@ func TestPlansFollowAModelUnderRandomCalls(t *testing.T) {
 					t.Fatalf("seed %d step %d op %d: %v", seed, step, op, err)
 				}
 				model[i].UpdatedAt = got.UpdatedAt
+				if changed != nil {
+					// The transition is the call's run and agent at the instant the edit was made.
+					model[i].Transitions = append(slices.Clone(model[i].Transitions), core.PlanTransition{
+						Status: *changed, Origin: core.RecordOrigin{Run: call.Run, Agent: call.Agent, At: got.UpdatedAt},
+					})
+				}
 				for j := range model[i].Comments {
 					model[i].Comments[j].At = got.Comments[j].At
 				}

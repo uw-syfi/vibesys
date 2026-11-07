@@ -40,6 +40,7 @@ func Run(t *testing.T, newStore New) {
 		{"results", testResults},
 		{"frontier", testFrontier},
 		{"plans", testPlans},
+		{"plan history", testPlanHistory},
 		{"bounds", testBounds},
 		{"events", testEvents},
 		{"logs", testLogs},
