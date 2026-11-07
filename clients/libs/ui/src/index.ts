@@ -41,6 +41,7 @@ export {
   CellLines,
   CellLink,
   CellMark,
+  CellSparkline,
   ColumnList,
   type ColumnSize,
   type ListColumn,

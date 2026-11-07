@@ -11,6 +11,7 @@
 @import './documents.css';
 @import './threads.css';
 @import './gantt-tree.css';
+@import './sparkline.css';
 @import './conversation.css';
 /*
  * The styles of the design system's components (the `.` entry). Every value is a token variable

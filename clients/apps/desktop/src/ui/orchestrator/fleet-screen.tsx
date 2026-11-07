@@ -2,6 +2,7 @@ import {
   Button,
   CellInline,
   CellLines,
+  CellSparkline,
   Chip,
   ColumnList,
   EmptyState,
@@ -25,6 +26,8 @@ import {
   type FleetState,
   fleetView,
   type NavigationAction,
+  type ObjectiveReport,
+  rowObjectives,
 } from '../../state/index.js';
 import {
   ago,
@@ -155,9 +158,42 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
   ];
 }
 
-/** The columns of figures: the best results, the agents working and the cost. */
-function figureColumns(): readonly ListColumn<FleetRow>[] {
+/**
+ * The first measured objective as a small trend: every candidate as a faint dot and the points the
+ * host marked as setting a best as the line over them, with how many more objectives were measured.
+ * A run with no series (nothing measured yet, or a host that serves none) has an empty cell.
+ */
+function trendCell(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNode {
+  const [first] = measured;
+  if (first === undefined) return null;
+  const [start] = first.points;
+  const end = first.points.at(-1);
+  if (start === undefined || end === undefined) return null;
+  return (
+    <CellSparkline
+      label={`${first.name}: every measured candidate and the best so far`}
+      points={first.points.map(point => ({x: point.atMs, y: point.value}))}
+      steps={first.bestPath.map(point => ({x: point.atMs, y: point.value}))}
+      from={start.atMs}
+      to={end.atMs}
+      tone={row.live ? 'accent' : 'muted'}
+      more={measured.length - 1}
+    />
+  );
+}
+
+/** The columns of figures: the measured history, the best results, the agents working and the cost. */
+function figureColumns(
+  objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+): readonly ListColumn<FleetRow>[] {
   return [
+    {
+      key: 'trend',
+      header: 'Candidates',
+      size: 'wide',
+      optional: true,
+      cell: row => trendCell(row, objectivesOf(row)),
+    },
     {
       key: 'best',
       header: 'Best',
@@ -199,10 +235,10 @@ function figureColumns(): readonly ListColumn<FleetRow>[] {
   ];
 }
 
-const columns = (nowMs: number): readonly ListColumn<FleetRow>[] => [
-  ...identityColumns(nowMs),
-  ...figureColumns(),
-];
+const columns = (
+  nowMs: number,
+  objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+): readonly ListColumn<FleetRow>[] => [...identityColumns(nowMs), ...figureColumns(objectivesOf)];
 
 const describe = (row: FleetRow, nowMs: number): string =>
   [
@@ -291,6 +327,7 @@ export function FleetScreen(props: {
   const filter: FleetFilter = {state: place.state, host: place.host};
   const view = fleetView(props.hosts, filter);
   const rows = [...view.live, ...view.history];
+  const objectivesOf = rowObjectives(props.hosts);
   const unread = view.hosts.some(
     host => host.freshness === 'empty' || host.freshness === 'unavailable',
   );
@@ -305,7 +342,7 @@ export function FleetScreen(props: {
   const list = (label: string, shown: readonly FleetRow[]): JSX.Element => (
     <ColumnList
       label={label}
-      columns={columns(nowMs)}
+      columns={columns(nowMs, objectivesOf)}
       rows={shown}
       rowKey={row => row.key}
       lines={2}

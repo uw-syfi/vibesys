@@ -8,6 +8,7 @@ import {
   CellLines,
   CellLink,
   CellMark,
+  CellSparkline,
   ColumnList,
   Dock,
   DotLegend,
@@ -291,6 +292,72 @@ function ColumnListDemo(): JSX.Element {
         selected={selected}
         select={setSelected}
         marks={row => ({lineage: row.name === 'ring-v2' || row.name === 'ring-v1'})}
+      />
+    </Card>
+  );
+}
+
+interface Trend {
+  readonly name: string;
+  readonly over: boolean;
+  readonly more: number;
+}
+
+const TRENDS: readonly Trend[] = [
+  {name: 'ring-v2', over: false, more: 0},
+  {name: 'ring-v1', over: true, more: 1},
+  {name: 'spin-park', over: false, more: 12},
+];
+
+/** Every candidate, and the points that set a best: the same history under three names. */
+const MEASURED = [
+  {x: 0, y: 1.58},
+  {x: 1, y: 1.2},
+  {x: 2, y: 2.4},
+  {x: 3, y: 1.9},
+  {x: 4, y: 2.2},
+  {x: 5, y: 3.1},
+  {x: 6, y: 2.8},
+  {x: 7, y: 3.0},
+  {x: 8, y: 6.05},
+  {x: 9, y: 5.1},
+];
+const BEST_SO_FAR = [
+  {x: 0, y: 1.58},
+  {x: 2, y: 2.4},
+  {x: 5, y: 3.1},
+  {x: 8, y: 6.05},
+];
+
+const TREND_COLUMNS: readonly ListColumn<Trend>[] = [
+  {key: 'name', header: 'Idea', size: 'fill', cell: row => <Text variant="code">{row.name}</Text>},
+  {
+    key: 'trend',
+    header: 'Candidates',
+    size: 'wide',
+    cell: row => (
+      <CellSparkline
+        label={`${row.name}: every candidate and the best so far`}
+        points={MEASURED}
+        steps={BEST_SO_FAR}
+        from={0}
+        to={9}
+        tone={row.over ? 'muted' : 'accent'}
+        more={row.more}
+      />
+    ),
+  },
+];
+
+function CellSparklineDemo(): JSX.Element {
+  return (
+    <Card>
+      <ColumnList
+        label="Trends"
+        columns={TREND_COLUMNS}
+        rows={TRENDS}
+        rowKey={row => row.name}
+        select={noop}
       />
     </Card>
   );
@@ -716,6 +783,7 @@ export const FRAME_ENTRIES = {
       </Text>
     ),
   },
+  CellSparkline: {render: () => <CellSparklineDemo />},
   CellMark: {
     render: () => (
       <Text tone="muted">

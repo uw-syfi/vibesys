@@ -13,8 +13,10 @@ import {
   RunSchema,
   RunStatus,
   RunsSnapshotSchema,
+  type SearchState,
   SearchStateSchema,
 } from '@vibesys/orchestrator-proto';
+import fc from 'fast-check';
 import {type JSX, useReducer} from 'react';
 import {
   applySnapshot,
@@ -26,7 +28,12 @@ import {
   type OrchestratorState,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
-import {FakeDaemon, fleetScenario} from '../../testing/orchestrator/index.js';
+import {
+  FakeDaemon,
+  fleetScenario,
+  measuredSearch,
+  SERVING,
+} from '../../testing/orchestrator/index.js';
 import {FleetScreen} from './fleet-screen.js';
 
 installDom();
@@ -51,6 +58,8 @@ function stateOf(
     readonly reportMs?: number;
     readonly working?: number;
     readonly result?: {readonly value: number; readonly unit: string; readonly percent?: number};
+    /** The search the host served for the run, whole: it replaces what `result` would make. */
+    readonly search?: SearchState;
   }[],
 ): OrchestratorState {
   const snapshot = {
@@ -93,46 +102,50 @@ function stateOf(
           ],
     ),
     searches: runs.flatMap(run =>
-      run.result === undefined
-        ? []
-        : [
-            create(SearchStateSchema, {
-              runId: run.id,
-              revision: 1n,
-              head: {
-                state: {
-                  case: 'current' as const,
-                  value: {
-                    head: 'b'.repeat(40),
-                    result: {
-                      outcome: {
-                        case: 'measure' as const,
-                        value: {metric: {name: 'throughput'}, value: run.result.value},
+      run.search !== undefined
+        ? [run.search]
+        : run.result === undefined
+          ? []
+          : [
+              create(SearchStateSchema, {
+                runId: run.id,
+                revision: 1n,
+                head: {
+                  state: {
+                    case: 'current' as const,
+                    value: {
+                      head: 'b'.repeat(40),
+                      result: {
+                        outcome: {
+                          case: 'measure' as const,
+                          value: {metric: {name: 'throughput'}, value: run.result.value},
+                        },
                       },
                     },
                   },
                 },
-              },
-              bounds: [
-                {
-                  objective: 'throughput',
-                  direction: Direction.MAXIMIZE,
-                  versions: [
-                    {
-                      seq: 1n,
-                      objective: 'throughput',
-                      direction: Direction.MAXIMIZE,
-                      value: 1000,
-                      unit: run.result.unit,
-                      origin: {runId: run.id, agent: 'lead', at: timestampFromMs(NOW)},
-                    },
-                  ],
-                  headValue: run.result.value,
-                  ...(run.result.percent === undefined ? {} : {percentOfBound: run.result.percent}),
-                },
-              ],
-            }),
-          ],
+                bounds: [
+                  {
+                    objective: 'throughput',
+                    direction: Direction.MAXIMIZE,
+                    versions: [
+                      {
+                        seq: 1n,
+                        objective: 'throughput',
+                        direction: Direction.MAXIMIZE,
+                        value: 1000,
+                        unit: run.result.unit,
+                        origin: {runId: run.id, agent: 'lead', at: timestampFromMs(NOW)},
+                      },
+                    ],
+                    headValue: run.result.value,
+                    ...(run.result.percent === undefined
+                      ? {}
+                      : {percentOfBound: run.result.percent}),
+                  },
+                ],
+              }),
+            ],
     ),
     sequence: 1n,
   };
@@ -381,6 +394,9 @@ describe('the fleet screen', () => {
     expect(drawn.length).toBeGreaterThan(0);
     expect(drawn.length).toBeLessThan(60);
     expect(drawn[0]?.getAttribute('aria-setsize')).toBe('597');
+    // The scenario's runs have series, and only the rows drawn draw them.
+    expect(history?.querySelectorAll('.vs-spark').length).toBeGreaterThan(0);
+    expect(history?.querySelectorAll('.vs-spark').length).toBeLessThanOrEqual(drawn.length);
     screen.unmount();
   });
 
@@ -415,5 +431,223 @@ describe('the fleet screen', () => {
       expect.stringContaining('just ended'),
     ]);
     screen.unmount();
+  });
+});
+
+const measuredRun = (id: string, task: string, objectives: typeof SERVING, more = {}) => ({
+  id,
+  task,
+  status: RunStatus.RUNNING,
+  startedMs: NOW - 5 * HOUR,
+  ...more,
+  search: measuredSearch(id, {
+    seed: 3,
+    candidates: 12,
+    startMs: NOW - 5 * HOUR,
+    endMs: NOW - MINUTE,
+    objectives,
+  }),
+});
+
+/** Candidates as a host serves them: oldest first, each a moment later, the marks arbitrary. */
+const served = fc
+  .array(
+    fc.record({
+      value: fc.integer({min: -500, max: 500}),
+      bestSoFar: fc.boolean(),
+      gapSeconds: fc.integer({min: 1, max: 600}),
+    }),
+    {minLength: 1, maxLength: 30},
+  )
+  .map(rows => {
+    let atMs = NOW - 6 * HOUR;
+    return rows.map(row => {
+      atMs += row.gapSeconds * 1000;
+      return {atMs, value: row.value, bestSoFar: row.bestSoFar};
+    });
+  });
+
+interface Plotted {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** The corners of a step line (`M x y H x V y ... H end`), the closing run to the edge left out. */
+function vertices(d: string): Plotted[] {
+  const found: Plotted[] = [];
+  let x = 0;
+  for (const [, command, args = ''] of d.matchAll(/([MHV])([^MHV]*)/g)) {
+    const numbers = args.trim().split(/\s+/).map(Number);
+    if (command === 'M') {
+      x = numbers[0] ?? 0;
+      found.push({x, y: numbers[1] ?? 0});
+    } else if (command === 'H') x = numbers[0] ?? 0;
+    else found.push({x, y: numbers[0] ?? 0});
+  }
+  return found;
+}
+
+/** The dots of a plot (`M x yh0` each). */
+const dotsOf = (d: string): Plotted[] =>
+  [...d.matchAll(/M([-\d.e+]+) ([-\d.e+]+)h0/g)].map(([, x, y]) => ({
+    x: Number(x),
+    y: Number(y),
+  }));
+
+/**
+ * The plot is the served points under a map that keeps time's order and reverses the value's (up is
+ * better to the eye, the screen's y grows down): every pair compares the same way in both.
+ */
+function expectSameShape(
+  drawn: readonly Plotted[],
+  given: readonly {readonly atMs: number; readonly value: number}[],
+): void {
+  expect(drawn).toHaveLength(given.length);
+  for (const [i, a] of drawn.entries())
+    for (const [j, b] of drawn.entries()) {
+      const p = given[i];
+      const q = given[j];
+      if (p === undefined || q === undefined) throw new Error('no point');
+      expect(Math.sign(a.y - b.y)).toBe(0 - Math.sign(p.value - q.value));
+      expect(Math.sign(a.x - b.x)).toBe(Math.sign(p.atMs - q.atMs));
+    }
+}
+
+const trendOf = (screen: ReturnType<typeof mount>, name: string): HTMLElement =>
+  cell(rowOf(screen, name), 'trend');
+
+const withHost = (runs: Parameters<typeof stateOf>[0]): FleetHostInput => ({
+  key: 'local',
+  label: 'This Mac',
+  freshness: 'live',
+  staleForMs: null,
+  data: stateOf(runs),
+});
+
+describe('the candidates cell of the fleet screen', () => {
+  const [throughput = SERVING[0], latency = SERVING[1]] = SERVING;
+
+  it('draws one objective as every candidate and the best-so-far line, with nothing else in the cell', () => {
+    if (throughput === undefined) throw new Error('no objective');
+    const {screen} = open([withHost([measuredRun('m1', 'one objective', [throughput])])]);
+    const trend = trendOf(screen, 'one objective');
+    const chart = trend.querySelector('svg[role="img"]');
+    expect(chart?.getAttribute('aria-label')).toContain('throughput');
+    // 12 candidates are 12 dots; the line is the points the host marked.
+    expect(trend.querySelector('.vs-spark-dots')?.getAttribute('d')?.split('M').length).toBe(13);
+    expect(trend.querySelector('.vs-spark-line')).not.toBeNull();
+    expect(trend.textContent).toBe('');
+    screen.unmount();
+  });
+
+  it('draws the first of two objectives and counts the other', () => {
+    if (throughput === undefined || latency === undefined) throw new Error('no objective');
+    const {screen} = open([withHost([measuredRun('m2', 'two objectives', [throughput, latency])])]);
+    const trend = trendOf(screen, 'two objectives');
+    expect(trend.querySelectorAll('svg[role="img"]')).toHaveLength(1);
+    expect(trend.querySelector('svg')?.getAttribute('aria-label')).toContain('throughput');
+    expect(trend.textContent).toBe('+1');
+    screen.unmount();
+  });
+
+  it('draws a line in the accent for a run that is working and a quiet one for a run that is over', () => {
+    if (throughput === undefined) throw new Error('no objective');
+    const {screen} = open([
+      withHost([
+        measuredRun('m3', 'working run', [throughput]),
+        measuredRun('m4', 'finished run', [throughput], {
+          status: RunStatus.ENDED,
+          endedMs: NOW - HOUR,
+        }),
+      ]),
+    ]);
+    const toneOf = (name: string) =>
+      trendOf(screen, name).querySelector('.vs-spark-line')?.getAttribute('data-tone');
+    expect(toneOf('working run')).toBe('accent');
+    expect(toneOf('finished run')).toBe('muted');
+    screen.unmount();
+  });
+
+  it('is empty for a run with nothing measured, with no placeholder', () => {
+    const {screen} = open([
+      withHost([
+        {
+          id: 'm5',
+          task: 'nothing measured',
+          status: RunStatus.RUNNING,
+          startedMs: NOW - HOUR,
+          search: measuredSearch('m5', {
+            seed: 1,
+            candidates: 0,
+            startMs: NOW - HOUR,
+            endMs: NOW,
+            objectives: SERVING,
+          }),
+        },
+      ]),
+    ]);
+    const trend = trendOf(screen, 'nothing measured');
+    expect(trend.querySelector('svg')).toBeNull();
+    expect(trend.textContent).toBe('');
+    screen.unmount();
+  });
+
+  it('is empty for a run of a host that serves no series, though it shows the head and the bound', () => {
+    const {screen} = open([hostA]);
+    const row = rowOf(screen, 'queue-rs');
+    expect(cell(row, 'best').textContent).toBe('2,310 tok/s · 71%');
+    expect(cell(row, 'trend').querySelector('svg')).toBeNull();
+    expect(cell(row, 'trend').textContent).toBe('');
+    screen.unmount();
+  });
+
+  it('draws exactly the best-so-far points the host marked, and every candidate as a dot, whatever the values say', () => {
+    fc.assert(
+      fc.property(
+        served,
+        fc.constantFrom(Direction.MAXIMIZE, Direction.MINIMIZE),
+        (points, direction) => {
+          const search = create(SearchStateSchema, {
+            runId: 'p1',
+            series: [
+              {
+                objective: 'score',
+                direction,
+                points: points.map((point, index) => ({
+                  jobId: `j${index}`,
+                  commit: 'c',
+                  at: timestampFromMs(point.atMs),
+                  value: point.value,
+                  bestSoFar: point.bestSoFar,
+                })),
+              },
+            ],
+          });
+          const {screen} = open([
+            withHost([
+              {
+                id: 'p1',
+                task: 'property run',
+                status: RunStatus.RUNNING,
+                startedMs: NOW - 7 * HOUR,
+                search,
+              },
+            ]),
+          ]);
+          try {
+            const trend = trendOf(screen, 'property run');
+            const marked = points.filter(point => point.bestSoFar);
+            const line = trend.querySelector('.vs-spark-line')?.getAttribute('d') ?? null;
+            if (marked.length === 0) expect(line).toBeNull();
+            else expectSameShape(vertices(line ?? ''), marked);
+            const dots = trend.querySelector('.vs-spark-dots')?.getAttribute('d') ?? '';
+            expectSameShape(dotsOf(dots), points);
+          } finally {
+            screen.unmount();
+          }
+        },
+      ),
+      {seed: 21, numRuns: 40},
+    );
   });
 });

@@ -72,7 +72,9 @@ export {
   fleetView,
   headObjectives,
   isLive,
+  measuredObjectives,
   NO_FLEET_FILTER,
+  rowObjectives,
 } from './orchestrator/fleet.js';
 export {
   type AgentFrame,
