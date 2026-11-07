@@ -132,9 +132,14 @@ export function BarRows(props: BarRowsProps<readonly BarColumn[]>): JSX.Element 
                         {row.name}
                       </span>
                       {row.note === undefined ? null : (
-                        <Text variant="small" tone="muted">
-                          {row.note}
-                        </Text>
+                        <>
+                          {/* The gap between the name and the note is drawn by the name's margin, so the
+                              text needs its own space: read without the layout (an assistive
+                              technology, a copy) the two are otherwise one word. */}{' '}
+                          <Text variant="small" tone="muted">
+                            {row.note}
+                          </Text>
+                        </>
                       )}
                     </span>
                   </span>

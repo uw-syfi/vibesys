@@ -2,6 +2,7 @@
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
+import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -1233,6 +1234,47 @@ describe('BarRows', () => {
       [...container.querySelectorAll('.vs-bar-rows-label')].map(each => each.getAttribute('title')),
     ).toEqual(['builder', 'planner', 'profiler']);
     expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('By type');
+  });
+
+  test('reads a row as its name, a space and its note, whatever the two say', async () => {
+    const word = fc.stringMatching(/^[A-Za-z][A-Za-z0-9-]{0,15}$/);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.record({name: word, note: fc.option(word, {nil: undefined})}), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        async entries => {
+          const container = await mount(
+            <BarRows
+              label="By type"
+              nameHeader="Type"
+              barLabel="Share"
+              columns={columns}
+              rows={entries.map(
+                (entry, at): BarRow<2> => ({
+                  key: String(at),
+                  name: entry.name,
+                  value: null,
+                  figures: ['1', null],
+                  ...(entry.note === undefined ? {} : {note: entry.note}),
+                }),
+              )}
+            />,
+          );
+          const heads = [...container.querySelectorAll('tbody th[scope="row"]')].map(
+            each => each.textContent,
+          );
+          expect(heads).toEqual(
+            entries.map(entry =>
+              entry.note === undefined ? entry.name : `${entry.name} ${entry.note}`,
+            ),
+          );
+        },
+      ),
+      // The row the live Cost screen drew as "ReviewerNo price".
+      {numRuns: 25, examples: [[[{name: 'Reviewer', note: 'No price'}]]]},
+    );
   });
 
   test('gives the figure columns the same room whenever the same figures are drawn', async () => {
