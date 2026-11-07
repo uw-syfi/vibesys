@@ -113,7 +113,9 @@
 // 3 is migrated the same way, to version 4. Version 5 added a job's needs and task version, and version 6
 // a plan's origin, transitions and workstream with the directories bounds/ and workstreams/, so a
 // store of 2 to 5 is migrated to 6 the same way too: every directory it lacks is made, and the
-// format file is written last. A program of an older version refuses the store from then on, since
+// format file is written last. Version 6 also keeps the unit of a measurement's metric and observations
+// (an absent unit is an unknown one, so a result saved without it reads as it did); it needed no version
+// of its own because no release read a store of 6 before the unit was added. A program of an older version refuses the store from then on, since
 // it would otherwise open it and ignore the directories it does not know. A record keeps the version
 // it was written with.
 // It refuses a record it cannot decode, one with a field it does not know, and one whose name and

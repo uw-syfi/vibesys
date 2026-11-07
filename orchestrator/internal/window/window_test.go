@@ -88,9 +88,21 @@ func generate(seed uint64) world {
 		}}})
 	}
 	facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: resultOf(r, "orphan")}})
-	for range r.IntN(8) {
-		p := &cli.Plan{Number: uint32(1 + r.IntN(6)), CreatedAt: stamp(r, 6), UpdatedAt: stamp(r, 6)}
+	for _, number := range r.Perm(6)[:r.IntN(7)] { // one plan to a number, which a stream may repeat
+		p := &cli.Plan{
+			Number: uint32(1 + number), CreatedAt: stamp(r, 6), UpdatedAt: stamp(r, 6),
+			Origin: &cli.RecordOrigin{RunId: pick(r, "r1", "r2", "", "r3"), At: timestamppb.New(at(r.IntN(grid)))},
+		}
+		for range r.IntN(4) {
+			p.Transitions = append(p.Transitions, &cli.PlanTransition{
+				Status: cli.PlanStatus_PLAN_STATUS_OPEN,
+				Origin: &cli.RecordOrigin{RunId: pick(r, "r1", "r2", "", "r3"), At: timestamppb.New(at(r.IntN(grid)))},
+			})
+		}
 		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: p}})
+		if r.IntN(4) == 0 {
+			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: proto.Clone(p).(*cli.Plan)}})
+		}
 	}
 	w.view = search.Fold(facts)
 	for i := range r.IntN(8) {
@@ -552,18 +564,69 @@ func TestAbsentPricesStayAbsent(t *testing.T) {
 	}
 }
 
-// A plan is created in the window it is made in, and changed in a later one, never both.
-func TestAPlanIsCreatedOnceAndChangedAfter(t *testing.T) {
-	plan := func(n uint32, created, updated int) *cli.TaskFact {
-		return &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: n, CreatedAt: timestamppb.New(at(created)), UpdatedAt: timestamppb.New(at(updated))}}}
+// ownsPlan is the rule that a plan is the run's, spelled out from the contract: the run made it
+// (the plan's origin), or the run set one of its statuses (a transition's origin). Nothing else makes
+// a plan the run's, neither when it was made or edited nor who else touched it.
+func ownsPlan(p *cli.Plan) bool {
+	return p.GetOrigin().GetRunId() == string(ours) || slices.ContainsFunc(p.GetTransitions(), func(t *cli.PlanTransition) bool {
+		return t.GetOrigin().GetRunId() == string(ours)
+	})
+}
+
+// The plans a window counts are the run's alone: a world with every plan the run did not make or set
+// a status of taken out has the same window facts as the whole world, whatever times the other plans
+// and the other runs' and persons' changes carry.
+func TestAWindowCountsOnlyThePlansOfTheRun(t *testing.T) {
+	for seed := range uint64(seeds) {
+		w, r := generate(seed), rng(seed)
+		a, _, c := three(r)
+		var own []*cli.TaskFact
+		for _, f := range w.view.Facts {
+			if p := f.GetPlan(); p == nil || ownsPlan(p) {
+				own = append(own, f)
+			}
+		}
+		only := w
+		only.view = search.Fold(own)
+		got, want := w.facts(rng(seed), a, c), only.facts(rng(seed), a, c)
+		if !slices.Equal(got.PlansCreated, want.PlansCreated) || !slices.Equal(got.PlansChanged, want.PlansChanged) {
+			t.Fatalf("seed %d, %d..%d: plans %v created %v changed, the run's own alone give %v and %v",
+				seed, a, c, got.PlansCreated, got.PlansChanged, want.PlansCreated, want.PlansChanged)
+		}
 	}
-	facts := []*cli.TaskFact{plan(1, 2, 3), plan(2, 2, 12), plan(3, 12, 12), plan(4, 30, 30)}
+}
+
+// A plan the run made is created in the window it is made in, and changed in a later one when the run
+// sets a status of it then, never both. A plan another run or a person made is the run's only for the
+// statuses the run set, and one nobody of the run touched is no one's: its dates say nothing.
+func TestAPlanIsCreatedOnceAndChangedAfter(t *testing.T) {
+	type change struct {
+		run string
+		at  int
+	}
+	plan := func(n uint32, creator string, created int, changes ...change) *cli.TaskFact {
+		p := &cli.Plan{Number: n, CreatedAt: timestamppb.New(at(created)), UpdatedAt: timestamppb.New(at(created)), Origin: &cli.RecordOrigin{RunId: creator, At: timestamppb.New(at(created))}}
+		for _, c := range changes {
+			p.Transitions = append(p.Transitions, &cli.PlanTransition{Status: cli.PlanStatus_PLAN_STATUS_OPEN, Origin: &cli.RecordOrigin{RunId: c.run, At: timestamppb.New(at(c.at))}})
+		}
+		return &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: p}}
+	}
+	facts := []*cli.TaskFact{
+		plan(1, "r1", 2, change{"r1", 3}),                   // made and edited in the first window: only made
+		plan(2, "r1", 2, change{"r1", 12}),                  // made early, edited later by the run
+		plan(3, "r1", 12),                                   // made later
+		plan(4, "r1", 30),                                   // after both
+		plan(5, "r2", 4, change{"r2", 5}),                   // another run's, never touched by this one
+		plan(6, "", 4, change{"", 11}),                      // a person's
+		plan(7, "r2", 4, change{"r2", 5}, change{"r1", 13}), // another run's, whose status the run set later
+		plan(8, "r2", 12, change{"r1", 12}),                 // made by another run in the later window and set by the run
+	}
 	early := factsOf(t, 0, 10, facts...)
 	late := factsOf(t, 10, 20, facts...)
 	if !slices.Equal(early.PlansCreated, []uint32{1, 2}) || len(early.PlansChanged) != 0 {
 		t.Fatalf("early: %+v %+v", early.PlansCreated, early.PlansChanged)
 	}
-	if !slices.Equal(late.PlansCreated, []uint32{3}) || !slices.Equal(late.PlansChanged, []uint32{2}) {
+	if !slices.Equal(late.PlansCreated, []uint32{3}) || !slices.Equal(late.PlansChanged, []uint32{2, 7, 8}) {
 		t.Fatalf("late: %+v %+v", late.PlansCreated, late.PlansChanged)
 	}
 }

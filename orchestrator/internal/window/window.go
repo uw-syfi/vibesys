@@ -70,7 +70,7 @@ func Facts(in Input) core.WindowFacts {
 		}
 	}
 	out.Objectives = objectives(measured, w)
-	out.PlansCreated, out.PlansChanged = plans(in.View.Plans(), w)
+	out.PlansCreated, out.PlansChanged = plans(in.View.Plans(in.Run), w)
 	return out
 }
 
@@ -104,6 +104,7 @@ func reports(in Input, w span) []core.MessageID {
 type point struct {
 	at        time.Time
 	direction core.Direction
+	unit      string
 	value     float64
 	job       core.JobID
 	commit    core.Commit
@@ -116,13 +117,17 @@ func objectives(measured []search.Measurement, w span) []core.ObjectiveMove {
 	byMetric := map[string][]point{}
 	for _, m := range measured {
 		for _, v := range m.Values {
-			byMetric[v.Metric] = append(byMetric[v.Metric], point{at: m.At, direction: v.Direction, value: v.Number, job: m.Job, commit: m.Commit, best: v.Best})
+			byMetric[v.Metric] = append(byMetric[v.Metric], point{at: m.At, direction: v.Direction, unit: v.Unit, value: v.Number, job: m.Job, commit: m.Commit, best: v.Best})
 		}
 	}
 	var out []core.ObjectiveMove
 	for _, metric := range slices.Sorted(maps.Keys(byMetric)) {
 		ps := byMetric[metric] // in order of date, as the measurements are
-		move := core.ObjectiveMove{Metric: metric, Direction: ps[0].direction}
+		units := make([]string, len(ps))
+		for i, p := range ps {
+			units[i] = p.unit
+		}
+		move := core.ObjectiveMove{Metric: metric, Direction: ps[0].direction, Unit: search.CommonUnit(units)}
 		move.Start, move.End = bestBefore(ps, w.from), bestBefore(ps, w.to)
 		if move.End != nil {
 			out = append(out, move)
@@ -150,24 +155,18 @@ func bestBefore(ps []point, t time.Time) *core.Best {
 	return &core.Best{Value: found.value, Job: found.job, Commit: found.commit, At: found.at}
 }
 
-// plans are the plans made in the window, and the older ones that were edited in it, by number. A plan
-// made and edited in the window is only made.
+// plans are the plans the run made in the window, and the others whose status the run set in it, by
+// number. Which plans are the run's is the view's (search.View.Plans, the rule the run's ideas use),
+// never inferred from when a plan was made or edited: another run's plans, and a person's, are not
+// counted. A plan the run made in the window is only made, whatever else it set; a plan made by
+// another run, or earlier, is changed when the run set one of its statuses in the window.
 func plans(all []search.Plan, w span) (created, changed []uint32) {
-	madeIn, editedIn := map[uint32]bool{}, map[uint32]bool{}
 	for _, p := range all {
 		switch {
-		case !p.CreatedAt.IsZero() && w.holds(p.CreatedAt):
-			madeIn[p.Number] = true
-		case !p.UpdatedAt.IsZero() && w.holds(p.UpdatedAt):
-			editedIn[p.Number] = true
-		}
-	}
-	for n := range madeIn {
-		created = append(created, n)
-	}
-	for n := range editedIn {
-		if !madeIn[n] {
-			changed = append(changed, n)
+		case p.MadeByRun && !p.CreatedAt.IsZero() && w.holds(p.CreatedAt):
+			created = append(created, p.Number)
+		case slices.ContainsFunc(p.RunTransitions, w.holds):
+			changed = append(changed, p.Number)
 		}
 	}
 	slices.Sort(created)

@@ -350,7 +350,7 @@ func TestTheObjectivesMustDeclareTheMetric(t *testing.T) {
 		"twice":         objectives + objectives,
 		"bad noise":     objectives + "[pareto]\nrelative_noise = 1.5\n",
 		"unknown key":   objectives + "[pareto]\nrelative_noise = 0.1\nextra = 1\n",
-		"unknown field": "[[objective]]\nname = \"ops_per_sec\"\ndirection = \"max\"\nunit = \"s\"\n",
+		"unknown field": "[[objective]]\nname = \"ops_per_sec\"\ndirection = \"max\"\nunits = \"s\"\n",
 	} {
 		_, err := task.Read(repo(taskFiles("t", jsonManifest, text)), "t")
 		if err == nil {

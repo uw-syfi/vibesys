@@ -75,10 +75,16 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 [[objective]]
 name = "requests_per_sec"   # equals [benchmark.result] metric
 direction = "max"           # or "min"
+unit = "req/s"              # optional: what it is counted in
 
 [pareto]
 relative_noise = 0.02       # optional: the relative spread of one run
 ```
+
+Declare a `unit` for every objective. Each measurement records it, so a bound an agent declares
+(`vibesys-cli bound declare`) can be checked against the unit of the numbers it bounds: a bound in
+another unit is shown as unverified, and a measurement with no unit has an unknown one. It is a
+label for people; nothing converts it.
 
 A task is multi-objective when `objectives.toml` declares more than one `[[objective]]` and has a
 `[pareto]` section. It then reports with `result_protocol = 2`, so that every sample reports every

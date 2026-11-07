@@ -7,7 +7,7 @@
  * - The report is the lead's newest report about the whole run: by number, never a window report.
  * - An agent is working when it is launching, in a turn, or waiting on subagents.
  * - Where the run stands on each objective is its head (the head's value) and its best (the bound's, or
- *   where the series' best line ends), with the standing bound's unit and the share each is at: the
+ *   where the series' best line ends), with the unit they are counted in, the standing bound's unit and its check, and the share each is at: the
  *   measured objectives first in the order the task declares them, then those with only a bound.
  */
 import {create} from '@bufbuild/protobuf';
@@ -15,6 +15,7 @@ import {
   type Agent,
   type AgentRole,
   AgentStatus,
+  BoundUnitCheck,
   type Message,
   type ObjectiveStanding,
   ObjectiveStandingSchema,
@@ -98,7 +99,16 @@ function servedStandings(search: SearchState | undefined): ObjectiveStanding[] {
       return create(ObjectiveStandingSchema, {
         name,
         headValue: bound?.headValue === undefined ? value : finite(bound.headValue),
-        unit: bound?.versions.at(-1)?.unit ?? '',
+        // The server serves the unit the measurements record. A search a screen test wrote by hand predates
+        // units and names only the bound's, so this Fake falls back to it until those tests state the
+        // measured unit (the screens' tests are item P's).
+        unit:
+          bound?.measuredUnit ||
+          search.series.find(each => each.objective === name)?.unit ||
+          bound?.versions.at(-1)?.unit ||
+          '',
+        boundUnit: bound?.versions.at(-1)?.unit ?? '',
+        boundUnitCheck: bound?.unitCheck ?? BoundUnitCheck.UNSPECIFIED,
         headPercentOfBound: finite(bound?.percentOfBound),
         bestValue: bound?.bestValue === undefined ? finite(marked?.value) : finite(bound.bestValue),
         bestPercentOfBound: finite(bound?.bestPercentOfBound),

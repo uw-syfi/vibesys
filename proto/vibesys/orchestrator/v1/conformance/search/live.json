@@ -76,13 +76,16 @@
           }
         ],
         "headValue": 11076,
-        "percentOfBound": 71
+        "percentOfBound": 71,
+        "measuredUnit": "tok/s",
+        "unitCheck": "BOUND_UNIT_CHECK_MATCH"
       }
     ],
     "series": [
       {
         "objective": "tok_s",
         "direction": "DIRECTION_MAXIMIZE",
+        "unit": "tok/s",
         "points": [
           {
             "jobId": "j1",

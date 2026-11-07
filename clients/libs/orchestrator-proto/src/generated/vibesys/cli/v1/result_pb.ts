@@ -4,6 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Duration, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_duration, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { EnvironmentFingerprint, MachineFacts, MachineLoad } from "./environment_pb.js";
@@ -14,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/result.proto.
  */
 export const file_vibesys_cli_v1_result: GenFile = /*@__PURE__*/
-  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIkQKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbiJJCgtPYnNlcnZhdGlvbhIMCgRuYW1lGAEgASgJEg4KBnZhbHVlcxgCIAMoARISCgV2YWx1ZRgDIAEoAUgAiAEBQggKBl92YWx1ZSJ8CgpPYmplY3RpdmVzEicKB21ldHJpY3MYASADKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSFgoOcmVsYXRpdmVfbm9pc2UYAiABKAESLQoFbm9pc2UYAyADKAsyHi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVOb2lzZSI2Cg5PYmplY3RpdmVOb2lzZRIMCgRuYW1lGAEgASgJEhYKDnJlbGF0aXZlX25vaXNlGAIgASgBIjoKC0NoZWNrUmVzdWx0EisKCGR1cmF0aW9uGAEgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uItABCg1NZWFzdXJlUmVzdWx0EiYKBm1ldHJpYxgBIAEoCzIWLnZpYmVzeXMuY2xpLnYxLk1ldHJpYxIPCgdzYW1wbGVzGAIgAygBEjEKDG9ic2VydmF0aW9ucxgDIAMoCzIbLnZpYmVzeXMuY2xpLnYxLk9ic2VydmF0aW9uEhQKDGNoZWNrX2pvYl9pZBgEIAEoCRINCgV2YWx1ZRgFIAEoARIuCgpvYmplY3RpdmVzGAYgASgLMhoudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlcyKxAQoLTWVhc3VyZW1lbnQSDgoGY29tbWl0GAEgASgJEhQKDHRhc2tfdmVyc2lvbhgCIAEoCRI7CgtlbnZpcm9ubWVudBgDIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSDwoHam9iX2lkcxgEIAMoCRIuCgdtZWFzdXJlGAUgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdCK9AwoGUmVzdWx0Eg4KBmpvYl9pZBgBIAEoCRILCgNrZXkYAiABKAkSDAoEdGFzaxgDIAEoCRIUCgx0YXNrX3ZlcnNpb24YBCABKAkSDgoGY29tbWl0GAUgASgJEhYKDnNjaGVtYV92ZXJzaW9uGAYgASgNEjsKC2Vudmlyb25tZW50GAcgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBItCgdtYWNoaW5lGAggASgLMhwudmliZXN5cy5jbGkudjEuTWFjaGluZUZhY3RzEikKBGxvYWQYCSABKAsyGy52aWJlc3lzLmNsaS52MS5NYWNoaW5lTG9hZBIvCgtyZWNvcmRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFY2hlY2sYCyABKAsyGy52aWJlc3lzLmNsaS52MS5DaGVja1Jlc3VsdEgAEjAKB21lYXN1cmUYDCABKAsyHS52aWJlc3lzLmNsaS52MS5NZWFzdXJlUmVzdWx0SAASFwoPY2FuZGlkYXRlX2ltYWdlGA0gASgJQgkKB291dGNvbWUqVgoJRGlyZWN0aW9uEhkKFURJUkVDVElPTl9VTlNQRUNJRklFRBAAEhYKEkRJUkVDVElPTl9NQVhJTUlaRRABEhYKEkRJUkVDVElPTl9NSU5JTUlaRRACQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIlsKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbhIVCgR1bml0GAMgASgJQge6SARyAihAImAKC09ic2VydmF0aW9uEgwKBG5hbWUYASABKAkSDgoGdmFsdWVzGAIgAygBEhIKBXZhbHVlGAMgASgBSACIAQESFQoEdW5pdBgEIAEoCUIHukgEcgIoQEIICgZfdmFsdWUifAoKT2JqZWN0aXZlcxInCgdtZXRyaWNzGAEgAygLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEhYKDnJlbGF0aXZlX25vaXNlGAIgASgBEi0KBW5vaXNlGAMgAygLMh4udmliZXN5cy5jbGkudjEuT2JqZWN0aXZlTm9pc2UiNgoOT2JqZWN0aXZlTm9pc2USDAoEbmFtZRgBIAEoCRIWCg5yZWxhdGl2ZV9ub2lzZRgCIAEoASI6CgtDaGVja1Jlc3VsdBIrCghkdXJhdGlvbhgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiLQAQoNTWVhc3VyZVJlc3VsdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDwoHc2FtcGxlcxgCIAMoARIxCgxvYnNlcnZhdGlvbnMYAyADKAsyGy52aWJlc3lzLmNsaS52MS5PYnNlcnZhdGlvbhIUCgxjaGVja19qb2JfaWQYBCABKAkSDQoFdmFsdWUYBSABKAESLgoKb2JqZWN0aXZlcxgGIAEoCzIaLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZXMisQEKC01lYXN1cmVtZW50Eg4KBmNvbW1pdBgBIAEoCRIUCgx0YXNrX3ZlcnNpb24YAiABKAkSOwoLZW52aXJvbm1lbnQYAyABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50Eg8KB2pvYl9pZHMYBCADKAkSLgoHbWVhc3VyZRgFIAEoCzIdLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVSZXN1bHQivQMKBlJlc3VsdBIOCgZqb2JfaWQYASABKAkSCwoDa2V5GAIgASgJEgwKBHRhc2sYAyABKAkSFAoMdGFza192ZXJzaW9uGAQgASgJEg4KBmNvbW1pdBgFIAEoCRIWCg5zY2hlbWFfdmVyc2lvbhgGIAEoDRI7CgtlbnZpcm9ubWVudBgHIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoHbWFjaGluZRgIIAEoCzIcLnZpYmVzeXMuY2xpLnYxLk1hY2hpbmVGYWN0cxIpCgRsb2FkGAkgASgLMhsudmliZXN5cy5jbGkudjEuTWFjaGluZUxvYWQSLwoLcmVjb3JkZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBWNoZWNrGAsgASgLMhsudmliZXN5cy5jbGkudjEuQ2hlY2tSZXN1bHRIABIwCgdtZWFzdXJlGAwgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdEgAEhcKD2NhbmRpZGF0ZV9pbWFnZRgNIAEoCUIJCgdvdXRjb21lKlYKCURpcmVjdGlvbhIZChVESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIWChJESVJFQ1RJT05fTUFYSU1JWkUQARIWChJESVJFQ1RJT05fTUlOSU1JWkUQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.Metric
@@ -29,6 +30,16 @@ export type Metric = Message<"vibesys.cli.v1.Metric"> & {
    * @generated from field: vibesys.cli.v1.Direction direction = 2;
    */
   direction: Direction;
+
+  /**
+   * What the metric is counted in, such as "tok/s" or "ms", as the task's objectives.toml declares
+   * it (TaskObjective.unit). A label for people: nothing converts it. Empty when the task declares
+   * none, and in a result saved before units were kept: the unit is then unknown, which no reader
+   * may take for a match with any other unit.
+   *
+   * @generated from field: string unit = 3;
+   */
+  unit: string;
 };
 
 /**
@@ -63,6 +74,13 @@ export type Observation = Message<"vibesys.cli.v1.Observation"> & {
    * @generated from field: optional double value = 3;
    */
   value?: number | undefined;
+
+  /**
+   * What the series is counted in, as Metric.unit says it for an objective. Empty when unknown.
+   *
+   * @generated from field: string unit = 4;
+   */
+  unit: string;
 };
 
 /**

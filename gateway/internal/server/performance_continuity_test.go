@@ -94,7 +94,7 @@ func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				observed := watchEntry(t, watch)
+				observed := watchHeadAt(t, watch, want.GetCommittedSeq())
 				assertSamePerformance(t, observed.Head, want)
 				cancel()
 				skeleton, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
@@ -126,6 +126,21 @@ func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 		})
 	}
 }
+
+// watchHeadAt reads a new subscription until it shows the head at seq. A subscription joins the
+// runs topic's retained state, which can still hold the previous head until the source has
+// scanned the rename that published the new one, so the snapshot's first entry names no
+// particular head. The context bounds a hang only; the wait ends on the entry, not on time.
+func watchHeadAt(t *testing.T, stream *runStream, seq uint64) *runFrame {
+	t.Helper()
+	for {
+		got := watchEntry(t, stream)
+		if got.RunId == "run-1" && got.Head.GetCommittedSeq() == seq {
+			return got
+		}
+	}
+}
+
 func assertSamePerformance(t *testing.T, got, want *storev1.RunHead) {
 	t.Helper()
 	if got == nil || !got.PerformanceStated || got.GetCommittedSeq() != want.GetCommittedSeq() {

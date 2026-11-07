@@ -72,7 +72,7 @@ func FrontierEntries(entries []core.FrontierEntry) []*cliv1.FrontierEntry {
 		m := &cliv1.FrontierEntry{Member: FrontierMember(e.Member)}
 		for _, v := range e.Values {
 			m.Values = append(m.Values, &cliv1.ObjectiveValue{
-				Metric: &cliv1.Metric{Name: v.Metric.Name, Direction: direction(v.Metric.Direction)},
+				Metric: &cliv1.Metric{Name: v.Metric.Name, Direction: direction(v.Metric.Direction), Unit: v.Metric.Unit},
 				Value:  v.Value, Samples: v.Samples,
 			})
 		}
