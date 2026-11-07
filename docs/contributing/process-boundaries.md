@@ -155,8 +155,10 @@ cannot be served:
   when the host started, how many runs are live, whether each part it needs (the
   session holder, the skills, the job tool) is ready or why not, and whether the
   orchestrator is serving or why not (`HELD_ELSEWHERE`, `HOLDER_GONE`,
-  `STATE_REFUSED`). It also says how many other clients are connected and, for a
-  build of no release, which program it is.
+  `STATE_REFUSED`; a refused state directory also says whether it is on a network
+  filesystem or one not known to be local, so a client names the setting that fixes
+  it and does not parse the host's text). It also says how many other clients are
+  connected and, for a build of no release, which program it is.
 - `Stop` stops the host, optionally only when no runs are live. Sessions outlive
   the host, so stopping is safe for them.
 
