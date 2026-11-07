@@ -715,4 +715,23 @@ describe('the candidates cell of the fleet screen', () => {
       {seed: 21, numRuns: 40},
     );
   });
+  it('says how many older runs the host left out, as the host said it, and nothing when it listed every run', () => {
+    const cut = (runsLeftOut: number): FleetHostInput => ({
+      ...hostA,
+      data: {...hostA.data, cut: {truncated: runsLeftOut > 0, runsLeftOut}},
+    });
+    const some = open([cut(7)]);
+    expect(some.screen.text()).toContain('7 older runs not shown');
+    some.screen.unmount();
+    const none = open([cut(0)]);
+    expect(none.screen.text()).not.toContain('not shown');
+    none.screen.unmount();
+    // Two hosts: the figure is of the hosts shown, and the host filter narrows it.
+    const both = open([
+      cut(7),
+      {...hostB, data: {...hostB.data, cut: {truncated: true, runsLeftOut: 5}}},
+    ]);
+    expect(both.screen.text()).toContain('12 older runs not shown');
+    both.screen.unmount();
+  });
 });

@@ -24,6 +24,7 @@ import {
   RunSummarySchema,
   type SearchState,
 } from '@vibesys/orchestrator-proto';
+import {messageIs} from '../../state/orchestrator/messages.js';
 import type {OrchestratorState} from '../../state/orchestrator/state.js';
 
 const WORKING: ReadonlySet<AgentStatus> = new Set([
@@ -32,29 +33,16 @@ const WORKING: ReadonlySet<AgentStatus> = new Set([
   AgentStatus.WAITING,
 ]);
 
-const REPORT_KINDS = {
-  text: true,
-  handoff: true,
-  report: true,
-  jobFinished: true,
-  subagentSettled: true,
-  brief: true,
-  leadBrief: true,
-  handoffReminder: true,
-  leadIdleReminder: true,
-  reportDue: true,
-  catchUpRequest: true,
-  runLimitReached: true,
-} as const;
-
 /** The report the run is summed up by: the highest-numbered one that is about the whole run. */
 export function summaryMessage(messages: readonly Message[]): Message | undefined {
   let best: Message | undefined;
+  let heldSequence = -1;
   for (const message of messages) {
-    if (!oneofIs(message.body, 'report', REPORT_KINDS)) continue;
-    if (message.body.value.scope === ReportScope.WINDOW) continue;
-    const held = best?.body.case === 'report' ? best.body.value.sequence : -1;
-    if (best === undefined || message.body.value.sequence >= held) best = message;
+    if (!messageIs(message, 'report') || message.body.value.scope === ReportScope.WINDOW) continue;
+    if (best === undefined || message.body.value.sequence >= heldSequence) {
+      best = message;
+      heldSequence = message.body.value.sequence;
+    }
   }
   return best;
 }
