@@ -8,6 +8,7 @@ export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
 export {AppFrame} from './components/app-frame.js';
 export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-chart.js';
+export {type BarColumn, type BarRow, BarRows} from './components/bar-rows.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
@@ -176,7 +177,12 @@ export {
 export {Slider} from './components/slider.js';
 export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {type AreaLayer, StackedArea} from './components/stacked-area.js';
-export {type BarSegment, type StackedBar, StackedBars} from './components/stacked-bars.js';
+export {
+  type BarMark,
+  type BarSegment,
+  type StackedBar,
+  StackedBars,
+} from './components/stacked-bars.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';

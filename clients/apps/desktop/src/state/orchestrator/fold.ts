@@ -2,8 +2,8 @@
  * The folds: a snapshot and the changes after its sequence become the state, and the per-agent feed
  * (items, progress, turns) lays over it. Plain reducers with no clock and no I/O.
  *
- * Two streams carry whole items (the run stream's `item`, the agent stream's page and item
- * frames), and neither item has a revision of its own. The revision is the committed `sequence`
+ * Two of the three streams carry whole items (the run stream's `item`, the agent stream's page and
+ * item frames; the third carries a run's cost), and neither item has a revision of its own. The revision is the committed `sequence`
  * the item was carried at: the change's, or the agent frame's. Which whole item wins:
  * 1. a final item (finished, failed) is never replaced by a running one, whatever its sequence;
  * 2. between two of the same finality, the higher sequence wins, and an equal one is the later
@@ -26,14 +26,13 @@ import {
   ItemStatus,
   oneofIs,
   type RunChange,
-  type RunCost,
   type RunsSnapshot,
   type SearchState,
   type Turn,
   TurnStatus,
   type WatchAgentResponse,
 } from '@vibesys/orchestrator-proto';
-import {costViewOf} from './cost.js';
+import type {CostView} from './cost.js';
 import type {OrchestratorState, Overlay, Progress} from './state.js';
 
 function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<string, T> {
@@ -60,6 +59,7 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     };
   }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
+  const runs = byId(snapshot.runs);
   return {
     ...state,
     sequence: snapshot.sequence,
@@ -67,7 +67,8 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     searchRevisions: Object.fromEntries(
       snapshot.searches.map(search => [search.runId, search.revision]),
     ),
-    runs: byId(snapshot.runs),
+    runs,
+    costs: costsOfRuns(state.costs, runs),
     agents: byId(snapshot.agents),
     turns,
     messages: byId(snapshot.messages),
@@ -291,7 +292,28 @@ export function applySearch(state: OrchestratorState, search: SearchState): Orch
   };
 }
 
-/** One whole cost view replaces the one held for its run: the host sends whole views, never parts. */
-export function applyCost(state: OrchestratorState, cost: RunCost): OrchestratorState {
-  return {...state, costs: {...state.costs, [cost.runId]: costViewOf(cost)}};
+/** The cost views of the runs the list still has: a run the host dropped takes its view with it. */
+function costsOfRuns(
+  costs: OrchestratorState['costs'],
+  runs: OrchestratorState['runs'],
+): OrchestratorState['costs'] {
+  return Object.fromEntries(Object.entries(costs).filter(([runId]) => runId in runs));
+}
+
+/**
+ * One whole cost view replaces the one held for its run: the host sends whole views, never parts.
+ * A view older than the one held does not: it is current to an earlier log sequence, or to the
+ * same one at an earlier instant (the rate of the last hour moves with the host's clock while the
+ * log does not). An equal one is the later arrival, which is the newer.
+ */
+export function applyCost(state: OrchestratorState, view: CostView): OrchestratorState {
+  const held = state.costs[view.runId];
+  if (
+    held !== undefined &&
+    (view.sequence < held.sequence ||
+      (view.sequence === held.sequence && view.asOfMs < held.asOfMs))
+  ) {
+    return state;
+  }
+  return {...state, costs: {...state.costs, [view.runId]: view}};
 }

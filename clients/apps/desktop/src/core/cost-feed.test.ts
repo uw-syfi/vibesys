@@ -11,14 +11,16 @@ import {
   WatchRunCostRequestSchema,
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
-import {costViewOf, type FeedStatus} from '../state/index.js';
+import {type FeedStatus, readCost} from '../state/index.js';
 import {
   FakeDaemon,
+  faultsOn,
   generateScenario,
   type HostHarness,
   hostHarness,
   methodPathOf,
 } from '../testing/orchestrator/index.js';
+import {RpcStatus} from './errors.js';
 
 const scenario = generateScenario({seed: 7, subagents: 2, live: false});
 const RUN = scenario.runId;
@@ -75,7 +77,9 @@ describe('a run cost stream', () => {
       expect(yield* h.read(h.session.costs.status(RUN))).toEqual({_tag: 'Live'});
       expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('live');
       const held = (yield* h.model).data.costs[RUN];
-      expect(held).toEqual(costViewOf(sent));
+      const read = readCost(sent);
+      expect(read._tag).toBe('View');
+      expect(held).toEqual(read._tag === 'View' ? read.view : undefined);
       // The numbers a screen shows are the host's, never a sum of its parts.
       expect(held?.total.costUsd).toBe(12.5);
       expect(held?.maxCostUsd).toBe(500);
@@ -119,6 +123,73 @@ describe('a run cost stream', () => {
       yield* h.elapse(1);
       expect(costCalls(h)).toHaveLength(2);
       expect((yield* h.model).data.costs[RUN]?.total.costUsd).toBe(3);
+    }),
+  );
+
+  it.effect(
+    'fails with the field named when a view lacks one the contract requires, and holds none',
+    () =>
+      Effect.gen(function* () {
+        const daemon = new FakeDaemon(scenario);
+        // A host that broke the contract: the view has no series.
+        daemon.publishCost(create(RunCostSchema, {...hostCost(5), series: undefined}));
+        const h = yield* hostHarness(daemon);
+        h.mount(h.session.runs.watch);
+        h.mount(h.session.costs.watch(RUN));
+        yield* h.elapse(30);
+        const status = yield* h.read(h.session.costs.status(RUN));
+        expect(status).toMatchObject({
+          _tag: 'Failed',
+          fault: {kind: 'InvalidMessage', retryable: false},
+        });
+        expect(status._tag === 'Failed' ? status.fault.detail : '').toContain('series');
+        // No view is made of it: nothing is held, and the rest of the app carries on.
+        expect((yield* h.model).data.costs[RUN]).toBeUndefined();
+        expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('unavailable');
+        expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      }),
+  );
+
+  it.effect('a host without the method fails the cost stream alone and leaves the link up', () =>
+    Effect.gen(function* () {
+      const daemon = new FakeDaemon(scenario);
+      const h = yield* hostHarness(daemon, {
+        wrap: base => ({
+          respond: (target, nth) =>
+            target.method === methodPathOf('WatchRunCost')
+              ? [{end: {message: 'no such method', status: RpcStatus.UNIMPLEMENTED}}]
+              : base.respond(target, nth),
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      h.mount(h.session.costs.watch(RUN));
+      yield* h.elapse(30);
+      expect(yield* h.read(h.session.costs.status(RUN))).toMatchObject({
+        _tag: 'Failed',
+        fault: {kind: 'Unimplemented', retryable: false},
+      });
+      expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('unavailable');
+      expect((yield* h.model).data.costs[RUN]).toBeUndefined();
+      // The rest of the app is unaffected: the run stream is live, and the cost stream is not retried.
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      expect(yield* h.read(h.session.runs.freshness)).toBe('live');
+      expect(costCalls(h)).toHaveLength(1);
+    }),
+  );
+
+  it.effect('opens the stream again after the link drops and then holds the host view', () =>
+    Effect.gen(function* () {
+      const daemon = new FakeDaemon(scenario);
+      daemon.publishCost(hostCost(7));
+      const h = yield* hostHarness(daemon, {
+        // The first stream loses the link before its view arrives; the second is whole.
+        wrap: faultsOn('WatchRunCost', {dropAfter: [0], duplicate: []}),
+      });
+      h.mount(h.session.costs.watch(RUN));
+      yield* h.elapse(60);
+      expect(costCalls(h).length).toBeGreaterThan(1);
+      expect((yield* h.model).data.costs[RUN]?.total.costUsd).toBe(7);
+      expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('live');
     }),
   );
 });

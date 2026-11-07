@@ -1,6 +1,5 @@
 /** The run report's view models, as plain reads of the folded state. */
 export {type AgentsStrip, type AgentTypeCount, agentsStrip} from './agents-strip.js';
-export {type CostCard, type CostTypeRow, costCard} from './cost-card.js';
 export {
   type Better,
   betterOf,

@@ -4,22 +4,22 @@
  * best, a frontier or a cost; each test says what the host sent and reads what a person sees.
  */
 import {describe, expect, it} from '@effect/vitest';
-import {AgentRole, oneofIs, ReportKind} from '@vibesys/orchestrator-proto';
+import {oneofIs, ReportKind} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {
   applyChange,
   applyCost,
   applySearch,
+  type CostFeedSnapshot,
+  type CostView,
   emptyState,
-  type FeedStatus,
   type Freshness,
   type OrchestratorState,
   type RunView,
 } from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
+import {NO_PRICES, PRICED_AND_UNPRICED} from '../../../testing/orchestrator/cost-views.js';
 import {
-  type CostSpec,
-  costFixture,
   generateScenario,
   type MeasuredOptions,
   measuredSearch,
@@ -39,26 +39,15 @@ const END = base.endMs;
 const REPORT_AT = END;
 const NOW = END + 23 * 60_000;
 
-const TYPES: CostSpec['types'] = [
-  {role: AgentRole.WORKER, agents: 4, costUsd: 205},
-  {role: AgentRole.LEAD, agents: 1, costUsd: 66},
-  {role: AgentRole.PLANNER, agents: 2, costUsd: 37},
-  {role: AgentRole.PROFILER, agents: 1, costUsd: null},
-];
-const COST: CostSpec = {
-  asOfMs: NOW,
-  startMs: START,
-  totalUsd: 318,
-  limitUsd: 500,
-  lastHourUsd: 12.4,
-  types: TYPES,
-};
+/** The cost views the host would send, for this run. */
+const COST: CostView = {...PRICED_AND_UNPRICED, runId: RUN};
+const NO_PRICE: CostView = {...NO_PRICES, runId: RUN};
 
 interface World {
   readonly objectives?: readonly ObjectiveSpec[];
   readonly candidates?: number;
   readonly report?: boolean;
-  readonly cost?: CostSpec | null;
+  readonly cost?: CostView | null;
   readonly revisedBound?: boolean;
   readonly live?: boolean;
   readonly stale?: boolean;
@@ -89,12 +78,12 @@ function stateOf(world: World): OrchestratorState {
   let state = withText.changes.reduce(applyChange, emptyState);
   state = applySearch(state, measuredSearch(RUN, options, {stale: world.stale === true}));
   const cost = world.cost === undefined ? COST : world.cost;
-  return cost === null ? state : applyCost(state, costFixture(RUN, cost));
+  return cost === null ? state : applyCost(state, cost);
 }
 
 function render(
   world: World,
-  options: {freshness?: Freshness; costFeed?: FeedStatus; view?: RunView} = {},
+  options: {freshness?: Freshness; costFeed?: CostFeedSnapshot; view?: RunView} = {},
 ) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0};
   const screen = mount(
@@ -105,7 +94,8 @@ function render(
       nowMs={world.live === false ? END + 60_000 : NOW}
       freshness={options.freshness ?? 'live'}
       staleForMs={options.freshness === undefined || options.freshness === 'live' ? null : 90_000}
-      costFeed={options.costFeed ?? {_tag: 'Live'}}
+      costFeed={options.costFeed ?? {status: {_tag: 'Live'}, freshness: 'live'}}
+      retryCost={() => undefined}
       view={options.view ?? 'report'}
       agentId={null}
       agentPanel={null}
@@ -124,6 +114,12 @@ function render(
   return {screen, probe};
 }
 
+/** The text of the card with this heading, or an empty text. */
+const cardText = (root: HTMLElement, heading: string): string =>
+  [...root.querySelectorAll('section.vs-card')].find(
+    card => card.querySelector('h2')?.textContent === heading,
+  )?.textContent ?? '';
+
 const cards = (root: HTMLElement): string[] =>
   [...root.querySelectorAll('section.vs-card > h2')].map(heading => heading.textContent ?? '');
 
@@ -135,7 +131,8 @@ describe('the report of a run with two objectives and a declared bound', () => {
       'Trade-off',
       'Over time',
       'Live agents',
-      'Cost',
+      'Spend',
+      'By agent type',
     ]);
     const text = screen.text();
     for (const word of ['throughput', 'p99_latency', 'Running', 'host-a', 'Started']) {
@@ -217,19 +214,14 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
-  it('shows the cost as the host sent it: total and limit, the last hour, and the split by type', () => {
+  it('shows the cost as the host sent it: spend against its cap, the last hour, and the split by type', () => {
     const {screen} = render({});
-    const cost = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
-      card.textContent?.startsWith('Cost'),
-    );
-    const text = cost?.textContent ?? '';
-    expect(text).toContain('$318');
-    expect(text).toContain('of $500');
-    expect(text).toContain('$12.4');
-    expect(text).toContain('Worker ×4');
-    expect(text).toContain('$205');
-    // The unpriced type has no share and no price.
-    expect(text).not.toContain('Profiler');
+    const spend = cardText(screen.container, 'Spend');
+    expect(spend).toContain('$318');
+    expect(spend).toContain('of $500');
+    expect(spend).toContain('Last hour');
+    expect(spend).toContain('1,433');
+    expect(cardText(screen.container, 'By agent type')).toContain('Worker');
     screen.unmount();
   });
 
@@ -314,48 +306,40 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
-  it('shows a dash and says partial for a cost with no price, and a split with nothing priced has no bar', () => {
-    const {screen} = render({
-      cost: {
-        ...COST,
-        totalUsd: null,
-        lastHourUsd: null,
-        unpricedTurns: 3,
-        types: TYPES.map(type => ({...type, costUsd: null})),
-      },
-    });
-    const cost = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
-      card.textContent?.startsWith('Cost'),
+  it('shows a dash for a cost no turn priced, and says the others are floors', () => {
+    const none = render({cost: NO_PRICE});
+    expect(cardText(none.screen.container, 'Spend')).toContain('\u2014');
+    none.screen.unmount();
+    const floor = render({});
+    expect(cardText(floor.screen.container, 'Spend')).toContain('\u2265');
+    floor.screen.unmount();
+  });
+
+  it('shows no cap and no meter for a run with no cost limit', () => {
+    const {screen} = render({cost: {...COST, maxCostUsd: null}});
+    const spend = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
+      card.textContent?.startsWith('Spend'),
     );
-    expect(cost?.textContent).toContain('—');
-    expect(cost?.textContent).toContain('Partial');
-    expect(cost?.querySelector('.vs-share')).toBeNull();
+    expect(spend?.textContent).not.toContain(' of $');
+    expect(spend?.querySelectorAll('.vs-meter')).toHaveLength(0);
     screen.unmount();
   });
 
-  it('shows no limit and no meter for a run with no cost limit', () => {
-    const {screen} = render({cost: {...COST, limitUsd: null}});
-    const cost = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
-      card.textContent?.startsWith('Cost'),
-    );
-    expect(cost?.textContent).not.toContain('of $');
-    expect(cost?.querySelectorAll('.vs-meter')).toHaveLength(0);
-    screen.unmount();
-  });
-
-  it('says the cost is being read until the host has sent it, and that it failed when it did', () => {
+  it('says the cost is being read until the host has sent it, and why it failed when it did', () => {
     const reading = render({cost: null});
-    const cost = (root: HTMLElement) =>
-      [...root.querySelectorAll('section.vs-card')].find(card =>
-        card.textContent?.startsWith('Cost'),
-      )?.textContent;
-    expect(cost(reading.screen.container)).toContain('Reading cost');
+    expect(cardText(reading.screen.container, 'Cost')).toContain('Reading cost');
     reading.screen.unmount();
     const failed = render(
       {cost: null},
-      {costFeed: {_tag: 'Failed', fault: {kind: 'Unavailable', detail: '', retryable: true}}},
+      {
+        costFeed: {
+          status: {_tag: 'Failed', fault: {kind: 'Unavailable', detail: '', retryable: true}},
+          freshness: 'unavailable',
+        },
+      },
     );
-    expect(cost(failed.screen.container)).toContain('Cost unavailable');
+    expect(cardText(failed.screen.container, 'Cost')).toContain('cannot be reached');
+    expect(failed.screen.controls('Retry cost')).toHaveLength(1);
     failed.screen.unmount();
   });
 });
@@ -422,7 +406,7 @@ describe('the report across any data', () => {
           candidates: data.candidates,
           report: data.report,
           live: data.live,
-          cost: data.priced ? COST : {...COST, totalUsd: null, lastHourUsd: null},
+          cost: data.priced ? COST : NO_PRICE,
         });
         expect(screen.text()).not.toMatch(/UNSPECIFIED|undefined|NaN|\[object|null/);
         const charts = [...screen.container.querySelectorAll('svg.vs-chart')].filter(svg =>

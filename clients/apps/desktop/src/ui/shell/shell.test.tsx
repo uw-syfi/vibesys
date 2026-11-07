@@ -74,6 +74,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
             expand: () => undefined,
           }}
           retryHost={() => undefined}
+          retryCost={() => undefined}
           route={navigation.runs}
           go={go}
         />

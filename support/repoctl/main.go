@@ -229,6 +229,10 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 	ensureHooks(root, os.Stderr)
 	runner = withRepositoryPython(runner, root, configPath)
 	switch args[0] {
+	case "gate", "test", "run-checks":
+		adoptPinnedPrograms(root, configPath, os.Stderr)
+	}
+	switch args[0] {
 	case "gate":
 		return runGate(root, configPath, g, args[1:], os.Stdout)
 	case "dev":

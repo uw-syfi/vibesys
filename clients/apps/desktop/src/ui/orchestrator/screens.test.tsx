@@ -64,8 +64,9 @@ function screen(
       nowMs={nowMs}
       freshness="live"
       staleForMs={null}
-      costFeed={{_tag: 'Live'}}
       view={view}
+      costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
+      retryCost={() => undefined}
       agentId={null}
       agentPanel={null}
       stopProgress={stopProgress}

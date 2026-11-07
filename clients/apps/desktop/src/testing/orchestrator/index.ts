@@ -8,8 +8,6 @@ export {
   methodPathOf,
 } from './recordings.js';
 export {
-  type CostSpec,
-  costFixture,
   type MeasuredOptions,
   measuredSearch,
   type ObjectiveSpec,

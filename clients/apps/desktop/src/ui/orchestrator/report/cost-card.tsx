@@ -1,106 +1,72 @@
-import {
-  Button,
-  Card,
-  Chip,
-  Meter,
-  Row,
-  ShareBar,
-  type SharePart,
-  Stack,
-  Stat,
-  Text,
-} from '@vibesys/ui';
+import {BarRows, Button, Card, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {CostCard as CostCardView, FeedStatus} from '../../../state/index.js';
-import {roleWord} from '../words.js';
-import {formatDollars} from './format.js';
+import type {CostFeedSnapshot, CostView} from '../../../state/index.js';
+import {costScreenModel, SpendCard} from '../../cost/index.js';
+import {COST_WORDS} from '../cost-words.js';
 
-/** How many types of agent get a place of their own in the palette before the series repeat. */
-const SERIES = 8;
-
-const dollars = (usd: number | null): string => (usd === null ? '—' : formatDollars(usd));
-
-function partsOf(card: CostCardView): readonly SharePart[] {
-  return card.types.flatMap((type, index) =>
-    type.costUsd === null
-      ? []
-      : [
-          {
-            key: String(type.role),
-            label: `${roleWord(type.role)} ×${type.agents}`,
-            value: type.costUsd,
-            figure: formatDollars(type.costUsd),
-            series: (index % SERIES) + 1,
-          },
-        ],
-  );
-}
-
-/** The totals: the cost against its limit, the last hour's, and what is wrong with either. */
-function Figures(props: {readonly cost: CostCardView; readonly feed: FeedStatus}): JSX.Element {
-  const {cost, feed} = props;
+/** What went wrong with the cost stream, beside the figures it last delivered, and the way to retry. */
+function FeedProblem(props: {
+  readonly feed: CostFeedSnapshot;
+  readonly retry: () => void;
+}): JSX.Element | null {
+  const {status} = props.feed;
+  if (status._tag !== 'Failed') return null;
   return (
-    <Row gap="space-5" rowGap="space-3" wrap align="end">
-      <Stat
-        label="Total"
-        value={dollars(cost.totalUsd)}
-        {...(cost.limitUsd === null ? {} : {sub: `of ${formatDollars(cost.limitUsd)}`})}
-      />
-      <Stat label="Last hour" value={dollars(cost.lastHourUsd)} unit="/h" />
-      {cost.partial ? (
-        <Chip
-          label="Partial"
-          tone="warn"
-          hint="Some turns reported no price, so the total is a floor."
-        />
-      ) : null}
-      {feed._tag === 'Failed' ? (
-        <Chip label="Stale" tone="warn" hint="The cost stream failed. What is shown is older." />
+    <Row gap="space-3" wrap>
+      <Text tone="warn" variant="small">
+        {COST_WORDS.fault(status.fault.kind)}
+      </Text>
+      {status.fault.retryable ? (
+        <Button text="Retry" label="Retry cost" variant="secondary" size="sm" press={props.retry} />
       ) : null}
     </Row>
   );
 }
 
-/** The share of the limit used, and the split by type of agent, when there is anything to draw. */
-function Shares(props: {readonly cost: CostCardView}): JSX.Element {
-  const {cost} = props;
-  const parts = partsOf(cost);
-  return (
-    <>
-      {cost.limitUsd === null || cost.totalUsd === null ? null : (
-        <Meter label="Cost against its limit" value={cost.totalUsd / cost.limitUsd} />
-      )}
-      {parts.length === 0 ? null : <ShareBar label="Cost by type of agent" parts={parts} />}
-    </>
-  );
-}
-
 /**
- * What the run has cost, as the host worked it out: the total against its limit, what the last hour
- * cost, and the split by type of agent. A price no turn reported is a dash, and a total that leaves
- * unpriced turns out says it is partial. A cost stream that cannot be read says so here and nowhere else.
+ * What the run has cost, as the host worked it out, in brief: the spend against its cap and the last
+ * hour (the Cost screen's own card), and the split by type of agent. Every figure is the host's, said
+ * in words by the Cost feature; a price no turn reported is a dash and a floor says so. The cost
+ * stream is followed while the report shows; one that cannot be read says so here, beside the figures
+ * it last delivered. The link opens the Cost screen.
  */
 export function CostCard(props: {
-  readonly cost: CostCardView | undefined;
-  readonly feed: FeedStatus;
+  readonly cost: CostView | undefined;
+  readonly feed: CostFeedSnapshot;
+  readonly retry: () => void;
   readonly open: () => void;
 }): JSX.Element {
   const {cost, feed} = props;
+  const model = cost === undefined ? undefined : costScreenModel(cost, COST_WORDS);
   return (
-    <Card section="Cost">
-      <Stack gap="space-4">
-        {cost === undefined ? (
-          <Text tone="muted">{feed._tag === 'Failed' ? 'Cost unavailable' : 'Reading cost'}</Text>
-        ) : (
-          <>
-            <Figures cost={cost} feed={feed} />
-            <Shares cost={cost} />
-          </>
-        )}
-        <Row gap="space-3" justify="end">
-          <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
-        </Row>
-      </Stack>
-    </Card>
+    <Stack gap="space-5">
+      {model === undefined ? (
+        <Card section="Cost">
+          <Stack gap="space-3">
+            {feed.status._tag === 'Failed' ? null : <Text tone="muted">Reading cost</Text>}
+            <FeedProblem feed={feed} retry={props.retry} />
+          </Stack>
+        </Card>
+      ) : (
+        <>
+          <SpendCard spend={model.spend} />
+          {model.empty ? null : (
+            <Card section="By agent type">
+              <BarRows
+                label="Cost by agent type"
+                nameHeader="Type"
+                barLabel="Share of the largest cost"
+                columns={[{header: 'Agents'}, {header: 'Turns'}, {header: 'Cost', strong: true}]}
+                rows={model.types}
+              />
+            </Card>
+          )}
+          <FeedProblem feed={feed} retry={props.retry} />
+        </>
+      )}
+      <Row gap="space-3" justify="end">
+        <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
+      </Row>
+    </Stack>
   );
 }

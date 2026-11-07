@@ -1,15 +1,13 @@
 /**
  * Everything the run report shows of one run, as one plain value of the folded state: the header's
  * facts, the lead's latest summary, the objectives with their history and bounds, the trade-off, the
- * agents by type and the cost card. A pure function of the state and the time the caller passes.
+ * and the agents by type. A pure function of the state and the time the caller passes.
  */
 import type {RunStatus, RunStopReason, SearchState} from '@vibesys/orchestrator-proto';
 import {oneofIs} from '@vibesys/orchestrator-proto';
-import type {CostView} from '../cost.js';
 import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
 import {type AgentsStrip, agentsStrip} from './agents-strip.js';
-import {type CostCard, costCard} from './cost-card.js';
 import {type ObjectiveReport, objectiveReports} from './objectives.js';
 import {latestReport, type SummaryView} from './summary.js';
 import {type TradeoffReport, tradeoffReport} from './tradeoff.js';
@@ -39,8 +37,6 @@ export interface RunReport {
   readonly objectives: readonly ObjectiveReport[];
   readonly tradeoff: TradeoffReport | undefined;
   readonly agents: AgentsStrip;
-  /** Undefined until the host has sent a cost view for the run. */
-  readonly cost: CostCard | undefined;
   readonly search: SearchReading;
   /** The span of the charts' time axis: the run's start to its end, or to now while it lives. */
   readonly span: {readonly fromMs: number; readonly toMs: number};
@@ -61,7 +57,6 @@ export function runReport(
   state: OrchestratorState,
   runId: string,
   nowMs: number,
-  cost: CostView | undefined = state.costs[runId],
 ): RunReport | undefined {
   const run = state.runs[runId];
   if (run === undefined) return undefined;
@@ -83,7 +78,6 @@ export function runReport(
     objectives: search === undefined ? [] : objectiveReports(search),
     tradeoff: search === undefined ? undefined : tradeoffReport(search),
     agents: agentsStrip(state, runId),
-    cost: cost === undefined ? undefined : costCard(cost),
     search: searchReading(search),
     span: {fromMs: startedMs, toMs},
     truncated: search?.truncated ?? false,

@@ -1,6 +1,12 @@
 import {ChartColumns, Stack} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import type {CommandProgress, FeedStatus, Freshness, RunReport} from '../../../state/index.js';
+import type {
+  CommandProgress,
+  CostFeedSnapshot,
+  CostView,
+  Freshness,
+  RunReport,
+} from '../../../state/index.js';
 import {AgentsCard} from './agents-card.js';
 import {CostCard} from './cost-card.js';
 import {LeadSummary} from './lead-summary.js';
@@ -22,8 +28,10 @@ export function ReportScreen(props: {
   readonly freshness: Freshness;
   /** How long what is shown has been out of date; null while it is current. */
   readonly staleForMs: number | null;
-  /** The state of the cost stream the report follows while it is shown. */
-  readonly costFeed: FeedStatus;
+  /** The run's cost, as the host last sent it, and how its stream is going. */
+  readonly cost: CostView | undefined;
+  readonly costFeed: CostFeedSnapshot;
+  readonly retryCost: () => void;
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
@@ -60,7 +68,12 @@ export function ReportScreen(props: {
       {props.ideas ?? null}
       <ChartColumns>
         <AgentsCard agents={report.agents} open={props.openAgents} />
-        <CostCard cost={report.cost} feed={props.costFeed} open={props.openCost} />
+        <CostCard
+          cost={props.cost}
+          feed={props.costFeed}
+          retry={props.retryCost}
+          open={props.openCost}
+        />
       </ChartColumns>
     </Stack>
   );

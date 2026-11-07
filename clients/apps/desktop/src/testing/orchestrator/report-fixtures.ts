@@ -8,20 +8,15 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
-  type AgentRole,
   Delivery,
   Direction,
   JobState,
   MessageSchema,
   ReportKind,
-  RoleCostSchema,
   RunChangeSchema,
-  type RunCost,
-  RunCostSchema,
   type SearchState,
   SearchStateSchema,
   UnreadableReason,
-  UsageSchema,
 } from '@vibesys/orchestrator-proto';
 import {Rng} from './log.js';
 import type {Scenario} from './scenario.js';
@@ -298,54 +293,4 @@ export function withReport(
     body: {case: 'message', value: message},
   });
   return {...scenario, changes: [...scenario.changes, change]};
-}
-
-export interface CostSpec {
-  readonly asOfMs: number;
-  readonly startMs: number;
-  /** Null for a run no turn of which is priced. */
-  readonly totalUsd: number | null;
-  readonly limitUsd: number | null;
-  readonly lastHourUsd: number | null;
-  readonly unpricedTurns?: number;
-  readonly types: readonly {
-    readonly role: AgentRole;
-    readonly agents: number;
-    readonly costUsd: number | null;
-  }[];
-}
-
-/** The cost view the host would send: every number is the test's, and the Fake adds up nothing. */
-export function costFixture(runId: string, spec: CostSpec): RunCost {
-  const unpriced = spec.unpricedTurns ?? 0;
-  const turns = Math.max(unpriced, 12);
-  return create(RunCostSchema, {
-    runId,
-    sequence: 3n,
-    asOf: timestampFromMs(spec.asOfMs),
-    total: create(UsageSchema, {
-      outputTokens: 9000n,
-      ...(spec.totalUsd === null ? {} : {costUsd: spec.totalUsd}),
-    }),
-    ...(spec.limitUsd === null ? {} : {maxCostUsd: spec.limitUsd}),
-    turns,
-    unpricedTurns: unpriced,
-    roles: spec.types.map(type =>
-      create(RoleCostSchema, {
-        role: type.role,
-        agents: type.agents,
-        turns: type.agents,
-        usage: create(UsageSchema, {
-          outputTokens: 100n,
-          ...(type.costUsd === null ? {} : {costUsd: type.costUsd}),
-        }),
-      }),
-    ),
-    series: {
-      start: timestampFromMs(spec.startMs),
-      width: {seconds: 3600n, nanos: 0},
-      buckets: [{start: timestampFromMs(spec.startMs), costUsd: spec.totalUsd ?? 0}],
-    },
-    ...(spec.lastHourUsd === null ? {} : {lastHourUsd: spec.lastHourUsd}),
-  });
 }

@@ -361,10 +361,9 @@ describe('the run report', () => {
     );
   });
 
-  it('says whether the search facts are being read, and carries the cost only once the host sent it', () => {
+  it('says whether the search facts are being read', () => {
     const none = runReport(stateOf(), 'r', 20_000);
     expect(none?.search).toEqual({state: 'none'});
-    expect(none?.cost).toBeUndefined();
     const live = runReport(
       {
         ...stateOf(),

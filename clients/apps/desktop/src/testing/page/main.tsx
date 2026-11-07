@@ -2,9 +2,12 @@
  * The window over a fake daemon, as a browser page: for looking at the screens and driving them
  * with Playwright without Electron. Built by `vite build --mode fixture` into `dist/fixture`.
  * `?scenario=<seed>-<subagents>-<live|done>[-tree[-<depth>]]` picks the run (`tree` has agents spawn
- * each other and uses every kind of tool call; `depth` makes histories longer); one `host=<key>` per
- * host to show (this machine when none); `appearance=<mode>-<light theme>-<dark theme>` sets what is
- * saved. Saved appearance lives in memory, so a reload starts again from the address.
+ * each other and uses every kind of tool call; `depth` makes histories longer);
+ * `cost=<priced|ended|none|empty|long|old|absent>` picks the cost the host serves for it (priced and
+ * unpriced turns when absent from the address; `old` is a host without the cost stream, `absent`
+ * one that has no view for the run); one `host=<key>` per host to show (this machine when none);
+ * `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
+ * memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
@@ -16,6 +19,7 @@ import * as Layer from 'effect/Layer';
 import * as Scope from 'effect/Scope';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {RpcStatus} from '../../core/errors.js';
 import {
   Ids,
   makeAppearance,
@@ -23,6 +27,7 @@ import {
   makeNavigation,
   preferencesOver,
 } from '../../core/index.js';
+import type {CostView} from '../../state/index.js';
 import {hostsOfAddress} from '../../ui/address.js';
 import type {ConnectedHost} from '../../ui/orchestrator/connected.js';
 import {
@@ -31,8 +36,16 @@ import {
   ThemeDocumentLive,
 } from '../../ui/shell/browser-layers.js';
 import {ConnectedShell} from '../../ui/shell/connected.js';
-import {FakeDaemon, generateScenario} from '../orchestrator/index.js';
+import {
+  ENDED_RUN,
+  LONG_NAMES,
+  NO_PRICES,
+  NO_TURNS,
+  PRICED_AND_UNPRICED,
+} from '../orchestrator/cost-views.js';
+import {FakeDaemon, generateScenario, methodPathOf} from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
+import {servedCost} from '../orchestrator/served-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
 import {makeFakeTransport} from '../transport/index.js';
 
@@ -60,13 +73,32 @@ function savedAppearance(query: URLSearchParams): Appearance | undefined {
   return parseAppearance({mode, light, dark}, 'appearance');
 }
 
+const COSTS: Readonly<Record<string, CostView>> = {
+  priced: PRICED_AND_UNPRICED,
+  ended: ENDED_RUN,
+  none: NO_PRICES,
+  empty: NO_TURNS,
+  long: LONG_NAMES,
+};
+
 const query = new URLSearchParams(window.location.search);
+const scenario = scenarioOf(window.location.search);
 const daemon = new FakeDaemon({
-  ...scenarioOf(window.location.search),
+  ...scenario,
   search: true,
   searchStale: query.has('stale'),
   searchTruncated: query.has('truncated'),
 });
+const cost = COSTS[query.get('cost') ?? 'priced'];
+if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
+const served = daemonRecording(daemon);
+/** A host that predates the cost stream answers every other method and not this one. */
+const withoutCostStream = {
+  respond: (...call: Parameters<typeof served.respond>) =>
+    call[0].method === methodPathOf('WatchRunCost')
+      ? [{end: {message: 'no such method', status: RpcStatus.UNIMPLEMENTED}}]
+      : served.respond(...call),
+};
 const fake = makeFakeTransport(
   query.has('login-failed')
     ? {
@@ -74,7 +106,9 @@ const fake = makeFakeTransport(
           {end: {linkProblem: DesktopLinkProblem.AUTH, message: 'Permission denied (publickey).'}},
         ],
       }
-    : daemonRecording(daemon),
+    : query.get('cost') === 'old'
+      ? withoutCostStream
+      : served,
 );
 const saved = savedAppearance(query);
 const preferences = makeFakePreferencesBridge(saved === undefined ? {} : {saved});

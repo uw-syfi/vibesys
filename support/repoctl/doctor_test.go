@@ -119,3 +119,49 @@ func TestARefusedPushPointsAtTheDoctorAndAPassingOneDoesNot(t *testing.T) {
 		t.Fatalf("no hint source printed %q", out.String())
 	}
 }
+
+const pinnedBunPolicy = `
+[hooks]
+path = ".githooks"
+[temp]
+max_path_length = 64
+[[programs]]
+name = "bun"
+exact_from = { file = "pin.py", pattern = 'BUN = "([0-9.]+)"' }
+cache_directories = ["$HOME/.cache/repo/bun-{version}"]
+fetch = ["python3", "fetch.py", "--output", "{cache}/bun"]
+`
+
+// The gate and the tests run the pinned program from the user cache when PATH resolves another
+// version, so no agent has to skip the gate or configure its shell first.
+func TestARunAdoptsTheCachedPinnedProgramThatPathMisses(t *testing.T) {
+	cfg, err := doctor.ParseConfig("test", pinnedBunPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := doctorTestHost()
+	h.Env["HOME"] = "/home/dev"
+	h.Env["PATH"] = "/old/bin:/usr/bin"
+	h.Files[doctorTestRoot+"/pin.py"] = `BUN = "1.4.2"`
+	h.Files["/old/bin/bun"] = ""
+	h.Versions["/old/bin/bun"] = "1.3.9"
+	run := func() (map[string]string, string) {
+		env := map[string]string{"PATH": h.Env["PATH"]}
+		var out bytes.Buffer
+		usePinnedPrograms(cfg, doctorTestRoot, h, func(k string) string { return env[k] }, func(k, v string) error { env[k] = v; return nil }, &out)
+		return env, out.String()
+	}
+	if env, said := run(); env["PATH"] != "/old/bin:/usr/bin" || said != "" {
+		t.Fatalf("nothing is cached, PATH must stay: %v %q", env, said)
+	}
+	h.Files["/home/dev/.cache/repo/bun-1.4.2/bun"] = ""
+	h.Versions["/home/dev/.cache/repo/bun-1.4.2/bun"] = "1.4.2"
+	env, said := run()
+	if env["PATH"] != "/home/dev/.cache/repo/bun-1.4.2:/old/bin:/usr/bin" || !strings.Contains(said, "/home/dev/.cache/repo/bun-1.4.2") {
+		t.Fatalf("got %v %q", env, said)
+	}
+	h.Env["PATH"] = env["PATH"]
+	if env, said := run(); env["PATH"] != h.Env["PATH"] || said != "" {
+		t.Fatalf("PATH already right, must not change: %v %q", env, said)
+	}
+}

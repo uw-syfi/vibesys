@@ -40,6 +40,16 @@ The [coding guide](coding-best-practices.md) describes the enforced limits.
 Run the repository doctor's environment check before the first check on a
 machine. It checks tool versions, dependencies, temporary storage and hook setup.
 Apply its reported environment exports in the same shell that runs later checks.
+The start of a session is one line, and it is safe to repeat:
+
+```bash
+./support/repoctl/repoctl doctor --fix && eval "$(./support/repoctl/repoctl doctor --env)"
+```
+
+`doctor --fix` fetches the pinned Bun (checksum verified, by `packaging/fetch_bun.py`)
+into `$XDG_CACHE_HOME/vibesys/bun-<version>/`, or `~/.cache/vibesys/bun-<version>/`, and
+skips the fetch when that copy exists. The gate and `repoctl test` use that copy on their
+own when PATH resolves another Bun, so a wrong Bun is never a reason to skip the gate.
 `doctor --fix` also removes a stray `.venv` left inside an example. `repoctl test`
 runs repository Python scripts with the repository's interpreter whatever PATH
 holds (it stops at once, naming the fix, when the machine has none), runs every
@@ -131,8 +141,9 @@ repository desktop verification skill owns their review workflow.
 
 ### Pre-push gate
 
-Every push runs the selected fast checks through the tracked hook. Verify that
-the hook is installed; the doctor reports a different hook configuration.
+Every push runs the selected fast checks through the tracked hook, and a push that
+changes a `.proto` file or `buf.yaml` also runs `buf lint` and the breaking-change check.
+Verify that the hook is installed; the doctor reports a different hook configuration.
 Repair setup failures and rerun the gate before pushing. CI and the merge queue
 remain authoritative for checks that need their infrastructure.
 

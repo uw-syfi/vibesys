@@ -31,6 +31,8 @@ fix = ["uv", "sync"]
 [[programs]]
 name = "bun"
 exact_from = { file = "pin.py", pattern = 'BUN = "([0-9.]+)"' }
+cache_directories = ["$XDG_CACHE_HOME/repo/bun-{version}", "$HOME/.cache/repo/bun-{version}"]
+fetch = ["python3", "fetch.py", "--output", "{cache}/bun"]
 hint = "install the pinned bun"
 
 [[programs]]
@@ -77,6 +79,7 @@ func goodHost() *doctor.FakeHost {
 	h.Env["PATH"] = "/usr/bin:/opt/bun/bin"
 	h.Env["TMPDIR"] = "/scratch/tmp"
 	h.Env["GOFLAGS"] = "-buildvcs=false"
+	h.Env["HOME"] = "/home/dev"
 	h.Linked = true
 	h.Mounts["/"] = doctor.Filesystem{Type: "ext4", Device: 1}
 	h.Files[root+"/pyproject.toml"] = `requires-python = ">=3.12"`
@@ -158,12 +161,168 @@ func TestOnlyTheFirstCopyOnPathCounts(t *testing.T) {
 	}
 }
 
-func TestAMissingPinnedProgramGetsItsHint(t *testing.T) {
+const cachedBun = "/home/dev/.cache/repo/bun-1.4.2/bun"
+
+func fetchAction(dir string) doctor.Action {
+	return doctor.Action{Kind: doctor.ActionRun, Dir: root, Argv: []string{"python3", "fetch.py", "--output", dir + "/bun"}}
+}
+
+func TestAMissingPinnedProgramIsFetchedIntoTheUserCache(t *testing.T) {
 	h := goodHost()
 	delete(h.Files, "/opt/bun/bin/bun")
 	f := find(t, evaluate(t, h), "bun")
-	if f.Status != doctor.Fail || !strings.Contains(f.Fix, "install the pinned bun") {
+	if f.Status != doctor.Fail || len(f.Actions) != 1 || fmt.Sprint(f.Actions[0]) != fmt.Sprint(fetchAction("/home/dev/.cache/repo/bun-1.4.2")) {
 		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Fix, "fetch.py") || !strings.Contains(f.Fix, "doctor --env") {
+		t.Fatalf("the fix should show the fetch and the PATH step: %s", f.Fix)
+	}
+}
+
+func TestAWrongPinnedVersionWithNoCachedCopyIsFetched(t *testing.T) {
+	h := goodHost()
+	h.Env["PATH"] = "/old/bin"
+	h.Files["/old/bin/bun"] = ""
+	h.Versions["/old/bin/bun"] = "1.3.9"
+	f := find(t, evaluate(t, h), "bun")
+	if f.Status != doctor.Fail || len(f.Actions) != 1 || !strings.Contains(f.Message, "1.3.9") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestACachedPinnedCopyIsPutFirstOnPathAndNotFetchedAgain(t *testing.T) {
+	h := goodHost()
+	h.Env["PATH"] = "/old/bin"
+	h.Files["/old/bin/bun"] = ""
+	h.Versions["/old/bin/bun"] = "1.3.9"
+	h.Files[cachedBun] = ""
+	h.Versions[cachedBun] = "1.4.2"
+	f := find(t, evaluate(t, h), "bun")
+	want := doctor.Export{Name: "PATH", Value: "/home/dev/.cache/repo/bun-1.4.2", Prepend: true}
+	if f.Status != doctor.Fail || len(f.Actions) != 0 || len(f.Exports) != 1 || f.Exports[0] != want {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestAStaleOrBrokenCachedCopyIsFetchedAgain(t *testing.T) {
+	for _, printed := range []string{"1.3.9", ""} {
+		h := goodHost()
+		h.Env["PATH"] = "/old/bin"
+		h.Files[cachedBun] = ""
+		h.Versions[cachedBun] = printed
+		f := find(t, evaluate(t, h), "bun")
+		if f.Status != doctor.Fail || len(f.Actions) != 1 || len(f.Exports) != 0 {
+			t.Fatalf("cached copy printing %q: got %+v", printed, f)
+		}
+	}
+}
+
+func TestTheCacheFollowsXDGCacheHomeButEveryCacheIsSearched(t *testing.T) {
+	h := goodHost()
+	delete(h.Files, "/opt/bun/bin/bun")
+	h.Env["XDG_CACHE_HOME"] = "/xdg"
+	f := find(t, evaluate(t, h), "bun")
+	if len(f.Actions) != 1 || fmt.Sprint(f.Actions[0]) != fmt.Sprint(fetchAction("/xdg/repo/bun-1.4.2")) {
+		t.Fatalf("fetch should install under XDG_CACHE_HOME: %+v", f)
+	}
+	h.Files[cachedBun] = ""
+	h.Versions[cachedBun] = "1.4.2"
+	f = find(t, evaluate(t, h), "bun")
+	if len(f.Actions) != 0 || len(f.Exports) != 1 || f.Exports[0].Value != "/home/dev/.cache/repo/bun-1.4.2" {
+		t.Fatalf("a copy in the home cache should be found: %+v", f)
+	}
+}
+
+func TestWithNoCacheLocationNothingIsFetched(t *testing.T) {
+	h := goodHost()
+	delete(h.Files, "/opt/bun/bin/bun")
+	delete(h.Env, "HOME")
+	f := find(t, evaluate(t, h), "bun")
+	if f.Status != doctor.Fail || len(f.Actions) != 0 || !strings.Contains(f.Fix, "install the pinned bun") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func fetchInstalls(h *doctor.FakeHost, a doctor.Action) {
+	if a.Kind == doctor.ActionRun && a.Argv[0] == "python3" {
+		dir := strings.TrimSuffix(a.Argv[len(a.Argv)-1], "/bun")
+		h.Files[dir+"/bun"] = ""
+		h.Versions[dir+"/bun"] = "1.4.2"
+	}
+}
+
+func TestFixFetchesTheWrongBunOnceThenSucceedsReadyForTheEval(t *testing.T) {
+	cfg := config(t)
+	h := goodHost()
+	h.Env["PATH"] = "/old/bin:/usr/bin"
+	h.Files["/old/bin/bun"] = ""
+	h.Versions["/old/bin/bun"] = "1.3.9"
+	h.OnExecute = fetchInstalls
+	var out bytes.Buffer
+	// The PATH change is left to the shell, yet the run succeeds so `--fix && eval` continues.
+	if err := doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if len(h.Executed) != 1 || h.Executed[0].Argv[0] != "python3" {
+		t.Fatalf("executed %+v", h.Executed)
+	}
+	var env bytes.Buffer
+	if err := doctor.Run(cfg, root, h, doctor.Options{Env: true}, &env); err != nil {
+		t.Fatal(err)
+	}
+	if want := "export PATH='/home/dev/.cache/repo/bun-1.4.2'\"${PATH:+:$PATH}\"\n"; !strings.Contains(env.String(), want) {
+		t.Fatalf("--env %q lacks %q", env.String(), want)
+	}
+	h.Executed = nil
+	if err := doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &out); err != nil || len(h.Executed) != 0 {
+		t.Fatalf("a second fix fetched again: %v %+v", err, h.Executed)
+	}
+}
+
+func TestFixStillFailsWhenTheFetchFailsItsChecksum(t *testing.T) {
+	cfg := config(t)
+	h := goodHost()
+	delete(h.Files, "/opt/bun/bin/bun")
+	h.RunFails = errors.New("Bun archive SHA-256 mismatch")
+	var out bytes.Buffer
+	err := doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &out)
+	if err == nil || !strings.Contains(err.Error(), "repair bun") || !strings.Contains(err.Error(), "SHA-256") {
+		t.Fatalf("got %v", err)
+	}
+	if h.Exists(cachedBun) {
+		t.Fatal("a failed fetch left a copy to be trusted")
+	}
+	if f := find(t, evaluate(t, h), "bun"); f.Status != doctor.Fail || len(f.Exports) != 0 {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestPinnedProgramExportsAreOnlyThePinnedCopiesThatPathMisses(t *testing.T) {
+	cfg := config(t)
+	exports := func(h *doctor.FakeHost) []doctor.Export { return doctor.PinnedProgramExports(cfg, root, h) }
+	if got := exports(goodHost()); len(got) != 0 {
+		t.Fatalf("a machine in order: %v", got)
+	}
+	h := goodHost()
+	h.Env["PATH"] = "/old/bin"
+	h.Files["/old/bin/bun"] = ""
+	h.Versions["/old/bin/bun"] = "1.3.9"
+	if got := exports(h); len(got) != 0 {
+		t.Fatalf("no pinned copy anywhere, nothing to adopt: %v", got)
+	}
+	h.Files[cachedBun] = ""
+	h.Versions[cachedBun] = "1.4.2"
+	want := doctor.Export{Name: "PATH", Value: "/home/dev/.cache/repo/bun-1.4.2", Prepend: true}
+	if got := exports(h); len(got) != 1 || got[0] != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	// A minimum-version program (python3) and an unpinned one (buf) in the repository are for the
+	// doctor to report: the gate does not reorder PATH for them.
+	h.Files[root+"/.venv/bin/python3"] = ""
+	h.Versions[root+"/.venv/bin/python3"] = "Python 3.13.0"
+	h.Versions["/usr/bin/python3"] = "Python 3.9.1"
+	if got := exports(h); len(got) != 1 {
+		t.Fatalf("got %v", got)
 	}
 }
 
@@ -508,6 +667,18 @@ func randomHost(seed int64) *doctor.FakeHost {
 	if r.Intn(2) == 0 {
 		delete(h.Files, "/opt/bun/bin/bun")
 	}
+	switch r.Intn(4) {
+	case 0:
+		h.Files[cachedBun] = ""
+		h.Versions[cachedBun] = pick("1.3.9", "1.4.2", "")
+	case 1:
+		h.Files["/xdg/repo/bun-1.4.2/bun"] = ""
+		h.Versions["/xdg/repo/bun-1.4.2/bun"] = "1.4.2"
+		h.Env["XDG_CACHE_HOME"] = "/xdg"
+	}
+	if r.Intn(5) == 0 {
+		delete(h.Env, "HOME")
+	}
 	switch r.Intn(3) {
 	case 0:
 		delete(h.Files, root+"/clients/node_modules/.modules.yaml")
@@ -595,6 +766,8 @@ func TestFixNeverLeavesMoreFailuresThanItFound(t *testing.T) {
 			switch {
 			case a.Kind == doctor.ActionRun && a.Argv[0] == "pnpm":
 				h.Files[root+"/clients/node_modules/.modules.yaml"] = ""
+			case a.Kind == doctor.ActionRun && a.Argv[0] == "python3":
+				fetchInstalls(h, a)
 			case a.Kind == doctor.ActionRun && a.Argv[0] == "uv":
 				h.Files[root+"/.venv/bin/python3"] = ""
 				h.Versions[root+"/.venv/bin/python3"] = "Python 3.12.3"
@@ -605,6 +778,27 @@ func TestFixNeverLeavesMoreFailuresThanItFound(t *testing.T) {
 		_ = doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &bytes.Buffer{})
 		after := doctor.Failed(doctor.Evaluate(cfg, doctor.Gather(cfg, root, h)))
 		return after <= before
+	}, &quick.Config{MaxCount: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFixThenTheExportsAlwaysLeaveThePinnedBunResolvable(t *testing.T) {
+	cfg := config(t)
+	err := quick.Check(func(seed int64) bool {
+		h := randomHost(seed)
+		h.OnExecute = func(h *doctor.FakeHost, a doctor.Action) { fetchInstalls(h, a) }
+		if h.Env["HOME"] == "" && h.Env["XDG_CACHE_HOME"] == "" {
+			return true
+		}
+		_ = doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &bytes.Buffer{})
+		applyExports(h.Env, doctor.Exports(doctor.Evaluate(cfg, doctor.Gather(cfg, root, h))))
+		if f := find(t, doctor.Evaluate(cfg, doctor.Gather(cfg, root, h)), "bun"); f.Status != doctor.Pass {
+			t.Logf("seed %d: %+v", seed, f)
+			return false
+		}
+		return true
 	}, &quick.Config{MaxCount: 300})
 	if err != nil {
 		t.Fatal(err)

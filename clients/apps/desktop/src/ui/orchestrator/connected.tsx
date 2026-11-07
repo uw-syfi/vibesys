@@ -11,7 +11,15 @@ import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
 import type {HistoryStatus, HostSession, Intent} from '../../core/index.js';
-import type {CommandProgress, FeedStatus, Route, RouteAction} from '../../state/index.js';
+import type {
+  CommandProgress,
+  CostFeedSnapshot,
+  CostTarget,
+  FeedStatus,
+  Route,
+  RouteAction,
+} from '../../state/index.js';
+import {costTarget} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
 import {sendIntent, startIntent, stopIntent} from './intents.js';
@@ -57,7 +65,7 @@ const watchAgent = (
       get(found.session.agents.watch(agentId));
   });
 
-/** One run's cost stream on its host, followed while this is mounted (while the report shows). */
+/** One run's cost stream on its host, followed while this is mounted. */
 const watchCost = (
   hosts: readonly ConnectedHost[],
   host: string | undefined,
@@ -74,7 +82,7 @@ const snapshots = (
   issues: Issues,
   openHost: string | undefined,
   openAgent: string | null | undefined,
-  costRun: string | undefined,
+  cost: CostTarget | null,
 ): Atom.Atom<{
   readonly hosts: readonly HostSnapshot[];
   readonly progress: AppCommandsProgress;
@@ -106,8 +114,13 @@ const snapshots = (
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
             : {},
         costFeeds:
-          openHost === key && costRun !== undefined
-            ? {[costRun]: get(session.costs.status(costRun))}
+          cost?.host === key
+            ? {
+                [cost.runId]: {
+                  status: get(session.costs.status(cost.runId)),
+                  freshness: get(session.costs.freshness(cost.runId)),
+                } satisfies CostFeedSnapshot,
+              }
             : {},
         history:
           openHost === key && openAgent !== null && openAgent !== undefined
@@ -142,15 +155,24 @@ export function ConnectedApp(props: {
   const {hosts, dispatch, route, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
-  // The cost is followed only while the report that shows it is on screen.
-  const costRun = route.screen === 'run' && route.view === 'report' ? route.runId : undefined;
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
-  useAtomMount(useMemo(() => watchCost(hosts, openHost, costRun), [hosts, openHost, costRun]));
+  // The cost stream is open only while the Cost view shows: leaving it closes the stream.
+  const cost = costTarget(route);
+  const costHost = cost?.host;
+  const costRun = cost?.runId;
+  useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
   const clock = useAtomValue(nowMs);
   const view = useAtomValue(
     useMemo(
-      () => snapshots(hosts, issues, openHost, openAgent, costRun),
-      [hosts, issues, openHost, openAgent, costRun],
+      () =>
+        snapshots(
+          hosts,
+          issues,
+          openHost,
+          openAgent,
+          costHost === undefined || costRun === undefined ? null : {host: costHost, runId: costRun},
+        ),
+      [hosts, issues, openHost, openAgent, costHost, costRun],
     ),
   );
   const sessionOf = (host: string): HostSession | undefined =>
@@ -203,6 +225,10 @@ export function ConnectedApp(props: {
       commands={commands}
       route={route}
       go={go}
+      retryCost={(host, runId) => {
+        const session = sessionOf(host);
+        if (session !== undefined) dispatch(session.costs.retry(runId), () => undefined);
+      }}
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;

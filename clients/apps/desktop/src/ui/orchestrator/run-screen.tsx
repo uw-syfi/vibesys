@@ -16,7 +16,7 @@ import type {JSX, ReactNode} from 'react';
 import {
   agentTree,
   type CommandProgress,
-  type FeedStatus,
+  type CostFeedSnapshot,
   type Freshness,
   flattenTree,
   type OrchestratorState,
@@ -24,8 +24,9 @@ import {
   runReport,
 } from '../../state/index.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
+import {CostScreen} from '../cost/index.js';
 import {CommandLine} from './command-line.js';
-import {CostView} from './cost-view.js';
+import {COST_WORDS} from './cost-words.js';
 import {HandoffCards} from './handoff-cards.js';
 import {agentNames} from './names.js';
 import {ReportScreen} from './report/report-screen.js';
@@ -92,9 +93,10 @@ interface RunScreenProps {
   readonly freshness: Freshness;
   /** How long what is shown has been out of date, from the host's freshness; null while it is current. */
   readonly staleForMs: number | null;
-  /** The state of the cost stream, which is followed while the report shows. */
-  readonly costFeed: FeedStatus;
   readonly view: RunView;
+  /** How the run's cost stream is going; it is open while the report or the Cost view is showing. */
+  readonly costFeed: CostFeedSnapshot;
+  readonly retryCost: () => void;
   readonly agentId: string | null;
   readonly agentPanel: ReactNode;
   /** What the last press of Stop came to, or undefined before any. */
@@ -123,7 +125,9 @@ export function RunScreen(props: RunScreenProps): JSX.Element {
       nowMs={props.nowMs}
       freshness={props.freshness}
       staleForMs={props.staleForMs}
+      cost={props.state.costs[props.runId]}
       costFeed={props.costFeed}
+      retryCost={props.retryCost}
       stopProgress={props.stopProgress}
       stop={props.stop}
       retryStop={props.retryStop}
@@ -135,6 +139,39 @@ export function RunScreen(props: RunScreenProps): JSX.Element {
   );
 }
 
+/** What the chosen view of the run shows: the timeline, the agents, the cost or the handoffs. */
+function ViewBody(props: RunScreenProps & {readonly over: boolean}): JSX.Element {
+  return props.view === 'timeline' || props.view === 'report' ? (
+    <TimelineView
+      state={props.state}
+      runId={props.runId}
+      nowMs={props.nowMs}
+      agentId={props.agentId}
+      pick={props.pick}
+    />
+  ) : props.view === 'agents' ? (
+    <AgentsScreen
+      state={props.state}
+      runId={props.runId}
+      host={props.host}
+      nowMs={props.nowMs}
+      selected={props.agentId}
+      open={props.pick}
+    />
+  ) : props.view === 'cost' ? (
+    <CostScreen
+      view={props.state.costs[props.runId]}
+      freshness={props.costFeed.freshness}
+      status={props.costFeed.status}
+      runOver={props.over}
+      words={COST_WORDS}
+      retry={props.retryCost}
+    />
+  ) : (
+    <HandoffCards state={props.state} runId={props.runId} />
+  );
+}
+
 /** A screen of the run that is not its report: its agents, its cost, its handoffs. */
 function DrillDown(props: RunScreenProps): JSX.Element {
   const run = props.state.runs[props.runId];
@@ -142,29 +179,9 @@ function DrillDown(props: RunScreenProps): JSX.Element {
   const search = props.state.searches[props.runId];
   const status = runWord(run.status);
   const stoppable = run.status === RunStatus.STARTING || run.status === RunStatus.RUNNING;
-  const body =
-    props.view === 'timeline' || props.view === 'report' ? (
-      <TimelineView
-        state={props.state}
-        runId={props.runId}
-        nowMs={props.nowMs}
-        agentId={props.agentId}
-        pick={props.pick}
-      />
-    ) : props.view === 'agents' ? (
-      <AgentsScreen
-        state={props.state}
-        runId={props.runId}
-        host={props.host}
-        nowMs={props.nowMs}
-        selected={props.agentId}
-        open={props.pick}
-      />
-    ) : props.view === 'cost' ? (
-      <CostView state={props.state} runId={props.runId} />
-    ) : (
-      <HandoffCards state={props.state} runId={props.runId} />
-    );
+  const body = (
+    <ViewBody {...props} over={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED} />
+  );
   return (
     <Stack gap="space-4">
       <Row gap="space-3" wrap>
