@@ -235,7 +235,9 @@ describe('the Start run form’s refusal', () => {
     const {screen} = open(HOSTS, {_tag: 'Refused', receipt} as CommandProgress);
     screen.press(screen.control('New run'));
     const text = screen.text();
-    expect(text).toContain('Start: Model model-x is not allowed. Allowed: model-a, model-b.');
+    expect(text).toContain(
+      'Start refused \u00b7 Model model-x not allowed \u00b7 allowed: model-a, model-b',
+    );
     screen.unmount();
   });
 });
