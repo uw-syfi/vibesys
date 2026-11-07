@@ -34,7 +34,7 @@ function gainHint(gains: readonly GainView[], units: ReadonlyMap<string, string 
   return gains
     .map(
       gain =>
-        `${gain.metric} ${formatGain(gain.ratio)} (${withUnit(formatExact(gain.bestValue), units.get(gain.metric) ?? null)} against ${formatExact(gain.baselineValue)})`,
+        `${gain.metric} ${formatGain(gain.ratio)} (${withUnit(formatExact(gain.bestValue), units.get(gain.metric) ?? null)} against ${withUnit(formatExact(gain.baselineValue), units.get(gain.metric) ?? null)})`,
     )
     .join('\n');
 }

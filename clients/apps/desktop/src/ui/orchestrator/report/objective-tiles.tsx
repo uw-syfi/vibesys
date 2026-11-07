@@ -1,3 +1,4 @@
+import {BoundUnitCheck} from '@vibesys/orchestrator-proto';
 import {Meter, MetricTile, MetricTiles} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {ObjectiveReport} from '../../../state/index.js';
@@ -35,6 +36,12 @@ export function ObjectiveTiles(props: {
         const value = objective.bestValue;
         const percent = objective.bestPercentOfBound;
         const hint = hintOf(objective);
+        const mismatch = objective.boundUnitCheck === BoundUnitCheck.MISMATCH;
+        const detail = mismatch
+          ? `${objective.unit ?? '?'} vs bound ${objective.boundUnit ?? '?'}`
+          : percent === undefined
+            ? ' '
+            : `${Math.round(percent)}% of bound${objective.boundUnitCheck === BoundUnitCheck.UNKNOWN ? ' · unverified' : ''}`;
         return (
           <MetricTile
             key={objective.name}
@@ -42,7 +49,7 @@ export function ObjectiveTiles(props: {
             figure={value === undefined ? '—' : formatFigure(value)}
             {...(objective.unit === null ? {} : {note: objective.unit})}
             tone={value === undefined ? 'muted' : 'ok'}
-            detail={percent === undefined ? ' ' : `${Math.round(percent)}% of bound`}
+            detail={detail}
             {...(hint === undefined ? {} : {hint})}
             {...(percent === undefined
               ? {}

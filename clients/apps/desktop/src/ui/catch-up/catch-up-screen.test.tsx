@@ -111,7 +111,7 @@ describe('the catch-up page of a live run', () => {
       expect(text).toContain('Writing…');
       expect(text).toContain('Since ');
       // The tiles say what the host counted, never a computed figure.
-      for (const word of ['Best', 'throughput', '1.84', '2.31', 'p99 latency', '118']) {
+      for (const word of ['Best', 'throughput', '1.84', '2.31', 'tok/s', 'p99 latency', '118']) {
         expect(text).toContain(word);
       }
       expect(text).toMatch(/Created\s*2/);

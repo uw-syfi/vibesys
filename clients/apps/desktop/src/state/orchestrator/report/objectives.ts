@@ -6,7 +6,12 @@
  * tiles show (best, head, unit, percents) is the objective's served standing, so this only changes
  * shapes (bigints and timestamps become numbers) and joins what one objective has under its name.
  */
-import {Direction, type ObjectiveStanding, type SearchState} from '@vibesys/orchestrator-proto';
+import {
+  BoundUnitCheck,
+  Direction,
+  type ObjectiveStanding,
+  type SearchState,
+} from '@vibesys/orchestrator-proto';
 import {type ObjectiveBoundsView, objectiveBounds} from '../search-views.js';
 import {ms} from '../time.js';
 
@@ -45,6 +50,10 @@ export interface ObjectiveReport {
   /** How close the best measured value (`best`) is to the standing bound, as the host worked it out. */
   readonly bestPercentOfBound: number | undefined;
   readonly bound: ObjectiveBoundsView | undefined;
+  /** The unit the standing bound is counted in, as served; null when none. */
+  readonly boundUnit: string | null;
+  /** Whether the bound's unit is the values' unit, as the host checked it. */
+  readonly boundUnitCheck: BoundUnitCheck;
 }
 
 export const betterOf = (direction: Direction): Better =>
@@ -52,6 +61,13 @@ export const betterOf = (direction: Direction): Better =>
 
 const unitOf = (standing: ObjectiveStanding | undefined): string | null =>
   standing === undefined || standing.unit === '' ? null : standing.unit;
+
+const boundUnitOf = (
+  standing: ObjectiveStanding | undefined,
+): Pick<ObjectiveReport, 'boundUnit' | 'boundUnitCheck'> => ({
+  boundUnit: standing === undefined || standing.boundUnit === '' ? null : standing.boundUnit,
+  boundUnitCheck: standing?.boundUnitCheck ?? BoundUnitCheck.UNSPECIFIED,
+});
 
 /**
  * The objectives of the run in the order the host serves them (the task's own), then the ones that
@@ -84,6 +100,7 @@ export function objectiveReports(
       percentOfBound: standingOf.get(series.objective)?.headPercentOfBound,
       bestPercentOfBound: standingOf.get(series.objective)?.bestPercentOfBound,
       bound,
+      ...boundUnitOf(standingOf.get(series.objective)),
     };
   });
   const seen = new Set(measured.map(objective => objective.name));
@@ -101,6 +118,7 @@ export function objectiveReports(
       percentOfBound: standingOf.get(bound.objective)?.headPercentOfBound,
       bestPercentOfBound: standingOf.get(bound.objective)?.bestPercentOfBound,
       bound,
+      ...boundUnitOf(standingOf.get(bound.objective)),
     }));
   return [...measured, ...unmeasured];
 }

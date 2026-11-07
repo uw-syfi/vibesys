@@ -5,7 +5,15 @@
  */
 import {describe, expect, it} from '@effect/vitest';
 import {create} from '@bufbuild/protobuf';
-import {oneofIs, ReportKind, SearchStateSchema} from '@vibesys/orchestrator-proto';
+import {timestampFromMs} from '@bufbuild/protobuf/wkt';
+import {
+  BoundUnitCheck,
+  Direction,
+  ObjectiveStandingSchema,
+  oneofIs,
+  ReportKind,
+  SearchStateSchema,
+} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {act} from 'react';
 import {
@@ -18,6 +26,7 @@ import {
   type Freshness,
   type IdeaWindow,
   type OrchestratorState,
+  objectiveReports,
   type RunView,
   runReport,
 } from '../../../state/index.js';
@@ -34,6 +43,7 @@ import {
 } from '../../../testing/orchestrator/index.js';
 import {agentNames} from '../names.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
+import {ObjectiveTiles} from './objective-tiles.js';
 import {ReportScreen} from './report-screen.js';
 
 installDom();
@@ -710,5 +720,44 @@ describe('the ideas and workstreams of the report', () => {
     );
     expect(current?.textContent).toContain(`#${plan}`);
     screen.unmount();
+  });
+});
+
+describe('the objective tiles and the bound’s unit', () => {
+  const search = create(SearchStateSchema, {
+    series: [
+      {
+        objective: 'tok_s',
+        direction: Direction.MAXIMIZE,
+        points: [{jobId: 'j', commit: 'c', at: timestampFromMs(1000), value: 5, bestSoFar: true}],
+      },
+    ],
+  });
+  const tileText = (check: BoundUnitCheck): string => {
+    const standing = create(ObjectiveStandingSchema, {
+      name: 'tok_s',
+      bestValue: 5,
+      unit: 'tok/s',
+      boundUnit: 'ms',
+      boundUnitCheck: check,
+      bestPercentOfBound: 40,
+    });
+    const screen = mount(<ObjectiveTiles objectives={objectiveReports(search, [standing])} />);
+    const text = screen.text();
+    screen.unmount();
+    return text;
+  };
+
+  it('names both units in a short label when the bound is in another unit, and shows the measured unit beside the best', () => {
+    const text = tileText(BoundUnitCheck.MISMATCH);
+    expect(text).toContain('tok/s vs bound ms');
+    expect(text).toContain('tok/s');
+    expect(text).not.toContain('% of bound');
+  });
+
+  it('shows the share of the bound as verified, unverified or not at all as the host checked it', () => {
+    expect(tileText(BoundUnitCheck.MATCH)).toContain('40% of bound');
+    expect(tileText(BoundUnitCheck.MATCH)).not.toContain('unverified');
+    expect(tileText(BoundUnitCheck.UNKNOWN)).toContain('40% of bound · unverified');
   });
 });

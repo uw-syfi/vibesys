@@ -152,6 +152,11 @@ function ObjectiveLine(props: {readonly objective: ObjectiveFigures}): JSX.Eleme
           )}
           {objective.start === null ? null : <Text tone="muted">→</Text>}
           <Text variant="metric">{objective.end}</Text>
+          {objective.unit === '' ? null : (
+            <Text variant="small" tone="muted">
+              {objective.unit}
+            </Text>
+          )}
         </Row>
       </span>
     </Stack>
