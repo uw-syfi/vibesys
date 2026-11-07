@@ -277,13 +277,16 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `result` | The head and a final number, its latest measurement that rests on a passing check of the same commit, task version and environment, or why there is none (exit `1`): `no_head` before the first promotion, and `head_not_measured`, which names the `submit measure <head>` that gives the head one (see "The result branch"). |
 | `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
 | `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
-| `plan create --title t [--body text \| --body-file path] [--gain-bound share]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. `--gain-bound` states the most the plan could gain, as a share (`0.05` or `5%`) of the headline; `--gain-bound-of` names what it is a share of (`headline` is the only value, and the default). |
+| `plan create --title t [--body text \| --body-file path] [--gain-bound share] [--workstream n]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. `--gain-bound` states the most the plan could gain, as a share (`0.05` or `5%`) of the headline; `--gain-bound-of` names what it is a share of (`headline` is the only value, and the default). `--workstream` puts the plan in a workstream of the task (`3` or `#3`), and a number the task has no workstream for is refused as not found, naming the flag. |
 | `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. A plan that states a gain bound prints it after the title (`gain <= 5% of headline`). |
 | `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
-| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share] [--workstream n]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. `--workstream` moves the plan to another workstream; a plan's workstream is moved and never cleared. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `plan check-gain --under share` | Whether every plan that is `open` or `parked` states a gain bound below the share (`0.1` or `10%`). It prints `yes: ...` or `no: ...` followed by one line for each plan that is not under (a plan that states no bound is not under), and exits `0` for either answer. With `--json` the answer is `answer` (`PLAN_GAIN_ANSWER_ALL_UNDER` or `PLAN_GAIN_ANSWER_NOT_ALL_UNDER`), `counted` and `blockers`. A bound equal to the share is not below it. |
+| `workstream start <title>` | Start a workstream, a line of work such as "KV cache layout" that plans join, and print its number, status and title. A title that a workstream that is not closed has, ignoring case and runs of white space, finds that workstream and prints it, so planners that name the same line of work at once agree on one number. A title is one line of at most 80 characters, stored with its white space collapsed. With `--json`, a `StartWorkstreamResponse`, whose `created` says whether this call made it. |
+| `workstream list [--status s]` | List the task's workstreams by number, one line each (number, status, title, and the note when there is one). `--status` is `active`, `paused` or `closed`; repeat it or separate with commas. |
+| `workstream edit <n> [--title t] [--status s] [--note text]` | Change what is given and keep the rest. The status is the agent's to set and no order is enforced; the note is one line of state, such as `paused: accuracy gate`, and an empty `--note` clears it. A title that another workstream that is not closed has, ignoring case and white space, is refused as a conflict (exit `1`), and so is reopening a workstream whose title was taken since. An edit that sets what is already there changes nothing, the update time included. |
 | `bound declare --objective name --value v --unit u (--note text \| --note-file path) [--commit rev]` | State the performance bound of an objective: the best it can reach, derived from first principles (its speed of light). The daemon reads the task at the commit (`HEAD` by default) and refuses an objective the task does not declare, naming it and listing the ones it does; it records which way the objective improves from the task, and who declared the bound and when from the call and its own clock. `v` is a number above 0 in the unit of the objective's own measurements, and the note says how it was derived. A declaration is never replaced: a revision is a new entry. It prints the entry's place in the log, the objective, the number with its unit, and the direction. |
 | `bound list [--objective name]` | Every declared bound of the task, oldest first, one line each (place, objective, number and unit, direction, time, declaring agent and run, `current` or `superseded`) with the note under it. The current bound of an objective is its newest. With `--json`, a `ListBoundsResponse`. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or with `--json` a `DaemonEnsureResponse`: the socket, the build, and the runtime directory. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this with `--json` and rebuilds no path. |
@@ -308,6 +311,16 @@ request has no field for it. `transitions` is the plan's status history, oldest 
 the origin of that call. Setting the status a plan has adds nothing. A plan saved before store format 6
 has no origin and no transitions, and none is invented for it: its transitions start at its first status
 change after the upgrade. `plan view --json` and every fact of `WatchTask` carry both.
+
+Workstreams belong to a task and are numbered 1, 2, ... by the daemon and never renumbered. A workstream is a
+line of work an agent names, such as "KV cache layout", with a status (`active`, `paused` or `closed`), a
+one-line note, and a `RecordOrigin` for who started it and when. Plans join one through `plan create
+--workstream` and `plan edit --workstream`, and `Plan.workstream` says which. Nothing a workstream holds is
+derived: how many plans it has and what they gained are read from the plans. No two workstreams that are not
+closed have the same title, so `workstream start` is idempotent in the title, the daemon makes the choice under
+the store's lock, and starts that race get one number. A closed workstream is named by no title, so its line of
+work can be started again as a new workstream, and a closed workstream still takes plans. Every change of a
+workstream is a fact of `WatchTask`, keyed `workstream/<number>`.
 
 Bounds belong to a task and are an append-only log, numbered 1, 2, ... by the daemon. Declaring one is
 the agent's choice, early or late, and the daemon only checks that it is well formed and about an
@@ -441,7 +454,7 @@ releases startup ownership and returns a typed unavailable failure with exit 4.
 ### Watching a task
 
 `WatchTask` is a server-streaming call that tells a program everything it needs to show a task:
-the head of the result branch, plans, declared bounds (a fact keyed `bound/<place>`), promotions, jobs and their results, a judgment of each of the
+the head of the result branch, plans, workstreams (a fact keyed `workstream/<number>`), declared bounds (a fact keyed `bound/<place>`), promotions, jobs and their results, a judgment of each of the
 newest measured commits (`judged_commits`, 0 for 20, at most 100), jobs that are held up and why,
 and whether the task's store is readable. The state is a set of keyed facts. On every wake the
 daemon captures the store under one request lock, checks its revision and lifecycle view after

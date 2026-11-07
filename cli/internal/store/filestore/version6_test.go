@@ -108,13 +108,20 @@ func versionFive(t *testing.T, withBounds bool) *fsys.MemFS {
 			if err := protojson.Unmarshal(data, &record); err != nil {
 				t.Fatal(err)
 			}
-			record.Plan.Origin, record.Plan.Transitions = nil, nil
+			record.Plan.Origin, record.Plan.Transitions, record.Plan.Workstream = nil, nil, 0
 			var err error
 			if data, err = (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&record); err != nil {
 				t.Fatal(err)
 			}
 		}
 		image.Put(name, withVersion(data, "5"))
+	}
+	for name := range image.Files() {
+		if strings.HasPrefix(name, stateDir+"/workstreams/") {
+			if err := image.Remove(name); err != nil {
+				t.Fatalf("removing %s: %v", name, err)
+			}
+		}
 	}
 	for _, dir := range []string{"workstreams", "bounds"} {
 		if dir == "bounds" && withBounds {

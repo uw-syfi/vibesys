@@ -22,10 +22,13 @@ type PlanChange struct {
 	Body      *string
 	Status    *core.PlanStatus
 	GainBound *core.GainBound
+	// Workstream moves the plan to that workstream, and 0 leaves it where it is.
+	Workstream core.WorkstreamNumber
 }
 
-// CreatePlan stores a new open plan with the next number.
-func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body string, bound *core.GainBound) (core.Plan, error) {
+// CreatePlan stores a new open plan with the next number, in the workstream when it names one (0
+// for none). A workstream the task does not have is refused as not found.
+func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body string, bound *core.GainBound, workstream core.WorkstreamNumber) (core.Plan, error) {
 	if err := core.CheckPlanTitle("title", title); err != nil {
 		return core.Plan{}, err
 	}
@@ -45,7 +48,7 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 	if err != nil {
 		return core.Plan{}, err
 	}
-	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, GainBound: bound, Origin: a.originOf(c)})
+	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, GainBound: bound, Workstream: workstream, Origin: a.originOf(c)})
 }
 
 // originOf is the origin a record the call makes has: the run and agent the call carried, and the
@@ -93,8 +96,8 @@ func (a *App) ViewPlan(ctx context.Context, scope core.Scope, number core.PlanNu
 // EditPlan changes a plan's title, body or status as one change. An edit that sets nothing is
 // refused, since it would only move the update time.
 func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.PlanNumber, change PlanChange) (core.Plan, error) {
-	if change.Title == nil && change.Body == nil && change.Status == nil && change.GainBound == nil {
-		return core.Plan{}, invalid("edit: set at least one of title, body, status or gain_bound")
+	if change.Title == nil && change.Body == nil && change.Status == nil && change.GainBound == nil && change.Workstream == 0 {
+		return core.Plan{}, invalid("edit: set at least one of title, body, status, gain_bound or workstream")
 	}
 	if change.GainBound != nil {
 		if err := core.CheckGainBound("gain_bound", *change.GainBound); err != nil {
@@ -114,7 +117,11 @@ func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.Plan
 	if change.Status != nil && !change.Status.Valid() {
 		return core.Plan{}, invalid("status: %q is not a plan status", *change.Status)
 	}
-	return a.editPlan(ctx, c, number, core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status, GainBound: change.GainBound})
+	edit := core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status, GainBound: change.GainBound}
+	if change.Workstream != 0 {
+		edit.Workstream = &change.Workstream
+	}
+	return a.editPlan(ctx, c, number, edit)
 }
 
 // CommentPlan adds a comment, which carries a decision or a result.

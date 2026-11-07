@@ -72,14 +72,15 @@ type JobTrouble struct {
 // TaskContent is everything the store holds about one task that a watch reports. Every slice is in
 // the order of its fact kind's key.
 type TaskContent struct {
-	Head       ResultAnswer
-	Plans      []Plan
-	Bounds     []Bound
-	Promotions []PromotionRecord
-	Jobs       []Job
-	Results    []Result
-	Judgments  []Judgment
-	Troubles   []JobTrouble
+	Head        ResultAnswer
+	Plans       []Plan
+	Workstreams []Workstream
+	Bounds      []Bound
+	Promotions  []PromotionRecord
+	Jobs        []Job
+	Results     []Result
+	Judgments   []Judgment
+	Troubles    []JobTrouble
 }
 
 // TaskView is what one look at a task found. Content is nil when the store could not be read,
@@ -94,7 +95,7 @@ type TaskView struct {
 type FactKey string
 
 // Fact is one keyed piece of a task's state. Value is a Job, Result, Judgment, PromotionRecord,
-// Plan, Bound, ResultAnswer (the head), StoreHealth or JobTrouble.
+// Plan, Workstream, Bound, ResultAnswer (the head), StoreHealth or JobTrouble.
 type Fact struct {
 	Key   FactKey
 	Value any
@@ -107,7 +108,7 @@ const (
 	prefixTrouble = "trouble/"
 )
 
-// Facts returns the view's facts in the order they are sent: health, head, plans, bounds,
+// Facts returns the view's facts in the order they are sent: health, head, plans, workstreams, bounds,
 // promotions, jobs, results, judgments, troubles, each by its key. A view with no content has only its
 // health.
 func (v TaskView) Facts() []Fact {
@@ -119,6 +120,9 @@ func (v TaskView) Facts() []Fact {
 	out = append(out, Fact{Key: keyHead, Value: c.Head})
 	for _, p := range c.Plans {
 		out = append(out, Fact{Key: FactKey("plan/" + strconv.Itoa(int(p.Number))), Value: p})
+	}
+	for _, w := range c.Workstreams {
+		out = append(out, Fact{Key: FactKey("workstream/" + strconv.FormatUint(uint64(w.Number), 10)), Value: w})
 	}
 	for _, b := range c.Bounds {
 		out = append(out, Fact{Key: FactKey("bound/" + strconv.FormatUint(b.Seq, 10)), Value: b})

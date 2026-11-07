@@ -39,6 +39,8 @@ func (b *backend) Commit(change ledger.Change) error {
 		return b.publish(jobPath(b.root, c.Job.ID), &cliv1.JobFile{Format: formatVersion, Job: job})
 	case ledger.PutPlan:
 		return b.publish(planPath(b.root, c.Plan.Number), &cliv1.PlanFile{Format: formatVersion, Plan: wire.Plan(c.Plan)})
+	case ledger.PutWorkstream:
+		return b.publish(workstreamPath(b.root, c.Workstream.Number), &cliv1.WorkstreamFile{Format: formatVersion, Workstream: wire.Workstream(c.Workstream)})
 	case ledger.AddPromotion:
 		return b.publish(promotionPath(b.root, c.Seq), &cliv1.PromotionFile{Format: formatVersion, Seq: c.Seq, Promotion: wire.Promotion(c.Promotion)})
 	case ledger.AddBound:
