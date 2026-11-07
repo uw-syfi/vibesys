@@ -2,7 +2,7 @@ import {createValidator} from '@bufbuild/protovalidate';
 import {Harness, StartRunSchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {describe, expect, it} from 'vitest';
-import {startIntent} from './intents.js';
+import {startRunMessage} from './intents.js';
 import {
   FANOUT_CHOICES,
   LEAD_CHOICES,
@@ -56,9 +56,8 @@ describe('the Start run form’s command', () => {
     fc.assert(
       fc.property(draft, choicesOf, (value, choices) => {
         if (missingFrom(value, choices) !== null) return;
-        const intent = startIntent(startRunRequest(value, choices));
-        if (intent.case !== 'startRun') throw new Error('a start is a startRun');
-        expect(validator.validate(StartRunSchema, intent.value).kind).toBe('valid');
+        const message = startRunMessage(startRunRequest(value, choices));
+        expect(validator.validate(StartRunSchema, message).kind).toBe('valid');
       }),
     );
   });
