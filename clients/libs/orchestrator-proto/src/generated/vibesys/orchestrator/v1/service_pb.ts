@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/service.proto.
  */
 export const file_vibesys_orchestrator_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJMCg9EaXNwYXRjaFJlcXVlc3QSOQoHY29tbWFuZBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbW1hbmRCBrpIA8gBASJNChBEaXNwYXRjaFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWNlaXB0Qga6SAPIAQEiTgoMSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASKaAQoNSGVsbG9SZXNwb25zZRI+CgZkYWVtb24YASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAAiKgoQV2F0Y2hSdW5zUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoBCKpAgoMUnVuc1NuYXBzaG90EioKBHJ1bnMYASADKAsyHC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW4SLgoGYWdlbnRzGAIgAygLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnQSEAoIc2VxdWVuY2UYAyABKAQSLAoFdHVybnMYBCADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuEjIKCG1lc3NhZ2VzGAUgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZRI2CghzZWFyY2hlcxgGIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlEhEKCXRydW5jYXRlZBgHIAEoCCLLAQoRV2F0Y2hSdW5zUmVzcG9uc2USOQoIc25hcHNob3QYASABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5zU25hcHNob3RIABI0CgZjaGFuZ2UYAiABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5DaGFuZ2VIABI2CgZzZWFyY2gYAyABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZUgAQg0KBGJvZHkSBbpIAggBImUKEVdhdGNoQWdlbnRSZXF1ZXN0EhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEh0KCXBhZ2Vfc2l6ZRgCIAEoDUIKukgHKgUY6AcgABIWCg5hZnRlcl9zZXF1ZW5jZRgDIAEoBCJoCglJdGVtc1BhZ2USLAoFaXRlbXMYASADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtEhAKCHNlcXVlbmNlGAIgASgEEhsKE25leHRfYmVmb3JlX29yZGluYWwYAyABKA0i+AEKEldhdGNoQWdlbnRSZXNwb25zZRIyCgRwYWdlGAEgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbXNQYWdlSAASLQoEaXRlbRgCIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1IABIvCgVkZWx0YRgDIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRlbHRhSAASLQoEdHVybhgEIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm5IABIQCghzZXF1ZW5jZRgFIAEoBEINCgRib2R5EgW6SAIIASJtChBMaXN0SXRlbXNSZXF1ZXN0EhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEh8KDmJlZm9yZV9vcmRpbmFsGAIgASgNQge6SAQqAiAAEh0KCXBhZ2Vfc2l6ZRgDIAEoDUIKukgHKgUY6AcgACJNChFMaXN0SXRlbXNSZXNwb25zZRI4CgRwYWdlGAEgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbXNQYWdlQga6SAPIAQEygQQKE09yY2hlc3RyYXRvclNlcnZpY2USVgoFSGVsbG8SJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IZWxsb1JlcXVlc3QaJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IZWxsb1Jlc3BvbnNlEl8KCERpc3BhdGNoEigudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGlzcGF0Y2hSZXF1ZXN0GikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGlzcGF0Y2hSZXNwb25zZRJkCglXYXRjaFJ1bnMSKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXF1ZXN0GioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hSdW5zUmVzcG9uc2UwARJnCgpXYXRjaEFnZW50EioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hBZ2VudFJlcXVlc3QaKy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVzcG9uc2UwARJiCglMaXN0SXRlbXMSKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXF1ZXN0GioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGlzdEl0ZW1zUmVzcG9uc2U6SQoQcHJvdG9jb2xfdmVyc2lvbhIcLmdvb2dsZS5wcm90b2J1Zi5GaWxlT3B0aW9ucxi+hwMgASgNUg9wcm90b2NvbFZlcnNpb246UAoUbWluX3Byb3RvY29sX3ZlcnNpb24SHC5nb29nbGUucHJvdG9idWYuRmlsZU9wdGlvbnMYv4cDIAEoDVISbWluUHJvdG9jb2xWZXJzaW9uQlxaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjHwuxgB+LsYAWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJMCg9EaXNwYXRjaFJlcXVlc3QSOQoHY29tbWFuZBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbW1hbmRCBrpIA8gBASJNChBEaXNwYXRjaFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWNlaXB0Qga6SAPIAQEiTgoMSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASKaAQoNSGVsbG9SZXNwb25zZRI+CgZkYWVtb24YASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAAiKgoQV2F0Y2hSdW5zUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoBCKpAgoMUnVuc1NuYXBzaG90EioKBHJ1bnMYASADKAsyHC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW4SLgoGYWdlbnRzGAIgAygLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnQSEAoIc2VxdWVuY2UYAyABKAQSLAoFdHVybnMYBCADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuEjIKCG1lc3NhZ2VzGAUgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZRI2CghzZWFyY2hlcxgGIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlEhEKCXRydW5jYXRlZBgHIAEoCCLLAQoRV2F0Y2hSdW5zUmVzcG9uc2USOQoIc25hcHNob3QYASABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5zU25hcHNob3RIABI0CgZjaGFuZ2UYAiABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5DaGFuZ2VIABI2CgZzZWFyY2gYAyABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZUgAQg0KBGJvZHkSBbpIAggBImUKEVdhdGNoQWdlbnRSZXF1ZXN0EhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEh0KCXBhZ2Vfc2l6ZRgCIAEoDUIKukgHKgUY6AcgABIWCg5hZnRlcl9zZXF1ZW5jZRgDIAEoBCKcAQoJSXRlbXNQYWdlEiwKBWl0ZW1zGAEgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbRIQCghzZXF1ZW5jZRgCIAEoBBIbChNuZXh0X2JlZm9yZV9vcmRpbmFsGAMgASgNEjIKCGVsaXNpb25zGAQgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRWxpc2lvbiJACgdFbGlzaW9uEhgKB29yZGluYWwYASABKA1CB7pIBCoCIAASGwoKYm9keV9ieXRlcxgCIAEoBEIHukgEMgIgACL4AQoSV2F0Y2hBZ2VudFJlc3BvbnNlEjIKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VIABItCgRpdGVtGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEi8KBWRlbHRhGAMgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsdGFIABItCgR0dXJuGAQgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEhAKCHNlcXVlbmNlGAUgASgEQg0KBGJvZHkSBbpIAggBIm0KEExpc3RJdGVtc1JlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHwoOYmVmb3JlX29yZGluYWwYAiABKA1CB7pIBCoCIAASHQoJcGFnZV9zaXplGAMgASgNQgq6SAcqBRjoByAAIk0KEUxpc3RJdGVtc1Jlc3BvbnNlEjgKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VCBrpIA8gBASJFCg5HZXRJdGVtUmVxdWVzdBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdvcmRpbmFsGAIgASgNQge6SAQqAiAAIlgKD0dldEl0ZW1SZXNwb25zZRIzCgRpdGVtGAEgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUIGukgDyAEBEhAKCHNlcXVlbmNlGAIgASgEMt8EChNPcmNoZXN0cmF0b3JTZXJ2aWNlElYKBUhlbGxvEiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGVsbG9SZXF1ZXN0GiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGVsbG9SZXNwb25zZRJfCghEaXNwYXRjaBIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRpc3BhdGNoUmVxdWVzdBopLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRpc3BhdGNoUmVzcG9uc2USZAoJV2F0Y2hSdW5zEikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hSdW5zUmVxdWVzdBoqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1Jlc3BvbnNlMAESZwoKV2F0Y2hBZ2VudBIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXF1ZXN0GisudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hBZ2VudFJlc3BvbnNlMAESYgoJTGlzdEl0ZW1zEikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGlzdEl0ZW1zUmVxdWVzdBoqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1Jlc3BvbnNlElwKB0dldEl0ZW0SJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5HZXRJdGVtUmVxdWVzdBooLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkdldEl0ZW1SZXNwb25zZTpJChBwcm90b2NvbF92ZXJzaW9uEhwuZ29vZ2xlLnByb3RvYnVmLkZpbGVPcHRpb25zGL6HAyABKA1SD3Byb3RvY29sVmVyc2lvbjpQChRtaW5fcHJvdG9jb2xfdmVyc2lvbhIcLmdvb2dsZS5wcm90b2J1Zi5GaWxlT3B0aW9ucxi/hwMgASgNUhJtaW5Qcm90b2NvbFZlcnNpb25CXFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MfC7GAH4uxgBYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.DispatchRequest
@@ -240,6 +240,8 @@ export const WatchAgentRequestSchema: GenMessage<WatchAgentRequest> = /*@__PURE_
  */
 export type ItemsPage = Message<"vibesys.orchestrator.v1.ItemsPage"> & {
   /**
+   * Large reasoning and tool output is left out of the items of a page: see `elisions`.
+   *
    * @generated from field: repeated vibesys.orchestrator.v1.Item items = 1;
    */
   items: Item[];
@@ -257,6 +259,15 @@ export type ItemsPage = Message<"vibesys.orchestrator.v1.ItemsPage"> & {
    * @generated from field: uint32 next_before_ordinal = 3;
    */
   nextBeforeOrdinal: number;
+
+  /**
+   * The items of this page whose text the host left out so that a page of history stays small. An
+   * item arrives whole in a stream or a change, and from GetItem; only a page elides. Absent when
+   * nothing was left out.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.Elision elisions = 4;
+   */
+  elisions: Elision[];
 };
 
 /**
@@ -265,6 +276,37 @@ export type ItemsPage = Message<"vibesys.orchestrator.v1.ItemsPage"> & {
  */
 export const ItemsPageSchema: GenMessage<ItemsPage> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_service, 8);
+
+/**
+ * Elision says a page left out the text of one of its items: the text of a reasoning item or the
+ * output of a tool call, when it was larger than the host's page limit. The item is in the page
+ * with that text empty; GetItem reads it whole. Assistant text, prompts and what a tool was asked
+ * are never left out.
+ *
+ * @generated from message vibesys.orchestrator.v1.Elision
+ */
+export type Elision = Message<"vibesys.orchestrator.v1.Elision"> & {
+  /**
+   * The ordinal of the item, which is in the same page.
+   *
+   * @generated from field: uint32 ordinal = 1;
+   */
+  ordinal: number;
+
+  /**
+   * How large the text left out was, in bytes.
+   *
+   * @generated from field: uint64 body_bytes = 2;
+   */
+  bodyBytes: bigint;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.Elision.
+ * Use `create(ElisionSchema)` to create a new message.
+ */
+export const ElisionSchema: GenMessage<Elision> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 9);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchAgentResponse
@@ -315,7 +357,7 @@ export type WatchAgentResponse = Message<"vibesys.orchestrator.v1.WatchAgentResp
  * Use `create(WatchAgentResponseSchema)` to create a new message.
  */
 export const WatchAgentResponseSchema: GenMessage<WatchAgentResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 9);
+  messageDesc(file_vibesys_orchestrator_v1_service, 10);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsRequest
@@ -344,7 +386,7 @@ export type ListItemsRequest = Message<"vibesys.orchestrator.v1.ListItemsRequest
  * Use `create(ListItemsRequestSchema)` to create a new message.
  */
 export const ListItemsRequestSchema: GenMessage<ListItemsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 10);
+  messageDesc(file_vibesys_orchestrator_v1_service, 11);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsResponse
@@ -361,7 +403,57 @@ export type ListItemsResponse = Message<"vibesys.orchestrator.v1.ListItemsRespon
  * Use `create(ListItemsResponseSchema)` to create a new message.
  */
 export const ListItemsResponseSchema: GenMessage<ListItemsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 11);
+  messageDesc(file_vibesys_orchestrator_v1_service, 12);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.GetItemRequest
+ */
+export type GetItemRequest = Message<"vibesys.orchestrator.v1.GetItemRequest"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * The item's place in the agent's history, as an Item carries it.
+   *
+   * @generated from field: uint32 ordinal = 2;
+   */
+  ordinal: number;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.GetItemRequest.
+ * Use `create(GetItemRequestSchema)` to create a new message.
+ */
+export const GetItemRequestSchema: GenMessage<GetItemRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 13);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.GetItemResponse
+ */
+export type GetItemResponse = Message<"vibesys.orchestrator.v1.GetItemResponse"> & {
+  /**
+   * Whole: nothing is left out.
+   *
+   * @generated from field: vibesys.orchestrator.v1.Item item = 1;
+   */
+  item?: Item | undefined;
+
+  /**
+   * The sequence the item is current to.
+   *
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.GetItemResponse.
+ * Use `create(GetItemResponseSchema)` to create a new message.
+ */
+export const GetItemResponseSchema: GenMessage<GetItemResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 14);
 
 /**
  * OrchestratorService is what the daemon serves to its clients, the desktop app and the headless
@@ -410,7 +502,7 @@ export const OrchestratorService: GenService<{
     output: typeof WatchAgentResponseSchema;
   },
   /**
-   * Older history, paged.
+   * Older history, paged. A page leaves out what is large: see ItemsPage.elisions.
    *
    * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.ListItems
    */
@@ -418,6 +510,16 @@ export const OrchestratorService: GenService<{
     methodKind: "unary";
     input: typeof ListItemsRequestSchema;
     output: typeof ListItemsResponseSchema;
+  },
+  /**
+   * One item of an agent, whole: what a page left out.
+   *
+   * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.GetItem
+   */
+  getItem: {
+    methodKind: "unary";
+    input: typeof GetItemRequestSchema;
+    output: typeof GetItemResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_vibesys_orchestrator_v1_service, 0);

@@ -393,7 +393,34 @@ func watchError(err error) error {
 	return status.Error(codes.Unavailable, err.Error())
 }
 
-// itemsPage reads a page of an agent's items. A zero before reads the newest.
+// ElideOver is the size in bytes above which a page of history leaves out a reasoning text or a
+// tool call's output (ItemsPage.elisions), so that a page of an agent that thought and ran a lot
+// stays small. The one place the limit is written; GetItem reads what a page left out.
+const ElideOver = 4096
+
+// elide empties a reasoning text or a tool call's output larger than ElideOver, and returns what
+// it says of it: the item's ordinal and how large the text was. Assistant text, prompts and what a
+// tool was asked are never left out. It is for the items of a page, which are the caller's own
+// copies: an item that arrives in a stream is never passed to it.
+func elide(item *pb.Item) *pb.Elision {
+	var text *string
+	switch body := item.GetBody().(type) {
+	case *pb.Item_Reasoning:
+		text = &body.Reasoning.Text
+	case *pb.Item_Tool:
+		text = &body.Tool.Output
+	default:
+		return nil
+	}
+	size := len(*text)
+	if size <= ElideOver {
+		return nil
+	}
+	*text = ""
+	return &pb.Elision{Ordinal: item.GetOrdinal(), BodyBytes: uint64(size)}
+}
+
+// itemsPage reads a page of an agent's items. A zero before reads the newest. Large text is left out.
 func (s *Service) itemsPage(agent core.AgentID, before uint32, size int) (*pb.ItemsPage, error) {
 	page, err := s.e.Store.Items(agent, before, min(size, store.MaxPageItems))
 	if err != nil {
@@ -401,7 +428,11 @@ func (s *Service) itemsPage(agent core.AgentID, before uint32, size int) (*pb.It
 	}
 	out := &pb.ItemsPage{}
 	for _, it := range page.Items {
-		out.Items = append(out.Items, wire.ItemMessage(it))
+		item := wire.ItemMessage(it)
+		if e := elide(item); e != nil {
+			out.Elisions = append(out.Elisions, e)
+		}
+		out.Items = append(out.Items, item)
 	}
 	if page.HasOlder && len(page.Items) > 0 {
 		out.NextBeforeOrdinal = page.Items[0].Ordinal
@@ -436,4 +467,44 @@ func (s *Service) ListItems(ctx context.Context, req *pb.ListItemsRequest) (*pb.
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &pb.ListItemsResponse{Page: page}, nil
+}
+
+// GetItem reads one item whole, as it stands: what a page of history elided.
+func (s *Service) GetItem(ctx context.Context, req *pb.GetItemRequest) (*pb.GetItemResponse, error) {
+	if err := wire.Validate(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	caller, err := s.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := operatorOnly(caller, "GetItem"); err != nil {
+		return nil, err
+	}
+	agent, ordinal := core.AgentID(req.GetAgentId()), req.GetOrdinal()
+	if _, ok := s.e.State().Agent(agent); !ok {
+		return nil, status.Errorf(codes.NotFound, "no agent %s: list the agents of a run with WatchRuns", agent)
+	}
+	var resp *pb.GetItemResponse
+	if err := s.e.Cut(func(_ core.State, last uint64) error {
+		// The newest item below the next ordinal is the item itself when it exists. The largest
+		// ordinal has no next one (a bound of zero reads the newest), and no agent has that many items.
+		if ordinal == ^uint32(0) {
+			return nil
+		}
+		page, err := s.e.Store.Items(agent, ordinal+1, 1)
+		if err != nil {
+			return fmt.Errorf("read item %d of %s: %w", ordinal, agent, err)
+		}
+		if len(page.Items) == 1 && page.Items[0].Ordinal == ordinal {
+			resp = &pb.GetItemResponse{Item: wire.ItemMessage(page.Items[0]), Sequence: last}
+		}
+		return nil
+	}); err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	if resp == nil {
+		return nil, status.Errorf(codes.NotFound, "agent %s has no item %d: its items start at 1", agent, ordinal)
+	}
+	return resp, nil
 }

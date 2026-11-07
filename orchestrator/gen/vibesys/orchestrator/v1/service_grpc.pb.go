@@ -24,6 +24,7 @@ const (
 	OrchestratorService_WatchRuns_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
 	OrchestratorService_WatchAgent_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
 	OrchestratorService_ListItems_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
+	OrchestratorService_GetItem_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -41,8 +42,10 @@ type OrchestratorServiceClient interface {
 	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(ctx context.Context, in *WatchAgentRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchAgentResponse], error)
-	// Older history, paged.
+	// Older history, paged. A page leaves out what is large: see ItemsPage.elisions.
 	ListItems(ctx context.Context, in *ListItemsRequest, opts ...grpc.CallOption) (*ListItemsResponse, error)
+	// One item of an agent, whole: what a page left out.
+	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -121,6 +124,16 @@ func (c *orchestratorServiceClient) ListItems(ctx context.Context, in *ListItems
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetItemResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -136,8 +149,10 @@ type OrchestratorServiceServer interface {
 	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(*WatchAgentRequest, grpc.ServerStreamingServer[WatchAgentResponse]) error
-	// Older history, paged.
+	// Older history, paged. A page leaves out what is large: see ItemsPage.elisions.
 	ListItems(context.Context, *ListItemsRequest) (*ListItemsResponse, error)
+	// One item of an agent, whole: what a page left out.
+	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -162,6 +177,9 @@ func (UnimplementedOrchestratorServiceServer) WatchAgent(*WatchAgentRequest, grp
 }
 func (UnimplementedOrchestratorServiceServer) ListItems(context.Context, *ListItemsRequest) (*ListItemsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListItems not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetItem not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -260,6 +278,24 @@ func _OrchestratorService_ListItems_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_GetItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetItem(ctx, req.(*GetItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -278,6 +314,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListItems",
 			Handler:    _OrchestratorService_ListItems_Handler,
+		},
+		{
+			MethodName: "GetItem",
+			Handler:    _OrchestratorService_GetItem_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

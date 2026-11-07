@@ -381,7 +381,11 @@ message Item {
     defined_only: true
     not_in: [0]
   }];
+  // When the item was last updated: for a finished item, when it finished.
   google.protobuf.Timestamp at = 6 [(buf.validate.field).required = true];
+  // When the item was first seen, and never changed by an update, so a finished item took `at`
+  // minus `started_at`. Absent for an item recorded before the host kept it: never zero.
+  google.protobuf.Timestamp started_at = 7;
   oneof body {
     option (buf.validate.oneof).required = true;
     Text assistant = 10;

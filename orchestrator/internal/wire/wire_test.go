@@ -48,7 +48,7 @@ func requireAll(t *testing.T, m proto.Message, accepted map[string]int) {
 // Every field of every message the core stores comes back from a trip through the core types, and
 // every enum value has a name there.
 func TestAnEventSurvivesTheCoreTypes(t *testing.T) {
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(1, 3))
 	accepted := map[string]int{}
 	reached := map[protoreflect.FullName]bool{}
 	for range rounds {

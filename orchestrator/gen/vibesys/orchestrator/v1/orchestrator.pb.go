@@ -1858,9 +1858,13 @@ type Item struct {
 	TurnId  string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
 	AgentId string `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	// Starts at 1 for each agent and has no gaps. The orchestrator assigns it on first sight.
-	Ordinal uint32                 `protobuf:"varint,4,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
-	Status  ItemStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=vibesys.orchestrator.v1.ItemStatus" json:"status,omitempty"`
-	At      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
+	Ordinal uint32     `protobuf:"varint,4,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	Status  ItemStatus `protobuf:"varint,5,opt,name=status,proto3,enum=vibesys.orchestrator.v1.ItemStatus" json:"status,omitempty"`
+	// When the item was last updated: for a finished item, when it finished.
+	At *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
+	// When the item was first seen, and never changed by an update, so a finished item took `at`
+	// minus `started_at`. Absent for an item recorded before the host kept it: never zero.
+	StartedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*Item_Assistant
@@ -1940,6 +1944,13 @@ func (x *Item) GetStatus() ItemStatus {
 func (x *Item) GetAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.At
+	}
+	return nil
+}
+
+func (x *Item) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
 	}
 	return nil
 }
@@ -4121,7 +4132,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x05usage\x18\a \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\x12A\n" +
 	"\n" +
 	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\x125\n" +
-	"\bended_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"\x84\x04\n" +
+	"\bended_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"\xbf\x04\n" +
 	"\x04Item\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12 \n" +
 	"\aturn_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06turnId\x12\"\n" +
@@ -4129,7 +4140,9 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\aordinal\x18\x04 \x01(\rB\a\xbaH\x04*\x02 \x00R\aordinal\x12G\n" +
 	"\x06status\x18\x05 \x01(\x0e2#.vibesys.orchestrator.v1.ItemStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x122\n" +
-	"\x02at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12=\n" +
+	"\x02at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x129\n" +
+	"\n" +
+	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12=\n" +
 	"\tassistant\x18\n" +
 	" \x01(\v2\x1d.vibesys.orchestrator.v1.TextH\x00R\tassistant\x12=\n" +
 	"\treasoning\x18\v \x01(\v2\x1d.vibesys.orchestrator.v1.TextH\x00R\treasoning\x127\n" +
@@ -4497,44 +4510,45 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	50, // 25: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
 	8,  // 26: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
 	50, // 27: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
-	25, // 28: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
-	25, // 29: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
-	25, // 30: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
-	26, // 31: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
-	27, // 32: vibesys.orchestrator.v1.ToolCall.shell:type_name -> vibesys.orchestrator.v1.ShellCall
-	28, // 33: vibesys.orchestrator.v1.ToolCall.read:type_name -> vibesys.orchestrator.v1.ReadCall
-	29, // 34: vibesys.orchestrator.v1.ToolCall.write:type_name -> vibesys.orchestrator.v1.WriteCall
-	30, // 35: vibesys.orchestrator.v1.ToolCall.edit:type_name -> vibesys.orchestrator.v1.EditCall
-	31, // 36: vibesys.orchestrator.v1.ToolCall.search:type_name -> vibesys.orchestrator.v1.SearchCall
-	32, // 37: vibesys.orchestrator.v1.ToolCall.other:type_name -> vibesys.orchestrator.v1.OtherCall
-	34, // 38: vibesys.orchestrator.v1.Handoff.worker:type_name -> vibesys.orchestrator.v1.WorkerHandoff
-	37, // 39: vibesys.orchestrator.v1.Handoff.planner:type_name -> vibesys.orchestrator.v1.PlannerHandoff
-	38, // 40: vibesys.orchestrator.v1.Handoff.judge:type_name -> vibesys.orchestrator.v1.JudgeHandoff
-	39, // 41: vibesys.orchestrator.v1.Handoff.combiner:type_name -> vibesys.orchestrator.v1.CombinerHandoff
-	40, // 42: vibesys.orchestrator.v1.Handoff.profiler:type_name -> vibesys.orchestrator.v1.ProfilerHandoff
-	35, // 43: vibesys.orchestrator.v1.WorkerHandoff.candidate:type_name -> vibesys.orchestrator.v1.Candidate
-	36, // 44: vibesys.orchestrator.v1.WorkerHandoff.no_candidate:type_name -> vibesys.orchestrator.v1.NoCandidate
-	15, // 45: vibesys.orchestrator.v1.JudgeHandoff.verdict:type_name -> vibesys.orchestrator.v1.JudgeVerdict
-	13, // 46: vibesys.orchestrator.v1.Report.kind:type_name -> vibesys.orchestrator.v1.ReportKind
-	14, // 47: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
-	4,  // 48: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
-	2,  // 49: vibesys.orchestrator.v1.RunLimitReached.limit:type_name -> vibesys.orchestrator.v1.RunLimit
-	10, // 50: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	50, // 51: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
-	11, // 52: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
-	33, // 53: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	41, // 54: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
-	42, // 55: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
-	43, // 56: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
-	48, // 57: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
-	44, // 58: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
-	45, // 59: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
-	46, // 60: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	50, // 28: vibesys.orchestrator.v1.Item.started_at:type_name -> google.protobuf.Timestamp
+	25, // 29: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
+	25, // 30: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
+	25, // 31: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
+	26, // 32: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
+	27, // 33: vibesys.orchestrator.v1.ToolCall.shell:type_name -> vibesys.orchestrator.v1.ShellCall
+	28, // 34: vibesys.orchestrator.v1.ToolCall.read:type_name -> vibesys.orchestrator.v1.ReadCall
+	29, // 35: vibesys.orchestrator.v1.ToolCall.write:type_name -> vibesys.orchestrator.v1.WriteCall
+	30, // 36: vibesys.orchestrator.v1.ToolCall.edit:type_name -> vibesys.orchestrator.v1.EditCall
+	31, // 37: vibesys.orchestrator.v1.ToolCall.search:type_name -> vibesys.orchestrator.v1.SearchCall
+	32, // 38: vibesys.orchestrator.v1.ToolCall.other:type_name -> vibesys.orchestrator.v1.OtherCall
+	34, // 39: vibesys.orchestrator.v1.Handoff.worker:type_name -> vibesys.orchestrator.v1.WorkerHandoff
+	37, // 40: vibesys.orchestrator.v1.Handoff.planner:type_name -> vibesys.orchestrator.v1.PlannerHandoff
+	38, // 41: vibesys.orchestrator.v1.Handoff.judge:type_name -> vibesys.orchestrator.v1.JudgeHandoff
+	39, // 42: vibesys.orchestrator.v1.Handoff.combiner:type_name -> vibesys.orchestrator.v1.CombinerHandoff
+	40, // 43: vibesys.orchestrator.v1.Handoff.profiler:type_name -> vibesys.orchestrator.v1.ProfilerHandoff
+	35, // 44: vibesys.orchestrator.v1.WorkerHandoff.candidate:type_name -> vibesys.orchestrator.v1.Candidate
+	36, // 45: vibesys.orchestrator.v1.WorkerHandoff.no_candidate:type_name -> vibesys.orchestrator.v1.NoCandidate
+	15, // 46: vibesys.orchestrator.v1.JudgeHandoff.verdict:type_name -> vibesys.orchestrator.v1.JudgeVerdict
+	13, // 47: vibesys.orchestrator.v1.Report.kind:type_name -> vibesys.orchestrator.v1.ReportKind
+	14, // 48: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
+	4,  // 49: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
+	2,  // 50: vibesys.orchestrator.v1.RunLimitReached.limit:type_name -> vibesys.orchestrator.v1.RunLimit
+	10, // 51: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	50, // 52: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
+	11, // 53: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
+	33, // 54: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	41, // 55: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
+	42, // 56: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
+	43, // 57: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
+	48, // 58: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
+	44, // 59: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
+	45, // 60: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
+	46, // 61: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_orchestrator_proto_init() }
