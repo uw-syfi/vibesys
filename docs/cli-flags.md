@@ -488,7 +488,8 @@ tasks. `--json` prints one `ExampleList` document (defined in
 `vibesys example new EXAMPLE DEST` copies the example's tracked files into
 `DEST`, runs `git init`, commits them, and prints the `vibesys --task ...` line
 to run next. An `external_repo` example is cloned at the commit the checkout
-pins. `DEST` must be absent or empty and outside the checkout; otherwise, and
+pins. A `[tool.uv.sources]` path that leaves the example is vendored under
+`DEST/vendor/` and rewritten. `DEST` must be absent or empty and outside the checkout; otherwise, and
 for an unknown or ambiguous example, the command exits 1 with the reason on
 stderr and leaves `DEST` as it was. `--checkout PATH` selects another VibeSys
 checkout's catalog.

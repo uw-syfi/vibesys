@@ -8,6 +8,9 @@ one initial commit, and prints the ``vibesys --task ...`` line to run there.
 An example whose source is another repository (``external_repo = true``) is
 cloned at the commit the checkout pins instead. Runs never use the catalog in
 place: an example inside the VibeSys checkout cannot be its own repository.
+A ``[tool.uv.sources]`` path that leaves the example (``../../../sdk/vs-bench``)
+resolves only inside the checkout, so the copy vendors that directory under
+``vendor/`` and rewrites the path.
 
 The file and Git work goes through :class:`ExampleMaterializer`;
 :class:`GitExampleMaterializer` is the real one. This is a light host command:
@@ -18,8 +21,10 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import posixpath
 import shutil
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
@@ -55,7 +60,9 @@ class ExampleMaterializer(Protocol):
     ) -> None:
         """Copy the files ``checkout`` tracks under ``example`` and commit them as a new repository.
 
-        Paths are relative to ``example``; submodules inside it are not copied.
+        Paths are relative to ``example``; submodules inside it are not copied. A
+        ``[tool.uv.sources]`` path of the example's ``pyproject.toml`` that leaves the
+        example is copied (tracked files) to ``vendor/<name>`` and the path rewritten.
         """
         ...
 
@@ -86,9 +93,34 @@ class GitExampleMaterializer:
             target = destination / path.removeprefix(prefix)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target, follow_symlinks=False)
+        self._vendor_outside_sources(checkout, example, destination)
         self._git(destination, "init", "--quiet")
         self._git(destination, "add", "--all")
         self._git(destination, "commit", "--quiet", "--message", message)
+
+    def _vendor_outside_sources(
+        self, checkout: Path, example: PurePosixPath, destination: Path
+    ) -> None:
+        pyproject = destination / "pyproject.toml"
+        if not pyproject.is_file():
+            return
+        text = pyproject.read_text(encoding="utf-8")
+        for relative in outside_path_sources(text):
+            library = PurePosixPath(posixpath.normpath(example / relative))
+            if library.is_absolute() or library.parts[:1] == ("..",):
+                message = f"{pyproject}: source {relative} leaves the checkout"
+                raise ExampleMaterializationError(message)
+            listing = self._git(checkout, "ls-files", "-z", "--", library.as_posix())
+            vendored = PurePosixPath("vendor") / library.name
+            for path in filter(None, listing.split("\0")):
+                target = destination / vendored / PurePosixPath(path).relative_to(library)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(checkout / path, target, follow_symlinks=False)
+            if not (destination / vendored).is_dir():
+                message = f"{pyproject}: source {relative} tracks no files in {checkout}"
+                raise ExampleMaterializationError(message)
+            text = text.replace(f'"{relative}"', f'"{vendored}"')
+        pyproject.write_text(text, encoding="utf-8")
 
     def clone_pinned(self, checkout: Path, example: PurePosixPath, destination: Path) -> None:
         """Clone the submodule's URL and branch, then point the branch at the pinned commit."""
@@ -113,6 +145,15 @@ class GitExampleMaterializer:
             message = f"`git {' '.join(args)}` failed in {cwd}: {completed.stderr.strip()}"
             raise ExampleMaterializationError(message)
         return completed.stdout
+
+
+def outside_path_sources(pyproject_text: str) -> tuple[str, ...]:
+    """The ``[tool.uv.sources]`` paths that leave the project directory (start with ``..``)."""
+    sources = tomllib.loads(pyproject_text).get("tool", {}).get("uv", {}).get("sources", {})
+    paths = (src.get("path") for src in sources.values() if isinstance(src, dict))
+    return tuple(
+        dict.fromkeys(path for path in paths if isinstance(path, str) and path.startswith(".."))
+    )
 
 
 _GITLINK_MODE = "160000"

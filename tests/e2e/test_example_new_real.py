@@ -73,6 +73,34 @@ def test_untracked_files_stay_behind_and_the_copy_is_one_clean_commit(tmp_path: 
     assert _git(destination, "status", "--porcelain") == ""
 
 
+def test_a_path_source_outside_the_example_is_vendored_and_rewritten(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    example = checkout / "examples" / "serving" / "demo"
+    library = checkout / "sdk" / "toolkit"
+    (library / "src").mkdir(parents=True)
+    (library / "src" / "toolkit.py").write_text("X = 1\n", encoding="utf-8")
+    (library / "pyproject.toml").write_text('[project]\nname = "toolkit"\n', encoding="utf-8")
+    example.mkdir(parents=True)
+    (example / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\ndependencies = ["toolkit"]\n'
+        '[tool.uv.sources]\ntoolkit = { path = "../../../sdk/toolkit" }\n',
+        encoding="utf-8",
+    )
+    _git(checkout, "init", "--quiet")
+    _git(checkout, "add", "--all")
+    _git(checkout, "commit", "--quiet", "--message", "catalog")
+    destination = tmp_path / "project"
+
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
+        checkout, PurePosixPath("examples/serving/demo"), destination, message="Start"
+    )
+
+    assert 'path = "vendor/toolkit"' in (destination / "pyproject.toml").read_text()
+    assert (destination / "vendor" / "toolkit" / "src" / "toolkit.py").is_file()
+    assert (destination / "vendor" / "toolkit" / "pyproject.toml").is_file()
+    assert _git(destination, "status", "--porcelain") == ""
+
+
 def test_new_from_the_real_catalog_creates_a_runnable_project(tmp_path: Path) -> None:
     destination = tmp_path / "stack"
 

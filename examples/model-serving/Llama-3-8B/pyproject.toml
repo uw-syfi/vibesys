@@ -8,11 +8,7 @@ dependencies = [
   "transformers>=4.40",
   "fastapi>=0.110",
   "uvicorn>=0.29",
-  "vs-bench",
 ]
 
 [tool.uv]
 package = false
-
-[tool.uv.sources]
-vs-bench = { path = "../../../sdk/vs-bench" }

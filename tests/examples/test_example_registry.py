@@ -19,10 +19,11 @@ import posixpath
 import re
 import shutil
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import pytest
+from packaging.specifiers import SpecifierSet
 from tests.support import run_test_command
 from tests.support.example_registry import (
     REPO_ROOT,
@@ -38,13 +39,15 @@ from tests.support.example_registry import (
 
 from entrypoints.cli import _run_validate
 from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
+from entrypoints.examples import GitExampleMaterializer
 from vibesys.errors import ConfigurationError
 from vibesys.inputs import InputManifestParseError, load_input_manifest, load_task
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vs_project.api import Project, load_objectives
+from vs_project.api import Git, Project, load_objectives
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -161,6 +164,58 @@ def test_ci_shards_the_cpu_check_and_requires_every_shard() -> None:
     policy = tomllib.loads((REPO_ROOT / ".repoctl" / "checks.toml").read_text())
     group = next(g for g in policy["check_groups"] if g["name"] == "examples_cpu_check_shard")
     assert any("cpu_check" in command for command in group["commands"])
+
+
+# --- a copied example resolves its Python environment ----------------------
+
+
+_PYTHON_MINORS = tuple(f"3.{minor}" for minor in range(8, 21))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(e, id=e.path)
+        for e in ENTRIES
+        if not e.external_repo and (example_root(e) / "pyproject.toml").is_file()
+    ],
+)
+def test_a_copied_example_resolves_its_path_dependencies(
+    entry: ExampleEntry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``vibesys example new`` copies an example outside the checkout, where uv must still resolve it.
+
+    Every ``[tool.uv.sources]`` path of the copy must hold a project, and the example's
+    ``requires-python`` must admit no Python the dependency refuses (``uv lock`` fails
+    otherwise).
+    """
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Example Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "example-test@localhost")
+    project = tmp_path / "project"
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
+        REPO_ROOT, PurePosixPath(entry.path), project, message="Start"
+    )
+    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    own = SpecifierSet(config["project"].get("requires-python", ""))
+    sources = config.get("tool", {}).get("uv", {}).get("sources", {})
+    failures: list[str] = []
+    for name, source in sources.items():
+        if "path" not in source:
+            continue
+        manifest = project / source["path"] / "pyproject.toml"
+        if not manifest.is_file():
+            failures.append(f"{name}: path {source['path']!r} has no pyproject.toml in a copy")
+            continue
+        dependency = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+        theirs = SpecifierSet(dependency.get("requires-python", ""))
+        refused = [v for v in _PYTHON_MINORS if v in own and v not in theirs]
+        if refused:
+            failures.append(
+                f"{name}: requires-python {str(own)!r} admits Python {refused} that "
+                f"{str(theirs)!r} refuses; raise the example's requires-python"
+            )
+    assert not failures, f"{entry.path}: " + "; ".join(failures)
 
 
 # --- validation through the CLI entry point ---------------------------------

@@ -360,7 +360,10 @@ vibesys --task spsc
 `git init`, makes one initial commit, and prints the `vibesys --task ...` line
 to run. The destination must be absent or an empty directory, outside the
 checkout. An example registered with `external_repo = true` is cloned from its
-repository at the commit the checkout pins instead. A unique last path
+repository at the commit the checkout pins instead. A `[tool.uv.sources]` path
+in the example's `pyproject.toml` that leaves the example (such as
+`../../../sdk/vs-bench`) is copied to `vendor/` in the new project and the path
+rewritten, so `uv` resolves it outside the checkout. A unique last path
 component (`stack`) also selects an example. `vibesys example list` prints a
 text listing grouped by category; the legacy JSON listing is removed.
 
