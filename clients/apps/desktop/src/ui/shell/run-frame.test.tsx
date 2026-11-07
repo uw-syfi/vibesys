@@ -307,6 +307,7 @@ describe('the pages of a run and the pages of the window', () => {
         runId: scenario.runId,
         view,
         agentId: null,
+        ideas: null,
       };
       const on = mount(app(flagged(true), nowMs, route));
       expect(on.container.querySelector('.vs-page-meta')?.textContent, view).toContain(

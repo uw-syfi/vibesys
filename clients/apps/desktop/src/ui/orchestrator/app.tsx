@@ -1,5 +1,5 @@
 import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
-import {type Crumb, Page, Text} from '@vibesys/ui';
+import {Chip, type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
 import {
