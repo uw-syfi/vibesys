@@ -73,6 +73,9 @@ _EVALUATOR_TOOLCHAINS_STAGE_PATH = ".vibesys-evaluator-toolchains"
 _FRAMEWORK_BIN_STAGE_PATH = ".bin"
 _FRAMEWORK_PIP_STAGE_PATH = ".pip"
 _FRAMEWORK_UV_CACHE_STAGE_PATH = ".uv-cache"
+# Where Modal's uv images (``Image.uv_sync``, ``Image.uv_pip_install``) keep their ``uv``
+# executable, ``modal.image.UV_ROOT``. Their virtual environment, first on ``PATH``, has no pip.
+_MODAL_IMAGE_UV_ROOT = "/.uv"
 # Linux caps a single argv string at 128 KiB; stay well under it per chunk.
 _B64_CHUNK_CHARS = 60_000
 _MAX_ENCODED_SETUP_COMMAND_CHARS = 60_000
@@ -846,11 +849,16 @@ def _bootstrap_script(
     """Build the in-container POSIX shell bootstrap.
 
     Receives the staged archive as base64 chunks in ``"$@"``, recreates the
-    workspace-relative layout in a temp directory, provides ``uv`` through an
-    isolated Python shim, runs optional trusted setup and the evaluator argv
-    verbatim from that directory, then emits each existing output file and the
-    command's exit code between sentinel markers. ``modal container exec`` does
-    not propagate exit codes itself.
+    workspace-relative layout in a temp directory, provides ``uv``, runs optional
+    trusted setup and the evaluator argv verbatim from that directory, then emits
+    each existing output file and the command's exit code between sentinel
+    markers. ``modal container exec`` does not propagate exit codes itself.
+
+    ``uv`` is the release pip installs into the stage, run through an isolated
+    Python shim, so every gate gets the same ``uv`` whatever the image carries.
+    Only when the image has no working pip (Modal's uv images) does the stage's
+    ``uv`` become the image's own, found on ``PATH`` or in Modal's uv root. With
+    neither, the bootstrap reports ``_EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE``.
     """
     quoted_command = " ".join(shlex.quote(token) for token in command)
     uv_wrapper = base64.b64encode(
@@ -893,9 +901,18 @@ printf '%s' {shlex.quote(uv_wrapper)} | base64 -d > "$stage/.bin/uv"
 chmod +x "$stage/.bin/uv"
 cd /tmp
 if ! python3 -I -m pip install --quiet --target "$stage/.pip" uv >&2; then
-  echo 'vibesys evaluator bootstrap failed: serving container lacks python3 -m pip' >&2
-  printf '\\n{_EXEC_RC_MARKER}%s\\n' {_EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE}
-  exit 0
+  image_uv=$(PATH="$PATH:{_MODAL_IMAGE_UV_ROOT}"; command -v uv) || image_uv=
+  case $image_uv in
+    /*) ;;
+    *) image_uv= ;;
+  esac
+  if [ ! -f "$image_uv" ] || [ ! -x "$image_uv" ]; then
+    echo 'vibesys evaluator bootstrap failed: the serving container has neither python3 -m pip nor uv (looked on PATH and in {_MODAL_IMAGE_UV_ROOT})' >&2
+    printf '\\n{_EXEC_RC_MARKER}%s\\n' {_EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE}
+    exit 0
+  fi
+  printf 'vibesys evaluator bootstrap: no python3 -m pip in the serving container; using its uv at %s\\n' "$image_uv" >&2
+  ln -sf "$image_uv" "$stage/.bin/uv"
 fi
 PATH="$stage/.bin:$PATH"; export PATH
 PYTHONPATH="$stage/.pip${{PYTHONPATH:+:$PYTHONPATH}}"; export PYTHONPATH
