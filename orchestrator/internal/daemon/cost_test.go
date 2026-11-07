@@ -48,10 +48,7 @@ func newCostWorld(t *testing.T, limits hub.Limits) *costWorld {
 			daemontest.DefaultReaction(s, cmd)
 			return
 		}
-		id := turn.StartTurn.GetTurnId()
-		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
-			TurnId: id, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, Usage: w.next(s.Launch.Session.Agent),
-		}}})
+		daemontest.AnswerTurnWith(s, turn.StartTurn.GetTurnId(), "ok", w.next(s.Launch.Session.Agent))
 	}
 	w.next = func(core.AgentID) *pb.Usage { return nil }
 	return w

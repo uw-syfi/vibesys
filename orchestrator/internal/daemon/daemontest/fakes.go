@@ -380,7 +380,10 @@ func DefaultReaction(s *Session, cmd *pb.SessionCommand) {
 
 // AnswerTurn emits what a turn that writes `text` and ends looks like: a delta, the finished item,
 // and the end of the turn. The session's lock must be held.
-func AnswerTurn(s *Session, turn, text string) {
+func AnswerTurn(s *Session, turn, text string) { AnswerTurnWith(s, turn, text, nil) }
+
+// AnswerTurnWith is AnswerTurn for a turn whose end reports usage, nil for none.
+func AnswerTurnWith(s *Session, turn, text string, usage *pb.Usage) {
 	item := "item-" + turn
 	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Delta{Delta: &pb.SessionDelta{
 		ItemId: item, Body: &pb.SessionDelta_Text{Text: text},
@@ -390,6 +393,6 @@ func AnswerTurn(s *Session, turn, text string) {
 		Body: &pb.SessionItem_Assistant{Assistant: &pb.Text{Text: text}},
 	}}})
 	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
-		TurnId: turn, Status: pb.TurnStatus_TURN_STATUS_COMPLETED,
+		TurnId: turn, Status: pb.TurnStatus_TURN_STATUS_COMPLETED, Usage: usage,
 	}}})
 }
