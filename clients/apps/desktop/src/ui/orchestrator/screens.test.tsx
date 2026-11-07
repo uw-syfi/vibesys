@@ -63,6 +63,8 @@ function screen(
       runId={runId}
       nowMs={nowMs}
       view={view}
+      costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
+      retryCost={() => undefined}
       agentId={null}
       agentPanel={null}
       stopProgress={stopProgress}

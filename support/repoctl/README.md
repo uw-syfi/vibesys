@@ -24,8 +24,11 @@ From a repository root:
 
 `doctor` checks that the machine can run the gate and the tests (Python, pinned Bun, `buf`,
 `TMPDIR`, installed client dependencies, `GOFLAGS` in a worktree, the hook) and prints the exact fix
-for each failure. `doctor --fix` does the safe repairs and `doctor --env` prints the exports for a
-shell to evaluate. The checks are policy in `.repoctl/doctor.toml`; the Go code in
+for each failure. `doctor --fix` does the safe repairs (it fetches the pinned Bun into a per-user
+cache, a `[[programs]]` entry's `cache_directories` and `fetch`) and `doctor --env` prints the exports
+for a shell to evaluate; `doctor --fix` exits zero when the exports are all that is left, so
+`doctor --fix && eval "$(doctor --env)"` is the session start. `gate`, `test` and `run-checks` put a
+cached pinned program first on their own PATH when the shell's has another version. The checks are policy in `.repoctl/doctor.toml`; the Go code in
 `internal/doctor` has a pure core (facts to findings) over a `Host` interface, tested on
 `FakeHost`. See [the contributor guide](../../docs/contributing/development.md#check-your-environment).
 

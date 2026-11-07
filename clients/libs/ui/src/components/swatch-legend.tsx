@@ -53,7 +53,7 @@ export function SwatchLegend(props: {
             {...(item.hatched === true ? {hatched: true} : {})}
             {...(item.muted === true ? {muted: true} : {})}
           />
-          <Text variant={item.mono === true ? 'code' : 'small'} tone="muted">
+          <Text variant={item.mono === true ? 'code' : 'small'} tone="muted" title={item.label}>
             {item.label}
           </Text>
         </li>

@@ -23,6 +23,8 @@ files="$(cd "$root" && uv run --locked --group proto buf ls-files proto --path p
 # protoc writes absolute imports of the proto package paths; point them at this package so the
 # generated tree does not shadow another `vibesys` or `buf` in the interpreter.
 grep -rl --include='*.py' -E '^from (vibesys|buf)\.' "$out" | while read -r file; do
-  sed -i -E "s/^from (vibesys|buf)\./from vs_sidecar.gen.\1./; s/^import (vibesys|buf)\./import vs_sidecar.gen.\1./" "$file"
+  # `-i.bak` with the suffix attached is the one in-place form GNU and BSD sed (macOS) share.
+  sed -i.bak -E "s/^from (vibesys|buf)\./from vs_sidecar.gen.\1./; s/^import (vibesys|buf)\./import vs_sidecar.gen.\1./" "$file"
+  rm -f "$file.bak"
 done
 find "$out" -type d -exec sh -c 'test -f "$1/__init__.py" || : > "$1/__init__.py"' _ {} \;

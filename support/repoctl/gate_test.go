@@ -319,3 +319,27 @@ func TestTheGateLeavesTheEnvironmentGitSetsForAHook(t *testing.T) {
 		}
 	}
 }
+
+// A push that changes a contract source runs buf lint and the breaking check before it leaves the
+// machine; a change only to the bindings generated from it does not (CI regenerates and compares).
+func TestAContractChangeRunsBufLintAndBreakingInTheGate(t *testing.T) {
+	lanes := repositoryGateLanes(t, []string{"proto/vibesys/store/v1/store.proto"})
+	commands, ok := lanes["proto_contract_gate"]
+	if !ok {
+		t.Fatalf("a .proto change selected no proto lane: %v", lanes)
+	}
+	var lint, breaking bool
+	for _, command := range commands {
+		joined := strings.Join(command, " ")
+		lint = lint || strings.HasSuffix(joined, "--group proto buf lint")
+		breaking = breaking || joined == "./scripts/check_proto_breaking.sh"
+	}
+	if !lint || !breaking {
+		t.Fatalf("lint=%v breaking=%v in %v", lint, breaking, commands)
+	}
+	for _, path := range []string{"gateway/gen/vibesys/store/v1/store.pb.go", "scripts/generate_proto.sh", "docs/contributing/development.md"} {
+		if _, ok := repositoryGateLanes(t, []string{path})["proto_contract_gate"]; ok {
+			t.Errorf("a change to %s runs the contract lane", path)
+		}
+	}
+}

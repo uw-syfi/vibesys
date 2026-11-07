@@ -12,14 +12,10 @@ import {
   JobOutcome,
   MessageSchema,
   SearchStateSchema,
-  TurnSchema,
-  TurnStatus,
-  TurnTrigger,
-  UsageSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {emptyState, type OrchestratorState} from './state.js';
-import {agentTree, flattenTree, timeline, unbrokenFrom, usageOf} from './views.js';
+import {agentTree, flattenTree, timeline, unbrokenFrom} from './views.js';
 
 const agent = (id: string, parent: string, role: AgentRole, startMs: number) =>
   create(AgentSchema, {
@@ -36,74 +32,18 @@ const agent = (id: string, parent: string, role: AgentRole, startMs: number) =>
 
 const roles = [AgentRole.PLANNER, AgentRole.WORKER, AgentRole.JUDGE];
 
-/** A lead with three subagents, each with turns whose usage reports only some fields. */
-const stateWith = (
-  turns: readonly {agent: number; input?: number | undefined; cost?: number | undefined}[],
-): OrchestratorState => {
+/** A lead with three subagents. */
+const stateWithAgents = (): OrchestratorState => {
   const agents = [
     agent('lead', '', AgentRole.LEAD, 0),
     ...roles.map((role, i) => agent(`a${i}`, 'lead', role, 1 + i)),
   ];
-  return {
-    ...emptyState,
-    agents: Object.fromEntries(agents.map(a => [a.id, a])),
-    turns: Object.fromEntries(
-      turns.map((turn, i) => [
-        `t${i}`,
-        create(TurnSchema, {
-          id: `t${i}`,
-          agentId: agents[turn.agent]?.id ?? 'lead',
-          ordinal: i + 1,
-          trigger: TurnTrigger.BRIEF,
-          triggerMessageId: 'm',
-          status: TurnStatus.COMPLETED,
-          startedAt: timestampFromMs(i),
-          usage: create(UsageSchema, {
-            ...(turn.input === undefined ? {} : {inputTokens: BigInt(turn.input)}),
-            ...(turn.cost === undefined ? {} : {costUsd: turn.cost}),
-          }),
-        }),
-      ]),
-    ),
-  };
+  return {...emptyState, agents: Object.fromEntries(agents.map(a => [a.id, a]))};
 };
-
-describe('usage', () => {
-  it('by agent, by role and for the run add up to the same total, and a field nobody reported stays absent', () => {
-    fc.assert(
-      fc.property(
-        fc.array(
-          fc.record({
-            agent: fc.integer({min: 0, max: 3}),
-            input: fc.option(fc.integer({min: 0, max: 1e6}), {nil: undefined}),
-            cost: fc.option(fc.integer({min: 0, max: 500}), {nil: undefined}),
-          }),
-          {maxLength: 25},
-        ),
-        turns => {
-          const report = usageOf(stateWith(turns), 'r');
-          const sum = (values: readonly (number | null)[]) =>
-            values.every(value => value === null)
-              ? null
-              : values.reduce<number>((total, value) => total + (value ?? 0), 0);
-          expect(report.run.inputTokens).toBe(sum(turns.map(turn => turn.input ?? null)));
-          expect(report.run.costUsd).toBe(sum(turns.map(turn => turn.cost ?? null)));
-          expect(sum(Object.values(report.byAgent).map(total => total.inputTokens))).toBe(
-            report.run.inputTokens,
-          );
-          expect(sum(Object.values(report.byRole).map(total => total?.inputTokens ?? null))).toBe(
-            report.run.inputTokens,
-          );
-          expect(report.run.turns).toBe(turns.length);
-        },
-      ),
-    );
-  });
-});
 
 describe('the agent tree', () => {
   it('puts each agent under its parent, the lead first, and lists every agent once', () => {
-    const tree = agentTree(stateWith([]), 'r');
+    const tree = agentTree(stateWithAgents(), 'r');
     expect(tree).toHaveLength(1);
     expect(flattenTree(tree).map(node => [node.agent.id, node.depth])).toEqual([
       ['lead', 0],

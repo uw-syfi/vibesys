@@ -499,6 +499,24 @@ timeout_seconds = 180
 commands = [["./scripts/check_proto.sh"]]
 
 [[check_groups]]
+# The pre-push gate's share of the proto group: lint and the breaking-change check, which fail most
+# often and take seconds, so a contract mistake is caught before the push and not in CI. The proto
+# group above stays CI's check (it runs the same two, and regenerates the bindings). Neither this
+# group's own commands nor its selection run under `repoctl test` or in a CI job. It runs only when a
+# change touches the contract sources, not every path the proto component owns (generated bindings).
+name = "proto_contract_gate"
+trigger_job = "proto"
+language = "python"
+directory = "."
+timeout_seconds = 180
+local_paths = ["proto", "buf.yaml"]
+commands = [["uv", "run", "--locked", "--group", "proto", "buf", "lint"]]
+gate_commands = [
+  ["uv", "run", "--locked", "--group", "proto", "buf", "lint"],
+  ["./scripts/check_proto_breaking.sh"],
+]
+
+[[check_groups]]
 name = "gateway_checks"
 trigger_job = "gateway"
 include_in_test = true
