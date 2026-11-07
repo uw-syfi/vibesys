@@ -1157,9 +1157,6 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vs-columnlist-cell[data-figure] {
-  font-variant-numeric: tabular-nums;
-}
 .vs-columnlist-cell[data-wrap] {
   overflow: visible;
   text-overflow: clip;

@@ -65,11 +65,14 @@ export function freshnessPhrase(freshness: Freshness, staleForMs: number | null)
   return freshness === 'stale' && staleForMs !== null ? `${label} ${span(staleForMs)}` : label;
 }
 
-/** One objective's result, for the eye: `2.31 tok/s`, or a dash when the head has no value. */
+/**
+ * One objective's result, for the eye: `2.31 tok/s`; with no declared unit, led by the objective's
+ * name (`latency 37`) so a bare number is never left to guess; a dash when the head has no value.
+ */
 export function resultWords(objective: FleetObjective): string {
-  if (objective.value === null) return '—';
+  if (objective.value === null) return '\u2014';
   return objective.unit === ''
-    ? figure(objective.value)
+    ? `${objective.name} ${figure(objective.value)}`
     : `${figure(objective.value)} ${objective.unit}`;
 }
 

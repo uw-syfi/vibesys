@@ -32,8 +32,6 @@ export interface ListColumn<Row> {
   readonly act?: (row: Row) => boolean;
   /** The cell's text wraps onto more lines instead of being cut short. */
   readonly wrap?: boolean;
-  /** The cell holds figures: set in tabular numerals, so a digit takes the room of any other and a column of them lines up. */
-  readonly figure?: boolean;
   /** The column's size when the list is narrow; the same by default. */
   readonly narrow?: ColumnSize;
   /** The column's size when a crowded list is tighter still; its `narrow` size by default. */
@@ -171,7 +169,6 @@ function Row<Row>(props: {
           data-align={column.align}
           data-optional={column.optional || undefined}
           data-wrap={column.wrap || undefined}
-          data-figure={column.figure || undefined}
           title={column.hint?.(props.row)}
         >
           {column.cell(props.row)}
@@ -282,18 +279,24 @@ export function ColumnList<Row>(props: {
   );
 }
 
-/** A cell's two lines: the figure and a quieter line under it (a status and its cause). */
+/**
+ * A cell's two lines: the figure and a quieter line under it (a status and its cause). The note is
+ * text, set small and muted; a note that is more than text (parts that come and go with the list's
+ * width) is the caller's own element, which then sets its own face.
+ */
 export function CellLines(props: {
   readonly main: ReactNode;
-  readonly note?: string | null | undefined;
+  readonly note?: ReactNode;
 }): JSX.Element {
   return (
     <span className="vs-columnlist-lines">
       {props.main}
-      {props.note === undefined || props.note === null ? null : (
+      {props.note === undefined || props.note === null ? null : typeof props.note === 'string' ? (
         <Text variant="small" tone="muted">
           {props.note}
         </Text>
+      ) : (
+        props.note
       )}
     </span>
   );

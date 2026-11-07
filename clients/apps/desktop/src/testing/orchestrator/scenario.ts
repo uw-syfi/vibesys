@@ -35,6 +35,7 @@ import {
   ReportSchema,
   type RunChange,
   RunStatus,
+  type SearchState,
   type Turn,
   TurnStatus,
   TurnTrigger,
@@ -55,6 +56,8 @@ export interface ScenarioOptions {
 }
 
 export interface Scenario {
+  /** The search facts of every run the scenario holds, when it holds several (`search` serves one). */
+  readonly searches?: readonly SearchState[];
   readonly search?: boolean;
   readonly searchStale?: boolean;
   readonly searchTruncated?: boolean;

@@ -93,15 +93,37 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
       cell: row => (
         <CellLines
           main={<Text variant="body-strong">{row.name}</Text>}
-          note={elapsed(row, nowMs)}
+          note={
+            <Text variant="small" tone="muted">
+              {elapsed(row, nowMs)}
+              {/* The Host column gives way when the list is narrow; its word moves here. */}
+              <span data-narrow-only>{` \u00b7 ${row.host.label}`}</span>
+            </Text>
+          }
         />
       ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      size: 'wide',
+      narrow: 'medium',
+      hint: row => whenHint(row, nowMs) || undefined,
+      cell: row => {
+        const word = runWord(row.status);
+        return (
+          <CellLines
+            main={<Chip label={word.label} tone={word.tone} dot />}
+            note={whenLine(row, nowMs)}
+          />
+        );
+      },
     },
     {
       key: 'host',
       header: 'Host',
       size: 'medium',
-      narrow: 'compact',
+      optional: true,
       hint: row => `${row.host.label}\n${freshnessPhrase(row.host.freshness, row.host.staleForMs)}`,
       cell: row => (
         <CellLines
@@ -127,7 +149,6 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
       header: 'Best',
       size: 'wide',
       narrow: 'medium',
-      figure: true,
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);
@@ -141,7 +162,6 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
       header: 'Agents',
       size: 'compact',
       align: 'end',
-      figure: true,
       optional: true,
       cell: row => <Text>{row.live ? String(row.agentsRunning) : '—'}</Text>,
     },
@@ -151,7 +171,6 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
       size: 'short',
       narrow: 'compact',
       align: 'end',
-      figure: true,
       hint: row =>
         row.costUsd === null
           ? 'No cost reported'
@@ -162,22 +181,6 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
           note={row.budgetUsd === null ? null : `of ${dollars(row.budgetUsd)}`}
         />
       ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      size: 'wide',
-      narrow: 'medium',
-      hint: row => whenHint(row, nowMs) || undefined,
-      cell: row => {
-        const word = runWord(row.status);
-        return (
-          <CellLines
-            main={<Chip label={word.label} tone={word.tone} dot />}
-            note={whenLine(row, nowMs)}
-          />
-        );
-      },
     },
   ];
 }
@@ -295,7 +298,7 @@ export function FleetScreen(props: {
   return (
     <Page
       key="runs"
-      width="fill"
+      width="wide"
       state={pageState(props.hosts.length === 0)}
       header={
         <Row justify="between" wrap>
