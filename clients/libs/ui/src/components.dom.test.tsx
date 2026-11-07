@@ -1165,6 +1165,30 @@ describe('Table control column', () => {
   });
 });
 
+describe('Table clipped column', () => {
+  test('marks the cells of a clipped column and gives each its whole text on hover, and no other', async () => {
+    const long = `name-${'x'.repeat(200)}`;
+    const container = await mount(
+      <Table
+        label="Rows"
+        columns={[
+          {key: 'name', header: 'Name', clip: row => row.id, cell: row => row.id},
+          {key: 'size', header: 'Size', cell: () => '1'},
+        ]}
+        rows={[{id: long}, {id: ''}]}
+        rowKey={row => `row-${row.id.length}`}
+      />,
+    );
+    const names = [...container.querySelectorAll('tbody td:first-child')];
+    expect(names.map(cell => cell.getAttribute('data-clip'))).toEqual(['true', 'true']);
+    expect(names.map(cell => cell.getAttribute('title'))).toEqual([long, '']);
+    const sizes = [...container.querySelectorAll('tbody td:last-child')];
+    expect(sizes.map(cell => cell.hasAttribute('data-clip') || cell.hasAttribute('title'))).toEqual(
+      [false, false],
+    );
+  });
+});
+
 describe('Table rows that pick', () => {
   test('a control inside a row acts alone: pressing it, by pointer or key, does not pick the row', async () => {
     const picked: string[] = [];

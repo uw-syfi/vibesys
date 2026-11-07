@@ -167,6 +167,18 @@ function desktopAppRules() {
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
     {
+      // A feature (a subfolder of `state`, `core`, `ui` or `testing` named for what it does) is
+      // reached only by the shell, which composes the features, and by its own folders. Two
+      // features that need one another's facts meet in the shell, which passes them as props.
+      name: 'desktop-features-do-not-import-each-other',
+      severity: 'error',
+      from: {path: '^apps/desktop/src/(?:state|core|ui)/(orchestrator|settings)/', pathNot: TEST_FILE},
+      to: {
+        path: '^apps/desktop/src/(?:state|core|ui|testing)/(?:orchestrator|settings|shell)/',
+        pathNot: '^apps/desktop/src/(?:state|core|ui|testing)/$1/',
+      },
+    },
+    {
       name: 'desktop-production-code-does-not-import-testing',
       severity: 'error',
       from: {path: DESKTOP_APP, pathNot: [TEST_FILE, DESKTOP_PART('testing')]},
