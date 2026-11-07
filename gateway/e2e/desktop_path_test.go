@@ -335,11 +335,9 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 	}
 
-	// One brief, three handoffs, and exactly eight job-completion notices wake
-	// the lead. Wait for typed delivery acknowledgments before counting files;
-	// the report itself may arrive before the last job notice was delivered.
-	r.awaitLeadDeliveries(started.RunID, lead.ID)
-	const expectedPrompts = 1 + 3 + 8
+	// One brief, three handoffs, and the job-completion notices that came before the run ended wake the
+	// lead (see minJobNotices). Read the typed deliveries once the run is over, then count the files.
+	expectedPrompts := 1 + 3 + r.awaitLeadDeliveries(started.RunID, lead.ID)
 	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
 		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
 	}
