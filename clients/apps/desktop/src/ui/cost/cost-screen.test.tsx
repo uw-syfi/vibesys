@@ -48,7 +48,6 @@ function screen(
       runOver={options.runOver ?? false}
       words={COST_WORDS}
       trail={[]}
-      notice={null}
       reading={null}
       retry={options.retry ?? (() => undefined)}
     />,
@@ -186,7 +185,7 @@ describe('the Cost screen over served views', () => {
     const html = screen(PRICED_AND_UNPRICED, {freshness: 'stale', status});
     // The last view stays on screen, marked stale, with the reason and the way to retry beside it.
     expect(textOf(html)).toContain('Stale');
-    expect(textOf(html)).toContain('did not answer in time');
+    expect(textOf(html)).toContain('Timed out');
     expect(textOf(html)).toContain('Retry');
     expect(html).toContain('≥\u2005$318');
     // It is a line in the screen, not a full-width banner.

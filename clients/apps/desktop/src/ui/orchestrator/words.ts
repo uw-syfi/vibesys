@@ -15,7 +15,7 @@ import {
   type ToolCall,
 } from '@vibesys/orchestrator-proto';
 import type {Fault, FaultKind} from '../../state/index.js';
-import {causeWord} from '../refusal-words.js';
+import {causeHint, causeWord} from '../refusal-words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -82,42 +82,43 @@ export const jobWord = (outcome: JobOutcome): Word => JOB[outcome];
 /** Where a message stands, in the contract's own terms: a steered message is sent, not yet confirmed. */
 const DELIVERY: Readonly<Record<Delivery, Word>> = {
   [Delivery.UNSPECIFIED]: {label: 'Not sent', tone: 'neutral'},
-  [Delivery.QUEUED]: {label: 'Accepted, waiting for the agent\u2019s next turn', tone: 'neutral'},
-  [Delivery.STEERED]: {label: 'Sent; delivery to agent unconfirmed', tone: 'live'},
-  [Delivery.NEW_TURN]: {label: 'Being handled in the agent\u2019s current turn', tone: 'live'},
-  [Delivery.CONSUMED]: {label: 'Read by the agent', tone: 'ok'},
+  [Delivery.QUEUED]: {label: 'Queued', tone: 'neutral'},
+  [Delivery.STEERED]: {label: 'Sent, unconfirmed', tone: 'live'},
+  [Delivery.NEW_TURN]: {label: 'In its turn', tone: 'live'},
+  [Delivery.CONSUMED]: {label: 'Read', tone: 'ok'},
   [Delivery.REJECTED]: {label: 'Not delivered', tone: 'err'},
 };
 
 export const deliveryWord = (delivery: Delivery): Word => DELIVERY[delivery];
 
+/** Why a message was not delivered, as a label. */
 const REJECTION: Readonly<Record<Rejection, string>> = {
-  [Rejection.UNSPECIFIED]: 'No reason was given.',
-  [Rejection.AGENT_GONE]: 'The agent\u2019s session is over and cannot be resumed.',
-  [Rejection.FANOUT_LIMIT]: 'Waking the agent would go over the run\u2019s limit of agents.',
-  [Rejection.AGENT_STOPPING]: 'The agent is being stopped.',
-  [Rejection.RUN_STOPPING]: 'The run is stopping or over.',
-  [Rejection.ATTEMPTS_EXHAUSTED]:
-    'Every attempt to deliver it ended in an interrupted or failed turn.',
+  [Rejection.UNSPECIFIED]: 'No reason given',
+  [Rejection.AGENT_GONE]: 'Session over',
+  [Rejection.FANOUT_LIMIT]: 'At agent limit',
+  [Rejection.AGENT_STOPPING]: 'Agent stopping',
+  [Rejection.RUN_STOPPING]: 'Run stopping',
+  [Rejection.ATTEMPTS_EXHAUSTED]: 'Attempts failed',
 };
 
 export const rejectionWord = (rejection: Rejection): string => REJECTION[rejection];
 
+/** Why the host refused a command, as a label. */
 const REFUSAL: Readonly<Record<Refusal, string>> = {
-  [Refusal.UNSPECIFIED]: 'The host did not accept that.',
-  [Refusal.RUN_NOT_FOUND]: 'That run no longer exists.',
-  [Refusal.AGENT_NOT_FOUND]: 'No such agent in this run.',
-  [Refusal.NOT_PERMITTED]: 'This app is not allowed to do that.',
-  [Refusal.RUN_NOT_RUNNING]: 'The run is not running.',
-  [Refusal.FANOUT_LIMIT]: 'The run is already at its limit of agents.',
-  [Refusal.AGENT_IS_LEAD]: 'That message cannot go to the lead.',
-  [Refusal.AGENT_NOT_LIVE]: 'That agent has finished and cannot take messages.',
-  [Refusal.REPOSITORY_IN_USE]: 'Another run is already working in this repository.',
-  [Refusal.AGENT_NOT_ALLOWED]: 'The run was not allowed to use that agent.',
-  [Refusal.HANDOFF_NOT_YOURS]: 'That handoff does not belong to the agent\u2019s role.',
-  [Refusal.TIME_LIMIT_REACHED]: 'The run reached its time limit and starts no new agent.',
-  [Refusal.COST_LIMIT_REACHED]: 'The run reached its cost limit and starts no new agent.',
-  [Refusal.NO_VIEWER]: 'This app did not say who is looking.',
+  [Refusal.UNSPECIFIED]: 'Not accepted',
+  [Refusal.RUN_NOT_FOUND]: 'Run gone',
+  [Refusal.AGENT_NOT_FOUND]: 'No such agent',
+  [Refusal.NOT_PERMITTED]: 'Not permitted',
+  [Refusal.RUN_NOT_RUNNING]: 'Not running',
+  [Refusal.FANOUT_LIMIT]: 'At agent limit',
+  [Refusal.AGENT_IS_LEAD]: 'Not for the lead',
+  [Refusal.AGENT_NOT_LIVE]: 'Agent finished',
+  [Refusal.REPOSITORY_IN_USE]: 'Repository in use',
+  [Refusal.AGENT_NOT_ALLOWED]: 'Agent not allowed',
+  [Refusal.HANDOFF_NOT_YOURS]: 'Not this role\u2019s handoff',
+  [Refusal.TIME_LIMIT_REACHED]: 'Time limit reached',
+  [Refusal.COST_LIMIT_REACHED]: 'Cost limit reached',
+  [Refusal.NO_VIEWER]: 'No viewer named',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];
@@ -142,8 +143,36 @@ export function formatMoment(atMs: number): string {
   return `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}, ${formatClock(atMs)} UTC`;
 }
 
-/** Why a connection or a request did not work, in a sentence a person can act on. */
+/** Why a connection or a request did not work, as a label. */
 export function faultWord(kind: FaultKind): string {
+  switch (kind) {
+    case 'AuthenticationFailed':
+      return 'Key refused';
+    case 'NoBridge':
+      return 'No host link';
+    case 'TransportFailed':
+      return 'Connection lost';
+    case 'Unavailable':
+      return 'Unreachable';
+    case 'DeadlineExceeded':
+      return 'Timed out';
+    case 'FellBehind':
+      return 'Fell behind';
+    case 'InvalidMessage':
+      return 'Invalid reply';
+    case 'NotFound':
+      return 'Not on host';
+    case 'Unimplemented':
+      return 'Host too old';
+    case 'Rejected':
+      return 'Rejected';
+    case 'Refused':
+      return 'Refused';
+  }
+}
+
+/** What to do about a fault, for a hover: the sentence the label stands for. */
+export function faultAdvice(kind: FaultKind): string {
   switch (kind) {
     case 'AuthenticationFailed':
       return 'SSH key authentication failed. Configure a key accepted by the host and try again.';
@@ -170,9 +199,13 @@ export function faultWord(kind: FaultKind): string {
   }
 }
 
-/** What a person is told of a fault: its cause when it is a typed refusal, else the kind's words. */
+/** A fault as a label: its cause when it is a typed refusal, else the kind's. */
 export const faultText = (fault: Fault): string =>
   fault.cause === undefined ? faultWord(fault.kind) : causeWord(fault.cause);
+
+/** The account behind a fault's label, for a hover: the cause's when typed, else the kind's. */
+export const faultHint = (fault: Fault): string =>
+  fault.cause === undefined ? faultAdvice(fault.kind) : causeHint(fault.cause);
 
 /** What a person is told of one tool call: its name, and what it was asked as text. */
 export interface CallWords {

@@ -103,7 +103,14 @@ export interface RunHistoryFrame {
   readonly runId: string;
   readonly page: Pick<
     GetRunHistoryResponse,
-    'sequence' | 'agents' | 'turns' | 'checkIns' | 'messages' | 'turnsLeftOut' | 'checkInsLeftOut'
+    | 'sequence'
+    | 'agents'
+    | 'turns'
+    | 'checkIns'
+    | 'messages'
+    | 'turnsLeftOutCount'
+    | 'checkInsLeftOutCount'
+    | 'agentsLeftOutCount'
   >;
   /** This is the run's first page, which holds what is not paged, so it says what the host left out. */
   readonly first: boolean;
@@ -144,8 +151,9 @@ export function applyRunHistory(
   const before = frame.first ? undefined : state.histories[runId];
   const read = {
     sequence: before?.sequence ?? page.sequence,
-    turnsLeftOut: before?.turnsLeftOut ?? page.turnsLeftOut,
-    checkInsLeftOut: before?.checkInsLeftOut ?? page.checkInsLeftOut,
+    turnsLeftOut: before?.turnsLeftOut ?? page.turnsLeftOutCount,
+    checkInsLeftOut: before?.checkInsLeftOut ?? page.checkInsLeftOutCount,
+    agentsLeftOut: before?.agentsLeftOut ?? page.agentsLeftOutCount,
     complete: frame.last,
   };
   return {

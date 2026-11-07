@@ -245,6 +245,7 @@ export function AgentTranscript(props: {
     <Conversation
       label={`${labelsOf(agentNames(state, agent.runId))(agentId)}, turn by turn`}
       items={items}
+      size="fill"
       earlier={
         earlier === null
           ? null

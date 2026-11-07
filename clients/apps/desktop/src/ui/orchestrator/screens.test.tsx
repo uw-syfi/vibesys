@@ -29,7 +29,7 @@ import {
 } from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {AgentPage} from '../agents/agent-page.js';
-import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
+import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
 import {agentNames} from './names.js';
 import {ReportScreen} from './report/report-screen.js';
 import {describeCall, harnessWord} from './words.js';
@@ -84,7 +84,6 @@ function page(state: OrchestratorState, agent: Agent, sendProgress?: CommandProg
       agent={agent}
       host="host-a"
       trail={[]}
-      notice={null}
       reading={null}
       history={{
         earlier: {_tag: 'Idle'},
@@ -119,7 +118,7 @@ describe('the screens', () => {
     );
   });
 
-  it('a connection that is not working says so with the reason and a Retry, and a working one is silent', () => {
+  it('a connection that is not working says so in chips with a Retry, and a working one is silent', () => {
     const fault = {kind: 'TransportFailed', detail: 'ssh exited', retryable: true} as const;
     const note = (
       connection: ConnectionNote['connection'],
@@ -134,7 +133,7 @@ describe('the screens', () => {
       tryAgain: () => undefined,
     });
     const ready = {_tag: 'Ready', epoch: 1, daemon: undefined as never} as const;
-    const html = (n: ConnectionNote) => renderToStaticMarkup(<ConnectionBanner notes={[n]} />);
+    const html = (n: ConnectionNote) => renderToStaticMarkup(<ConnectionStatus notes={[n]} />);
     expect(html(note(ready, {_tag: 'Live'}))).toBe('');
     expect(html(note(ready, {_tag: 'Opening'}))).toContain('Catching up');
     for (const lost of [
@@ -143,12 +142,14 @@ describe('the screens', () => {
       note({_tag: 'Unusable', fault}, {_tag: 'Opening'}),
     ]) {
       expect(html(lost)).toContain('Retry');
-      expect(html(lost)).toContain('out of date');
+      expect(html(lost)).toContain('Connection lost');
+      // The reason, the context and the host's own words are on hover, not lines of the screen.
+      expect(html(lost)).toContain('aria-description="');
       expect(html(lost)).toContain('ssh exited');
     }
     // How long what is shown has been out of date, as the host's freshness reports it.
     const waiting = note({_tag: 'Waiting', attempt: 1, fault, retryAtMs: 5}, {_tag: 'Live'});
-    expect(html(waiting)).toContain('Stale · 40 s');
+    expect(html(waiting)).toContain('Stale 40 s');
     expect(html({...waiting, staleForMs: null})).not.toContain('Stale');
     expect(html(note({_tag: 'Incompatible', side: 'daemon-too-old'}, {_tag: 'Opening'}))).toContain(
       'Update VibeSys on that host',
@@ -181,11 +182,11 @@ describe('the screens', () => {
         }),
       },
     });
-    expect(page(state, agent, progress)).toContain('Sent; delivery to agent unconfirmed');
-    expect(page(stored(Delivery.CONSUMED), agent, progress)).toContain('Read by the agent');
+    expect(page(state, agent, progress)).toContain('Sent, unconfirmed');
+    expect(page(stored(Delivery.CONSUMED), agent, progress)).toContain('Read');
     const rejected = page(stored(Delivery.REJECTED, Rejection.AGENT_GONE), agent, progress);
     expect(rejected).toContain('Not delivered');
-    expect(rejected).toContain('session is over');
+    expect(rejected).toContain('Session over');
   });
 
   it('a call shows as what it did, from the typed call and never as JSON', () => {
@@ -222,8 +223,8 @@ describe('the screens', () => {
     const codex = agents.find(a => a.capabilities?.steers === false && a.role === AgentRole.WORKER);
     if (claude === undefined || codex === undefined)
       throw new Error('the fixture mixes both tools');
-    expect(page(state, claude)).toContain('in the middle of what it is doing');
-    expect(page(state, codex)).toContain('waits until it finishes its current step');
+    expect(page(state, claude)).toContain('reaches it mid-turn');
+    expect(page(state, codex)).toContain('waits for its step');
   });
 
   it('shows Stop only while the run can be stopped, and what became of the press', () => {
@@ -246,12 +247,12 @@ describe('the screens', () => {
     }
     const command = create(CommandSchema, {id: 'c'});
     const sending = report(as(RunStatus.RUNNING), runId, now, {_tag: 'Sending', command});
-    expect(sending).toContain('Stop: sending.');
+    expect(sending).toContain('Stop: sending');
     const refused = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Refused',
       receipt: create(ReceiptSchema, {commandId: 'c', refusal: Refusal.RUN_NOT_RUNNING}),
     });
-    expect(refused).toContain('The run is not running.');
+    expect(refused).toContain('Stop refused \u00b7 Not running');
     const unsure = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Unconfirmed',
       command,

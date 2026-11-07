@@ -11,6 +11,7 @@ import {
   MiddleText,
   Page,
   pageState,
+  Reserve,
   Row,
   SegmentedControl,
   Select,
@@ -128,7 +129,13 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
         return (
           <CellLines
             main={<Chip label={word.label} tone={word.tone} dot />}
-            note={whenLine(row, nowMs)}
+            note={
+              row.reportUnavailable ? (
+                <Chip label="Report unavailable" tone="warn" />
+              ) : (
+                whenLine(row, nowMs)
+              )
+            }
           />
         );
       },
@@ -312,18 +319,51 @@ function HostFilter(props: {
   );
 }
 
+/** The widest the count of older runs reads in its chip: the room reserved while there is none. */
+const WIDEST_LEFT_OUT = '999 older runs not shown';
+
 /**
- * How many runs the hosts shown did not list: a status beside the filters, absent when every run is
- * listed. The host says it (`runs_left_out`); the screen never counts the rows it was given.
+ * How many runs the hosts shown did not list: a status beside the filters. The host says it
+ * (`runs_left_out`); the screen never counts the rows it was given. While every run is listed its
+ * room is kept empty, so the chip that arrives with a late host never moves the rows under it.
  */
 function RunsLeftOut(props: {
   readonly hosts: readonly FleetHostView[];
   readonly host: string | null;
-}): JSX.Element | null {
+}): JSX.Element {
   const left = props.hosts
     .filter(host => props.host === null || host.key === props.host)
     .reduce((sum, host) => sum + host.runsLeftOut, 0);
-  return left === 0 ? null : <Chip label={`${left} older runs not shown`} tone="warn" dot />;
+  return left === 0 ? (
+    <Reserve>
+      <Chip label={WIDEST_LEFT_OUT} tone="warn" dot />
+    </Reserve>
+  ) : (
+    <Chip label={`${left} older runs not shown`} tone="warn" dot />
+  );
+}
+
+/** The way to try the hosts that cannot be read again; its room is kept while none needs it. */
+function RetryHosts(props: {
+  readonly hosts: readonly FleetHostView[];
+  readonly retryHost: (host: string) => void;
+}): JSX.Element {
+  const needRetry = props.hosts.filter(
+    host => host.freshness === 'stale' || host.freshness === 'unavailable',
+  );
+  const button = (
+    <Button
+      text="Retry"
+      icon="refresh"
+      variant="quiet"
+      size="sm"
+      hint={`Try ${needRetry.map(host => host.label).join(', ')} again`}
+      press={() => {
+        for (const host of needRetry) props.retryHost(host.key);
+      }}
+    />
+  );
+  return needRetry.length === 0 ? <Reserve>{button}</Reserve> : button;
 }
 
 /**
@@ -350,10 +390,6 @@ export function FleetScreen(props: {
   const objectivesOf = rowObjectives(props.hosts);
   const unread = view.hosts.some(
     host => host.freshness === 'empty' || host.freshness === 'unavailable',
-  );
-  // A host that cannot be read (its link is down, its stream failed) is tried again from here.
-  const needRetry = view.hosts.filter(
-    host => host.freshness === 'stale' || host.freshness === 'unavailable',
   );
   const open = (key: string): void => {
     const row = rows.find(candidate => candidate.key === key);
@@ -396,18 +432,7 @@ export function FleetScreen(props: {
           />
           <HostFilter hosts={view.hosts} host={place.host} go={go} />
           <RunsLeftOut hosts={view.hosts} host={place.host} />
-          {needRetry.length === 0 ? null : (
-            <Button
-              text="Retry"
-              icon="refresh"
-              variant="quiet"
-              size="sm"
-              hint={`Try ${needRetry.map(host => host.label).join(', ')} again`}
-              press={() => {
-                for (const host of needRetry) props.retryHost(host.key);
-              }}
-            />
-          )}
+          <RetryHosts hosts={view.hosts} retryHost={props.retryHost} />
         </Row>
         {rows.length === 0 ? (
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
