@@ -41,6 +41,23 @@ export {
   type SpendBucketView,
 } from './orchestrator/cost.js';
 export {
+  FLEET_STATES,
+  type FleetFilter,
+  type FleetHostInput,
+  type FleetHostRef,
+  type FleetHostView,
+  type FleetObjective,
+  type FleetRow,
+  type FleetState,
+  type FleetView,
+  fleetKey,
+  fleetRows,
+  fleetView,
+  headObjectives,
+  isLive,
+  NO_FLEET_FILTER,
+} from './orchestrator/fleet.js';
+export {
   type AgentFrame,
   applyAgentFeed,
   applyChange,
@@ -114,6 +131,7 @@ export {SETTINGS_TABS, type SettingsTab} from './settings/tabs.js';
 export {isBack, type KeyPress} from './shell/keys.js';
 export {
   type Destination,
+  type FleetPlace,
   initialNavigation,
   NAVIGATION_KINDS,
   type Navigation,

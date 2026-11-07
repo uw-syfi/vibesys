@@ -32,6 +32,8 @@ export interface ListColumn<Row> {
   readonly act?: (row: Row) => boolean;
   /** The cell's text wraps onto more lines instead of being cut short. */
   readonly wrap?: boolean;
+  /** The cell holds figures: set in tabular numerals, so a digit takes the room of any other and a column of them lines up. */
+  readonly figure?: boolean;
   /** The column's size when the list is narrow; the same by default. */
   readonly narrow?: ColumnSize;
   /** The column's size when a crowded list is tighter still; its `narrow` size by default. */
@@ -169,6 +171,7 @@ function Row<Row>(props: {
           data-align={column.align}
           data-optional={column.optional || undefined}
           data-wrap={column.wrap || undefined}
+          data-figure={column.figure || undefined}
           title={column.hint?.(props.row)}
         >
           {column.cell(props.row)}

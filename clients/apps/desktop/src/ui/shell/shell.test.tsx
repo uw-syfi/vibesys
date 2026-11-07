@@ -33,6 +33,15 @@ const host: HostSnapshot = {
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
 };
+/** A second host that has said nothing yet, so the list offers a host filter. */
+const quiet: HostSnapshot = {
+  key: 'ssh:other',
+  label: 'Other host',
+  model: {data: emptyState, agentCursors: {}},
+  connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
+  runsFeed: {_tag: 'Live'},
+  agentFeeds: {},
+};
 const resources: readonly ResourceRow[] = [
   {key: 'local', label: 'This machine', connection: 'connected', freshness: 'live'},
   {
@@ -55,7 +64,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
     <AppShell destination={navigation.destination} go={go}>
       {navigation.destination === 'runs' ? (
         <OrchestratorApp
-          hosts={[host]}
+          hosts={[host, quiet]}
           nowMs={scenario.endMs}
           commands={{
             start: idle,
@@ -70,6 +79,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
           }}
           retryHost={() => undefined}
           route={navigation.runs}
+          fleet={navigation.fleet}
           go={go}
         />
       ) : (
@@ -84,6 +94,13 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
     </AppShell>
   );
 }
+
+/** The first run the list shows, as a person would press it. */
+const firstRun = (screen: ReturnType<typeof mount>): HTMLElement => {
+  const [row] = screen.container.querySelectorAll<HTMLElement>('[role="option"]');
+  if (row === undefined) throw new Error('no run listed');
+  return row;
+};
 
 const open = () => {
   const log: NavigationAction[] = [];
@@ -117,9 +134,7 @@ describe('the window shell', () => {
 
   it('returns to the open run when Settings is left', () => {
     const {screen} = open();
-    const [row] = screen.container.querySelectorAll<HTMLElement>('tr[data-selectable]');
-    if (row === undefined) throw new Error('no run listed');
-    screen.press(row);
+    screen.press(firstRun(screen));
     expect(screen.controls('Runs').length).toBeGreaterThan(1);
     screen.press(screen.control('Settings'));
     screen.press(screen.control('Runs'));
@@ -129,25 +144,19 @@ describe('the window shell', () => {
 
   it('the Runs breadcrumb of an open run returns to the list', () => {
     const {screen, log} = open();
-    const [row] = screen.container.querySelectorAll<HTMLElement>('tr[data-selectable]');
-    if (row === undefined) throw new Error('no run listed');
-    screen.press(row);
+    screen.press(firstRun(screen));
     const crumb = screen.controls('Runs').find(control => control.classList.contains('vs-crumb'));
     if (crumb === undefined) throw new Error('the run has no Runs breadcrumb');
     screen.press(crumb);
     expect(log.map(action => action.type)).toEqual(['open-run', 'close-run']);
-    expect(screen.container.querySelectorAll('tr[data-selectable]').length).toBeGreaterThan(0);
+    expect(screen.container.querySelectorAll('[role="option"]').length).toBeGreaterThan(0);
     screen.unmount();
   });
 
   it('every navigation intent but the keyboard back is sent by a control the screens show', () => {
     const {screen, log} = open();
     const sent = (): Set<NavigationKind> => new Set(log.map(action => action.type));
-    const row = (): HTMLElement => {
-      const [first] = screen.container.querySelectorAll<HTMLElement>('tr[data-selectable]');
-      if (first === undefined) throw new Error('no run listed');
-      return first;
-    };
+    const row = (): HTMLElement => firstRun(screen);
     screen.press(row());
     const [agent] = screen.container.querySelectorAll<HTMLElement>('[role="treeitem"]');
     if (agent === undefined) throw new Error('the run lists no agent');
@@ -160,6 +169,12 @@ describe('the window shell', () => {
     screen.press(screen.control('Settings'));
     screen.press(screen.control('Resources'));
     screen.press(screen.control('Runs'));
+    // The list's own controls: its state filter and, with two hosts, its host filter.
+    for (const value of ['live', 'ssh:other'])
+      screen.press(
+        screen.container.querySelector<HTMLElement>(`input[type="radio"][value="${value}"]`) ??
+          row(),
+      );
     expect(sent()).toEqual(new Set(NAVIGATION_KINDS.filter(kind => kind !== 'back')));
     screen.unmount();
   });

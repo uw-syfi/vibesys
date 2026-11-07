@@ -1157,6 +1157,9 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.vs-columnlist-cell[data-figure] {
+  font-variant-numeric: tabular-nums;
+}
 .vs-columnlist-cell[data-wrap] {
   overflow: visible;
   text-overflow: clip;
@@ -1190,6 +1193,12 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The words of a part, as flex items, are cut with their own ellipsis when the cell has no room. */
+.vs-columnlist-inline[data-nowrap] > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .vs-columnlist-mark {
   flex: none;
   width: var(--dot);
@@ -1203,6 +1212,13 @@ button.vs-crumb:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+/* Each line of a cell stays on one line and is cut with an ellipsis (the cell's hint has it whole). */
+.vs-columnlist-lines > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */

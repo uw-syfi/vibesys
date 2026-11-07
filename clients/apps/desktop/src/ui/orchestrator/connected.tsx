@@ -11,7 +11,13 @@ import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
 import type {HostSession, Intent} from '../../core/index.js';
-import type {CommandProgress, FeedStatus, Route, RouteAction} from '../../state/index.js';
+import type {
+  CommandProgress,
+  FeedStatus,
+  FleetPlace,
+  NavigationAction,
+  Route,
+} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
 import {sendIntent, startIntent, stopIntent} from './intents.js';
@@ -110,11 +116,12 @@ export function ConnectedApp(props: {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
   readonly route: Route;
-  readonly go: (action: RouteAction) => void;
+  readonly fleet: FleetPlace;
+  readonly go: (action: NavigationAction) => void;
   readonly issues: Issues;
   readonly setIssues: (update: (all: Issues) => Issues) => void;
 }): JSX.Element {
-  const {hosts, dispatch, route, go, issues, setIssues} = props;
+  const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
@@ -164,6 +171,7 @@ export function ConnectedApp(props: {
       nowMs={clock.value}
       commands={commands}
       route={route}
+      fleet={fleet}
       go={go}
       retryHost={host => {
         const session = sessionOf(host);
