@@ -25,9 +25,6 @@ import {messageIs} from './messages.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
 
-/** Check-ins by id, as the host sent them. */
-export type CheckIns = Readonly<Record<string, CheckIn>>;
-
 /** How far a check-in has come, as one number that only rises: state first, then the linked report. */
 function progressOf(checkIn: CheckIn): number {
   const settled = checkIn.state === CheckInState.PENDING ? 0 : 2;
@@ -35,7 +32,7 @@ function progressOf(checkIn: CheckIn): number {
 }
 
 /** The snapshot's check-ins, by id. A later copy of an id in one snapshot is the one kept. */
-export function checkInsOfSnapshot(checkIns: readonly CheckIn[]): CheckIns {
+export function checkInsOfSnapshot(checkIns: readonly CheckIn[]): OrchestratorState['checkIns'] {
   return Object.fromEntries(checkIns.map(checkIn => [checkIn.id, checkIn]));
 }
 

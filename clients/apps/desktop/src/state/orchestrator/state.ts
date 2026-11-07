@@ -5,6 +5,7 @@
  */
 import type {
   Agent,
+  CheckIn,
   Item,
   Message,
   Receipt,
@@ -12,7 +13,6 @@ import type {
   SearchState,
   Turn,
 } from '@vibesys/orchestrator-proto';
-import type {CheckIns} from './check-ins.js';
 import type {CostView} from './cost.js';
 
 /** One piece of progress on a running item, with the sequence it was made at. */
@@ -63,7 +63,7 @@ export interface OrchestratorState {
    * Every viewer's check-ins of the runs held (Catch me up), by check-in id, each whole with the facts
    * the host froze in it. A viewer's own list is the ones with its id (`rewind` in `check-ins.ts`).
    */
-  readonly checkIns: CheckIns;
+  readonly checkIns: Readonly<Record<string, CheckIn>>;
   /** Answers to commands this client has seen, by command id. */
   readonly receipts: Readonly<Record<string, Receipt>>;
   /** Unstored progress, by item id. */

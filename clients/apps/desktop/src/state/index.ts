@@ -41,7 +41,6 @@ export {
 } from './host-model.js';
 export {
   type CheckInRead,
-  type CheckIns,
   type Facts,
   readCheckIn,
   rewind,
