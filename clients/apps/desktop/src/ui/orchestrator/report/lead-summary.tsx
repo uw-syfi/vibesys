@@ -1,6 +1,7 @@
 import {Card, Chip, KeyValue, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
+import {withShortCommits} from '../../commit-text.js';
 import {formatAge, seattleMoment} from './format.js';
 
 const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
@@ -20,7 +21,7 @@ export function LeadSummary(props: {
   const {summary} = props;
   const rest = (summary?.fields ?? []).map(({field, text}) => ({
     key: FIELD_LABELS[field],
-    value: text,
+    value: withShortCommits(text),
   }));
   return (
     <Card section="Lead summary">
@@ -34,7 +35,7 @@ export function LeadSummary(props: {
             </Text>
             {summary.final ? <Chip label="Final" tone="ok" /> : null}
           </Row>
-          <Text as="p">{summary.headline}</Text>
+          <Text as="p">{withShortCommits(summary.headline)}</Text>
           {rest.length === 0 ? null : <KeyValue items={rest} />}
         </Stack>
       )}

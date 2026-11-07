@@ -6,8 +6,9 @@
  * are written back as they were. A file that cannot be read or is not a valid message is logged and
  * read as nothing saved, so a damaged file never keeps the window from opening; a save never
  * replaces such a file (the person's other data may be in it, or a newer app wrote it), it fails
- * with the reason and leaves the file alone. Saves run one at a time, so two windows cannot lose
- * each other's update. The viewer (who this install is to a host, `viewer.ts`) is one of the other
+ * with the reason and leaves the file alone. A save is a read-merge-write of the whole file under
+ * the file's lock (`FileLock`), taken after this process's own turn, so neither two windows nor two
+ * app instances lose each other's update. The viewer (who this install is to a host, `viewer.ts`) is one of the other
  * fields: the main process alone reads and replaces it, through the same rules.
  */
 import {join} from 'node:path';
@@ -28,11 +29,14 @@ import {
   PREFERENCES_WRITE_CHANNEL,
 } from '../core/settings/preferences-codec.js';
 import {defaultAppearance} from '../state/index.js';
-import type {ReadFile, WriteFile} from './files.js';
+import type {FileLock, ReadFile, WriteFile} from './files.js';
 import {isOwnWindow, type OwnWindows, type PortEvent} from './port-ipc.js';
 
 const FILE = 'preferences.pb';
 const VERSION = 1;
+
+/** Where the preferences are kept in the app's user data. */
+export const preferencesPath = (userData: string): string => join(userData, FILE);
 
 /** `compute` as an Effect whose failure is an `Error`: a message that does not validate is one. */
 const attempt = <A>(compute: () => A): Effect.Effect<A, Error> =>
@@ -59,10 +63,10 @@ export interface PreferencesStore {
 
 export function makePreferencesStore(
   userData: string,
-  files: {readonly read: ReadFile; readonly write: WriteFile},
+  files: {readonly read: ReadFile; readonly write: WriteFile; readonly lock: FileLock},
   log: (line: string) => void,
 ): PreferencesStore {
-  const path = join(userData, FILE);
+  const path = preferencesPath(userData);
   /** What the file holds: nothing, a message (unknown fields kept), or bytes this app cannot read. */
   const held = Effect.gen(function* () {
     const bytes = yield* files.read(path);
@@ -76,8 +80,13 @@ export function makePreferencesStore(
       return {kind: 'unreadable', cause: String(cause)} as const;
     }
   });
-  /** One save at a time in this process: each is a read-modify-write of the whole file. */
+  /**
+   * One save at a time in this process, and under the file's lock across processes: each is a
+   * read-modify-write of the whole file.
+   */
   const saving = Semaphore.makeUnsafe(1);
+  const locked = <A>(save: Effect.Effect<A, Error>) =>
+    saving.withPermits(1)(files.lock(path, save));
   /** The file as a save starts from it; one this app cannot read is refused, never replaced. */
   const beforeSave = Effect.gen(function* () {
     const before = yield* held;
@@ -106,7 +115,7 @@ export function makePreferencesStore(
         : null;
     }),
     write: appearance =>
-      saving.withPermits(1)(
+      locked(
         Effect.gen(function* () {
           const next = yield* attempt(() =>
             validatedExactFromBinary(DesktopAppearanceSchema, appearance),
@@ -135,7 +144,7 @@ export function makePreferencesStore(
         : null;
     }),
     writeViewer: viewer =>
-      saving.withPermits(1)(
+      locked(
         Effect.gen(function* () {
           const next = yield* attempt(() => validatedExactFromBinary(DesktopViewerSchema, viewer));
           const before = yield* beforeSave;

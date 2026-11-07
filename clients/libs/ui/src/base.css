@@ -51,6 +51,15 @@ body > div:first-child {
   color: var(--err);
 }
 
+/*
+ * The least room between two neighbours that can be hovered or chosen (tabs, rail buttons, sidebar
+ * entries, segments, tree and pick rows), so their highlights never touch. Every grouped control
+ * takes it as its `gap`; `group-gap.test.ts` holds that.
+ */
+:root {
+  --group-gap: var(--space-3);
+}
+
 /* --- layout ------------------------------------------------------------------------------------ */
 
 .vs-page {

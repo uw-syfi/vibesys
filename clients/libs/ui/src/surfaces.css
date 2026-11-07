@@ -384,7 +384,7 @@
 .vs-tab-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--group-gap);
   border-bottom: var(--hairline) solid var(--line);
 }
 .vs-tab {
@@ -417,7 +417,7 @@
 .vs-tree {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--group-gap);
 }
 .vs-tree-row {
   box-sizing: border-box;

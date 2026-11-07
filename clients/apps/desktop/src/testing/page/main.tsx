@@ -24,6 +24,7 @@ import '@vibesys/ui/components.css';
 import {ReportKind} from '@vibesys/orchestrator-proto';
 import {DesktopLinkProblem} from '@vibesys/proto';
 import {type Appearance, parseAppearance} from '@vibesys/ui/tokens';
+import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
 import * as Scope from 'effect/Scope';
@@ -106,6 +107,19 @@ const COSTS: Readonly<Record<string, CostView>> = {
 };
 
 const query = new URLSearchParams(window.location.search);
+
+/**
+ * The page's wall clock: the moment the scenario ends plus a minute, frozen, so a scenario reads the
+ * same every time it is opened (ages, times of day, who is fresh). The fleet's runs are placed
+ * against it and the screens read it as Effect's `Clock`.
+ */
+const NOW_MS = scenarioOf(window.location.search).endMs + 60_000;
+const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.defaultValue()), {
+  currentTimeMillisUnsafe: () => NOW_MS,
+  currentTimeMillis: Effect.succeed(NOW_MS),
+  currentTimeNanosUnsafe: () => BigInt(NOW_MS) * 1_000_000n,
+  currentTimeNanos: Effect.succeed(BigInt(NOW_MS) * 1_000_000n),
+});
 const named = hostsOfAddress(window.location.search);
 const shown = named.length === 0 ? [THIS_MACHINE] : named;
 
@@ -115,7 +129,7 @@ const downAt = query.has('down') ? Number(query.get('down')) : undefined;
 /** Each host's own fleet, from `fleet=<runs>-<live>`: the same shape, a different seed. */
 function fleetRecording(spec: string): Recording {
   const [runs = '12', live = '4'] = spec.split('-');
-  const nowMs = Date.now();
+  const nowMs = NOW_MS;
   const leftOut = Number(query.get('leftOut') ?? 0);
   const bases = new Map(
     shown.map((host, index) => {
@@ -261,5 +275,6 @@ Effect.runFork(
       ),
     ),
     Effect.scoped,
+    Effect.provideService(Clock.Clock, frozenClock),
   ),
 );

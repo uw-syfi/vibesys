@@ -1,8 +1,16 @@
 import {create, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {DesktopPreferencesSchema, DesktopRunRefSchema, validatedFromBinary} from '@vibesys/proto';
+import {
+  DesktopAppearanceSchema,
+  DesktopPreferencesSchema,
+  DesktopRunRefSchema,
+  validatedFromBinary,
+} from '@vibesys/proto';
 import {APPEARANCE_MODES, type Appearance, themesOf} from '@vibesys/ui/tokens';
+import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
+import * as Fiber from 'effect/Fiber';
+import * as TestClock from 'effect/testing/TestClock';
 import fc from 'fast-check';
 import {
   appearanceFromBytes,
@@ -11,7 +19,9 @@ import {
   PREFERENCES_WRITE_CHANNEL,
 } from '../core/settings/preferences-codec.js';
 import {viewerToBytes} from '../core/viewer/viewer-codec.js';
+import {directory} from '../testing/main/memory-directory.js';
 import {makeMemoryFiles} from '../testing/main/memory-files.js';
+import {makeFileLock, makeWriteFile} from './files.js';
 import {installPreferencesIpc, makePreferencesStore, type PreferencesIpc} from './preferences.js';
 
 const FILE = '/data/preferences.pb';
@@ -162,6 +172,7 @@ describe('the preferences file', () => {
             yield* memory.write(path, bytes);
             active -= 1;
           }),
+        lock: memory.lock,
       };
       const store = makePreferencesStore('/data', files, () => undefined);
       yield* Effect.all(
@@ -169,6 +180,56 @@ describe('the preferences file', () => {
         {concurrency: 'unbounded'},
       );
       expect(deepest).toBe(1);
+    }),
+  );
+
+  it.effect('keeps the update of another app instance saving at the same time', () =>
+    Effect.gen(function* () {
+      // Two instances: each has its own store (and so its own process-wide turn) over one directory.
+      const shared = directory();
+      // Each read waits a moment for the other's, so without a lock both read the file before either
+      // has written; with the lock the other never gets as far as a read, and the wait runs out.
+      let readers = 0;
+      let tokens = 0;
+      const together = Deferred.makeUnsafe<void>();
+      const instance = () => {
+        const write = makeWriteFile(shared.ops, () => {
+          tokens += 1;
+          return `t${tokens}`;
+        });
+        return makePreferencesStore(
+          '/data',
+          {
+            read: path =>
+              Effect.gen(function* () {
+                readers += 1;
+                if (readers === 2) yield* Deferred.succeed(together, undefined);
+                yield* Effect.race(Deferred.await(together), Effect.sleep('5 millis'));
+                return shared.files.get(path)?.bytes ?? null;
+              }),
+            write,
+            lock: makeFileLock(shared.ops),
+          },
+          () => undefined,
+        );
+      };
+      const [first, second] = [instance(), instance()];
+      const viewer = viewerToBytes({id: 'install-1', label: 'ana'});
+      // Not the default, so a save that starts from the defaults shows.
+      const chosen: Appearance = {mode: 'light', light: 'sand', dark: 'terminal'};
+      const saving = yield* Effect.all(
+        [first.write(appearanceToBytes(chosen)), second.writeViewer(viewer)],
+        {concurrency: 'unbounded'},
+      ).pipe(Effect.forkChild);
+      for (let step = 0; step < 40; step++) yield* TestClock.adjust('25 millis');
+      yield* Fiber.join(saving);
+      const saved = stored(shared.files.get(FILE)?.bytes);
+      expect(saved.appearance).toBeDefined();
+      if (saved.appearance === undefined) throw new Error('an appearance was saved');
+      expect(appearanceFromBytes(toBinary(DesktopAppearanceSchema, saved.appearance))).toEqual(
+        chosen,
+      );
+      expect(saved.viewer?.id).toBe('install-1');
     }),
   );
 

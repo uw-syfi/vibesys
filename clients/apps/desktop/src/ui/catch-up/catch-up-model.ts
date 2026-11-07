@@ -11,6 +11,7 @@ import type {BarRow} from '@vibesys/ui';
 import type {CheckInRead, Summary} from '../../state/index.js';
 import {formatDayTime, formatSpan} from '../agents/time.js';
 import {formatCount, formatUsd, NOT_REPORTED, precisionOf} from '../cost/words.js';
+import {formatFigure} from '../figures.js';
 
 /** The words of the run's own vocabulary this page needs, so it imports nothing from the feature that shows it. */
 export interface CatchUpWords {
@@ -84,10 +85,8 @@ export interface CatchUpModel {
   readonly summary: SummaryModel;
 }
 
-const NUMBER = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 4});
-
-/** An objective's value at four significant figures: the host's unit is in the metric's name. */
-const formatValue = (value: number): string => NUMBER.format(value);
+/** An objective's value as every screen writes it: the host's unit is in the metric's name. */
+const formatValue = formatFigure;
 
 const DIRECTIONS = {
   [Direction.UNSPECIFIED]: 'maximize',
@@ -191,6 +190,16 @@ export function catchUpModel(read: CheckInRead, words: CatchUpWords): CatchUpMod
     tiles: facts.kind === 'ready' ? tilesOf(facts.facts, words) : null,
     summary: summaryOf(read.summary),
   };
+}
+
+/**
+ * The plans a check-in counted for its window, created then changed: the numbers behind the Created
+ * and Changed tiles, the same ones the report's ideas list narrows to. None until the host has
+ * worked the window out.
+ */
+export function windowPlans(read: CheckInRead): readonly number[] {
+  if (read.facts.kind !== 'ready') return [];
+  return [...read.facts.facts.plansCreated, ...read.facts.facts.plansChanged];
 }
 
 /** What a check-in cost, for its row in the list: the host's figure for the window, or why there is none. */
