@@ -17,6 +17,7 @@ import {
   type IdeaWindow,
   type NavigationAction,
   type OrchestratorState,
+  type RepositoryChecked,
   type Route,
   runReport,
   staleForMs,
@@ -47,6 +48,8 @@ export interface HostSnapshot {
   readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
+  /** The host's latest answer about the repository path typed in the Start form. */
+  readonly repositoryChecked: RepositoryChecked | undefined;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
@@ -69,6 +72,8 @@ export interface AppCommands {
   /** The last Send to each agent, by agent id. */
   readonly send: Readonly<Record<string, CommandProgress>>;
   readonly startRun: (host: string, request: StartRunRequest) => void;
+  /** The repository path typed in the Start form is now `repository` on `host`. */
+  readonly checkRepository: (host: string, repository: string) => void;
   readonly retryStart: () => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
@@ -198,9 +203,15 @@ export function OrchestratorApp(props: {
         retryHost={props.retryHost}
         newRun={
           <NewRun
-            hosts={hosts.map(({key, label, model}) => ({key, label, models: model.data.models}))}
+            hosts={hosts.map(({key, label, model, repositoryChecked}) => ({
+              key,
+              label,
+              models: model.data.models,
+              repositoryChecked,
+            }))}
             progress={commands.start}
             start={commands.startRun}
+            checkRepository={commands.checkRepository}
             retry={commands.retryStart}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />

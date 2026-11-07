@@ -173,6 +173,12 @@ export {
   unbrokenFrom,
 } from './orchestrator/views.js';
 export {
+  type RepositoryAnswer,
+  type RepositoryChecked,
+  type RepositoryVerdict,
+  repositoryVerdict,
+} from './repository-check.js';
+export {
   type CostTarget,
   costTarget,
   initialRoute,

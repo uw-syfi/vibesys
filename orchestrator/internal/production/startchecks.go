@@ -91,14 +91,11 @@ type StartChecks struct {
 // PartsCheck is nil when every part can be used now, and otherwise says which cannot and why.
 type PartsCheck interface{ Check() error }
 
-// CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
-// repository path that is not absolute, does not exist or is not the root of a git work tree, a
-// task name that is not one plain folder name, a task the repository does not hold under
-// .vibesys/tasks, and a repository whose latest commit cannot feed the subagents: they work in
-// copies made from it, so it must exist and hold the task. Edits to the task's files that are not
-// committed are the lead's to judge, as its skill says. It returns the repository with its
-// symbolic links resolved.
-func (c StartChecks) CheckStart(repository, task string) (string, error) {
+// CheckRepository implements daemon.StartChecks: the part of a start's check that needs the
+// repository alone. It refuses a daemon with no launcher, and a repository path that is not
+// absolute, does not exist or is not the root of a git work tree, and returns the repository with
+// its symbolic links resolved.
+func (c StartChecks) CheckRepository(repository string) (string, error) {
 	if _, none := c.Sidecars.(NoSidecars); none {
 		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
 	}
@@ -118,7 +115,25 @@ func (c StartChecks) CheckStart(repository, task string) (string, error) {
 		return refuse("repository %s cannot be found: %v", given, err)
 	case !c.Tree.Exists(filepath.Join(repository, ".git")):
 		return refuse("repository %s is not a git work tree: it has no .git", repository)
-	case !validTaskName(task):
+	}
+	return repository, nil
+}
+
+// CheckStart implements daemon.StartChecks. In order it refuses what CheckRepository does, a task
+// name that is not one plain folder name, a task the repository does not hold under
+// .vibesys/tasks, and a repository whose latest commit cannot feed the subagents: they work in
+// copies made from it, so it must exist and hold the task. Edits to the task's files that are not
+// committed are the lead's to judge, as its skill says. It returns the repository with its
+// symbolic links resolved.
+func (c StartChecks) CheckStart(repository, task string) (string, error) {
+	repository, err := c.CheckRepository(repository)
+	if err != nil {
+		return "", err
+	}
+	refuse := func(format string, args ...any) (string, error) {
+		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
+	}
+	if !validTaskName(task) {
 		return refuse("task %q is not a task name: it must be one folder name under .vibesys/tasks, with no path separators and not . or ..", task)
 	}
 	dir := filepath.Join(repository, ".vibesys", "tasks", task)

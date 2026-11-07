@@ -30,6 +30,7 @@ function hostWith(
   return {
     key: 'local',
     label: 'This machine',
+    repositoryChecked: undefined,
     model: {data: {...base, costs}, agentCursors: {}},
     connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
     freshness: {status: 'live', lastUpdateMs: null},
@@ -62,6 +63,7 @@ function Window(props: {
         stop: {},
         send: {},
         startRun: () => undefined,
+        checkRepository: () => undefined,
         retryStart: () => undefined,
         stopRun: () => undefined,
         retryStop: () => undefined,

@@ -22,6 +22,7 @@ import type {Ids} from './ids.js';
 import {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
+import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
 import type {GatewayTransport} from './transport/gateway-transport.js';
@@ -40,6 +41,8 @@ export interface HostSession {
   /** The CPU, memory and GPUs of the machine the host runs on. */
   readonly machine: MachineStatsFeed;
   readonly commands: Commands;
+  /** The host's answer about the repository path being typed in the Start form. */
+  readonly repositoryCheck: RepositoryCheck;
   /** The press of Catch me up, over `commands`. */
   readonly catchUp: CatchUp;
 }
@@ -68,6 +71,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
       ambient,
     }),
     commands,
+    repositoryCheck: yield* makeRepositoryCheck(parts),
     catchUp: yield* makeCatchUp(commands),
   };
 });

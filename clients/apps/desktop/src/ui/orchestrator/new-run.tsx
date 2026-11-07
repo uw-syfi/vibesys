@@ -14,6 +14,7 @@ export function NewRun(props: {
   /** What the last press of Start came to, or undefined before any. */
   readonly progress: CommandProgress | undefined;
   readonly start: (host: string, request: StartRunRequest) => void;
+  readonly checkRepository: (host: string, repository: string) => void;
   readonly retry: () => void;
   /** Show the run a Start created. */
   readonly openRun: (host: string, runId: string) => void;
@@ -33,6 +34,7 @@ export function NewRun(props: {
           choose={setChosen}
           progress={props.progress}
           start={props.start}
+          checkRepository={props.checkRepository}
           retry={props.retry}
           openRun={(host, runId) => {
             setOpen(false);

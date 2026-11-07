@@ -29,6 +29,7 @@ const scenario = generateScenario({seed: 3, subagents: 2, live: true});
 const host: HostSnapshot = {
   key: 'local',
   label: 'This machine',
+  repositoryChecked: undefined,
   model: {data: scenario.changes.reduce(applyChange, emptyState), agentCursors: {}},
   connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
   freshness: {status: 'live', lastUpdateMs: null},
@@ -42,6 +43,7 @@ const host: HostSnapshot = {
 const quiet: HostSnapshot = {
   key: 'ssh:other',
   label: 'Other host',
+  repositoryChecked: undefined,
   model: {data: emptyState, agentCursors: {}},
   connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
   freshness: {status: 'live', lastUpdateMs: null},
@@ -95,6 +97,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
                   stop: {},
                   send: {},
                   startRun: () => undefined,
+                  checkRepository: () => undefined,
                   retryStart: () => undefined,
                   stopRun: () => undefined,
                   retryStop: () => undefined,

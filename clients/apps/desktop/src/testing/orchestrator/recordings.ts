@@ -7,6 +7,8 @@
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   BuildVersionsSchema,
+  CheckRepositoryRequestSchema,
+  CheckRepositoryResponseSchema,
   Compatibility,
   DispatchRequestSchema,
   DispatchResponseSchema,
@@ -67,6 +69,14 @@ export interface DaemonOptions {
   readonly live?: boolean;
   /** What the host's control service answers to Identify; with none it is not served (UNIMPLEMENTED). */
   readonly identify?: () => IdentifyResponse;
+  /**
+   * The host's refusal of a repository path for a start (its reason, and whether it is the host's
+   * fault rather than the path's), or undefined to accept it; every path is accepted by default.
+   * `unserved` makes the method unknown, as an older host's is.
+   */
+  readonly checkRepository?:
+    | ((repository: string) => {readonly reason: string; readonly notReady?: boolean} | undefined)
+    | 'unserved';
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -298,6 +308,26 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     return [{frame: bytes}];
   };
 
+  const checkRepository = (target: CallTarget): ReadonlyArray<Step> => {
+    const {repository} = fromBinary(CheckRepositoryRequestSchema, target.request);
+    const check = options.checkRepository;
+    if (check === 'unserved')
+      return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+    const refusal = check === undefined ? undefined : invokeCallback(() => check(repository));
+    return [
+      {
+        frame: toBinary(
+          CheckRepositoryResponseSchema,
+          create(CheckRepositoryResponseSchema, {
+            ...(refusal === undefined
+              ? {}
+              : {refusal: {reason: refusal.reason, notReady: refusal.notReady === true}}),
+          }),
+        ),
+      },
+    ];
+  };
+
   const watchAgent = (target: CallTarget): ReadonlyArray<Step> => {
     const request = fromBinary(WatchAgentRequestSchema, target.request);
     const encode = (init: Parameters<typeof create<typeof WatchAgentResponseSchema>>[1]): Step => ({
@@ -341,6 +371,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return getItemSteps(daemon, target);
         case methodPathOf('GetRunHistory'):
           return runHistorySteps(daemon, target, options.historyPageMessages);
+        case methodPathOf('CheckRepository'):
+          return checkRepository(target);
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):

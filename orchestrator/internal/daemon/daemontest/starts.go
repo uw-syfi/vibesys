@@ -44,6 +44,12 @@ func (s *StartChecks) Calls() []StartCall {
 	return append([]StartCall(nil), s.calls...)
 }
 
+// CheckRepository implements daemon.StartChecks. It follows the same refusal and links as
+// CheckStart and records its call with an empty task.
+func (s *StartChecks) CheckRepository(repository string) (string, error) {
+	return s.CheckStart(repository, "")
+}
+
 // CheckStart implements daemon.StartChecks.
 func (s *StartChecks) CheckStart(repository, task string) (string, error) {
 	s.mu.Lock()
