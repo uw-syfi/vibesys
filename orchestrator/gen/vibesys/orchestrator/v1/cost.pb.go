@@ -51,7 +51,7 @@ type RunCost struct {
 	Turns         uint32 `protobuf:"varint,6,opt,name=turns,proto3" json:"turns,omitempty"`
 	UnpricedTurns uint32 `protobuf:"varint,7,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
 	// One entry for each type of agent the run has, most costly first; a type with no priced turn
-	// comes last, in the order of the roles.
+	// comes last, in the order of the role names.
 	Roles []*RoleCost `protobuf:"bytes,8,rep,name=roles,proto3" json:"roles,omitempty"`
 	// One entry for each model the run's agents ran on, most costly first; a model with no priced
 	// turn comes last, in the order of its harness and name.

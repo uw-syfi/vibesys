@@ -12,6 +12,7 @@ import type {
   SearchState,
   Turn,
 } from '@vibesys/orchestrator-proto';
+import type {CostView} from './cost.js';
 
 /** One piece of progress on a running item, with the sequence it was made at. */
 export interface Progress {
@@ -43,6 +44,8 @@ export interface OrchestratorState {
   /** Revision floors for the current WatchRuns stream, separate from retained display facts. */
   readonly searchRevisions: Readonly<Record<string, bigint>>;
   readonly searches: Readonly<Record<string, SearchState>>;
+  /** The latest cost view of each run whose cost stream a screen has watched, by run id. */
+  readonly costs: Readonly<Record<string, CostView>>;
   readonly runs: Readonly<Record<string, Run>>;
   readonly agents: Readonly<Record<string, Agent>>;
   readonly turns: Readonly<Record<string, Turn>>;
@@ -60,6 +63,7 @@ export interface OrchestratorState {
 export const emptyState: OrchestratorState = {
   sequence: 0n,
   searches: {},
+  costs: {},
   searchRevisions: {},
   runs: {},
   agents: {},

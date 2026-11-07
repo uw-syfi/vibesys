@@ -1,7 +1,7 @@
 /**
- * Everything the app holds about one host: its connection, the folded model, the two streams and
- * the commands. Built once per host in a `Scope`; nothing dials until a screen mounts a view or
- * submits a command.
+ * Everything the app holds about one host: its connection, the folded model, the streams (the runs,
+ * one agent's, one run's cost) and the commands. Built once per host in a `Scope`; nothing dials
+ * until a screen mounts a view or submits a command.
  */
 
 import * as Effect from 'effect/Effect';
@@ -11,6 +11,7 @@ import type {HostKey, HostModel} from '../state/index.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
+import {type CostFeed, makeCostFeed} from './cost-feed.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
@@ -23,6 +24,7 @@ export interface HostSession {
   readonly model: Atom.Atom<HostModel>;
   readonly runs: RunsView;
   readonly agents: AgentView;
+  readonly costs: CostFeed;
   readonly commands: Commands;
 }
 
@@ -39,6 +41,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     model: store.atom,
     runs: yield* makeRunsView(parts),
     agents: yield* makeAgentView(parts),
+    costs: yield* makeCostFeed(parts),
     commands: yield* makeCommands(parts),
   };
 });

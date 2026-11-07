@@ -81,7 +81,7 @@ export type RunCost = Message<"vibesys.orchestrator.v1.RunCost"> & {
 
   /**
    * One entry for each type of agent the run has, most costly first; a type with no priced turn
-   * comes last, in the order of the roles.
+   * comes last, in the order of the role names.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.RoleCost roles = 8;
    */

@@ -31,9 +31,19 @@ export {
   runsCursor,
 } from './host-model.js';
 export {
+  type CostModel,
+  type CostUsage,
+  type CostView,
+  costViewOf,
+  type ModelCostView,
+  type RoleCostView,
+  type SpendBucketView,
+} from './orchestrator/cost.js';
+export {
   type AgentFrame,
   applyAgentFeed,
   applyChange,
+  applyCost,
   applySearch,
   applySnapshot,
   isFinalItem,

@@ -43,7 +43,7 @@ message RunCost {
   uint32 turns = 6;
   uint32 unpriced_turns = 7;
   // One entry for each type of agent the run has, most costly first; a type with no priced turn
-  // comes last, in the order of the roles.
+  // comes last, in the order of the role names.
   repeated RoleCost roles = 8 [(buf.validate.field).repeated.max_items = 16];
   // One entry for each model the run's agents ran on, most costly first; a model with no priced
   // turn comes last, in the order of its harness and name.
