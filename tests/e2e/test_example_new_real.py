@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import pytest
+from packaging.specifiers import SpecifierSet
 from tests.support import run_test_command
 from tests.support.example_materializer import (
     check_copy_tracked_contract,
 )
+from tests.support.example_registry import REPO_ROOT, example_root, load_registry
 
 from entrypoints.examples import GitExampleMaterializer, default_checkout, run
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S
+
+if TYPE_CHECKING:
+    from entrypoints.example_catalog import ExampleEntry
+
+REGISTRY = load_registry()
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -123,3 +132,49 @@ def test_new_from_the_real_catalog_creates_a_runnable_project(tmp_path: Path) ->
     assert _git(destination, "log", "--format=%s").splitlines() == [
         "Start from VibeSys example data-structures/stack"
     ]
+
+
+_PYTHON_MINORS = tuple(f"3.{minor}" for minor in range(8, 21))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(e, id=e.path)
+        for e in REGISTRY.example
+        if not e.external_repo and (example_root(e) / "pyproject.toml").is_file()
+    ],
+)
+def test_a_copied_example_resolves_its_path_dependencies(
+    entry: ExampleEntry, tmp_path: Path
+) -> None:
+    """``vibesys example new`` copies an example outside the checkout, where uv must still resolve it.
+
+    Every ``[tool.uv.sources]`` path of the copy must hold a project, and the example's
+    ``requires-python`` must admit no Python the dependency refuses (``uv lock`` fails
+    otherwise).
+    """
+    project = tmp_path / "project"
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
+        REPO_ROOT, PurePosixPath(entry.path), project, message="Start"
+    )
+    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    own = SpecifierSet(config["project"].get("requires-python", ""))
+    sources = config.get("tool", {}).get("uv", {}).get("sources", {})
+    failures: list[str] = []
+    for name, source in sources.items():
+        if "path" not in source:
+            continue
+        manifest = project / source["path"] / "pyproject.toml"
+        if not manifest.is_file():
+            failures.append(f"{name}: path {source['path']!r} has no pyproject.toml in a copy")
+            continue
+        dependency = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+        theirs = SpecifierSet(dependency.get("requires-python", ""))
+        refused = [v for v in _PYTHON_MINORS if v in own and v not in theirs]
+        if refused:
+            failures.append(
+                f"{name}: requires-python {str(own)!r} admits Python {refused} that "
+                f"{str(theirs)!r} refuses; raise the example's requires-python"
+            )
+    assert not failures, f"{entry.path}: " + "; ".join(failures)
