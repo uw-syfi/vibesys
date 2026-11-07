@@ -1,0 +1,17 @@
+// Pixel snapshots fail on every intended visual change and are re-rendered on CI's Linux
+// runners, so each UI PR paid an extra CI round for new baselines while the real defects
+// (geometry, contrast, overflow) were caught by tests that measure. Assert a computed style,
+// a bounding box, an axe result or an overflow instead.
+language js;
+
+or {
+  `$page.toHaveScreenshot($args)`,
+  `$page.toMatchSnapshot($args)`,
+  `$page.toMatchImageSnapshot($args)`
+} as $snapshot where {
+  register_diagnostic(
+    span = $snapshot,
+    message = "Pixel snapshots are banned: measure geometry, computed style, axe contrast or overflow instead.",
+    severity = "error"
+  )
+}
