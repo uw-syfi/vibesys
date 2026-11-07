@@ -153,7 +153,14 @@ class PreRoundDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     need_profile: Annotated[
-        bool, DecidedFrom("round_number", "regression_kind", "exhaustion_feedback")
+        bool,
+        DecidedFrom(
+            "round_number",
+            "base_revision",
+            "base_value",
+            "regression_kind",
+            "exhaustion_feedback",
+        ),
     ] = Field(description="True when a profiler run should happen before planning.")
     profile_focus: str = Field(
         default="",

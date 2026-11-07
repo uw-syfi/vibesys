@@ -137,6 +137,9 @@ _JUDGE = st.builds(
 _PRE_ROUND = st.builds(
     PreRoundPrompt,
     round_number=st.integers(1, 5),
+    base_revision=_REVISIONS,
+    base_round=st.none() | st.integers(1, 4),
+    base_value=st.none() | st.floats(0.5, 1e6),
     has_history=st.booleans(),
     regression_kind=st.none() | _TEXT,
     regression_round=st.none() | st.integers(1, 4),
@@ -208,6 +211,103 @@ def _render(
 @given(context=_PRE_ROUND, kind=st.sampled_from(("none", "linux_cpu")))
 def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, kind: str) -> None:
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PRE_ROUND)
+def test_a_measured_base_is_never_launched_by_the_router_to_learn_whether_it_runs(
+    context: PreRoundPrompt,
+) -> None:
+    """A trusted measurement already says the base runs; only an unmeasured round 1 checks."""
+    text = _render(PromptTemplate.PRE_ROUND, context, profiler_kind="neuron")
+    measured = context.base_value is not None
+    assert ("The trusted gates measured it at" in text) is measured
+    assert ("you may run" in text and "one cheap check" in text) is (
+        not measured and not context.has_history
+    )
+    if measured:
+        assert "holds no measurement at all" not in text
+
+
+def test_a_routing_prompt_saved_before_the_base_was_shown_still_decodes() -> None:
+    """Regression: a required ``base_revision`` made a paused run's saved state undecodable.
+
+    Resume decodes every stored turn request; a router prompt written before the field existed
+    must still validate, so the field has a default.
+    """
+    saved = {
+        "template": "pre_round",
+        "round_number": 1,
+        "has_history": False,
+        "regression_kind": None,
+        "regression_round": None,
+        "exhaustion_feedback": None,
+        "exhaustion_round": None,
+    }
+    restored = PreRoundPrompt.model_validate(saved)
+    assert restored.base_revision is None
+    assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, restored, profiler_kind="neuron")
+
+
+_BASE_FIELDS = ("base_revision", "base_round", "base_value")
+
+
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(context=_PRE_ROUND, kept=st.sets(st.sampled_from(_BASE_FIELDS)))
+def test_a_saved_routing_prompt_re_encodes_to_the_document_that_was_saved(
+    context: PreRoundPrompt, kept: set[str]
+) -> None:
+    """Every routing prompt a run recorded re-encodes byte-for-byte, so its digest still holds.
+
+    Runs recorded these prompts with the base fields absent (before they existed), present as
+    ``null`` (while they were optional and always written), or set. Recovery proves each
+    record against the digest of what was saved; any of them re-encoding differently blocks a
+    resume with "recovery blocked: outcome unknown".
+    """
+    full = context.model_dump(mode="json")
+    saved = {
+        name: value for name, value in full.items() if name not in _BASE_FIELDS or name in kept
+    }
+    for name in kept:
+        saved.setdefault(name, None)
+
+    assert PreRoundPrompt.model_validate(saved).model_dump(mode="json") == saved
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(context=_PRE_ROUND)
+def test_a_routing_prompt_saved_before_the_base_fields_keeps_its_digest(
+    context: PreRoundPrompt,
+) -> None:
+    """Regression: a stored router prompt re-encoded under this code must keep its digest.
+
+    Recovery proves each recorded request against its stored digest. Decoded under a schema
+    that added ``base_revision``, ``base_round`` and ``base_value``, a prompt written before
+    them re-encoded with those keys at their defaults, its digest no longer matched, and a
+    paused run's resume ended with "recovery blocked: outcome unknown" for a render that had
+    long succeeded. The digest is taken over ``model_dump(mode="json")``, so a prompt saved
+    without those fields must re-encode to exactly the document that was saved.
+    """
+    saved = context.model_dump(mode="json", exclude={"base_revision", "base_round", "base_value"})
+
+    assert PreRoundPrompt.model_validate(saved).model_dump(mode="json") == saved
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PRE_ROUND)
+def test_the_routing_prompt_points_at_the_base_revision_not_the_input_in_the_workspace(
+    context: PreRoundPrompt,
+) -> None:
+    """The run root holds the input until adoption; the router must judge the round's base."""
+    assert context.base_revision is not None
+    text = _render(PromptTemplate.PRE_ROUND, context, profiler_kind="neuron")
+    assert "Your workspace holds the run's input, not candidate work" in text
+    assert f"`{context.base_revision.revision_id.root}`" in text
+    assert "git show REVISION:PATH" in text
+    if context.base_round is None:
+        assert "the input itself" in text
+    else:
+        assert f"made in round {context.base_round}" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
@@ -377,7 +477,9 @@ def test_every_reply_prompt_tells_the_agent_its_prose_fields_are_markdown(
 ) -> None:
     plan = _prose_plan("claim")
     contexts: dict[PromptTemplate, Value] = {
-        PromptTemplate.PRE_ROUND: PreRoundPrompt(round_number=1, has_history=False),
+        PromptTemplate.PRE_ROUND: PreRoundPrompt(
+            round_number=1, base_revision=_REVISION, has_history=False
+        ),
         PromptTemplate.PROFILER: ProfilerPrompt(round_number=1, profile_focus="focus"),
         PromptTemplate.IMPLEMENT: _implement_context(plan),
         PromptTemplate.JUDGE: _judge_context(plan, "claim"),
