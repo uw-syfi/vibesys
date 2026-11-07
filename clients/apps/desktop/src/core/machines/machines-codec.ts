@@ -77,7 +77,8 @@ export function machineRequestFromBytes(bytes: Uint8Array): MachineRequest {
     case undefined:
       throw new Error('the machine request names no operation');
     default:
-      return op satisfies never;
+      op satisfies never;
+      throw new Error('unreachable');
   }
 }
 
@@ -125,6 +126,7 @@ export function machineReplyFromBytes(bytes: Uint8Array): MachineReply {
     case undefined:
       throw new Error('the machine reply names no result');
     default:
-      return result satisfies never;
+      result satisfies never;
+      throw new Error('unreachable');
   }
 }
