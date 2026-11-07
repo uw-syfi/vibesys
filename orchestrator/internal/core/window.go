@@ -63,7 +63,7 @@ type ObjectiveMove struct {
 	// Unit is what the values are counted in, "" when unknown (see search.CommonUnit).
 	Unit  string
 	Start *Best
-	End       *Best
+	End   *Best
 }
 
 // WindowFacts is what happened in a run during a window.
