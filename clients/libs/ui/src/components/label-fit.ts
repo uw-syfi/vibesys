@@ -60,7 +60,7 @@ export function placeLabels(
 
 /**
  * Whether every label of an axis `width` pixels wide can be drawn centred on its own share: none
- * runs past either end and none comes within `gap` of its neighbour. `labels` come in order.
+ * reaches past either end and none comes within `gap` of its neighbour. `labels` come in order.
  */
 export function labelsFit(
   labels: readonly AxisLabel[],
