@@ -731,6 +731,8 @@ it.effect('opening a feed without begin publishes no unchanged model', () =>
         model,
         connection: {
           state: Atom.make({_tag: 'Idle'} as const),
+          freshness: Atom.make({status: 'stale', lastUpdateMs: null} as const),
+          heard: Effect.void,
           ready: () => Effect.succeed(1),
           suspect: () => Effect.void,
           retry,

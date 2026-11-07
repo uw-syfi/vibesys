@@ -1,8 +1,6 @@
 /** The timings and limits the services run by, in one place. */
 import type * as Duration from 'effect/Duration';
 
-/** How long a Hello may take before the attempt counts as failed. */
-export const CONNECT_DEADLINE: Duration.Input = '15 seconds';
 /** The longest a command waits for its receipt (main ends a unary call at the same age). */
 export const COMMAND_DEADLINE: Duration.Input = '15 seconds';
 
