@@ -1,0 +1,30 @@
+{
+  "summary": {
+    "runId": "run-1",
+    "report": {
+      "id": "message-9",
+      "runId": "run-1",
+      "fromAgentId": "agent-1",
+      "delivery": "DELIVERY_CONSUMED",
+      "at": "2026-01-01T00:10:00Z",
+      "report": {
+        "headline": "Throughput is at 90 percent of the bound",
+        "changed": "Two candidates measured.",
+        "kind": "REPORT_KIND_PROGRESS",
+        "scope": "REPORT_SCOPE_RUN",
+        "sequence": 3
+      }
+    },
+    "agentsWorking": 2,
+    "agentsTotal": 3,
+    "roles": [
+      {"role": "AGENT_ROLE_LEAD", "total": 1, "working": 1},
+      {"role": "AGENT_ROLE_WORKER", "total": 2, "working": 1}
+    ],
+    "objectives": [
+      {"name": "latency", "headValue": 12.5, "unit": "ms", "headPercentOfBound": 80, "bestValue": 9.5, "bestPercentOfBound": 105},
+      {"name": "tput", "headValue": 60, "bestValue": 90},
+      {"name": "memory"}
+    ]
+  }
+}

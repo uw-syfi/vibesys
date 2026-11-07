@@ -249,24 +249,33 @@ func (t *tx) settleCheckIn(id CheckInID, outcome CheckInOutcome) {
 	t.emit(check.Run, check)
 }
 
-// answerCatchUp links the report a lead has just posted to the check-in whose request started the turn
-// it is in. A report posted in any other turn answers nothing.
-func (t *tx) answerCatchUp(lead agentState, report MessageID) {
+// catchUpAsked returns the check-in a report the lead posts now would answer: the one whose request
+// started the turn the lead is in, when no report has answered it yet. A report posted in any other turn,
+// or a second one in that turn, answers nothing, and it is by this that a report is known to be about a
+// window and not the run.
+func (t *tx) catchUpAsked(lead agentState) (CheckIn, bool) {
 	if lead.turn == nil {
-		return
+		return CheckIn{}, false
 	}
 	ask, ok := t.s.messages[lead.turn.Message]
 	if !ok {
-		return
+		return CheckIn{}, false
 	}
 	body, ok := ask.Body.(CatchUpRequest)
 	if !ok {
-		return
+		return CheckIn{}, false
 	}
-	if check, ok := t.s.checkIns[body.CheckIn]; ok && check.Report == "" && check.Ask == ask.ID {
-		check.Report = report
-		t.emit(check.Run, check)
+	check, ok := t.s.checkIns[body.CheckIn]
+	if !ok || check.Report != "" || check.Ask != ask.ID {
+		return CheckIn{}, false
 	}
+	return check, true
+}
+
+// linkCatchUp links the report that answers a check-in to it.
+func (t *tx) linkCatchUp(check CheckIn, report MessageID) {
+	check.Report = report
+	t.emit(check.Run, check)
 }
 
 // checkInBreaches says how the check-ins of a run disagree with the rules above. A viewer's check-ins

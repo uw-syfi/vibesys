@@ -40,6 +40,7 @@ function screenOf(seed: number, subagents: number, live: boolean, tree: boolean)
       nowMs={scenario.endMs + 60_000}
       trail={[]}
       notice={null}
+      reading={null}
       open={() => undefined}
     />,
   );

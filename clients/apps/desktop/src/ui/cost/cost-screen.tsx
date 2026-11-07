@@ -139,6 +139,8 @@ export function CostScreen(props: {
   readonly trail: readonly Crumb[];
   /** The state of every connection that is not working, above the figures. */
   readonly notice: ReactNode;
+  /** Where the read of the run's history stands, beside the status. */
+  readonly reading: ReactNode;
   readonly retry: () => void;
 }): JSX.Element {
   const {label, tone} = statusOf(props.freshness, props.runOver);
@@ -150,7 +152,12 @@ export function CostScreen(props: {
       state={pageState(props.view === undefined && props.freshness === 'empty')}
       trail={props.trail}
       title="Cost"
-      meta={<Chip label={label} tone={tone} dot />}
+      meta={
+        <>
+          <Chip label={label} tone={tone} dot />
+          {props.reading}
+        </>
+      }
     >
       {props.notice}
       <Problem status={props.status} words={props.words} retry={props.retry} />

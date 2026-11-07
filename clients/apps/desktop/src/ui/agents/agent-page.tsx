@@ -63,6 +63,8 @@ export function AgentPage(props: {
   readonly trail: readonly Crumb[];
   /** The state of every connection that is not working, above the transcript. */
   readonly notice: ReactNode;
+  /** Where the read of the run's history stands, among the chips under the title. */
+  readonly reading: ReactNode;
   /** What the last press of Send to this agent came to, or undefined before any. */
   readonly sendProgress: CommandProgress | undefined;
   readonly history: HistoryAccess;
@@ -91,6 +93,7 @@ export function AgentPage(props: {
           <Chip label={props.host} mono clip />
           <Chip label={harnessWord(agent.harness)} />
           {agent.model === '' ? null : <Chip label={agent.model} mono clip />}
+          {props.reading}
         </>
       }
     >

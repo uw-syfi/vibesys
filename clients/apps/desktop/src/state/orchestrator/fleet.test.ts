@@ -5,15 +5,17 @@ import {
   AgentRole,
   AgentSchema,
   AgentStatus,
-  Direction,
   Harness,
   MessageSchema,
+  ObjectiveStandingSchema,
   ReportKind,
   ReportSchema,
+  ReportScope,
   type Run,
   RunSchema,
   RunStatus,
-  SearchStateSchema,
+  type RunSummary,
+  RunSummarySchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {Freshness} from '../freshness.js';
@@ -24,11 +26,10 @@ import {
   type FleetRow,
   fleetRows,
   fleetView,
-  headObjectives,
   isLive,
   NO_FLEET_FILTER,
 } from './fleet.js';
-import {emptyState} from './state.js';
+import {emptyState, type OrchestratorState} from './state.js';
 
 const STATUSES = [
   RunStatus.STARTING,
@@ -39,6 +40,27 @@ const STATUSES = [
 ] as const;
 const FRESHNESS: readonly Freshness[] = ['live', 'catching-up', 'stale', 'empty', 'unavailable'];
 
+/** The summary the host served of a run: what the fleet shows of it, and nothing else. */
+interface SummarySpec {
+  readonly working: number;
+  readonly reportAtMs: number | undefined;
+  readonly objectives: readonly {
+    readonly name: string;
+    readonly value: number | undefined;
+    readonly unit: string;
+    readonly percent: number | undefined;
+  }[];
+}
+
+/**
+ * What is held of a run besides its summary: agents and messages of any kind and scope, which the
+ * fleet must not read. They are noise to it, and any amount of them leaves its rows as they were.
+ */
+interface NoiseSpec {
+  readonly agentStatuses: readonly AgentStatus[];
+  readonly messages: readonly {readonly atMs: number; readonly scope: ReportScope}[];
+}
+
 interface RunSpec {
   readonly id: string;
   readonly status: RunStatus;
@@ -47,10 +69,46 @@ interface RunSpec {
   readonly neverOpened: boolean;
   readonly cost: number | undefined;
   readonly budget: number | undefined;
-  readonly agentStatuses: readonly AgentStatus[];
-  readonly reports: readonly number[];
-  readonly otherMessages: readonly number[];
+  readonly summary: SummarySpec | undefined;
+  readonly noise: NoiseSpec;
 }
+
+const summarySpec: fc.Arbitrary<SummarySpec> = fc.record({
+  working: fc.integer({min: 0, max: 9}),
+  reportAtMs: fc.option(
+    fc.integer({min: 1, max: 20}).map(n => n * 1000),
+    {nil: undefined},
+  ),
+  objectives: fc.array(
+    fc.record({
+      name: fc.constantFrom('tput', 'latency', 'memory'),
+      value: fc.option(fc.double({min: 0.5, max: 1e6, noNaN: true}), {nil: undefined}),
+      unit: fc.constantFrom('', 'ms', 'tok/s'),
+      percent: fc.option(fc.double({min: 0.01, max: 500, noNaN: true}), {nil: undefined}),
+    }),
+    {maxLength: 3},
+  ),
+});
+
+const noiseSpec: fc.Arbitrary<NoiseSpec> = fc.record({
+  agentStatuses: fc.array(
+    fc.constantFrom(
+      AgentStatus.LAUNCHING,
+      AgentStatus.ACTIVE,
+      AgentStatus.WAITING,
+      AgentStatus.IDLE,
+      AgentStatus.ENDED,
+    ),
+    {maxLength: 5},
+  ),
+  messages: fc.array(
+    fc.record({
+      atMs: fc.integer({min: 1, max: 40}).map(n => n * 1000),
+      scope: fc.constantFrom(ReportScope.UNSPECIFIED, ReportScope.RUN, ReportScope.WINDOW),
+    }),
+    {maxLength: 4},
+  ),
+});
 
 const runSpec: fc.Arbitrary<RunSpec> = fc.record({
   id: fc.constantFrom('r1', 'r2', 'r3', 'r4', 'r5', 'r6'),
@@ -61,29 +119,50 @@ const runSpec: fc.Arbitrary<RunSpec> = fc.record({
   neverOpened: fc.boolean(),
   cost: fc.option(fc.double({min: 0, max: 5000, noNaN: true}), {nil: undefined}),
   budget: fc.option(fc.double({min: 1, max: 9000, noNaN: true}), {nil: undefined}),
-  agentStatuses: fc.array(
-    fc.constantFrom(
-      AgentStatus.LAUNCHING,
-      AgentStatus.ACTIVE,
-      AgentStatus.WAITING,
-      AgentStatus.IDLE,
-      AgentStatus.ENDED,
-      AgentStatus.FAILED,
-      AgentStatus.LOST,
-    ),
-    {maxLength: 5},
-  ),
-  reports: fc.array(
-    fc.integer({min: 1, max: 20}).map(n => n * 1000),
-    {maxLength: 3},
-  ),
-  otherMessages: fc.array(
-    fc.integer({min: 1, max: 20}).map(n => n * 1000),
-    {maxLength: 3},
-  ),
+  summary: fc.option(summarySpec, {nil: undefined}),
+  noise: noiseSpec,
 });
 
-function dataOf(specs: readonly RunSpec[]) {
+function summaryOf(runId: string, spec: SummarySpec): RunSummary {
+  return create(RunSummarySchema, {
+    runId,
+    agentsWorking: spec.working,
+    agentsTotal: spec.working + 2,
+    ...(spec.reportAtMs === undefined
+      ? {}
+      : {
+          report: create(MessageSchema, {
+            id: `${runId}-summary-report`,
+            runId,
+            at: timestampFromMs(spec.reportAtMs),
+            body: {
+              case: 'report',
+              value: create(ReportSchema, {
+                headline: 'h',
+                kind: ReportKind.PROGRESS,
+                scope: ReportScope.RUN,
+              }),
+            },
+          }),
+        }),
+    objectives: spec.objectives.map(objective =>
+      create(ObjectiveStandingSchema, {
+        name: objective.name,
+        unit: objective.unit,
+        // The head and the best are two things, and a row shows the best.
+        ...(objective.value === undefined
+          ? {}
+          : {bestValue: objective.value, headValue: objective.value / 2}),
+        ...(objective.percent === undefined
+          ? {}
+          : {bestPercentOfBound: objective.percent, headPercentOfBound: objective.percent / 2}),
+      }),
+    ),
+  });
+}
+
+/** The state of a host with these runs; `noise` says whether the agents and messages are held at all. */
+function dataOf(specs: readonly RunSpec[], noise = true): OrchestratorState {
   // One run per id, as a host keeps one record per id.
   const unique = [...new Map(specs.map(spec => [spec.id, spec])).values()];
   const runs: Run[] = unique.map(spec =>
@@ -99,41 +178,42 @@ function dataOf(specs: readonly RunSpec[]) {
       ...(spec.budget === undefined ? {} : {maxCostUsd: spec.budget}),
     }),
   );
-  const agents = unique.flatMap(spec =>
-    spec.agentStatuses.map((status, index) =>
-      create(AgentSchema, {
-        id: `${spec.id}-a${index}`,
-        runId: spec.id,
-        role: AgentRole.WORKER,
-        harness: Harness.CODEX,
-        status,
-      }),
-    ),
-  );
-  const messages = unique.flatMap(spec => [
-    ...spec.reports.map((at, index) =>
-      create(MessageSchema, {
-        id: `${spec.id}-report-${index}`,
-        runId: spec.id,
-        at: timestampFromMs(at),
-        body: {
-          case: 'report',
-          value: create(ReportSchema, {headline: 'h', kind: ReportKind.PROGRESS}),
-        },
-      }),
-    ),
-    ...spec.otherMessages.map((at, index) =>
-      create(MessageSchema, {
-        id: `${spec.id}-text-${index}`,
-        runId: spec.id,
-        at: timestampFromMs(at),
-        body: {case: 'text', value: 'hello'},
-      }),
-    ),
-  ]);
+  const agents = noise
+    ? unique.flatMap(spec =>
+        spec.noise.agentStatuses.map((status, index) =>
+          create(AgentSchema, {
+            id: `${spec.id}-a${index}`,
+            runId: spec.id,
+            role: AgentRole.WORKER,
+            harness: Harness.CODEX,
+            status,
+          }),
+        ),
+      )
+    : [];
+  const messages = noise
+    ? unique.flatMap(spec =>
+        spec.noise.messages.map(({atMs, scope}, index) =>
+          create(MessageSchema, {
+            id: `${spec.id}-report-${index}`,
+            runId: spec.id,
+            at: timestampFromMs(atMs),
+            body: {
+              case: 'report',
+              value: create(ReportSchema, {headline: 'h', kind: ReportKind.PROGRESS, scope}),
+            },
+          }),
+        ),
+      )
+    : [];
   return {
     ...emptyState,
     runs: Object.fromEntries(runs.map(run => [run.id, run])),
+    summaries: Object.fromEntries(
+      unique.flatMap(spec =>
+        spec.summary === undefined ? [] : [[spec.id, summaryOf(spec.id, spec.summary)] as const],
+      ),
+    ),
     agents: Object.fromEntries(agents.map(agent => [agent.id, agent])),
     messages: Object.fromEntries(messages.map(message => [message.id, message])),
   };
@@ -143,10 +223,12 @@ const hostInput: fc.Arbitrary<{
   readonly freshness: Freshness;
   readonly staleForMs: number | null;
   readonly specs: readonly RunSpec[];
+  readonly leftOut: number;
 }> = fc.record({
   freshness: fc.constantFrom(...FRESHNESS),
   staleForMs: fc.option(fc.integer({min: 0, max: 10_000_000}), {nil: null}),
   specs: fc.array(runSpec, {maxLength: 8}),
+  leftOut: fc.integer({min: 0, max: 40}),
 });
 
 /** One to four hosts with distinct keys; the same run ids repeat across them. */
@@ -156,7 +238,10 @@ const fleet: fc.Arbitrary<readonly FleetHostInput[]> = fc
     inputs.map((input, index) => ({
       key: `host-${index}`,
       label: `Host ${index}`,
-      data: dataOf(input.specs),
+      data: {
+        ...dataOf(input.specs),
+        cut: {truncated: input.leftOut > 0, runsLeftOut: input.leftOut},
+      },
       freshness: input.freshness,
       staleForMs: input.staleForMs,
     })),
@@ -270,6 +355,16 @@ describe('the fleet of runs', () => {
     );
   });
 
+  it('says for each host how many runs its snapshot left out, as the host said it', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        const view = fleetView(hosts, NO_FLEET_FILTER);
+        for (const [index, host] of view.hosts.entries())
+          expect(host.runsLeftOut).toBe(hosts[index]?.data.cut.runsLeftOut);
+      }),
+    );
+  });
+
   it('keeps the rows of a host that is stale or cannot be reached, each carrying its host freshness', () => {
     fc.assert(
       fc.property(fleet, hosts => {
@@ -285,37 +380,48 @@ describe('the fleet of runs', () => {
     );
   });
 
-  it('counts the agents that are starting, working or waiting, and no others', () => {
+  it('shows the agents working and the time of the last report as the run summary says, absent when the host sent none', () => {
     fc.assert(
       fc.property(fleet, hosts => {
         for (const row of shown(hosts, NO_FLEET_FILTER)) {
           const host = hosts.find(each => each.key === row.host.key);
-          const expected = Object.values(host?.data.agents ?? {}).filter(
-            agent =>
-              agent.runId === row.runId &&
-              [AgentStatus.LAUNCHING, AgentStatus.ACTIVE, AgentStatus.WAITING].includes(
-                agent.status,
-              ),
-          ).length;
-          expect(row.agentsRunning).toBe(expected);
+          const summary = host?.data.summaries[row.runId];
+          expect(row.agentsRunning).toBe(summary?.agentsWorking ?? null);
+          const at = summary?.report?.at;
+          expect(row.lastReportMs).toBe(
+            at === undefined ? null : Number(at.seconds) * 1000 + Math.floor(at.nanos / 1e6),
+          );
+          // A row shows the best the run measured and its share of the bound, never the head's.
+          expect(
+            row.objectives.map(({name, value, unit, percentOfBound}) => ({
+              name,
+              value: value ?? undefined,
+              unit,
+              percentOfBound: percentOfBound ?? undefined,
+            })),
+          ).toEqual(
+            (summary?.objectives ?? []).map(({name, bestValue, unit, bestPercentOfBound}) => ({
+              name,
+              value: bestValue,
+              unit,
+              percentOfBound: bestPercentOfBound,
+            })),
+          );
         }
       }),
     );
   });
 
-  it('dates the last report from reports only, never another kind of message', () => {
+  // The fleet derives nothing: a host that held any agents and any messages (a window report among
+  // them, which the host marks and the fleet never inspects) shows the rows of a host that held none.
+  it('reads nothing but runs and their summaries: the agents and messages held change no row', () => {
     fc.assert(
       fc.property(fleet, hosts => {
-        for (const row of shown(hosts, NO_FLEET_FILTER)) {
-          const host = hosts.find(each => each.key === row.host.key);
-          const reports = Object.values(host?.data.messages ?? {})
-            .filter(
-              message =>
-                message.runId === row.runId && message.id.startsWith(`${row.runId}-report-`),
-            )
-            .map(message => Number(message.at?.seconds ?? 0n) * 1000);
-          expect(row.lastReportMs).toBe(reports.length === 0 ? null : Math.max(...reports));
-        }
+        const bare = hosts.map(host => ({
+          ...host,
+          data: {...host.data, agents: {}, messages: {}, turns: {}, checkIns: {}},
+        }));
+        expect(fleetView(hosts, NO_FLEET_FILTER)).toEqual(fleetView(bare, NO_FLEET_FILTER));
       }),
     );
   });
@@ -341,136 +447,7 @@ describe('the fleet of runs', () => {
     expect(view.live).toEqual([]);
     expect(view.history).toEqual([]);
     expect(view.hosts).toEqual([
-      {key: 'a', label: 'A', freshness: 'empty', staleForMs: null, runs: 0},
-    ]);
-  });
-});
-
-const measuredInit = (fields: {
-  readonly scored: string;
-  readonly value: number;
-  readonly others?: readonly {readonly name: string; readonly value: number | undefined}[];
-}) => ({
-  head: {
-    state: {
-      case: 'current' as const,
-      value: {
-        head: 'b'.repeat(40),
-        result: {
-          outcome: {
-            case: 'measure' as const,
-            value: {
-              metric: {name: fields.scored},
-              value: fields.value,
-              ...(fields.others === undefined
-                ? {}
-                : {
-                    objectives: {
-                      metrics: [fields.scored, ...fields.others.map(other => other.name)].map(
-                        name => ({name}),
-                      ),
-                    },
-                    observations: fields.others.map(other => ({
-                      name: other.name,
-                      ...(other.value === undefined ? {} : {value: other.value}),
-                    })),
-                  }),
-            },
-          },
-        },
-      },
-    },
-  },
-});
-
-const measured = (fields: Parameters<typeof measuredInit>[0]) =>
-  create(SearchStateSchema, measuredInit(fields));
-
-const bound = (
-  objective: string,
-  fields: {readonly headValue?: number; readonly percentOfBound?: number; readonly unit?: string},
-) => ({
-  objective,
-  direction: Direction.MAXIMIZE,
-  versions: [
-    {
-      seq: 1n,
-      objective,
-      direction: Direction.MAXIMIZE,
-      value: 100,
-      unit: fields.unit ?? 'tok/s',
-      note: '',
-    },
-  ],
-  ...(fields.headValue === undefined ? {} : {headValue: fields.headValue}),
-  ...(fields.percentOfBound === undefined ? {} : {percentOfBound: fields.percentOfBound}),
-});
-
-describe('the best result of a run, per objective', () => {
-  it('is nothing for a run with no search state or no head', () => {
-    expect(headObjectives(undefined)).toEqual([]);
-    expect(headObjectives(create(SearchStateSchema))).toEqual([]);
-  });
-
-  it('is the head value of the scored metric, with no unit and no percent until bounds are served', () => {
-    expect(headObjectives(measured({scored: 'Throughput', value: 42}))).toEqual([
-      {name: 'Throughput', value: 42, unit: '', percentOfBound: null},
-    ]);
-  });
-
-  it('names every objective of a multi-objective measurement, the scored one and the observed ones', () => {
-    expect(
-      headObjectives(
-        measured({
-          scored: 'tok_s',
-          value: 2300,
-          others: [
-            {name: 'ttft_ms', value: 38},
-            {name: 'mem_gb', value: undefined},
-          ],
-        }),
-      ).map(({name, value}) => [name, value]),
-    ).toEqual([
-      ['tok_s', 2300],
-      ['ttft_ms', 38],
-      ['mem_gb', null],
-    ]);
-  });
-
-  it('shows the percent of the bound exactly as the host served it, and none when it served none', () => {
-    fc.assert(
-      fc.property(
-        fc.option(fc.double({min: 0.01, max: 500, noNaN: true}), {nil: undefined}),
-        fc.double({min: 1, max: 1e6, noNaN: true}),
-        (percentOfBound, value) => {
-          const search = create(SearchStateSchema, {
-            ...measuredInit({scored: 'tok_s', value}),
-            bounds: [
-              bound('tok_s', {
-                headValue: value,
-                unit: 'tok/s',
-                ...(percentOfBound === undefined ? {} : {percentOfBound}),
-              }),
-            ],
-          });
-          const [objective] = headObjectives(search);
-          // The app divides nothing: with no served percent there is none, whatever the numbers give.
-          expect(objective?.percentOfBound).toBe(percentOfBound ?? null);
-          expect(objective?.unit).toBe('tok/s');
-          expect(objective?.value).toBe(value);
-        },
-      ),
-    );
-  });
-
-  it('keeps a declared bound whose objective the head has not measured, with the value the host served', () => {
-    const search = create(SearchStateSchema, {
-      ...measuredInit({scored: 'tok_s', value: 10}),
-      bounds: [bound('mem_gb', {unit: 'GB'}), bound('tok_s', {percentOfBound: 40})],
-    });
-    expect(headObjectives(search)).toEqual([
-      {name: 'tok_s', value: 10, unit: 'tok/s', percentOfBound: 40},
-      {name: 'mem_gb', value: null, unit: 'GB', percentOfBound: null},
+      {key: 'a', label: 'A', freshness: 'empty', staleForMs: null, runs: 0, runsLeftOut: 0},
     ]);
   });
 });

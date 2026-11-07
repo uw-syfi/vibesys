@@ -26,8 +26,11 @@ type Run struct {
 	// JobTool is the tool the run's agents use and the daemon it serves. It is recorded when the run
 	// starts and every session of the run is launched with it.
 	JobTool JobToolEndpoint
-	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
+	// ReportsPosted counts the reports the lead has posted, of every scope; the next is numbered one more.
 	ReportsPosted uint32
+	// SummaryReport is the newest report the lead posted about the whole run, never one that answered a
+	// check-in; empty before it posts one. The host serves it as the run's summary.
+	SummaryReport MessageID
 	// FinalReported says the lead's latest report is a final one and it has started no new work since:
 	// it has spawned no agent, no job has started and it has posted no report. It has finished what it
 	// was asked, so the run is not stalled and the lead is not reminded, however it answers a
@@ -342,9 +345,11 @@ type (
 	}
 	// Report is what the lead tells the operator. Kind says whether it is a note along the way or
 	// the lead's last word. Sequence is zero in a command and the report's place in its run, from 1,
-	// once recorded.
+	// once recorded; Scope is empty in a command and says, once recorded, whether the report is about
+	// the whole run or only a check-in's window.
 	Report struct {
 		Kind        ReportKind
+		Scope       ReportScope
 		Sequence    uint32
 		Headline    string
 		Changed     string

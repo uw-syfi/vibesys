@@ -233,6 +233,7 @@ describe('the press of Catch me up', () => {
         const id = made(yield* standing(h));
         // The host held the receipt of the first send: the same check-in, not a second window.
         h.mount(h.session.runs.watch);
+        h.mount(h.session.runHistory.watch(RUN));
         yield* h.elapse(60, 5);
         expect((yield* mine(h)).map(each => each.checkIn.id)).toEqual([id]);
       }),

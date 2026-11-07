@@ -7,7 +7,10 @@
  * unpriced turns when absent from the address; `old` is a host without the cost stream, `absent`
  * one that has no view for the run); one `host=<key>` per host to show (this machine when none);
  * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
- * long, `down=<n>` has the host at that position lose its link after its first snapshot);
+ * long, `down=<n>` has the host at that position lose its link after its first snapshot,
+ * `leftOut=<n>` has each host say its snapshot left that many older runs out);
+ * `report` has the lead post a report about the whole run, which the report screen sums the run up by
+ * (a Catch me up answer, a window report, never replaces it);
  * `catchUp=<none|history|writing|written|pending|failed>` gives the viewer check-ins already made
  * on the run (none when absent), and a press of Catch me up makes another that stays pending while
  * the lead writes; `measured=<candidates>` gives the run that many measured candidates on two
@@ -18,6 +21,7 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {ReportKind} from '@vibesys/orchestrator-proto';
 import {DesktopLinkProblem} from '@vibesys/proto';
 import {type Appearance, parseAppearance} from '@vibesys/ui/tokens';
 import * as Effect from 'effect/Effect';
@@ -61,6 +65,7 @@ import {
   methodPathOf,
   SERVING,
   START_MS,
+  withReport,
 } from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
@@ -111,22 +116,22 @@ const downAt = query.has('down') ? Number(query.get('down')) : undefined;
 function fleetRecording(spec: string): Recording {
   const [runs = '12', live = '4'] = spec.split('-');
   const nowMs = Date.now();
+  const leftOut = Number(query.get('leftOut') ?? 0);
   const bases = new Map(
-    shown.map((host, index) => [
-      host.key,
-      daemonRecording(
-        new FakeDaemon(
-          fleetScenario({
-            seed: 11 + index,
-            prefix: `h${index}`,
-            runs: Number(runs),
-            live: Number(live),
-            nowMs,
-            ...(query.has('long') ? {longEvery: 3} : {}),
-          }),
-        ),
-      ),
-    ]),
+    shown.map((host, index) => {
+      const daemon = new FakeDaemon(
+        fleetScenario({
+          seed: 11 + index,
+          prefix: `h${index}`,
+          runs: Number(runs),
+          live: Number(live),
+          nowMs,
+          ...(query.has('long') ? {longEvery: 3} : {}),
+        }),
+      );
+      daemon.runsLeftOut = leftOut;
+      return [host.key, daemonRecording(daemon)] as const;
+    }),
   );
   // The transport counts calls to a method across hosts; a host's own count says which call is its first.
   const calls = new Map<string, number>();
@@ -146,7 +151,17 @@ function fleetRecording(spec: string): Recording {
   };
 }
 
-const scenario = scenarioOf(window.location.search);
+const base = scenarioOf(window.location.search);
+const scenario = query.has('report')
+  ? withReport(base, {
+      sequence: 1,
+      kind: ReportKind.PROGRESS,
+      atMs: base.endMs - 20 * 60_000,
+      headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
+      changed: 'Fused expert dispatch landed.',
+      openForUser: 'Should quantization stay paused?',
+    })
+  : base;
 const measured = query.get('measured');
 const daemon = new FakeDaemon({
   ...scenario,

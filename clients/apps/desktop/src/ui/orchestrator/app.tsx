@@ -1,7 +1,7 @@
 import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
-import {type Crumb, Page, Text} from '@vibesys/ui';
+import {Button, Chip, type Crumb, Page, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {HistoryStatus} from '../../core/index.js';
+import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
@@ -47,6 +47,8 @@ export interface HostSnapshot {
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
   readonly costFeeds: Readonly<Record<string, CostFeedSnapshot>>;
+  /** Where the read of the open run's history (agents, turns, messages, check-ins) stands. */
+  readonly runHistory: RunHistoryStatus;
   /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
   readonly history: {
     readonly earlier: HistoryStatus;
@@ -115,6 +117,8 @@ function OpenAgent(props: {
   readonly commands: AppCommands;
   readonly trail: readonly Crumb[];
   readonly notice: JSX.Element | null;
+  /** Where the read of the run's history stands, beside the title. */
+  readonly reading: JSX.Element | null;
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {agent, host, commands, go} = props;
@@ -126,6 +130,7 @@ function OpenAgent(props: {
       host={host.label}
       trail={props.trail}
       notice={props.notice}
+      reading={props.reading}
       history={{
         ...host.history,
         loadEarlier: before => commands.loadEarlier(host.key, agent.id, before),
@@ -155,6 +160,40 @@ function agentNote(
     staleForMs: staleForMs(host.freshness, props.nowMs),
     tryAgain: () => props.retryHost(host.key),
   };
+}
+
+/**
+ * Where the read of the open run's history stands, as a word beside the title: nothing once it is read,
+ * and a way to read it again when it failed.
+ */
+function HistoryStatusWord(props: {
+  readonly status: RunHistoryStatus;
+  readonly retry: () => void;
+}): JSX.Element | null {
+  const {status} = props;
+  switch (status._tag) {
+    case 'Idle':
+      return null;
+    case 'Loading':
+      return <Chip label="Reading history" tone="live" dot />;
+    case 'Failed':
+      return (
+        <Row gap="space-2">
+          <Chip label="History not read" tone="warn" dot />
+          <Button
+            text="Retry"
+            icon="refresh"
+            variant="quiet"
+            size="sm"
+            hint="Read the run's history again"
+            press={props.retry}
+          />
+        </Row>
+      );
+    default:
+      status satisfies never;
+      return null;
+  }
 }
 
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
@@ -225,6 +264,8 @@ function AgentsDestination(props: {
   /** The trail down to the run. */
   readonly trail: readonly Crumb[];
   readonly notice: JSX.Element | null;
+  /** Where the read of the run's history stands, beside the title. */
+  readonly reading: JSX.Element | null;
   readonly commands: AppCommands;
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
@@ -245,6 +286,7 @@ function AgentsDestination(props: {
       nowMs={props.nowMs}
       trail={trail}
       notice={props.notice}
+      reading={props.reading}
       open={agentId => go({type: 'pick-agent', agentId})}
     />
   ) : (
@@ -256,6 +298,7 @@ function AgentsDestination(props: {
       commands={props.commands}
       trail={trail}
       notice={props.notice}
+      reading={props.reading}
       go={go}
     />
   );
@@ -294,6 +337,9 @@ function RunDestination(props: {
       ]}
     />
   );
+  const reading = (
+    <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+  );
   const toRun: readonly Crumb[] = [
     {id: 'runs', label: TITLE, press: goRuns},
     {id: runId, label: run.task, press: () => go({type: 'show', view: 'report'})},
@@ -309,6 +355,7 @@ function RunDestination(props: {
         words={COST_WORDS}
         trail={[...toRun, {id: 'cost', label: 'Cost'}]}
         notice={notice}
+        reading={reading}
         retry={() => props.retryCost(host.key, runId)}
       />
     );
@@ -323,6 +370,7 @@ function RunDestination(props: {
         agent={agent}
         trail={toRun}
         notice={notice}
+        reading={reading}
         commands={commands}
         go={go}
       />
@@ -334,6 +382,7 @@ function RunDestination(props: {
       runId={runId}
       nowMs={nowMs}
       notice={notice}
+      reading={reading}
       commands={commands}
       retryCost={props.retryCost}
       go={go}
@@ -362,6 +411,8 @@ function ReportDestination(props: {
   readonly runId: string;
   readonly nowMs: number;
   readonly notice: JSX.Element | null;
+  /** Where the read of the run's history stands, beside the title. */
+  readonly reading: JSX.Element | null;
   readonly commands: AppCommands;
   readonly retryCost: (host: string, runId: string) => void;
   readonly go: (action: NavigationAction) => void;
@@ -392,6 +443,7 @@ function ReportDestination(props: {
       openCost={() => go({type: 'show', view: 'cost'})}
       names={agentNames(state, runId)}
       notice={props.notice}
+      reading={props.reading}
     />
   );
 }

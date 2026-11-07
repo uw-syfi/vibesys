@@ -70,6 +70,7 @@ function report(
       openCost={() => undefined}
       names={agentNames(state, runId)}
       notice={null}
+      reading={null}
     />,
   );
 }
@@ -83,6 +84,7 @@ function page(state: OrchestratorState, agent: Agent, sendProgress?: CommandProg
       host="host-a"
       trail={[]}
       notice={null}
+      reading={null}
       history={{
         earlier: {_tag: 'Idle'},
         wholes: {},

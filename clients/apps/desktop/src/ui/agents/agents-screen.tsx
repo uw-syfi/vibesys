@@ -140,6 +140,8 @@ export function AgentsScreen(props: {
   readonly trail: readonly Crumb[];
   /** The state of every connection that is not working, above the tree. */
   readonly notice: ReactNode;
+  /** Where the read of the run's history stands, beside the counts. */
+  readonly reading: ReactNode;
   readonly open: (agentId: string) => void;
 }): JSX.Element {
   const [folds, setFolds] = useState<FoldChoices>({});
@@ -165,7 +167,12 @@ export function AgentsScreen(props: {
       state="ready"
       trail={props.trail}
       title="Agents"
-      meta={<Stats tree={tree} />}
+      meta={
+        <>
+          <Stats tree={tree} />
+          {props.reading}
+        </>
+      }
     >
       {props.notice}
       <Card flush>

@@ -26,6 +26,7 @@ import {
   measuredSearch,
   type ObjectiveSpec,
   SERVING,
+  serveSummaries,
   withReport,
 } from '../../../testing/orchestrator/index.js';
 import {agentNames} from '../names.js';
@@ -81,7 +82,7 @@ function stateOf(world: World): OrchestratorState {
   let state = withText.changes.reduce(applyChange, emptyState);
   state = applySearch(state, measuredSearch(RUN, options, {stale: world.stale === true}));
   const cost = world.cost === undefined ? COST : world.cost;
-  return cost === null ? state : applyCost(state, cost);
+  return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
 
 function render(world: World, options: {freshness?: Freshness; costFeed?: CostFeedSnapshot} = {}) {
@@ -115,6 +116,7 @@ function render(world: World, options: {freshness?: Freshness; costFeed?: CostFe
       openCost={() => probe.shown.push('cost')}
       names={agentNames(state, RUN)}
       notice={null}
+      reading={null}
     />,
   );
   return {screen, probe};

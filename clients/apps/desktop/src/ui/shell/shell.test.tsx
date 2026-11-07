@@ -35,6 +35,7 @@ const host: HostSnapshot = {
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
   costFeeds: {},
+  runHistory: {_tag: 'Idle'},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 /** A second host that has said nothing yet, so the list offers a host filter. */
@@ -47,6 +48,7 @@ const quiet: HostSnapshot = {
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
   costFeeds: {},
+  runHistory: {_tag: 'Idle'},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [

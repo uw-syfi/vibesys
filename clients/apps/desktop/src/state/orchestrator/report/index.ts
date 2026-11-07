@@ -13,6 +13,6 @@ export {
   runReport,
   type SearchReading,
 } from './run-report.js';
-export {latestReport, type SummaryField, type SummaryView} from './summary.js';
+export {type SummaryField, type SummaryView, summaryReport} from './summary.js';
 export {timeTicks, valueTicks} from './ticks.js';
 export {type TradeoffPointView, type TradeoffReport, tradeoffReport} from './tradeoff.js';

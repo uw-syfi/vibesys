@@ -25,6 +25,15 @@ func TestDecodeEveryWatchRunsKind(t *testing.T) {
 				decoded = change
 			case "search":
 				decoded = search
+			case "summary":
+				// The frame of a stream that asked for summaries: the three readers above see none of it.
+				if snapshot != nil || change != nil || search != nil {
+					t.Fatal("a summary frame was read as another kind")
+				}
+				if !proto.Equal(client.WatchRunsSummary(frame), reflected.Get(field).Message().Interface()) {
+					t.Fatalf("decoder lost %s", field.Name())
+				}
+				return
 			default:
 				t.Fatalf("add a fixture assertion for new kind %s", field.Name())
 			}

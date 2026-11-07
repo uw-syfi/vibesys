@@ -47,6 +47,8 @@ export function ReportScreen(props: {
   readonly names: ReadonlyMap<string, string>;
   /** The state of every connection that is not working, above the report; nothing when all work. */
   readonly notice: ReactNode;
+  /** Where the read of the run's history stands, among the state words beside the title. */
+  readonly reading: ReactNode;
   readonly ideas?: ReactNode;
 }): JSX.Element {
   const {report} = props;
@@ -63,13 +65,16 @@ export function ReportScreen(props: {
       ]}
       title={report.header.name}
       meta={
-        <ReportMeta
-          report={report}
-          host={props.host}
-          freshness={props.freshness}
-          nowMs={props.nowMs}
-          staleForMs={props.staleForMs}
-        />
+        <>
+          <ReportMeta
+            report={report}
+            host={props.host}
+            freshness={props.freshness}
+            nowMs={props.nowMs}
+            staleForMs={props.staleForMs}
+          />
+          {props.reading}
+        </>
       }
       actions={
         <ReportActions

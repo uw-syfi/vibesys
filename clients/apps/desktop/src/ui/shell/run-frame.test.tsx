@@ -33,8 +33,12 @@ installDom();
 const PIECES_OF_THE_OLD_FRAME =
   /Result so far|Candidates|Task job queue|Plans|Handoffs|Timeline|Views of this run|Agents in this run/;
 
-function hostOf(state: OrchestratorState): HostSnapshot {
+function hostOf(
+  state: OrchestratorState,
+  runHistory: HostSnapshot['runHistory'] = {_tag: 'Idle'},
+): HostSnapshot {
   return {
+    runHistory,
     key: 'local',
     label: 'This machine',
     model: {data: state, agentCursors: {}},
@@ -64,10 +68,15 @@ function world(seed: number, subagents: number, live: boolean) {
   return {scenario, state};
 }
 
-function app(state: OrchestratorState, nowMs: number, route: Route): JSX.Element {
+function app(
+  state: OrchestratorState,
+  nowMs: number,
+  route: Route,
+  runHistory?: HostSnapshot['runHistory'],
+): JSX.Element {
   return (
     <OrchestratorApp
-      hosts={[hostOf(state)]}
+      hosts={[hostOf(state, runHistory)]}
       nowMs={nowMs}
       commands={{
         start: undefined,
@@ -193,6 +202,37 @@ describe('the pages of a run and the pages of the window', () => {
       title: 'Catch me up',
     });
     catchUp.unmount();
+  });
+
+  it('says where the read of the run’s history stands among the words under the title of every page of it', () => {
+    const {scenario, state} = world(3, 3, true);
+    const agent = Object.values(state.agents).find(each => each.parentAgentId !== '');
+    const routes: Route[] = [
+      {screen: 'run', host: 'local', runId: scenario.runId, view: 'report', agentId: null},
+      {screen: 'run', host: 'local', runId: scenario.runId, view: 'cost', agentId: null},
+      {screen: 'run', host: 'local', runId: scenario.runId, view: 'agents', agentId: null},
+      {
+        screen: 'run',
+        host: 'local',
+        runId: scenario.runId,
+        view: 'agents',
+        agentId: agent?.id ?? '',
+      },
+    ];
+    for (const route of routes) {
+      const idle = mount(app(state, scenario.endMs, route));
+      expect(idle.container.querySelector('.vs-page-meta')?.textContent).not.toContain('history');
+      idle.unmount();
+      const reading = mount(app(state, scenario.endMs, route, {_tag: 'Loading'}));
+      expect(reading.container.querySelector('.vs-page-meta')?.textContent).toContain(
+        'Reading history',
+      );
+      // It is one of the words of the title row, not a banner above the page.
+      expect(reading.container.querySelector('.vs-page-body')?.textContent).not.toContain(
+        'Reading history',
+      );
+      reading.unmount();
+    }
   });
 
   it('puts the run in the trail of every page of it, each step but the last a way back', () => {

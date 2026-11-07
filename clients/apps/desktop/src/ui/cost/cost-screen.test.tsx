@@ -49,6 +49,7 @@ function screen(
       words={COST_WORDS}
       trail={[]}
       notice={null}
+      reading={null}
       retry={options.retry ?? (() => undefined)}
     />,
   );

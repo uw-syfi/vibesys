@@ -33,6 +33,7 @@ describe('the agents screen', () => {
         nowMs={scenario.endMs}
         trail={[]}
         notice={null}
+        reading={null}
         open={id => opened.push(id)}
       />,
     );
@@ -100,6 +101,7 @@ describe('an agent page', () => {
         host="host-a"
         trail={[{id: 'runs', label: 'Runs'}]}
         notice={null}
+        reading={null}
         sendProgress={undefined}
         history={{
           earlier: {_tag: 'Idle'},

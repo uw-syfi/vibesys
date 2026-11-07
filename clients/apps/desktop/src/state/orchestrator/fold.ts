@@ -22,10 +22,12 @@
 import {
   type Delta,
   type Elision,
+  type GetRunHistoryResponse,
   type Item,
   ItemStatus,
   oneofIs,
   type RunChange,
+  type RunSummary,
   type RunsSnapshot,
   type SearchState,
   type Turn,
@@ -40,41 +42,119 @@ function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<strin
   return Object.fromEntries(rows.map(row => [row.id, row]));
 }
 
+const summariesOf = (summaries: readonly RunSummary[]): OrchestratorState['summaries'] =>
+  Object.fromEntries(summaries.map(summary => [summary.runId, summary]));
+
 /**
- * A read of the runs from scratch: replaces runs, agents and messages wholesale. An older stored
- * sequence leaves those records alone, unless the state is waiting out a gap: the read that was
- * asked for to close the gap is authoritative, even when the daemon's sequence restarted below
- * the one held, or the same gap would reopen forever. What it does not carry (items, receipts,
- * progress) stays, and a turn the agent stream already finished is not taken back to running.
- * Search facts always replace the held map, including omitted runs: their revisions restart
- * with the host, independently of the stored event sequence.
+ * A read of the runs from scratch: replaces the runs, their summaries, what the host says it left out
+ * and every history it carries (agents, turns, messages, check-ins: a snapshot of detail SUMMARY, which
+ * is what the app asks for, carries none, so none is held after it, and a screen of a run reads the
+ * history again with `GetRunHistory`). A snapshot is read because the stream's continuity was lost, so
+ * a record held from before it cannot be told from a stale one. An older stored sequence leaves the
+ * runs alone, unless the state is waiting out a gap: the read that was asked for to close the gap is
+ * authoritative, even when the daemon's sequence restarted below the one held, or the same gap would
+ * reopen forever. What it does not carry (items, receipts, progress) stays, and a turn the agent stream
+ * already finished is not taken back to running.
+ * Search facts and summaries always replace the held maps, including omitted runs: their revisions
+ * restart with the host, independently of the stored event sequence.
  */
 export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
+  const searches = Object.fromEntries(snapshot.searches.map(search => [search.runId, search]));
+  const searchRevisions = Object.fromEntries(
+    snapshot.searches.map(search => [search.runId, search.revision]),
+  );
+  const cut = {truncated: snapshot.truncated, runsLeftOut: snapshot.runsLeftOut};
   if (snapshot.sequence < state.sequence && state.gap === null) {
-    return {
-      ...state,
-      searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
-      searchRevisions: Object.fromEntries(
-        snapshot.searches.map(search => [search.runId, search.revision]),
-      ),
-    };
+    return {...state, searches, searchRevisions, summaries: summariesOf(snapshot.summaries), cut};
   }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
   const runs = byId(snapshot.runs);
   return {
     ...state,
     sequence: snapshot.sequence,
-    searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
-    searchRevisions: Object.fromEntries(
-      snapshot.searches.map(search => [search.runId, search.revision]),
-    ),
+    searches,
+    searchRevisions,
     runs,
+    summaries: summariesOf(snapshot.summaries),
+    cut,
+    histories: {},
     costs: costsOfRuns(state.costs, runs),
     agents: byId(snapshot.agents),
     turns,
     messages: byId(snapshot.messages),
     checkIns: checkInsOfSnapshot(snapshot.checkIns),
     gap: null,
+  };
+}
+
+/**
+ * One whole summary replaces the one held for its run: the host sends whole summaries, never parts, and
+ * the latest to arrive on the one stream is the newest.
+ */
+export function applySummary(state: OrchestratorState, summary: RunSummary): OrchestratorState {
+  return {...state, summaries: {...state.summaries, [summary.runId]: summary}};
+}
+
+/**
+ * One page of a run's history, read on request (`GetRunHistory`), with the run it is of and where it
+ * stands among the run's pages.
+ */
+export interface RunHistoryFrame {
+  readonly runId: string;
+  readonly page: Pick<
+    GetRunHistoryResponse,
+    'sequence' | 'agents' | 'turns' | 'checkIns' | 'messages' | 'turnsLeftOut' | 'checkInsLeftOut'
+  >;
+  /** This is the run's first page, which holds what is not paged, so it says what the host left out. */
+  readonly first: boolean;
+  /** This is the last page: the run's history is whole after it. */
+  readonly last: boolean;
+}
+
+/** The records of two copies of a set: where `authoritative`, `incoming` wins a record held in both. */
+function merged<T>(
+  held: Readonly<Record<string, T>>,
+  incoming: Readonly<Record<string, T>>,
+  authoritative: boolean,
+): Record<string, T> {
+  return authoritative ? {...held, ...incoming} : {...incoming, ...held};
+}
+
+/**
+ * Folds one page of a run's history. The page is current to its own sequence and the stream goes on
+ * delivering what happens after it. A record the state does not hold is added. One it holds and the
+ * page carries is the newer of the two when the page is at or past the sequence the state has applied,
+ * and then the page replaces it; when the state has applied events past the page, the held record is
+ * the newer and stays. Either way the stream's changes bring a record to its newest, so the history
+ * and the stream agree whichever arrives first. A turn the stream already finished is not taken back
+ * to running (`withTurn`), and a check-in only moves forward (`withCheckIn`).
+ */
+export function applyRunHistory(
+  state: OrchestratorState,
+  frame: RunHistoryFrame,
+): OrchestratorState {
+  const {page, runId} = frame;
+  // A snapshot between two pages forgot the first, so the pages that follow are of a history that is no
+  // longer being read: the reader starts again from the first page.
+  if (!frame.first && state.histories[runId] === undefined) return state;
+  const authoritative = page.sequence >= state.sequence;
+  const turns = page.turns.reduce(withTurn, state).turns;
+  const checkIns = page.checkIns.reduce(withCheckIn, state).checkIns;
+  // What the host left out is said on the first page, and the pages after it say nothing of it.
+  const before = frame.first ? undefined : state.histories[runId];
+  const read = {
+    sequence: before?.sequence ?? page.sequence,
+    turnsLeftOut: before?.turnsLeftOut ?? page.turnsLeftOut,
+    checkInsLeftOut: before?.checkInsLeftOut ?? page.checkInsLeftOut,
+    complete: frame.last,
+  };
+  return {
+    ...state,
+    agents: merged(state.agents, byId(page.agents), authoritative),
+    turns,
+    messages: merged(state.messages, byId(page.messages), authoritative),
+    checkIns,
+    histories: {...state.histories, [runId]: read},
   };
 }
 

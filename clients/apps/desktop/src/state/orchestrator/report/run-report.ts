@@ -1,7 +1,7 @@
 /**
  * Everything the run report shows of one run, as one plain value of the folded state: the header's
- * facts, the lead's latest summary, the objectives with their history and bounds, the trade-off, the
- * and the agents by type. A pure function of the state and the time the caller passes.
+ * facts, the report the host sums the run up by, the objectives with their history and bounds, the
+ * trade-off and the agents by type. A pure function of the state and the time the caller passes.
  */
 import type {RunStatus, RunStopReason, SearchState} from '@vibesys/orchestrator-proto';
 import {oneofIs} from '@vibesys/orchestrator-proto';
@@ -9,7 +9,7 @@ import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
 import {type AgentsStrip, agentsStrip} from './agents-strip.js';
 import {type ObjectiveReport, objectiveReports} from './objectives.js';
-import {latestReport, type SummaryView} from './summary.js';
+import {type SummaryView, summaryReport} from './summary.js';
 import {type TradeoffReport, tradeoffReport} from './tradeoff.js';
 
 export interface ReportHeader {
@@ -74,8 +74,11 @@ export function runReport(
       endedMs,
       elapsedMs: toMs - startedMs,
     },
-    summary: latestReport(state, runId),
-    objectives: search === undefined ? [] : objectiveReports(search),
+    summary: summaryReport(state, runId),
+    objectives:
+      search === undefined
+        ? []
+        : objectiveReports(search, state.summaries[runId]?.objectives ?? []),
     tradeoff: search === undefined ? undefined : tradeoffReport(search),
     agents: agentsStrip(state, runId),
     search: searchReading(search),

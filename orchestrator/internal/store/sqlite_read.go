@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -165,7 +166,7 @@ func (s *SQLite) Settings() (writer Settings, readers []Settings, err error) {
 func (s *SQLite) Explain() (map[string][]string, error) {
 	args := map[string]int{
 		"snapshot runs": 2, "snapshot agents": 1, "events of a run": 3, "events of all": 2, "items page": 3,
-		"messages of a run": 3, "turns in window": 4, "receipt": 1, "claim": 2, "checkpoint": 1, "next due": 0,
+		"messages of a run": 3, "message by id": 1, "turns in window": 4, "receipt": 1, "claim": 2, "checkpoint": 1, "next due": 0,
 	}
 	out := map[string][]string{}
 	for name, query := range screenQueries {
@@ -279,6 +280,29 @@ func (s *SQLite) Items(agent core.AgentID, before uint32, limit int) (ItemPage, 
 		page.Items[i], page.Items[j] = page.Items[j], page.Items[i]
 	}
 	return page, err
+}
+
+// Message implements Reader.
+func (s *SQLite) Message(id core.MessageID) (core.Message, bool, error) {
+	var msg core.Message
+	found := false
+	err := s.reading(func(tx *sql.Tx) error {
+		var body []byte
+		switch err := tx.QueryRow(queryMessage, string(id)).Scan(&body); {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil
+		case err != nil:
+			return fmt.Errorf("store: %w", err)
+		}
+		_, e, err := decodeBody(body)
+		if err != nil {
+			return err
+		}
+		msg, err = entity[core.Message](e)
+		found = err == nil
+		return err
+	})
+	return msg, found, err
 }
 
 // Messages implements Reader.

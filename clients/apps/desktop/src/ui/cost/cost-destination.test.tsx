@@ -35,6 +35,7 @@ function hostWith(
     freshness: {status: 'live', lastUpdateMs: null},
     runsFeed: {_tag: 'Live'},
     agentFeeds: {},
+    runHistory: {_tag: 'Idle'},
     history: {earlier: {_tag: 'Idle'}, wholes: {}},
     costFeeds: feed === undefined ? {} : {[scenario.runId]: feed},
   };
