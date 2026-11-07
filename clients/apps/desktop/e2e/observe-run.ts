@@ -55,7 +55,8 @@ const HARNESS_WORD: Readonly<Record<string, string>> = {
 const WORLD_KEYS = ['home', 'runId', 'task', 'report', 'agents'];
 
 /** Text as the app shows it: each full commit id (40 hex digits) is cut to its first 8 digits. */
-const shown = (text: string): string => text.replace(/\b[0-9a-f]{40}\b/g, (commit) => commit.slice(0, 8));
+const shown = (text: string): string =>
+  text.replace(/\b[0-9a-f]{40}\b/g, commit => commit.slice(0, 8));
 
 
 function readWorld(env: NodeJS.ProcessEnv = process.env): World {
