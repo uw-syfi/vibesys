@@ -22,4 +22,4 @@ export {
   withReport,
 } from './report-fixtures.js';
 export {generateScenario} from './scenario.js';
-export {servedSummary, serveSummaries} from './served-summary.js';
+export {serveSummaries} from './served-summary.js';

@@ -34,7 +34,7 @@ const WORKING: ReadonlySet<AgentStatus> = new Set([
 ]);
 
 /** The report the run is summed up by: the highest-numbered one that is about the whole run. */
-export function summaryMessage(messages: readonly Message[]): Message | undefined {
+function summaryMessage(messages: readonly Message[]): Message | undefined {
   let best: Message | undefined;
   let heldSequence = -1;
   for (const message of messages) {
@@ -51,7 +51,7 @@ const finite = (value: number | undefined): number | undefined =>
   value !== undefined && Number.isFinite(value) ? value : undefined;
 
 /** The head's value on each objective, as the host serves it. */
-export function servedHeads(search: SearchState | undefined): ObjectiveHead[] {
+function servedHeads(search: SearchState | undefined): ObjectiveHead[] {
   if (search === undefined) return [];
   const head = search.head?.state;
   const outcome = oneofIs(head, 'current', {current: true, none: true})
