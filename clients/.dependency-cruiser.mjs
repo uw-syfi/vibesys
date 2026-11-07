@@ -172,7 +172,10 @@ function desktopAppRules() {
       // features that need one another's facts meet in the shell, which passes them as props.
       name: 'desktop-features-do-not-import-each-other',
       severity: 'error',
-      from: {path: '^apps/desktop/src/(?:state|core|ui)/(orchestrator|settings)/', pathNot: TEST_FILE},
+      from: {
+        path: '^apps/desktop/src/(?:state|core|ui)/(orchestrator|settings)/',
+        pathNot: TEST_FILE,
+      },
       to: {
         path: '^apps/desktop/src/(?:state|core|ui|testing)/(?:orchestrator|settings|shell)/',
         pathNot: '^apps/desktop/src/(?:state|core|ui|testing)/$1/',
