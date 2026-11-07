@@ -67,8 +67,9 @@ func (t *tx) markMoved(id RunID) {
 // still holds. A timer for any other time is a stale one: the lead reported unasked, the run reached a
 // limit or began stopping, or the timer is repeated, and it does nothing.
 //
-// A request that the lead has not yet read is not repeated: it will report on the whole run when it
-// does, so the movement counts as asked and no second message waits behind the first.
+// A request that the lead has not yet read, the schedule's or a viewer's (see requestInTransit), is not
+// repeated: it will report when the lead reads it, so the movement counts as asked and no second message
+// waits behind the first.
 func (t *tx) summaryDue(b TimerFired) {
 	run, ok := t.s.runs[b.Timer.Run]
 	if !ok || run.NextSummaryAt.IsZero() || !run.NextSummaryAt.Equal(b.Timer.FireAt) {
@@ -76,21 +77,11 @@ func (t *tx) summaryDue(b TimerFired) {
 	}
 	run.LastSummaryAt, run.NextSummaryAt = t.in.At, time.Time{}
 	t.emit(run.ID, run)
-	if t.reportDueInTransit(run.ID) {
+	if t.requestInTransit(run.ID) {
 		return
 	}
 	t.post(Message{Run: run.ID, To: run.Lead, Body: ReportDue{Every: run.SummaryEvery.Truncate(time.Second), Reports: run.ReportsPosted}})
 	t.sweep(run.ID)
-}
-
-// reportDueInTransit says a request for a report is on its way to the run's lead.
-func (t *tx) reportDueInTransit(id RunID) bool {
-	for _, m := range t.s.messages {
-		if _, ok := m.Body.(ReportDue); ok && m.Run == id {
-			return true
-		}
-	}
-	return false
 }
 
 // reported counts the schedule from a report the lead posted at at, and cancels the request that was

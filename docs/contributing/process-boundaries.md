@@ -122,16 +122,22 @@ is a change to something a user already has.
   path is proved held and not only present in the script's text. The release workflow runs
   `scripts/check_boundaries.py --release`, which refuses a tag if the text ever loses that path.
   Only an additive change passes. A change that must break needs a new package version.
-- **The stored format is schema 12.** The orchestrator's SQLite store records its schema
-  version (`schemaVersion` in `orchestrator/internal/store/schema.go`). A host reads exactly the
-  version it was built with. It refuses a store of any other version, older or newer, naming
-  the file and the two versions, and it never converts a row. The message tells the operator
-  to move the state directory away, which discards its run history. A store written before the
-  tag has a version below 12 and is refused this way for good: only development builds wrote them.
-  There is no code that upgrades rows, and a refusal after a downgrade gives the same
-  advice. From the tag on, a change that raises the number is a decision: either the new build
-  reads the version before it, or it refuses on purpose and the release notes say that
-  run history is lost. Do not raise the number without making that choice in the same change.
+- **The stored format is schema 13.** The orchestrator's SQLite store records its schema
+  version (`schemaVersion` in `orchestrator/internal/store/schema.go`). A host reads the
+  version it was built with and the versions it lists as read (`readsVersions`: 12). It refuses a
+  store of any other version, older or newer, naming the file and the versions, and it never
+  converts a row. The message tells the operator to move the state directory away, which
+  discards its run history. A store written before the tag has a version below 12 and is
+  refused this way for good: only development builds wrote them. Version 12 is the first tag's
+  format, and 13 added check-ins (an event body, a table and a message body) to it without
+  changing what any version 12 row means, so a 13 build reads a 12 store as it is and only
+  stamps 13 on it: the upgrade keeps run history and is one way. A build that reads only 12
+  refuses that store by its number, with the same advice, and never replays an event body it
+  cannot decode. From the tag on, a change that raises the number is a decision: either the new
+  build reads the version before it (and stamps, if the version before cannot read what the new
+  one writes), or it refuses on purpose and the release notes say that run history is lost. Do
+  not raise the number without making that choice in the same change. An additive change to the
+  stored bodies raises it for that reason too, because the build before cannot read them.
 - **The client handshake says protocol 1.** `protocol_version` and `min_protocol_version` in
   `service.proto` are 1: the first protocol a published client speaks. They stayed at 1 through
   the redesign before the tag because no older client was ever published, so there was nothing to

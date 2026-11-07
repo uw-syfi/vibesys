@@ -8,6 +8,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 // MergeWindow is how often the daemon ends the hub's merge window. Run ticks at this rate.
@@ -133,6 +134,17 @@ type Sidecar interface {
 type EventStream interface {
 	Next() (*pb.SessionEvent, error)
 	Close()
+}
+
+// JobLog reads the job log of a run's task at the moment it is asked, not from a view kept earlier.
+// The kept view follows a stream and may be behind it: a result recorded before a check-in's window
+// ended but delivered after its facts froze would be in no window. A read made after the window ended
+// has every result recorded before it, so the facts are worked out from one.
+type JobLog interface {
+	// ReadJobLog returns the whole job log of the run's task as the job service has it now. A log that
+	// cannot be read is a view with its reason, as a kept view has; an error is a read that did not
+	// finish.
+	ReadJobLog(ctx context.Context, run core.Run) (search.View, error)
 }
 
 // Checkouts removes the working copies that agents made of a repository once their run is over.

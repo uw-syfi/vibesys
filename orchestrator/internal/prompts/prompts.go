@@ -17,6 +17,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	_ "time/tzdata" // Seattle's rules travel with the host: a prompt must not depend on the machine's zone files.
 	"unicode"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -31,11 +32,27 @@ var templates = template.Must(template.New("prompts").Option("missingkey=error")
 // ErrNoPrompt is returned for a message that has no body, so there is nothing to word.
 var ErrNoPrompt = errors.New("the message has no prompt")
 
-// Render returns the words an agent is sent for m. It fails with ErrNoPrompt for a message with no
-// body. A text or a brief of nothing but blanks renders to nothing, as it always has: the effect
-// must still be carried out, because a turn that is never started would hold back its session.
-func Render(m core.Message) (string, error) {
-	name, data, err := dataOf(m)
+// ErrNoFacts is returned for a request whose words are made of a check-in's frozen facts when the check-in
+// is not there or has none yet. The core sends the request in the commit that freezes them, so it cannot
+// happen to a message the core made.
+var ErrNoFacts = errors.New("the check-in a request is for has no facts")
+
+// Records is what the words of some messages need besides the message: the check-in a catch-up request
+// is worded from. core.State is one.
+type Records interface {
+	CheckIn(core.CheckInID) (core.CheckIn, bool)
+}
+
+// Render returns the words an agent is sent for m, for a message whose words need no records. It fails
+// with ErrNoPrompt for a message with no body. A text or a brief of nothing but blanks renders to
+// nothing, as it always has: the effect must still be carried out, because a turn that is never started
+// would hold back its session.
+func Render(m core.Message) (string, error) { return RenderWith(m, nil) }
+
+// RenderWith is Render for any message, reading from records what its words are made of. The same
+// message and the same records give the same bytes.
+func RenderWith(m core.Message, records Records) (string, error) {
+	name, data, err := dataOf(m, records)
 	if err != nil {
 		return "", err
 	}
@@ -119,11 +136,39 @@ type (
 		Judges      uint32
 	}
 
-	// catchUpRequestData is the window the operator wants a report on, in UTC, and its length in whole
-	// seconds and whole minutes: the words say seconds for a window of a minute or two.
+	// catchUpRequestData is the window the operator wants a report on, as times of day in Seattle (how
+	// the operator reads them) and its length in whole seconds and whole minutes: the words say seconds
+	// for a window of a minute or two. Facts are what the host worked out for the window and froze.
 	catchUpRequestData struct {
-		Since, Until     time.Time
+		Since, Until     string
 		Seconds, Minutes uint32
+		Facts            catchUpFacts
+	}
+
+	// catchUpFacts is a check-in's facts, as the words state them. A price no turn reported is absent:
+	// HasCost says whether CostUSD is a figure.
+	catchUpFacts struct {
+		Turns, Unpriced                          uint32
+		HasCost                                  bool
+		CostUSD                                  float64
+		AgentsStarted, AgentsEnded, JobsMeasured uint32
+		Objectives                               []catchUpObjective
+		PlansCreated, PlansChanged               []uint32
+		Reports                                  int
+	}
+
+	// catchUpObjective is where one objective stood at the two ends of the window. HasStart is false
+	// when nothing was measured before the window.
+	catchUpObjective struct {
+		Metric, Direction string
+		HasStart          bool
+		Start, End        catchUpBest
+	}
+
+	// catchUpBest is a best value, the measure job and the commit that made it.
+	catchUpBest struct {
+		Value       float64
+		Job, Commit string
 	}
 
 	// reportDueData is how often the operator expects a report and how many the lead has posted.
@@ -134,7 +179,7 @@ type (
 )
 
 // dataOf names the template of m's body and gathers the data it renders.
-func dataOf(m core.Message) (string, any, error) {
+func dataOf(m core.Message, records Records) (string, any, error) {
 	switch b := m.Body.(type) {
 	case core.Text:
 		return "text", textData{Text: b.Text}, nil
@@ -167,9 +212,14 @@ func dataOf(m core.Message) (string, any, error) {
 		// Whole seconds in a uint32, as the message is stored, like the idle reminder's.
 		return "report_due", reportDueData{EveryMinutes: uint32(b.Every/time.Second) / 60, Reports: b.Reports}, nil
 	case core.CatchUpRequest:
+		facts, err := catchUpFactsOf(m, b, records)
+		if err != nil {
+			return "", nil, err
+		}
 		span := b.Until.Sub(b.Since)
 		return "catch_up_request", catchUpRequestData{
-			Since: b.Since.UTC(), Until: b.Until.UTC(), Seconds: uint32(span / time.Second), Minutes: uint32(span / time.Minute),
+			Since: seattle(b.Since), Until: seattle(b.Until), Seconds: uint32(span / time.Second), Minutes: uint32(span / time.Minute),
+			Facts: facts,
 		}, nil
 	case core.LeadIdleReminder:
 		// Whole seconds in a uint32, as the message is stored, so the minutes do not depend on
@@ -199,4 +249,54 @@ func handoffDataOf(from core.AgentID, h core.Handoff) handoffData {
 		d.Kind, d.Question, d.Revision, d.Answer, d.Evidence, d.Unsupported, d.Informs = "findings", b.Question, b.Revision, b.Answer, b.Evidence, b.Unsupported, b.Informs
 	}
 	return d
+}
+
+// operatorZone is where the operator reads times: Seattle. A prompt never shows UTC.
+var operatorZone = func() *time.Location {
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		panic("prompts: no time zone data for Seattle: " + err.Error())
+	}
+	return zone
+}()
+
+// seattle words a time of day, with its date and the zone's name, as the operator reads it.
+func seattle(t time.Time) string { return t.In(operatorZone).Format("2006-01-02 15:04 MST") }
+
+// catchUpFactsOf reads the facts a catch-up request is worded from out of its check-in.
+func catchUpFactsOf(m core.Message, b core.CatchUpRequest, records Records) (catchUpFacts, error) {
+	if records == nil {
+		return catchUpFacts{}, fmt.Errorf("message %s asks for a catch-up report and no records were given: %w", m.ID, ErrNoFacts)
+	}
+	check, ok := records.CheckIn(b.CheckIn)
+	if !ok {
+		return catchUpFacts{}, fmt.Errorf("message %s is for check-in %s, which does not exist: %w", m.ID, b.CheckIn, ErrNoFacts)
+	}
+	ready, ok := check.Outcome.(core.CheckInReady)
+	if !ok {
+		return catchUpFacts{}, fmt.Errorf("message %s is for check-in %s, which is %T: %w", m.ID, b.CheckIn, check.Outcome, ErrNoFacts)
+	}
+	f := ready.Facts
+	out := catchUpFacts{
+		Turns: f.Spend.Turns, Unpriced: f.Spend.Unpriced,
+		AgentsStarted: f.AgentsStarted, AgentsEnded: f.AgentsEnded, JobsMeasured: f.JobsMeasured,
+		PlansCreated: f.PlansCreated, PlansChanged: f.PlansChanged, Reports: len(f.Reports),
+	}
+	if c := f.Spend.Usage.CostUSD; c != nil {
+		out.HasCost, out.CostUSD = true, *c
+	}
+	best := func(b *core.Best) catchUpBest {
+		return catchUpBest{Value: b.Value, Job: string(b.Job), Commit: string(b.Commit)}
+	}
+	for _, o := range f.Objectives {
+		move := catchUpObjective{Metric: o.Metric, Direction: string(o.Direction)}
+		if o.Start != nil {
+			move.HasStart, move.Start = true, best(o.Start)
+		}
+		if o.End != nil {
+			move.End = best(o.End)
+		}
+		out.Objectives = append(out.Objectives, move)
+	}
+	return out, nil
 }

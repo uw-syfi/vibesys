@@ -30,7 +30,10 @@ type Config struct {
 	Checkouts Checkouts
 	// Jobs is the job source. Nil means there is none: no job is ever reported, which is the truth
 	// for a build with no vibesys-cli wired in, and not the same as a source that reports no jobs.
-	Jobs      jobs.JobSource
+	Jobs jobs.JobSource
+	// JobLog reads the job log afresh for the facts of a check-in on a live run. Nil means there is no
+	// way to: the facts are worked out from the view the host holds, which is as current as its last read.
+	JobLog    JobLog
 	Authority Authority
 	// Bounds limits every call the daemon makes outside itself. It is required.
 	Bounds Bounds
@@ -62,6 +65,9 @@ type Daemon struct {
 	// done and retry are effects that were carried out (or not) and whose outbox rows could not be
 	// settled yet. They are settled first on the next step.
 	done, retry []store.OutboxID
+	// windowTries counts the times each check-in's facts failed to be worked out for want of a record the
+	// host could not read, so that a store that never answers ends in a failed check-in.
+	windowTries map[core.CheckInID]int
 }
 
 // follow is one open Follow, and the event that could not be committed yet.
@@ -90,7 +96,7 @@ func Open(cfg Config) (*Daemon, error) {
 	return &Daemon{
 		Engine: engine, cfg: cfg, searchPublished: map[core.RunID]uint64{},
 		conns: map[core.Session]Sidecar{}, follows: map[core.Session]*follow{},
-		toAttach: map[core.Session]bool{}, deltaThrough: map[core.Session]uint64{},
+		toAttach: map[core.Session]bool{}, deltaThrough: map[core.Session]uint64{}, windowTries: map[core.CheckInID]int{},
 	}, nil
 }
 
@@ -349,7 +355,7 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 	case core.ReleaseCheckouts:
 		return d.releaseCheckouts(ctx, b)
 	case core.ComputeWindowFacts:
-		return d.computeWindowFacts(b)
+		return d.computeWindowFacts(ctx, b)
 	case core.LaunchSession:
 		if !isLive(state, b.Session) {
 			// The session ended before this launch was carried out, such as one that did not open in
@@ -375,7 +381,9 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		d.forget(session)
 		return nil
 	}
-	cmd, ok, err := wire.SessionCommandFor(e, prompts.Render)
+	// A request for a catch-up report is worded from its check-in's frozen facts, which are in the state
+	// the core committed the request with.
+	cmd, ok, err := wire.SessionCommandFor(e, func(m core.Message) (string, error) { return prompts.RenderWith(m, state) })
 	if err != nil || !ok {
 		return err
 	}

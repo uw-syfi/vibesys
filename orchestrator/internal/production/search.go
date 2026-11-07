@@ -9,6 +9,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
@@ -253,6 +254,40 @@ func (r *Reconciler) readEnded(ctx context.Context, run core.Run) {
 	}()
 }
 
+// ReadJobLog reads the whole job log of a run's task now, on a stream of its own: the first view a stream
+// gives is the whole state at the moment it opened, so every result recorded before the call is in it,
+// which a view kept from a stream that may be behind does not promise. The stream closes when it has
+// answered. It returns the context's error when the context ends first.
+func (r *Reconciler) ReadJobLog(ctx context.Context, run core.Run) (search.View, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	first := make(chan search.View, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Follow(ctx, subscription(run), func(v search.View) {
+			select {
+			case first <- v:
+			default:
+			}
+			cancel()
+		})
+	}()
+	defer func() { <-done }()
+	select {
+	case v := <-first:
+		return v, nil
+	case <-ctx.Done():
+		// The stream's own cancel after it answered ends the context too: the answer wins.
+		select {
+		case v := <-first:
+			return v, nil
+		default:
+			return search.View{}, ctx.Err()
+		}
+	}
+}
+
 func (r *Reconciler) Close() {
 	r.mu.Lock()
 	var all []*following
@@ -329,6 +364,14 @@ func reconcile(r *Reconciler) func(context.Context, []core.Run) {
 		return nil
 	}
 	return r.Sync
+}
+
+// jobLog is the reconciler as the daemon's way to read a job log afresh, or none when there is no reconciler.
+func jobLog(r *Reconciler) daemon.JobLog {
+	if r == nil {
+		return nil
+	}
+	return r
 }
 
 func searchStore(r *Reconciler) *search.Store {
