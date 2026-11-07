@@ -191,13 +191,17 @@ Transient feedback uses toasts. A condition that changes what an operator can
 do stays beside the affected control or view. Failures name the action and
 leave enough context for the operator to decide what to do next.
 
-### The gallery and its screenshots
+### The gallery and its measurements
 
 The gallery exercises components across themes and states independently of the
-app. Screenshot comparisons protect their appearance. Desktop fixtures exercise
-complete screens through the same services used by the live app, with Fakes at
-external boundaries. Component screenshots and screen fixtures answer different
-questions; neither substitutes for the other.
+app. Its browser suite measures them: axe accessibility and contrast in every
+theme, geometry, overflow, keyboard behavior, and a clean console for every
+entry. There are no pixel snapshots; a baseline image fails on every intended
+visual change and was never what caught a defect (a lint rule bans them). A
+visual rule is held by a test that reads a box or a computed style. Desktop
+fixtures exercise complete screens through the same services used by the live
+app, with Fakes at external boundaries. Component measurements and screen
+fixtures answer different questions; neither substitutes for the other.
 
 ## Where a desktop test goes
 

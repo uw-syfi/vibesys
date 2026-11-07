@@ -33,18 +33,11 @@ import {
   type ObjectiveReport,
   rowObjectives,
 } from '../../state/index.js';
+import {useDisplayClock} from '../display-clock.js';
+import type {DisplayClock} from '../display-time.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {hostStatusWord} from '../host-status-words.js';
-import {
-  ago,
-  dollars,
-  percent,
-  resultHint,
-  resultWords,
-  seattle,
-  span,
-  unreadTitle,
-} from './fleet-words.js';
+import {ago, dollars, percent, resultHint, resultWords, span, unreadTitle} from './fleet-words.js';
 import {runWord} from './words.js';
 
 /** A row whose run started, or ended, within this long is new on screen: it arrives with a flash. */
@@ -79,20 +72,20 @@ function resultLines(row: FleetRow): readonly string[] {
 }
 
 /** What a row says for the status cell's second line: the report's age while live, the end time after. */
-function whenLine(row: FleetRow, nowMs: number): string {
-  if (!row.live) return row.endedMs === null ? '' : seattle(row.endedMs);
+function whenLine(row: FleetRow, nowMs: number, clock: DisplayClock): string {
+  if (!row.live) return row.endedMs === null ? '' : clock.datedMoment(row.endedMs);
   return row.lastReportMs === null ? 'No report' : `Report ${ago(nowMs - row.lastReportMs)}`;
 }
 
-const whenHint = (row: FleetRow, nowMs: number): string => {
-  if (!row.live) return row.endedMs === null ? '' : `Ended ${seattle(row.endedMs)}`;
+const whenHint = (row: FleetRow, nowMs: number, clock: DisplayClock): string => {
+  if (!row.live) return row.endedMs === null ? '' : `Ended ${clock.datedMoment(row.endedMs)}`;
   return row.lastReportMs === null
     ? 'The lead has not posted a report'
-    : `Last report ${ago(nowMs - row.lastReportMs)}, ${seattle(row.lastReportMs)}`;
+    : `Last report ${ago(nowMs - row.lastReportMs)}, ${clock.datedMoment(row.lastReportMs)}`;
 };
 
 /** The columns that name a run and say how it stands, and where it is. */
-function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
+function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColumn<FleetRow>[] {
   return [
     {
       key: 'name',
@@ -102,7 +95,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
         [
           row.name,
           row.repository,
-          row.startedMs === null ? '' : `Started ${seattle(row.startedMs)}`,
+          row.startedMs === null ? '' : `Started ${clock.datedMoment(row.startedMs)}`,
         ]
           .filter(line => line !== '')
           .join('\n'),
@@ -124,7 +117,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
       header: 'Status',
       size: 'wide',
       narrow: 'short',
-      hint: row => whenHint(row, nowMs) || undefined,
+      hint: row => whenHint(row, nowMs, clock) || undefined,
       cell: row => {
         const word = runWord(row.status);
         return (
@@ -134,7 +127,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
               row.reportUnavailable ? (
                 <Chip label="Report unavailable" tone="warn" />
               ) : (
-                whenLine(row, nowMs)
+                whenLine(row, nowMs, clock)
               )
             }
           />
@@ -248,16 +241,20 @@ function figureColumns(
 
 const columns = (
   nowMs: number,
+  clock: DisplayClock,
   objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
-): readonly ListColumn<FleetRow>[] => [...identityColumns(nowMs), ...figureColumns(objectivesOf)];
+): readonly ListColumn<FleetRow>[] => [
+  ...identityColumns(nowMs, clock),
+  ...figureColumns(objectivesOf),
+];
 
-const describe = (row: FleetRow, nowMs: number): string =>
+const describe = (row: FleetRow, nowMs: number, clock: DisplayClock): string =>
   [
     `On ${row.host.label}`,
     runWord(row.status).label,
     resultLines(row).join(', '),
     row.costUsd === null ? undefined : dollars(row.costUsd),
-    whenLine(row, nowMs),
+    whenLine(row, nowMs, clock),
   ]
     .filter(part => part !== undefined && part !== '')
     .join('. ');
@@ -382,6 +379,7 @@ export function FleetScreen(props: {
   readonly newRun: ReactNode;
 }): JSX.Element {
   const {place, nowMs, go} = props;
+  const clock = useDisplayClock();
   const filter: FleetFilter = {state: place.state, host: place.host};
   const view = fleetView(props.hosts, filter);
   const rows = [...view.live, ...view.history];
@@ -396,14 +394,14 @@ export function FleetScreen(props: {
   const list = (label: string, shown: readonly FleetRow[]): JSX.Element => (
     <ColumnList
       label={label}
-      columns={columns(nowMs, objectivesOf)}
+      columns={columns(nowMs, clock, objectivesOf)}
       rows={shown}
       rowKey={row => row.key}
       lines={2}
       selected={place.selected ?? undefined}
       select={open}
       marks={row => ({fresh: isFresh(row, nowMs)})}
-      describe={row => describe(row, nowMs)}
+      describe={row => describe(row, nowMs, clock)}
     />
   );
   return (

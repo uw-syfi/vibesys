@@ -469,7 +469,7 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group clients_build
 
-  # The UI gallery's visual and accessibility suite (Playwright, Chromium on Linux), the one
+  # The UI gallery's measuring and accessibility suite (Playwright, Chromium on Linux; no pixel snapshots), the one
   # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
   # `clients-tests`.
   clients-e2e:
@@ -487,17 +487,6 @@ jobs:
 
       - name: Test the UI gallery
         run: ./support/repoctl/repoctl run-checks --group clients_e2e
-
-      # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
-      # a reviewer can see the change without rerunning it in the Linux image.
-      - name: Upload the gallery's screenshot differences
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ui-gallery-test-results
-          path: clients/apps/ui-gallery/test-results/
-          if-no-files-found: ignore
-          retention-days: 7
 
   queue-native:
     needs: changes

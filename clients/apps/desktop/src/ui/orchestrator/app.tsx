@@ -24,8 +24,9 @@ import {
 import {AgentPage} from '../agents/agent-page.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
 import {CostScreen} from '../cost/index.js';
+import {useDisplayClock} from '../display-clock.js';
 import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
-import {COST_WORDS} from './cost-words.js';
+import {costWords} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
@@ -291,6 +292,7 @@ function RunDestination(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {route, host, commands, go, nowMs} = props;
+  const clock = useDisplayClock();
   const state = host.model.data;
   const {runId} = route;
   const run = state.runs[runId];
@@ -335,7 +337,7 @@ function RunDestination(props: {
         })}
         feed={feed.status}
         runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
-        words={COST_WORDS}
+        words={costWords(clock)}
         trail={[...toRun, {id: 'cost', label: 'Cost'}]}
         reading={reading}
         retry={() => props.retryCost(host.key, runId)}

@@ -3,8 +3,11 @@ import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {applyChange, type Branch, emptyState, spawnTree} from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {TEST_CLOCK} from '../test-display-clock.js';
 import {AgentsScreen, guidesOf} from './agents-screen.js';
-import {axisLabel, formatDayTime, formatSpan, formatTime, formatUsd, zoneOffsetMs} from './time.js';
+import {formatSpan, formatUsd} from './time.js';
+
+const {axisLabel, dayTime: formatDayTime, time: formatTime, offsetMs: zoneOffsetMs} = TEST_CLOCK;
 
 const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object|NaN/;
 
