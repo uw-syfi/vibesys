@@ -40,6 +40,14 @@ export {
   runsCursor,
 } from './host-model.js';
 export {
+  type CheckInRead,
+  type CheckIns,
+  type Facts,
+  readCheckIn,
+  rewind,
+  type Summary,
+} from './orchestrator/check-ins.js';
+export {
   type CostFeedSnapshot,
   type CostModel,
   type CostRead,

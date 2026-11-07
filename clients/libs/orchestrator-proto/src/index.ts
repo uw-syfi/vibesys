@@ -13,6 +13,7 @@ export {JobState} from './generated/vibesys/cli/v1/job_pb.js';
 export {type Plan, PlanSchema, PlanStatus} from './generated/vibesys/cli/v1/plan_pb.js';
 export {Direction} from './generated/vibesys/cli/v1/result_pb.js';
 export {VerdictKind} from './generated/vibesys/cli/v1/verdict_pb.js';
+export * from './generated/vibesys/orchestrator/v1/checkin_pb.js';
 export * from './generated/vibesys/orchestrator/v1/cost_pb.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
