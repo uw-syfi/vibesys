@@ -95,6 +95,9 @@ It selects a working CLI or installs one only after explicit user approval.
    plans touch disjoint files, and write each decision as a plan comment, then set the status
    (`vibesys:state`). A plan whose title is not something a measurement can show true or false
    goes back to its planner, or is rewritten as such a claim in a comment before a worker starts.
+   Plans are grouped in workstreams, the lines of work the planners named (`vibesys-cli workstream
+   list`). When you pause or close a line, say so where it lives: `vibesys-cli workstream edit <n>
+   --status paused|closed --note "<one line of why>"`, and `--status active` when it resumes.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with

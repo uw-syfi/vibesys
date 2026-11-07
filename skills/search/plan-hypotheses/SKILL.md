@@ -53,11 +53,16 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    the current result sits under it. A part's headroom is real only below that ceiling. When your
    ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
    `bound declare` and say how you derived it; the earlier one stays in the history.
-3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
-   --body-file -` with a stub body (one line of mechanism) and `--gain-bound <share>`, the most
-   the idea could gain as a share of the headline (see step 5); note the number it prints. Before
-   investing in details, list the plans again: if a sibling already claimed the same mechanism,
-   pick another idea and change yours with `plan edit <n> --title ... --body-file -`.
+3. **Claim early.** As soon as you chose an idea, put it in a workstream, the line of work its
+   mechanism belongs to (`vibesys-cli workstream list`, such as "KV cache layout"): join the one
+   that fits, or start one with a short name, `vibesys-cli workstream start "<name>"`, which
+   returns the open workstream of that title if one exists, so two planners naming the same line
+   get one number. Then run `vibesys-cli plan create --title "<claim>" --body-file -
+   --workstream <n>` with a stub body (one line of mechanism) and `--gain-bound <share>`, the
+   most the idea could gain as a share of the headline (see step 5); note the number it prints.
+   Before investing in details, list the plans again: if a sibling already claimed the same
+   mechanism, pick another idea and change yours with `plan edit <n> --title ... --body-file -`
+   (`--workstream <n>` moves it to another line of work).
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
    you rely on exists and fits this hardware. Check the idea against the rules in `OBJECTIVE.md`.
 5. Write the proposal as the plan's body, as in [proposal.md](references/proposal.md): one claim
