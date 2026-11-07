@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/bound.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/result.proto";
@@ -28,6 +29,49 @@ message SearchState {
   repeated vibesys.cli.v1.JobTrouble troubles = 10 [(buf.validate.field).repeated.max_items = 500];
   uint32 unattributed_jobs = 11;
   bool truncated = 12;
+  // The performance bounds the run's agents declared, one entry per objective, by objective name.
+  // Kept whole under the byte budget: a few small entries, bounded by construction.
+  repeated ObjectiveBounds bounds = 13 [(buf.validate.field).repeated.max_items = 64];
+}
+
+// ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
+// earlier version of it, so a chart can draw the bound as it stood at each moment.
+message ObjectiveBounds {
+  option (buf.validate.message).cel = {
+    id: "objective_bounds.versions_are_of_the_objective"
+    message: "every version declares this objective, in the direction of the objective"
+    expression: "this.versions.all(v, v.objective == this.objective && v.direction == this.direction)"
+  };
+
+  string objective = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // Which way the objective improves, as the task declared it.
+  vibesys.cli.v1.Direction direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Every declaration for the objective in this run, oldest first. The last is the bound that
+  // stands. When the run declared more versions than fit, the newest are kept and the state is
+  // marked truncated.
+  repeated vibesys.cli.v1.ObjectiveBound versions = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+  // The head's value on the objective, the number percent_of_bound is a share of. Absent when the
+  // run has no head, the head has no value for the objective, or the head measured the objective in
+  // another direction than the bound's.
+  optional double head_value = 4 [(buf.validate.field).double.finite = true];
+  // How close the head is to the standing bound, in percent: 100 at the bound, and above 100 when
+  // the head has gone past it, which says the bound was too modest. For an objective that is
+  // maximized it is head_value over the bound, and for one that is minimized the bound over
+  // head_value, so more is better for both. Absent when head_value is, and when either number is not
+  // above zero.
+  optional double percent_of_bound = 5 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
 }
 
 message SearchHealth {

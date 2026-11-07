@@ -4,6 +4,7 @@ package vibesys.cli.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/bound.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
@@ -74,6 +75,12 @@ service DaemonService {
   rpc EditPlan(EditPlanRequest) returns (EditPlanResponse);
   rpc CommentPlan(CommentPlanRequest) returns (CommentPlanResponse);
   rpc ClosePlan(ClosePlanRequest) returns (ClosePlanResponse);
+
+  // DeclareBound records the performance bound an agent states for an objective of the task, as a
+  // new version that supersedes the bound standing for it. Nothing is overwritten.
+  rpc DeclareBound(DeclareBoundRequest) returns (DeclareBoundResponse);
+  // ListBounds lists every declared bound of the task, oldest first.
+  rpc ListBounds(ListBoundsRequest) returns (ListBoundsResponse);
 }
 
 // CallContext identifies who is calling and about what. The daemon serves many repositories and
@@ -496,6 +503,42 @@ message ClosePlanResponse {
   Plan plan = 1;
 }
 
+message DeclareBoundRequest {
+  CallContext context = 1;
+  // The full commit of the checkout the agent works in. The daemon reads the task as the commit has
+  // it, to check that the objective is one the task declares and to learn which way it improves.
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  string objective = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  double value = 4 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  string unit = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 64
+  }];
+  string note = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+}
+
+message DeclareBoundResponse {
+  // The bound as recorded, with its place in the log, its origin and the direction the task gave.
+  ObjectiveBound bound = 1;
+}
+
+message ListBoundsRequest {
+  CallContext context = 1;
+}
+
+message ListBoundsResponse {
+  repeated ObjectiveBound bounds = 1;
+}
+
 message WatchTaskRequest {
   // The repository and the task. The run and the agent are not used.
   CallContext context = 1 [(buf.validate.field).required = true];
@@ -537,8 +580,8 @@ message TaskFacts {
   }];
 }
 
-// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number or
-// trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
+// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number,
+// bound.seq or trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
 // of the daemon's hands; a key that stops existing is conveyed by a Reset, except a judgment, which
 // leaves the window of judged commits and is then stale by its against.
 message TaskFact {
@@ -552,6 +595,7 @@ message TaskFact {
     Head head = 6;
     StoreHealth health = 7;
     JobTrouble trouble = 8;
+    ObjectiveBound bound = 9;
   }
 }
 
