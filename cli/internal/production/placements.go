@@ -230,7 +230,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 		runtime = apptainer.RuntimePyxis
 	} else {
 		// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
-		sif, err := localsif.New(p.Getenv("PATH"))
+		sif, err := localsif.New(p.Getenv("PATH"), clk, cfg.Grace)
 		if err != nil {
 			return nil, err
 		}

@@ -238,7 +238,7 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
 		return checked(img, err)
 	}
-	if err := p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}}, log); err != nil {
+	if err := p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}, Role: TaskImage}, log); err != nil {
 		return Image{}, err
 	}
 	img, ok, err := p.cfg.Engine.Image(ctx, tag)
