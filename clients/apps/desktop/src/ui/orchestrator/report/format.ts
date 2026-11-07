@@ -87,6 +87,9 @@ export function formatFigure(value: number): string {
   return `${scaled === 0 ? 0 : scaled}${suffix}`;
 }
 
+/** A gain as the host oriented it, in two decimals and a times sign (`1.25×`); above 1 is better. */
+export const formatGain = (ratio: number): string => `${ratio.toFixed(2)}×`;
+
 /** A number whole, grouped, as a hover writes it (`11,076`). */
 export const formatExact = (value: number): string => EXACT.format(value);
 

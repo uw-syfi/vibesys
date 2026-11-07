@@ -75,6 +75,7 @@ export interface FactsFields {
   readonly jobsMeasured?: number;
   readonly objectives?: readonly {
     readonly metric: string;
+    readonly unit?: string;
     readonly direction: ObjectiveDirection;
     readonly start?: BestValue | undefined;
     readonly end: BestValue;
@@ -108,6 +109,7 @@ export function windowFactsOf(fields: FactsFields = {}): WindowFacts {
     objectives: (fields.objectives ?? []).map(objective =>
       create(ObjectiveMoveSchema, {
         metric: objective.metric,
+        unit: objective.unit ?? '',
         direction: objective.direction,
         ...(objective.start === undefined ? {} : {start: objective.start}),
         end: objective.end,
@@ -275,6 +277,7 @@ export function busyFacts(startMs: number, reportMessageIds: readonly string[] =
     objectives: [
       {
         metric: 'throughput',
+        unit: 'tok/s',
         direction: ObjectiveDirection.MAXIMIZE,
         start: bestValue(1.84, startMs - 60_000, 'job-1'),
         end: bestValue(2.31, startMs + 60_000, 'job-7'),

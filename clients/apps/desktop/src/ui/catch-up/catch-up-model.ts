@@ -20,6 +20,8 @@ export interface CatchUpWords {
 
 export interface ObjectiveFigures {
   readonly metric: string;
+  /** What the values are counted in, as the host served it; empty when it did not. */
+  readonly unit: string;
   readonly direction: 'maximize' | 'minimize';
   /** Where the objective stood when the window began; null when nothing was measured before it. */
   readonly start: string | null;
@@ -131,6 +133,7 @@ export function tilesOf(facts: WindowFacts, words: CatchUpWords): Tiles {
     jobsMeasured: formatCount(facts.jobsMeasured),
     objectives: facts.objectives.map(objective => ({
       metric: objective.metric,
+      unit: objective.unit,
       direction: DIRECTIONS[objective.direction],
       start: objective.start === undefined ? null : formatValue(objective.start.value),
       end: objective.end === undefined ? NOT_REPORTED : formatValue(objective.end.value),

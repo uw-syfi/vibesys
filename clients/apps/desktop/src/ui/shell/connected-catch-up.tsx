@@ -35,6 +35,7 @@ export function ConnectedCatchUp(props: {
             : {
                 state: get(host.session.model).data,
                 press: get(host.session.catchUp.standing(runId)),
+                history: get(host.session.runHistory.status(runId)),
               },
         ),
       [host, runId],
@@ -53,10 +54,13 @@ export function ConnectedCatchUp(props: {
     <CatchUpScreen
       run={run.task}
       rows={viewerId === null ? [] : rewind(view.state, runId, viewerId)}
+      history={view.history}
+      retryHistory={() => dispatch(session.runHistory.retry(runId), () => undefined)}
       press={view.press}
       catchUp={() => dispatch(session.catchUp.press(runId), () => undefined)}
       goRuns={() => go({type: 'close-run'})}
       goRun={() => go({type: 'show', view: 'report'})}
+      goIdeas={window => go({type: 'show-ideas', window})}
       words={words}
     />
   );

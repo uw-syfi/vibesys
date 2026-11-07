@@ -157,6 +157,32 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
 }
 
+/**
+ * The report's ideas and workstreams: both sections are on the page, and a chart point, reached and
+ * chosen by the keyboard alone, says what it is: the idea its job measured or that it names no plan.
+ * With a window folder set, the ideas section is captured (the window alone).
+ */
+async function checkTheIdeasAndTheChartLink(page: Page): Promise<void> {
+  const ideas = page.getByRole('region', {name: 'Ideas', exact: true});
+  const workstreams = page.getByRole('region', {name: 'Workstreams', exact: true});
+  await ideas.scrollIntoViewIfNeeded();
+  await expect(ideas).toBeVisible();
+  await expect(workstreams).toBeVisible();
+  const folder = process.env['VIBESYS_E2E_SHOTS'];
+  const points = page.locator('.vs-chart-pick');
+  if ((await points.count()) > 0) {
+    // The chart's points are one tab stop; Enter chooses the focused one.
+    const first = points.first();
+    await first.focus();
+    await page.keyboard.press('Enter');
+    const chosen = page.getByRole('status', {name: 'Chosen point'});
+    await expect(chosen).toContainText(/No plan|Idea #|#\d+/);
+  }
+  if (folder !== undefined && folder !== '')
+    await page.screenshot({path: join(folder, '2b-ideas.png')});
+  await page.getByRole('heading', {level: 1}).scrollIntoViewIfNeeded();
+}
+
 /** A run opens on its report, which carries the lead's latest report as the run's summary. */
 async function checkTheReportShowsTheLeadsSummary(page: Page, world: World): Promise<void> {
   await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
@@ -321,6 +347,7 @@ test('the app lists the scripted run, shows each agent’s harness and the repor
     app = await launch(world, userData);
     page = await app.firstWindow();
     await checkRunIsListedAndRunning(page, world);
+    await checkTheIdeasAndTheChartLink(page);
     await pressCatchUpAndSeeWhatChanged(page, world);
     await checkTheReportShowsTheLeadsSummary(page, world);
     await checkEveryAgentShowsItsHarness(page, world);

@@ -52,6 +52,7 @@ const KINDS = {
   'open-run': true,
   'close-run': true,
   show: true,
+  'show-ideas': true,
   'pick-agent': true,
   'close-agent': true,
   'open-runs': true,
@@ -100,6 +101,7 @@ export function navigationReducer(navigation: Navigation, action: NavigationActi
         : navigation;
     case 'close-run':
     case 'show':
+    case 'show-ideas':
     case 'pick-agent':
     case 'close-agent':
       // These come from the runs screens, so they mean nothing while another destination shows.

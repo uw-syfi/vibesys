@@ -247,7 +247,7 @@ describe('the window shell', () => {
     screen.unmount();
   });
 
-  it('every navigation intent but the keyboard back is sent by a control the screens show', () => {
+  it('every navigation intent but the keyboard back and the ideas link is sent by a control the screens show', () => {
     const {screen, log} = open();
     const sent = (): Set<NavigationKind> => new Set(log.map(action => action.type));
     const row = (): HTMLElement => firstRun(screen);
@@ -279,7 +279,11 @@ describe('the window shell', () => {
       hosts.value = 'ssh:other';
       hosts.dispatchEvent(new View.Event('change', {bubbles: true}));
     });
-    expect(sent()).toEqual(new Set(NAVIGATION_KINDS.filter(kind => kind !== 'back')));
+    // The ideas tile of Catch me up sends show-ideas, and needs a stored check-in to draw: the catch-up
+    // page's own tests press it.
+    expect(sent()).toEqual(
+      new Set(NAVIGATION_KINDS.filter(kind => kind !== 'back' && kind !== 'show-ideas')),
+    );
     screen.unmount();
   });
 });

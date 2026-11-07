@@ -1,11 +1,14 @@
 import {
+  Button,
   Card,
   Chart,
+  ChartDetail,
   ChartLegend,
   ChartPanel,
   type ChartPoint,
   type ChartReference,
   type ChartTick,
+  Chip,
   Field,
   type ParetoAxis,
   ParetoChart,
@@ -17,6 +20,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
+  type IdeasReport,
   type ObjectiveReport,
   type RunReport,
   type TradeoffReport,
@@ -41,6 +45,28 @@ const X_LABELS = 4;
 const Y_LABELS = 3;
 /** The share of the value range left above and below the data, so no point sits on the frame. */
 const PAD = 0.1;
+
+/** How a chart point links to the ideas: what the host served, the point chosen and the idea singled out. */
+export interface PointLinks {
+  readonly ideas: IdeasReport | undefined;
+  /** The measure job of the point chosen, or null. */
+  readonly picked: string | null;
+  /** The jobs of the idea singled out in the table: lit on every chart. */
+  readonly lit: ReadonlySet<string>;
+  readonly pick: (jobId: string) => void;
+  /** Open the idea's row in the table. */
+  readonly showIdea: (plan: number) => void;
+}
+
+/** The plans a point's job names: none for a `--no-plan` one; undefined while no ideas are served. */
+const plansOf = (links: PointLinks, jobId: string): readonly number[] | undefined =>
+  links.ideas?.plansOfJob.get(jobId);
+
+/** `#7`, `#7 #9` or `no plan`: what a point says of the idea it measured. */
+function planWords(plans: readonly number[] | undefined): string {
+  if (plans === undefined) return '';
+  return plans.length === 0 ? 'no plan' : plans.map(plan => `#${plan}`).join(' ');
+}
 
 function boundReference(
   objective: ObjectiveReport,
@@ -88,6 +114,7 @@ function ObjectiveChart(props: {
   readonly names: ReadonlyMap<string, string>;
   /** The widest value label of any chart on this axis, so every plot starts at one left edge. */
   readonly labelChars: number;
+  readonly links: PointLinks;
 }): JSX.Element | null {
   const {objective, span} = props;
   if (objective.points.length === 0) return null;
@@ -98,8 +125,19 @@ function ObjectiveChart(props: {
     id: point.id,
     x: point.atMs,
     y: point.value,
+    selected: props.links.picked === point.id,
+    lit: props.links.lit.has(point.id),
+    label: [
+      point.commit.slice(0, 8),
+      planWords(plansOf(props.links, point.id)),
+      withUnit(formatExact(point.value), objective.unit),
+    ]
+      .filter(part => part !== '')
+      .join(' · '),
     tip: {
-      lead: point.commit.slice(0, 8),
+      lead: [point.commit.slice(0, 8), planWords(plansOf(props.links, point.id))]
+        .filter(part => part !== '')
+        .join(' · '),
       detail: withUnit(formatExact(point.value), objective.unit),
     },
   }));
@@ -114,9 +152,9 @@ function ObjectiveChart(props: {
   const yTicks = valueLabels(objective);
   const reference = boundReference(objective, props.names);
   const best =
-    objective.best === undefined
+    objective.bestValue === undefined
       ? undefined
-      : withUnit(formatFigure(objective.best.value), objective.unit);
+      : withUnit(formatFigure(objective.bestValue), objective.unit);
   return (
     <ChartPanel
       title={objective.name}
@@ -133,6 +171,7 @@ function ObjectiveChart(props: {
         xTicks={xTicks}
         yTicks={yTicks}
         yLabelChars={props.labelChars}
+        pick={props.links.pick}
         size={props.size}
         {...(reference === undefined ? {} : {references: [reference]})}
       />
@@ -146,6 +185,7 @@ export function OverTime(props: {
   readonly span: RunReport['span'];
   /** What each agent is called on screen, by agent id. */
   readonly names: ReadonlyMap<string, string>;
+  readonly links: PointLinks;
 }): JSX.Element {
   const measured = props.objectives.filter(objective => objective.points.length > 0);
   const labelChars = Math.max(
@@ -171,13 +211,64 @@ export function OverTime(props: {
               objective={objective}
               span={props.span}
               names={props.names}
+              links={props.links}
               labelChars={labelChars}
               size={measured.length === 1 ? 'default' : 'compact'}
             />
           ))}
+          <PointDetail objectives={measured} links={props.links} />
         </Stack>
       )}
     </Card>
+  );
+}
+
+/** The longest idea title the line under the charts writes; the table has it whole. */
+const TITLE_LIMIT = 48;
+
+/**
+ * What the point chosen on a chart is: its job's commit, its value, and the idea each plan it names
+ * stands for, with a button to that idea's row. A job that names no plan says so. The line holds its
+ * height with no point chosen, so choosing one moves nothing.
+ */
+function PointDetail(props: {
+  readonly objectives: readonly ObjectiveReport[];
+  readonly links: PointLinks;
+}): JSX.Element {
+  const {links} = props;
+  const found = props.objectives.flatMap(objective =>
+    objective.points.filter(point => point.id === links.picked).map(point => ({objective, point})),
+  )[0];
+  if (found === undefined) return <ChartDetail label="Chosen point" />;
+  const {objective, point} = found;
+  const plans = plansOf(links, point.id);
+  return (
+    <ChartDetail label="Chosen point">
+      <Text variant="code">{point.commit.slice(0, 8)}</Text>
+      <Text variant="small" tone="muted">
+        {`${objective.name} ${withUnit(formatExact(point.value), objective.unit)}`}
+      </Text>
+      {plans === undefined ? null : plans.length === 0 ? (
+        <Chip label="No plan" />
+      ) : (
+        plans.map(plan => {
+          const idea = links.ideas?.ideas.find(each => each.planNumber === plan);
+          return idea === undefined ? (
+            <Chip key={plan} label={`Idea #${plan}`} />
+          ) : (
+            <Button
+              key={plan}
+              variant="quiet"
+              size="sm"
+              text={`#${plan} ${clip(idea.title, TITLE_LIMIT)}`}
+              label={`Show idea ${plan}`}
+              hint={idea.title}
+              press={() => links.showIdea(plan)}
+            />
+          );
+        })
+      )}
+    </ChartDetail>
   );
 }
 

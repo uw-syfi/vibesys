@@ -893,3 +893,18 @@ export function ChartColumns(props: {
     </div>
   );
 }
+
+/**
+ * The line under a chart that says what its chosen point is: it holds its height with nothing in
+ * it, and announces what appears in it.
+ */
+export function ChartDetail(props: {
+  readonly label: string;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="vs-chart-detail" role="status" aria-live="polite" aria-label={props.label}>
+      {props.children}
+    </div>
+  );
+}

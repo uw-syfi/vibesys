@@ -8,10 +8,12 @@ import {AgentRole, type Report, RunStatus} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
 import type {JSX} from 'react';
+import type {RunHistoryStatus} from '../../core/index.js';
 import {
   type CatchUpPress,
   type CheckInRead,
   type HostModel,
+  type IdeaWindow,
   messageIs,
   rewind,
 } from '../../state/index.js';
@@ -38,16 +40,29 @@ interface Props {
   readonly rows: readonly CheckInRead[];
   readonly press?: CatchUpPress | undefined;
   readonly catchUp?: () => void;
+  readonly history?: RunHistoryStatus;
+  readonly retryHistory?: () => void;
+  readonly goIdeas?: (window: IdeaWindow) => void;
 }
 
-const page = ({rows, press = NO_PRESS, catchUp = () => undefined}: Props): JSX.Element => (
+const page = ({
+  rows,
+  press = NO_PRESS,
+  catchUp = () => undefined,
+  history = {_tag: 'Idle'},
+  retryHistory = () => undefined,
+  goIdeas = () => undefined,
+}: Props): JSX.Element => (
   <CatchUpScreen
     run="faster-decode"
     rows={rows}
+    history={history}
+    retryHistory={retryHistory}
     press={press}
     catchUp={catchUp}
     goRuns={() => undefined}
     goRun={() => undefined}
+    goIdeas={goIdeas}
     words={WORDS}
   />
 );
@@ -96,7 +111,7 @@ describe('the catch-up page of a live run', () => {
       expect(text).toContain('Writing…');
       expect(text).toContain('Since ');
       // The tiles say what the host counted, never a computed figure.
-      for (const word of ['Best', 'throughput', '1.84', '2.31', 'p99 latency', '118']) {
+      for (const word of ['Best', 'throughput', '1.84', '2.31', 'tok/s', 'p99 latency', '118']) {
         expect(text).toContain(word);
       }
       expect(text).toMatch(/Created\s*2/);
@@ -111,6 +126,23 @@ describe('the catch-up page of a live run', () => {
       expect(text).toContain('No price');
       screen.unmount();
     }),
+  );
+
+  it.effect(
+    'links the ideas tile to the report’s ideas narrowed to the span the check-in covers',
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* afterwards(new FakeDaemon(live), live.runId, (daemon, press) =>
+          Effect.gen(function* () {
+            daemon.settleCheckIn(yield* press(), busyFacts(0));
+          }),
+        );
+        const asked: IdeaWindow[] = [];
+        const screen = mount(page({rows, goIdeas: window => asked.push(window)}));
+        screen.press(screen.control('Show ideas of this window'));
+        expect(asked).toEqual([{fromMs: rows[0]?.sinceMs, toMs: rows[0]?.atMs}]);
+        screen.unmount();
+      }),
   );
 
   it.effect('reads the window before the list of check-ins it came from, at any width', () =>
@@ -223,6 +255,33 @@ describe('the catch-up page with no check-in', () => {
     expect(screen.text()).toContain('No check-ins yet');
     screen.press(screen.control('New check-in'));
     expect(pressed).toBe(1);
+    screen.unmount();
+  });
+});
+
+describe('the catch-up page while the run history is read', () => {
+  it('does not read as having no check-ins while the history loads', () => {
+    const screen = mount(page({rows: [], history: {_tag: 'Loading'}}));
+    expect(screen.text()).toContain('Reading history');
+    expect(screen.text()).not.toContain('No check-ins yet');
+    screen.unmount();
+  });
+
+  it('says the history was not read when it failed, and retries on press', () => {
+    let retried = 0;
+    const screen = mount(
+      page({
+        rows: [],
+        history: {_tag: 'Failed', fault: {kind: 'unreachable', detail: 'down'} as never},
+        retryHistory: () => {
+          retried += 1;
+        },
+      }),
+    );
+    expect(screen.text()).toContain('History not read');
+    expect(screen.text()).not.toContain('No check-ins yet');
+    screen.press(screen.control('Retry'));
+    expect(retried).toBe(1);
     screen.unmount();
   });
 });

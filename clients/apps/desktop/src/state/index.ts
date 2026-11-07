@@ -116,6 +116,13 @@ export {
   agentsStrip,
   type Better,
   betterOf,
+  type GainView,
+  type IdeaRow,
+  type IdeasReport,
+  type IdeaWindow,
+  ideasInRun,
+  ideasInWindow,
+  ideasOfVerdict,
   type MeasuredPointView,
   type ObjectiveReport,
   objectiveReports,
@@ -130,7 +137,9 @@ export {
   type TradeoffReport,
   timeTicks,
   tradeoffReport,
+  type Verdict,
   valueTicks,
+  type WorkstreamRow,
 } from './orchestrator/report/index.js';
 export {
   candidates,
