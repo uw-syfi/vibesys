@@ -136,6 +136,20 @@ describe('the status of a host', () => {
     );
   });
 
+  it('reads a host that failed its first attempt as unreachable whichever side of a retry the link is on', () => {
+    const none = (connection: HostConnectionState): HostStatusInput => ({
+      connection,
+      feed: {_tag: 'Opening'},
+      hasData: false,
+      staleForMs: null,
+    });
+    const kind = (connection: HostConnectionState) => hostStatusOf(none(connection)).kind;
+    expect(kind({_tag: 'Connecting', attempt: 0})).toBe('connecting');
+    expect(kind({_tag: 'Connecting', attempt: 1})).toBe('unreachable');
+    expect(kind({_tag: 'Waiting', attempt: 1, fault: link, retryAtMs: 5})).toBe('unreachable');
+    expect(kind({_tag: 'Idle'})).toBe('waiting');
+  });
+
   it('keeps the age only for a stale host', () => {
     const stale = hostStatusOf({
       connection: {_tag: 'Waiting', attempt: 1, fault: link, retryAtMs: 5},

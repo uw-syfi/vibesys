@@ -140,15 +140,15 @@ describe('the screens', () => {
       note({_tag: 'Unusable', fault}, {_tag: 'Opening'}),
     ]) {
       expect(html(lost)).toContain('Retry');
-      expect(html(lost)).toContain('Connection lost');
+      expect(html(lost)).toMatch(/Stale|Unreachable/);
       // The reason, the context and the host's own words are on hover, not lines of the screen.
       expect(html(lost)).toContain('aria-description="');
       expect(html(lost)).toContain('ssh exited');
     }
     // How long what is shown has been out of date, as the host's freshness reports it.
     const waiting = note({_tag: 'Waiting', attempt: 1, fault, retryAtMs: 5}, {_tag: 'Live'});
-    expect(html(waiting)).toContain('Stale 40 s');
-    expect(html({...waiting, staleForMs: null})).not.toContain('Stale');
+    expect(html(waiting)).toContain('Stale 40s');
+    expect(html({...waiting, staleForMs: null})).not.toContain('Stale ');
     expect(html(note({_tag: 'Incompatible', side: 'daemon-too-old'}, {_tag: 'Opening'}))).toContain(
       'Update VibeSys on that host',
     );
