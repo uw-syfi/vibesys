@@ -42,7 +42,7 @@ export interface FakeCall {
 }
 
 /** What the test lets through a throttled link. */
-export interface Throttle {
+interface Throttle {
   /**
    * Let `bytes` bytes through to the client on every connection throttled: whatever the peer sent
    * and the link still holds, in order, cut anywhere (the middle of an HTTP/2 frame included).
