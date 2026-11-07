@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import shlex
 import subprocess
 import sys
+import tarfile
+from contextlib import nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -78,6 +82,10 @@ from vs_sandbox.api.slurm import (
     read_slurm_capture_plan,
 )
 from vs_sandbox.api.testing import FakeLifecycleRunner
+
+# test-isolation: the Modal trusted evaluator is a standalone stdlib file mounted into the
+# editor; this module path is the only way to run the helper the gate command invokes.
+from vs_sandbox.modal_evaluator import ModalHost, ProgramResult, run_evaluator
 from vs_sim.api import DISCARD, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
@@ -2052,6 +2060,144 @@ def test_a_modal_environment_rejects_an_unbounded_wait_or_unknown_option_by_name
 ) -> None:
     with pytest.raises(ValueError, match=named):
         build_run_environment(RunEnvironmentSpec("modal", options))
+
+
+class _ModalServingApp:
+    """The Modal CLI as one deployed app with one serving container; records what was staged."""
+
+    _APP = "candidate-app"
+
+    def __init__(self) -> None:
+        self.staged: list[str] = []
+        self.scripts: list[str] = []
+
+    def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
+        """Answer one ``modal`` subcommand the trusted evaluator runs."""
+        del cwd, timeout
+        arguments = list(argv)
+        modal = arguments[arguments.index("modal") + 1 :]
+        if modal[0] == "deploy":
+            return ProgramResult(
+                0,
+                "Web Function URL: https://workspace--candidate.modal.run\n"
+                f"View Deployment: https://modal.com/apps/workspace/main/deployed/{self._APP}\n",
+                "",
+            )
+        if modal[:2] == ["container", "list"]:
+            # Started after the deploy began, so it runs the version the gate deployed.
+            started = datetime.fromtimestamp(_MODAL_DEPLOY_BEGAN + 30, UTC).isoformat(" ")
+            listing = [{"app_name": self._APP, "container_id": "ta-1", "start_time": started}]
+            return ProgramResult(0, json.dumps(listing), "")
+        if modal[:2] == ["container", "exec"]:
+            # exec <container> -- sh -c <bootstrap script> vibesys-eval <base64 archive chunks>
+            self.scripts.append(modal[6])
+            archive = base64.b64decode("".join(modal[8:]))
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as staged:
+                self.staged.extend(staged.getnames())
+            return ProgramResult(0, "__VIBESYS_EXEC_RC__=0\n", "")
+        raise AssertionError(arguments)
+
+
+_MODAL_DEPLOY_BEGAN = datetime(2026, 11, 7, 12, tzinfo=UTC).timestamp()
+"""The fake Modal host's calendar time when the gate's deploy begins."""
+
+
+class _AdvancingClock:
+    """A manual clock whose sleep moves it forward."""
+
+    def __init__(self) -> None:
+        self._clock = ManualClock(0.0)
+
+    def now(self) -> float:
+        return self._clock.now()
+
+    def sleep(self, seconds: float) -> None:
+        self._clock.advance(seconds)
+
+
+_TASK_INPUTS = (
+    ".vibesys/tasks/demo/accuracy_checker/checker.py",
+    ".vibesys/tasks/demo/accuracy_checker/cases.json",
+    ".vibesys/tasks/demo/benchmark/benchmark.py",
+    ".vibesys/shared/requests.jsonl",
+)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("stage", "inputs"),
+    [
+        pytest.param(
+            "accuracy",
+            (
+                ".vibesys/tasks/demo/accuracy_checker/checker.py",
+                ".vibesys/tasks/demo/accuracy_checker/cases.json",
+            ),
+            id="accuracy-script-and-sibling",
+        ),
+        pytest.param(
+            "benchmark",
+            (".vibesys/tasks/demo/benchmark/benchmark.py", ".vibesys/shared/requests.jsonl"),
+            id="benchmark-script-and-option-value",
+        ),
+    ],
+)
+def test_a_modal_gate_stages_the_project_inputs_its_task_command_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str, inputs: tuple[str, ...]
+) -> None:
+    """Regression (#4095): a Modal gate copies a task's ``${PROJECT_ROOT}`` inputs to the server.
+
+    The trusted command runs inside the serving container, which has no ``/workspace``, so
+    the helper must stage every project input the command names. The environment used to
+    bind ``${PROJECT_ROOT}`` to the editor's ``/workspace``: the helper staged nothing and the
+    checker did not exist where it ran.
+    """
+    monkeypatch.delenv("VIBESYS_CANDIDATE_REVISION", raising=False)
+    monkeypatch.delenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", raising=False)
+    workspace = tmp_path / "workspace"
+    for relative in _TASK_INPUTS:
+        (workspace / relative).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / relative).write_text("# task input\n")
+    (workspace / "main.py").write_text("app = object()\n")
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("modal")),
+        _request(
+            tmp_path,
+            FakeBackend(),
+            workspace=workspace,
+            accuracy_command=(
+                "uv run python ${PROJECT_ROOT}/.vibesys/tasks/demo/accuracy_checker/checker.py"
+            ),
+            benchmark_command=(
+                "uv run python ${PROJECT_ROOT}/.vibesys/tasks/demo/benchmark/benchmark.py "
+                "--trace ${PROJECT_ROOT}/.vibesys/shared/requests.jsonl"
+            ),
+        ),
+    )
+    paths = session.view.paths
+    gate = shlex.split(
+        (paths.accuracy_command if stage == "accuracy" else paths.benchmark_command) or ""
+    )
+    assert gate[:2] == ["python", "/opt/vibesys-modal-evaluator.py"]
+    command = gate[gate.index("--") + 1 :]
+    serving = _ModalServingApp()
+
+    status = run_evaluator(
+        command,
+        host=ModalHost(
+            clock=_AdvancingClock(),
+            wall_clock=ManualClock(_MODAL_DEPLOY_BEGAN),
+            programs=serving,
+            health=lambda _url, _timeout: 200,
+            keep_warm=lambda _url: nullcontext(),
+        ),
+        workspace=str(workspace),
+    )
+
+    assert status == 0
+    assert [name for name in inputs if name not in serving.staged] == []
+    assert serving.scripts
+    assert all(shlex.join(command) in script for script in serving.scripts)
 
 
 _TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")

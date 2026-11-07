@@ -840,8 +840,14 @@ metric = "requests_per_second"
 
 Direct `command = [...]` arrays may point at Python, shell, Go, Rust, C++, or
 any other task-owned program. Package entry points decouple task manifests
-from the package's install location. `${PROJECT_ROOT}` in package arguments
-expands to the absolute candidate repository root.
+from the package's install location. `${PROJECT_ROOT}` in a command or package
+arguments expands to the candidate repository root where the command runs: its
+absolute path locally and in Docker, and `.` on Modal, SkyPilot and Slurm, which
+run the command on another machine from a directory holding the project files it
+names. On Modal, write each input the command reads as its own argument
+(`--trace ${PROJECT_ROOT}/data.jsonl`, not `--trace=...`): the evaluator copies
+those files, with their directories, into the serving container, up to 8 MiB
+compressed.
 
 Serving bundles that enable trusted captures declare a separate diagnostic load:
 
