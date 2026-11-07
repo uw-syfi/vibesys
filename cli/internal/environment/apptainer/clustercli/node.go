@@ -3,6 +3,7 @@ package clustercli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -472,22 +473,71 @@ func (n *node) pyxisArgv(box apptainer.Box, argv []string) ([]string, error) {
 	return append(out, argv...), nil
 }
 
-// Start implements apptainer.Node.
+// Start implements apptainer.Node. A step whose client does not reach the login node never ran,
+// so its client is started again as remote.Reconnect says, writing to the same sink, before the
+// process is said to have ended.
 func (n *node) Start(box apptainer.Box, argv []string, sink io.Writer) (environment.Process, error) {
 	full, err := n.StepArgv(box, argv)
 	if err != nil {
 		return nil, err
 	}
-	cmd := n.c.cfg.Shell.Command(context.Background(), full)
-	var stderr lockedBuffer
-	cmd.Stdout, cmd.Stderr = sink, &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot reach %s to start a step: %v", n.c.cfg.Shell.Where(), err)
+	ctx, cancel := context.WithCancel(context.Background())
+	first, err := n.client(ctx, full, sink)
+	if err != nil {
+		cancel()
+		return nil, err
 	}
-	p := &process{n: n, box: box.Name, cmd: cmd, exited: make(chan environment.Exit, 1)}
-	p.wg.Go(func() { p.exited <- n.finish(box.Name, cmd.Wait(), stderr.String()) })
+	p := &process{n: n, box: box.Name, kill: cancel, exited: make(chan environment.Exit, 1)}
+	p.wg.Go(func() {
+		defer cancel()
+		p.exited <- n.follow(ctx, box.Name, full, sink, first)
+	})
 	return p, nil
 }
+
+// stepClient is the started client of a step, and what it writes to standard error.
+type stepClient struct {
+	cmd    *exec.Cmd
+	stderr *lockedBuffer
+}
+
+// client starts the client of the step full, which ctx ends.
+func (n *node) client(ctx context.Context, full []string, sink io.Writer) (stepClient, error) {
+	cmd := n.c.cfg.Shell.Command(ctx, full)
+	c := stepClient{cmd: cmd, stderr: &lockedBuffer{}}
+	cmd.Stdout, cmd.Stderr = sink, c.stderr
+	if err := cmd.Start(); err != nil {
+		return stepClient{}, unavailable("cannot reach %s to start a step: %v", n.c.cfg.Shell.Where(), err)
+	}
+	return c, nil
+}
+
+// follow waits for the step's client, starting it again while it does not reach the login node,
+// and says how the box's process ended.
+func (n *node) follow(ctx context.Context, box string, full []string, sink io.Writer, first stepClient) environment.Exit {
+	c := &first
+	exit, _ := remote.Reconnect(ctx, n.c.cfg.Timers, func() (environment.Exit, bool, error) {
+		if c == nil {
+			next, err := n.client(ctx, full, sink)
+			if err != nil {
+				return docker.Lost(fmt.Sprintf("the client of a command of %s could not be started again: %v", box, err)), false, nil
+			}
+			c = &next
+		}
+		waitErr := c.cmd.Wait()
+		stderr := c.stderr.String()
+		c = nil
+		exit := n.finish(box, waitErr, stderr)
+		if ctx.Err() == nil && remote.Unreached(n.c.cfg.Shell, waitErr, stderr) {
+			return exit, true, errStepUnreached
+		}
+		return exit, false, nil
+	})
+	return exit
+}
+
+// errStepUnreached is the failure of a step's client that did not reach the login node.
+var errStepUnreached = errors.New("the step's client did not reach the login node")
 
 // finish says how a box's process ended, from how its client did.
 func (n *node) finish(box string, waitErr error, stderr string) environment.Exit {
@@ -537,7 +587,7 @@ func (n *node) Signal(ctx context.Context, box string, sig apptainer.Signal) err
 type process struct {
 	n      *node
 	box    string
-	cmd    *exec.Cmd
+	kill   context.CancelFunc
 	exited chan environment.Exit
 	wg     sync.WaitGroup
 }
@@ -554,8 +604,4 @@ func (p *process) Terminate() {
 
 // Kill implements environment.Process: it ends the step's client at once. The command ends no
 // later than its box is killed or its allocation ends.
-func (p *process) Kill() {
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-	}
-}
+func (p *process) Kill() { p.kill() }

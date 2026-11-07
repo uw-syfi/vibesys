@@ -1,6 +1,7 @@
 package clustercli_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,8 +10,11 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 )
 
 // fakeSqueue lists one job of the scope d1.
@@ -113,5 +117,74 @@ func TestAClaimThatDoesNotReachTheLoginNodeIsMadeAgain(t *testing.T) {
 	}
 	if got := sh.calls.Load(); got != 4 {
 		t.Errorf("%d calls, want two dropped, the claim, and the second claim", got)
+	}
+}
+
+// Regression: a command lost mid-run because its step's ssh client failed at the key exchange was
+// declared lost, though it never ran. A step whose client does not reach the login node is started
+// again, up to its attempts, and the process ends as its command does, its output written once.
+func TestAStepWhoseClientDoesNotReachTheLoginNodeIsStartedAgain(t *testing.T) {
+	for drops := range attempts + 2 {
+		sh := newShell(t)
+		sh.lost255 = true
+		sh.drops.Store(int32(drops))
+		n := reconnecting(t, sh, apptainer.RuntimeApptainer).Node("77")
+		var out bytes.Buffer
+		p, err := n.Start(apptainer.Box{Name: "b", Image: "/shared/x.sif"}, []string{"/bin/sh", "-c", "echo hi; exit 3"}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := wait(t, p)
+		if got, want := int(sh.calls.Load()), min(drops+1, attempts); got != want {
+			t.Errorf("%d drops: %d calls, want %d", drops, got, want)
+		}
+		if drops < attempts {
+			if e != (environment.Exit{Code: 3}) || out.String() != "hi\n" {
+				t.Errorf("%d drops: exit %+v, output %q; want the command's", drops, e, out.String())
+			}
+			continue
+		}
+		if !errors.Is(e.Err, docker.ErrLost) || !strings.Contains(e.Err.Error(), "kex_exchange_identification") || out.Len() != 0 {
+			t.Errorf("%d drops: exit %+v, output %q; want lost", drops, e, out.String())
+		}
+	}
+}
+
+// A step whose client lost its connection once the session was open is lost at once: its command
+// may have run.
+func TestAStepWhoseConnectionDropsInTheSessionIsLostAtOnce(t *testing.T) {
+	sh := newShell(t)
+	sh.lost255 = true
+	sh.dropped = "Connection to host-a closed by remote host.\r\n"
+	sh.drops.Store(1)
+	p, err := reconnecting(t, sh, apptainer.RuntimeApptainer).Node("77").Start(apptainer.Box{Name: "b", Image: "/shared/x.sif"}, []string{"true"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := wait(t, p); !errors.Is(e.Err, docker.ErrLost) || sh.calls.Load() != 1 {
+		t.Errorf("exit %+v after %d calls, want lost after 1", e, sh.calls.Load())
+	}
+}
+
+// A step killed while it waits to start its client again ends lost, and is not started again.
+func TestAStepKilledWhileItWaitsToReconnectEnds(t *testing.T) {
+	sh := newShell(t)
+	sh.lost255 = true
+	sh.drops.Store(1)
+	timers := envtest.NewTimers()
+	c, err := clustercli.New(clustercli.Config{Shell: sh, Timers: timers, Submit: []string{"sbatch"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := c.Node("77").Start(apptainer.Box{Name: "b", Image: "/shared/x.sif"}, []string{"true"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timers.Await(ctx(t), 1) == nil {
+		t.Fatal("the step never waited to reconnect")
+	}
+	p.Kill()
+	if e := wait(t, p); !errors.Is(e.Err, docker.ErrLost) || sh.calls.Load() != 1 {
+		t.Errorf("exit %+v after %d calls, want lost after 1", e, sh.calls.Load())
 	}
 }
