@@ -10,9 +10,8 @@ import {
   targetFromInput,
 } from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
-import type {Dispatch} from '../../orchestrator/connected.js';
 import {SettingsScreen} from '../settings-screen.js';
-import {useMachineControls} from './machine-controls.js';
+import {type MachineDispatch as Dispatch, useMachineControls} from './machine-controls.js';
 
 const dom = installDom().window;
 

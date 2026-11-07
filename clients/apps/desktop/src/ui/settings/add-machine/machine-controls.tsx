@@ -1,4 +1,5 @@
 import {Button, Row, ToastStack} from '@vibesys/ui';
+import type * as Effect from 'effect/Effect';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {MachineActions, MachineUndo} from '../../../core/index.js';
 import {
@@ -9,8 +10,10 @@ import {
   hostFromKey,
   hostLabel,
 } from '../../../state/index.js';
-import type {Dispatch} from '../../orchestrator/connected.js';
 import {AddMachine} from './add-machine.js';
+
+/** Runs `effect` and hands its answer to `then`; the entry owns where it runs. */
+export type MachineDispatch = <A>(effect: Effect.Effect<A>, then: (value: A) => void) => void;
 
 /** What the Resources tab shows of the machines controls: the Add machine bar, a remove, and the toasts of a removal. */
 export interface MachineControls {
@@ -38,7 +41,7 @@ interface Removed {
  */
 export function useMachineControls(
   actions: MachineActions | undefined,
-  dispatch: Dispatch,
+  dispatch: MachineDispatch,
 ): MachineControls | undefined {
   const [open, setOpen] = useState(false);
   const [add, setAdd] = useState<AddMachineState>(emptyAddMachine);
