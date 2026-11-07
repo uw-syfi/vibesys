@@ -142,6 +142,25 @@ async function launch(world: World, userData: string): Promise<ElectronApplicati
   });
 }
 
+/**
+ * The Start run form carries a Model control and the run's two bounds, and is put away with Escape. The
+ * host of this world has no policy and cannot name its tool's models, so the model is the tool's own
+ * default; the form's choices from a host's models are covered by its DOM tests. With a window folder
+ * set, the form is captured (the window alone).
+ */
+async function checkTheStartFormNamesTheModelAndBoundsTheRun(page: Page): Promise<void> {
+  await page.getByRole('button', {name: 'New run'}).click();
+  const form = page.getByRole('dialog');
+  await expect(form.getByLabel('Model')).toBeVisible();
+  await expect(form.getByLabel('Time limit')).toBeVisible();
+  await expect(form.getByLabel('Cost limit ($)')).toBeVisible();
+  const folder = process.env['VIBESYS_E2E_SHOTS'];
+  if (folder !== undefined && folder !== '')
+    await page.screenshot({path: join(folder, '1b-start.png')});
+  await page.keyboard.press('Escape');
+  await expect(form).toBeHidden();
+}
+
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
   // A running run is in the list of live runs; a row is named by its run (the task) and says the
   // rest, its state first, in its description.
@@ -150,6 +169,7 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await expect(row).toBeVisible();
   await expect(row).toContainText('Running');
   await seen(page, '1-runs');
+  await checkTheStartFormNamesTheModelAndBoundsTheRun(page);
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
   await seen(page, '2-report');
