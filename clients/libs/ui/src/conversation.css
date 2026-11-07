@@ -91,17 +91,30 @@
   width: 100%;
 }
 
-/* A row that leads to another conversation. */
+/* A row that leads to another conversation, with a note of a few lines under its title. */
 .vs-conversation-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   min-width: 0;
   padding: var(--space-2) var(--space-4);
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
   color: var(--muted);
+}
+.vs-conversation-link-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-conversation-link-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  /* Under the title's words: past the icon, the gap, and the quiet button's own padding. */
+  padding-inline-start: calc(var(--icon) + 2 * var(--space-3));
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 .vs-conversation-link .vs-button {
   min-width: 0;

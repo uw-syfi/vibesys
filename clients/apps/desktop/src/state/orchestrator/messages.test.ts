@@ -1,6 +1,7 @@
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {
+  AgentStatus,
   HandoffSchema,
   JobFinishedSchema,
   LeadBriefSchema,
@@ -80,5 +81,24 @@ describe('a message body', () => {
       kind: 'brief',
       text: 'x',
     });
+  });
+
+  it('that says a child settled keeps who, how and the reason the host gave', () => {
+    fc.assert(
+      fc.property(
+        fc.string({minLength: 1}),
+        fc.constantFrom(AgentStatus.IDLE, AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST),
+        fc.string(),
+        (agentId, status, detail) => {
+          const body = create(SubagentSettledSchema, {agentId, status, detail});
+          expect(noteOf(messageOf({case: 'subagentSettled', value: body}))).toEqual({
+            kind: 'settled',
+            agentId,
+            status,
+            detail,
+          });
+        },
+      ),
+    );
   });
 });

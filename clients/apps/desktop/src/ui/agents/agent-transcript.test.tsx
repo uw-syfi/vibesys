@@ -1,12 +1,15 @@
 import {describe, expect, it} from '@effect/vitest';
+import {AgentStatus} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {
   agentNames,
   applyChange,
+  type Entry,
   emptyState,
   itemIs,
   type OrchestratorState,
+  type Transcript,
   transcript,
 } from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
@@ -131,6 +134,87 @@ describe('the transcript screen', () => {
         },
       })[0],
     ).toMatch(/^Could not load 5 KB/);
+  });
+});
+
+/** One turn of a lead, whose entries say what came of a child named Worker 2. */
+function childWorld(entries: readonly Entry[]) {
+  const data: Transcript = {
+    agentId: 'lead',
+    crumbs: [],
+    state: 'running',
+    costUsd: null,
+    turns: 1,
+    entries: [
+      {kind: 'turn', key: 't', turnId: 't', ordinal: 1, atMs: 0, costUsd: null, outcome: 'running'},
+      ...entries,
+    ],
+    earlier: null,
+  };
+  const context = {...contextOf(emptyState, 'lead'), labelOf: () => 'Worker 2'};
+  return itemsOf(data, context);
+}
+
+/** A reason as the host may give it: none, blank, one line, or long and over several lines. */
+const reason = fc.oneof(
+  fc.constant(''),
+  fc.constant('  \n'),
+  fc.string({minLength: 1, maxLength: 80}),
+  fc
+    .array(fc.string({minLength: 1, maxLength: 120}), {minLength: 2, maxLength: 8})
+    .map(lines => lines.join('\n')),
+);
+
+describe('a child that stopped working without a handoff', () => {
+  const HOW = [
+    [AgentStatus.IDLE, 'went idle'],
+    [AgentStatus.ENDED, 'ended'],
+    [AgentStatus.FAILED, 'failed'],
+    [AgentStatus.LOST, 'was lost'],
+  ] as const;
+
+  it('is told to the lead by name, with how it settled and the reason the host gave', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...HOW), reason, ([status, how], detail) => {
+        const [, bubble] = childWorld([
+          {
+            kind: 'incoming',
+            key: 'in',
+            atMs: 0,
+            from: {kind: 'host'},
+            note: {kind: 'settled', agentId: 'w2', status, detail},
+          },
+        ]);
+        if (bubble?.kind !== 'bubble') throw new Error('the message is drawn as a bubble');
+        const said = detail.trim() === '' ? '.' : `: ${detail.trim()}`;
+        expect(bubble.text).toBe(`Worker 2 ${how} without a handoff${said}`);
+      }),
+    );
+  });
+
+  it('comes back on a row that says how, with the reason under it when the host gave one', () => {
+    const CHIP = {
+      'handed-back': 'Done',
+      idle: 'Idle',
+      ended: 'Ended',
+      failed: 'Failed',
+      lost: 'Lost',
+    } as const;
+    fc.assert(
+      fc.property(
+        fc.constantFrom('handed-back', 'idle', 'ended', 'failed', 'lost'),
+        reason,
+        (result, detail) => {
+          const [, row] = childWorld([
+            {kind: 'join', key: 'j', atMs: 0, childId: 'w2', result, detail},
+          ]);
+          if (row?.kind !== 'link') throw new Error('a join is drawn as a link');
+          expect(row.title).toBe('Worker 2 joined');
+          expect(row.chip?.label).toBe(CHIP[result]);
+          expect(row.note).toBe(detail.trim() === '' ? undefined : detail.trim());
+        },
+      ),
+    );
   });
 });
 

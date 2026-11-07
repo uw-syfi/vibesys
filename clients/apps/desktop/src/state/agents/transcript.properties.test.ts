@@ -41,10 +41,20 @@ interface ItemSpec {
   readonly bumpTurn: boolean;
 }
 
+/** The status the host settles a child with, by how the child stopped. */
+const SETTLED_AS = {
+  idle: AgentStatus.IDLE,
+  ended: AgentStatus.ENDED,
+  failed: AgentStatus.FAILED,
+  lost: AgentStatus.LOST,
+} as const;
+
 interface ChildSpec {
   readonly start: number;
-  readonly result: 'none' | 'handoff' | 'failed' | 'ended';
+  readonly result: 'none' | 'handoff' | keyof typeof SETTLED_AS;
   readonly resultAt: number;
+  /** The host's reason, when the child settled. */
+  readonly detail: string;
 }
 
 interface World {
@@ -69,8 +79,9 @@ const itemSpec: fc.Arbitrary<ItemSpec> = fc.record({
 
 const childSpec: fc.Arbitrary<ChildSpec> = fc.record({
   start: fc.integer({min: 0, max: 400_000}),
-  result: fc.constantFrom('none', 'handoff', 'failed', 'ended'),
+  result: fc.constantFrom('none', 'handoff', 'idle', 'ended', 'failed', 'lost'),
   resultAt: fc.integer({min: 0, max: 500_000}),
+  detail: fc.oneof(fc.constant(''), fc.string({maxLength: 300})),
 });
 
 const world: fc.Arbitrary<World> = fc.record({
@@ -189,7 +200,8 @@ function resultOf(one: ChildSpec, childId: string, index: number): Message[] {
         case: 'subagentSettled',
         value: create(SubagentSettledSchema, {
           agentId: childId,
-          status: one.result === 'failed' ? AgentStatus.FAILED : AgentStatus.ENDED,
+          status: SETTLED_AS[one.result],
+          detail: one.detail,
         }),
       },
     }),
@@ -351,7 +363,7 @@ describe('a transcript', () => {
     );
   });
 
-  it('shows a result of a child that failed or ended without handing back, and says which', () => {
+  it('says how a child that did not hand back settled, as the host said, and why', () => {
     fc.assert(
       fc.property(world, spec => {
         const {result} = read(spec);
@@ -361,6 +373,7 @@ describe('a transcript', () => {
           if (one.result === 'none') expect(join).toBeUndefined();
           else {
             expect(join?.result).toBe(one.result === 'handoff' ? 'handed-back' : one.result);
+            expect(join?.detail).toBe(one.result === 'handoff' ? '' : one.detail);
           }
         });
       }),
