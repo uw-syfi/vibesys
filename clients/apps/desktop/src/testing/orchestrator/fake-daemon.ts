@@ -14,6 +14,8 @@ import {
   type Command,
   Delivery,
   ElisionSchema,
+  type GetRunHistoryResponse,
+  GetRunHistoryResponseSchema,
   type Item,
   type ItemsPage,
   ItemsPageSchema,
@@ -27,12 +29,16 @@ import {
   Rejection,
   ReportKind,
   ReportSchema,
+  ReportScope,
   type RunChange,
   RunChangeSchema,
   type RunCost,
   RunStatus,
+  type RunSummary,
   type RunsSnapshot,
   RunsSnapshotSchema,
+  type SearchState,
+  SnapshotDetail,
   ViewerSchema,
   type WindowFacts,
 } from '@vibesys/orchestrator-proto';
@@ -42,6 +48,7 @@ import {ms} from '../../state/orchestrator/time.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
+import {servedSummary} from './served-summary.js';
 
 /** The size past which a page leaves out reasoning text and tool output, as the real daemon does. */
 export const ELIDE_OVER = 4096;
@@ -168,28 +175,87 @@ export class FakeDaemon {
     return state;
   }
 
-  snapshot(): RunsSnapshot {
+  /** How many runs the host says its snapshot left out, for a test of a host with more runs than it lists. */
+  runsLeftOut = 0;
+
+  /** The search views the host holds, one per run it reads. */
+  #searches(): SearchState[] {
+    return this.scenario.searches !== undefined
+      ? [...this.scenario.searches]
+      : this.scenario.search === true
+        ? [
+            searchFixture(
+              this.scenario.runId,
+              this.scenario.endMs,
+              this.scenario.searchStale ?? false,
+              this.scenario.searchTruncated ?? false,
+            ),
+          ]
+        : [];
+  }
+
+  /** The search views the host holds now. */
+  searches(): SearchState[] {
+    return this.#searches();
+  }
+
+  /** The summary the host serves of each run it lists, as it stands now. */
+  summaries(): RunSummary[] {
     const state = this.#state(this.#visible);
+    const searches = this.#searches();
+    return Object.keys(state.runs)
+      .sort()
+      .map(runId =>
+        servedSummary(
+          state,
+          runId,
+          searches.find(search => search.runId === runId),
+        ),
+      );
+  }
+
+  /**
+   * The snapshot of runs. With detail SUMMARY it lists the runs and their summaries and nothing of their
+   * histories, as the host does; otherwise it holds the whole histories too.
+   */
+  snapshot(detail: SnapshotDetail = SnapshotDetail.UNSPECIFIED): RunsSnapshot {
+    const state = this.#state(this.#visible);
+    const summary = detail === SnapshotDetail.SUMMARY;
     return create(RunsSnapshotSchema, {
       runs: Object.values(state.runs),
-      agents: Object.values(state.agents),
-      turns: Object.values(state.turns),
-      messages: Object.values(state.messages),
-      checkIns: Object.values(state.checkIns),
+      summaries: this.summaries(),
+      agents: summary ? [] : Object.values(state.agents),
+      turns: summary ? [] : Object.values(state.turns),
+      messages: summary ? [] : Object.values(state.messages),
+      checkIns: summary ? [] : Object.values(state.checkIns),
       sequence: state.sequence,
-      searches:
-        this.scenario.searches !== undefined
-          ? [...this.scenario.searches]
-          : this.scenario.search === true
-            ? [
-                searchFixture(
-                  this.scenario.runId,
-                  this.scenario.endMs,
-                  this.scenario.searchStale ?? false,
-                  this.scenario.searchTruncated ?? false,
-                ),
-              ]
-            : [],
+      searches: this.#searches(),
+      runsLeftOut: this.runsLeftOut,
+      truncated: this.runsLeftOut > 0,
+    });
+  }
+
+  /**
+   * One page of a run's history. The first page (cursor zero) holds the run's agents, turns and
+   * check-ins; every page holds up to `pageMessages` of its messages in the order they were made, and
+   * names the cursor of the next, which is zero after the last.
+   */
+  history(runId: string, cursor: bigint, pageMessages = 200): GetRunHistoryResponse {
+    const state = this.#state(this.#visible);
+    const all = Object.values(state.messages).filter(message => message.runId === runId);
+    const from = Number(cursor);
+    const messages = all.slice(from, from + pageMessages);
+    const next = from + messages.length;
+    const first = cursor === 0n;
+    return create(GetRunHistoryResponseSchema, {
+      sequence: state.sequence,
+      agents: first ? Object.values(state.agents).filter(agent => agent.runId === runId) : [],
+      turns: first
+        ? Object.values(state.turns).filter(turn => state.agents[turn.agentId]?.runId === runId)
+        : [],
+      checkIns: first ? Object.values(state.checkIns).filter(each => each.runId === runId) : [],
+      messages,
+      nextCursor: next < all.length ? BigInt(next) : 0n,
     });
   }
 
@@ -389,7 +455,13 @@ export class FakeDaemon {
         at: timestampFromMs(at),
         body: {
           case: 'report',
-          value: create(ReportSchema, {headline, changed, kind: ReportKind.PROGRESS, sequence: 1}),
+          value: create(ReportSchema, {
+            headline,
+            changed,
+            kind: ReportKind.PROGRESS,
+            scope: ReportScope.WINDOW,
+            sequence: 1,
+          }),
         },
       }),
     });

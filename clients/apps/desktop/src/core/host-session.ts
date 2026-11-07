@@ -19,6 +19,7 @@ import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
+import {makeRunHistory, type RunHistory} from './run-history.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
 import type {GatewayTransport} from './transport/gateway-transport.js';
 
@@ -30,6 +31,8 @@ export interface HostSession {
   readonly agents: AgentView;
   /** Reads of an agent's past: earlier pages and whole items. */
   readonly history: AgentHistory;
+  /** Reads of a run's history, which a snapshot of runs does not hold. */
+  readonly runHistory: RunHistory;
   readonly costs: CostFeed;
   readonly commands: Commands;
   /** The press of Catch me up, over `commands`. */
@@ -55,6 +58,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     runs: yield* makeRunsView(parts),
     agents: yield* makeAgentView(parts),
     history: yield* makeAgentHistory(parts),
+    runHistory: yield* makeRunHistory(parts),
     costs: yield* makeCostFeed(parts),
     commands,
     catchUp: yield* makeCatchUp(commands),

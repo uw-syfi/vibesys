@@ -1,9 +1,10 @@
 /**
- * The run's summary: the newest report the lead posted. The lead writes it and the host numbers it,
- * so the newest is the one with the highest number (ties by the time it was recorded, then its id),
- * whatever order the messages arrived in.
+ * The run's summary: the report the host serves as the one that sums the run up (`RunSummary.report`).
+ * The host picks it (the lead's newest report about the whole run, never one that answered Catch me
+ * up) and this only reads it into a view: nothing here looks through messages for the newest.
  */
-import {oneofIs, ReportKind} from '@vibesys/orchestrator-proto';
+import {ReportKind} from '@vibesys/orchestrator-proto';
+import {messageIs} from '../messages.js';
 import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
 
@@ -21,47 +22,19 @@ export interface SummaryView {
   readonly sequence: number;
 }
 
-/** Every kind of message body, so a kind added to the contract is a compile error here. */
-const BODY_KINDS = {
-  text: true,
-  handoff: true,
-  report: true,
-  jobFinished: true,
-  subagentSettled: true,
-  brief: true,
-  leadBrief: true,
-  handoffReminder: true,
-  leadIdleReminder: true,
-  runLimitReached: true,
-  reportDue: true,
-  catchUpRequest: true,
-} as const;
-
 const FIELDS: readonly SummaryField[] = ['changed', 'inFlight', 'decisions', 'openForUser'];
 
-/** The newest report of the run, or undefined before the lead has posted one. */
-export function latestReport(state: OrchestratorState, runId: string): SummaryView | undefined {
-  const views: SummaryView[] = [];
-  for (const message of Object.values(state.messages)) {
-    if (message.runId !== runId || !oneofIs(message.body, 'report', BODY_KINDS)) continue;
-    const report = message.body.value;
-    views.push({
-      id: message.id,
-      headline: report.headline,
-      fields: FIELDS.flatMap(field => (report[field] === '' ? [] : [{field, text: report[field]}])),
-      final: report.kind === ReportKind.FINAL,
-      atMs: ms(message.at) ?? 0,
-      sequence: report.sequence,
-    });
-  }
-  return views.reduce<SummaryView | undefined>(
-    (newest, view) => (newest === undefined || isNewer(view, newest) ? view : newest),
-    undefined,
-  );
-}
-
-function isNewer(a: SummaryView, b: SummaryView): boolean {
-  return (
-    (a.sequence - b.sequence || a.atMs - b.atMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) > 0
-  );
+/** The report the host sums the run up by, or undefined before the host has sent one. */
+export function summaryReport(state: OrchestratorState, runId: string): SummaryView | undefined {
+  const message = state.summaries[runId]?.report;
+  if (!messageIs(message, 'report')) return undefined;
+  const report = message.body.value;
+  return {
+    id: message.id,
+    headline: report.headline,
+    fields: FIELDS.flatMap(field => (report[field] === '' ? [] : [{field, text: report[field]}])),
+    final: report.kind === ReportKind.FINAL,
+    atMs: ms(message.at) ?? 0,
+    sequence: report.sequence,
+  };
 }

@@ -84,7 +84,6 @@ export {
   fleetKey,
   fleetRows,
   fleetView,
-  headObjectives,
   isLive,
   NO_FLEET_FILTER,
 } from './orchestrator/fleet.js';
@@ -93,10 +92,13 @@ export {
   applyAgentFeed,
   applyChange,
   applyCost,
+  applyRunHistory,
   applySearch,
   applySnapshot,
+  applySummary,
   isFinalItem,
   type OlderFrame,
+  type RunHistoryFrame,
 } from './orchestrator/fold.js';
 export {type ItemOf, itemIs} from './orchestrator/items.js';
 export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
@@ -106,7 +108,6 @@ export {
   agentsStrip,
   type Better,
   betterOf,
-  latestReport,
   type MeasuredPointView,
   type ObjectiveReport,
   objectiveReports,
@@ -116,6 +117,7 @@ export {
   type SearchReading,
   type SummaryField,
   type SummaryView,
+  summaryReport,
   type TradeoffPointView,
   type TradeoffReport,
   timeTicks,
@@ -135,6 +137,8 @@ export {
   type OrchestratorState,
   type Overlay,
   type Progress,
+  type RunHistoryRead,
+  type SnapshotCut,
 } from './orchestrator/state.js';
 export {ms} from './orchestrator/time.js';
 export {

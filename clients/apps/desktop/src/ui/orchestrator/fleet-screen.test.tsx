@@ -26,7 +26,7 @@ import {
   type OrchestratorState,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
-import {FakeDaemon, fleetScenario} from '../../testing/orchestrator/index.js';
+import {FakeDaemon, fleetScenario, serveSummaries} from '../../testing/orchestrator/index.js';
 import {FleetScreen} from './fleet-screen.js';
 
 installDom();
@@ -136,7 +136,7 @@ function stateOf(
     ),
     sequence: 1n,
   };
-  return applySnapshot(emptyState, create(RunsSnapshotSchema, snapshot));
+  return serveSummaries(applySnapshot(emptyState, create(RunsSnapshotSchema, snapshot)));
 }
 
 const live = (id: string, task: string, more = {}) => ({

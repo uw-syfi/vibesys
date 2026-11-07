@@ -1,16 +1,16 @@
 /**
  * The fleet: every run of every connected host as one row each, live runs first and then history,
  * with the filters of the Runs screen applied. A plain fold over what the hosts have said; it reads
- * no clock and starts no work, and it derives nothing the host serves: a percent of a bound, a cost
- * and a time are shown as sent, and absent exactly when the host sent none. The screen formats.
+ * no clock and starts no work, and it derives nothing the host serves: the report a run is summed up
+ * by, the agents working, the head of each objective, a percent of a bound, a cost and a time are
+ * shown as sent (the run's `RunSummary`), and absent exactly when the host sent none. The screen
+ * formats.
  */
 import {
-  AgentStatus,
-  type Message,
-  oneofIs,
+  type ObjectiveHead,
   type Run,
   RunStatus,
-  type SearchState,
+  type RunSummary,
 } from '@vibesys/orchestrator-proto';
 import type {Freshness} from '../freshness.js';
 import type {OrchestratorState} from './state.js';
@@ -64,6 +64,14 @@ export interface FleetObjective {
   readonly percentOfBound: number | null;
 }
 
+/** The host's head of one objective as a row carries it: the same four facts, absent as null. */
+const objectiveOf = (head: ObjectiveHead): FleetObjective => ({
+  name: head.name,
+  value: head.value ?? null,
+  unit: head.unit,
+  percentOfBound: head.percentOfBound ?? null,
+});
+
 export interface FleetRow {
   /** Unique across hosts: the host and the run, the same key a route is made from. */
   readonly key: string;
@@ -84,15 +92,26 @@ export interface FleetRow {
   readonly costUsd: number | null;
   /** The most the run may cost, or null for a run with no cost limit. */
   readonly budgetUsd: number | null;
-  /** Agents that are starting, working or waiting on a subagent. */
-  readonly agentsRunning: number;
-  /** When the lead last posted a report, or null when it has not. */
+  /**
+   * Agents that are starting, in a turn or waiting on a subagent, as the host counts them; null until
+   * the host has sent the run's summary.
+   */
+  readonly agentsRunning: number | null;
+  /**
+   * When the lead last posted a report about the whole run (never one that answered Catch me up), or
+   * null when it has not.
+   */
   readonly lastReportMs: number | null;
 }
 
 /** A host as the filter strip shows it, with its run count under the state filter. */
 export interface FleetHostView extends FleetHostRef {
   readonly runs: number;
+  /**
+   * How many of the host's runs its last snapshot did not list, because listing them would pass its
+   * byte budget (the oldest finished ones); zero when it listed every run.
+   */
+  readonly runsLeftOut: number;
 }
 
 export interface FleetView {
@@ -110,91 +129,10 @@ const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set([
   RunStatus.STOPPING,
 ]);
 
-const WORKING_AGENTS: ReadonlySet<AgentStatus> = new Set([
-  AgentStatus.LAUNCHING,
-  AgentStatus.ACTIVE,
-  AgentStatus.WAITING,
-]);
-
 /** Whether a run in `status` is still working. */
 export const isLive = (status: RunStatus): boolean => LIVE_STATUSES.has(status);
 
-const isReport = (message: Message): boolean =>
-  oneofIs(message.body, 'report', {
-    text: true,
-    handoff: true,
-    report: true,
-    jobFinished: true,
-    subagentSettled: true,
-    brief: true,
-    leadBrief: true,
-    handoffReminder: true,
-    leadIdleReminder: true,
-    reportDue: true,
-    catchUpRequest: true,
-    runLimitReached: true,
-  });
-
-/** The head's value on each objective and the bounds served for them, merged by objective name. */
-export function headObjectives(search: SearchState | undefined): readonly FleetObjective[] {
-  if (search === undefined) return [];
-  const head = search.head?.state;
-  const outcome = oneofIs(head, 'current', {current: true, none: true})
-    ? head.value.result?.outcome
-    : undefined;
-  const measure = oneofIs(outcome, 'measure', {check: true, measure: true})
-    ? outcome.value
-    : undefined;
-  const bounds = new Map(search.bounds.map(entry => [entry.objective, entry] as const));
-  const measured: {name: string; value: number | null}[] = [];
-  if (measure !== undefined) {
-    const scored = measure.metric?.name ?? '';
-    const names = measure.objectives?.metrics.map(metric => metric.name) ?? [scored];
-    for (const name of names) {
-      const observed = measure.observations.find(each => each.name === name)?.value;
-      measured.push({name, value: name === scored ? measure.value : (observed ?? null)});
-    }
-  }
-  const named = new Set(measured.map(each => each.name));
-  const rows = [
-    ...measured,
-    ...search.bounds
-      .filter(entry => !named.has(entry.objective))
-      .map(entry => ({name: entry.objective, value: null})),
-  ];
-  return rows.map(({name, value}) => {
-    const bound = bounds.get(name);
-    return {
-      name,
-      value: bound?.headValue ?? value,
-      unit: bound?.versions.at(-1)?.unit ?? '',
-      percentOfBound: bound?.percentOfBound ?? null,
-    };
-  });
-}
-
-interface RunFacts {
-  readonly agentsRunning: Map<string, number>;
-  readonly lastReportMs: Map<string, number>;
-}
-
-/** One pass over the agents and messages, so a row costs nothing per run to read them. */
-function factsOf(data: OrchestratorState): RunFacts {
-  const agentsRunning = new Map<string, number>();
-  for (const agent of Object.values(data.agents)) {
-    if (WORKING_AGENTS.has(agent.status))
-      agentsRunning.set(agent.runId, (agentsRunning.get(agent.runId) ?? 0) + 1);
-  }
-  const lastReportMs = new Map<string, number>();
-  for (const message of Object.values(data.messages)) {
-    const at = ms(message.at);
-    if (at === null || !isReport(message)) continue;
-    lastReportMs.set(message.runId, Math.max(lastReportMs.get(message.runId) ?? at, at));
-  }
-  return {agentsRunning, lastReportMs};
-}
-
-function rowOf(host: FleetHostRef, data: OrchestratorState, facts: RunFacts, run: Run): FleetRow {
+function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): FleetRow {
   return {
     key: fleetKey(host.key, run.id),
     host,
@@ -205,11 +143,11 @@ function rowOf(host: FleetHostRef, data: OrchestratorState, facts: RunFacts, run
     live: isLive(run.status),
     startedMs: ms(run.createdAt),
     endedMs: ms(run.endedAt),
-    objectives: headObjectives(data.searches[run.id]),
+    objectives: summary?.objectives.map(objectiveOf) ?? [],
     costUsd: run.usage?.costUsd ?? null,
     budgetUsd: run.maxCostUsd ?? null,
-    agentsRunning: facts.agentsRunning.get(run.id) ?? 0,
-    lastReportMs: facts.lastReportMs.get(run.id) ?? null,
+    agentsRunning: summary?.agentsWorking ?? null,
+    lastReportMs: ms(summary?.report?.at),
   };
 }
 
@@ -225,10 +163,9 @@ export function fleetRows(hosts: readonly FleetHostInput[]): readonly FleetRow[]
       freshness: host.freshness,
       staleForMs: host.staleForMs,
     };
-    const facts = factsOf(host.data);
     return Object.values(host.data.runs)
       .filter(run => !run.neverOpened)
-      .map(run => rowOf(ref, host.data, facts, run));
+      .map(run => rowOf(ref, host.data.summaries[run.id], run));
   });
 }
 
@@ -263,6 +200,7 @@ export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter)
       freshness: host.freshness,
       staleForMs: host.staleForMs,
       runs: byState.filter(row => row.host.key === host.key).length,
+      runsLeftOut: host.data.cut.runsLeftOut,
     })),
   };
 }
