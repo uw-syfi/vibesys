@@ -37,6 +37,7 @@ var rules = map[string][]string{
 	"internal/production":              {"release", "privatesocket", "hostlock", "hostconfig", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/mcp", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
 	"internal/cost":                    {"internal/core"},
+	"internal/window":                  {"internal/core", "internal/cost", "internal/search"},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
 	"internal/prompts":                 {"internal/core"},
@@ -70,6 +71,8 @@ var rules = map[string][]string{
 // source; the core's own code reaches neither.
 var testRules = map[string][]string{
 	"internal/search": {"internal/clidaemon", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/wire", "gen/vibesys/orchestrator/"},
+	// The window facts are tested over job logs built as the job service states them.
+	"internal/window": {"gen/vibesys/cli/"},
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
 	"internal/production": {"release/releasetest", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
@@ -103,7 +106,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"clientcli", "clientcli/attachview", "internal/cost", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"clientcli", "clientcli/attachview", "internal/cost", "internal/window", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}
