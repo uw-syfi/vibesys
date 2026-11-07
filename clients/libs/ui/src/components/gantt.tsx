@@ -2,7 +2,9 @@ import type {FocusEvent, JSX, KeyboardEvent} from 'react';
 import {SIZE} from '../tokens/index.js';
 import {Button} from './button.js';
 import type {StyleWithVars} from './css-vars.js';
+import {useEntering} from './entering.js';
 import {type Guide, Guides} from './guides.js';
+import {Icon} from './icon.js';
 import {placeLabels, useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
@@ -11,13 +13,13 @@ import {useWindowed} from './windowing.js';
 /**
  * One piece of a Gantt bar: its span on the axis and its `kind`, a shade (solid, hatched, or
  * grey), not words. A solid or hatched piece is the accent, or the palette's color number
- * `series` (`--series-N`) when it has one; a hatched piece with none is muted.
+ * `series` (`--series-N`) when it has one; a hatched piece with none is muted; `err` is the error color.
  */
 export interface GanttSegment {
   readonly id: string;
   readonly start: number;
   readonly end: number;
-  readonly kind: 'solid' | 'hatched' | 'grey';
+  readonly kind: 'solid' | 'hatched' | 'grey' | 'err';
   readonly series?: number;
   /** The one-line tooltip. */
   readonly label: string;
@@ -25,9 +27,26 @@ export interface GanttSegment {
   readonly press?: () => void;
 }
 
+/** A thin line across a row's bar at one moment, such as where a result came back. */
+export interface GanttMark {
+  readonly at: number;
+  readonly tone: 'ok' | 'err';
+  /** The one-line tooltip. */
+  readonly label: string;
+}
+
+/** The fold of a row that has rows under it: whether they are shown, and how to change that. */
+export interface GanttFold {
+  readonly open: boolean;
+  readonly toggle: () => void;
+}
+
 /**
  * One row of a `Gantt`: a name (with lineage `guides`), a bar from `start` to `end` split into
  * `segments`, an `outcome` that colors the bar's end (`live` pulses), and a `figure` after it.
+ * A row may carry `marks` on its bar, a `tag` in its own column (see `tagLabel`), a `fold` (a
+ * chevron before the name; Right opens it and Left closes it) and a `count`, the number of rows
+ * folded into it, which is drawn as a stack under the bar and as `×count` after the name.
  */
 export interface GanttRow {
   readonly id: string;
@@ -40,6 +59,10 @@ export interface GanttRow {
   /** The figure in full, as the hover shows it, when the figure is a short form. */
   readonly figureTitle?: string;
   readonly segments: readonly GanttSegment[];
+  readonly marks?: readonly GanttMark[];
+  readonly tag?: string;
+  readonly fold?: GanttFold;
+  readonly count?: number;
   readonly selected?: boolean;
   readonly fresh?: boolean;
   readonly press: () => void;
@@ -129,7 +152,12 @@ function GanttBar(props: {
     '--gantt-span': percent(Math.max(0, end - start)),
   };
   return (
-    <span className="vs-gantt-bar" data-outcome={row.outcome} style={place}>
+    <span
+      className="vs-gantt-bar"
+      data-outcome={row.outcome}
+      data-stacked={((row.count ?? 0) > 0 && row.fold?.open !== true) || undefined}
+      style={place}
+    >
       {props.aggregate
         ? null
         : row.segments.map(segment => {
@@ -163,6 +191,19 @@ function GanttBar(props: {
               />
             );
           })}
+      {(row.marks ?? []).map(mark => {
+        const at = shareOf(mark.at, row.start, row.end);
+        const place: StyleWithVars = {'--mark-at': percent(Math.max(0, Math.min(1, at)))};
+        return (
+          <span
+            key={`${mark.at}-${mark.label}`}
+            className="vs-gantt-mark"
+            data-tone={mark.tone}
+            title={mark.label}
+            style={place}
+          />
+        );
+      })}
     </span>
   );
 }
@@ -171,6 +212,7 @@ function AxisRow(props: {
   readonly ticks: readonly GanttTick[];
   readonly view: GanttView;
   readonly nameLabel: string | undefined;
+  readonly tagLabel: string | undefined;
   readonly figureLabel: string | undefined;
 }): JSX.Element {
   const {view} = props;
@@ -189,6 +231,11 @@ function AxisRow(props: {
       <span className="vs-gantt-name vs-listheader" title={props.nameLabel}>
         {props.nameLabel ?? ''}
       </span>
+      {props.tagLabel === undefined ? null : (
+        <span className="vs-gantt-tag vs-listheader" title={props.tagLabel}>
+          {props.tagLabel}
+        </span>
+      )}
       <span ref={measure} className="vs-gantt-track">
         {(placed ?? shown.map((_, index) => ({index, left: null}))).map(({index, left}) => {
           const tick = shown[index];
@@ -253,6 +300,108 @@ function ZoomBar(props: {
   );
 }
 
+/** The words a row's accessible name adds to its label: how many rows it holds, and whether they show. */
+function rowName(row: GanttRow): string {
+  const count = row.count === undefined || row.count === 0 ? '' : ` ×${row.count}`;
+  const fold = row.fold === undefined ? '' : row.fold.open ? ', open' : ', folded';
+  return `${row.label}${count}${fold}`;
+}
+
+/** Right opens a closed fold and Left closes an open one, as in a tree. */
+function foldKeys(event: KeyboardEvent<HTMLElement>, row: GanttRow): boolean {
+  const {fold} = row;
+  if (fold === undefined) return false;
+  if ((event.key === 'ArrowRight' && !fold.open) || (event.key === 'ArrowLeft' && fold.open)) {
+    event.preventDefault();
+    fold.toggle();
+    return true;
+  }
+  return false;
+}
+
+/** The name cell of a row: its lineage, the chevron of its fold, its label and what is folded into it. */
+function RowName(props: {readonly row: GanttRow; readonly foldable: boolean}): JSX.Element {
+  const {row} = props;
+  const {fold} = row;
+  return (
+    <span className="vs-gantt-name" title={rowName(row)}>
+      <Guides guides={row.guides} />
+      {props.foldable ? (
+        <span
+          className="vs-tree-chevron vs-gantt-fold"
+          data-open={fold?.open || undefined}
+          data-empty={fold === undefined || undefined}
+          aria-hidden="true"
+          onClick={
+            fold === undefined
+              ? undefined
+              : event => {
+                  event.stopPropagation();
+                  fold.toggle();
+                }
+          }
+        >
+          {fold === undefined ? null : <Icon name="chevron-right" />}
+        </span>
+      ) : null}
+      <Text variant="code">{row.label}</Text>
+      {row.count === undefined || row.count === 0 ? null : (
+        <span className="vs-gantt-count">{`×${row.count}`}</span>
+      )}
+    </span>
+  );
+}
+
+/** One row of a `Gantt`: an option of its listbox. */
+function RowView(props: {
+  readonly row: GanttRow;
+  readonly index: number;
+  readonly size: number;
+  readonly stop: number;
+  readonly strip: boolean;
+  readonly foldable: boolean;
+  readonly tagged: boolean;
+  readonly entering: boolean;
+  readonly view: GanttView;
+  readonly aggregate: boolean;
+  readonly playhead: StyleWithVars | null;
+}): JSX.Element {
+  const {row} = props;
+  return (
+    <div
+      className="vs-gantt-row"
+      role="option"
+      aria-label={rowName(row)}
+      aria-posinset={props.index + 1}
+      aria-setsize={props.size}
+      tabIndex={props.index === props.stop ? 0 : -1}
+      aria-selected={row.selected === true}
+      data-fresh={row.fresh === true || undefined}
+      data-entering={props.entering || undefined}
+      onClick={row.press}
+      onKeyDown={event => {
+        if (!foldKeys(event, row)) pickKeys(event, row.press);
+      }}
+    >
+      {props.strip ? null : <RowName row={row} foldable={props.foldable} />}
+      {props.tagged ? (
+        <span className="vs-gantt-tag" title={row.tag}>
+          {row.tag ?? ''}
+        </span>
+      ) : null}
+      <span className="vs-gantt-track">
+        <GanttBar row={row} view={props.view} aggregate={props.aggregate} />
+        {props.playhead === null ? null : (
+          <span className="vs-gantt-playhead" style={props.playhead} />
+        )}
+      </span>
+      <span className="vs-gantt-figure" data-outcome={row.outcome} title={row.figureTitle}>
+        {row.figure ?? ''}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Rows of bars on one time axis from `from` to `to`, a tick row above them, and a `playhead` line
  * through every row. Rows are the options of a windowed listbox (only the rows near the visible
@@ -265,6 +414,11 @@ function ZoomBar(props: {
  * Left and Right arrows do the same; bars clip at the edges of the view. Many rows read as plain
  * bars, without their pieces (`detail` `aggregate`, the default above 120 rows); zoom in to the
  * rows that matter, or pass `detail` `full`.
+ *
+ * Rows nest as a tree when they carry `guides` and `fold`s: every row's name, tag, bar and figure
+ * keep their own columns at any depth, the lineage and chevron are the name column's indent. With
+ * `tagLabel` the tags have a column of their own. A row that arrives while the Gantt is on screen
+ * draws in with a short motion, and bars follow the axis smoothly as it grows.
  */
 export function Gantt(props: {
   readonly label: string;
@@ -274,8 +428,9 @@ export function Gantt(props: {
   readonly ticks?: readonly GanttTick[];
   readonly rows: readonly GanttRow[];
   readonly strip?: boolean;
-  /** Column names on the tick row: over the names and over the figures. */
+  /** Column names on the tick row: over the names, the tags and the figures. */
   readonly nameLabel?: string;
+  readonly tagLabel?: string;
   readonly figureLabel?: string;
   readonly view?: GanttView;
   readonly changeView?: (view: GanttView) => void;
@@ -288,6 +443,9 @@ export function Gantt(props: {
   const strip = props.strip === true;
   const {rows, changeView} = props;
   const detail = props.detail ?? (rows.length > AGGREGATE_ABOVE ? 'aggregate' : 'full');
+  const foldable = rows.some(row => row.fold !== undefined);
+  const tagged = props.tagLabel !== undefined;
+  const entering = useEntering(rows.map(row => row.id));
   const win = useWindowed({
     count: rows.length,
     keyOf: index => rows[index]?.id ?? String(index),
@@ -298,8 +456,10 @@ export function Gantt(props: {
     props.playhead === undefined
       ? null
       : {'--gantt-from': percent(shareOf(props.playhead, view.from, view.to))};
-  const selectedIndex = rows.findIndex(row => row.selected === true);
-  const stop = Math.max(0, selectedIndex);
+  const stop = Math.max(
+    0,
+    rows.findIndex(row => row.selected === true),
+  );
   const drawn = stop >= win.first && stop < win.last;
   const focusStop = (event: FocusEvent<HTMLDivElement>): void => {
     if (event.target === event.currentTarget) win.reveal(stop, row => row.focus());
@@ -313,7 +473,12 @@ export function Gantt(props: {
     changeView(next);
   };
   return (
-    <div className="vs-gantt" data-strip={strip || undefined} data-size={props.size ?? 'default'}>
+    <div
+      className="vs-gantt"
+      data-strip={strip || undefined}
+      data-tags={tagged || undefined}
+      data-size={props.size ?? 'default'}
+    >
       {strip || changeView === undefined ? null : (
         <ZoomBar view={view} whole={whole} change={changeView} />
       )}
@@ -322,6 +487,7 @@ export function Gantt(props: {
           ticks={props.ticks}
           view={view}
           nameLabel={props.nameLabel}
+          tagLabel={props.tagLabel}
           figureLabel={props.figureLabel}
         />
       )}
@@ -337,33 +503,20 @@ export function Gantt(props: {
       >
         <div aria-hidden="true" style={{height: win.before}} />
         {rows.slice(win.first, win.last).map((row, offset) => (
-          <div
+          <RowView
             key={row.id}
-            className="vs-gantt-row"
-            role="option"
-            aria-label={row.label}
-            aria-posinset={win.first + offset + 1}
-            aria-setsize={rows.length}
-            tabIndex={win.first + offset === stop ? 0 : -1}
-            aria-selected={row.selected === true}
-            data-fresh={row.fresh === true || undefined}
-            onClick={row.press}
-            onKeyDown={event => pickKeys(event, row.press)}
-          >
-            {strip ? null : (
-              <span className="vs-gantt-name" title={row.label}>
-                <Guides guides={row.guides} />
-                <Text variant="code">{row.label}</Text>
-              </span>
-            )}
-            <span className="vs-gantt-track">
-              <GanttBar row={row} view={view} aggregate={detail === 'aggregate'} />
-              {playhead === null ? null : <span className="vs-gantt-playhead" style={playhead} />}
-            </span>
-            <span className="vs-gantt-figure" data-outcome={row.outcome} title={row.figureTitle}>
-              {row.figure ?? ''}
-            </span>
-          </div>
+            row={row}
+            index={win.first + offset}
+            size={rows.length}
+            stop={stop}
+            strip={strip}
+            foldable={foldable}
+            tagged={tagged}
+            entering={entering.has(row.id)}
+            view={view}
+            aggregate={detail === 'aggregate'}
+            playhead={playhead}
+          />
         ))}
         <div aria-hidden="true" style={{height: win.after}} />
       </div>

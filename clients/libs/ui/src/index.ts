@@ -64,6 +64,8 @@ export {Fact, FactLine} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
+  type GanttFold,
+  type GanttMark,
   type GanttRow,
   type GanttSegment,
   type GanttTick,

@@ -77,10 +77,12 @@ export function itemOf(fields: {
   output?: string;
   exit?: number;
   status?: ItemStatus;
+  /** What the tool was asked, when it is not a shell command made of `text`. */
+  call?: ToolCall['call'];
 }): Item {
   const status = fields.status ?? ItemStatus.FINISHED;
   const tool: ToolCall = create(ToolCallSchema, {
-    call: {case: 'shell', value: create(ShellCallSchema, {command: fields.text})},
+    call: fields.call ?? {case: 'shell', value: create(ShellCallSchema, {command: fields.text})},
     output: fields.output ?? '',
     ...(fields.exit === undefined ? {} : {exitCode: fields.exit}),
   });

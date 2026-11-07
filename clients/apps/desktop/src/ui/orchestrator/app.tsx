@@ -20,6 +20,7 @@ import {StartRunForm} from './start-run-form.js';
 const TITLE = 'Runs';
 const RUN_TITLES = {
   timeline: 'Search and activity',
+  agents: 'Agents',
   cost: 'Cost',
   handoffs: 'Handoffs and reports',
   ideas: 'Ideas',
