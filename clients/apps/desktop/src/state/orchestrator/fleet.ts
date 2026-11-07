@@ -131,6 +131,7 @@ const isReport = (message: Message): boolean =>
     handoffReminder: true,
     leadIdleReminder: true,
     reportDue: true,
+    catchUpRequest: true,
     runLimitReached: true,
   });
 
