@@ -121,7 +121,9 @@ describe('a toast', () => {
     const container = await mount(
       <ToastStack
         label="Notifications"
-        toasts={[{id: 'gone', tone: 'neutral', title: 'Removed host-a', open: false, action: 'Undo'}]}
+        toasts={[
+          {id: 'gone', tone: 'neutral', title: 'Removed host-a', open: false, action: 'Undo'},
+        ]}
         toggle={() => undefined}
         dismiss={() => undefined}
         act={id => acted.push(id)}
