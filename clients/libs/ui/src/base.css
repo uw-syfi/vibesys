@@ -167,6 +167,16 @@ body > div:first-child {
     linear-gradient(transparent, var(--bg) 70%) bottom / 100% var(--space-6) no-repeat local,
     linear-gradient(transparent, var(--scroll-shade)) bottom / 100% var(--space-4) no-repeat scroll;
 }
+/* `fill`: the body is the room between header and footer; the page scrolls only when it must. */
+.vs-page-scroll[data-fill] {
+  display: flex;
+  flex-direction: column;
+  background: none;
+}
+.vs-page-scroll[data-fill] > .vs-page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .vs-page-footer {
   flex: none;
   min-width: 0;
@@ -374,8 +384,14 @@ body > div:first-child {
     flex-wrap: wrap;
     padding-block: var(--space-1);
   }
+  /* Tabs in one row share it equally, so none is wider than its neighbour for its label. */
   .vs-section-nav .vs-sidebar-item {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    justify-content: center;
+  }
+  .vs-section-nav .vs-sidebar-link {
+    flex: 0 1 auto;
+    align-items: center;
   }
 }
 /* Steps: a list beside the content while wide; under one line the reader opens when narrower. */

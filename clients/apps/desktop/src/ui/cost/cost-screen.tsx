@@ -53,9 +53,7 @@ function Problem(props: {
   if (failed === null) return null;
   return (
     <Row gap="space-3" wrap>
-      <Text tone="warn" variant="small">
-        {props.words.fault(failed.kind)}
-      </Text>
+      <Chip label={props.words.fault(failed.kind)} tone="warn" dot />
       {failed.retryable ? (
         <Button text="Retry" label="Retry cost" variant="secondary" size="sm" press={props.retry} />
       ) : null}
@@ -137,8 +135,6 @@ export function CostScreen(props: {
   readonly words: CostWords;
   /** Where the reader is: the levels above this screen. */
   readonly trail: readonly Crumb[];
-  /** The state of every connection that is not working, above the figures. */
-  readonly notice: ReactNode;
   /** Where the read of the run's history stands, beside the status. */
   readonly reading: ReactNode;
   readonly retry: () => void;
@@ -159,7 +155,6 @@ export function CostScreen(props: {
         </>
       }
     >
-      {props.notice}
       <Problem status={props.status} words={props.words} retry={props.retry} />
       {model === undefined ? null : (
         <>

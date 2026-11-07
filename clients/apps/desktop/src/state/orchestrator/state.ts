@@ -59,10 +59,12 @@ export interface RunHistoryRead {
   readonly sequence: bigint;
   /** The last page was folded: the history is whole, but for what the host says it left out. */
   readonly complete: boolean;
-  /** The run has more turns than the host's timeline window, and the later ones were not served. */
-  readonly turnsLeftOut: boolean;
-  /** A viewer made more check-ins than the host serves, and the older ones were not served. */
-  readonly checkInsLeftOut: boolean;
+  /** How many of the run's turns the host did not serve (its timeline window and byte budget); zero when it served all. */
+  readonly turnsLeftOut: number;
+  /** How many check-ins the host did not serve; zero when it served all. */
+  readonly checkInsLeftOut: number;
+  /** How many agents the host did not serve, to fit its byte budget; zero when it served all. */
+  readonly agentsLeftOut: number;
 }
 
 export interface OrchestratorState {

@@ -32,11 +32,11 @@ describe('the words of a refusal', () => {
   it('say there is no model for an unnamed one, and list what is allowed', () => {
     const words = receiptRefusalWord(refused('', ['model-a', 'model-b']));
     expect(words).toContain('model-a, model-b');
-    expect(words).not.toContain('is not allowed');
+    expect(words).not.toContain('not allowed');
   });
 
   it('say the host cannot be read when the host lists nothing', () => {
-    expect(receiptRefusalWord(refused('model-a', []))).toContain('cannot be read');
+    expect(receiptRefusalWord(refused('model-a', []))).toContain('unreadable');
   });
 
   it('leave every other refusal to its own word', () => {

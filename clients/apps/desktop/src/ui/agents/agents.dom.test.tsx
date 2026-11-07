@@ -32,7 +32,6 @@ describe('the agents screen', () => {
         host="host-a"
         nowMs={scenario.endMs}
         trail={[]}
-        notice={null}
         reading={null}
         open={id => opened.push(id)}
       />,
@@ -100,7 +99,6 @@ describe('an agent page', () => {
         agent={agent}
         host="host-a"
         trail={[{id: 'runs', label: 'Runs'}]}
-        notice={null}
         reading={null}
         sendProgress={undefined}
         history={{
@@ -115,19 +113,81 @@ describe('an agent page', () => {
       />,
     );
 
-  it('reads as a centred column: where the agent sits and ran, its conversation, then the box to write in', () => {
+  it('reads in one scroll: where the agent sits and ran, its conversation filling the page, then the box to write in', () => {
     for (const agent of Object.values(state.agents).slice(0, 6)) {
       const screen = page(agent);
-      const column = screen.container.querySelector('[data-width="reading"]');
-      expect(column).not.toBeNull();
-      // Placement, then the conversation, then the message box, all inside the one column.
-      const sections = [...(column?.children ?? [])].map(each => each.textContent ?? '');
-      const placement = sections.findIndex(text => text.startsWith('Placement'));
-      const box = sections.findIndex(text => text.startsWith('Message'));
+      // The page's body does not scroll; the conversation takes what the cards leave and scrolls itself.
+      const body = screen.container.querySelector('.vs-page-scroll[data-fill] > .vs-page-body');
+      expect(body).not.toBeNull();
+      const sections = [...(body?.children ?? [])];
+      const text = sections.map(each => each.textContent ?? '');
+      const placement = text.findIndex(each => each.startsWith('Placement'));
+      const box = text.findIndex(each => each.startsWith('Message'));
+      const conversation = sections.findIndex(each =>
+        each.matches('.vs-conversation[data-size="fill"]'),
+      );
       expect(placement).toBeGreaterThanOrEqual(0);
-      expect(box).toBeGreaterThan(placement);
-      expect(column?.querySelector('.vs-conversation')).not.toBeNull();
-      expect(column?.textContent).toContain('host-a');
+      expect(conversation).toBeGreaterThan(placement);
+      expect(box).toBeGreaterThan(conversation);
+      // One conversation, drawn as a direct child of the body: no column of its own around it.
+      expect(screen.container.querySelectorAll('.vs-conversation')).toHaveLength(1);
+      expect(body?.textContent).toContain('host-a');
+      screen.unmount();
+    }
+  });
+
+  it('says in its header that older turns are not shown with the count the host gave, and only when it left some out', () => {
+    const agent = Object.values(state.agents)[0];
+    if (agent === undefined) throw new Error('the run has agents');
+    const read = (turnsLeftOut: number) => ({
+      ...state,
+      histories: {
+        ...state.histories,
+        [agent.runId]: {
+          sequence: 1n,
+          complete: true,
+          turnsLeftOut,
+          checkInsLeftOut: 0,
+          agentsLeftOut: 0,
+        },
+      },
+    });
+    const shown = (held: OrchestratorState) => {
+      const screen = mount(
+        <AgentPage
+          state={held}
+          nowMs={scenario.endMs}
+          agent={agent}
+          host="host-a"
+          trail={[{id: 'runs', label: 'Runs'}]}
+          reading={null}
+          sendProgress={undefined}
+          history={{
+            earlier: {_tag: 'Idle'},
+            wholes: {},
+            loadEarlier: () => undefined,
+            expand: () => undefined,
+          }}
+          send={() => undefined}
+          retrySend={() => undefined}
+          open={() => undefined}
+        />,
+      );
+      const text = screen.container.querySelector('.vs-page-meta')?.textContent ?? '';
+      screen.unmount();
+      return text;
+    };
+    expect(shown(read(12))).toContain('12 turns not shown');
+    expect(shown(read(0))).not.toContain('not shown');
+    expect(shown(state)).not.toContain('not shown');
+  });
+
+  it('counts its turns in the singular for one', () => {
+    for (const agent of Object.values(state.agents)) {
+      const screen = page(agent);
+      const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
+      expect(screen.container.textContent).not.toContain('1 turns');
+      expect(screen.container.textContent).toContain(`${turns} ${turns === 1 ? 'turn' : 'turns'}`);
       screen.unmount();
     }
   });

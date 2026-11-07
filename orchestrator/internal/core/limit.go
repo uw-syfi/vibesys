@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 // This file holds the limits of a run: what happens when one is reached.
 //
 // A time limit is the run's Deadline, reached by the timer armed at its start. A cost limit is
@@ -31,8 +33,10 @@ func (t *tx) reachLimit(id RunID, limit RunLimit) {
 		t.beginStop(t.s.runs[id], limit.stopReason())
 		return
 	}
+	// The message carries whole seconds, as the wire does, so the log replays the message that was
+	// posted: a cost limit is reached at whatever instant a turn's end arrives.
 	t.post(Message{Run: id, To: run.Lead, Body: RunLimitReached{
-		Limit: limit, Elapsed: t.in.At.Sub(run.CreatedAt), Spent: run.Usage.CostUSD, MaxCost: run.MaxCostUSD, Grace: LimitGrace,
+		Limit: limit, Elapsed: t.in.At.Sub(run.CreatedAt).Truncate(time.Second), Spent: run.Usage.CostUSD, MaxCost: run.MaxCostUSD, Grace: LimitGrace,
 	}})
 	t.effect(ArmTimer{Kind: TimerLimitGrace, Run: id, FireAt: t.in.At.Add(LimitGrace)})
 }
