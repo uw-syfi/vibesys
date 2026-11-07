@@ -198,6 +198,10 @@ export function applyChange(state: OrchestratorState, change: RunChange): Orches
       return {...next, messages: {...next.messages, [body.value.id]: body.value}};
     case 'receipt':
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
+    case 'checkIn':
+      // Catch me up: no screen reads a check-in yet, so the fold keeps none. The catch-up feature adds
+      // them here by id, and the snapshot's `checkIns` beside the runs.
+      return next;
     case undefined:
       return next;
     default:

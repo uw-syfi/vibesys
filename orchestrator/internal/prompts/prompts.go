@@ -119,6 +119,13 @@ type (
 		Judges      uint32
 	}
 
+	// catchUpRequestData is the window the operator wants a report on, in UTC, and its length in whole
+	// seconds and whole minutes: the words say seconds for a window of a minute or two.
+	catchUpRequestData struct {
+		Since, Until     time.Time
+		Seconds, Minutes uint32
+	}
+
 	// reportDueData is how often the operator expects a report and how many the lead has posted.
 	reportDueData struct {
 		EveryMinutes uint32
@@ -159,6 +166,11 @@ func dataOf(m core.Message) (string, any, error) {
 	case core.ReportDue:
 		// Whole seconds in a uint32, as the message is stored, like the idle reminder's.
 		return "report_due", reportDueData{EveryMinutes: uint32(b.Every/time.Second) / 60, Reports: b.Reports}, nil
+	case core.CatchUpRequest:
+		span := b.Until.Sub(b.Since)
+		return "catch_up_request", catchUpRequestData{
+			Since: b.Since.UTC(), Until: b.Until.UTC(), Seconds: uint32(span / time.Second), Minutes: uint32(span / time.Minute),
+		}, nil
 	case core.LeadIdleReminder:
 		// Whole seconds in a uint32, as the message is stored, so the minutes do not depend on
 		// whether the message was read back or is still the one that was built.

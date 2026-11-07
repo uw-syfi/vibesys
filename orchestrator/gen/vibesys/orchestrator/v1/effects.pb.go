@@ -106,6 +106,7 @@ type Effect struct {
 	//	*Effect_CloseSession
 	//	*Effect_ArmTimer
 	//	*Effect_ReleaseCheckouts
+	//	*Effect_ComputeWindowFacts
 	Body          isEffect_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -218,6 +219,15 @@ func (x *Effect) GetReleaseCheckouts() *ReleaseCheckouts {
 	return nil
 }
 
+func (x *Effect) GetComputeWindowFacts() *ComputeWindowFacts {
+	if x != nil {
+		if x, ok := x.Body.(*Effect_ComputeWindowFacts); ok {
+			return x.ComputeWindowFacts
+		}
+	}
+	return nil
+}
+
 type isEffect_Body interface {
 	isEffect_Body()
 }
@@ -250,6 +260,10 @@ type Effect_ReleaseCheckouts struct {
 	ReleaseCheckouts *ReleaseCheckouts `protobuf:"bytes,16,opt,name=release_checkouts,json=releaseCheckouts,proto3,oneof"`
 }
 
+type Effect_ComputeWindowFacts struct {
+	ComputeWindowFacts *ComputeWindowFacts `protobuf:"bytes,17,opt,name=compute_window_facts,json=computeWindowFacts,proto3,oneof"`
+}
+
 func (*Effect_LaunchSession) isEffect_Body() {}
 
 func (*Effect_StartTurn) isEffect_Body() {}
@@ -263,6 +277,8 @@ func (*Effect_CloseSession) isEffect_Body() {}
 func (*Effect_ArmTimer) isEffect_Body() {}
 
 func (*Effect_ReleaseCheckouts) isEffect_Body() {}
+
+func (*Effect_ComputeWindowFacts) isEffect_Body() {}
 
 // SessionRef names one session of one agent. The program holding a session refuses a stale one.
 type SessionRef struct {
@@ -686,6 +702,78 @@ func (x *ReleaseCheckouts) GetRunId() string {
 	return ""
 }
 
+// ComputeWindowFacts asks for the facts of a check-in's window to be worked out from the host's records
+// (the job log, the finished turns, the agents and the messages of the run). It is answered by
+// WindowFactsReady, or by WindowFactsFailed when a record the facts need cannot be read now, and the
+// check-in is pending until then.
+type ComputeWindowFacts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CheckInId     string                 `protobuf:"bytes,1,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Since         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=since,proto3" json:"since,omitempty"`
+	Until         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=until,proto3" json:"until,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ComputeWindowFacts) Reset() {
+	*x = ComputeWindowFacts{}
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ComputeWindowFacts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ComputeWindowFacts) ProtoMessage() {}
+
+func (x *ComputeWindowFacts) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ComputeWindowFacts.ProtoReflect.Descriptor instead.
+func (*ComputeWindowFacts) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ComputeWindowFacts) GetCheckInId() string {
+	if x != nil {
+		return x.CheckInId
+	}
+	return ""
+}
+
+func (x *ComputeWindowFacts) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *ComputeWindowFacts) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *ComputeWindowFacts) GetUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Until
+	}
+	return nil
+}
+
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 type ArmTimer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -700,7 +788,7 @@ type ArmTimer struct {
 
 func (x *ArmTimer) Reset() {
 	*x = ArmTimer{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -712,7 +800,7 @@ func (x *ArmTimer) String() string {
 func (*ArmTimer) ProtoMessage() {}
 
 func (x *ArmTimer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -725,7 +813,7 @@ func (x *ArmTimer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArmTimer.ProtoReflect.Descriptor instead.
 func (*ArmTimer) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ArmTimer) GetKind() TimerKind {
@@ -760,7 +848,7 @@ var File_vibesys_orchestrator_v1_effects_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\n" +
-	"%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xac\x04\n" +
+	"%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\x8d\x05\n" +
 	"\x06Effect\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12O\n" +
 	"\x0elaunch_session\x18\n" +
@@ -771,7 +859,8 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\tinterrupt\x18\r \x01(\v2\".vibesys.orchestrator.v1.InterruptH\x00R\tinterrupt\x12L\n" +
 	"\rclose_session\x18\x0e \x01(\v2%.vibesys.orchestrator.v1.CloseSessionH\x00R\fcloseSession\x12@\n" +
 	"\tarm_timer\x18\x0f \x01(\v2!.vibesys.orchestrator.v1.ArmTimerH\x00R\barmTimer\x12X\n" +
-	"\x11release_checkouts\x18\x10 \x01(\v2).vibesys.orchestrator.v1.ReleaseCheckoutsH\x00R\x10releaseCheckoutsB\r\n" +
+	"\x11release_checkouts\x18\x10 \x01(\v2).vibesys.orchestrator.v1.ReleaseCheckoutsH\x00R\x10releaseCheckouts\x12_\n" +
+	"\x14compute_window_facts\x18\x11 \x01(\v2+.vibesys.orchestrator.v1.ComputeWindowFactsH\x00R\x12computeWindowFactsB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"S\n" +
 	"\n" +
 	"SessionRef\x12\"\n" +
@@ -802,7 +891,12 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"2\n" +
 	"\x10ReleaseCheckouts\x12\x1e\n" +
-	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\x8c\x03\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xd1\x01\n" +
+	"\x12ComputeWindowFacts\x12'\n" +
+	"\vcheck_in_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcheckInId\x12\x1e\n" +
+	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x128\n" +
+	"\x05since\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x128\n" +
+	"\x05until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05until\"\x8c\x03\n" +
 	"\bArmTimer\x12B\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.TimerKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n" +
@@ -832,7 +926,7 @@ func file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_effects_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(TimerKind)(0),                // 0: vibesys.orchestrator.v1.TimerKind
 	(*Effect)(nil),                // 1: vibesys.orchestrator.v1.Effect
@@ -843,11 +937,12 @@ var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(*Interrupt)(nil),             // 6: vibesys.orchestrator.v1.Interrupt
 	(*CloseSession)(nil),          // 7: vibesys.orchestrator.v1.CloseSession
 	(*ReleaseCheckouts)(nil),      // 8: vibesys.orchestrator.v1.ReleaseCheckouts
-	(*ArmTimer)(nil),              // 9: vibesys.orchestrator.v1.ArmTimer
-	(AgentRole)(0),                // 10: vibesys.orchestrator.v1.AgentRole
-	(Harness)(0),                  // 11: vibesys.orchestrator.v1.Harness
-	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*ComputeWindowFacts)(nil),    // 9: vibesys.orchestrator.v1.ComputeWindowFacts
+	(*ArmTimer)(nil),              // 10: vibesys.orchestrator.v1.ArmTimer
+	(AgentRole)(0),                // 11: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 12: vibesys.orchestrator.v1.Harness
+	(*Message)(nil),               // 13: vibesys.orchestrator.v1.Message
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	3,  // 0: vibesys.orchestrator.v1.Effect.launch_session:type_name -> vibesys.orchestrator.v1.LaunchSession
@@ -855,25 +950,28 @@ var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	5,  // 2: vibesys.orchestrator.v1.Effect.steer:type_name -> vibesys.orchestrator.v1.Steer
 	6,  // 3: vibesys.orchestrator.v1.Effect.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
 	7,  // 4: vibesys.orchestrator.v1.Effect.close_session:type_name -> vibesys.orchestrator.v1.CloseSession
-	9,  // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
+	10, // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
 	8,  // 6: vibesys.orchestrator.v1.Effect.release_checkouts:type_name -> vibesys.orchestrator.v1.ReleaseCheckouts
-	2,  // 7: vibesys.orchestrator.v1.LaunchSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	10, // 8: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	11, // 9: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
-	2,  // 10: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	12, // 11: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 12: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	12, // 13: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 14: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	2,  // 15: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	0,  // 16: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
-	2,  // 17: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	13, // 18: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	9,  // 7: vibesys.orchestrator.v1.Effect.compute_window_facts:type_name -> vibesys.orchestrator.v1.ComputeWindowFacts
+	2,  // 8: vibesys.orchestrator.v1.LaunchSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	11, // 9: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	12, // 10: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
+	2,  // 11: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	13, // 12: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 13: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	13, // 14: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 15: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	2,  // 16: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	14, // 17: vibesys.orchestrator.v1.ComputeWindowFacts.since:type_name -> google.protobuf.Timestamp
+	14, // 18: vibesys.orchestrator.v1.ComputeWindowFacts.until:type_name -> google.protobuf.Timestamp
+	0,  // 19: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
+	2,  // 20: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	14, // 21: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_effects_proto_init() }
@@ -890,6 +988,7 @@ func file_vibesys_orchestrator_v1_effects_proto_init() {
 		(*Effect_CloseSession)(nil),
 		(*Effect_ArmTimer)(nil),
 		(*Effect_ReleaseCheckouts)(nil),
+		(*Effect_ComputeWindowFacts)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -897,7 +996,7 @@ func file_vibesys_orchestrator_v1_effects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_effects_proto_rawDesc), len(file_vibesys_orchestrator_v1_effects_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

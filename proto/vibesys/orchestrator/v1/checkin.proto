@@ -1,0 +1,171 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// Viewer is who pressed Catch me up. It is a label the client chose, one id for each install of the
+// app and a name to show: nothing authenticates it, the host trusts nobody more for it, and it grants
+// nothing. It reaches the host as call metadata (vibesys-viewer-id and vibesys-viewer-label), never
+// in a message body, so a body cannot claim to be someone else.
+message Viewer {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string label = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+}
+
+// CheckInState is how far a check-in has come. The facts are worked out after the press, so a
+// check-in is PENDING until they are, and READY from then on; it is FAILED when they could not be.
+enum CheckInState {
+  CHECK_IN_STATE_UNSPECIFIED = 0;
+  CHECK_IN_STATE_PENDING = 1;
+  CHECK_IN_STATE_READY = 2;
+  CHECK_IN_STATE_FAILED = 3;
+}
+
+// CheckIn is what one viewer's press of Catch me up recorded: everything that happened in a run since
+// that viewer's last check-in, as facts the host worked out and froze. The window [since, at) is the
+// span since the viewer's last check-in that did not fail (the start of the run for a first one) up to
+// the press, or to the end of the run when it is over. A viewer's check-ins in a run follow one
+// another with no gap and no overlap, which is why a failed one does not move the next one's start.
+//
+// A client shows these facts and works out none of them, so a past check-in reads the same every time
+// it is shown.
+message CheckIn {
+  option (buf.validate.message).cel = {
+    id: "check_in.window"
+    message: "since is not after at"
+    expression: "this.since <= this.at"
+  };
+  option (buf.validate.message).cel = {
+    id: "check_in.ready_has_facts"
+    message: "a ready check-in has its facts, and only a ready one does"
+    expression: "(this.state == 2) == has(this.facts)"
+  };
+  option (buf.validate.message).cel = {
+    id: "check_in.failed_has_failure"
+    message: "a failed check-in says why, and only a failed one does"
+    expression: "(this.state == 3) == (this.failure != '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "check_in.report_follows_ask"
+    message: "only a check-in that asked the lead for a report has one"
+    expression: "this.report_message_id == '' || this.ask_message_id != ''"
+  };
+
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  Viewer viewer = 3 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp since = 4 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp at = 5 [(buf.validate.field).required = true];
+  CheckInState state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Set exactly when the check-in is ready.
+  WindowFacts facts = 7;
+  // Set exactly when the check-in failed: what could not be read, in words for the viewer to see.
+  string failure = 8 [(buf.validate.field).string.max_len = 1000];
+  // The message that asked the lead for a report covering the window. Empty when the run could not be
+  // asked: it was over, stopping, past a limit or its lead had finished. How the request stands (queued,
+  // being read, consumed or rejected) is that message's delivery. The app shows "Writing" while the
+  // request is not final and report_message_id is empty.
+  string ask_message_id = 9;
+  // The report the lead posted in answer: the one it posted in the turn the request started. Empty
+  // until it does, and for a request the lead did not answer with one. The reports posted inside the
+  // window are in facts.
+  string report_message_id = 10;
+}
+
+// WindowFacts is what happened in a run during a window [since, at), worked out by the host from its
+// records and frozen in the check-in. Every figure is of the records dated inside the window, except
+// the objectives, which say where each stood at the two ends. A price no turn reported is absent, never
+// zero: a window with no priced turn has no cost_usd, and unpriced_turns says how many turns the cost
+// leaves out.
+message WindowFacts {
+  WindowSpend spend = 1 [(buf.validate.field).required = true];
+  // The agents whose start, and whose end, fall in the window. An agent resumed after it ended has no
+  // end to count.
+  uint32 agents_started = 2;
+  uint32 agents_ended = 3;
+  // The measurements the run's agents recorded in the window.
+  uint32 jobs_measured = 4;
+  // Each objective measured by the end of the window, in the order of the metric names.
+  repeated ObjectiveMove objectives = 5 [(buf.validate.field).repeated.max_items = 64];
+  // The numbers of the plans made in the window, and of the older plans edited in it, ascending.
+  repeated uint32 plans_created = 6 [(buf.validate.field).repeated.max_items = 1000];
+  repeated uint32 plans_changed = 7 [(buf.validate.field).repeated.max_items = 1000];
+  // The reports the lead posted in the window, in the order posted. The messages are in the run's
+  // snapshot, with their text.
+  repeated string report_message_ids = 8 [(buf.validate.field).repeated.max_items = 1000];
+}
+
+// WindowSpend is what the turns that ended inside a window cost.
+message WindowSpend {
+  option (buf.validate.message).cel = {
+    id: "window_spend.unpriced_turns"
+    message: "unpriced_turns cannot exceed turns"
+    expression: "this.unpriced_turns <= this.turns"
+  };
+
+  uint32 turns = 1;
+  uint32 unpriced_turns = 2;
+  // Tokens by kind, and the cost of the priced turns. Absent when no turn ended in the window.
+  Usage usage = 3;
+  // One entry for each type of agent that ended a turn in the window, in the order of the role names.
+  repeated RoleSpend roles = 4 [(buf.validate.field).repeated.max_items = 16];
+}
+
+// RoleSpend is what the turns of one type of agent cost in a window.
+message RoleSpend {
+  option (buf.validate.message).cel = {
+    id: "role_spend.unpriced_turns"
+    message: "unpriced_turns cannot exceed turns"
+    expression: "this.unpriced_turns <= this.turns"
+  };
+
+  AgentRole role = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint32 turns = 2;
+  uint32 unpriced_turns = 3;
+  Usage usage = 4;
+}
+
+// ObjectiveDirection is which way an objective improves.
+enum ObjectiveDirection {
+  OBJECTIVE_DIRECTION_UNSPECIFIED = 0;
+  OBJECTIVE_DIRECTION_MAXIMIZE = 1;
+  OBJECTIVE_DIRECTION_MINIMIZE = 2;
+}
+
+// ObjectiveMove is where one objective stood at the start of a window and at its end, among the
+// measurements the run made. An absent start means nothing was measured before the window.
+message ObjectiveMove {
+  string metric = 1 [(buf.validate.field).string.min_len = 1];
+  ObjectiveDirection direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  BestValue start = 3;
+  BestValue end = 4 [(buf.validate.field).required = true];
+}
+
+// BestValue is the best measurement of an objective up to a time, and the candidate that made it.
+message BestValue {
+  double value = 1 [(buf.validate.field).double.finite = true];
+  // The measure job, and the commit it measured: the candidate.
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  string commit = 3;
+  // When the measurement was recorded.
+  google.protobuf.Timestamp at = 4 [(buf.validate.field).required = true];
+}

@@ -8,6 +8,8 @@ type (
 	ItemID     string
 	MessageID  string
 	CommandID  string
+	CheckInID  string
+	ViewerID   string
 	JobID      string
 	TimerID    string
 	EffectID   string

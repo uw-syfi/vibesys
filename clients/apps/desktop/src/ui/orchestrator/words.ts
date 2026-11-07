@@ -116,6 +116,7 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.HANDOFF_NOT_YOURS]: 'That handoff does not belong to the agent\u2019s role.',
   [Refusal.TIME_LIMIT_REACHED]: 'The run reached its time limit and starts no new agent.',
   [Refusal.COST_LIMIT_REACHED]: 'The run reached its cost limit and starts no new agent.',
+  [Refusal.NO_VIEWER]: 'This app did not say who is looking.',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];

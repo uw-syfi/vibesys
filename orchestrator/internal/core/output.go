@@ -22,8 +22,8 @@ type Event struct {
 	Body   EventBody
 }
 
-// EventBody is a whole entity, so that a reader replaces by id: Run, Agent, Turn, Item, Message or
-// Receipt. The set is closed.
+// EventBody is a whole entity, so that a reader replaces by id: Run, Agent, Turn, Item, Message,
+// Receipt or CheckIn. The set is closed.
 type EventBody interface{ eventBody() }
 
 func (Run) eventBody()     {}
@@ -32,6 +32,7 @@ func (Turn) eventBody()    {}
 func (Item) eventBody()    {}
 func (Message) eventBody() {}
 func (Receipt) eventBody() {}
+func (CheckIn) eventBody() {}
 
 // Effect is one request for I/O. It is carried out at least once, after its events are committed.
 // The set is closed.
@@ -77,6 +78,13 @@ type (
 	// ReleaseCheckouts asks for the working copies the agents of a run that is over made to be removed,
 	// except those that hold work git does not have. It is answered by CheckoutsReleased.
 	ReleaseCheckouts struct{ Run RunID }
+	// ComputeWindowFacts asks for the facts of a check-in's window to be worked out from the host's
+	// records. It is answered by WindowFactsReady, or WindowFactsFailed when a record cannot be read.
+	ComputeWindowFacts struct {
+		CheckIn      CheckInID
+		Run          RunID
+		Since, Until time.Time
+	}
 	// ArmTimer asks for a TimerFired at FireAt.
 	ArmTimer struct {
 		Kind TimerKind
@@ -108,6 +116,9 @@ func (e CloseSession) ID() EffectID {
 
 // ID implements Effect.
 func (e ReleaseCheckouts) ID() EffectID { return EffectID("checkouts/" + string(e.Run)) }
+
+// ID implements Effect.
+func (e ComputeWindowFacts) ID() EffectID { return EffectID("window/" + string(e.CheckIn)) }
 
 // ID implements Effect.
 func (e ArmTimer) ID() EffectID { return EffectID("timer/" + string(e.Timer())) }

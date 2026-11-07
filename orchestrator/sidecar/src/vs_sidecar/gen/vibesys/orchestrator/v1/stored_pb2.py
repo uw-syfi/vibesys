@@ -24,12 +24,13 @@ _sym_db = _symbol_database.Default()
 
 from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
+from vs_sidecar.gen.vibesys.orchestrator.v1 import checkin_pb2 as vibesys_dot_orchestrator_dot_v1_dot_checkin__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import events_pb2 as vibesys_dot_orchestrator_dot_v1_dot_events__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as vibesys_dot_orchestrator_dot_v1_dot_orchestrator__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import stored_options_pb2 as vibesys_dot_orchestrator_dot_v1_dot_stored__options__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n\x0b\x41gentRecord\x12<\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentB\x06\xbaH\x03\xc8\x01\x01R\x05\x61gent\x12/\n\x0cresume_token\x18\x02 \x01(\x0c\x42\x0c\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\x0bresumeToken\"\xd8\x01\n\tRunRecord\x12\x36\n\x03run\x18\x01 \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.RunB\x06\xbaH\x03\xc8\x01\x01R\x03run\x12I\n\x08job_tool\x18\x02 \x01(\x0b\x32(.vibesys.orchestrator.v1.JobToolEndpointB\x04\x90\xbd\x18\x01R\x07jobTool\x12H\n\x0flast_summary_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x04\x90\xbd\x18\x01R\rlastSummaryAt\"\x95\x01\n\rReceiptRecord\x12\x42\n\x07receipt\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\x07receipt\x12@\n\x0e\x63ommand_digest\x18\x02 \x01(\tB\x19\xbaH\x12r\x10\x32\x0e^[0-9a-f]{64}$\x90\xbd\x18\x01R\rcommandDigest\"\x86\x01\n\x0fJobToolEndpoint\x12\x32\n\nexecutable\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\nexecutable\x12?\n\x11runtime_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\x10runtimeDirectory\"w\n\rSessionSource\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12!\n\x07session\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x07session\x12\x1f\n\x06offset\x18\x03 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x06offset\"\xa9\x05\n\x05\x45vent\x12#\n\x08sequence\x18\x01 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08sequence\x12\x15\n\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n\ncommand_id\x18\x03 \x01(\tR\tcommandId\x12\x32\n\x02\x61t\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12\x44\n\x06source\x18\x05 \x01(\x0b\x32&.vibesys.orchestrator.v1.SessionSourceB\x04\x90\xbd\x18\x01R\x06source\x12\x45\n\x0brun_updated\x18\n \x01(\x0b\x32\".vibesys.orchestrator.v1.RunRecordH\x00R\nrunUpdated\x12K\n\ragent_updated\x18\x0b \x01(\x0b\x32$.vibesys.orchestrator.v1.AgentRecordH\x00R\x0c\x61gentUpdated\x12\x42\n\x0cturn_updated\x18\x0c \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x0bturnUpdated\x12\x42\n\x0citem_updated\x18\r \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x0bitemUpdated\x12K\n\x0fmessage_updated\x18\x0e \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12S\n\x10receipt_recorded\x18\x0f \x01(\x0b\x32&.vibesys.orchestrator.v1.ReceiptRecordH\x00R\x0freceiptRecordedB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%vibesys/orchestrator/v1/checkin.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n\x0b\x41gentRecord\x12<\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentB\x06\xbaH\x03\xc8\x01\x01R\x05\x61gent\x12/\n\x0cresume_token\x18\x02 \x01(\x0c\x42\x0c\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\x0bresumeToken\"\xd8\x01\n\tRunRecord\x12\x36\n\x03run\x18\x01 \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.RunB\x06\xbaH\x03\xc8\x01\x01R\x03run\x12I\n\x08job_tool\x18\x02 \x01(\x0b\x32(.vibesys.orchestrator.v1.JobToolEndpointB\x04\x90\xbd\x18\x01R\x07jobTool\x12H\n\x0flast_summary_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x04\x90\xbd\x18\x01R\rlastSummaryAt\"\x95\x01\n\rReceiptRecord\x12\x42\n\x07receipt\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\x07receipt\x12@\n\x0e\x63ommand_digest\x18\x02 \x01(\tB\x19\xbaH\x12r\x10\x32\x0e^[0-9a-f]{64}$\x90\xbd\x18\x01R\rcommandDigest\"\x86\x01\n\x0fJobToolEndpoint\x12\x32\n\nexecutable\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\nexecutable\x12?\n\x11runtime_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\x10runtimeDirectory\"w\n\rSessionSource\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12!\n\x07session\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x07session\x12\x1f\n\x06offset\x18\x03 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x06offset\"\xf7\x05\n\x05\x45vent\x12#\n\x08sequence\x18\x01 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08sequence\x12\x15\n\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n\ncommand_id\x18\x03 \x01(\tR\tcommandId\x12\x32\n\x02\x61t\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12\x44\n\x06source\x18\x05 \x01(\x0b\x32&.vibesys.orchestrator.v1.SessionSourceB\x04\x90\xbd\x18\x01R\x06source\x12\x45\n\x0brun_updated\x18\n \x01(\x0b\x32\".vibesys.orchestrator.v1.RunRecordH\x00R\nrunUpdated\x12K\n\ragent_updated\x18\x0b \x01(\x0b\x32$.vibesys.orchestrator.v1.AgentRecordH\x00R\x0c\x61gentUpdated\x12\x42\n\x0cturn_updated\x18\x0c \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x0bturnUpdated\x12\x42\n\x0citem_updated\x18\r \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x0bitemUpdated\x12K\n\x0fmessage_updated\x18\x0e \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12S\n\x10receipt_recorded\x18\x0f \x01(\x0b\x32&.vibesys.orchestrator.v1.ReceiptRecordH\x00R\x0freceiptRecorded\x12L\n\x10\x63heck_in_updated\x18\x10 \x01(\x0b\x32 .vibesys.orchestrator.v1.CheckInH\x00R\x0e\x63heckInUpdatedB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -69,16 +70,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EVENT'].fields_by_name['at']._serialized_options = b'\272H\003\310\001\001'
   _globals['_EVENT'].fields_by_name['source']._loaded_options = None
   _globals['_EVENT'].fields_by_name['source']._serialized_options = b'\220\275\030\001'
-  _globals['_AGENTRECORD']._serialized_start=255
-  _globals['_AGENTRECORD']._serialized_end=379
-  _globals['_RUNRECORD']._serialized_start=382
-  _globals['_RUNRECORD']._serialized_end=598
-  _globals['_RECEIPTRECORD']._serialized_start=601
-  _globals['_RECEIPTRECORD']._serialized_end=750
-  _globals['_JOBTOOLENDPOINT']._serialized_start=753
-  _globals['_JOBTOOLENDPOINT']._serialized_end=887
-  _globals['_SESSIONSOURCE']._serialized_start=889
-  _globals['_SESSIONSOURCE']._serialized_end=1008
-  _globals['_EVENT']._serialized_start=1011
-  _globals['_EVENT']._serialized_end=1692
+  _globals['_AGENTRECORD']._serialized_start=294
+  _globals['_AGENTRECORD']._serialized_end=418
+  _globals['_RUNRECORD']._serialized_start=421
+  _globals['_RUNRECORD']._serialized_end=637
+  _globals['_RECEIPTRECORD']._serialized_start=640
+  _globals['_RECEIPTRECORD']._serialized_end=789
+  _globals['_JOBTOOLENDPOINT']._serialized_start=792
+  _globals['_JOBTOOLENDPOINT']._serialized_end=926
+  _globals['_SESSIONSOURCE']._serialized_start=928
+  _globals['_SESSIONSOURCE']._serialized_end=1047
+  _globals['_EVENT']._serialized_start=1050
+  _globals['_EVENT']._serialized_end=1809
 # @@protoc_insertion_point(module_scope)

@@ -339,6 +339,7 @@ type Event struct {
 	//	*Event_ItemUpdated
 	//	*Event_MessageUpdated
 	//	*Event_ReceiptRecorded
+	//	*Event_CheckInUpdated
 	Body          isEvent_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -470,6 +471,15 @@ func (x *Event) GetReceiptRecorded() *ReceiptRecord {
 	return nil
 }
 
+func (x *Event) GetCheckInUpdated() *CheckIn {
+	if x != nil {
+		if x, ok := x.Body.(*Event_CheckInUpdated); ok {
+			return x.CheckInUpdated
+		}
+	}
+	return nil
+}
+
 type isEvent_Body interface {
 	isEvent_Body()
 }
@@ -500,6 +510,11 @@ type Event_ReceiptRecorded struct {
 	ReceiptRecorded *ReceiptRecord `protobuf:"bytes,15,opt,name=receipt_recorded,json=receiptRecorded,proto3,oneof"`
 }
 
+type Event_CheckInUpdated struct {
+	// The whole check-in. It has no private part, so it is the public message.
+	CheckInUpdated *CheckIn `protobuf:"bytes,16,opt,name=check_in_updated,json=checkInUpdated,proto3,oneof"`
+}
+
 func (*Event_RunUpdated) isEvent_Body() {}
 
 func (*Event_AgentUpdated) isEvent_Body() {}
@@ -512,11 +527,13 @@ func (*Event_MessageUpdated) isEvent_Body() {}
 
 func (*Event_ReceiptRecorded) isEvent_Body() {}
 
+func (*Event_CheckInUpdated) isEvent_Body() {}
+
 var File_vibesys_orchestrator_v1_stored_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n" +
+	"$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%vibesys/orchestrator/v1/checkin.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n" +
 	"\vAgentRecord\x12<\n" +
 	"\x05agent\x18\x01 \x01(\v2\x1e.vibesys.orchestrator.v1.AgentB\x06\xbaH\x03\xc8\x01\x01R\x05agent\x12/\n" +
 	"\fresume_token\x18\x02 \x01(\fB\f\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\vresumeToken\"\xd8\x01\n" +
@@ -535,7 +552,7 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"\rSessionSource\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
 	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\x12\x1f\n" +
-	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\xa9\x05\n" +
+	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\xf7\x05\n" +
 	"\x05Event\x12#\n" +
 	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n" +
@@ -550,7 +567,8 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"\fturn_updated\x18\f \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\vturnUpdated\x12B\n" +
 	"\fitem_updated\x18\r \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\vitemUpdated\x12K\n" +
 	"\x0fmessage_updated\x18\x0e \x01(\v2 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12S\n" +
-	"\x10receipt_recorded\x18\x0f \x01(\v2&.vibesys.orchestrator.v1.ReceiptRecordH\x00R\x0freceiptRecordedB\r\n" +
+	"\x10receipt_recorded\x18\x0f \x01(\v2&.vibesys.orchestrator.v1.ReceiptRecordH\x00R\x0freceiptRecorded\x12L\n" +
+	"\x10check_in_updated\x18\x10 \x01(\v2 .vibesys.orchestrator.v1.CheckInH\x00R\x0echeckInUpdatedB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
@@ -580,6 +598,7 @@ var file_vibesys_orchestrator_v1_stored_proto_goTypes = []any{
 	(*Turn)(nil),                  // 10: vibesys.orchestrator.v1.Turn
 	(*Item)(nil),                  // 11: vibesys.orchestrator.v1.Item
 	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
+	(*CheckIn)(nil),               // 13: vibesys.orchestrator.v1.CheckIn
 }
 var file_vibesys_orchestrator_v1_stored_proto_depIdxs = []int32{
 	6,  // 0: vibesys.orchestrator.v1.AgentRecord.agent:type_name -> vibesys.orchestrator.v1.Agent
@@ -595,11 +614,12 @@ var file_vibesys_orchestrator_v1_stored_proto_depIdxs = []int32{
 	11, // 10: vibesys.orchestrator.v1.Event.item_updated:type_name -> vibesys.orchestrator.v1.Item
 	12, // 11: vibesys.orchestrator.v1.Event.message_updated:type_name -> vibesys.orchestrator.v1.Message
 	2,  // 12: vibesys.orchestrator.v1.Event.receipt_recorded:type_name -> vibesys.orchestrator.v1.ReceiptRecord
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 13: vibesys.orchestrator.v1.Event.check_in_updated:type_name -> vibesys.orchestrator.v1.CheckIn
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_stored_proto_init() }
@@ -607,6 +627,7 @@ func file_vibesys_orchestrator_v1_stored_proto_init() {
 	if File_vibesys_orchestrator_v1_stored_proto != nil {
 		return
 	}
+	file_vibesys_orchestrator_v1_checkin_proto_init()
 	file_vibesys_orchestrator_v1_events_proto_init()
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
 	file_vibesys_orchestrator_v1_stored_options_proto_init()
@@ -617,6 +638,7 @@ func file_vibesys_orchestrator_v1_stored_proto_init() {
 		(*Event_ItemUpdated)(nil),
 		(*Event_MessageUpdated)(nil),
 		(*Event_ReceiptRecorded)(nil),
+		(*Event_CheckInUpdated)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

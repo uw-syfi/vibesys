@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"net"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
@@ -37,12 +39,23 @@ type Session struct {
 	Token   string
 }
 
+// Viewer says which install of an operator's client is calling: an id that stays the same for the
+// install, and a name to show. The daemon takes both as a label, to say whose a check-in is, and
+// authenticates neither.
+type Viewer struct {
+	ID    string
+	Label string
+}
+
 // Options are what Dial needs besides a Dialer.
 type Options struct {
 	// BinaryVersion is the release version, for display.
 	BinaryVersion string
 	// Session is set by an agent's tools and left empty by an operator.
 	Session *Session
+	// Viewer is set by an operator's client, and is sent on every call. A call to catch up needs it, and
+	// the daemon refuses one without it, naming the field (see BadField).
+	Viewer *Viewer
 }
 
 // Client is a connection to the daemon.
@@ -78,8 +91,15 @@ func Dial(ctx context.Context, dial Dialer, opts Options) (*Client, error) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return dial(ctx) }),
 	}
+	var pairs []string
 	if s := opts.Session; s != nil {
-		md := metadata.Pairs("vibesys-agent", s.Agent, "vibesys-session", fmt.Sprint(s.Session), "vibesys-token", s.Token)
+		pairs = append(pairs, "vibesys-agent", s.Agent, "vibesys-session", fmt.Sprint(s.Session), "vibesys-token", s.Token)
+	}
+	if v := opts.Viewer; v != nil {
+		pairs = append(pairs, protocol.MetaViewerID, v.ID, protocol.MetaViewerLabel, v.Label)
+	}
+	if len(pairs) > 0 {
+		md := metadata.Pairs(pairs...)
 		dialOpts = append(dialOpts,
 			grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, o ...grpc.CallOption) error {
 				return inv(metadata.NewOutgoingContext(ctx, md), method, req, reply, cc, o...)
@@ -110,6 +130,21 @@ func Dial(ctx context.Context, dial Dialer, opts Options) (*Client, error) {
 
 // Close ends the connection.
 func (c *Client) Close() error { return c.conn.Close() }
+
+// BadField names the field of the call that an error says is wrong or missing, such as the viewer
+// metadata a catch-up needs, and reports false for an error that names none.
+func BadField(err error) (string, bool) {
+	st, ok := status.FromError(err)
+	if !ok {
+		return "", false
+	}
+	for _, d := range st.Details() {
+		if bad, ok := d.(*errdetails.BadRequest); ok && len(bad.GetFieldViolations()) > 0 {
+			return bad.GetFieldViolations()[0].GetField(), true
+		}
+	}
+	return "", false
+}
 
 // Dispatch carries out a command. A retry with the same command gets the same receipt.
 func (c *Client) Dispatch(ctx context.Context, cmd *pb.Command) (*pb.Receipt, error) {

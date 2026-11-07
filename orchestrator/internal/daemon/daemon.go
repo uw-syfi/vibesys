@@ -348,6 +348,8 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		return err
 	case core.ReleaseCheckouts:
 		return d.releaseCheckouts(ctx, b)
+	case core.ComputeWindowFacts:
+		return d.computeWindowFacts(b)
 	case core.LaunchSession:
 		if !isLive(state, b.Session) {
 			// The session ended before this launch was carried out, such as one that did not open in
