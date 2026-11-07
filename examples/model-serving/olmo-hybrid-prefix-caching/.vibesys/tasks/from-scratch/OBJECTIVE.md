@@ -59,9 +59,10 @@ It sends ten fixed prompts to the running server's `/v1/completions` as token ID
 prompt's own `max_tokens`, and EOS honored (no `ignore_eos`). Each `choices[0].text`
 must equal the Hugging Face `transformers` greedy reference for that prompt exactly
 (bfloat16, eager attention, decoded with `skip_special_tokens=True`), stored in
-`reference_outputs.json` beside the checker. All ten must match. The checker needs
-only the standard library; run it against your server with
-`python .vibesys/shared/accuracy_checker/checker.py --url http://localhost:8000`.
+`reference_outputs.json` beside the checker. Where the plain-torch and
+flash-linear-attention kernels give different references, either text passes. All ten
+must match. The checker needs only the standard library; run it against your server
+with `python .vibesys/shared/accuracy_checker/checker.py --url http://localhost:8000`.
 
 ## Notes
 
