@@ -12,7 +12,7 @@ const THREE_DIGITS = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 3
 const EXACT = new Intl.NumberFormat('en-US', {maximumFractionDigits: 6});
 
 /** A result as a few digits: `2.31`, `318`, `15.6K`. */
-export const figure = (value: number): string =>
+const figure = (value: number): string =>
   Math.abs(value) >= 10_000 ? COMPACT.format(value) : THREE_DIGITS.format(value);
 
 /** A cost in dollars: cents below a hundred, whole dollars above. */

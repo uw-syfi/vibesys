@@ -309,7 +309,10 @@ describe('the fleet of runs', () => {
         for (const row of shown(hosts, NO_FLEET_FILTER)) {
           const host = hosts.find(each => each.key === row.host.key);
           const reports = Object.values(host?.data.messages ?? {})
-            .filter(message => message.runId === row.runId && message.body.case === 'report')
+            .filter(
+              message =>
+                message.runId === row.runId && message.id.startsWith(`${row.runId}-report-`),
+            )
             .map(message => Number(message.at?.seconds ?? 0n) * 1000);
           expect(row.lastReportMs).toBe(reports.length === 0 ? null : Math.max(...reports));
         }
