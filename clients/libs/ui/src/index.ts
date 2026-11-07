@@ -10,6 +10,7 @@ export {AppFrame} from './components/app-frame.js';
 export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-chart.js';
 export {type BarColumn, type BarFigures, type BarRow, BarRows} from './components/bar-rows.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
+export {Breadcrumb, type Crumb} from './components/breadcrumb.js';
 export {
   Button,
   type ButtonAction,
@@ -74,6 +75,7 @@ export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
   type GanttFold,
+  type GanttLegend,
   type GanttMark,
   type GanttRow,
   type GanttSegment,
@@ -92,6 +94,7 @@ export {
   Page,
   type PageState,
   type PageWidth,
+  pageArrival,
   pageState,
   Reserve,
   Row,
@@ -159,7 +162,7 @@ export {
   type RowTrail,
 } from './components/pick-list.js';
 export {RailFrame, RailItem} from './components/rail.js';
-export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
+export {type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
 export {

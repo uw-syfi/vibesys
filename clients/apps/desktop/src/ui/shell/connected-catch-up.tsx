@@ -43,28 +43,21 @@ export function ConnectedCatchUp(props: {
   const run = view?.state.runs[runId];
   if (host === undefined || view === null || run === undefined) {
     return (
-      <Page key="catch-up" state="loading" header={<Text variant="title">Catch me up</Text>}>
+      <Page key="catch-up" width="wide" state="loading" title="Catch me up">
         <Text tone="muted">Connecting.</Text>
       </Page>
     );
   }
   const {session} = host;
   return (
-    <Page
-      key="catch-up"
-      width="fill"
-      state="ready"
-      header={<Text variant="title">{`${run.task}: Catch me up`}</Text>}
-    >
-      <CatchUpScreen
-        run={run.task}
-        rows={viewerId === null ? [] : rewind(view.state, runId, viewerId)}
-        press={view.press}
-        catchUp={() => dispatch(session.catchUp.press(runId), () => undefined)}
-        goRuns={() => go({type: 'close-run'})}
-        goRun={() => go({type: 'show', view: 'report'})}
-        words={words}
-      />
-    </Page>
+    <CatchUpScreen
+      run={run.task}
+      rows={viewerId === null ? [] : rewind(view.state, runId, viewerId)}
+      press={view.press}
+      catchUp={() => dispatch(session.catchUp.press(runId), () => undefined)}
+      goRuns={() => go({type: 'close-run'})}
+      goRun={() => go({type: 'show', view: 'report'})}
+      words={words}
+    />
   );
 }

@@ -132,6 +132,30 @@ describe('the transcript screen', () => {
   });
 });
 
+describe('the turns of a transcript', () => {
+  it('each has a divider before it, the first included, and the conversation opens on one', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({min: 1, max: 40}),
+        fc.integer({min: 1, max: 12}),
+        fc.boolean(),
+        (seed, subagents, live) => {
+          const {scenario, state} = worldOf(seed, subagents, live);
+          for (const agent of Object.values(state.agents)) {
+            const data = must(transcript(state, agent.id, scenario.endMs));
+            const kinds = itemsOf(data, contextOf(state, agent.id)).map(row => row.kind);
+            const dividers = kinds.filter(kind => kind === 'rule').length;
+            expect(dividers).toBe(data.entries.filter(entry => entry.kind === 'turn').length);
+            // No row of a turn precedes its divider: the conversation opens on the first one.
+            if (kinds.length > 0) expect(kinds[0]).toBe('rule');
+          }
+        },
+      ),
+      {numRuns: 15},
+    );
+  });
+});
+
 function must<T>(value: T | null): T {
   if (value === null) throw new Error('the agent is in the state');
   return value;

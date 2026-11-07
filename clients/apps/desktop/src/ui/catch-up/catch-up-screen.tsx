@@ -1,12 +1,12 @@
 import {
   BarRows,
-  Breadcrumb,
   Button,
   Card,
   Chip,
   EmptyState,
   Grid,
   Markdown,
+  Page,
   PickList,
   PickRow,
   Row,
@@ -84,7 +84,7 @@ function CatchUpButton(props: {
 }): JSX.Element {
   return (
     <Button
-      text="Catch me up"
+      text="New check-in"
       variant="primary"
       press={props.catchUp}
       {...(props.press?._tag === 'Pressing' ? {disabledReason: 'Sending.', quietReason: true} : {})}
@@ -279,18 +279,18 @@ export function CatchUpScreen(props: {
   const [picked, setPicked] = useState<string | null>(null);
   const shown = props.rows.find(read => read.checkIn.id === picked) ?? props.rows[0];
   return (
-    <Stack gap="space-4">
-      <Row gap="space-3" wrap justify="between">
-        <Breadcrumb
-          label="Where you are"
-          items={[
-            {id: 'runs', label: 'Runs', press: props.goRuns},
-            {id: 'run', label: props.run, press: props.goRun},
-            {id: 'catch-up', label: 'Catch me up'},
-          ]}
-        />
-        <CatchUpButton press={props.press} catchUp={props.catchUp} />
-      </Row>
+    <Page
+      key="catch-up"
+      width="wide"
+      state="ready"
+      trail={[
+        {id: 'runs', label: 'Runs', press: props.goRuns},
+        {id: 'run', label: props.run, press: props.goRun},
+        {id: 'catch-up', label: 'Catch me up'},
+      ]}
+      title="Catch me up"
+      actions={<CatchUpButton press={props.press} catchUp={props.catchUp} />}
+    >
       <div role="status" aria-live="polite" aria-label="Catch me up: outcome">
         <PressLine press={props.press} words={props.words} again={props.catchUp} />
       </div>
@@ -298,7 +298,7 @@ export function CatchUpScreen(props: {
         <EmptyState title="No check-ins yet" />
       ) : (
         <Split
-          asideFirst
+          asideAtStart
           aside={
             <Card section="Check-ins" flush>
               <PickList
@@ -319,6 +319,6 @@ export function CatchUpScreen(props: {
           main={<Window model={catchUpModel(shown, props.words)} />}
         />
       )}
-    </Stack>
+    </Page>
   );
 }

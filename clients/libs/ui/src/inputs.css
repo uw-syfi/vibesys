@@ -36,11 +36,13 @@
 .vs-button[data-full] {
   width: 100%;
 }
-.vs-button[aria-label] {
+/* An icon alone is a square. A button with words keeps its padding, whatever name it is also given:
+   `label` adds an `aria-label` to a button that has text, which must not make it a square. */
+.vs-button[data-icon-only] {
   padding: 0;
   min-width: var(--control);
 }
-.vs-button[aria-label][data-size="sm"] {
+.vs-button[data-icon-only][data-size="sm"] {
   min-width: var(--control-sm);
 }
 .vs-button[data-variant="primary"] {

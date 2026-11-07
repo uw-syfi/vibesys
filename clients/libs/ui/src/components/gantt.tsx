@@ -402,6 +402,63 @@ function RowView(props: {
   );
 }
 
+/** The words of a Gantt's key, one for each thing its bars can show; the caller's, in its own vocabulary. */
+export interface GanttLegend {
+  /** A bar that is still growing. */
+  readonly live: string;
+  readonly done: string;
+  readonly failed: string;
+  /** The line across a bar where a result came back. */
+  readonly returned: string;
+  /** The tag column's own word. */
+  readonly tag: string;
+  /** The stack drawn under a bar that holds several rows. */
+  readonly folded: string;
+}
+
+/** The key to what a Gantt's bars say, drawn with the bars' own shades. */
+function LegendKey(props: {readonly words: GanttLegend}): JSX.Element {
+  const {words} = props;
+  const item = (key: string, sample: JSX.Element, label: string): JSX.Element => (
+    <li key={key} className="vs-gantt-legend-item">
+      {sample}
+      <Text variant="small" tone="muted">
+        {label}
+      </Text>
+    </li>
+  );
+  const bar = (kind: string, outcome: string, stacked?: boolean): JSX.Element => (
+    <span
+      className="vs-gantt-legend-bar"
+      data-outcome={outcome}
+      data-stacked={stacked === true || undefined}
+      aria-hidden="true"
+    >
+      <span className="vs-gantt-legend-fill" data-kind={kind} />
+    </span>
+  );
+  return (
+    <ul className="vs-gantt-legend" aria-label="Key to the bars">
+      {item('live', bar('solid', 'live'), words.live)}
+      {item('done', bar('grey', 'muted'), words.done)}
+      {item('failed', bar('err', 'err'), words.failed)}
+      {item(
+        'returned',
+        <span className="vs-gantt-legend-mark" aria-hidden="true" />,
+        words.returned,
+      )}
+      {item(
+        'tag',
+        <span className="vs-gantt-tag vs-gantt-legend-tag" aria-hidden="true">
+          {'\u00a0'}
+        </span>,
+        words.tag,
+      )}
+      {item('folded', bar('grey', 'muted', true), words.folded)}
+    </ul>
+  );
+}
+
 /**
  * Rows of bars on one time axis from `from` to `to`, a tick row above them, and a `playhead` line
  * through every row. Rows are the options of a windowed listbox (only the rows near the visible
@@ -437,6 +494,8 @@ export function Gantt(props: {
   readonly detail?: 'full' | 'aggregate';
   /** `fill` takes the height of its container; the default is at most a thread's. */
   readonly size?: 'default' | 'fill';
+  /** A key above the rows to what the bars, the lines on them, the tags and the stacks mean, in these words. */
+  readonly legend?: GanttLegend;
 }): JSX.Element {
   const whole: GanttView = {from: props.from, to: props.to};
   const view = props.view ?? whole;
@@ -479,6 +538,7 @@ export function Gantt(props: {
       data-tags={tagged || undefined}
       data-size={props.size ?? 'default'}
     >
+      {props.legend === undefined ? null : <LegendKey words={props.legend} />}
       {strip || changeView === undefined ? null : (
         <ZoomBar view={view} whole={whole} change={changeView} />
       )}

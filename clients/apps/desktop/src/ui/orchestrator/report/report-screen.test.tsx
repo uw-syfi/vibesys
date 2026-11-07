@@ -16,6 +16,7 @@ import {
   type Freshness,
   type OrchestratorState,
   type RunView,
+  runReport,
 } from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
 import {NO_PRICES, PRICED_AND_UNPRICED} from '../../../testing/orchestrator/cost-views.js';
@@ -28,8 +29,9 @@ import {
   serveSummaries,
   withReport,
 } from '../../../testing/orchestrator/index.js';
-import {RunScreen} from '../run-screen.js';
+import {agentNames} from '../names.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
+import {ReportScreen} from './report-screen.js';
 
 installDom();
 
@@ -83,24 +85,22 @@ function stateOf(world: World): OrchestratorState {
   return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
 
-function render(
-  world: World,
-  options: {freshness?: Freshness; costFeed?: CostFeedSnapshot; view?: RunView} = {},
-) {
+function render(world: World, options: {freshness?: Freshness; costFeed?: CostFeedSnapshot} = {}) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
+  const state = stateOf(world);
+  const nowMs = world.live === false ? END + 60_000 : NOW;
+  const report = runReport(state, RUN, nowMs);
+  if (report === undefined) throw new Error('the fixture has its run');
   const screen = mount(
-    <RunScreen
-      state={stateOf(world)}
+    <ReportScreen
+      report={report}
       host="host-a"
-      runId={RUN}
-      nowMs={world.live === false ? END + 60_000 : NOW}
+      nowMs={nowMs}
       freshness={options.freshness ?? 'live'}
       staleForMs={options.freshness === undefined || options.freshness === 'live' ? null : 90_000}
+      cost={state.costs[RUN]}
       costFeed={options.costFeed ?? {status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}
-      view={options.view ?? 'report'}
-      agentId={null}
-      agentPanel={null}
       stopProgress={undefined}
       stop={() => {
         probe.stops += 1;
@@ -112,8 +112,11 @@ function render(
       goRuns={() => {
         probe.runs += 1;
       }}
-      show={view => probe.shown.push(view)}
-      pick={() => undefined}
+      openAgents={() => probe.shown.push('agents')}
+      openCost={() => probe.shown.push('cost')}
+      names={agentNames(state, RUN)}
+      notice={null}
+      reading={null}
     />,
   );
   return {screen, probe};
@@ -126,7 +129,85 @@ const cardText = (root: HTMLElement, heading: string): string =>
   )?.textContent ?? '';
 
 const cards = (root: HTMLElement): string[] =>
-  [...root.querySelectorAll('section.vs-card > h2')].map(heading => heading.textContent ?? '');
+  [...root.querySelectorAll('section.vs-card h2')].map(heading => heading.textContent ?? '');
+
+describe('the report as a page of the run', () => {
+  it('opens on the trail, then the title, with Catch me up and Stop run in one group and no best line', () => {
+    const {screen} = render({});
+    const header = screen.container.querySelector('.vs-page-header');
+    expect(header?.firstElementChild?.classList.contains('vs-page-trail')).toBe(true);
+    expect(header?.querySelector('h1')?.textContent).toBe(stateOf({}).runs[RUN]?.task ?? 'a title');
+    // What is best so far is the objective tiles', so the header does not say it a second time.
+    expect(header?.textContent).not.toMatch(/\bBest\b/);
+    // Both actions are the standard size, in the one group; the danger one is the outline, the
+    // leading one is the filled button.
+    const actions = [...(screen.container.querySelectorAll('.vs-page-actions .vs-button') ?? [])];
+    expect(actions.map(button => button.textContent)).toEqual(['Catch me up', 'Stop run']);
+    expect(actions.map(button => button.getAttribute('data-size'))).toEqual(['md', 'md']);
+    expect(actions.map(button => button.getAttribute('data-variant'))).toEqual([
+      'primary',
+      'danger',
+    ]);
+    screen.unmount();
+  });
+
+  it('puts the objective tiles on the tracks the charts below them are on', () => {
+    const {screen} = render({});
+    const tiles = screen.container.querySelector('section.vs-tiles[aria-label="Objectives"]');
+    expect(tiles?.getAttribute('data-track')).toBe('chart');
+    expect(tiles?.querySelectorAll('article.vs-tile').length).toBeGreaterThan(1);
+    expect(screen.container.querySelector('.vs-chart-columns')).not.toBeNull();
+    screen.unmount();
+  });
+
+  it('calls the agents of a run that is over the agents it had, none of them working, with no rate of spend', () => {
+    const live = render({});
+    expect(cards(live.screen.container)).toContain('Live agents');
+    expect(cardText(live.screen.container, 'Live agents')).toContain('working');
+    expect(cardText(live.screen.container, 'Spend')).toContain('Last hour');
+    live.screen.unmount();
+    const over = render({live: false});
+    expect(cards(over.screen.container)).not.toContain('Live agents');
+    expect(cardText(over.screen.container, 'Agents')).not.toContain('working');
+    expect(cardText(over.screen.container, 'Agents')).toContain('in all');
+    expect(cardText(over.screen.container, 'Spend')).not.toContain('Last hour');
+    expect(cardText(over.screen.container, 'Spend')).not.toContain('/h');
+    over.screen.unmount();
+  });
+
+  it('says why a spend is a floor beside it, and gives the links of its cards one place and one look', () => {
+    const {screen} = render({});
+    expect(cardText(screen.container, 'Spend')).toMatch(/≥ \$318[\s\S]*41 unpriced/);
+    const links = [...screen.container.querySelectorAll('.vs-card-head .vs-button')];
+    expect(links.map(link => link.textContent)).toEqual(['Agents', 'Details']);
+    // One style, in the heading's line of each card.
+    expect(new Set(links.map(link => link.getAttribute('data-variant')))).toEqual(
+      new Set(['quiet']),
+    );
+    expect(new Set(links.map(link => link.getAttribute('data-size')))).toEqual(new Set(['sm']));
+    screen.unmount();
+  });
+
+  it('sets what the lead needs from the person apart, in the warning tone', () => {
+    const {screen} = render({});
+    const ask = [...screen.container.querySelectorAll('.vs-chip')].find(
+      chip => chip.textContent === 'Needs you',
+    );
+    expect(ask?.getAttribute('data-tone')).toBe('warn');
+    expect(ask?.parentElement?.textContent).toContain('Should quantization stay paused?');
+    screen.unmount();
+  });
+
+  it('writes the age of the report and the time the run has run in the words of the Runs list', () => {
+    const {screen} = render({});
+    expect(cardText(screen.container, 'Lead summary')).toContain('Updated 23m ago');
+    expect(screen.container.querySelector('.vs-page-meta')?.textContent).toMatch(
+      /host-a(\d+d \d+h|\d+h \d+m|\d+m|\d+s)Started/,
+    );
+    expect(screen.text()).not.toMatch(/\d+ (s|min|h|d) ago/);
+    screen.unmount();
+  });
+});
 
 describe('the header of a report', () => {
   it('has Catch me up beside Stop while the run lives, and the press goes to the run', () => {
@@ -184,7 +265,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
-  it('shows one number for an objective’s best in the header, its tile and its chart, whatever the head scored', () => {
+  it('shows one number for an objective’s best in its tile and its chart, whatever the head scored', () => {
     const {screen} = render({});
     const search = stateOf({}).searches[RUN];
     const objectives = search?.series ?? [];
@@ -195,18 +276,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
       const unit = bound?.versions.at(-1)?.unit ?? null;
       const best = series.points.filter(point => point.bestSoFar).at(-1)?.value ?? Number.NaN;
       const figure = formatFigure(best);
-      // The header says it in the hover of its figure, the tile and the chart panel in their text.
-      const headerFigure = screen.container.querySelector(
-        `[title="${withUnit(formatExact(best), unit)}"]`,
-      );
-      expect(headerFigure).not.toBeNull();
-      // Beside the figure, the header gives the best's share of the bound, not the head's.
-      const share = Math.round(bound?.bestPercentOfBound ?? Number.NaN);
-      expect(headerFigure?.parentElement?.textContent).toContain(`${share}% of bound`);
-      const headShare = Math.round(bound?.percentOfBound ?? Number.NaN);
-      if (headShare !== share) {
-        expect(headerFigure?.parentElement?.textContent).not.toContain(`${headShare}% of bound`);
-      }
+      // The tile and the chart panel say it in their text.
       const tile = [...screen.container.querySelectorAll('.vs-tile')].find(each =>
         each.textContent?.includes(series.objective),
       );
@@ -276,7 +346,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
     const {screen} = render({});
     const summary = screen.container.querySelector('section.vs-card')?.textContent ?? '';
     expect(summary).toContain('Throughput is 2.3 times the baseline');
-    expect(summary).toContain('Updated 23 min ago');
+    expect(summary).toContain('Updated 23m ago');
     expect(summary).toContain('Fused expert dispatch landed.');
     expect(summary).toContain('Needs you');
     screen.unmount();
@@ -435,7 +505,7 @@ describe('what the header says about freshness', () => {
     const chip = [...screen.container.querySelectorAll('.vs-chip')].find(
       each => each.textContent === 'Stale',
     );
-    expect(chip?.getAttribute('aria-description')).toContain('Last current 1 min ago');
+    expect(chip?.getAttribute('aria-description')).toContain('Last current 1m ago');
     screen.unmount();
   });
 

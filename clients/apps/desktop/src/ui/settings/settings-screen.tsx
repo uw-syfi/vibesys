@@ -155,15 +155,7 @@ export function SettingsScreen(props: {
   readonly resources: readonly ResourceRow[];
 }): JSX.Element {
   return (
-    <Page
-      width="wide"
-      state="ready"
-      header={
-        <Text variant="title" as="h1">
-          Settings
-        </Text>
-      }
-    >
+    <Page width="wide" state="ready" title="Settings">
       <SectionLayout
         label="Settings sections"
         sections={
