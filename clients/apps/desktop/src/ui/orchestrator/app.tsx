@@ -84,6 +84,7 @@ export function OrchestratorApp(props: {
   if (route.screen === 'runs') {
     return (
       <Page
+        key="runs"
         width="wide"
         state={pageState(hosts.length === 0)}
         header={
@@ -119,7 +120,7 @@ export function OrchestratorApp(props: {
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
     return (
-      <Page state="loading" header={<Text variant="title">{TITLE}</Text>}>
+      <Page key="run" state="loading" header={<Text variant="title">{TITLE}</Text>}>
         <Text tone="muted">Connecting.</Text>
       </Page>
     );
@@ -145,7 +146,7 @@ export function OrchestratorApp(props: {
         ]),
   ];
   return (
-    <Page width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
+    <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />
         <RunScreen

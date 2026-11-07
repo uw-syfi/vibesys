@@ -4,6 +4,11 @@ import {expect, it} from '@effect/vitest';
 import * as Schema from 'effect/Schema';
 import ts from 'typescript';
 import {GATEWAY_CHANNEL, type GatewayPortBridge} from '../core/gateway-codec.js';
+import {
+  PREFERENCES_READ_CHANNEL,
+  PREFERENCES_WRITE_CHANNEL,
+  type PreferencesBridge,
+} from '../core/settings/preferences-codec.js';
 
 interface Preload {
   readonly GATEWAY_PRELOAD_CHANNEL: string;
@@ -14,6 +19,10 @@ interface Preload {
       close(): void;
     };
   }) => GatewayPortBridge;
+  readonly PREFERENCES_PRELOAD_CHANNELS: {readonly read: string; readonly write: string};
+  readonly createPreferencesPreload: (ipc: {
+    invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  }) => PreferencesBridge;
 }
 
 /**
@@ -41,7 +50,12 @@ function loadPreload(): Preload {
   return module.exports as Preload;
 }
 
-const {createGatewayPreload, GATEWAY_PRELOAD_CHANNEL} = loadPreload();
+const {
+  createGatewayPreload,
+  GATEWAY_PRELOAD_CHANNEL,
+  createPreferencesPreload,
+  PREFERENCES_PRELOAD_CHANNELS,
+} = loadPreload();
 
 class Channel {
   received: (value: unknown) => void = () => {};
@@ -108,4 +122,76 @@ it.prop(
 
 it('the production channel name is the one main serves', () => {
   expect(GATEWAY_PRELOAD_CHANNEL).toBe(GATEWAY_CHANNEL);
+});
+
+it('the preferences channel names are the ones main serves', () => {
+  expect(PREFERENCES_PRELOAD_CHANNELS).toEqual({
+    read: PREFERENCES_READ_CHANNEL,
+    write: PREFERENCES_WRITE_CHANNEL,
+  });
+});
+
+/** An `invoke` that answers each call as the test says, and records what it was asked. */
+function invoking(answer: (channel: string) => Promise<unknown>) {
+  const asked: {channel: string; args: unknown[]}[] = [];
+  return {
+    asked,
+    ipc: {
+      invoke: (channel: string, ...args: unknown[]) => {
+        asked.push({channel, args});
+        return answer(channel);
+      },
+    },
+  };
+}
+
+const settled = () => new Promise<void>(resolve => queueMicrotask(resolve));
+
+it('a preferences read ends in exactly one callback: bytes, nothing, or a failure', async () => {
+  for (const [reply, expected] of [
+    [Promise.resolve(REPLY), {bytes: REPLY, errors: 0}],
+    [Promise.resolve(null), {bytes: null, errors: 0}],
+    [Promise.resolve('text'), {bytes: undefined, errors: 1}],
+    [Promise.reject(new Error('denied')), {bytes: undefined, errors: 1}],
+  ] as const) {
+    const {ipc, asked} = invoking(() => reply);
+    const got: (Uint8Array | null)[] = [];
+    const errors: string[] = [];
+    createPreferencesPreload(ipc).read(
+      bytes => got.push(bytes),
+      error => errors.push(error),
+    );
+    await settled();
+    await settled();
+    expect(asked.map(call => call.channel)).toEqual([PREFERENCES_READ_CHANNEL]);
+    expect(got).toEqual(expected.bytes === undefined ? [] : [expected.bytes]);
+    expect(errors).toHaveLength(expected.errors);
+  }
+});
+
+it('a preferences write sends the bytes on the write channel and ends in one callback', async () => {
+  const sent = invoking(() => Promise.resolve(undefined));
+  let done = 0;
+  createPreferencesPreload(sent.ipc).write(
+    REQUEST,
+    () => {
+      done += 1;
+    },
+    () => {
+      done += 100;
+    },
+  );
+  await settled();
+  expect(sent.asked).toEqual([{channel: PREFERENCES_WRITE_CHANNEL, args: [REQUEST]}]);
+  expect(done).toBe(1);
+  const refused = invoking(() => Promise.reject(new Error('refused')));
+  const errors: string[] = [];
+  createPreferencesPreload(refused.ipc).write(
+    REQUEST,
+    () => undefined,
+    error => errors.push(error),
+  );
+  await settled();
+  await settled();
+  expect(errors).toEqual(['refused']);
 });

@@ -85,17 +85,23 @@ const ORCHESTRATOR_PROTO = [
   '/node_modules/@vibesys/orchestrator-proto/',
 ];
 
+// The design system's token tables: plain data and pure functions with no DOM (`@vibesys/ui/tokens`).
+// A fold reads the theme table at run time (the appearance fold, which resolves the theme a mode
+// shows), and a mirrored table would repeat it.
+const DESIGN_TOKENS = ['^libs/ui/src/tokens/', '/node_modules/@vibesys/ui/(?:src|dist)/tokens/'];
+
 function desktopAppRules() {
   return [
     {
       // A fold is a function from data to data that a test calls directly. Only a type, which the
       // compiler erases, may name another module, except the generated orchestrator protocol,
-      // whose enums a fold reads at run time.
+      // whose enums a fold reads at run time, and the design tokens, whose theme table the
+      // appearance fold reads.
       name: 'desktop-state-imports-nothing-outside-itself',
       severity: 'error',
       from: {path: DESKTOP_PART('state'), pathNot: TEST_FILE},
       to: {
-        pathNot: [DESKTOP_PART('state'), ...ORCHESTRATOR_PROTO],
+        pathNot: [DESKTOP_PART('state'), ...ORCHESTRATOR_PROTO, ...DESIGN_TOKENS],
         dependencyTypesNot: ['type-only'],
       },
     },
@@ -159,6 +165,21 @@ function desktopAppRules() {
         pathNot: TEST_FILE,
       },
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+    },
+    {
+      // A feature (a subfolder of `state`, `core`, `ui` or `testing` named for what it does) is
+      // reached only by the shell, which composes the features, and by its own folders. Two
+      // features that need one another's facts meet in the shell, which passes them as props.
+      name: 'desktop-features-do-not-import-each-other',
+      severity: 'error',
+      from: {
+        path: '^apps/desktop/src/(?:state|core|ui)/(orchestrator|settings)/',
+        pathNot: TEST_FILE,
+      },
+      to: {
+        path: '^apps/desktop/src/(?:state|core|ui|testing)/(?:orchestrator|settings|shell)/',
+        pathNot: '^apps/desktop/src/(?:state|core|ui|testing)/$1/',
+      },
     },
     {
       name: 'desktop-production-code-does-not-import-testing',

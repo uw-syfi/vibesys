@@ -344,6 +344,9 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    border-color var(--duration-fast) var(--easing);
 }
 .vs-swatch:hover {
   background: var(--panel-2);

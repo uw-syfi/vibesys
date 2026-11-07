@@ -121,6 +121,10 @@
   font-weight: var(--text-body-weight);
   cursor: pointer;
   position: relative;
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    border-color var(--duration-fast) var(--easing),
+    color var(--duration-fast) var(--easing);
 }
 /* The chosen segment is bolder: its bold label is reserved unseen under every segment's, so a segment
    is as wide chosen as not and the control is the same box whichever is chosen. */

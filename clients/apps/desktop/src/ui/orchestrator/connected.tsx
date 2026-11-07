@@ -9,10 +9,9 @@ import {Page, Text} from '@vibesys/ui';
 import type * as Effect from 'effect/Effect';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
-import {type JSX, useMemo, useReducer, useState} from 'react';
+import {type JSX, useMemo} from 'react';
 import type {HostSession, Intent} from '../../core/index.js';
-import type {CommandProgress, FeedStatus} from '../../state/index.js';
-import {initialRoute, routeReducer} from '../../state/index.js';
+import type {CommandProgress, FeedStatus, Route, RouteAction} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
 import {sendIntent, startIntent, stopIntent} from './intents.js';
@@ -34,21 +33,16 @@ interface Issued {
   readonly id: string;
 }
 
-interface Issues {
+/** The commands this window has issued, kept above the screens so leaving them forgets none. */
+export interface Issues {
   readonly start: Issued | undefined;
   readonly stops: Readonly<Record<string, Issued>>;
   readonly sends: Readonly<Record<string, Issued>>;
 }
 
-const NONE: Issues = {start: undefined, stops: {}, sends: {}};
+export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}};
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
-
-/** The run streams of every host, followed while this is mounted. */
-const watchRuns = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
-  Atom.make(get => {
-    for (const host of hosts) get(host.session.runs.watch);
-  });
 
 /** One agent's stream on its host, followed while this is mounted. */
 const watchAgent = (
@@ -108,16 +102,21 @@ const snapshots = (
 
 type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send'>;
 
+/**
+ * The runs of every host, one open at a time. The run streams are followed by the window (the
+ * shell mounts them), and where the person is comes from the shell's navigation.
+ */
 export function ConnectedApp(props: {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
+  readonly route: Route;
+  readonly go: (action: RouteAction) => void;
+  readonly issues: Issues;
+  readonly setIssues: (update: (all: Issues) => Issues) => void;
 }): JSX.Element {
-  const {hosts, dispatch} = props;
-  const [route, go] = useReducer(routeReducer, initialRoute);
-  const [issues, setIssues] = useState<Issues>(NONE);
+  const {hosts, dispatch, route, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
-  useAtomMount(useMemo(() => watchRuns(hosts), [hosts]));
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
   const clock = useAtomValue(nowMs);
   const view = useAtomValue(

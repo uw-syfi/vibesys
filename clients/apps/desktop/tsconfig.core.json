@@ -9,5 +9,9 @@
   },
   "include": ["src/core/**/*.ts"],
   "exclude": ["src/core/**/*.test.ts"],
-  "references": [{"path": "./tsconfig.state.json"}, {"path": "../../libs/orchestrator-proto/tsconfig.lib.json"}]
+  "references": [
+    {"path": "./tsconfig.state.json"},
+    {"path": "../../libs/orchestrator-proto/tsconfig.lib.json"},
+    {"path": "../../libs/ui/tsconfig.tokens.json"}
+  ]
 }

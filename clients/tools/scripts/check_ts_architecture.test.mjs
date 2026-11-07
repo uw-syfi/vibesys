@@ -108,6 +108,9 @@ const VALID_FILES = {
   'apps/desktop/src/main/local-host.ts': "import 'node:net';\n",
   'apps/desktop/src/preload/index.cts':
     "import 'electron';\nimport type {} from '../core/index.js';\n",
+  // Features: the shell composes them, and one does not import another.
+  'apps/desktop/src/ui/settings/words.ts': 'export {};\n',
+  'apps/desktop/src/ui/shell/shell.ts': "import '../settings/words.js';\n",
   'apps/desktop/src/testing/index.ts': "import '../core/index.js';\n",
   'apps/desktop/src/core/index.test.ts':
     "import '../testing/index.js';\nimport '@effect/vitest';\n",
@@ -141,6 +144,20 @@ const RULE_CASES = [
   {
     rule: 'desktop-state-never-imports-effect',
     files: {'apps/desktop/src/state/fold.ts': "import type {} from 'effect/Option';\n"},
+  },
+  {
+    rule: 'desktop-features-do-not-import-each-other',
+    files: {
+      'apps/desktop/src/ui/orchestrator/words.ts': 'export {};\n',
+      'apps/desktop/src/ui/settings/words.ts': "import '../orchestrator/words.js';\n",
+    },
+  },
+  {
+    rule: 'desktop-features-do-not-import-each-other',
+    files: {
+      'apps/desktop/src/ui/shell/shell.ts': 'export {};\n',
+      'apps/desktop/src/ui/settings/words.ts': "import '../shell/shell.js';\n",
+    },
   },
   {
     rule: 'desktop-core-does-not-reach-the-shells',

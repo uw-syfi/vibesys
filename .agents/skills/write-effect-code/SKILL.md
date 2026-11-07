@@ -44,6 +44,9 @@ Adding a client package is described in "Adding a package" of
    `desktop-main-and-preload-do-not-import-ui` and
    `desktop-production-code-does-not-import-testing` fail a misplaced import, and
    `check_package_graph` (`external-dependencies`) confines `effect` to those entries.
+   Group the code by feature inside each of those folders (`shell`, `settings`,
+   `orchestrator`), and let a feature reach another only through its exports.
+   Unenforced: whether code belongs to a feature is judgment.
 2. **Import Effect modules as namespaces from their subpath**:
    `import * as Effect from 'effect/Effect'`. The Grit rule `effect-namespace-imports`
    rejects the `effect` barrel and named imports of a module's members.

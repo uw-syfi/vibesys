@@ -14,7 +14,7 @@ import * as Scope from 'effect/Scope';
 import {app, BrowserWindow, ipcMain, session, type WebContents} from 'electron';
 import {hostKey} from '../state/host.js';
 import {controlDirectory} from './control-directory.js';
-import {nodeReadFile} from './files.js';
+import {nodeReadFile, nodeWriteFile} from './files.js';
 import {installGatewayIpc, type RunCall} from './gateway.js';
 import {NodeGatewayArtifacts} from './gateway-artifacts.js';
 import {makeGatewayCalls} from './gateway-calls.js';
@@ -22,6 +22,7 @@ import {makeGatewayDialers} from './gateway-dialers.js';
 import {makeLinkPool} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
+import {installPreferencesIpc, makePreferencesStore} from './preferences.js';
 import {NodeProcessSpawner} from './process.js';
 import {quit} from './quit.js';
 import {savedHosts} from './saved-hosts.js';
@@ -128,14 +129,23 @@ async function start(): Promise<void> {
   lockDownSession();
   const {calls, saved} = await wire(app.getPath('userData'));
   const windows = new Set<number>();
+  const own = {
+    has: (id: number) => windows.has(id),
+    isAppUrl: (url: string) => isAppPage(UI_DIRECTORY, url),
+  };
   installGatewayIpc(ipcMain, {
     calls,
     run,
-    admits: (event: PortEvent) =>
-      isOwnWindow(event, {
-        has: id => windows.has(id),
-        isAppUrl: url => isAppPage(UI_DIRECTORY, url),
-      }),
+    admits: (event: PortEvent) => isOwnWindow(event, own),
+  });
+  installPreferencesIpc(ipcMain, {
+    store: makePreferencesStore(
+      app.getPath('userData'),
+      {read: nodeReadFile, write: nodeWriteFile},
+      log,
+    ),
+    own,
+    run: effect => Effect.runPromise(effect),
   });
   app.on('web-contents-created', (_event, contents) => confine(contents));
   const window = openWindow(startupHosts(asked, [...saved]));

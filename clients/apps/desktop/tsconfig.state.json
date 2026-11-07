@@ -18,6 +18,9 @@
   "references": [
     {
       "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.tokens.json"
     }
   ]
 }

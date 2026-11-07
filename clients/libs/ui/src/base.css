@@ -281,6 +281,9 @@ body > div:first-child {
   align-items: start;
   gap: var(--space-5);
 }
+.vs-section-nav .vs-sidebar-item[data-active] {
+  border-color: var(--accent);
+}
 .vs-section-nav {
   position: sticky;
   top: 0;
@@ -292,6 +295,10 @@ body > div:first-child {
 }
 .vs-section-content {
   min-width: 0;
+}
+/* Another section's content arrives as a screen does, sooner and shorter: it is a part of the screen. */
+.vs-section-content > * {
+  animation: vs-arrive var(--duration-base) var(--easing-enter);
 }
 /* A list of numbered steps carries an answer under each: room for the longest to stay on one line. */
 @container (min-width: 42rem) {
