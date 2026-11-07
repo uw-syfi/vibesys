@@ -42,6 +42,36 @@ func (ExecRunner) Run(ctx context.Context, program string, args, env []string) (
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
+// versionArgv is the question of which versions a tool speaks. It is answered from the binary, with
+// no daemon, so it can be asked of any tool at any time.
+const versionArgv = "--version --json"
+
+// toolSpeaks is what a job tool says it speaks.
+type toolSpeaks struct {
+	// Protocol is the revision of the CLI contract the tool speaks.
+	Protocol uint32
+	// Build is the tool's identity, as it reports it.
+	Build string
+}
+
+// askWhatToolSpeaks runs the tool's version question. A tool that cannot be run is that error of the
+// operating system. A tool that runs and does not answer with its versions is a *JobToolTooOldError:
+// an older build takes the question for no command and prints its usage.
+func askWhatToolSpeaks(ctx context.Context, runner Runner, tool string) (toolSpeaks, error) {
+	stdout, _, err := runner.Run(ctx, tool, strings.Fields(versionArgv), nil)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+		return toolSpeaks{}, err
+	}
+	versions := &cliv1.BuildVersions{}
+	if err == nil {
+		err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(stdout, versions)
+	}
+	if err != nil {
+		return toolSpeaks{}, &JobToolTooOldError{Tool: tool}
+	}
+	return toolSpeaks{Protocol: versions.GetProtocolVersion(), Build: versions.GetBinaryVersion()}, nil
+}
+
 // ExecEnsurer asks the recorded tool, never a PATH lookup, in the host's own environment. An empty
 // runtime directory lets the tool choose, which is how a run's endpoint is first learned.
 type ExecEnsurer struct {

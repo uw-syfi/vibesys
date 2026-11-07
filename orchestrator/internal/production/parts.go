@@ -4,13 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/encoding/protojson"
-
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -94,20 +90,12 @@ func (p Parts) JobTool() (string, pb.PartOrigin, error) {
 func (p Parts) JobToolSpeaks(ctx context.Context, tool string) error {
 	ctx, cancel := context.WithTimeout(ctx, jobToolSpeaksBound)
 	defer cancel()
-	stdout, _, err := p.Runner.Run(ctx, tool, []string{"--version", "--json"}, nil)
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+	speaks, err := askWhatToolSpeaks(ctx, p.Runner, tool)
+	if err != nil {
 		return err
 	}
-	versions := &cliv1.BuildVersions{}
-	if err == nil {
-		err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(stdout, versions)
-	}
-	if err != nil {
-		// An older tool takes --version with another word for no command and prints its usage.
-		return &JobToolTooOldError{Tool: tool}
-	}
-	if versions.GetProtocolVersion() < RequiredJobToolProtocol {
-		return &JobToolTooOldError{Tool: tool, Speaks: versions.GetProtocolVersion(), Build: versions.GetBinaryVersion()}
+	if speaks.Protocol < RequiredJobToolProtocol {
+		return &JobToolTooOldError{Tool: tool, Speaks: speaks.Protocol, Build: speaks.Build}
 	}
 	return nil
 }

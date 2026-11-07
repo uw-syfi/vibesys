@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 var full = core.Commit("0123456789abcdef0123456789abcdef01234567")
@@ -140,7 +141,7 @@ func TestVersionJSONSaysWhatTheBuildSpeaks(t *testing.T) {
 	if r.code != exitOK || r.stderr != "" || protojson.Unmarshal([]byte(r.stdout), &got) != nil {
 		t.Fatalf("result = %+v", r)
 	}
-	want := production.BuildVersions(version)
+	want := wire.BuildVersions(version, production.CurrentVersions())
 	if !proto.Equal(&got, want) || got.GetProtocolVersion() < core.TaskSchema02Since {
 		t.Errorf("printed %v, want %v at protocol %d or above", &got, want, core.TaskSchema02Since)
 	}
