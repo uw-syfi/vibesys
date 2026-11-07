@@ -6,7 +6,7 @@ import type {Duplex} from 'node:stream';
 import * as Effect from 'effect/Effect';
 import type * as Scope from 'effect/Scope';
 import {type HostKey, hostFromKey} from '../state/host.js';
-import {GatewayFailed, type LinkFailed} from './errors.js';
+import {GatewayFailed, type GatewayRefused, type LinkFailed} from './errors.js';
 import {bridge} from './gateway-bridge.js';
 import type {GatewayDialer} from './gateway-connection.js';
 import {GATEWAY_CONNECT_SCRIPT, GatewayArtifacts, provisionGateway} from './gateway-provision.js';
@@ -56,7 +56,11 @@ export const makeGatewayDialers = (
                 .pipe(Effect.mapError(error => new GatewayFailed({message: error.message})));
               return yield* bridge(process, link, say);
             }),
-          ) satisfies Effect.Effect<Duplex, GatewayFailed | LinkFailed, Scope.Scope>,
+          ) satisfies Effect.Effect<
+            Duplex,
+            GatewayFailed | GatewayRefused | LinkFailed,
+            Scope.Scope
+          >,
       };
     };
   });

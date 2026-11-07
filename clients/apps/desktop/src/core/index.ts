@@ -4,10 +4,8 @@ export {type AgentView, makeAgentView} from './agent-view.js';
 export {
   type CallOptions,
   type EffectClient,
-  FIRST_FRAME_DEADLINE,
   makeClient,
   STREAM_CAPACITY,
-  UNARY_DEADLINE,
 } from './client/make-client.js';
 export {type Commands, type Intent, makeCommands} from './commands.js';
 export {
@@ -28,6 +26,7 @@ export {
   isRetryable,
   NoBridge,
   NotFound,
+  Refused,
   Rejected,
   RpcStatus,
   rpcStatusOf,

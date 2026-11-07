@@ -9,6 +9,7 @@ import {
   isRetryable,
   NoBridge,
   NotFound,
+  Refused,
   Rejected,
   RpcStatus,
   TransportFailed,
@@ -29,6 +30,7 @@ const everyError: ReadonlyArray<AppError> = [
   new NotFound({detail: 'agent'}),
   new Unimplemented({detail: 'method'}),
   new Rejected({status: RpcStatus.PERMISSION_DENIED, detail: 'no'}),
+  new Refused({cause: 'state-network-filesystem', detail: 'the state directory is on nfs'}),
 ];
 
 describe('the fault a screen sees', () => {

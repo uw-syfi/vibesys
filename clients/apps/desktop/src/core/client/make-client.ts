@@ -15,13 +15,13 @@ import {decodeResponse, encodeRequest} from './validate.js';
 
 /** The most unread frames a stream holds before it is cut (one snapshot is one frame). */
 export const STREAM_CAPACITY = 2048;
-/** The longest a unary call waits: the gateway ends it at the same age. */
-export const UNARY_DEADLINE: Duration.Input = '15 seconds';
-/** The longest a stream waits for its first frame. */
-export const FIRST_FRAME_DEADLINE: Duration.Input = '15 seconds';
-
 export interface CallOptions {
-  /** How long a unary call, or a stream's first frame, may take. */
+  /**
+   * How long a unary call, or a stream's first frame, may take, when the caller wants a wall bound
+   * (a command's receipt). Without one the call is bounded by what it is waiting for: the main
+   * process ends a call that heard nothing for a window and a link that went silent, and measures
+   * a reply that is still arriving by its progress, so a slow healthy reply is never cut here.
+   */
   readonly deadline?: Duration.Input;
 }
 
@@ -74,46 +74,53 @@ export const makeClient = <M extends GenServiceMethods>(
 
     const unary = (method: DescMethod) => (init: unknown, options?: CallOptions) => {
       const type = method.output.typeName;
-      const deadline = options?.deadline ?? UNARY_DEADLINE;
+      const deadline = options?.deadline;
       return Effect.gen(function* () {
         const request = yield* encodeRequest(method.input, init as MessageInitShape<DescMessage>);
-        const reply = yield* transport
+        const call = transport
           .unary({host, method: methodPath(service, method), request})
-          .pipe(
-            Effect.mapError(error => fromTransportError(error, type)),
-            Effect.timeoutOrElse({
-              duration: deadline,
-              orElse: () =>
-                Effect.fail(
-                  new DeadlineExceeded({
-                    origin: 'client',
-                    waited: Duration.fromInputUnsafe(deadline),
-                  }),
-                ),
-            }),
-          );
+          .pipe(Effect.mapError(error => fromTransportError(error, type)));
+        const reply = yield* deadline === undefined
+          ? call
+          : call.pipe(
+              Effect.timeoutOrElse({
+                duration: deadline,
+                orElse: () =>
+                  Effect.fail(
+                    new DeadlineExceeded({
+                      origin: 'client',
+                      waited: Duration.fromInputUnsafe(deadline),
+                    }),
+                  ),
+              }),
+            );
         return yield* decodeResponse(method.output, reply);
       });
     };
 
     const serverStream = (method: DescMethod) => (init: unknown, options?: CallOptions) => {
       const type = method.output.typeName;
-      const deadline = options?.deadline ?? FIRST_FRAME_DEADLINE;
+      const deadline = options?.deadline;
       return Stream.unwrap(
         encodeRequest(method.input, init as MessageInitShape<DescMessage>).pipe(
-          Effect.map(request =>
-            timeoutFirst<Uint8Array, AppError, never>(
-              transport
-                .stream({host, method: methodPath(service, method), request}, STREAM_CAPACITY)
-                .pipe(Stream.mapError(error => fromTransportError(error, type))),
-              deadline,
-              () =>
-                new DeadlineExceeded({
-                  origin: 'client',
-                  waited: Duration.fromInputUnsafe(deadline),
-                }),
-            ).pipe(Stream.mapEffect(frame => decodeResponse(method.output, frame))),
-          ),
+          Effect.map(request => {
+            const frames = transport
+              .stream({host, method: methodPath(service, method), request}, STREAM_CAPACITY)
+              .pipe(Stream.mapError(error => fromTransportError(error, type)));
+            return (
+              deadline === undefined
+                ? frames
+                : timeoutFirst<Uint8Array, AppError, never>(
+                    frames,
+                    deadline,
+                    () =>
+                      new DeadlineExceeded({
+                        origin: 'client',
+                        waited: Duration.fromInputUnsafe(deadline),
+                      }),
+                  )
+            ).pipe(Stream.mapEffect(frame => decodeResponse(method.output, frame)));
+          }),
         ),
       );
     };

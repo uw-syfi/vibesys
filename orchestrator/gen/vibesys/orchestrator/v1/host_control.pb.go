@@ -240,6 +240,59 @@ func (PartProblemReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{3}
 }
 
+// StateRefusal is what is wrong with a state directory's place, so that a client names the setting
+// that fixes it (the host's state directory, on a local disk) instead of repeating the host's text.
+type StateRefusal int32
+
+const (
+	StateRefusal_STATE_REFUSAL_UNSPECIFIED StateRefusal = 0
+	// On a network filesystem (NFS, SMB, ...), where SQLite cannot lock safely.
+	StateRefusal_STATE_REFUSAL_NETWORK_FILESYSTEM StateRefusal = 1
+	// On a filesystem this build does not know to be local, or one that could not be examined.
+	StateRefusal_STATE_REFUSAL_UNKNOWN_FILESYSTEM StateRefusal = 2
+)
+
+// Enum value maps for StateRefusal.
+var (
+	StateRefusal_name = map[int32]string{
+		0: "STATE_REFUSAL_UNSPECIFIED",
+		1: "STATE_REFUSAL_NETWORK_FILESYSTEM",
+		2: "STATE_REFUSAL_UNKNOWN_FILESYSTEM",
+	}
+	StateRefusal_value = map[string]int32{
+		"STATE_REFUSAL_UNSPECIFIED":        0,
+		"STATE_REFUSAL_NETWORK_FILESYSTEM": 1,
+		"STATE_REFUSAL_UNKNOWN_FILESYSTEM": 2,
+	}
+)
+
+func (x StateRefusal) Enum() *StateRefusal {
+	p := new(StateRefusal)
+	*p = x
+	return p
+}
+
+func (x StateRefusal) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StateRefusal) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_orchestrator_v1_host_control_proto_enumTypes[4].Descriptor()
+}
+
+func (StateRefusal) Type() protoreflect.EnumType {
+	return &file_vibesys_orchestrator_v1_host_control_proto_enumTypes[4]
+}
+
+func (x StateRefusal) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StateRefusal.Descriptor instead.
+func (StateRefusal) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{4}
+}
+
 type UnservedReason int32
 
 const (
@@ -284,11 +337,11 @@ func (x UnservedReason) String() string {
 }
 
 func (UnservedReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_host_control_proto_enumTypes[4].Descriptor()
+	return file_vibesys_orchestrator_v1_host_control_proto_enumTypes[5].Descriptor()
 }
 
 func (UnservedReason) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_host_control_proto_enumTypes[4]
+	return &file_vibesys_orchestrator_v1_host_control_proto_enumTypes[5]
 }
 
 func (x UnservedReason) Number() protoreflect.EnumNumber {
@@ -297,7 +350,7 @@ func (x UnservedReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UnservedReason.Descriptor instead.
 func (UnservedReason) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{5}
 }
 
 type IdentifyRequest struct {
@@ -745,7 +798,11 @@ type Unserved struct {
 	// The release of the process that holds the orchestrator, when it is another host and says.
 	HeldByRelease string `protobuf:"bytes,2,opt,name=held_by_release,json=heldByRelease,proto3" json:"held_by_release,omitempty"`
 	// Display only.
-	Detail        string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Why the state directory was refused, when the reason is UNSERVED_REASON_STATE_REFUSED and the
+	// refusal is about where the directory is. Unspecified for every other reason and for a state
+	// refused for another cause (permissions, a corrupt store).
+	StateRefusal  StateRefusal `protobuf:"varint,4,opt,name=state_refusal,json=stateRefusal,proto3,enum=vibesys.orchestrator.v1.StateRefusal" json:"state_refusal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -799,6 +856,13 @@ func (x *Unserved) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *Unserved) GetStateRefusal() StateRefusal {
+	if x != nil {
+		return x.StateRefusal
+	}
+	return StateRefusal_STATE_REFUSAL_UNSPECIFIED
 }
 
 type StopRequest struct {
@@ -1263,12 +1327,13 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\x0e2*.vibesys.orchestrator.v1.PartProblemReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n" +
 	"\x06detail\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail\"\t\n" +
-	"\aServing\"\xab\x01\n" +
+	"\aServing\"\x81\x02\n" +
 	"\bUnserved\x12K\n" +
 	"\x06reason\x18\x01 \x01(\x0e2'.vibesys.orchestrator.v1.UnservedReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x120\n" +
 	"\x0fheld_by_release\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rheldByRelease\x12 \n" +
-	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail\"/\n" +
+	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail\x12T\n" +
+	"\rstate_refusal\x18\x04 \x01(\x0e2%.vibesys.orchestrator.v1.StateRefusalB\b\xbaH\x05\x82\x01\x02\x10\x01R\fstateRefusal\"/\n" +
 	"\vStopRequest\x12 \n" +
 	"\fonly_if_idle\x18\x01 \x01(\bR\n" +
 	"onlyIfIdle\"\x9c\x01\n" +
@@ -1312,7 +1377,11 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n" +
 	"&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n" +
-	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\xbd\x01\n" +
+	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*y\n" +
+	"\fStateRefusal\x12\x1d\n" +
+	"\x19STATE_REFUSAL_UNSPECIFIED\x10\x00\x12$\n" +
+	" STATE_REFUSAL_NETWORK_FILESYSTEM\x10\x01\x12$\n" +
+	" STATE_REFUSAL_UNKNOWN_FILESYSTEM\x10\x02*\xbd\x01\n" +
 	"\x0eUnservedReason\x12\x1f\n" +
 	"\x1bUNSERVED_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eUNSERVED_REASON_HELD_ELSEWHERE\x10\x01\x12!\n" +
@@ -1335,56 +1404,58 @@ func file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_host_control_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_host_control_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_vibesys_orchestrator_v1_host_control_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_vibesys_orchestrator_v1_host_control_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_vibesys_orchestrator_v1_host_control_proto_goTypes = []any{
 	(ReleaseRelation)(0),          // 0: vibesys.orchestrator.v1.ReleaseRelation
 	(HostPart)(0),                 // 1: vibesys.orchestrator.v1.HostPart
 	(PartOrigin)(0),               // 2: vibesys.orchestrator.v1.PartOrigin
 	(PartProblemReason)(0),        // 3: vibesys.orchestrator.v1.PartProblemReason
-	(UnservedReason)(0),           // 4: vibesys.orchestrator.v1.UnservedReason
-	(*IdentifyRequest)(nil),       // 5: vibesys.orchestrator.v1.IdentifyRequest
-	(*IdentifyResponse)(nil),      // 6: vibesys.orchestrator.v1.IdentifyResponse
-	(*PartReadiness)(nil),         // 7: vibesys.orchestrator.v1.PartReadiness
-	(*PartReady)(nil),             // 8: vibesys.orchestrator.v1.PartReady
-	(*PartProblem)(nil),           // 9: vibesys.orchestrator.v1.PartProblem
-	(*Serving)(nil),               // 10: vibesys.orchestrator.v1.Serving
-	(*Unserved)(nil),              // 11: vibesys.orchestrator.v1.Unserved
-	(*StopRequest)(nil),           // 12: vibesys.orchestrator.v1.StopRequest
-	(*StopResponse)(nil),          // 13: vibesys.orchestrator.v1.StopResponse
-	(*Stopping)(nil),              // 14: vibesys.orchestrator.v1.Stopping
-	(*Busy)(nil),                  // 15: vibesys.orchestrator.v1.Busy
-	(*HostLock)(nil),              // 16: vibesys.orchestrator.v1.HostLock
-	(*HostStartReport)(nil),       // 17: vibesys.orchestrator.v1.HostStartReport
-	(*AlreadyServed)(nil),         // 18: vibesys.orchestrator.v1.AlreadyServed
-	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	(StateRefusal)(0),             // 4: vibesys.orchestrator.v1.StateRefusal
+	(UnservedReason)(0),           // 5: vibesys.orchestrator.v1.UnservedReason
+	(*IdentifyRequest)(nil),       // 6: vibesys.orchestrator.v1.IdentifyRequest
+	(*IdentifyResponse)(nil),      // 7: vibesys.orchestrator.v1.IdentifyResponse
+	(*PartReadiness)(nil),         // 8: vibesys.orchestrator.v1.PartReadiness
+	(*PartReady)(nil),             // 9: vibesys.orchestrator.v1.PartReady
+	(*PartProblem)(nil),           // 10: vibesys.orchestrator.v1.PartProblem
+	(*Serving)(nil),               // 11: vibesys.orchestrator.v1.Serving
+	(*Unserved)(nil),              // 12: vibesys.orchestrator.v1.Unserved
+	(*StopRequest)(nil),           // 13: vibesys.orchestrator.v1.StopRequest
+	(*StopResponse)(nil),          // 14: vibesys.orchestrator.v1.StopResponse
+	(*Stopping)(nil),              // 15: vibesys.orchestrator.v1.Stopping
+	(*Busy)(nil),                  // 16: vibesys.orchestrator.v1.Busy
+	(*HostLock)(nil),              // 17: vibesys.orchestrator.v1.HostLock
+	(*HostStartReport)(nil),       // 18: vibesys.orchestrator.v1.HostStartReport
+	(*AlreadyServed)(nil),         // 19: vibesys.orchestrator.v1.AlreadyServed
+	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_host_control_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.IdentifyResponse.relation:type_name -> vibesys.orchestrator.v1.ReleaseRelation
-	19, // 1: vibesys.orchestrator.v1.IdentifyResponse.started_at:type_name -> google.protobuf.Timestamp
-	7,  // 2: vibesys.orchestrator.v1.IdentifyResponse.parts:type_name -> vibesys.orchestrator.v1.PartReadiness
-	10, // 3: vibesys.orchestrator.v1.IdentifyResponse.serving:type_name -> vibesys.orchestrator.v1.Serving
-	11, // 4: vibesys.orchestrator.v1.IdentifyResponse.unserved:type_name -> vibesys.orchestrator.v1.Unserved
+	20, // 1: vibesys.orchestrator.v1.IdentifyResponse.started_at:type_name -> google.protobuf.Timestamp
+	8,  // 2: vibesys.orchestrator.v1.IdentifyResponse.parts:type_name -> vibesys.orchestrator.v1.PartReadiness
+	11, // 3: vibesys.orchestrator.v1.IdentifyResponse.serving:type_name -> vibesys.orchestrator.v1.Serving
+	12, // 4: vibesys.orchestrator.v1.IdentifyResponse.unserved:type_name -> vibesys.orchestrator.v1.Unserved
 	1,  // 5: vibesys.orchestrator.v1.PartReadiness.part:type_name -> vibesys.orchestrator.v1.HostPart
-	8,  // 6: vibesys.orchestrator.v1.PartReadiness.ready:type_name -> vibesys.orchestrator.v1.PartReady
-	9,  // 7: vibesys.orchestrator.v1.PartReadiness.problem:type_name -> vibesys.orchestrator.v1.PartProblem
+	9,  // 6: vibesys.orchestrator.v1.PartReadiness.ready:type_name -> vibesys.orchestrator.v1.PartReady
+	10, // 7: vibesys.orchestrator.v1.PartReadiness.problem:type_name -> vibesys.orchestrator.v1.PartProblem
 	2,  // 8: vibesys.orchestrator.v1.PartReady.origin:type_name -> vibesys.orchestrator.v1.PartOrigin
 	3,  // 9: vibesys.orchestrator.v1.PartProblem.reason:type_name -> vibesys.orchestrator.v1.PartProblemReason
-	4,  // 10: vibesys.orchestrator.v1.Unserved.reason:type_name -> vibesys.orchestrator.v1.UnservedReason
-	14, // 11: vibesys.orchestrator.v1.StopResponse.stopping:type_name -> vibesys.orchestrator.v1.Stopping
-	15, // 12: vibesys.orchestrator.v1.StopResponse.refused:type_name -> vibesys.orchestrator.v1.Busy
-	10, // 13: vibesys.orchestrator.v1.HostStartReport.serving:type_name -> vibesys.orchestrator.v1.Serving
-	18, // 14: vibesys.orchestrator.v1.HostStartReport.already_served:type_name -> vibesys.orchestrator.v1.AlreadyServed
-	11, // 15: vibesys.orchestrator.v1.HostStartReport.refused:type_name -> vibesys.orchestrator.v1.Unserved
-	5,  // 16: vibesys.orchestrator.v1.HostControlService.Identify:input_type -> vibesys.orchestrator.v1.IdentifyRequest
-	12, // 17: vibesys.orchestrator.v1.HostControlService.Stop:input_type -> vibesys.orchestrator.v1.StopRequest
-	6,  // 18: vibesys.orchestrator.v1.HostControlService.Identify:output_type -> vibesys.orchestrator.v1.IdentifyResponse
-	13, // 19: vibesys.orchestrator.v1.HostControlService.Stop:output_type -> vibesys.orchestrator.v1.StopResponse
-	18, // [18:20] is the sub-list for method output_type
-	16, // [16:18] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	5,  // 10: vibesys.orchestrator.v1.Unserved.reason:type_name -> vibesys.orchestrator.v1.UnservedReason
+	4,  // 11: vibesys.orchestrator.v1.Unserved.state_refusal:type_name -> vibesys.orchestrator.v1.StateRefusal
+	15, // 12: vibesys.orchestrator.v1.StopResponse.stopping:type_name -> vibesys.orchestrator.v1.Stopping
+	16, // 13: vibesys.orchestrator.v1.StopResponse.refused:type_name -> vibesys.orchestrator.v1.Busy
+	11, // 14: vibesys.orchestrator.v1.HostStartReport.serving:type_name -> vibesys.orchestrator.v1.Serving
+	19, // 15: vibesys.orchestrator.v1.HostStartReport.already_served:type_name -> vibesys.orchestrator.v1.AlreadyServed
+	12, // 16: vibesys.orchestrator.v1.HostStartReport.refused:type_name -> vibesys.orchestrator.v1.Unserved
+	6,  // 17: vibesys.orchestrator.v1.HostControlService.Identify:input_type -> vibesys.orchestrator.v1.IdentifyRequest
+	13, // 18: vibesys.orchestrator.v1.HostControlService.Stop:input_type -> vibesys.orchestrator.v1.StopRequest
+	7,  // 19: vibesys.orchestrator.v1.HostControlService.Identify:output_type -> vibesys.orchestrator.v1.IdentifyResponse
+	14, // 20: vibesys.orchestrator.v1.HostControlService.Stop:output_type -> vibesys.orchestrator.v1.StopResponse
+	19, // [19:21] is the sub-list for method output_type
+	17, // [17:19] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_host_control_proto_init() }
@@ -1414,7 +1485,7 @@ func file_vibesys_orchestrator_v1_host_control_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_host_control_proto_rawDesc), len(file_vibesys_orchestrator_v1_host_control_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,

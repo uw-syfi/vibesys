@@ -16,9 +16,29 @@ export const FAULT_KINDS = [
   'NotFound',
   'Unimplemented',
   'Rejected',
+  'Refused',
 ] as const;
 
 export type FaultKind = (typeof FAULT_KINDS)[number];
+
+/**
+ * Why a host or the app refused for good: no retry changes it, so the screens say which cause and
+ * what to change. The first four are the app's own refusals (a method, a request, a platform no
+ * host program is built for, a build that holds none for it); the rest are the host's, typed from
+ * what it says about why it does not serve.
+ */
+export const REFUSAL_CAUSES = [
+  'method-not-available',
+  'invalid-request',
+  'unsupported-platform',
+  'host-program-missing',
+  'state-network-filesystem',
+  'state-unknown-filesystem',
+  'state-refused',
+  'config-refused',
+] as const;
+
+export type RefusalCause = (typeof REFUSAL_CAUSES)[number];
 
 export interface Fault {
   readonly kind: FaultKind;
@@ -26,4 +46,6 @@ export interface Fault {
   readonly detail: string;
   /** Trying the same call again may work; false means the call can never work as sent. */
   readonly retryable: boolean;
+  /** For a `Refused` fault, the cause. */
+  readonly cause?: RefusalCause;
 }

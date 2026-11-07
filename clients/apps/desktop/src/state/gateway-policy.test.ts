@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {afterFailure, MAX_DIALS} from './gateway-policy.js';
+import {afterFailure, CONNECTION_LINGER_MS, MAX_DIALS} from './gateway-policy.js';
 
 describe('gateway recovery policy', () => {
   it('waits 0.5, 1, 2 and 4 seconds between five dials, then goes offline', () => {
@@ -22,9 +22,26 @@ describe('gateway recovery policy', () => {
     for (const code of [9, 13, 15])
       fc.assert(
         fc.property(fc.integer({min: 1, max: 4}), failures => {
-          expect(afterFailure(failures, code)).toEqual({_tag: 'offline'});
+          expect(afterFailure(failures, {code, refused: false})).toEqual({_tag: 'offline'});
         }),
       );
-    expect(afterFailure(1, 14)._tag).toBe('redial');
+    expect(afterFailure(1, {code: 14, refused: false})._tag).toBe('redial');
+  });
+
+  it('goes offline at once on a refusal, whatever the count and status: no redial changes it', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({min: 1, max: 1000}),
+        fc.option(fc.integer({min: 0, max: 16}), {nil: undefined}),
+        (failures, code) => {
+          expect(afterFailure(failures, {code, refused: true})).toEqual({_tag: 'offline'});
+        },
+      ),
+    );
+  });
+
+  it('keeps the connection up for a short while after its last call, a policy value', () => {
+    expect(CONNECTION_LINGER_MS).toBeGreaterThan(0);
+    expect(CONNECTION_LINGER_MS).toBeLessThanOrEqual(30_000);
   });
 });

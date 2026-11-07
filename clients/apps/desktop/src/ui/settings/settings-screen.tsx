@@ -31,6 +31,7 @@ import {
   withMode,
   withTheme,
 } from '../../state/index.js';
+import {causeWord} from '../refusal-words.js';
 import {CONNECTION_WORD, FRESHNESS_WORD, MODE_WORD, TAB_WORD, themeWord} from './words.js';
 
 const MODES = APPEARANCE_MODES.map(value => ({value, label: MODE_WORD[value]}));
@@ -115,7 +116,12 @@ const COLUMNS: readonly TableColumn<ResourceRow>[] = [
     header: 'State',
     cell: row => {
       const word = CONNECTION_WORD[row.connection];
-      return <Chip label={word.label} tone={word.tone} dot />;
+      return (
+        <Row gap="space-2" align="center">
+          <Chip label={word.label} tone={word.tone} dot />
+          {row.cause === null ? null : <Text variant="small">{causeWord(row.cause)}</Text>}
+        </Row>
+      );
     },
   },
   {

@@ -8,16 +8,18 @@
  * payload is checked against the generated schemas before it is forwarded and again before it is
  * handed on.
  */
-import {OrchestratorService} from '@vibesys/orchestrator-proto';
-import {HostService, validateServicePayload} from '@vibesys/proto';
+import {HostControlService, OrchestratorService} from '@vibesys/orchestrator-proto';
+import {DesktopRefusal, HostService, validateServicePayload} from '@vibesys/proto';
 import type * as Duration from 'effect/Duration';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Scope from 'effect/Scope';
+import {CONNECTION_LINGER_MS} from '../state/gateway-policy.js';
 import type {HostKey} from '../state/host.js';
 import {
   failureMessage,
   GatewayFailed,
+  GatewayRefused,
   GrpcCode,
   GrpcFailed,
   grpcCodeOf,
@@ -31,15 +33,19 @@ import {
 } from './gateway-connection.js';
 
 /** The services a payload is checked against. */
-const SERVICES = [HostService, OrchestratorService];
+const SERVICES = [HostService, OrchestratorService, HostControlService];
 
-/** The methods the window may call: the handshake, and every orchestrator method. */
+/**
+ * The methods the window may call: the handshake, every orchestrator method, and the host's
+ * `Identify`, which says why a host does not serve. Never `Stop`: the app does not end hosts.
+ */
 const ALLOWED: ReadonlySet<string> = new Set([
   HELLO_METHOD,
   ...OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
+  `/${HostControlService.typeName}/${HostControlService.method.identify.name}`,
 ]);
 
-export type CallError = GrpcFailed | GatewayFailed | LinkFailed;
+export type CallError = GrpcFailed | GatewayFailed | GatewayRefused | LinkFailed;
 
 export interface GatewayCalls {
   /**
@@ -65,15 +71,26 @@ interface Entry {
   readonly connection: GatewayConnection;
   readonly scope: Scope.Closeable;
   users: number;
+  /** Counts the times the connection went unused, so a linger timer knows whether it is current. */
+  idles: number;
 }
 
-const checkInput = (method: string, bytes: Uint8Array): Effect.Effect<void, GatewayFailed> =>
-  Effect.try({
-    try: () => {
-      if (!ALLOWED.has(method)) throw new Error(`method not available: ${method}`);
-      validateServicePayload(SERVICES, method, 'input', bytes);
-    },
-    catch: cause => new GatewayFailed({message: failureMessage(cause)}),
+/** A call the app will not make is refused for good: no dial or retry changes it. */
+const checkInput = (method: string, bytes: Uint8Array): Effect.Effect<void, GatewayRefused> =>
+  Effect.gen(function* () {
+    if (!ALLOWED.has(method))
+      return yield* new GatewayRefused({
+        refusal: DesktopRefusal.METHOD_NOT_AVAILABLE,
+        message: `method not available: ${method}`,
+      });
+    yield* Effect.try({
+      try: () => validateServicePayload(SERVICES, method, 'input', bytes),
+      catch: cause =>
+        new GatewayRefused({
+          refusal: DesktopRefusal.INVALID_REQUEST,
+          message: failureMessage(cause),
+        }),
+    });
   });
 
 /** A reply the gateway sent that its schema rejects ends the call as a broken contract. */
@@ -138,6 +155,7 @@ export const makeGatewayCalls = (
   log: (host: HostKey, line: string) => void,
 ): Effect.Effect<GatewayCalls, never, Scope.Scope> =>
   Effect.gen(function* () {
+    const scope = yield* Scope.Scope;
     const entries = new Map<HostKey, Entry>();
     let closed = false;
 
@@ -157,19 +175,39 @@ export const makeGatewayCalls = (
           const connection = yield* makeGatewayConnection(dialerFor(host), line =>
             log(host, line),
           ).pipe(Effect.provideService(Scope.Scope, scope));
-          entry = {connection, scope, users: 0};
+          entry = {connection, scope, users: 0, idles: 0};
           entries.set(host, entry);
         }
         entry.users += 1;
         return entry;
       });
 
+    const close = (host: HostKey, entry: Entry): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        if (entries.get(host) === entry) entries.delete(host);
+        return Scope.close(entry.scope, Exit.void);
+      });
+
+    /**
+     * A connection with no call left stays up for `CONNECTION_LINGER_MS`: a connect is a handshake
+     * and then a feed, and the feed finds the connection the handshake dialed. A call within the
+     * linger takes it back; one after it dials anew.
+     */
     const release = (host: HostKey, entry: Entry): Effect.Effect<void> =>
       Effect.suspend(() => {
         entry.users -= 1;
         if (entry.users > 0) return Effect.void;
-        if (entries.get(host) === entry) entries.delete(host);
-        return Scope.close(entry.scope, Exit.void);
+        entry.idles += 1;
+        const idle = entry.idles;
+        return Effect.sleep(`${CONNECTION_LINGER_MS} millis`).pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              entry.users === 0 && entry.idles === idle ? close(host, entry) : Effect.void,
+            ),
+          ),
+          Effect.forkIn(scope),
+          Effect.asVoid,
+        );
       });
 
     /** `use` on the host's connection, which stays up until it returns. */
@@ -197,8 +235,6 @@ export const makeGatewayCalls = (
         });
       }),
     );
-    const scope = yield* Scope.Scope;
-
     return {
       warm: (host, hold) =>
         Effect.acquireUseRelease(

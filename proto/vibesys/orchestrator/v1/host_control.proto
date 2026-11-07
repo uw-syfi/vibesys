@@ -135,6 +135,20 @@ message Unserved {
   string held_by_release = 2 [(buf.validate.field).string.max_bytes = 128];
   // Display only.
   string detail = 3 [(buf.validate.field).string.max_bytes = 4096];
+  // Why the state directory was refused, when the reason is UNSERVED_REASON_STATE_REFUSED and the
+  // refusal is about where the directory is. Unspecified for every other reason and for a state
+  // refused for another cause (permissions, a corrupt store).
+  StateRefusal state_refusal = 4 [(buf.validate.field).enum.defined_only = true];
+}
+
+// StateRefusal is what is wrong with a state directory's place, so that a client names the setting
+// that fixes it (the host's state directory, on a local disk) instead of repeating the host's text.
+enum StateRefusal {
+  STATE_REFUSAL_UNSPECIFIED = 0;
+  // On a network filesystem (NFS, SMB, ...), where SQLite cannot lock safely.
+  STATE_REFUSAL_NETWORK_FILESYSTEM = 1;
+  // On a filesystem this build does not know to be local, or one that could not be examined.
+  STATE_REFUSAL_UNKNOWN_FILESYSTEM = 2;
 }
 
 enum UnservedReason {

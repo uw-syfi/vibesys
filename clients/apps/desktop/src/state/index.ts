@@ -12,7 +12,13 @@ export {
   idleConnection,
   isTerminal,
 } from './connection.js';
-export {FAULT_KINDS, type Fault, type FaultKind} from './fault.js';
+export {
+  FAULT_KINDS,
+  type Fault,
+  type FaultKind,
+  REFUSAL_CAUSES,
+  type RefusalCause,
+} from './fault.js';
 export type {FeedStatus} from './feed.js';
 export {
   type Freshness,
@@ -39,6 +45,7 @@ export {
   type HostModel,
   runsCursor,
 } from './host-model.js';
+export {type HostRefusal, refusalOf} from './host-refusal.js';
 export {
   type CostFeedSnapshot,
   type CostModel,

@@ -123,6 +123,67 @@ func (DesktopLinkProblem) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_desktop_v1_gateway_proto_rawDescGZIP(), []int{1}
 }
 
+// Why the main process refused a call for good: no retry and no redial changes it, so the window
+// shows it and does not try again. The end's `error` says which platform, method or version.
+type DesktopRefusal int32
+
+const (
+	DesktopRefusal_DESKTOP_REFUSAL_UNSPECIFIED DesktopRefusal = 0
+	// The window asked for a method the app does not allow.
+	DesktopRefusal_DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE DesktopRefusal = 1
+	// The host's operating system or CPU is one no host program is built for.
+	DesktopRefusal_DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM DesktopRefusal = 2
+	// This build of the app holds no host program for the host's platform, so it cannot provision one.
+	DesktopRefusal_DESKTOP_REFUSAL_HOST_PROGRAM_MISSING DesktopRefusal = 3
+	// The request breaks its schema, so it can never be answered as sent.
+	DesktopRefusal_DESKTOP_REFUSAL_INVALID_REQUEST DesktopRefusal = 4
+)
+
+// Enum value maps for DesktopRefusal.
+var (
+	DesktopRefusal_name = map[int32]string{
+		0: "DESKTOP_REFUSAL_UNSPECIFIED",
+		1: "DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE",
+		2: "DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM",
+		3: "DESKTOP_REFUSAL_HOST_PROGRAM_MISSING",
+		4: "DESKTOP_REFUSAL_INVALID_REQUEST",
+	}
+	DesktopRefusal_value = map[string]int32{
+		"DESKTOP_REFUSAL_UNSPECIFIED":          0,
+		"DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE": 1,
+		"DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM": 2,
+		"DESKTOP_REFUSAL_HOST_PROGRAM_MISSING": 3,
+		"DESKTOP_REFUSAL_INVALID_REQUEST":      4,
+	}
+)
+
+func (x DesktopRefusal) Enum() *DesktopRefusal {
+	p := new(DesktopRefusal)
+	*p = x
+	return p
+}
+
+func (x DesktopRefusal) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DesktopRefusal) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_desktop_v1_gateway_proto_enumTypes[2].Descriptor()
+}
+
+func (DesktopRefusal) Type() protoreflect.EnumType {
+	return &file_vibesys_desktop_v1_gateway_proto_enumTypes[2]
+}
+
+func (x DesktopRefusal) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DesktopRefusal.Descriptor instead.
+func (DesktopRefusal) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_gateway_proto_rawDescGZIP(), []int{2}
+}
+
 // Electron routes this message as protobuf bytes. The preload owns the port,
 // while the caller owns decoding and cancellation; neither transports JSON.
 type DesktopGatewayRequest struct {
@@ -198,8 +259,10 @@ type DesktopGatewayEnd struct {
 	Error *string                `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	// The gRPC status code when the gateway refused the call, so a typed refusal
 	// (not found, unavailable) is not flattened into a retryable disconnect.
-	Status        *int32              `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
-	LinkProblem   *DesktopLinkProblem `protobuf:"varint,3,opt,name=link_problem,json=linkProblem,proto3,enum=vibesys.desktop.v1.DesktopLinkProblem,oneof" json:"link_problem,omitempty"`
+	Status      *int32              `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	LinkProblem *DesktopLinkProblem `protobuf:"varint,3,opt,name=link_problem,json=linkProblem,proto3,enum=vibesys.desktop.v1.DesktopLinkProblem,oneof" json:"link_problem,omitempty"`
+	// Set when the app itself refused the call for good (never with a status or a link problem).
+	Refusal       *DesktopRefusal `protobuf:"varint,4,opt,name=refusal,proto3,enum=vibesys.desktop.v1.DesktopRefusal,oneof" json:"refusal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -253,6 +316,13 @@ func (x *DesktopGatewayEnd) GetLinkProblem() DesktopLinkProblem {
 		return *x.LinkProblem
 	}
 	return DesktopLinkProblem_DESKTOP_LINK_PROBLEM_UNSPECIFIED
+}
+
+func (x *DesktopGatewayEnd) GetRefusal() DesktopRefusal {
+	if x != nil && x.Refusal != nil {
+		return *x.Refusal
+	}
+	return DesktopRefusal_DESKTOP_REFUSAL_UNSPECIFIED
 }
 
 type DesktopGatewayReply struct {
@@ -348,15 +418,19 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	"\x04host\x18\x02 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\x12Q\n" +
 	"\x06method\x18\x03 \x01(\tB9\xbaH6r4(\x80\b2/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$R\x06method\x12 \n" +
 	"\x05bytes\x18\x04 \x01(\fB\n" +
-	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"\xe3\x01\n" +
+	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"\xbe\x02\n" +
 	"\x11DesktopGatewayEnd\x12$\n" +
 	"\x05error\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x05error\x88\x01\x01\x12&\n" +
 	"\x06status\x18\x02 \x01(\x05B\t\xbaH\x06\x1a\x04\x18\x10(\x00H\x01R\x06status\x88\x01\x01\x12Z\n" +
 	"\flink_problem\x18\x03 \x01(\x0e2&.vibesys.desktop.v1.DesktopLinkProblemB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\vlinkProblem\x88\x01\x01B\b\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\vlinkProblem\x88\x01\x01\x12M\n" +
+	"\arefusal\x18\x04 \x01(\x0e2\".vibesys.desktop.v1.DesktopRefusalB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x03R\arefusal\x88\x01\x01B\b\n" +
 	"\x06_errorB\t\n" +
 	"\a_statusB\x0f\n" +
-	"\r_link_problem\"\x83\x01\n" +
+	"\r_link_problemB\n" +
+	"\n" +
+	"\b_refusal\"\x83\x01\n" +
 	"\x13DesktopGatewayReply\x12\"\n" +
 	"\x05bytes\x18\x01 \x01(\fB\n" +
 	"\xbaH\az\x05\x18\x80\x80\x80\bH\x00R\x05bytes\x129\n" +
@@ -370,7 +444,13 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	" DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n" +
 	"\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n" +
-	"\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
+	"\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03*\xd4\x01\n" +
+	"\x0eDesktopRefusal\x12\x1f\n" +
+	"\x1bDESKTOP_REFUSAL_UNSPECIFIED\x10\x00\x12(\n" +
+	"$DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE\x10\x01\x12(\n" +
+	"$DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM\x10\x02\x12(\n" +
+	"$DESKTOP_REFUSAL_HOST_PROGRAM_MISSING\x10\x03\x12#\n" +
+	"\x1fDESKTOP_REFUSAL_INVALID_REQUEST\x10\x04BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
 
 var (
 	file_vibesys_desktop_v1_gateway_proto_rawDescOnce sync.Once
@@ -384,24 +464,26 @@ func file_vibesys_desktop_v1_gateway_proto_rawDescGZIP() []byte {
 	return file_vibesys_desktop_v1_gateway_proto_rawDescData
 }
 
-var file_vibesys_desktop_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_desktop_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_desktop_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_desktop_v1_gateway_proto_goTypes = []any{
 	(DesktopGatewayKind)(0),       // 0: vibesys.desktop.v1.DesktopGatewayKind
 	(DesktopLinkProblem)(0),       // 1: vibesys.desktop.v1.DesktopLinkProblem
-	(*DesktopGatewayRequest)(nil), // 2: vibesys.desktop.v1.DesktopGatewayRequest
-	(*DesktopGatewayEnd)(nil),     // 3: vibesys.desktop.v1.DesktopGatewayEnd
-	(*DesktopGatewayReply)(nil),   // 4: vibesys.desktop.v1.DesktopGatewayReply
+	(DesktopRefusal)(0),           // 2: vibesys.desktop.v1.DesktopRefusal
+	(*DesktopGatewayRequest)(nil), // 3: vibesys.desktop.v1.DesktopGatewayRequest
+	(*DesktopGatewayEnd)(nil),     // 4: vibesys.desktop.v1.DesktopGatewayEnd
+	(*DesktopGatewayReply)(nil),   // 5: vibesys.desktop.v1.DesktopGatewayReply
 }
 var file_vibesys_desktop_v1_gateway_proto_depIdxs = []int32{
 	0, // 0: vibesys.desktop.v1.DesktopGatewayRequest.kind:type_name -> vibesys.desktop.v1.DesktopGatewayKind
 	1, // 1: vibesys.desktop.v1.DesktopGatewayEnd.link_problem:type_name -> vibesys.desktop.v1.DesktopLinkProblem
-	3, // 2: vibesys.desktop.v1.DesktopGatewayReply.end:type_name -> vibesys.desktop.v1.DesktopGatewayEnd
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 2: vibesys.desktop.v1.DesktopGatewayEnd.refusal:type_name -> vibesys.desktop.v1.DesktopRefusal
+	4, // 3: vibesys.desktop.v1.DesktopGatewayReply.end:type_name -> vibesys.desktop.v1.DesktopGatewayEnd
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_desktop_v1_gateway_proto_init() }
@@ -419,7 +501,7 @@ func file_vibesys_desktop_v1_gateway_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_desktop_v1_gateway_proto_rawDesc), len(file_vibesys_desktop_v1_gateway_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,

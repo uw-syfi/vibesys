@@ -88,11 +88,27 @@ connection finishes. An open session is alive while bytes arrive from the host, 
 A session silent for a window is probed with the handshake; one silent through a second window
 is lost and redialed, so a hung link is noticed within the silence bound (`state/liveness.ts`).
 
+A call is held to the same rule. A request, and a stream until its first reply, is stalled when a
+whole window (`REPLY_STALL_MS`) passed with nothing heard on it, so a reply that keeps arriving,
+however slowly and however large, is never cut, and one that stops is cut within two windows. The
+window has no wall deadline of its own on a call; only a command's receipt keeps one. A host's
+connection outlives its last call by a short linger (`CONNECTION_LINGER_MS`), so the handshake and
+the feed that follows share one dial and one ssh master. A master that freezes and ignores its
+control socket is killed by the pid it reported (once that pid is still an ssh master), and the
+host is redialed on a fresh one; a teardown that cannot be confirmed refuses one lease, never the
+host for good.
+
 The end of a call separates a lost link from a refusal. A stream that ends with no gRPC status,
 a closed socket and an ssh exit are a lost link, which the reconnect policy redials. A status is
-the host's own word and is shown as such, never retried. The connection exposes each host's
-freshness as data (live, reconnecting or stale, and when the host last spoke); screens show it and
-compute nothing from the clock.
+the host's own word and is shown as such, never retried. So is what the app refuses itself, typed
+across the port (`DesktopRefusal`): a method it does not allow, a request that breaks its schema, a
+platform no host program is built for, a build that holds none for the host's platform (the message
+names the platform and the version, which is the API hash of the program). And so is what the host
+says about why it does not serve: after an UNAVAILABLE handshake the connection asks `Identify`, and
+a state or configuration the host refused is shown with its cause and the setting that fixes it
+(a state directory on a local disk), not retried; a host merely held by another process is waited
+out. The connection exposes each host's freshness as data (live, reconnecting or stale, and when
+the host last spoke); screens show it and compute nothing from the clock.
 
 Dependency rules keep pure state free of effects, services free of the renderer
 and main process, and the renderer free of main-process and preload internals.

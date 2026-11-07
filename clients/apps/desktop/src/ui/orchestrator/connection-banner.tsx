@@ -6,7 +6,7 @@ import {
   freshnessOf,
   type HostConnectionState,
 } from '../../state/index.js';
-import {faultWord, formatDuration} from './words.js';
+import {faultText, formatDuration} from './words.js';
 
 /** One thing about a connection a person should know, with the way to try again. */
 export interface ConnectionNote {
@@ -50,7 +50,7 @@ function sayAbout(note: ConnectionNote): Say | null {
   }
   if (connection._tag === 'Unusable') {
     return {
-      text: faultWord(connection.fault.kind),
+      text: faultText(connection.fault),
       context: `Automatic retries stopped. ${hasData ? staleTail : 'No runs have been read.'}`,
       tone: 'warn',
       fault: connection.fault,
@@ -59,7 +59,7 @@ function sayAbout(note: ConnectionNote): Say | null {
   }
   if (connection._tag === 'Waiting') {
     return {
-      text: faultWord(connection.fault.kind),
+      text: faultText(connection.fault),
       context: `${staleTail} Trying again.`,
       tone: 'warn',
       fault: connection.fault,
@@ -70,7 +70,7 @@ function sayAbout(note: ConnectionNote): Say | null {
   const freshness = freshnessOf(connection, feed, hasData);
   if (feed._tag === 'Failed' && connection._tag === 'Ready') {
     return {
-      text: faultWord(feed.fault.kind),
+      text: faultText(feed.fault),
       context: staleTail,
       tone: 'warn',
       fault: feed.fault,

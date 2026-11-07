@@ -1,6 +1,7 @@
 import type {PassThrough} from 'node:stream';
 import {gunzipSync, gzipSync} from 'node:zlib';
 import {describe, expect, it} from '@effect/vitest';
+import {DesktopRefusal} from '@vibesys/proto';
 import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
@@ -150,7 +151,12 @@ describe('gateway provisioning', () => {
       const bytes = new Uint8Array([1]);
       const fake = fakeHost(bytes, 'FreeBSD\namd64\n');
       const failure = yield* Effect.flip(provision(bytes, false, fake));
+      expect(failure).toMatchObject({
+        _tag: 'GatewayRefused',
+        refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+      });
       expect(failure.message).toContain('unsupported gateway platform');
+      expect(failure.message).toContain('FreeBSD');
       expect(fake.host.uploads).toHaveLength(0);
     }),
   );
