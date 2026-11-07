@@ -174,7 +174,7 @@ func (w *sim) decide(body core.InputBody) {
 		w.log = append(w.log, c)
 		w.outbox = append(w.outbox, c.effects...)
 	}
-	if err := w.monitor.commit(body, events); err != nil {
+	if err := w.monitor.commit(body, events, effects); err != nil {
 		w.fail("%v", err)
 	}
 	if v := w.state.Violations(); len(v) > 0 {
@@ -323,6 +323,11 @@ func (w *sim) startRun() {
 	}
 	if w.r.IntN(2) == 0 {
 		start.MaxTime = durationpb.New(time.Duration(300+w.r.IntN(1800)) * time.Second)
+	}
+	// Most runs ask their lead for a report every few minutes, which the pauses of the simulation outlast;
+	// the rest take the default of an hour.
+	if w.r.IntN(4) != 0 {
+		start.SummaryEvery = durationpb.New(time.Duration(5+w.r.IntN(16)) * time.Minute)
 	}
 	w.command(core.Operator{}, &pb.Command{Body: &pb.Command_StartRun{StartRun: start}})
 }

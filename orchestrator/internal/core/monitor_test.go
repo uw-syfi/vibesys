@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
@@ -15,6 +16,7 @@ type coverage struct {
 	costStops, limitMessages, limitRefusals, finishedStops                              int
 	startsFailed, startsTimedOut                                                        int
 	stalls, leadReminders, handoffReminders, reports                                    int
+	schedule                                                                            scheduleCoverage
 }
 
 func (c *coverage) add(o coverage) {
@@ -42,6 +44,7 @@ func (c *coverage) add(o coverage) {
 	c.leadReminders += o.leadReminders
 	c.handoffReminders += o.handoffReminders
 	c.reports += o.reports
+	c.schedule.add(o.schedule)
 }
 
 func (c coverage) require(t *testing.T) {
@@ -55,7 +58,9 @@ func (c coverage) require(t *testing.T) {
 		"spawns refused for a limit": c.limitRefusals, "stops of a lead that had finished": c.finishedStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
 		"sessions that failed to start": c.startsFailed, "sessions that timed out opening": c.startsTimedOut,
 		"stalled runs": c.stalls, "reminders to a lead": c.leadReminders, "reminders to hand off": c.handoffReminders,
-		"reports": c.reports,
+		"reports": c.reports, "requests for a report": c.schedule.asks, "requests for a report that were still unread": c.schedule.swallowed,
+		"summary timers that were stale": c.schedule.stale, "reports that restarted the interval": c.schedule.restarted,
+		"requests for a report that a limit, a stop or a final report took away": c.schedule.cancelled,
 	} {
 		if n == 0 {
 			t.Errorf("the simulation never reached: %s", name)
@@ -65,6 +70,7 @@ func (c coverage) require(t *testing.T) {
 
 // messageRecord is the monitor's own account of one message.
 type messageRecord struct {
+	run      core.RunID
 	to       core.AgentID
 	body     core.MessageBody
 	last     core.Delivery
@@ -111,6 +117,12 @@ type monitor struct {
 	finished map[core.RunID]bool
 	// limited holds the runs that were told their limit was reached, with the message that told them.
 	limited map[core.RunID]core.MessageID
+	// books holds each run's report schedule as the monitor works it out, and startEvery the interval
+	// the start being checked asked for, zero for none.
+	books      map[core.RunID]*schedule
+	startEvery time.Duration
+	// arms holds, for the commit being checked, each time a request became due in a run.
+	arms map[core.RunID][]time.Time
 
 	// The rest lasts one transaction.
 	refusedSteer core.MessageID
@@ -128,13 +140,13 @@ func newMonitor() *monitor {
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
 		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
-		limited: map[core.RunID]core.MessageID{},
+		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{},
 	}
 }
 
 // commit checks one transaction, in order: what an input may change, then each event, then what
 // must have come of them taken together.
-func (m *monitor) commit(body core.InputBody, events []core.Event) error {
+func (m *monitor) commit(body core.InputBody, events []core.Event, effects []core.Effect) error {
 	m.refusedSteer = ""
 	m.idled, m.over, m.noticed, m.resumed = map[core.AgentID]bool{}, map[core.AgentID]bool{}, map[core.AgentID]int{}, map[core.AgentID]bool{}
 	if fact, ok := body.(core.SessionFact); ok {
@@ -160,10 +172,23 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 		}
 		launchTimer = &session
 	}
+	m.startEvery = 0
+	if c, ok := body.(core.Command); ok {
+		if start, ok := c.Body.(core.StartRun); ok {
+			m.startEvery = start.SummaryEvery
+		}
+	}
+	m.arms = map[core.RunID][]time.Time{}
+	if err := m.summaryTimer(body, events); err != nil {
+		return err
+	}
 	for _, e := range events {
 		if err := m.observe(e); err != nil {
 			return err
 		}
+	}
+	if err := m.summaryBooks(effects); err != nil {
+		return err
 	}
 	if graceTimer != nil {
 		if run := m.runs[graceTimer.Run]; run.Status.Live() {
@@ -305,9 +330,15 @@ func (m *monitor) observe(e core.Event) error {
 }
 
 func (m *monitor) run(r core.Run) error {
+	if _, known := m.runs[r.ID]; !known {
+		if err := m.newSchedule(r); err != nil {
+			return err
+		}
+	}
 	if old, ok := m.runs[r.ID]; ok && r.ActiveJobs > old.ActiveJobs {
 		delete(m.finished, r.ID)
 	}
+	defer m.runChanged(r)
 	if limited := r.StopReason == core.StopTimeLimit || r.StopReason == core.StopCostLimit; limited {
 		want := map[core.RunLimit]core.RunStopReason{core.LimitTime: core.StopTimeLimit, core.LimitCost: core.StopCostLimit}
 		if want[r.LimitReached] != r.StopReason {
@@ -485,9 +516,14 @@ func (m *monitor) item(i core.Item) error {
 func (m *monitor) message(msg core.Message) error {
 	record := m.messages[msg.ID]
 	if record == nil {
-		record = &messageRecord{to: msg.To, body: msg.Body}
+		record = &messageRecord{run: msg.Run, to: msg.To, body: msg.Body}
 		m.messages[msg.ID] = record
+		m.workMoved(msg)
 		switch b := msg.Body.(type) {
+		case core.ReportDue:
+			if err := m.reportDue(msg, b); err != nil {
+				return err
+			}
 		case core.Handoff:
 			m.covered.handoffs++
 			m.handed[msg.From] = true
@@ -518,6 +554,7 @@ func (m *monitor) message(msg core.Message) error {
 			}
 			m.reports[msg.Run]++
 			m.finished[msg.Run] = b.Kind == core.ReportFinal
+			m.reported(msg)
 			if b.Sequence != m.reports[msg.Run] || m.runs[msg.Run].ReportsPosted != b.Sequence {
 				return fmt.Errorf("report %s is number %d, the run counts %d, want %d", msg.ID, b.Sequence, m.runs[msg.Run].ReportsPosted, m.reports[msg.Run])
 			}
