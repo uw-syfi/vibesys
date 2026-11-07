@@ -1,8 +1,8 @@
 import {Text} from '@vibesys/ui';
-import type {JSX, ReactNode} from 'react';
+import type {ReactNode} from 'react';
 
 /** How many characters of a commit id the app shows; the full id is the text on hover. */
-export const SHORT_COMMIT_LENGTH = 8;
+const SHORT_COMMIT_LENGTH = 8;
 
 const FULL_COMMIT = /\b[0-9a-f]{40}\b/g;
 
@@ -27,9 +27,4 @@ export function withShortCommits(text: string): readonly ReactNode[] {
   }
   if (from < text.length) parts.push(text.slice(from));
   return parts;
-}
-
-/** `withShortCommits` as a fragment, for a slot that takes one child. */
-export function ShortCommits(props: {readonly text: string}): JSX.Element {
-  return <>{withShortCommits(props.text)}</>;
 }
