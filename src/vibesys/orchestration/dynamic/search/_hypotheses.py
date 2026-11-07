@@ -47,10 +47,11 @@ def cancelled(plan: WorkPlan, sequence: int, parts: tuple[CombineSource, ...]) -
 def with_round(current: HypothesisRecord, done: WorkstreamDone) -> HypothesisRecord:
     """The record with the round the finished implement workstream added."""
     continued = done.start.plan.continue_hypothesis
+    rounds = current.continuation_rounds + (1 if continued else 0)
     return current.model_copy(
         update={
-            "rounds": (*current.rounds, round_of(done)),
-            "continuation_rounds": current.continuation_rounds + (1 if continued else 0),
+            "rounds": (*current.rounds, round_of(done, continuation_rounds=rounds)),
+            "continuation_rounds": rounds,
         }
     )
 

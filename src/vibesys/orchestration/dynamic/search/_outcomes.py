@@ -608,8 +608,8 @@ def _failing_tail(done: WorkstreamDone) -> str:
     return "" if done.failure is None else done.failure.output
 
 
-def round_of(done: WorkstreamDone) -> RoundRecord:
-    """The round an implement workstream adds to its hypothesis."""
+def round_of(done: WorkstreamDone, *, continuation_rounds: int = 0) -> RoundRecord:
+    """The round an implement workstream adds to a hypothesis continued that many times."""
     start = done.start
     accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
@@ -619,7 +619,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
     kept = keeps_hypothesis_active(
         outcome=outcome,
         next_step=next_step,
-        continuation_rounds=0,
+        continuation_rounds=continuation_rounds,
         max_continuation_rounds=start.config.max_continuation_rounds,
     )
     settlement = done.settlement
