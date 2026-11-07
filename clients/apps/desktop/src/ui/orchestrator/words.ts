@@ -138,18 +138,6 @@ export function receiptRefusalWord(receipt: Receipt): string {
     : `Model ${receipt.model} not allowed \u00b7 ${allowed}`;
 }
 
-export function formatClock(atMs: number): string {
-  return new Date(atMs).toISOString().slice(11, 16);
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** A moment with its date and the zone it is told in, for lists that span days: `Nov 1, 17:00 UTC`. */
-export function formatMoment(atMs: number): string {
-  const at = new Date(atMs);
-  return `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}, ${formatClock(atMs)} UTC`;
-}
-
 /** Why a connection or a request did not work, as a label. */
 export function faultWord(kind: FaultKind): string {
   switch (kind) {

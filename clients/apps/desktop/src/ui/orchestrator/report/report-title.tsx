@@ -2,9 +2,10 @@ import {RunStatus} from '@vibesys/orchestrator-proto';
 import {Button, Chip, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CommandProgress, HostStatus, RunReport} from '../../../state/index.js';
+import {useDisplayClock} from '../../display-clock.js';
 import {HostStatusChip} from '../../host-status-chip.js';
 import {runWord} from '../words.js';
-import {formatAge, formatElapsed, seattleMoment} from './format.js';
+import {formatAge, formatElapsed} from './format.js';
 
 /**
  * What the report's title row says about the run: its state, the host it runs on, how long it has
@@ -18,6 +19,7 @@ export function ReportMeta(props: {
   readonly nowMs: number;
 }): JSX.Element {
   const {header} = props.report;
+  const clock = useDisplayClock();
   const status = runWord(header.status);
   return (
     <>
@@ -35,7 +37,7 @@ export function ReportMeta(props: {
         {formatElapsed(header.elapsedMs)}
       </Text>
       <Text variant="small" tone="muted">
-        {`Started ${seattleMoment(header.startedMs)}`}
+        {`Started ${clock.reportMoment(header.startedMs)}`}
       </Text>
     </>
   );

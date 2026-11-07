@@ -12,9 +12,11 @@ import {
   type Transcript as TranscriptData,
   transcript,
 } from '../../state/index.js';
+import {useDisplayClock} from '../display-clock.js';
+import type {DisplayClock} from '../display-time.js';
 import {describeCall, jobWord} from '../orchestrator/words.js';
 import {agentLabel} from './labels.js';
-import {formatDayTime, formatSpan, formatTime, formatUsd} from './time.js';
+import {formatSpan, formatUsd} from './time.js';
 
 /** What the screen reads of the agent's history requests, and how it makes them. */
 export interface HistoryAccess {
@@ -66,6 +68,7 @@ interface Context {
   readonly labelOf: (agentId: string) => string;
   readonly open: (agentId: string) => void;
   readonly history: HistoryAccess;
+  readonly clock: DisplayClock;
 }
 
 function author(party: Party, context: Context): {label: string; press?: () => void} {
@@ -100,12 +103,12 @@ const OUTCOME = {
 
 type Of<K extends Entry['kind']> = Extract<Entry, {kind: K}>;
 
-function turnItem(entry: Of<'turn'>): ConversationItem {
+function turnItem(entry: Of<'turn'>, clock: DisplayClock): ConversationItem {
   const cost = entry.costUsd === null ? '' : ` · ${formatUsd(entry.costUsd)}`;
   return {
     kind: 'rule',
     id: entry.key,
-    label: `Turn ${entry.ordinal} · ${formatDayTime(entry.atMs)}${cost}${OUTCOME[entry.outcome]}`,
+    label: `Turn ${entry.ordinal} · ${clock.dayTime(entry.atMs)}${cost}${OUTCOME[entry.outcome]}`,
   };
 }
 
@@ -151,7 +154,7 @@ function joinItem(entry: Of<'join'>, context: Context): ConversationItem {
     icon: 'arrow-up',
     title: `${context.labelOf(entry.childId)} joined`,
     chip: JOINED[entry.result],
-    trail: formatTime(entry.atMs),
+    trail: context.clock.time(entry.atMs),
     press: () => context.open(entry.childId),
   };
 }
@@ -159,14 +162,14 @@ function joinItem(entry: Of<'join'>, context: Context): ConversationItem {
 function itemOf(entry: Entry, context: Context): ConversationItem[] {
   switch (entry.kind) {
     case 'turn':
-      return [turnItem(entry)];
+      return [turnItem(entry, context.clock)];
     case 'incoming':
       return [
         {
           kind: 'bubble',
           id: entry.key,
           author: author(entry.from, context),
-          at: formatTime(entry.atMs),
+          at: context.clock.time(entry.atMs),
           text: noteWords(entry.note, context.labelOf),
         },
       ];
@@ -183,7 +186,7 @@ function itemOf(entry: Entry, context: Context): ConversationItem[] {
           id: entry.key,
           icon: 'bot',
           title: `Spawned ${context.labelOf(entry.childId)}`,
-          trail: `${context.host} · ${formatTime(entry.atMs)}`,
+          trail: `${context.host} · ${context.clock.time(entry.atMs)}`,
           press: () => context.open(entry.childId),
         },
       ];
@@ -222,6 +225,7 @@ export function AgentTranscript(props: {
   readonly open: (agentId: string) => void;
 }): JSX.Element | null {
   const {state, agentId, history} = props;
+  const clock = useDisplayClock();
   const data = transcript(state, agentId, props.nowMs);
   const agent = state.agents[agentId];
   if (data === null || agent === undefined) return null;
@@ -231,6 +235,7 @@ export function AgentTranscript(props: {
     labelOf: labelsOf(agentNames(state, agent.runId)),
     open: props.open,
     history,
+    clock,
   };
   const items = itemsOf(data, context);
   const ordinals = new Map(

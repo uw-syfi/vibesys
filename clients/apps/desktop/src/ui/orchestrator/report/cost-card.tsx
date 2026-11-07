@@ -2,7 +2,9 @@ import {BarRows, Button, Card, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CostFeedSnapshot, CostView} from '../../../state/index.js';
 import {costScreenModel, SpendCard, TYPE_COLUMNS} from '../../cost/index.js';
-import {COST_WORDS} from '../cost-words.js';
+import {useDisplayClock} from '../../display-clock.js';
+import {costWords} from '../cost-words.js';
+import {faultWord} from '../words.js';
 
 /** What went wrong with the cost stream, beside the figures it last delivered, and the way to retry. */
 function FeedProblem(props: {
@@ -14,7 +16,7 @@ function FeedProblem(props: {
   return (
     <Row gap="space-3" wrap>
       <Text tone="warn" variant="small">
-        {COST_WORDS.fault(status.fault.kind)}
+        {faultWord(status.fault.kind)}
       </Text>
       {status.fault.retryable ? (
         <Button text="Retry" label="Retry cost" variant="secondary" size="sm" press={props.retry} />
@@ -39,7 +41,8 @@ export function CostCard(props: {
   readonly open: () => void;
 }): JSX.Element {
   const {cost, feed} = props;
-  const model = cost === undefined ? undefined : costScreenModel(cost, COST_WORDS);
+  const clock = useDisplayClock();
+  const model = cost === undefined ? undefined : costScreenModel(cost, costWords(clock));
   const details = (
     <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
   );

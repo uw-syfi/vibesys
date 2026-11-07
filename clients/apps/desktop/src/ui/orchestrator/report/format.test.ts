@@ -1,18 +1,15 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
 import {timeTicks} from '../../../state/index.js';
-import {
-  clip,
-  formatAge,
-  formatDollars,
-  formatElapsed,
-  formatFigure,
-  seattleClock,
-  seattleMoment,
-  seattleOffsetMs,
-} from './format.js';
+import {TEST_CLOCK} from '../../test-display-clock.js';
+import {clip, formatAge, formatDollars, formatElapsed, formatFigure} from './format.js';
 
 const HOUR = 3_600_000;
+const {
+  reportTime: seattleClock,
+  reportMoment: seattleMoment,
+  offsetMs: seattleOffsetMs,
+} = TEST_CLOCK;
 
 describe('Seattle time', () => {
   it('is eight hours behind UTC in winter and seven in summer, whatever the instant', () => {

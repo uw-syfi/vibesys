@@ -1,7 +1,8 @@
 /**
  * The words and figures of the fleet's rows. A figure is shown as the host sent it, rounded for the
- * eye; the whole value is the text on hover. Every time is told in Seattle time, the zone named, so
- * a list that spans days never leaves a reader to guess which clock it is on.
+ * eye; the whole value is the text on hover. A time is told by the display clock with its zone named
+ * (`DisplayClock.datedMoment`), so a list that spans days never leaves a reader to guess which
+ * clock it is on.
  */
 import type {FleetHostRef, FleetObjective} from '../../state/index.js';
 import {span} from '../duration.js';
@@ -22,18 +23,6 @@ export {span};
 
 /** How long ago: `3s ago`. */
 export const ago = (elapsedMs: number): string => `${span(elapsedMs)} ago`;
-
-const SEATTLE = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/Los_Angeles',
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-  timeZoneName: 'short',
-});
-
-/** A moment in Seattle time with its zone: `Nov 2, 4:10 PM PST`. */
-export const seattle = (atMs: number): string => SEATTLE.format(new Date(atMs));
 
 /**
  * What the Runs list says when no host has been read: "Not read yet", or the host's own word when

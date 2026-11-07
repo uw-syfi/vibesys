@@ -41,8 +41,10 @@ import {
   SERVING,
   serveSummaries,
 } from '../../testing/orchestrator/index.js';
+import {DisplayClockProvider} from '../display-clock.js';
 import {hostStatusWord} from '../host-status-words.js';
 import {causeWord} from '../refusal-words.js';
+import {TEST_ZONE} from '../test-display-clock.js';
 import {FleetScreen} from './fleet-screen.js';
 
 installDom();
@@ -234,17 +236,19 @@ function Screen(props: {
 }): JSX.Element {
   const [navigation, move] = useReducer(navigationReducer, initialNavigation);
   return (
-    <FleetScreen
-      hosts={props.hosts}
-      place={navigation.fleet}
-      nowMs={props.nowMs ?? NOW}
-      go={action => {
-        props.log.push(action);
-        move(action);
-      }}
-      retryHost={noop}
-      newRun={null}
-    />
+    <DisplayClockProvider zone={TEST_ZONE}>
+      <FleetScreen
+        hosts={props.hosts}
+        place={navigation.fleet}
+        nowMs={props.nowMs ?? NOW}
+        go={action => {
+          props.log.push(action);
+          move(action);
+        }}
+        retryHost={noop}
+        newRun={null}
+      />
+    </DisplayClockProvider>
   );
 }
 

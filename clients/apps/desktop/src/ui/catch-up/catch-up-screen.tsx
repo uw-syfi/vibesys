@@ -24,8 +24,9 @@ import type {
   FaultKind,
   IdeaWindow,
 } from '../../state/index.js';
-import {formatDayTime, formatSpan} from '../agents/time.js';
+import {formatSpan} from '../agents/time.js';
 import {NOT_REPORTED} from '../cost/words.js';
+import {useDisplayClock} from '../display-clock.js';
 import {HistoryStatusWord} from '../orchestrator/history-status.js';
 import {
   type CatchUpModel,
@@ -264,6 +265,7 @@ function Window(props: {
 /** One check-in as a row of the list: when it was made, how long it covers, and what it cost. */
 function CheckInRow(props: {readonly read: CheckInRead; readonly select: () => void}) {
   const {read} = props;
+  const clock = useDisplayClock();
   const figure = costFigure(read);
   const state =
     read.facts.kind === 'ready'
@@ -274,7 +276,7 @@ function CheckInRow(props: {readonly read: CheckInRead; readonly select: () => v
   return (
     <PickRow
       id={read.checkIn.id}
-      title={formatDayTime(read.atMs)}
+      title={clock.dayTime(read.atMs)}
       summary={formatSpan(read.atMs - read.sinceMs)}
       figure={figure ?? (read.facts.kind === 'failed' ? 'Failed' : 'Working…')}
       figureTone={figure === null ? 'muted' : 'default'}
@@ -305,6 +307,7 @@ export function CatchUpScreen(props: {
   readonly goIdeas: (window: IdeaWindow) => void;
   readonly words: CatchUpPageWords;
 }): JSX.Element {
+  const clock = useDisplayClock();
   const [picked, setPicked] = useState<string | null>(null);
   const shown = props.rows.find(read => read.checkIn.id === picked) ?? props.rows[0];
   return (
@@ -352,7 +355,7 @@ export function CatchUpScreen(props: {
           }
           main={
             <Window
-              model={catchUpModel(shown, props.words)}
+              model={catchUpModel(shown, props.words, clock)}
               showIdeas={() => props.goIdeas({plans: windowPlans(shown)})}
             />
           }

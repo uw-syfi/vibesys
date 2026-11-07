@@ -10,11 +10,12 @@ import {
   ms,
   type OrchestratorState,
 } from '../../state/index.js';
+import {useDisplayClock} from '../display-clock.js';
 import {agentWord, harnessWord} from '../orchestrator/words.js';
 import {AgentTranscript, type HistoryAccess} from './agent-transcript.js';
 import {agentLabel} from './labels.js';
 import {MessageBox} from './message-box.js';
-import {formatDayTime, formatSpan, formatUsd} from './time.js';
+import {formatSpan, formatUsd} from './time.js';
 
 /**
  * Where the agent ran and for how long: the machine it is on, from when to when, and what it took.
@@ -28,6 +29,7 @@ function Placement(props: {
   readonly turns: number;
 }): JSX.Element {
   const {agent} = props;
+  const clock = useDisplayClock();
   const from = ms(agent.startedAt) ?? props.nowMs;
   const to = ms(agent.endedAt) ?? props.nowMs;
   const cost = formatUsd(agent.usage?.costUsd ?? null);
@@ -36,7 +38,7 @@ function Placement(props: {
       <Row gap="space-4" rowGap="space-2" wrap align="baseline">
         <Chip label={props.host} mono clip />
         <Text variant="small" title="From and to">
-          {`${formatDayTime(from)} to ${formatDayTime(to)}`}
+          {`${clock.dayTime(from)} to ${clock.dayTime(to)}`}
         </Text>
         <Text variant="small" tone="muted">
           {[

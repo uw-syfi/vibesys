@@ -23,7 +23,7 @@ import {
   PRICED_AND_UNPRICED,
 } from '../../testing/orchestrator/cost-views.js';
 import {FakeDaemon, generateScenario, hostHarness} from '../../testing/orchestrator/index.js';
-import {COST_WORDS} from '../orchestrator/cost-words.js';
+import {COST_WORDS} from '../test-display-clock.js';
 import {CostScreen} from './cost-screen.js';
 import {formatCount} from './words.js';
 

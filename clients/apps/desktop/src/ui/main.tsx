@@ -31,6 +31,8 @@ import {
   ViewerFromWindow,
 } from '../core/index.js';
 import {hostsOfAddress} from './address.js';
+import {DisplayClockProvider} from './display-clock.js';
+import {systemDisplayZone} from './display-time.js';
 import type {Dispatch} from './orchestrator/connected.js';
 import {
   KeyPressesFromWindow,
@@ -101,17 +103,21 @@ function Window(props: {
 const root = document.getElementById('root');
 if (root === null) throw new Error('index.html has no #root');
 const page = createRoot(root);
+// The display zone is the system's, read once here and passed in.
+const zone = systemDisplayZone();
 Effect.runFork(
   Effect.map(open, ({roster, machines, appearance, navigation, viewer}) => {
     page.render(
       <StrictMode>
-        <Window
-          roster={roster}
-          machines={machines}
-          navigation={navigation}
-          appearance={appearance}
-          viewerId={viewer}
-        />
+        <DisplayClockProvider zone={zone}>
+          <Window
+            roster={roster}
+            machines={machines}
+            navigation={navigation}
+            appearance={appearance}
+            viewerId={viewer}
+          />
+        </DisplayClockProvider>
       </StrictMode>,
     );
   }),
