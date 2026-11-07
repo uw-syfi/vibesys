@@ -13,7 +13,7 @@
 }
 .vs-overview-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--column-chart), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--column-chart)), 1fr));
   gap: var(--space-3);
 }
 .vs-overview-tile {

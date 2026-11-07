@@ -201,7 +201,8 @@ describe('tiles and charts on one set of tracks', () => {
     );
     expect(one(container, 'section').getAttribute('data-track')).toBe('chart');
     const frame = css('frame.css');
-    const chart = /\.vs-chart-columns \{[^}]*gap: var\(--space-6\)[^}]*minmax\(var\(--chart-min\)/s;
+    const chart =
+      /\.vs-chart-columns \{[^}]*gap: var\(--space-6\)[^}]*minmax\(min\(100%, var\(--chart-min\)\)/s;
     const tiles =
       /\.vs-tiles\[data-track="chart"\] \{[^}]*repeat\(auto-fit, minmax\(min\(100%, var\(--chart-min\)\), 1fr\)\)[^}]*gap: var\(--space-6\)/s;
     expect(frame).toMatch(chart);
@@ -323,7 +324,7 @@ describe('Gantt columns', () => {
       expect(rows[1]).toContain('scrollbar-gutter: stable');
     }
     expect(frame).toMatch(
-      /\.vs-gantt-row\[data-axis\]\s*\{[^}]*overflow-y:\s*hidden;[^}]*scrollbar-gutter:\s*stable/,
+      /\.vs-gantt-row\[data-axis\]\s*\{[^}]*overflow:\s*hidden;[^}]*scrollbar-gutter:\s*stable/,
     );
   });
 

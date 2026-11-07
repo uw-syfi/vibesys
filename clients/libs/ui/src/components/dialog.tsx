@@ -1,4 +1,5 @@
 import {type JSX, type MouseEvent, type ReactNode, type SyntheticEvent, useId, useRef} from 'react';
+import {ScrollArea} from './scroll-area.js';
 import {Text} from './text.js';
 
 function focusedElement(): HTMLElement | null {
@@ -58,7 +59,7 @@ export function Dialog(props: {
       onMouseDown={backdrop}
     >
       {props.open ? (
-        <div className="vs-dialog-card">
+        <ScrollArea kind="column" className="vs-dialog-card">
           <Text as="h2" variant="heading" id={titleId}>
             {props.title}
           </Text>
@@ -66,7 +67,7 @@ export function Dialog(props: {
           {props.actions === undefined ? null : (
             <div className="vs-dialog-actions">{props.actions}</div>
           )}
-        </div>
+        </ScrollArea>
       ) : null}
     </dialog>
   );

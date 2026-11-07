@@ -1,6 +1,7 @@
 import type {JSX} from 'react';
 import {TYPE} from '../tokens/index.js';
 import {NewBelow} from './new-below.js';
+import {ScrollArea} from './scroll-area.js';
 import {useWindowed} from './windowing.js';
 
 /** One line of output; `err` lines (standard error) are drawn in `err`. */
@@ -37,13 +38,14 @@ export function LogPane(props: {
   });
   return (
     <div className="vs-log" data-size={props.size ?? 'md'}>
-      <pre
+      <ScrollArea
+        as="pre"
+        kind="feed"
         ref={win.scroller}
         className="vs-log-pane"
         data-size={props.size ?? 'md'}
         role="log"
         aria-label={props.label}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
         onScroll={win.scrolled}
       >
@@ -60,7 +62,7 @@ export function LogPane(props: {
           </span>
         ))}
         <span className="vs-log-gap" style={{height: win.after}} />
-      </pre>
+      </ScrollArea>
       {win.behind ? (
         <span className="vs-log-jump">
           <NewBelow text="New below" press={win.jump} />

@@ -11,6 +11,7 @@ import {
 import type {SpaceToken} from '../tokens/index.js';
 import {Breadcrumb, type Crumb} from './breadcrumb.js';
 import {Icon} from './icon.js';
+import {ScrollArea} from './scroll-area.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
@@ -182,11 +183,17 @@ export function Page(props: {
     );
   if (header === undefined && props.footer === undefined) {
     return (
-      <main className="vs-page" data-state={props.state} ref={arrived}>
+      <ScrollArea
+        as="main"
+        kind="column"
+        className="vs-page"
+        data-state={props.state}
+        ref={arrived}
+      >
         <div className="vs-page-content" data-width={width}>
           {props.children}
         </div>
-      </main>
+      </ScrollArea>
     );
   }
   return (
@@ -208,9 +215,9 @@ export function Page(props: {
             {header}
           </div>
         )}
-        <div className="vs-page-scroll" data-fill={props.fill || undefined}>
+        <ScrollArea kind="column" className="vs-page-scroll" data-fill={props.fill || undefined}>
           <div className="vs-page-body">{props.children}</div>
-        </div>
+        </ScrollArea>
         {props.footer === undefined ? null : <div className="vs-page-footer">{props.footer}</div>}
       </div>
     </main>
@@ -277,11 +284,14 @@ export function Split(props: {
   readonly asideSticky?: boolean;
 }): JSX.Element {
   const main = <div className="vs-split-main">{props.main}</div>;
-  const aside = (
-    <div className="vs-split-aside" data-sticky={props.asideSticky === true || undefined}>
-      {props.aside}
-    </div>
-  );
+  const aside =
+    props.asideSticky === true ? (
+      <ScrollArea kind="column" className="vs-split-aside" data-sticky="">
+        {props.aside}
+      </ScrollArea>
+    ) : (
+      <div className="vs-split-aside">{props.aside}</div>
+    );
   return (
     <div
       className="vs-split"

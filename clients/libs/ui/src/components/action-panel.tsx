@@ -1,6 +1,7 @@
 import {type JSX, type ReactNode, useId} from 'react';
 import {type CheckState, STATES} from './check-list.js';
 import {Icon} from './icon.js';
+import {ScrollArea} from './scroll-area.js';
 
 /**
  * A panel for a page's primary action, to be pinned in a `Page` footer: a one-line status that
@@ -25,15 +26,16 @@ export function ActionPanel(props: {
   return (
     <section className="vs-action-panel" aria-label={props.label}>
       {props.open ? (
-        <section
+        <ScrollArea
+          as="section"
+          kind="column"
           className="vs-action-panel-details"
           id={detailsId}
           aria-label="Details"
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: a box that scrolls must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls the details.
           tabIndex={0}
         >
           {props.details}
-        </section>
+        </ScrollArea>
       ) : null}
       <div className="vs-action-panel-bar">
         <button

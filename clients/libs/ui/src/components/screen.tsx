@@ -1,5 +1,6 @@
 import type {JSX, ReactNode} from 'react';
 import type {PageState} from './layout.js';
+import {ScrollArea} from './scroll-area.js';
 
 /** How much a screen's parts are spaced: `comfortable` (default) or `compact` (dense rows, slim headers). */
 export type Density = 'comfortable' | 'compact';
@@ -30,7 +31,9 @@ export function Screen(
       data-state={props.state}
     >
       <div className="vs-screen-header">{props.header}</div>
-      <div className="vs-screen-body">{props.children}</div>
+      <ScrollArea kind="column" className="vs-screen-body">
+        {props.children}
+      </ScrollArea>
     </Root>
   );
 }

@@ -55,9 +55,6 @@
   flex: none;
   flex-direction: column;
   /* The groups' separation is a `Spacer`'s, which never leaves them touching. */
-  overflow-y: auto;
-  /* A rail too short for its items scrolls without a bar over the window's controls. */
-  scrollbar-width: none;
   width: max(var(--rail), var(--chrome-start-width, var(--space-0)));
   max-height: 100%;
   /* The window's controls sit in the corner at the top; the items start below it. */

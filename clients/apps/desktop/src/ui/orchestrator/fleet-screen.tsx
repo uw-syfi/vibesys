@@ -123,7 +123,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
       key: 'status',
       header: 'Status',
       size: 'wide',
-
+      narrow: 'short',
       hint: row => whenHint(row, nowMs) || undefined,
       cell: row => {
         const word = runWord(row.status);
@@ -207,6 +207,7 @@ function figureColumns(
       key: 'best',
       header: 'Best',
       size: 'wide',
+      narrow: 'short',
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);

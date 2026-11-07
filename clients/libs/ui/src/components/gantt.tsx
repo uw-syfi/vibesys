@@ -7,6 +7,7 @@ import {type Guide, Guides} from './guides.js';
 import {Icon} from './icon.js';
 import {placeLabels, useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
+import {ScrollArea} from './scroll-area.js';
 import {Text} from './text.js';
 import {fittedTimeTicks, type ZoneOffset} from './time-ticks.js';
 import {useWindowed} from './windowing.js';
@@ -576,7 +577,8 @@ export function Gantt(props: {
           figureLabel={props.figureLabel}
         />
       )}
-      <div
+      <ScrollArea
+        kind="feed"
         ref={win.scroller}
         className="vs-gantt-rows"
         role="listbox"
@@ -604,7 +606,7 @@ export function Gantt(props: {
           />
         ))}
         <div aria-hidden="true" style={{height: win.after}} />
-      </div>
+      </ScrollArea>
     </div>
   );
 }

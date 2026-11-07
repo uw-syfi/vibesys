@@ -2,6 +2,7 @@ import type {JSX} from 'react';
 import {Button} from './button.js';
 import {DetailsToggle} from './details-toggle.js';
 import {withoutPaths} from './paths.js';
+import {ScrollArea} from './scroll-area.js';
 import {StatusDot} from './status.js';
 import {Text} from './text.js';
 
@@ -87,7 +88,13 @@ export function ToastStack(props: {
 }): JSX.Element {
   const {act} = props;
   return (
-    <section className="vs-toast-stack" aria-label={props.label} aria-live="polite">
+    <ScrollArea
+      as="section"
+      kind="feed"
+      className="vs-toast-stack"
+      aria-label={props.label}
+      aria-live="polite"
+    >
       {props.toasts.map(toast => (
         <Toast
           key={toast.id}
@@ -102,6 +109,6 @@ export function ToastStack(props: {
             : {action: {label: toast.action, press: () => act(toast.id)}})}
         />
       ))}
-    </section>
+    </ScrollArea>
   );
 }

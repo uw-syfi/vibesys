@@ -122,8 +122,9 @@
 .vs-markdown-pre {
   box-sizing: border-box;
   max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   padding: var(--space-3) var(--space-4);
-  overflow-x: auto;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
   background: var(--log-bg);
@@ -133,12 +134,11 @@
 .vs-markdown-pre code {
   font-size: var(--text-code-size);
   line-height: var(--text-code-line);
-  white-space: pre;
-  overflow-wrap: normal;
+  white-space: inherit;
+  overflow-wrap: inherit;
 }
 .vs-markdown-scroll {
   max-width: 100%;
-  overflow-x: auto;
 }
 .vs-markdown table {
   border-collapse: collapse;
@@ -263,7 +263,6 @@
 }
 .vs-check-raw pre {
   margin: var(--space-1) 0 0;
-  overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--text-code-family);
@@ -324,7 +323,6 @@ button.vs-stage-head {
   height: var(--log);
   margin: 0;
   padding: var(--space-4) var(--space-5);
-  overflow: auto;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--log-bg);
