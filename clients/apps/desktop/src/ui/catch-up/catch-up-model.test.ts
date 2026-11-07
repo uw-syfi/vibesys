@@ -30,6 +30,7 @@ describe('the tiles of a window', () => {
     expect(tiles.objectives).toEqual([
       {
         metric: 'throughput',
+        unit: 'tok/s',
         direction: 'maximize',
         start: '1.84',
         end: '2.31',
@@ -37,6 +38,7 @@ describe('the tiles of a window', () => {
       },
       {
         metric: 'p99 latency',
+        unit: '',
         direction: 'minimize',
         start: null,
         end: '118',

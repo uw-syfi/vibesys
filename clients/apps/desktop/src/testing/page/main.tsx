@@ -180,6 +180,7 @@ const daemon = new FakeDaemon({
               startMs: START_MS,
               endMs: scenario.endMs,
               objectives: SERVING,
+              ...(query.has('ideas') ? {ideas: Number(query.get('ideas'))} : {}),
             },
             {stale: query.has('stale')},
           ),

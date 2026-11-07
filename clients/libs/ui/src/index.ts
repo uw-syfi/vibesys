@@ -23,6 +23,7 @@ export {Card} from './components/card.js';
 export {
   Chart,
   ChartColumns,
+  ChartDetail,
   ChartLegend,
   type ChartLegendItem,
   type ChartLegendMark,

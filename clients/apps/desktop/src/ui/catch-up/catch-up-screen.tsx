@@ -16,9 +16,17 @@ import {
   Text,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import type {CatchUpPress, CatchUpRefusal, CheckInRead, FaultKind} from '../../state/index.js';
+import type {RunHistoryStatus} from '../../core/index.js';
+import type {
+  CatchUpPress,
+  CatchUpRefusal,
+  CheckInRead,
+  FaultKind,
+  IdeaWindow,
+} from '../../state/index.js';
 import {formatDayTime, formatSpan} from '../agents/time.js';
 import {NOT_REPORTED} from '../cost/words.js';
+import {HistoryStatusWord} from '../orchestrator/history-status.js';
 import {
   type CatchUpModel,
   type CatchUpWords,
@@ -144,6 +152,11 @@ function ObjectiveLine(props: {readonly objective: ObjectiveFigures}): JSX.Eleme
           )}
           {objective.start === null ? null : <Text tone="muted">→</Text>}
           <Text variant="metric">{objective.end}</Text>
+          {objective.unit === '' ? null : (
+            <Text variant="small" tone="muted">
+              {objective.unit}
+            </Text>
+          )}
         </Row>
       </span>
     </Stack>
@@ -151,7 +164,7 @@ function ObjectiveLine(props: {readonly objective: ObjectiveFigures}): JSX.Eleme
 }
 
 /** The window's figures, a card for each kind: what the host counted and nothing it did not. */
-function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
+function TileCards(props: {readonly tiles: Tiles; readonly showIdeas: () => void}): JSX.Element {
   const {tiles} = props;
   return (
     <Stack gap="space-4">
@@ -168,9 +181,16 @@ function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
           )}
         </Card>
         <Card section="Ideas">
-          <Row gap="space-7" rowGap="space-4" wrap>
+          <Row gap="space-7" rowGap="space-4" align="end" wrap>
             <Stat label="Created" value={tiles.ideas.created} />
             <Stat label="Changed" value={tiles.ideas.changed} />
+            <Button
+              text="Show ideas"
+              label="Show ideas of this window"
+              variant="quiet"
+              size="sm"
+              press={props.showIdeas}
+            />
           </Row>
         </Card>
         <Card section="Agents">
@@ -209,7 +229,10 @@ function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
 }
 
 /** The window the page shows: its title, how long it is, where its facts stand, and what it holds. */
-function Window(props: {readonly model: CatchUpModel}): JSX.Element {
+function Window(props: {
+  readonly model: CatchUpModel;
+  readonly showIdeas: () => void;
+}): JSX.Element {
   const {model} = props;
   return (
     <Stack gap="space-4">
@@ -232,7 +255,7 @@ function Window(props: {readonly model: CatchUpModel}): JSX.Element {
         ) : null}
       </Stack>
       <SummaryCard summary={model.summary} />
-      {model.tiles === null ? null : <TileCards tiles={model.tiles} />}
+      {model.tiles === null ? null : <TileCards tiles={model.tiles} showIdeas={props.showIdeas} />}
     </Stack>
   );
 }
@@ -270,10 +293,15 @@ export function CatchUpScreen(props: {
   /** The run's name, for the breadcrumb. */
   readonly run: string;
   readonly rows: readonly CheckInRead[];
+  /** Where reading the run's history (where check-ins are served) stands: an empty list is "none" only once it is read. */
+  readonly history: RunHistoryStatus;
+  readonly retryHistory: () => void;
   readonly press: CatchUpPress | undefined;
   readonly catchUp: () => void;
   readonly goRuns: () => void;
   readonly goRun: () => void;
+  /** Open the report's ideas narrowed to the span a check-in covers (a display filter only). */
+  readonly goIdeas: (window: IdeaWindow) => void;
   readonly words: CatchUpPageWords;
 }): JSX.Element {
   const [picked, setPicked] = useState<string | null>(null);
@@ -294,8 +322,13 @@ export function CatchUpScreen(props: {
       <div role="status" aria-live="polite" aria-label="Catch me up: outcome">
         <PressLine press={props.press} words={props.words} again={props.catchUp} />
       </div>
+      {props.history._tag === 'Idle' ? null : (
+        <HistoryStatusWord status={props.history} retry={props.retryHistory} />
+      )}
       {shown === undefined ? (
-        <EmptyState title="No check-ins yet" />
+        props.history._tag === 'Idle' ? (
+          <EmptyState title="No check-ins yet" />
+        ) : null
       ) : (
         <Split
           asideAtStart
@@ -316,7 +349,12 @@ export function CatchUpScreen(props: {
               </PickList>
             </Card>
           }
-          main={<Window model={catchUpModel(shown, props.words)} />}
+          main={
+            <Window
+              model={catchUpModel(shown, props.words)}
+              showIdeas={() => props.goIdeas({fromMs: shown.sinceMs, toMs: shown.atMs})}
+            />
+          }
         />
       )}
     </Page>
