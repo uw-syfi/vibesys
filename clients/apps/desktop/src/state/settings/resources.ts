@@ -1,28 +1,15 @@
 /** What the Resources tab shows of each host the app is connected to, as plain facts. */
-import {type HostConnectionState, refusalCauseOf} from '../connection.js';
-import type {RefusalCause} from '../fault.js';
+import type {HostConnectionState} from '../connection.js';
 import type {FeedStatus} from '../feed.js';
-import {type Freshness, freshnessOf} from '../freshness.js';
-
-/** How the link to a host stands, in the words a person can act on. */
-export type ResourceConnection =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'incompatible'
-  | 'refused'
-  | 'unreachable';
+import {type HostStatus, hostStatusOf} from '../host-status.js';
 
 export interface ResourceRow {
   /** The `HostKey`: stable, and what a route names. */
   readonly key: string;
   /** What the host is called on screen. */
   readonly label: string;
-  readonly connection: ResourceConnection;
-  /** Why the host refuses for good, when `connection` is `refused`: what to change, not a retry. */
-  readonly cause: RefusalCause | null;
-  readonly freshness: Freshness;
+  /** The one status the host has on every screen. */
+  readonly status: HostStatus;
 }
 
 /** What a host's row is built from. */
@@ -34,29 +21,17 @@ export interface ResourceHost {
   readonly runsFeed: FeedStatus;
   /** Something read earlier from the host is on screen. */
   readonly hasData: boolean;
-}
-
-function connectionOf(state: HostConnectionState): ResourceConnection {
-  switch (state._tag) {
-    case 'Idle':
-      return 'idle';
-    case 'Connecting':
-      return 'connecting';
-    case 'Ready':
-      return 'connected';
-    case 'Waiting':
-      return 'reconnecting';
-    case 'Incompatible':
-      return 'incompatible';
-    case 'Unusable':
-      return state.fault.kind === 'Refused' ? 'refused' : 'unreachable';
-  }
+  /** How long the link has been down, when the clock and the connection know. */
+  readonly staleForMs: number | null;
 }
 
 export const resourceRow = (host: ResourceHost): ResourceRow => ({
   key: host.key,
   label: host.label,
-  connection: connectionOf(host.connection),
-  cause: refusalCauseOf(host.connection),
-  freshness: freshnessOf(host.connection, host.runsFeed, host.hasData),
+  status: hostStatusOf({
+    connection: host.connection,
+    feed: host.runsFeed,
+    hasData: host.hasData,
+    staleForMs: host.staleForMs,
+  }),
 });

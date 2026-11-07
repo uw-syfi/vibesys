@@ -19,6 +19,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {Freshness} from '../freshness.js';
+import {HOST_STATUS_KINDS, type HostStatus} from '../host-status.js';
 import {
   FLEET_STATES,
   type FleetFilter,
@@ -221,12 +222,16 @@ function dataOf(specs: readonly RunSpec[], noise = true): OrchestratorState {
 
 const hostInput: fc.Arbitrary<{
   readonly freshness: Freshness;
-  readonly staleForMs: number | null;
+  readonly status: HostStatus;
   readonly specs: readonly RunSpec[];
   readonly leftOut: number;
 }> = fc.record({
   freshness: fc.constantFrom(...FRESHNESS),
-  staleForMs: fc.option(fc.integer({min: 0, max: 10_000_000}), {nil: null}),
+  status: fc.record({
+    kind: fc.constantFrom(...HOST_STATUS_KINDS),
+    cause: fc.constantFrom(null, 'job-tool-too-old' as const),
+    staleForMs: fc.option(fc.integer({min: 0, max: 10_000_000}), {nil: null}),
+  }),
   specs: fc.array(runSpec, {maxLength: 8}),
   leftOut: fc.integer({min: 0, max: 40}),
 });
@@ -243,7 +248,7 @@ const fleet: fc.Arbitrary<readonly FleetHostInput[]> = fc
         cut: {truncated: input.leftOut > 0, runsLeftOut: input.leftOut},
       },
       freshness: input.freshness,
-      staleForMs: input.staleForMs,
+      status: input.status,
     })),
   );
 
@@ -371,7 +376,7 @@ describe('the fleet of runs', () => {
         for (const row of shown(hosts, NO_FLEET_FILTER)) {
           const host = hosts.find(each => each.key === row.host.key);
           expect(row.host.freshness).toBe(host?.freshness);
-          expect(row.host.staleForMs).toBe(host?.staleForMs);
+          expect(row.host.status).toBe(host?.status);
         }
         // Whatever the freshness, nothing is dropped for it.
         const live = hosts.map(host => ({...host, freshness: 'live' as const}));
@@ -441,7 +446,15 @@ describe('the fleet of runs', () => {
 
   it('is total on a host that has said nothing yet: no rows, and the host still listed', () => {
     const view = fleetView(
-      [{key: 'a', label: 'A', data: emptyState, freshness: 'empty', staleForMs: null}],
+      [
+        {
+          key: 'a',
+          label: 'A',
+          data: emptyState,
+          freshness: 'empty',
+          status: {kind: 'waiting', cause: null, staleForMs: null},
+        },
+      ],
       NO_FLEET_FILTER,
     );
     expect(view.live).toEqual([]);
@@ -451,8 +464,7 @@ describe('the fleet of runs', () => {
         key: 'a',
         label: 'A',
         freshness: 'empty',
-        staleForMs: null,
-        refusal: null,
+        status: {kind: 'waiting', cause: null, staleForMs: null},
         runs: 0,
         runsLeftOut: 0,
       },

@@ -70,9 +70,7 @@ const rows = (keys: readonly string[]): ResourceRow[] =>
   keys.map(key => ({
     key,
     label: key === 'local' ? 'This Mac' : key.slice(4),
-    connection: 'connected',
-    cause: null,
-    freshness: 'live',
+    status: {kind: 'live', cause: null, staleForMs: null},
   }));
 
 function Screen(props: {

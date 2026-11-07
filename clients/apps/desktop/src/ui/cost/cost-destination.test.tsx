@@ -136,7 +136,7 @@ describe('the Cost destination of a run', () => {
   it('shows loading, with no figures and no banner, until the host has sent a view', () => {
     const {screen} = openCost(hostWith({}, {status: {_tag: 'Opening'}, freshness: 'empty'}));
     screen.press(screen.control('Open cost'));
-    expect(screen.text()).toContain('Loading');
+    expect(screen.text()).toContain('Waiting');
     expect(screen.text()).not.toContain('By agent type');
     screen.unmount();
   });

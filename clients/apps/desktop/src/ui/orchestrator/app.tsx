@@ -12,11 +12,12 @@ import {
   type HostConnectionState,
   type HostFreshness,
   type HostModel,
+  type HostStatus,
+  hostStatusOf,
   type IdeaWindow,
   type NavigationAction,
   type OrchestratorState,
   type Route,
-  refusalCauseOf,
   runReport,
   staleForMs,
 } from '../../state/index.js';
@@ -86,14 +87,22 @@ const OPENING_COST: CostFeedSnapshot = {status: {_tag: 'Opening'}, freshness: 'e
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
+/** The one status of a host, as its runs feed reads it. */
+const runsStatus = (host: HostSnapshot, nowMs: number): HostStatus =>
+  hostStatusOf({
+    connection: host.connection,
+    feed: host.runsFeed,
+    hasData: hasData(host),
+    staleForMs: staleForMs(host.freshness, nowMs),
+  });
+
 /** A host as the fleet reads it: its runs, how far to trust them, and how long they have been out of date. */
 const fleetInput = (host: HostSnapshot, nowMs: number): FleetHostInput => ({
   key: host.key,
   label: host.label,
   data: host.model.data,
   freshness: freshnessOf(host.connection, host.runsFeed, hasData(host)),
-  staleForMs: staleForMs(host.freshness, nowMs),
-  refusal: refusalCauseOf(host.connection),
+  status: runsStatus(host, nowMs),
 });
 
 function runsNote(
@@ -320,8 +329,13 @@ function RunDestination(props: {
     return (
       <CostScreen
         view={state.costs[runId]}
-        freshness={feed.freshness}
-        status={feed.status}
+        status={hostStatusOf({
+          connection: host.connection,
+          feed: feed.status,
+          hasData: state.costs[runId] !== undefined,
+          staleForMs: staleForMs(host.freshness, nowMs),
+        })}
+        feed={feed.status}
         runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
         words={COST_WORDS}
         trail={[...toRun, {id: 'cost', label: 'Cost'}]}
@@ -396,8 +410,7 @@ function ReportDestination(props: {
       report={report}
       host={host.label}
       nowMs={nowMs}
-      freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
-      staleForMs={staleForMs(host.freshness, nowMs)}
+      status={runsStatus(host, nowMs)}
       cost={state.costs[runId]}
       costFeed={host.costFeeds[runId] ?? OPENING_COST}
       retryCost={() => props.retryCost(host.key, runId)}

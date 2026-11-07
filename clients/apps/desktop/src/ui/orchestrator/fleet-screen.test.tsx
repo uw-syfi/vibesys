@@ -23,11 +23,15 @@ import {
   applySnapshot,
   emptyState,
   type FleetHostInput,
+  type Freshness,
+  type HostStatus,
+  type HostStatusKind,
   initialNavigation,
   type NavigationAction,
   navigationReducer,
   type OrchestratorState,
   REFUSAL_CAUSES,
+  type RefusalCause,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {
@@ -37,9 +41,9 @@ import {
   SERVING,
   serveSummaries,
 } from '../../testing/orchestrator/index.js';
+import {hostStatusWord} from '../host-status-words.js';
 import {causeWord} from '../refusal-words.js';
 import {FleetScreen} from './fleet-screen.js';
-import {freshnessPhrase} from './fleet-words.js';
 
 installDom();
 
@@ -172,11 +176,29 @@ const live = (id: string, task: string, more = {}) => ({
   ...more,
 });
 
+/** The status a host of this freshness (and refusal) has, as the service layer works it out. */
+const statusFor = (
+  freshness: Freshness,
+  staleForMs: number | null,
+  cause: RefusalCause | null,
+): HostStatus => {
+  if (cause !== null) return {kind: 'refused', cause, staleForMs: null};
+  const kinds: Record<Freshness, HostStatusKind> = {
+    live: 'live',
+    'catching-up': 'catching-up',
+    stale: 'stale',
+    empty: 'waiting',
+    unavailable: 'unavailable',
+  };
+  const kind = kinds[freshness];
+  return {kind, cause: null, staleForMs: kind === 'stale' ? staleForMs : null};
+};
+
 const hostA: FleetHostInput = {
   key: 'local',
   label: 'This Mac',
   freshness: 'live',
-  staleForMs: null,
+  status: statusFor('live', null, null),
   data: stateOf([
     live('a1', 'queue-rs · mpmc', {
       cost: 318,
@@ -200,7 +222,7 @@ const hostB: FleetHostInput = {
   key: 'ssh:gpu-cluster-1',
   label: 'gpu-cluster-1',
   freshness: 'stale',
-  staleForMs: 14 * MINUTE,
+  status: statusFor('stale', 14 * MINUTE, null),
   data: stateOf([live('b1', 'KV cache kernel', {cost: 1204.5})]),
 };
 
@@ -315,14 +337,26 @@ describe('the fleet screen', () => {
   it('never claims a host has no runs before it has been read', () => {
     for (const freshness of ['empty', 'unavailable'] as const) {
       const {screen} = open([
-        {key: 'local', label: 'This Mac', freshness, staleForMs: null, data: emptyState},
+        {
+          key: 'local',
+          label: 'This Mac',
+          freshness,
+          status: statusFor(freshness, null, null),
+          data: emptyState,
+        },
       ]);
       expect(screen.text()).not.toContain('No runs');
       expect(screen.text()).toContain('Not read yet');
       screen.unmount();
     }
     const {screen} = open([
-      {key: 'local', label: 'This Mac', freshness: 'live', staleForMs: null, data: emptyState},
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data: emptyState,
+      },
     ]);
     expect(screen.text()).toContain('No runs');
     screen.unmount();
@@ -337,8 +371,7 @@ describe('the fleet screen', () => {
           key: 'ssh:h',
           label: 'host-a',
           freshness: 'unavailable',
-          staleForMs: null,
-          refusal: cause,
+          status: statusFor('unavailable', null, cause),
           data: emptyState,
         },
       ]);
@@ -355,8 +388,7 @@ describe('the fleet screen', () => {
           key: 'ssh:h',
           label: 'host-a',
           freshness: 'unavailable',
-          staleForMs: null,
-          refusal: cause,
+          status: statusFor('unavailable', null, cause),
           data: emptyState,
         },
         hostA,
@@ -375,8 +407,7 @@ describe('the fleet screen', () => {
         key: 'local',
         label: 'This Mac',
         freshness: 'empty',
-        staleForMs: null,
-        refusal: 'job-tool-too-old',
+        status: statusFor('empty', null, 'job-tool-too-old'),
         data: emptyState,
       },
     ]);
@@ -386,7 +417,7 @@ describe('the fleet screen', () => {
   });
 
   it('shows a host that is read but cannot run a run with its cause on its chip, and keeps its rows', () => {
-    const {screen} = open([{...hostA, refusal: 'job-tool-too-old'}]);
+    const {screen} = open([{...hostA, status: statusFor('live', null, 'job-tool-too-old')}]);
     expect(screen.text()).toContain('Job tool too old');
     expect(rows(screen)).not.toHaveLength(0);
     screen.unmount();
@@ -397,7 +428,13 @@ describe('the fleet screen', () => {
     const screen = mount(
       <FleetScreen
         hosts={[
-          {key: 'local', label: 'This Mac', freshness: 'live', staleForMs: null, data: emptyState},
+          {
+            key: 'local',
+            label: 'This Mac',
+            freshness: 'live',
+            status: statusFor('live', null, null),
+            data: emptyState,
+          },
         ]}
         place={initialNavigation.fleet}
         nowMs={NOW}
@@ -420,7 +457,7 @@ describe('the fleet screen', () => {
         key: `h${index}`,
         label,
         freshness: 'live' as const,
-        staleForMs: null,
+        status: statusFor('live', null, null),
         data: stateOf([live(`x${index}`, `run ${index}`)]),
       })),
     );
@@ -436,14 +473,14 @@ describe('the fleet screen', () => {
   it('never says a host is stale for 0 seconds, and says the age once it is worth saying', () => {
     fc.assert(
       fc.property(fc.integer({min: 0, max: 30 * 24 * HOUR}), ageMs => {
-        const phrase = freshnessPhrase('stale', ageMs);
-        expect(phrase).not.toMatch(/\b0s\b/);
-        expect(phrase === 'Stale').toBe(ageMs < 10_000);
+        const {label} = hostStatusWord({kind: 'stale', cause: null, staleForMs: ageMs});
+        expect(label).not.toMatch(/\b0s\b/);
+        expect(label === 'Stale').toBe(ageMs < 10_000);
       }),
       {seed: 31},
     );
-    expect(freshnessPhrase('stale', null)).toBe('Stale');
-    expect(freshnessPhrase('live', 5 * HOUR)).toBe('Live');
+    expect(hostStatusWord({kind: 'stale', cause: null, staleForMs: null}).label).toBe('Stale');
+    expect(hostStatusWord({kind: 'live', cause: null, staleForMs: 5 * HOUR}).label).toBe('Live');
   });
 
   it('sends the state filter and the host filter as intents, and shows what they leave', () => {
@@ -511,7 +548,7 @@ describe('the fleet screen', () => {
         key: host,
         label: host,
         freshness: 'live',
-        staleForMs: null,
+        status: statusFor('live', null, null),
         data: stateOf([live('x1', name, {cost: 1})]),
       },
     ]);
@@ -526,7 +563,13 @@ describe('the fleet screen', () => {
     const scenario = fleetScenario({seed: 5, prefix: 'big', runs: 600, live: 3, nowMs: NOW});
     const data = applySnapshot(emptyState, new FakeDaemon(scenario).snapshot());
     const {screen} = open([
-      {key: 'local', label: 'This Mac', freshness: 'live', staleForMs: null, data},
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data,
+      },
     ]);
     const history = screen.container.querySelector('[role="listbox"][aria-label="Run history"]');
     const drawn = history?.querySelectorAll('[role="option"]') ?? [];
@@ -659,7 +702,7 @@ const withHost = (runs: Parameters<typeof stateOf>[0]): FleetHostInput => ({
   key: 'local',
   label: 'This Mac',
   freshness: 'live',
-  staleForMs: null,
+  status: statusFor('live', null, null),
   data: stateOf(runs),
 });
 
@@ -835,9 +878,12 @@ describe('the candidates cell of the fleet screen', () => {
     // A count of older runs, and a stale host with its Retry, arrive: no cell is added or removed.
     expect(bar([cut(7)])).toHaveLength(quiet.length);
     // The second host answers late, stale or with runs left out: the same cells as when it is live.
-    const both = bar([hostA, {...hostB, freshness: 'live', staleForMs: null}]);
+    const both = bar([hostA, {...hostB, freshness: 'live', status: statusFor('live', null, null)}]);
     expect(
-      bar([hostA, {...hostB, freshness: 'empty', staleForMs: null, data: emptyState}]),
+      bar([
+        hostA,
+        {...hostB, freshness: 'empty', status: statusFor('empty', null, null), data: emptyState},
+      ]),
     ).toHaveLength(both.length);
     expect(bar([hostA, hostB])).toHaveLength(both.length);
     expect(
@@ -846,7 +892,7 @@ describe('the candidates cell of the fleet screen', () => {
         {
           ...hostB,
           freshness: 'live',
-          staleForMs: null,
+          status: statusFor('live', null, null),
           data: {...hostB.data, cut: {truncated: true, runsLeftOut: 4}},
         },
       ]),
