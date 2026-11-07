@@ -35,6 +35,7 @@ import {
   ReportSchema,
   type RunChange,
   RunStatus,
+  type SearchState,
   type Turn,
   TurnStatus,
   TurnTrigger,
@@ -55,7 +56,10 @@ export interface ScenarioOptions {
 }
 
 export interface Scenario {
+  /** Serve the generic scripted search view with the run. */
   readonly search?: boolean;
+  /** Serve these search views with the run instead (the host's own, scripted by the caller). */
+  readonly searches?: readonly SearchState[];
   readonly searchStale?: boolean;
   readonly searchTruncated?: boolean;
   readonly runId: string;
