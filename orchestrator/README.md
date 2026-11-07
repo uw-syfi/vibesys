@@ -381,8 +381,11 @@ to repeat. The daemon sees a session that started and then opened or failed with
 core sees none of it. A host that crashes between any two of these finds the process again and asks
 again; one process holds a session, and it starts one agent.
 
-A store of another schema version is refused, with what to do: this contract changed the stored
-state, and there is no upgrade. A session of another protocol found after an upgrade is ended, and
+A store of a schema version this build does not read is refused, with what to do: this contract changed
+the stored state, and no row is ever converted. The one version before the current is read as it is,
+because the change between them only added (check-ins), and the open stamps the current version on it, so
+a build that reads only the older one refuses it by its number (`docs/contributing/process-boundaries.md`).
+A session of another protocol found after an upgrade is ended, and
 its agent resumes under this host's.
 
 The reason is the closed enum `StartFailureReason` on `Agent.start_failure_reason` and on the sidecar's
