@@ -4,6 +4,7 @@
  * (`desktop-state-*` rules in `.dependency-cruiser.mjs`), so a fold is a function from data to
  * data that any test calls directly.
  */
+export * from './agents/index.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
   type HostConnectionState,
