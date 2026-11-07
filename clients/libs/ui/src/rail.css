@@ -120,6 +120,10 @@
 }
 .vs-rail-item[data-active] {
   background: var(--rail-selected);
+  /* The label is text, and the accent falls short of AA on its own tint in some themes. */
+  color: var(--text);
+}
+.vs-rail-item[data-active] .vs-rail-icon {
   color: var(--accent);
 }
 .vs-rail-item:focus-visible {

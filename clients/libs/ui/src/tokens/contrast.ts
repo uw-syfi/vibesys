@@ -56,6 +56,13 @@ export const LOG_ERR_MIX = {role: 'err', share: 60, into: 'log-text', on: 'log-b
 /** A chip's fill: its tone mixed into the panel it sits on, and the text of that tone drawn on it. */
 export const CHIP_FILL_MIX = {share: 12, into: 'panel'} as const;
 
+/**
+ * A rail item's hover and selected fills: the accent mixed into the rail's own ground. The label
+ * and the icon sit on them, so the label is `text` (not the accent, which falls short on a tint in
+ * some themes) and the icon is the accent.
+ */
+export const RAIL_MIX = {hover: 8, selected: 16, into: 'panel-2'} as const;
+
 export interface ContrastPair {
   readonly foreground: ColorRole;
   readonly background: ColorRole;

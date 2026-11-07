@@ -1,4 +1,4 @@
-import {CHIP_FILL_MIX, LOG_ERR_MIX} from './contrast.js';
+import {CHIP_FILL_MIX, LOG_ERR_MIX, RAIL_MIX} from './contrast.js';
 import {
   ELEVATION,
   FONT_STACKS,
@@ -97,8 +97,8 @@ function derivedDeclarations(): string[] {
   return [
     `--selection: ${mix('accent', MIX.selection, 'bg')};`,
     // A rail item sits on the rail's own ground (`--panel-2`): hover and selection are tints of the accent over it.
-    `--rail-hover: ${mix('accent', MIX.railHover, 'panel-2')};`,
-    `--rail-selected: ${mix('accent', MIX.railSelected, 'panel-2')};`,
+    `--rail-hover: ${mix('accent', RAIL_MIX.hover, RAIL_MIX.into)};`,
+    `--rail-selected: ${mix('accent', RAIL_MIX.selected, RAIL_MIX.into)};`,
     `--log-err: ${mix(LOG_ERR_MIX.role, LOG_ERR_MIX.share, LOG_ERR_MIX.into)};`,
     ...TONES.flatMap(tone => [
       `--chip-${tone}-bg: ${mix(tone, MIX.fill, CHIP_FILL_MIX.into)};`,

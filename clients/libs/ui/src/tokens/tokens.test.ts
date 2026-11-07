@@ -13,9 +13,11 @@ import {
   CONTRAST_PAIRS,
   contrastRatio,
   DEFAULT_THEMES,
+  GRAPHIC_FLOOR,
   LOG_ERR_MIX,
   MOTION,
   mixHex,
+  RAIL_MIX,
   TEXT_FLOOR,
   THEMES,
   type ThemeMode,
@@ -106,6 +108,22 @@ describe('contrast floors', () => {
       return (['accent', 'ok', 'warn', 'err'] as const).flatMap(tone => {
         const ratio = contrastRatio(colors[tone], mixHex(colors[tone], share, colors[into]));
         return ratio >= TEXT_FLOOR ? [] : [`${name}: ${tone} chip text is ${ratio.toFixed(2)}:1`];
+      });
+    });
+    expect(failures).toEqual([]);
+  });
+
+  test('a rail item reads when hovered and when selected, in every theme', () => {
+    const failures = THEME_NAMES.flatMap(name => {
+      const {colors} = THEMES[name];
+      return (['hover', 'selected'] as const).flatMap(state => {
+        const fill = mixHex(colors.accent, RAIL_MIX[state], colors[RAIL_MIX.into]);
+        const label = contrastRatio(colors.text, fill);
+        const icon = contrastRatio(colors.accent, fill);
+        return [
+          ...(label >= TEXT_FLOOR ? [] : [`${name}: ${state} rail label is ${label.toFixed(2)}:1`]),
+          ...(icon >= GRAPHIC_FLOOR ? [] : [`${name}: ${state} rail icon is ${icon.toFixed(2)}:1`]),
+        ];
       });
     });
     expect(failures).toEqual([]);

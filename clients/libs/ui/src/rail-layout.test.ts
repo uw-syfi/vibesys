@@ -44,6 +44,9 @@ describe('the rail', () => {
     const selected = declarations('rail.css', '.vs-rail-item[data-active]');
     expect(selected).toContain('background: var(--rail-selected);');
     expect(selected).not.toMatch(/border|outline|box-shadow/);
+    expect(declarations('rail.css', '.vs-rail-item[data-active] .vs-rail-icon')).toContain(
+      'color: var(--accent);',
+    );
     expect(declarations('rail.css', '.vs-rail-item:hover')).toContain(
       'background: var(--rail-hover);',
     );

@@ -20,6 +20,7 @@ export {
   GRAPHIC_FLOOR,
   LOG_ERR_MIX,
   mixHex,
+  RAIL_MIX,
   relativeLuminance,
   TEXT_FLOOR,
 } from './contrast.js';
