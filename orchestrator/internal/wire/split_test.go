@@ -29,6 +29,8 @@ func publicPart(in *pb.Event) *pb.RunChange {
 		out.Body = &pb.RunChange_Message{Message: b.MessageUpdated}
 	case *pb.Event_ReceiptRecorded:
 		out.Body = &pb.RunChange_Receipt{Receipt: b.ReceiptRecorded.GetReceipt()}
+	case *pb.Event_CheckInUpdated:
+		out.Body = &pb.RunChange_CheckIn{CheckIn: b.CheckInUpdated}
 	}
 	return out
 }
@@ -39,6 +41,9 @@ func storedEvent(r *rand.Rand) *pb.Event {
 	in := generated(r, &pb.Event{})
 	if receipt := in.GetReceiptRecorded().GetReceipt(); receipt != nil {
 		receipt.Sequence = in.GetSequence()
+	}
+	if check := in.GetCheckInUpdated(); check != nil {
+		legalCheckIn(r, check)
 	}
 	return in
 }
@@ -77,6 +82,8 @@ func TestOnlyThePublicPartOfARecordReachesAWatcher(t *testing.T) {
 			served, public = wire.AgentMessage(b), want.GetAgent()
 		case core.Receipt:
 			served, public = wire.ReceiptMessage(b, seq), want.GetReceipt()
+		case core.CheckIn:
+			served, public = wire.CheckInMessage(b), want.GetCheckIn()
 		}
 		if served != nil && !proto.Equal(served, public) {
 			t.Fatalf("a snapshot or an answer gives more or less than the public part\n got: %v\nwant: %v", served, public)

@@ -32,6 +32,7 @@ const BODY_KINDS = {
   handoffReminder: true,
   leadIdleReminder: true,
   reportDue: true,
+  catchUpRequest: true,
   runLimitReached: true,
 } as const satisfies Record<BodyKind, true>;
 
@@ -61,7 +62,7 @@ export type MessageNote =
   | {readonly kind: 'settled'; readonly agentId: string; readonly status: AgentStatus}
   /** The host nudging an agent. */
   | {readonly kind: 'reminder'}
-  /** The host asking the lead for a progress report. */
+  /** The host asking the lead for a progress report: on its schedule, or because a viewer pressed Catch me up. */
   | {readonly kind: 'report-due'}
   | {readonly kind: 'limit'; readonly limit: RunLimit};
 
@@ -91,6 +92,7 @@ export function noteOf(message: Message): MessageNote {
     case 'leadIdleReminder':
       return {kind: 'reminder'};
     case 'reportDue':
+    case 'catchUpRequest':
       return {kind: 'report-due'};
     case 'runLimitReached':
       return {kind: 'limit', limit: body.value.limit};

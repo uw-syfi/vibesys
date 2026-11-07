@@ -12,6 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs/jobstest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 )
 
@@ -51,6 +52,9 @@ type Rig struct {
 	JobToolErr error
 	// JobStall makes that many polls of the job source hang until their bound ends.
 	JobStall int
+	// Search is the job log every daemon is given, read at each Restart: the one the host has read of
+	// each run's task. Nil is a host that reads none.
+	Search *search.Store
 	// JobSource overrides the default Fake for integrated deterministic tests.
 	JobSource jobs.JobSource
 	// NewHost makes the launcher each new daemon is given, for a test of the real start protocol.
@@ -108,7 +112,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	}
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log,
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Search: r.Search,
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:

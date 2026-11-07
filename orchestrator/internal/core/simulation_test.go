@@ -457,6 +457,35 @@ func (w *sim) report() {
 	}}})
 }
 
+// press has a viewer, one of three installs or sometimes none, press Catch me up on a run that is
+// live or over. A press that comes again with the same command id is a retry, which the simulation
+// sends at random like any other.
+func (w *sim) press() {
+	run, ok := pick(w, w.state.Runs())
+	if !ok {
+		return
+	}
+	var viewer core.Viewer
+	if n := w.r.IntN(13); n < 12 {
+		viewer = core.Viewer{ID: core.ViewerID(fmt.Sprintf("install-%d", n%3)), Label: fmt.Sprintf("viewer %d", n%3)}
+	}
+	w.command(core.Operator{Viewer: viewer}, &pb.Command{Body: &pb.Command_RequestCatchUp{RequestCatchUp: &pb.RequestCatchUp{RunId: string(run.ID)}}})
+}
+
+// answerWindow is the far side of ComputeWindowFacts: the shell works the facts out and says so, or
+// cannot. The effect is carried out at least once, so the answer comes more than once, and a later one
+// says something else; the check-in keeps the first.
+func (w *sim) answerWindow(e core.ComputeWindowFacts) {
+	if _, ok := w.state.CheckIn(e.CheckIn); !ok {
+		w.fail("asked to work out the facts of %s, which is not a check-in", e.CheckIn)
+	}
+	if w.r.IntN(5) == 0 {
+		w.decide(core.WindowFactsFailed{CheckIn: e.CheckIn, Detail: fmt.Sprintf("the job log could not be read (%d)", w.r.IntN(100))})
+		return
+	}
+	w.decide(core.WindowFactsReady{CheckIn: e.CheckIn, Facts: drawnFacts(w.r.IntN)})
+}
+
 // pause lets a long time pass with nothing happening, which is what a stall needs, and then fires
 // the timers that came due.
 func (w *sim) pause() {
@@ -532,6 +561,9 @@ func (w *sim) carryOut(e core.Effect) {
 		if !slices.Contains(w.timers, b) {
 			w.timers = append(w.timers, b)
 		}
+		return
+	case core.ComputeWindowFacts:
+		w.answerWindow(b)
 		return
 	case core.ReleaseCheckouts:
 		// Working copies are removed only once nothing can continue in them, and the answer names some
@@ -778,7 +810,7 @@ func (w *sim) drawPlan() []action {
 	w.slowStarts = w.r.IntN(2) == 0
 	return []action{
 		{40, w.finishStart}, {20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs}, {20, w.report},
-		{fault(10), w.pause}, {fault(8), w.lull},
+		{fault(10), w.pause}, {fault(8), w.lull}, {40, w.press},
 		{fault(10), w.stopSubagent}, {fault(2), w.stopRun}, {fault(15), w.retry}, {fault(5), w.crash},
 		{fault(20), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
 		{200, w.work}, {160, w.act}, {230, func() { w.readSidecar() }},

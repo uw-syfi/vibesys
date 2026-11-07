@@ -34,12 +34,14 @@ type tables struct {
 	items    map[core.ItemID]row
 	messages map[core.MessageID]row
 	receipts map[core.CommandID]row
+	checkIns map[core.CheckInID]row
 }
 
 func newTables() *tables {
 	return &tables{
 		runs: map[core.RunID]row{}, agents: map[core.AgentID]row{}, turns: map[core.TurnID]row{},
 		items: map[core.ItemID]row{}, messages: map[core.MessageID]row{}, receipts: map[core.CommandID]row{},
+		checkIns: map[core.CheckInID]row{},
 	}
 }
 
@@ -63,6 +65,8 @@ func (t *tables) apply(seq uint64, e core.Event, body []byte) error {
 		t.messages[b.ID] = r
 	case core.Receipt:
 		t.receipts[b.Command] = r
+	case core.CheckIn:
+		t.checkIns[b.ID] = r
 	default:
 		return fmt.Errorf("store: unknown event body %T", e.Body)
 	}
@@ -145,18 +149,21 @@ func runAfter(e core.Effect) (nanos int64, timed bool) {
 }
 
 // summary is the part of the tables that must equal the state: what a state holds for runs, agents,
-// mail in transit and receipts. Items, turns and settled messages are history, which no state keeps.
+// mail in transit, receipts and check-ins. Items, turns and settled messages are history, which no
+// state keeps.
 type summary struct {
 	runs     map[core.RunID]core.Run
 	agents   map[core.AgentID]core.Agent
 	transit  map[core.MessageID]core.Message
 	receipts map[core.CommandID]core.Receipt
+	checkIns map[core.CheckInID]core.CheckIn
 }
 
 func newSummary() summary {
 	return summary{
 		runs: map[core.RunID]core.Run{}, agents: map[core.AgentID]core.Agent{},
 		transit: map[core.MessageID]core.Message{}, receipts: map[core.CommandID]core.Receipt{},
+		checkIns: map[core.CheckInID]core.CheckIn{},
 	}
 }
 
@@ -177,6 +184,9 @@ func (t *tables) summary() summary {
 	for id, r := range t.receipts {
 		out.receipts[id] = r.event.Body.(core.Receipt)
 	}
+	for id, r := range t.checkIns {
+		out.checkIns[id] = r.event.Body.(core.CheckIn)
+	}
 	return out
 }
 
@@ -187,6 +197,9 @@ func (sm summary) check(s core.State) error {
 		want.runs[run.ID] = run
 		for _, a := range s.Agents(run.ID) {
 			want.agents[a.ID] = a
+		}
+		for _, c := range s.CheckIns(run.ID) {
+			want.checkIns[c.ID] = c
 		}
 	}
 	for _, m := range s.InTransit() {
@@ -206,7 +219,10 @@ func (sm summary) check(s core.State) error {
 	if err := sameSet("messages in transit", want.transit, sm.transit); err != nil {
 		return err
 	}
-	return sameSet("receipts", want.receipts, sm.receipts)
+	if err := sameSet("receipts", want.receipts, sm.receipts); err != nil {
+		return err
+	}
+	return sameSet("check-ins", want.checkIns, sm.checkIns)
 }
 
 // sameSet compares what a replay gives (want) with what a table holds (got).

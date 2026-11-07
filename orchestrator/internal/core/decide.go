@@ -28,6 +28,10 @@ func Decide(s State, in Input) (State, []Event, []Effect) {
 		t.jobsRunning(b)
 	case TimerFired:
 		t.timer(b)
+	case WindowFactsReady:
+		t.windowFactsReady(b)
+	case WindowFactsFailed:
+		t.windowFactsFailed(b)
 	case CheckoutsReleased:
 		t.checkoutsReleased(b)
 	default:
@@ -99,6 +103,8 @@ func (t *tx) command(c Command) {
 			run = t.postHandoff(c, b, &r)
 		case PostReport:
 			run = t.postReport(c, b, &r)
+		case RequestCatchUp:
+			run = t.requestCatchUp(c, b, &r)
 		default:
 			panic(fmt.Sprintf("core: unknown command %T", c.Body))
 		}
@@ -373,6 +379,7 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	report := b.Report
 	report.Sequence = run.ReportsPosted
 	r.Message = t.post(Message{Run: caller.Run, From: caller.ID, Body: report}).ID
+	t.answerCatchUp(caller, r.Message)
 	if run.FinalReported && run.LimitReached != "" {
 		// The lead did what the limit asked of it, so there is nothing to wait out.
 		t.beginStop(t.s.runs[run.ID], run.LimitReached.stopReason())

@@ -31,7 +31,7 @@ func (t *tx) route(m *Message, a agentState) {
 	switch {
 	case a.Stop != StopNone:
 		m.Delivery, m.Rejection = DeliveryRejected, RejectAgentStopping
-	case a.Status == AgentActive && a.Capabilities.Steers:
+	case a.Status == AgentActive && a.Capabilities.Steers && !m.ownTurn():
 		m.Delivery = DeliverySteered
 		t.effect(Steer{Session: Session{a.ID, a.Session}, Turn: a.turn.ID, Message: *m})
 	case !a.Status.Over():

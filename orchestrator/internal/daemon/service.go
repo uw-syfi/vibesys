@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -115,7 +117,11 @@ func (s *Service) caller(ctx context.Context) (core.Caller, error) {
 		if len(agent)+len(md.Get(MetaSession))+len(md.Get(MetaToken)) > 0 {
 			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the endpoint named by "+envcodec.NameOf(&pb.ToolServerCredentials{}, "endpoint"))
 		}
-		return core.Operator{}, nil
+		viewer, err := viewerOf(md)
+		if err != nil {
+			return nil, err
+		}
+		return core.Operator{Viewer: viewer}, nil
 	}
 	if len(agent) == 0 {
 		return nil, status.Error(codes.Unauthenticated, "this is the agent socket and every call needs the session credentials: start the tool from the environment the orchestrator launched the agent with")
@@ -129,6 +135,40 @@ func (s *Service) caller(ctx context.Context) (core.Caller, error) {
 		return nil, status.Errorf(codes.PermissionDenied, "session %d of agent %s is over: the agent was stopped or resumed", n, session.Agent)
 	}
 	return core.AgentCaller{Agent: session.Agent}, nil
+}
+
+// maxViewerBytes bounds the id and the label of a viewer, as the contract does.
+const maxViewerBytes = 128
+
+// viewerOf reads the viewer a call's metadata names. A call that names none has none: only a command
+// that needs one is refused for it (see Dispatch). A call that names half of one, or one the contract
+// would refuse, is an error that names the field, because it can only be a client that is wrong.
+func viewerOf(md metadata.MD) (core.Viewer, error) {
+	id, label := first(md.Get(protocol.MetaViewerID)), first(md.Get(protocol.MetaViewerLabel))
+	for _, f := range []struct{ field, value, other string }{
+		{protocol.MetaViewerID, id, label}, {protocol.MetaViewerLabel, label, id},
+	} {
+		switch {
+		case f.value == "" && f.other != "":
+			return core.Viewer{}, fieldError(codes.InvalidArgument, f.field, "is missing: a viewer is an id and a label, and this call has only the other")
+		case len(f.value) > maxViewerBytes:
+			return core.Viewer{}, fieldError(codes.InvalidArgument, f.field, fmt.Sprintf("is longer than %d bytes", maxViewerBytes))
+		case !utf8.ValidString(f.value):
+			return core.Viewer{}, fieldError(codes.InvalidArgument, f.field, "is not valid UTF-8")
+		}
+	}
+	return core.Viewer{ID: core.ViewerID(id), Label: label}, nil
+}
+
+// fieldError is an error that names the metadata field at fault, in the status's details as well as in
+// its words, so a client can tell which field without reading the message.
+func fieldError(code codes.Code, field, why string) error {
+	st := status.New(code, fmt.Sprintf("the call's %s metadata %s", field, why))
+	detailed, err := st.WithDetails(&errdetails.BadRequest{FieldViolations: []*errdetails.BadRequest_FieldViolation{{Field: field, Description: why}}})
+	if err != nil {
+		return st.Err()
+	}
+	return detailed.Err()
 }
 
 func first(v []string) string {
@@ -158,6 +198,11 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	cmd, err := wire.ParseCommandMessage(req.GetCommand(), caller)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if op, ok := cmd.Caller.(core.Operator); ok {
+		if _, catchUp := cmd.Body.(core.RequestCatchUp); catchUp && op.Viewer == (core.Viewer{}) {
+			return nil, fieldError(codes.InvalidArgument, protocol.MetaViewerID, "is missing: a catch-up is recorded for a viewer, so the call names one with this field and "+protocol.MetaViewerLabel)
+		}
 	}
 	cmd, err = s.checkStart(ctx, cmd)
 	if err != nil {
@@ -269,19 +314,14 @@ func (s *Service) addHistory(snap *pb.RunsSnapshot, run core.RunID) error {
 	for _, t := range window.Turns {
 		snap.Turns = append(snap.Turns, wire.TurnMessage(t))
 	}
-	for after := uint64(0); ; {
-		page, err := s.e.Store.Messages(run, after, store.MaxPageMessages)
-		if err != nil {
-			return fmt.Errorf("read the messages of %s: %w", run, err)
-		}
-		for _, rec := range page {
-			snap.Messages = append(snap.Messages, wire.MailboxMessage(rec.Message))
-			after = rec.Seq
-		}
-		if len(page) < store.MaxPageMessages {
-			return nil
-		}
+	records, err := s.e.readMessages(run)
+	if err != nil {
+		return err
 	}
+	for _, rec := range records {
+		snap.Messages = append(snap.Messages, wire.MailboxMessage(rec.Message))
+	}
+	return nil
 }
 
 // WatchRuns streams a snapshot of runs and agents, then the public part of every event after it.

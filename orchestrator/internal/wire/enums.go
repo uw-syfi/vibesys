@@ -137,6 +137,7 @@ var (
 		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
 		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
 
+		core.RefuseNoViewer:         pb.Refusal_REFUSAL_NO_VIEWER,
 		core.RefuseTimeLimitReached: pb.Refusal_REFUSAL_TIME_LIMIT_REACHED,
 		core.RefuseCostLimitReached: pb.Refusal_REFUSAL_COST_LIMIT_REACHED,
 	})
@@ -160,6 +161,10 @@ var (
 		core.VerdictPass:       pb.JudgeVerdict_JUDGE_VERDICT_PASS,
 		core.VerdictFail:       pb.JudgeVerdict_JUDGE_VERDICT_FAIL,
 		core.VerdictUnmeasured: pb.JudgeVerdict_JUDGE_VERDICT_UNMEASURED,
+	})
+	objectiveDirections = newEnum(map[core.Direction]pb.ObjectiveDirection{
+		core.Maximize: pb.ObjectiveDirection_OBJECTIVE_DIRECTION_MAXIMIZE,
+		core.Minimize: pb.ObjectiveDirection_OBJECTIVE_DIRECTION_MINIMIZE,
 	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,

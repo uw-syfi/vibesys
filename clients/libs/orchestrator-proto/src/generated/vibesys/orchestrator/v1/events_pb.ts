@@ -7,6 +7,8 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Duration, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_duration, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { CheckIn } from "./checkin_pb.js";
+import { file_vibesys_orchestrator_v1_checkin } from "./checkin_pb.js";
 import type { Agent, AgentRole, AllowedAgent, Delivery, Handoff, Harness, Item, Message as Message$1, Report, Run, Turn } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_orchestrator } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_tool_options } from "./tool_options_pb.js";
@@ -16,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/events.proto.
  */
 export const file_vibesys_orchestrator_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmVudHMucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIpsDCglSdW5DaGFuZ2USGQoIc2VxdWVuY2UYASABKARCB7pIBDICIAASLgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESDgoGcnVuX2lkGAMgASgJEisKA3J1bhgKIAEoCzIcLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bkgAEi8KBWFnZW50GAsgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRIABItCgR0dXJuGAwgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEi0KBGl0ZW0YDSABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtSAASMwoHbWVzc2FnZRgOIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VIABIzCgdyZWNlaXB0GA8gASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEgAQg0KBGJvZHkSBbpIAggBInUKBURlbHRhEhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEhgKB2l0ZW1faWQYAiABKAlCB7pIBHICEAESDgoEdGV4dBgDIAEoCUgAEhgKDmNvbW1hbmRfb3V0cHV0GAQgASgJSABCDQoEYm9keRIFukgCCAEicQoJQWdlbnRTcGVjEjsKB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgi6SAWCAQIQARINCgVtb2RlbBgCIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAMgASgJIucDCghTdGFydFJ1bhIbCgpyZXBvc2l0b3J5GAEgASgJQge6SARyAhABEhUKBHRhc2sYAiABKAlCB7pIBHICEAESFAoMZmFub3V0X2xpbWl0GAMgASgNEoABCgRsZWFkGAUgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTcGVjQk66SEu6AUUKFnN0YXJ0X3J1bi5sZWFkLmhhcm5lc3MSGHRoZSBsZWFkIG5lZWRzIGEgaGFybmVzcxoRdGhpcy5oYXJuZXNzICE9IDDIAQESDQoFYnJpZWYYBiABKAkSOwoMYWxsb3dfYWdlbnRzGAcgAygLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWxsb3dlZEFnZW50EisKDG1heF9jb3N0X3VzZBgIIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEjUKCG1heF90aW1lGAkgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uQgi6SAWqAQIqABI9Cg1zdW1tYXJ5X2V2ZXJ5GAogASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uQgu6SAiqAQUyAwisAkIPCg1fbWF4X2Nvc3RfdXNkSgQIBBAFUghkZWFkbGluZSIiCgdTdG9wUnVuEhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQASLEAQoKU3Bhd25BZ2VudBIXCgZydW5faWQYASABKAlCB7pIBHICEAESPgoEcm9sZRgCIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIMukgJggEGEAEgACABEjAKBHNwZWMYAyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFNwZWMSEwoLcGxhbl9udW1iZXIYBCABKA0SFgoFYnJpZWYYBSABKAlCB7pIBHICEAEiqgEKCVN0b3BBZ2VudBIyCghhZ2VudF9pZBgBIAEoCUIgukgEcgIQAaq7GBVUaGUgc3ViYWdlbnQgdG8gc3RvcC46aaq7GGUKCnN0b3BfYWdlbnQSV1N0b3Agb25lIHN1YmFnZW50IG9mIHlvdXIgcnVuLiBJdCBpcyBhc2tlZCB0byBmaW5pc2ggaXRzIHR1cm4sIHRoZW4gaXRzIHNlc3Npb24gY2xvc2VzLiL6AQoLU2VuZE1lc3NhZ2USLwoIYWdlbnRfaWQYASABKAlCHbpIBHICEAGquxgSVGhlIGFnZW50IHRvIHRlbGwuEiUKBHRleHQYAiABKAlCF7pIBHICEAGquxgMV2hhdCB0byBzYXkuOpIBqrsYjQEKDHNlbmRfbWVzc2FnZRJ9U2VuZCB0ZXh0IHRvIG9uZSBhZ2VudCBvZiB5b3VyIHJ1bi4gSXQgcmVhY2hlcyB0aGUgYWdlbnQgYXMgc3RlZXJpbmcgaWYgaXQgaXMgd29ya2luZywgb3Igc3RhcnRzIGl0cyBuZXh0IHR1cm4gaWYgaXQgaXMgaWRsZS4iSAoLUG9zdEhhbmRvZmYSOQoHaGFuZG9mZhgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhbmRvZmZCBrpIA8gBASJFCgpQb3N0UmVwb3J0EjcKBnJlcG9ydBgBIAEoCzIfLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEIGukgDyAEBIskDCgdDb21tYW5kEhMKAmlkGAEgASgJQge6SARyAhABEjYKCXN0YXJ0X3J1bhgKIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0YXJ0UnVuSAASNAoIc3RvcF9ydW4YCyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUnVuSAASOgoLc3Bhd25fYWdlbnQYDCABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TcGF3bkFnZW50SAASOAoKc3RvcF9hZ2VudBgNIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BBZ2VudEgAEjwKDHNlbmRfbWVzc2FnZRgOIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlbmRNZXNzYWdlSAASPAoMcG9zdF9oYW5kb2ZmGA8gASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUG9zdEhhbmRvZmZIABI6Cgtwb3N0X3JlcG9ydBgQIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBvc3RSZXBvcnRIAEINCgRib2R5EgW6SAIIASK/AgoHUmVjZWlwdBIbCgpjb21tYW5kX2lkGAEgASgJQge6SARyAhABEjsKB3JlZnVzYWwYAyABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWZ1c2FsQgi6SAWCAQIQARIOCgZydW5faWQYBCABKAkSEAoIYWdlbnRfaWQYBSABKAkSEgoKbWVzc2FnZV9pZBgGIAEoCRI9CghkZWxpdmVyeRgHIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRlbGl2ZXJ5Qgi6SAWCAQIQARIQCghzZXF1ZW5jZRgIIAEoBBI9Cg5hbGxvd2VkX2FnZW50cxgJIAMoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFsbG93ZWRBZ2VudEoECAIQA1IOY29tbWFuZF9kaWdlc3QqnwMKB1JlZnVzYWwSFwoTUkVGVVNBTF9VTlNQRUNJRklFRBAAEhkKFVJFRlVTQUxfUlVOX05PVF9GT1VORBABEhsKF1JFRlVTQUxfQUdFTlRfTk9UX0ZPVU5EEAISGQoVUkVGVVNBTF9OT1RfUEVSTUlUVEVEEAMSGwoXUkVGVVNBTF9SVU5fTk9UX1JVTk5JTkcQBBIYChRSRUZVU0FMX0ZBTk9VVF9MSU1JVBAFEhkKFVJFRlVTQUxfQUdFTlRfSVNfTEVBRBAGEhoKFlJFRlVTQUxfQUdFTlRfTk9UX0xJVkUQBxIdChlSRUZVU0FMX1JFUE9TSVRPUllfSU5fVVNFEAkSHQoZUkVGVVNBTF9BR0VOVF9OT1RfQUxMT1dFRBAKEh0KGVJFRlVTQUxfSEFORE9GRl9OT1RfWU9VUlMQCxIeChpSRUZVU0FMX1RJTUVfTElNSVRfUkVBQ0hFRBAMEh4KGlJFRlVTQUxfQ09TVF9MSU1JVF9SRUFDSEVEEA0iBAgIEAgqF1JFRlVTQUxfREVBRExJTkVfUEFTU0VEQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_tool_options]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmVudHMucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxItEDCglSdW5DaGFuZ2USGQoIc2VxdWVuY2UYASABKARCB7pIBDICIAASLgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESDgoGcnVuX2lkGAMgASgJEisKA3J1bhgKIAEoCzIcLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bkgAEi8KBWFnZW50GAsgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRIABItCgR0dXJuGAwgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEi0KBGl0ZW0YDSABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtSAASMwoHbWVzc2FnZRgOIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VIABIzCgdyZWNlaXB0GA8gASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEgAEjQKCGNoZWNrX2luGBAgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2hlY2tJbkgAQg0KBGJvZHkSBbpIAggBInUKBURlbHRhEhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEhgKB2l0ZW1faWQYAiABKAlCB7pIBHICEAESDgoEdGV4dBgDIAEoCUgAEhgKDmNvbW1hbmRfb3V0cHV0GAQgASgJSABCDQoEYm9keRIFukgCCAEicQoJQWdlbnRTcGVjEjsKB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgi6SAWCAQIQARINCgVtb2RlbBgCIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAMgASgJIucDCghTdGFydFJ1bhIbCgpyZXBvc2l0b3J5GAEgASgJQge6SARyAhABEhUKBHRhc2sYAiABKAlCB7pIBHICEAESFAoMZmFub3V0X2xpbWl0GAMgASgNEoABCgRsZWFkGAUgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTcGVjQk66SEu6AUUKFnN0YXJ0X3J1bi5sZWFkLmhhcm5lc3MSGHRoZSBsZWFkIG5lZWRzIGEgaGFybmVzcxoRdGhpcy5oYXJuZXNzICE9IDDIAQESDQoFYnJpZWYYBiABKAkSOwoMYWxsb3dfYWdlbnRzGAcgAygLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWxsb3dlZEFnZW50EisKDG1heF9jb3N0X3VzZBgIIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEjUKCG1heF90aW1lGAkgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uQgi6SAWqAQIqABI9Cg1zdW1tYXJ5X2V2ZXJ5GAogASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uQgu6SAiqAQUyAwisAkIPCg1fbWF4X2Nvc3RfdXNkSgQIBBAFUghkZWFkbGluZSIiCgdTdG9wUnVuEhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQASLEAQoKU3Bhd25BZ2VudBIXCgZydW5faWQYASABKAlCB7pIBHICEAESPgoEcm9sZRgCIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIMukgJggEGEAEgACABEjAKBHNwZWMYAyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFNwZWMSEwoLcGxhbl9udW1iZXIYBCABKA0SFgoFYnJpZWYYBSABKAlCB7pIBHICEAEiqgEKCVN0b3BBZ2VudBIyCghhZ2VudF9pZBgBIAEoCUIgukgEcgIQAaq7GBVUaGUgc3ViYWdlbnQgdG8gc3RvcC46aaq7GGUKCnN0b3BfYWdlbnQSV1N0b3Agb25lIHN1YmFnZW50IG9mIHlvdXIgcnVuLiBJdCBpcyBhc2tlZCB0byBmaW5pc2ggaXRzIHR1cm4sIHRoZW4gaXRzIHNlc3Npb24gY2xvc2VzLiL6AQoLU2VuZE1lc3NhZ2USLwoIYWdlbnRfaWQYASABKAlCHbpIBHICEAGquxgSVGhlIGFnZW50IHRvIHRlbGwuEiUKBHRleHQYAiABKAlCF7pIBHICEAGquxgMV2hhdCB0byBzYXkuOpIBqrsYjQEKDHNlbmRfbWVzc2FnZRJ9U2VuZCB0ZXh0IHRvIG9uZSBhZ2VudCBvZiB5b3VyIHJ1bi4gSXQgcmVhY2hlcyB0aGUgYWdlbnQgYXMgc3RlZXJpbmcgaWYgaXQgaXMgd29ya2luZywgb3Igc3RhcnRzIGl0cyBuZXh0IHR1cm4gaWYgaXQgaXMgaWRsZS4iSAoLUG9zdEhhbmRvZmYSOQoHaGFuZG9mZhgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhbmRvZmZCBrpIA8gBASJFCgpQb3N0UmVwb3J0EjcKBnJlcG9ydBgBIAEoCzIfLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEIGukgDyAEBIikKDlJlcXVlc3RDYXRjaFVwEhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQASKOBAoHQ29tbWFuZBITCgJpZBgBIAEoCUIHukgEcgIQARI2CglzdGFydF9ydW4YCiABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydFJ1bkgAEjQKCHN0b3BfcnVuGAsgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RvcFJ1bkgAEjoKC3NwYXduX2FnZW50GAwgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3Bhd25BZ2VudEgAEjgKCnN0b3BfYWdlbnQYDSABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wQWdlbnRIABI8CgxzZW5kX21lc3NhZ2UYDiABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZW5kTWVzc2FnZUgAEjwKDHBvc3RfaGFuZG9mZhgPIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBvc3RIYW5kb2ZmSAASOgoLcG9zdF9yZXBvcnQYECABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Qb3N0UmVwb3J0SAASQwoQcmVxdWVzdF9jYXRjaF91cBgRIAEoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcXVlc3RDYXRjaFVwSABCDQoEYm9keRIFukgCCAEi1AIKB1JlY2VpcHQSGwoKY29tbWFuZF9pZBgBIAEoCUIHukgEcgIQARI7CgdyZWZ1c2FsGAMgASgOMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVmdXNhbEIIukgFggECEAESDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhIKCm1lc3NhZ2VfaWQYBiABKAkSPQoIZGVsaXZlcnkYByABKA4yIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EZWxpdmVyeUIIukgFggECEAESEAoIc2VxdWVuY2UYCCABKAQSPQoOYWxsb3dlZF9hZ2VudHMYCSADKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BbGxvd2VkQWdlbnQSEwoLY2hlY2tfaW5faWQYCiABKAlKBAgCEANSDmNvbW1hbmRfZGlnZXN0KrYDCgdSZWZ1c2FsEhcKE1JFRlVTQUxfVU5TUEVDSUZJRUQQABIZChVSRUZVU0FMX1JVTl9OT1RfRk9VTkQQARIbChdSRUZVU0FMX0FHRU5UX05PVF9GT1VORBACEhkKFVJFRlVTQUxfTk9UX1BFUk1JVFRFRBADEhsKF1JFRlVTQUxfUlVOX05PVF9SVU5OSU5HEAQSGAoUUkVGVVNBTF9GQU5PVVRfTElNSVQQBRIZChVSRUZVU0FMX0FHRU5UX0lTX0xFQUQQBhIaChZSRUZVU0FMX0FHRU5UX05PVF9MSVZFEAcSHQoZUkVGVVNBTF9SRVBPU0lUT1JZX0lOX1VTRRAJEh0KGVJFRlVTQUxfQUdFTlRfTk9UX0FMTE9XRUQQChIdChlSRUZVU0FMX0hBTkRPRkZfTk9UX1lPVVJTEAsSHgoaUkVGVVNBTF9USU1FX0xJTUlUX1JFQUNIRUQQDBIeChpSRUZVU0FMX0NPU1RfTElNSVRfUkVBQ0hFRBANEhUKEVJFRlVTQUxfTk9fVklFV0VSEA4iBAgIEAgqF1JFRlVTQUxfREVBRExJTkVfUEFTU0VEQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_checkin, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_tool_options]);
 
 /**
  * RunChange is what a watcher of runs receives for one committed event: the public part of it. A
@@ -86,6 +88,15 @@ export type RunChange = Message<"vibesys.orchestrator.v1.RunChange"> & {
      */
     value: Receipt;
     case: "receipt";
+  } | {
+    /**
+     * A check-in made, or changed as its facts were worked out or its report was posted. The whole
+     * check-in, so a client replaces by id.
+     *
+     * @generated from field: vibesys.orchestrator.v1.CheckIn check_in = 16;
+     */
+    value: CheckIn;
+    case: "checkIn";
   } | { case: undefined; value?: undefined };
 };
 
@@ -378,6 +389,30 @@ export const PostReportSchema: GenMessage<PostReport> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_events, 9);
 
 /**
+ * RequestCatchUp is the press of Catch me up. The host records a check-in for the viewer who pressed
+ * it, covering everything since that viewer's last check-in in the run, works its facts out, and on a
+ * run that can be asked also asks the lead for a report covering the window. The viewer is not in the
+ * body: it is the call's metadata (see Viewer), and a call without it is refused. The receipt answers
+ * at once with the check-in's id, and a press while the viewer's last check-in is still being worked
+ * out answers with that one. Allowed on a run that is over.
+ *
+ * @generated from message vibesys.orchestrator.v1.RequestCatchUp
+ */
+export type RequestCatchUp = Message<"vibesys.orchestrator.v1.RequestCatchUp"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.RequestCatchUp.
+ * Use `create(RequestCatchUpSchema)` to create a new message.
+ */
+export const RequestCatchUpSchema: GenMessage<RequestCatchUp> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_events, 10);
+
+/**
  * Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
  * from the connection or the agent's session, so that a caller cannot claim to be someone else.
  *
@@ -436,6 +471,12 @@ export type Command = Message<"vibesys.orchestrator.v1.Command"> & {
      */
     value: PostReport;
     case: "postReport";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.RequestCatchUp request_catch_up = 17;
+     */
+    value: RequestCatchUp;
+    case: "requestCatchUp";
   } | { case: undefined; value?: undefined };
 };
 
@@ -444,7 +485,7 @@ export type Command = Message<"vibesys.orchestrator.v1.Command"> & {
  * Use `create(CommandSchema)` to create a new message.
  */
 export const CommandSchema: GenMessage<Command> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 10);
+  messageDesc(file_vibesys_orchestrator_v1_events, 11);
 
 /**
  * Receipt is the answer to a command, and the same answer to each retry of it.
@@ -501,6 +542,14 @@ export type Receipt = Message<"vibesys.orchestrator.v1.Receipt"> & {
    * @generated from field: repeated vibesys.orchestrator.v1.AllowedAgent allowed_agents = 9;
    */
   allowedAgents: AllowedAgent[];
+
+  /**
+   * The check-in a RequestCatchUp made, or for a press while the viewer's last check-in is being worked
+   * out, that one. The message the lead was asked with, if it was, is message_id.
+   *
+   * @generated from field: string check_in_id = 10;
+   */
+  checkInId: string;
 };
 
 /**
@@ -508,7 +557,7 @@ export type Receipt = Message<"vibesys.orchestrator.v1.Receipt"> & {
  * Use `create(ReceiptSchema)` to create a new message.
  */
 export const ReceiptSchema: GenMessage<Receipt> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 11);
+  messageDesc(file_vibesys_orchestrator_v1_events, 12);
 
 /**
  * Refusal says why a command was not carried out.
@@ -599,6 +648,15 @@ export enum Refusal {
    * @generated from enum value: REFUSAL_COST_LIMIT_REACHED = 13;
    */
   COST_LIMIT_REACHED = 13,
+
+  /**
+   * A catch-up was asked for with no viewer: the call carried no vibesys-viewer-id and
+   * vibesys-viewer-label metadata. A client that goes through the daemon is refused with an error
+   * naming the field before this is ever decided; this is what the decision itself says.
+   *
+   * @generated from enum value: REFUSAL_NO_VIEWER = 14;
+   */
+  NO_VIEWER = 14,
 }
 
 /**
