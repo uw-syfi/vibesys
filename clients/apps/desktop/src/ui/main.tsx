@@ -19,6 +19,8 @@ import {
   makeHostSession,
   makeNavigation,
   PreferencesFromWindow,
+  Viewer,
+  ViewerFromWindow,
 } from '../core/index.js';
 import {hostsOfAddress} from './address.js';
 import type {ConnectedHost, Dispatch} from './orchestrator/connected.js';
@@ -38,18 +40,27 @@ const open = Effect.gen(function* () {
   // The theme first, so the page is never drawn in one the person did not choose.
   const appearance = yield* makeAppearance().pipe(Scope.provide(scope));
   const navigation = yield* makeNavigation().pipe(Scope.provide(scope));
+  // Who this install is, to tell which check-ins a host keeps are its own; the main process stamps it
+  // on every call, so an app that cannot read it still works and just lists none as its own.
+  const viewer = yield* (yield* Viewer).whoami.pipe(
+    Effect.map(identity => identity.id),
+    Effect.catch(error =>
+      Effect.logWarning(`could not read the viewer: ${error.detail}`).pipe(Effect.as(null)),
+    ),
+  );
   const sessions: ConnectedHost[] = [];
   for (const {key, label} of hostsOfAddress(window.location.search)) {
     const session = yield* makeHostSession(key).pipe(Scope.provide(scope));
     sessions.push({key, label, session});
   }
-  return {sessions, appearance, navigation};
+  return {sessions, appearance, navigation, viewer};
 }).pipe(
   Effect.provide(
     Layer.mergeAll(
       GatewayTransportLive,
       Ids.layer,
       PreferencesFromWindow,
+      ViewerFromWindow,
       SystemAppearanceFromWindow,
       ThemeDocumentLive,
       KeyPressesFromWindow,
@@ -61,7 +72,7 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('index.html has no #root');
 const page = createRoot(root);
 Effect.runFork(
-  Effect.map(open, ({sessions, appearance, navigation}) => {
+  Effect.map(open, ({sessions, appearance, navigation, viewer}) => {
     page.render(
       <StrictMode>
         <ConnectedShell
@@ -69,6 +80,7 @@ Effect.runFork(
           dispatch={dispatch}
           navigation={navigation}
           appearance={appearance}
+          viewerId={viewer}
         />
       </StrictMode>,
     );

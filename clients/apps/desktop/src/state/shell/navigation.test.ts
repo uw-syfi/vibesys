@@ -29,6 +29,7 @@ const generators: {
       'agents' as const,
       'cost' as const,
       'handoffs' as const,
+      'catch-up' as const,
     ),
   }),
   'pick-agent': fc.record({

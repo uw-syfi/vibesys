@@ -5,6 +5,7 @@
  */
 import type {
   Agent,
+  CheckIn,
   Item,
   Message,
   Receipt,
@@ -58,6 +59,11 @@ export interface OrchestratorState {
   /** The sequence each stored item was committed at: the revision that decides which copy is newer. */
   readonly itemSequences: Readonly<Record<string, bigint>>;
   readonly messages: Readonly<Record<string, Message>>;
+  /**
+   * Every viewer's check-ins of the runs held (Catch me up), by check-in id, each whole with the facts
+   * the host froze in it. A viewer's own list is the ones with its id (`rewind` in `check-ins.ts`).
+   */
+  readonly checkIns: Readonly<Record<string, CheckIn>>;
   /** Answers to commands this client has seen, by command id. */
   readonly receipts: Readonly<Record<string, Receipt>>;
   /** Unstored progress, by item id. */
@@ -77,6 +83,7 @@ export const emptyState: OrchestratorState = {
   elided: {},
   itemSequences: {},
   messages: {},
+  checkIns: {},
   receipts: {},
   overlays: {},
   gap: null,

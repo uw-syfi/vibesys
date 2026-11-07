@@ -49,6 +49,7 @@ const VIEW_CRUMBS = {
   cost: 'Cost',
   handoffs: 'Handoffs',
   ideas: 'Ideas',
+  'catch-up': 'Catch me up',
 } satisfies Record<RunView, string>;
 
 function AgentTree(props: {
@@ -103,6 +104,8 @@ interface RunScreenProps {
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
+  /** Press Catch me up on this run and open its page. */
+  readonly catchUp: () => void;
   readonly goRuns: () => void;
   readonly show: (view: RunView) => void;
   readonly pick: (agentId: string) => void;
@@ -131,6 +134,7 @@ export function RunScreen(props: RunScreenProps): JSX.Element {
       stopProgress={props.stopProgress}
       stop={props.stop}
       retryStop={props.retryStop}
+      catchUp={props.catchUp}
       goRuns={props.goRuns}
       openAgents={() => props.show('agents')}
       openCost={() => props.show('cost')}

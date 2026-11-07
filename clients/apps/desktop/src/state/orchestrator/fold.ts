@@ -32,6 +32,7 @@ import {
   TurnStatus,
   type WatchAgentResponse,
 } from '@vibesys/orchestrator-proto';
+import {checkInsOfSnapshot, withCheckIn} from './check-ins.js';
 import type {CostView} from './cost.js';
 import type {OrchestratorState, Overlay, Progress} from './state.js';
 
@@ -72,6 +73,7 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     agents: byId(snapshot.agents),
     turns,
     messages: byId(snapshot.messages),
+    checkIns: checkInsOfSnapshot(snapshot.checkIns),
     gap: null,
   };
 }
@@ -199,9 +201,7 @@ export function applyChange(state: OrchestratorState, change: RunChange): Orches
     case 'receipt':
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
     case 'checkIn':
-      // Catch me up: no screen reads a check-in yet, so the fold keeps none. The catch-up feature adds
-      // them here by id, and the snapshot's `checkIns` beside the runs.
-      return next;
+      return withCheckIn(next, body.value);
     case undefined:
       return next;
     default:

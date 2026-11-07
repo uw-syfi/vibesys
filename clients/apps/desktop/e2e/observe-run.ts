@@ -6,8 +6,10 @@
  * what the daemon reported. This launches the built Electron app with its HOME set to the
  * daemon's, so the app's local gateway is the running one, and checks what a person sees, by
  * role and accessible name: the run listed and running, its report with the lead's summary, the
- * harness on every agent row, the lead's report. It then presses Stop and sees the run end. The test then checks the daemon's
- * side of Stop and that no process of the app is left.
+ * harness on every agent row, the lead's report. It presses Catch me up twice and sees the window's
+ * figures and the report (the lead has finished, so the host does not ask it for another), presses
+ * Stop and sees the run end, and catches up once more on the run that is over. The test then checks
+ * the daemon's side of Stop and that no process of the app is left.
  *
  * Every wait is an expectation with a bound that only guards against a hang; nothing sleeps.
  */
@@ -154,6 +156,44 @@ async function checkTheLeadsReportIsShown(page: Page, world: World): Promise<voi
   await expect(page.getByRole('region', {name: 'Final report'})).toContainText(world.report);
 }
 
+/** The check-ins listed on the catch-up page, newest first. */
+const checkIns = (page: Page) => page.getByRole('listbox', {name: 'Check-ins'}).getByRole('option');
+
+/**
+ * Press Catch me up on the live run. Its lead has given its final report, so the host cannot ask
+ * it for another: the window's facts are the daemon's own count of the run's agents, and the
+ * report is the one posted inside the window. A second press makes a second window, which is empty.
+ */
+async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<void> {
+  await page.getByRole('button', {name: 'Catch me up'}).click();
+  await expect(checkIns(page)).toHaveCount(1);
+  await expect(page.getByRole('region', {name: 'Agents', exact: true})).toContainText(
+    new RegExp(`Started\\s*${world.agents.length}(?!\\d)`),
+  );
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
+  await expect(page.getByText('Writing…')).toHaveCount(0);
+  await page.getByRole('button', {name: 'Catch me up'}).click();
+  await expect(checkIns(page)).toHaveCount(2);
+  // The run is where it was left: its page is one step back.
+  await page
+    .getByRole('navigation', {name: 'Where you are'})
+    .getByRole('button', {name: world.task})
+    .click();
+  await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
+}
+
+/** A run that is over can be caught up on too: a third check-in, with no lead to write for it. */
+async function pressCatchUpOnTheEndedRun(page: Page, world: World): Promise<void> {
+  // Catch me up is in the header of the run's report, which the run's name leads back to.
+  await page
+    .getByRole('navigation', {name: 'Where you are'})
+    .getByRole('button', {name: world.task})
+    .click();
+  await page.getByRole('button', {name: 'Catch me up'}).click();
+  await expect(checkIns(page)).toHaveCount(3);
+  await expect(page.getByText('Writing…')).toHaveCount(0);
+}
+
 async function pressStopAndSeeTheRunEnd(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'Stop run'}).click();
   await expect(page.getByRole('status', {name: 'Stop: outcome'})).toContainText('accepted');
@@ -196,7 +236,7 @@ async function quit(app: ElectronApplication): Promise<void> {
   }
 }
 
-test('the app lists the scripted run, shows each agent’s harness and the report, and Stop ends the run', async () => {
+test('the app lists the scripted run, shows each agent’s harness and the report, catches the viewer up, and Stop ends the run', async () => {
   const world = readWorld();
   const userData = await mkdtemp(join(tmpdir(), 'vsd-ui-'));
   let app: ElectronApplication | undefined;
@@ -205,10 +245,12 @@ test('the app lists the scripted run, shows each agent’s harness and the repor
     app = await launch(world, userData);
     page = await app.firstWindow();
     await checkRunIsListedAndRunning(page, world);
+    await pressCatchUpAndSeeWhatChanged(page, world);
     await checkTheReportShowsTheLeadsSummary(page, world);
     await checkEveryAgentShowsItsHarness(page, world);
     await checkTheLeadsReportIsShown(page, world);
     await pressStopAndSeeTheRunEnd(page);
+    await pressCatchUpOnTheEndedRun(page, world);
   } catch (error) {
     // What the screen showed, by role and name, says more than the failed expectation does.
     const shown = await page

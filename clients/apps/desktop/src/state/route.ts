@@ -2,7 +2,7 @@
  * Where the user is: the run list, or one run with an agent picked and one of its views. A plain
  * reducer, so every move is a value and a test can walk any sequence of them.
  */
-export type RunView = 'report' | 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas';
+export type RunView = 'report' | 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas' | 'catch-up';
 
 export type Route =
   | {readonly screen: 'runs'}
