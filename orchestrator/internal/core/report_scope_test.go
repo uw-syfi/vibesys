@@ -43,6 +43,8 @@ func TestAReportThatAnswersACatchUpIsAboutItsWindowAndNotTheRun(t *testing.T) {
 	}
 
 	_, c := w.press(ann, run)
+	// The lead is asked when the host has the window's facts, and the request starts a turn of its own.
+	w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
 	answer := w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "since you looked"}})
 	if w.checkIn(c.ID).Report != answer.Message || w.reportOf(answer.Message).Scope != core.ReportScopeWindow {
 		t.Fatalf("the answer %q is %+v, check-in %+v", answer.Message, w.reportOf(answer.Message), w.checkIn(c.ID))
@@ -71,6 +73,7 @@ func TestAReportThatAnswersACatchUpIsAboutItsWindowAndNotTheRun(t *testing.T) {
 func TestAFinalReportThatAnswersACatchUpIsTheRunsReport(t *testing.T) {
 	w, run, leadID := started(t, 2, steers)
 	_, c := w.press(ann, run)
+	w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
 	answer := w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
 	got := w.checkRun(run)
 	if got.SummaryReport != answer.Message || !got.FinalReported || w.reportOf(answer.Message).Scope != core.ReportScopeRun || w.checkIn(c.ID).Report != answer.Message {

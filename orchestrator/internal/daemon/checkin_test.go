@@ -92,7 +92,7 @@ func TestACatchUpFreezesFactsWorkedOutFromTheHostsRecords(t *testing.T) {
 	searches.Put(run.ID, search.Fold(facts))
 
 	receipt, err := press(t, viewing(ann), rig, run.ID)
-	if err != nil || receipt.GetCheckInId() == "" || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED || receipt.GetMessageId() == "" {
+	if err != nil || receipt.GetCheckInId() == "" || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED || receipt.GetMessageId() != "" {
 		t.Fatalf("press: %v, %v", receipt, err)
 	}
 	pending := checkIn(t, rig, receipt.GetCheckInId())

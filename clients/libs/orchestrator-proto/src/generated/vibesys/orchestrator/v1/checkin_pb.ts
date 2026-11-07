@@ -102,8 +102,10 @@ export type CheckIn = Message<"vibesys.orchestrator.v1.CheckIn"> & {
   failure: string;
 
   /**
-   * The message that asked the lead for a report covering the window. Empty when the run could not be
-   * asked: it was over, stopping, past a limit or its lead had finished. How the request stands (queued,
+   * The message that asked the lead for a report covering the window, set in the same change that makes
+   * the check-in ready: the request is worded from the frozen facts. Empty until then, and when the run
+   * could not be asked (it was over, stopping, past a limit or its lead had finished) or the lead had
+   * another request on its way, a viewer's or the schedule's. How the request stands (queued,
    * being read, consumed or rejected) is that message's delivery. The app shows "Writing" while the
    * request is not final and report_message_id is empty.
    *

@@ -200,6 +200,19 @@ func markBests(all []*measured) {
 	}
 }
 
+// bestValues are the best each objective reached: its newest value marked as setting a best.
+func bestValues(all []*measured) map[string]objectiveValue {
+	out := map[string]objectiveValue{}
+	for _, m := range all {
+		for name, v := range m.values {
+			if v.best {
+				out[name] = v
+			}
+		}
+	}
+	return out
+}
+
 // directionOf is the way an objective improves, which every value of it shares.
 func directionOf(all []*measured, name string) (cli.Direction, bool) {
 	for _, m := range slices.Backward(all) {

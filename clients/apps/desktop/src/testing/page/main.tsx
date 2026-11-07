@@ -13,7 +13,9 @@
  * (a Catch me up answer, a window report, never replaces it);
  * `catchUp=<none|history|writing|written|pending|failed>` gives the viewer check-ins already made
  * on the run (none when absent), and a press of Catch me up makes another that stays pending while
- * the lead writes; `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
+ * the lead writes; `measured=<candidates>` gives the run that many measured candidates on two
+ * objectives, with the lead's bounds, so the report has its charts and tiles (the head is the best
+ * of the first); `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
  * memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
@@ -59,7 +61,10 @@ import {
   FakeDaemon,
   fleetScenario,
   generateScenario,
+  measuredSearch,
   methodPathOf,
+  SERVING,
+  START_MS,
   withReport,
 } from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
@@ -146,21 +151,40 @@ function fleetRecording(spec: string): Recording {
   };
 }
 
+const base = scenarioOf(window.location.search);
 const scenario = query.has('report')
-  ? withReport(scenarioOf(window.location.search), {
+  ? withReport(base, {
       sequence: 1,
       kind: ReportKind.PROGRESS,
-      atMs: scenarioOf(window.location.search).endMs - 20 * 60_000,
+      atMs: base.endMs - 20 * 60_000,
       headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
       changed: 'Fused expert dispatch landed.',
       openForUser: 'Should quantization stay paused?',
     })
-  : scenarioOf(window.location.search);
+  : base;
+const measured = query.get('measured');
 const daemon = new FakeDaemon({
   ...scenario,
   search: true,
   searchStale: query.has('stale'),
   searchTruncated: query.has('truncated'),
+  ...(measured === null
+    ? {}
+    : {
+        searches: [
+          measuredSearch(
+            scenario.runId,
+            {
+              seed: 4,
+              candidates: Number(measured),
+              startMs: START_MS,
+              endMs: scenario.endMs,
+              objectives: SERVING,
+            },
+            {stale: query.has('stale')},
+          ),
+        ],
+      }),
 });
 const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));

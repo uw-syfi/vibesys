@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,8 +128,16 @@ func (s *SQLite) open() (err error) {
 	if err != nil {
 		return err
 	}
+	if slices.Contains(readsVersions, v) {
+		// Additive versions: no row changes, so the stamp is the whole upgrade, and it is made before
+		// anything of the store is read.
+		if _, err := s.w.Exec(`UPDATE meta SET value = ? WHERE key = 'schema_version'`, schemaVersion); err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		v = schemaVersion
+	}
 	if v != schemaVersion {
-		return fmt.Errorf("store: %s has schema version %d and this build reads only %d: move the state directory holding it away, which discards its run history, and start again", s.path, v, schemaVersion)
+		return fmt.Errorf("store: %s has schema version %d and this build reads only %d (and %s): move the state directory holding it away, which discards its run history, and start again", s.path, v, schemaVersion, joinVersions(readsVersions))
 	}
 	if s.r, err = sql.Open("sqlite", s.dsn(true)); err != nil {
 		return fmt.Errorf("store: %w", err)
@@ -801,4 +811,12 @@ func verifySummary(tx *sql.Tx, state core.State) error {
 		return err
 	}
 	return sm.check(state)
+}
+
+func joinVersions(vs []uint64) string {
+	parts := make([]string, len(vs))
+	for i, v := range vs {
+		parts[i] = strconv.FormatUint(v, 10)
+	}
+	return strings.Join(parts, ", ")
 }

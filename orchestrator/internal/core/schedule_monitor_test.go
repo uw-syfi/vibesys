@@ -25,13 +25,15 @@ type scheduleCoverage struct {
 	// asks are requests sent to a lead, swallowed ones a request that was due while the last was still
 	// unread, stale the timers that fired for a time the run no longer held, restarted the reports a
 	// lead posted while a request was waiting for its timer, and cancelled the requests that a limit, a
-	// stop or a final report took away.
-	asks, swallowed, stale, restarted, cancelled int
+	// stop or a final report took away. behindCatchUp counts the schedule's requests held back because a
+	// viewer's was on its way.
+	asks, swallowed, behindCatchUp, stale, restarted, cancelled int
 }
 
 func (c *scheduleCoverage) add(o scheduleCoverage) {
 	c.asks += o.asks
 	c.swallowed += o.swallowed
+	c.behindCatchUp += o.behindCatchUp
 	c.stale += o.stale
 	c.restarted += o.restarted
 	c.cancelled += o.cancelled
@@ -105,14 +107,21 @@ func (m *monitor) runChanged(r core.Run) {
 	}
 }
 
-// reportDueInTransit says a request for a report is still on its way to the run's lead.
-func (m *monitor) reportDueInTransit(id core.RunID) bool {
+// requestsInTransit says which requests for a report are still on their way to the run's lead, or being
+// read by it: the schedule's and a viewer's. The lead has one at a time.
+func (m *monitor) requestsInTransit(id core.RunID) (scheduled, viewers bool) {
 	for _, record := range m.messages {
-		if _, ok := record.body.(core.ReportDue); ok && record.run == id && !record.last.Final() {
-			return true
+		if record.run != id || record.last.Final() {
+			continue
+		}
+		switch record.body.(type) {
+		case core.ReportDue:
+			scheduled = true
+		case core.CatchUpRequest:
+			viewers = true
 		}
 	}
-	return false
+	return scheduled, viewers
 }
 
 // summaryTimer holds a fired summary timer to the books: a timer for the time the schedule holds asks
@@ -146,9 +155,12 @@ func (m *monitor) summaryTimer(body core.InputBody, events []core.Event) error {
 		}
 	}
 	sent := len(requests)
-	switch unread := m.reportDueInTransit(fired.Timer.Run); {
+	scheduled, viewers := m.requestsInTransit(fired.Timer.Run)
+	switch unread := scheduled || viewers; {
 	case unread && sent != 0:
-		return fmt.Errorf("run %s sent a second request for a report while the first was unread", fired.Timer.Run)
+		return fmt.Errorf("run %s sent a request for a report (the schedule's) while another was unread (scheduled %t, a viewer's %t)", fired.Timer.Run, scheduled, viewers)
+	case viewers:
+		m.covered.schedule.behindCatchUp++
 	case unread:
 		m.covered.schedule.swallowed++
 	case sent != 1:

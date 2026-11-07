@@ -16,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -51,6 +52,15 @@ func summariesIn(frames []*pb.WatchRunsResponse) []*pb.RunSummary {
 	return out
 }
 
+// readingJobLog gives the host a job log it has read, with nothing in it, so that the facts of a press are
+// worked out and the lead is then asked for its report.
+func readingJobLog(rig *daemontest.Rig, run core.RunID) {
+	searches := new(search.Store)
+	searches.Put(run, search.Fold(nil))
+	rig.Search = searches
+	rig.Daemon.Search = searches
+}
+
 // holdCatchUps makes a session leave a turn that Catch me up started open, so that the lead can post
 // the report that answers it, and answer every other turn at once.
 func holdCatchUps(rig *daemontest.Rig) {
@@ -67,6 +77,7 @@ func holdCatchUps(rig *daemontest.Rig) {
 func TestACatchUpAnswerIsNotTheReportARunIsSummedUpBy(t *testing.T) {
 	rig := daemontest.NewRig(t)
 	run, lead := beginRun(t, rig)
+	readingJobLog(rig, run.ID)
 	holdCatchUps(rig)
 	whole := post(t, rig, lead.ID, "whole", reportCommand(pb.ReportKind_REPORT_KIND_PROGRESS, "the run"))
 
@@ -423,6 +434,7 @@ func allMessages(rig *daemontest.Rig, run core.RunID) ([]string, error) {
 func TestARunRecordedBeforeItsSummaryReportWasNamedStillHasOne(t *testing.T) {
 	rig := daemontest.NewRig(t)
 	run, lead := beginRun(t, rig)
+	readingJobLog(rig, run.ID)
 	holdCatchUps(rig)
 	post(t, rig, lead.ID, "first", reportCommand(pb.ReportKind_REPORT_KIND_PROGRESS, "first"))
 	rig.Clock.Advance(time.Minute)

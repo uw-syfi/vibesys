@@ -290,8 +290,19 @@ type ObjectiveBounds struct {
 	// no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
 	// another unit gives a wrong percent. The version's unit is served for a reader to judge.
 	PercentOfBound *float64 `protobuf:"fixed64,5,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The best the run measured on the objective, in the bound's direction: the value of the newest
+	// point of the objective's series that set a best, which is where the series' best line ends. It
+	// is not the head's. The head is the candidate the run last promoted, and for a task of several
+	// objectives it is the best of one of them, so on the others head_value and best_value differ.
+	// Absent when the run measured nothing on the objective, and when its newest measurement says
+	// the objective improves the other way than the bound does.
+	BestValue *float64 `protobuf:"fixed64,6,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
+	// How close best_value is to the standing bound, in percent, defined as percent_of_bound is for
+	// the head's value (with the same unit caveat). Absent when best_value is, and when either number
+	// is not above zero.
+	BestPercentOfBound *float64 `protobuf:"fixed64,7,opt,name=best_percent_of_bound,json=bestPercentOfBound,proto3,oneof" json:"best_percent_of_bound,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ObjectiveBounds) Reset() {
@@ -355,6 +366,20 @@ func (x *ObjectiveBounds) GetHeadValue() float64 {
 func (x *ObjectiveBounds) GetPercentOfBound() float64 {
 	if x != nil && x.PercentOfBound != nil {
 		return *x.PercentOfBound
+	}
+	return 0
+}
+
+func (x *ObjectiveBounds) GetBestValue() float64 {
+	if x != nil && x.BestValue != nil {
+		return *x.BestValue
+	}
+	return 0
+}
+
+func (x *ObjectiveBounds) GetBestPercentOfBound() float64 {
+	if x != nil && x.BestPercentOfBound != nil {
+		return *x.BestPercentOfBound
 	}
 	return 0
 }
@@ -871,7 +896,7 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\ttruncated\x18\f \x01(\bR\ttruncated\x12J\n" +
 	"\x06bounds\x18\r \x03(\v2(.vibesys.orchestrator.v1.ObjectiveBoundsB\b\xbaH\x05\x92\x01\x02\x10@R\x06bounds\x12J\n" +
 	"\x06series\x18\x0e \x03(\v2(.vibesys.orchestrator.v1.ObjectiveSeriesB\b\xbaH\x05\x92\x01\x02\x10\bR\x06series\x12=\n" +
-	"\btradeoff\x18\x0f \x01(\v2!.vibesys.orchestrator.v1.TradeoffR\btradeoff\"\xb4\x04\n" +
+	"\btradeoff\x18\x0f \x01(\v2!.vibesys.orchestrator.v1.TradeoffR\btradeoff\"\xd4\x05\n" +
 	"\x0fObjectiveBounds\x12(\n" +
 	"\tobjective\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +
@@ -881,10 +906,15 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\xbaH\a\x92\x01\x04\b\x01\x10@R\bversions\x12+\n" +
 	"\n" +
 	"head_value\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12?\n" +
-	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
+	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01\x12+\n" +
+	"\n" +
+	"best_value\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x02R\tbestValue\x88\x01\x01\x12H\n" +
+	"\x15best_percent_of_bound\x18\a \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x03R\x12bestPercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
 	".objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n" +
 	"\v_head_valueB\x13\n" +
-	"\x11_percent_of_bound\"\xcd\x01\n" +
+	"\x11_percent_of_boundB\r\n" +
+	"\v_best_valueB\x18\n" +
+	"\x16_best_percent_of_bound\"\xcd\x01\n" +
 	"\x0fObjectiveSeries\x12(\n" +
 	"\tobjective\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +

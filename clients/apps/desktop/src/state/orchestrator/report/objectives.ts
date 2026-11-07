@@ -1,10 +1,11 @@
 /**
  * The performance of a run, objective by objective, as the orchestrator serves it: every measured
  * candidate, the points that set a new best (the best-so-far line), the standing bound with its
- * provenance, and the head's value and its percent of the bound. Nothing here is worked out: the
- * best marks come from the search state and the head's value and percent from the run's summary,
- * both served by the host, so this only changes their shape (bigints and timestamps become numbers)
- * and joins what one objective has under its name.
+ * provenance, the head's value and the percent of the bound the head and the best are at. Nothing
+ * here is worked out: the best marks come from the search state, the head's value and percent from
+ * the run's summary and the best's percent from the bounds, all served by the host, so this only
+ * changes their shape (bigints and timestamps become numbers) and joins what one objective has under
+ * its name.
  */
 import {Direction, type ObjectiveHead, type SearchState} from '@vibesys/orchestrator-proto';
 import {type ObjectiveBoundsView, objectiveBounds} from '../search-views.js';
@@ -39,6 +40,8 @@ export interface ObjectiveReport {
   readonly headValue: number | undefined;
   /** How close the head is to the standing bound in percent, as the host worked it out. */
   readonly percentOfBound: number | undefined;
+  /** How close the best measured value (`best`) is to the standing bound, as the host worked it out. */
+  readonly bestPercentOfBound: number | undefined;
   readonly bound: ObjectiveBoundsView | undefined;
 }
 
@@ -74,6 +77,7 @@ export function objectiveReports(
       best: bestPath.at(-1),
       headValue: headOf.get(series.objective)?.value,
       percentOfBound: headOf.get(series.objective)?.percentOfBound,
+      bestPercentOfBound: bound?.bestPercentOfBound,
       bound,
     };
   });
@@ -90,6 +94,7 @@ export function objectiveReports(
       best: undefined,
       headValue: headOf.get(bound.objective)?.value,
       percentOfBound: headOf.get(bound.objective)?.percentOfBound,
+      bestPercentOfBound: bound.bestPercentOfBound,
       bound,
     }));
   return [...measured, ...unmeasured];

@@ -1,0 +1,11 @@
+{
+  "id": "c2",
+  "runId": "r1",
+  "viewer": {"id": "install-ann", "label": "Ann's laptop"},
+  "since": "2026-01-01T11:35:20Z",
+  "at": "2026-01-01T11:35:50Z",
+  "state": "CHECK_IN_STATE_READY",
+  "facts": {
+    "spend": {}
+  }
+}

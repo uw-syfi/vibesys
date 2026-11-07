@@ -1,10 +1,11 @@
 package store
 
-// schemaVersion is stored in meta. A store written under any other version, older or newer, is
-// refused, with what to do about it. Version 12 is the stored format of the first vibesys-v* tag; the
-// versions below it were written by development builds only, and a store of one is refused for good.
-// From the tag on, raising this number is a public change that needs either a reader of the version
-// before or a refusal chosen on purpose (docs/contributing/process-boundaries.md). Version 4 added report kinds and numbers, the
+// schemaVersion is stored in meta. A build reads this version and the ones in readsVersions, and refuses
+// a store of any other, older or newer, with what to do about it. Version 12 is the stored format of the
+// first vibesys-v* tag; the versions below it were written by development builds only, and a store of
+// one is refused for good. From the tag on, raising this number is a public change that needs either a
+// reader of the version before or a refusal chosen on purpose (docs/contributing/process-boundaries.md).
+// Version 4 added report kinds and numbers, the
 // stall and usage fields of a run, and the reminders. Version 5 took the worktree off an agent and
 // renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use. Version 7 gave a finished run the working copies it kept.
 // Version 8 gave a handoff the body of its role, so a stored handoff no longer has the flat fields of the version before.
@@ -14,7 +15,18 @@ package store
 // Version 11 gave a run its limits (a cost limit, the limit it reached and when), and a start its time limit as a duration.
 // Version 12 replaced a tool call's provider tool name, call id and JSON arguments with a typed call:
 // a command, a file read, write or edit, a search, or any other tool by name and text.
-const schemaVersion = 12
+// Version 13 added check-ins, a viewer's catch-ups: a check-in event body, the check_ins table, and the
+// catch-up request message body. Nothing a version 12 store holds changes meaning, so this build reads
+// version 12 as it is and only stamps 13 on it (no row is converted), and that is the choice the doc asks
+// for: the upgrade is one-way on purpose. A build that reads only 12 cannot decode a check-in event, so
+// it refuses a store of 13 by its number, with the same advice as for any other version, and does not
+// fail on an unknown event body halfway through a replay.
+const schemaVersion = 13
+
+// readsVersions are the older versions this build reads without converting a row, because everything they
+// hold means the same in this build. Opening one stamps schemaVersion on it, so that a build that does not
+// know the new bodies refuses the store at once and never replays it.
+var readsVersions = []uint64{12}
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

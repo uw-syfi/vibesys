@@ -13,14 +13,14 @@ import (
 // hold by never being tested.
 type checkInCoverage struct {
 	// made are check-ins pressed, repeated the presses answered with a pending one, unviewed the
-	// presses that named no viewer, asked the requests sent to a lead, inFlight the presses that sent
-	// none because one was on its way, cannot those that sent none because the run could not be asked,
-	// ready and failed the answers, linked the reports that answered a request, overRuns the presses on
-	// a run that was over, and empty the windows with nothing in them. windowReports are the linked reports
-	// that were about the window alone (progress), and finalAnswers those the lead gave as its last word,
-	// which are about the run.
-	made, repeated, unviewed, asked, inFlight, cannot, ready, failed, linked, overRuns, empty int
-	windowReports, finalAnswers                                                               int
+	// presses that named no viewer, asked the requests sent to a lead when the facts were ready, inFlight
+	// the answers that sent none because a request was on its way (behindSchedule: the scheduled one),
+	// cannot those that sent none because the run could not be asked, ready and failed the answers, linked
+	// the reports that answered a request, overRuns the presses on a run that was over, and empty the
+	// windows with nothing in them. windowReports are the linked reports that were about the window alone
+	// (progress), and finalAnswers those the lead gave as its last word, which are about the run.
+	made, repeated, unviewed, asked, inFlight, behindSchedule, cannot, ready, failed, linked, overRuns, empty int
+	windowReports, finalAnswers                                                                               int
 }
 
 func (c *checkInCoverage) add(o checkInCoverage) {
@@ -29,6 +29,7 @@ func (c *checkInCoverage) add(o checkInCoverage) {
 	c.unviewed += o.unviewed
 	c.asked += o.asked
 	c.inFlight += o.inFlight
+	c.behindSchedule += o.behindSchedule
 	c.cannot += o.cannot
 	c.ready += o.ready
 	c.failed += o.failed
@@ -143,16 +144,19 @@ func (m *monitor) checkIns(body core.InputBody, events []core.Event, effects []c
 			err = m.nothingAbout(changed, asks, windows, body)
 		}
 	case core.WindowFactsReady:
-		err = m.facts(in.CheckIn, "ready", changed, func(r *checkInRecord, c core.CheckIn) error {
+		err = m.facts(in.CheckIn, "ready", changed, asks, func(r *checkInRecord, c core.CheckIn) error {
 			if _, facts, _ := outcomeState(c); !reflect.DeepEqual(facts, in.Facts) {
 				return fmt.Errorf("check-in %s froze facts %+v, which are not the ones answered: %+v", c.ID, facts, in.Facts)
 			}
-			return nil
+			return m.askWhenReady(r, c, in.Facts, asks)
 		})
 	case core.WindowFactsFailed:
-		err = m.facts(in.CheckIn, "failed", changed, func(r *checkInRecord, c core.CheckIn) error {
+		err = m.facts(in.CheckIn, "failed", changed, asks, func(r *checkInRecord, c core.CheckIn) error {
 			if _, _, failure := outcomeState(c); failure != in.Detail {
 				return fmt.Errorf("check-in %s failed saying %q, want %q", c.ID, failure, in.Detail)
+			}
+			if len(asks) != 0 || c.Ask != "" {
+				return fmt.Errorf("check-in %s failed and asked the lead %+v", c.ID, asks)
 			}
 			return nil
 		})
@@ -227,36 +231,39 @@ func (m *monitor) press(in core.Command, c core.RequestCatchUp, receipt *core.Re
 		m.covered.checkIns.empty++
 	}
 	m.covered.checkIns.made++
-	return m.ask(run, check, receipt, asks)
+	if receipt.Message != "" || check.Ask != "" || len(asks) != 0 {
+		return fmt.Errorf("a press asked the lead before the facts were frozen: receipt %+v, check-in %+v, requests %+v", *receipt, check, asks)
+	}
+	return nil
 }
 
-// ask holds the request for a report to its rules: it is sent to a lead that can be asked and has no
-// request on its way, once, for the window of the check-in, and not otherwise.
-func (m *monitor) ask(run core.Run, check core.CheckIn, receipt *core.Receipt, asks []core.Message) error {
-	inFlight := false
-	for _, r := range m.messages {
-		if _, ok := r.body.(core.CatchUpRequest); ok && r.run == run.ID && !r.last.Final() {
-			inFlight = true
-		}
-	}
+// askWhenReady holds the request for a report to its rules: when the facts freeze it is sent, with them,
+// to a lead that can be asked and that has no other request on its way, once, for the window of the
+// check-in, and not otherwise. A request on its way is a viewer's or the schedule's.
+func (m *monitor) askWhenReady(rec *checkInRecord, check core.CheckIn, facts core.WindowFacts, asks []core.Message) error {
+	run := m.runs[rec.run]
+	scheduled, viewers := m.requestsInTransit(run.ID)
 	canBeAsked := run.Status.Live() && run.LimitReached == "" && !m.finished[run.ID]
 	switch {
-	case canBeAsked && !inFlight:
-		if len(asks) != 1 || check.Ask != asks[0].ID || receipt.Message != asks[0].ID {
-			return fmt.Errorf("a lead that could be asked was sent requests %+v for %+v (receipt %+v)", asks, check, *receipt)
+	case canBeAsked && !scheduled && !viewers:
+		if len(asks) != 1 || check.Ask != asks[0].ID {
+			return fmt.Errorf("a lead that could be asked was sent requests %+v for %+v", asks, check)
 		}
 		want := core.CatchUpRequest{CheckIn: check.ID, Since: check.Since, Until: check.At}
-		if got := asks[0]; got.Body != want || got.To != run.Lead || got.From != "" || got.Run != run.ID {
+		if got := asks[0]; !reflect.DeepEqual(got.Body, want) || got.To != run.Lead || got.From != "" || got.Run != run.ID {
 			return fmt.Errorf("the request was %+v, want %+v to %s", got, want, run.Lead)
 		}
 		m.covered.checkIns.asked++
 	default:
-		if len(asks) != 0 || check.Ask != "" || receipt.Message != "" {
-			return fmt.Errorf("a run that was not to be asked (live %t, limit %q, finished %t, request in flight %t) was sent %+v for %+v", run.Status.Live(), run.LimitReached, m.finished[run.ID], inFlight, asks, check)
+		if len(asks) != 0 || check.Ask != "" {
+			return fmt.Errorf("a run that was not to be asked (live %t, limit %q, finished %t, request in flight: scheduled %t, a viewer's %t) was sent %+v for %+v", run.Status.Live(), run.LimitReached, m.finished[run.ID], scheduled, viewers, asks, check)
 		}
-		if inFlight {
+		switch {
+		case canBeAsked && scheduled:
+			m.covered.checkIns.behindSchedule++
+		case canBeAsked:
 			m.covered.checkIns.inFlight++
-		} else {
+		default:
 			m.covered.checkIns.cannot++
 		}
 	}
@@ -265,11 +272,11 @@ func (m *monitor) ask(run core.Run, check core.CheckIn, receipt *core.Receipt, a
 
 // facts holds an answer to the work of a check-in: a pending check-in takes it once, and it is the only
 // thing that changes; any other answer, such as a repeat, changes nothing.
-func (m *monitor) facts(id core.CheckInID, want string, changed []core.CheckIn, check func(*checkInRecord, core.CheckIn) error) error {
+func (m *monitor) facts(id core.CheckInID, want string, changed []core.CheckIn, asks []core.Message, check func(*checkInRecord, core.CheckIn) error) error {
 	rec := m.checkInBooks.records[id]
 	if rec == nil || rec.state != "pending" {
-		if len(changed) > 0 {
-			return fmt.Errorf("an answer for check-in %s, which is not pending, changed %+v", id, changed)
+		if len(changed) > 0 || len(asks) > 0 {
+			return fmt.Errorf("an answer for check-in %s, which is not pending, changed %+v and sent %+v", id, changed, asks)
 		}
 		return nil
 	}
@@ -336,15 +343,17 @@ func (m *monitor) keepCheckIns(changed []core.CheckIn) error {
 			return fmt.Errorf("check-in %+v breaks its own shape", c)
 		}
 		if rec == nil {
-			if state != "pending" || c.Report != "" {
-				return fmt.Errorf("check-in %+v began as %s with a report", c, state)
+			if state != "pending" || c.Report != "" || c.Ask != "" {
+				return fmt.Errorf("check-in %+v began as %s with a report or a request", c, state)
 			}
-			books.records[c.ID] = &checkInRecord{id: c.ID, run: c.Run, viewer: c.Viewer.ID, since: c.Since, at: c.At, state: state, ask: c.Ask}
+			books.records[c.ID] = &checkInRecord{id: c.ID, run: c.Run, viewer: c.Viewer.ID, since: c.Since, at: c.At, state: state}
 			books.order = append(books.order, c.ID)
 			continue
 		}
+		// The request is made once, in the same commit as the facts freeze, and is never changed after.
+		asked := rec.ask != "" || (rec.state == "pending" && state == "ready")
 		switch {
-		case c.Run != rec.run || c.Viewer.ID != rec.viewer || !c.Since.Equal(rec.since) || !c.At.Equal(rec.at) || c.Ask != rec.ask:
+		case c.Run != rec.run || c.Viewer.ID != rec.viewer || !c.Since.Equal(rec.since) || !c.At.Equal(rec.at) || (rec.ask != "" && c.Ask != rec.ask) || (c.Ask != "" && !asked):
 			return fmt.Errorf("check-in %s changed its window or its request: %+v, was %+v", c.ID, c, *rec)
 		case rec.state != "pending" && (state != rec.state || !reflect.DeepEqual(facts, rec.facts) || failure != rec.failure):
 			return fmt.Errorf("check-in %s changed after it was %s: %+v, was %+v", c.ID, rec.state, c, *rec)
@@ -353,7 +362,7 @@ func (m *monitor) keepCheckIns(changed []core.CheckIn) error {
 		case rec.report != "" && c.Report != rec.report:
 			return fmt.Errorf("check-in %s changed its report from %q to %q", c.ID, rec.report, c.Report)
 		}
-		rec.state, rec.facts, rec.failure, rec.report = state, facts, failure, c.Report
+		rec.state, rec.facts, rec.failure, rec.report, rec.ask = state, facts, failure, c.Report, c.Ask
 	}
 	return nil
 }

@@ -1392,7 +1392,7 @@ export const RunLimitReachedSchema: GenMessage<RunLimitReached> = /*@__PURE__*/
  * CatchUpRequest asks a lead for a report covering a window: a viewer pressed Catch me up, and the
  * window is what happened since that viewer last looked. The lead answers with post_report, kind
  * progress, posted in the turn this message starts, which is how the report is tied to the check-in.
- * It carries the data a template words; the lead decides what the report says.
+ * It names the check-in, whose frozen facts the template words; the lead decides what the report says.
  *
  * @generated from message vibesys.orchestrator.v1.CatchUpRequest
  */
