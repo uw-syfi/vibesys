@@ -34,6 +34,7 @@ const BODY_KINDS = {
   leadIdleReminder: true,
   runLimitReached: true,
   reportDue: true,
+  catchUpRequest: true,
 } as const;
 
 const FIELDS: readonly SummaryField[] = ['changed', 'inFlight', 'decisions', 'openForUser'];
