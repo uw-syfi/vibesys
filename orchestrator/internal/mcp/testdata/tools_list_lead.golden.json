@@ -104,7 +104,7 @@
       "name": "stop_agent"
     },
     {
-      "description": "Send the operator a report. Use kind progress for a note along the way and kind final once, when you have finished what you were asked to do or cannot go on.",
+      "description": "Send the operator a report. Decide every open question yourself and record each decision under decisions. Use kind progress for a note along the way. Use kind final once, when the work is finished, or only when an external factor you cannot fix stops all progress, such as no disk space, no quota or a host that is gone; then name the cause in the headline.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -113,7 +113,7 @@
             "type": "string"
           },
           "decisions": {
-            "description": "What you decided on your own.",
+            "description": "What you decided on your own, including every question that was open.",
             "type": "string"
           },
           "headline": {
@@ -131,10 +131,6 @@
               "progress",
               "final"
             ],
-            "type": "string"
-          },
-          "open_for_user": {
-            "description": "What needs the operator.",
             "type": "string"
           }
         },

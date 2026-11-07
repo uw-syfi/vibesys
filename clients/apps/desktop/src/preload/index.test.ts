@@ -4,6 +4,7 @@ import {expect, it} from '@effect/vitest';
 import * as Schema from 'effect/Schema';
 import ts from 'typescript';
 import {GATEWAY_CHANNEL, type GatewayPortBridge} from '../core/gateway-codec.js';
+import {MACHINES_CHANNEL, type MachinesBridge} from '../core/machines/machines-codec.js';
 import {
   PREFERENCES_READ_CHANNEL,
   PREFERENCES_WRITE_CHANNEL,
@@ -24,6 +25,10 @@ interface Preload {
   readonly createPreferencesPreload: (ipc: {
     invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   }) => PreferencesBridge;
+  readonly MACHINES_PRELOAD_CHANNEL: string;
+  readonly createMachinesPreload: (ipc: {
+    invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  }) => MachinesBridge;
   readonly VIEWER_PRELOAD_CHANNEL: string;
   readonly createViewerPreload: (ipc: {
     invoke(channel: string, ...args: unknown[]): Promise<unknown>;
@@ -62,6 +67,8 @@ const {
   PREFERENCES_PRELOAD_CHANNELS,
   createViewerPreload,
   VIEWER_PRELOAD_CHANNEL,
+  createMachinesPreload,
+  MACHINES_PRELOAD_CHANNEL,
 } = loadPreload();
 
 class Channel {
@@ -201,6 +208,32 @@ it('a preferences write sends the bytes on the write channel and ends in one cal
   await settled();
   await settled();
   expect(errors).toEqual(['refused']);
+});
+
+it('the machines channel name is the one main serves', () => {
+  expect(MACHINES_PRELOAD_CHANNEL).toBe(MACHINES_CHANNEL);
+});
+
+it('a machines call ends in exactly one callback: bytes, or a failure', async () => {
+  for (const [reply, expected] of [
+    [Promise.resolve(REPLY), {bytes: REPLY, errors: 0}],
+    [Promise.resolve(null), {bytes: undefined, errors: 1}],
+    [Promise.reject(new Error('denied')), {bytes: undefined, errors: 1}],
+  ] as const) {
+    const {ipc, asked} = invoking(() => reply);
+    const got: Uint8Array[] = [];
+    const errors: string[] = [];
+    createMachinesPreload(ipc).call(
+      REPLY,
+      bytes => got.push(bytes),
+      error => errors.push(error),
+    );
+    await settled();
+    await settled();
+    expect(asked.map(call => call.channel)).toEqual([MACHINES_CHANNEL]);
+    expect(got).toEqual(expected.bytes === undefined ? [] : [expected.bytes]);
+    expect(errors).toHaveLength(expected.errors);
+  }
 });
 
 it('the viewer channel name is the one main serves', () => {

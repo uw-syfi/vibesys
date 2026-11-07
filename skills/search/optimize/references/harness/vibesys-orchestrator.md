@@ -56,7 +56,7 @@ report (a subagent started, a handoff or a job's end reached you) and the run's 
 passed since that report, you are sent a message that says a progress report is due. The interval
 is the run's own (one hour unless the operator chose another, never under five minutes), and the
 message says it. Answer with `post_report` (`kind` `progress`, `headline`, `changed`, `in_flight`,
-`decisions`, `open_for_user`), covering the whole run, and send one after each promotion as well.
+`decisions`), covering the whole run, and send one after each promotion as well.
 Any report you send, asked or not, starts the interval again. A run where nothing moved is not
 asked. The operator reads the report in the run; it is not a question and needs no reply.
 
@@ -68,7 +68,7 @@ other work from you.
 
 Every report has a `kind`. Use `progress` for the periodic report and the note after a promotion:
 the run goes on. Use `final` once, as your last report, when the SKILL's Finish rule holds, or
-when you cannot go on and say why in its headline. An operator or a script that waits for the
+when an external factor you cannot fix stops all progress (no disk space, no quota, a host that is gone) and name that cause in its headline. An operator or a script that waits for the
 result waits for the `final` report; a `progress` report never satisfies it, so do not mark a
 note along the way `final`, and do not end the work without one. A progress report after every
 job or handoff is noise: send it after a promotion or when the run asks for one.

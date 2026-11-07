@@ -188,3 +188,19 @@ export const makeFileLock =
   };
 
 export const nodeFileLock: FileLock = makeFileLock(nodeFileOps);
+
+/** The names in a directory; none when it does not exist. */
+export type ListDirectory = (path: string) => Effect.Effect<readonly string[], Error>;
+
+export const nodeListDirectory: ListDirectory = path =>
+  Effect.tryPromise({
+    try: async () => {
+      try {
+        return await readdir(path);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+        throw error;
+      }
+    },
+    catch: failure,
+  });

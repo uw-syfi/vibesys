@@ -24,8 +24,9 @@ set; export it as the absolute path of the vibesys-cli to use`.
    2. **Changed:** each promotion or finding, in plain words, code name in parentheses.
    3. **In flight:** each running item, what it waits on, and when it should finish.
    4. **Decisions made for the user:** each choice, with the reason, so they can reverse it.
-   5. **Open for the user:** choices you already made that they may want to reverse, and what
-      only they can supply (access, credentials). Work continues meanwhile; never wait on a reply.
+   5. **Blocked by:** only when an external factor you cannot fix stops all progress (no disk
+      space, no quota, a host that is gone): name the cause in the headline. Otherwise omit it: you decide every
+      open question yourself and list it under the decisions.
    6. **Self-check:** the checklist of the skill that asked for the report.
 4. Cut every line the reader cannot act on or use to judge trust.
 

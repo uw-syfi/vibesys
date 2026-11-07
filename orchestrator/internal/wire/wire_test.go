@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -110,6 +111,9 @@ func requireEveryField(t *testing.T, m protoreflect.MessageDescriptor, reached m
 		fields := m.Fields()
 		for i := range fields.Len() {
 			fd := fields.Get(i)
+			if fd.Options().(*descriptorpb.FieldOptions).GetDeprecated() {
+				continue // retired for buf breaking; no mapper carries it
+			}
 			if !reached[fd.FullName()] {
 				t.Errorf("no accepted message set %s: teach the generator a valid value for it", fd.FullName())
 			}
