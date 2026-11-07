@@ -16,6 +16,11 @@ command and an explicitly selected framework-owned evaluator package are staged
 into the container. An optional framework-owned setup argv runs from that random
 stage before the evaluator. Absolute not-yet-existing paths in the command (for
 example a ``--output-json`` target) are relayed back to the caller after the run.
+
+The caller bounds each wait for the deployed container: for it to answer ``/health``
+(``--readiness-timeout-seconds``) and for it to be listed for the colocated run
+(``--container-discovery-timeout-seconds``). A wait that ends while Modal lists no
+container of the app says so, since Modal may still be queueing it for GPU capacity.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import binascii
 import fcntl
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -85,6 +91,7 @@ _B64_CHUNK_CHARS = 60_000
 _MAX_ENCODED_SETUP_COMMAND_CHARS = 60_000
 _MAX_STAGE_ARCHIVE_BYTES = 8 * 1024 * 1024
 _CONTAINER_DISCOVERY_TIMEOUT_SECONDS = 90.0
+_CAPACITY_WAIT_NOTE = "Modal may still be waiting for capacity for its GPU"
 _CONTAINER_POLL_SECONDS = 5.0
 _HEALTH_POLL_SECONDS = 2.0
 _HEALTH_PROBE_TIMEOUT_SECONDS = 10.0
@@ -898,6 +905,31 @@ def health_ready(http_status: int) -> bool:
     return http_status == _HTTP_OK_STATUS
 
 
+def unready_container_note(life: ContainerLife, app_identifier: str, waited_seconds: float) -> str:
+    """What the app's containers were doing when the wait for ``/health`` ran out. Total.
+
+    A gate that timed out while Modal listed no started container of the deployed version
+    says Modal may still be queueing one for GPU capacity, so neither the agent nor the
+    operator mistakes a capacity wait for a broken candidate. Each listed container passed
+    over (not started yet, or started before the deploy) is named.
+    """
+    if isinstance(life, ContainerRunning):
+        return (
+            f"Container {life.container_id} of Modal app {app_identifier} is running but did "
+            f"not answer /health within {waited_seconds:g} s."
+        )
+    if isinstance(life, ContainerStarting):
+        passed_over = f" (passed over: {', '.join(life.passed_over)})" if life.passed_over else ""
+        return (
+            f"No container of Modal app {app_identifier} started running the deployed version "
+            f"within {waited_seconds:g} s{passed_over}: {_CAPACITY_WAIT_NOTE}."
+        )
+    return (
+        f"Whether a container of Modal app {app_identifier} is running is unknown: "
+        f"{life.raw or 'no listing'}."
+    )
+
+
 def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; the app and the earliest start its container may have, where to list it, the bound, and the three effects the wait performs.
     # > The clock, listing and warm-up are the loop's effects; bundling them into one
     # > object would add a type to this stdlib-only helper that only its tests construct.
@@ -942,7 +974,11 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
         if isinstance(life, ContainerRunning):
             return life.container_id
         if clock.now() >= deadline:
-            message = f"no running container found for Modal app {app_identifier}: {last_error}"
+            reason = last_error
+            if isinstance(life, ContainerStarting):
+                seen = f"{last_error}; " if life.passed_over else ""
+                reason = f"{seen}none started within {timeout_seconds:g} s; {_CAPACITY_WAIT_NOTE}"
+            message = f"no running container found for Modal app {app_identifier}: {reason}"
             raise TimeoutError(message)
         warm(base_url)
         if (remaining := deadline - clock.now()) > 0:
@@ -1116,9 +1152,10 @@ class _ThreadKeepWarm:
             _healthy_now(self._base_url, self._health)
 
 
-def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; the command, its workspace and deployment, the host effects, and two staging inputs.
-    # > A request object would be built only to unpack here (both callers hold the values
-    # > separately), and discovering the container in each caller would duplicate the wait.
+def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; the command, its workspace and deployment, the host effects, two staging inputs, and the discovery bound.
+    # > A request object would be built only to unpack here (the caller holds the values
+    # > separately), and discovering the container in the caller would split the wait
+    # > from the staging and exec that need its result.
     command: Sequence[str],
     *,
     workspace: str,
@@ -1126,8 +1163,13 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
     host: ModalHost,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
+    container_discovery_timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
 ) -> int:
-    """Run the trusted command inside a serving container of the deployed version."""
+    """Run the trusted command inside a serving container of the deployed version.
+
+    Waits up to ``container_discovery_timeout_seconds`` for such a container to be listed,
+    warming the public endpoint meanwhile.
+    """
     base_url, app_identifier = deployment.base_url, deployment.app_identifier
     plan = _plan_command_transfer(command, workspace)
     archive = _build_stage_archive(
@@ -1145,6 +1187,7 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
         started_since=deployment.started_since,
         workspace=workspace,
         base_url=base_url,
+        timeout_seconds=container_discovery_timeout_seconds,
         clock=host.clock,
         list_containers=partial(_list_containers, programs=host.programs),
         warm=partial(_healthy_now, health=host.health),
@@ -1179,20 +1222,21 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
     return exit_status_of(life, result.returncode)
 
 
-def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, readiness timeout, trusted setup argv, and evaluator package root as separate caller controls.
+def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, the readiness and container-discovery timeouts, trusted setup argv, and evaluator package root as separate caller controls.
     command: Sequence[str],
     *,
     host: ModalHost,
     workspace: str = "/workspace",
     entrypoint: str = DEFAULT_MODAL_ENTRYPOINT,
     readiness_timeout_seconds: float = 90,
+    container_discovery_timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
     """Deploy the candidate and run ``command`` inside its serving container.
 
     ``host`` runs the Modal CLI, probes the deployment, and times and paces the
-    readiness and container-discovery waits.
+    readiness and container-discovery waits, each bounded by its own timeout.
     """
     if not command:
         message = "missing evaluator command after '--'"
@@ -1216,19 +1260,19 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
             workspace=workspace,
             entrypoint=entrypoint,
             readiness_timeout_seconds=readiness_timeout_seconds,
+            container_discovery_timeout_seconds=container_discovery_timeout_seconds,
             setup_command=normalized_setup,
             evaluator_package_root=normalized_package_root,
         )
 
 
 def _execute_reused_candidate(
-    command: Sequence[str],
-    *,
-    host: ModalHost,
-    workspace: str,
-    setup_command: Sequence[str] | None,
-    evaluator_package_root: str | None,
+    execute: Callable[[_Deployment], int], *, host: ModalHost, workspace: str
 ) -> int | None:
+    """Run ``execute`` in the leased deployment of this candidate revision, if it is healthy.
+
+    Returns ``None`` when there is no reusable deployment, after retiring a stale lease.
+    """
     candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
     if not candidate_revision:
         return None
@@ -1248,21 +1292,27 @@ def _execute_reused_candidate(
         file=sys.stderr,
     )
     try:
-        return _execute_colocated(
-            command,
-            workspace=workspace,
-            # No deploy runs here, so no container of the app is older than the leased version.
-            deployment=_Deployment(lease.base_url, lease.app_identifier, started_since=None),
-            host=host,
-            setup_command=setup_command,
-            evaluator_package_root=evaluator_package_root,
-        )
+        # No deploy runs here, so no container of the app is older than the leased version.
+        return execute(_Deployment(lease.base_url, lease.app_identifier, started_since=None))
     except (TimeoutError, ValueError) as exc:
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000219 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
     finally:
         if _release_requested():
             _retire_deployment(lease, workspace=workspace, programs=host.programs)
+
+
+def _report_unready_container(
+    deployment: _Deployment, *, workspace: str, waited_seconds: float, programs: Programs
+) -> None:
+    """Say whether a container of the deployed version ran when the readiness wait ran out."""
+    app_identifier = deployment.app_identifier
+    life = container_reading(
+        _list_containers(workspace, programs=programs),
+        app_identifier,
+        started_since=deployment.started_since,
+    )
+    print(unready_container_note(life, app_identifier, waited_seconds), file=sys.stderr)  # noqa: T201  # lint-waiver: LW-473902 [T201]; the container state after a readiness timeout is reported to the invoking CLI.
 
 
 def _deploy_and_wait_for_health(
@@ -1300,6 +1350,15 @@ def _deploy_and_wait_for_health(
             with suppress(ValueError):
                 app_identifier = extract_modal_app_identifier(deploy_output)
         if app_identifier is not None:
+            if isinstance(exc, TimeoutError):
+                _report_unready_container(
+                    _Deployment(
+                        base_url, app_identifier, started_since_deploy(deploy_began, deploy_output)
+                    ),
+                    workspace=workspace,
+                    waited_seconds=readiness_timeout_seconds,
+                    programs=host.programs,
+                )
             print(  # noqa: T201  # lint-waiver: LW-000223 [T201]; recent Modal logs are shown to the invoking CLI after readiness failure.
                 "Recent Modal logs:\n"
                 f"{recent_modal_logs(app_identifier, workspace=workspace, programs=host.programs)}",
@@ -1317,17 +1376,24 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
     workspace: str,
     entrypoint: str,
     readiness_timeout_seconds: float,
+    container_discovery_timeout_seconds: float,
     setup_command: Sequence[str] | None,
     evaluator_package_root: str | None,
 ) -> int:
+    def execute(deployment: _Deployment) -> int:
+        """Run the command in ``deployment``, whether reused or freshly deployed."""
+        return _execute_colocated(
+            command,
+            workspace=workspace,
+            deployment=deployment,
+            host=host,
+            setup_command=setup_command,
+            evaluator_package_root=evaluator_package_root,
+            container_discovery_timeout_seconds=container_discovery_timeout_seconds,
+        )
+
     candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
-    reused_result = _execute_reused_candidate(
-        command,
-        host=host,
-        workspace=workspace,
-        setup_command=setup_command,
-        evaluator_package_root=evaluator_package_root,
-    )
+    reused_result = _execute_reused_candidate(execute, host=host, workspace=workspace)
     if reused_result is not None:
         return reused_result
 
@@ -1345,14 +1411,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
         _write_deployment_lease(candidate_revision, base_url, app_identifier)
 
     try:
-        return _execute_colocated(
-            command,
-            workspace=workspace,
-            deployment=deployed,
-            host=host,
-            setup_command=setup_command,
-            evaluator_package_root=evaluator_package_root,
-        )
+        return execute(deployed)
     except (TimeoutError, ValueError) as exc:
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000224 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
@@ -1369,11 +1428,28 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
                 _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
 
 
+def _wait_seconds(text: str) -> float:
+    """Parse a wait bound for argparse: a positive, finite number of seconds."""
+    try:
+        seconds = float(text)
+    except ValueError:
+        seconds = math.nan
+    if not (math.isfinite(seconds) and seconds > 0):
+        message = f"expected a positive, finite number of seconds, got {text!r}"
+        raise argparse.ArgumentTypeError(message)
+    return seconds
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", default="/workspace")
     parser.add_argument("--entrypoint", default=DEFAULT_MODAL_ENTRYPOINT)
-    parser.add_argument("--readiness-timeout-seconds", type=float, default=90)
+    parser.add_argument("--readiness-timeout-seconds", type=_wait_seconds, default=90)
+    parser.add_argument(
+        "--container-discovery-timeout-seconds",
+        type=_wait_seconds,
+        default=_CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
+    )
     parser.add_argument("--setup-command-base64", type=_setup_command_argument)
     parser.add_argument("--evaluator-package-root")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -1398,6 +1474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         workspace=args.workspace,
         entrypoint=args.entrypoint,
         readiness_timeout_seconds=args.readiness_timeout_seconds,
+        container_discovery_timeout_seconds=args.container_discovery_timeout_seconds,
         setup_command=args.setup_command_base64,
         evaluator_package_root=args.evaluator_package_root,
     )

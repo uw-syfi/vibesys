@@ -170,6 +170,8 @@ class _EvaluatorOptions(TypedDict, total=False):
     container_listing: SimpleNamespace | None
     exec_stdout: str
     health: ScriptedHealth
+    clock: AdvancingClock
+    container_discovery_timeout_seconds: float
 
 
 _DEPLOY_STDOUT = (
@@ -292,7 +294,12 @@ def _run_public_evaluator(
             str(evaluator_package_root) if evaluator_package_root is not None else None
         ),
         setup_command=setup_command,
-        host=_fake_host(run, health=options.get("health"), wall_clock=wall_clock).host,
+        container_discovery_timeout_seconds=options.get(
+            "container_discovery_timeout_seconds", 90.0
+        ),
+        host=_fake_host(
+            run, health=options.get("health"), clock=options.get("clock"), wall_clock=wall_clock
+        ).host,
     )
     return result, calls
 
@@ -607,6 +614,7 @@ def test_setup_command_encoding_round_trips_opaque_argv(
                 "workspace": "/workspace",
                 "entrypoint": "main.py",
                 "readiness_timeout_seconds": 90,
+                "container_discovery_timeout_seconds": 90.0,
                 "setup_command": command,
                 "evaluator_package_root": None,
             },
@@ -985,7 +993,9 @@ def test_evaluator_reports_container_list_cli_error(
     )
     assert result == 1
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
-    assert "container list exited 2: token expired" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "container list exited 2: token expired" in err
+    assert "capacity" not in err, "a listing that failed says nothing about capacity"
 
 
 def test_evaluator_reports_missing_running_container(
@@ -1010,6 +1020,118 @@ def test_evaluator_reports_missing_running_container(
     assert len(health.urls) >= 2
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
     assert "no running container found" in capsys.readouterr().err
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("bound", [1.0, 90.0, 7200.0])
+def test_container_discovery_waits_as_long_as_its_caller_bounds_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    bound: float,
+) -> None:
+    """Regression (#4099): discovery gave a container a fixed 90 s, whatever the gate asked for.
+
+    A scarce GPU's container can queue for capacity after readiness too, so the wait for it
+    to be listed follows the bound the run environment passes, and its failure says that
+    Modal may still be waiting for capacity.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+    clock = AdvancingClock()
+
+    result, calls = _run_public_evaluator(
+        workspace,
+        ["python", "main.py"],
+        tmp_path,
+        monkeypatch,
+        container_listing=SimpleNamespace(returncode=0, stdout="[]", stderr=""),
+        container_discovery_timeout_seconds=bound,
+        clock=clock,
+    )
+
+    assert result == 1
+    assert clock.now() == bound
+    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    err = capsys.readouterr().err
+    assert (
+        f"no running container found for Modal app candidate-app: none started within {bound:g} s; "
+        "Modal may still be waiting for capacity for its GPU"
+    ) in err
+
+
+@pytest.mark.parametrize(
+    ("listing", "said", "capacity"),
+    [
+        pytest.param(
+            _listing(),
+            "No container of Modal app candidate-app started running the deployed version "
+            "within 30 s: Modal may still be waiting for capacity for its GPU.",
+            True,
+            id="none-listed",
+        ),
+        pytest.param(
+            _listing(_container("ta-pending", "Pending")),
+            "No container of Modal app candidate-app started running the deployed version "
+            "within 30 s (passed over: ta-pending (start time 'Pending')): "
+            "Modal may still be waiting for capacity for its GPU.",
+            True,
+            id="pending",
+        ),
+        pytest.param(
+            _listing(_container("ta-1", _modal_start_time(5))),
+            "Container ta-1 of Modal app candidate-app is running but did not answer /health "
+            "within 30 s.",
+            False,
+            id="running",
+        ),
+        pytest.param(
+            SimpleNamespace(returncode=2, stdout="", stderr="token expired"),
+            "Whether a container of Modal app candidate-app is running is unknown: "
+            "container list exited 2: token expired.",
+            False,
+            id="unlisted",
+        ),
+    ],
+)
+def test_a_readiness_timeout_says_whether_the_app_had_a_running_container(
+    capsys: pytest.CaptureFixture[str], listing: SimpleNamespace, said: str, *, capacity: bool
+) -> None:
+    deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
+
+    def run(argv: list[str]) -> SimpleNamespace:
+        return listing if argv[3:5] == ["container", "list"] else deploy
+
+    fake = _fake_host(run, health=ScriptedHealth(error=OSError("timed out")))
+
+    result = modal_evaluator.run_evaluator(
+        ["true"], workspace="/workspace", readiness_timeout_seconds=30, host=fake.host
+    )
+
+    assert result == 1
+    err = capsys.readouterr().err
+    assert said in err
+    assert ("capacity" in err) == capacity
+    assert (
+        ProgramCall(
+            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            cwd="/workspace",
+            timeout=60,
+        )
+        in fake.programs.calls
+    )
+
+
+@pytest.mark.parametrize(
+    "flag", ["--readiness-timeout-seconds", "--container-discovery-timeout-seconds"]
+)
+@pytest.mark.parametrize("value", ["0", "-5", "nan", "inf", "soon"])
+def test_a_container_wait_must_be_a_positive_finite_number_of_seconds(
+    flag: str, value: str
+) -> None:
+    with pytest.raises(SystemExit):
+        modal_evaluator.main([flag, value, "--", "true"])
 
 
 def test_evaluator_relays_exec_outputs_and_passes_through_progress(
@@ -1428,6 +1550,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
         host=host,
         setup_command=None,
         evaluator_package_root=None,
+        container_discovery_timeout_seconds=90.0,
     )
 
 
@@ -1504,6 +1627,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
         host=host,
         setup_command=("installer", "--locked"),
         evaluator_package_root=str(package.resolve()),
+        container_discovery_timeout_seconds=90.0,
     )
 
 
@@ -1516,6 +1640,10 @@ def test_main_decodes_setup_command_and_forwards_package(monkeypatch: pytest.Mon
         [
             "--workspace",
             "/workspace",
+            "--readiness-timeout-seconds",
+            "7200",
+            "--container-discovery-timeout-seconds",
+            "7200",
             "--setup-command-base64",
             encoded,
             "--evaluator-package-root",
@@ -1539,7 +1667,8 @@ def test_main_decodes_setup_command_and_forwards_package(monkeypatch: pytest.Mon
         {
             "workspace": "/workspace",
             "entrypoint": "main.py",
-            "readiness_timeout_seconds": 90,
+            "readiness_timeout_seconds": 7200.0,
+            "container_discovery_timeout_seconds": 7200.0,
             "setup_command": ("installer", "argument with spaces"),
             "evaluator_package_root": "/opt/vibesys-evaluator-package",
         },
@@ -1629,6 +1758,7 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
         host=host,
         setup_command=None,
         evaluator_package_root=None,
+        container_discovery_timeout_seconds=90.0,
     )
 
 
@@ -2013,18 +2143,18 @@ def test_reused_deployment_setup_failure_is_reported_and_released(
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setenv(_RELEASE_DEPLOYMENT_ENV, "1")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(
-        modal_evaluator, "_execute_colocated", MagicMock(side_effect=ValueError("bad setup"))
-    )
     fake = _fake_host(lambda _argv: SimpleNamespace(returncode=0, stdout="", stderr=""))
 
-    result = _execute_reused_candidate(
-        ["true"],
-        workspace="/workspace",
-        setup_command=None,
-        evaluator_package_root=None,
-        host=fake.host,
-    )
+    def execute(deployment: modal_evaluator._Deployment) -> int:
+        assert (deployment.base_url, deployment.app_identifier, deployment.started_since) == (
+            "https://workspace--candidate.modal.run",
+            "candidate-app",
+            None,
+        )
+        message = "bad setup"
+        raise ValueError(message)
+
+    result = _execute_reused_candidate(execute, workspace="/workspace", host=fake.host)
 
     assert result == 1
     err = capsys.readouterr().err

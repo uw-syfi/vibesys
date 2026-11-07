@@ -1236,16 +1236,42 @@ class DockerEnvironment(NoCaptureRecovery):
 #: container; baked into that environment's agent image.
 _MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = ("modal>=0.66",)
 
+MODAL_CONTAINER_WAIT_SECONDS = 1200
+"""How long a Modal gate waits for the candidate's container when the operator sets no wait."""
+MAX_MODAL_CONTAINER_WAIT_SECONDS = 86_400
+"""The longest container wait an operator may set: one day keeps every gate bounded."""
+
+_MODAL_OPTIONS = frozenset(
+    {"image", "gpu", "model_volume", "app", "entrypoint", "container_wait_seconds"}
+)
+
 
 @dataclass(frozen=True)
 class ModalEnvironmentConfig:
-    """Configuration for Modal-backed candidate evaluations."""
+    """Configuration for Modal-backed candidate evaluations.
+
+    ``container_wait_seconds`` bounds each wait a trusted gate makes for the deployed
+    candidate's container: for it to answer ``/health`` after the deploy, and for it to be
+    listed for the colocated run. Modal queues a container until a GPU of the requested
+    type is free, which for a scarce GPU can take far longer than the default.
+    """
 
     image: str | None = None
     gpu: str = "H100!"
     model_volume: str | None = None
     app: str = "vibesys"
     entrypoint: str | None = None
+    container_wait_seconds: int = MODAL_CONTAINER_WAIT_SECONDS
+
+    def __post_init__(self) -> None:
+        """Reject a container wait that is not a bounded, positive whole number of seconds."""
+        wait = self.container_wait_seconds
+        if type(wait) is not int or not 1 <= wait <= MAX_MODAL_CONTAINER_WAIT_SECONDS:
+            message = (
+                "Modal option container_wait_seconds (--modal-container-wait-seconds) must be "
+                f"whole seconds from 1 to {MAX_MODAL_CONTAINER_WAIT_SECONDS}, got {wait!r}"
+            )
+            raise ValueError(message)
 
 
 class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
@@ -1302,7 +1328,14 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
 
     @classmethod
     def from_options(cls, options: Mapping[str, object]) -> ModalEnvironment:
-        """Build Modal environment configuration from CLI options."""
+        """Build Modal environment configuration from CLI options, rejecting unknown keys."""
+        unknown = sorted(set(options) - _MODAL_OPTIONS)
+        if unknown:
+            message = (
+                f"unknown Modal run environment option(s): {', '.join(unknown)}; "
+                f"expected one of: {', '.join(sorted(_MODAL_OPTIONS))}"
+            )
+            raise ValueError(message)
         return cls(
             ModalEnvironmentConfig(
                 image=str(options["image"]) if options.get("image") else None,
@@ -1312,6 +1345,9 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 ),
                 app=str(options.get("app") or "vibesys"),
                 entrypoint=(str(options["entrypoint"]) if options.get("entrypoint") else None),
+                container_wait_seconds=cast(
+                    "int", options.get("container_wait_seconds", MODAL_CONTAINER_WAIT_SECONDS)
+                ),
             )
         )
 
@@ -1444,11 +1480,23 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             "[modal] starting local Docker editor; GPU work will dispatch "
             "to Modal via the candidate's declared `modal run` entrypoint"
         )
-        setup_timeout_seconds = 1200
+        # The operator's one bound applies to each wait for the candidate's container, since
+        # Modal can queue it for GPU capacity before readiness and again before discovery.
+        # The gate's extra budget is the sum of both waits (before, it was the readiness wait
+        # alone), so the two waits together can never outlast it.
+        container_wait = str(self.config.container_wait_seconds)
+        setup_timeout_seconds = 2 * self.config.container_wait_seconds
         evaluator_arguments = ["python", evaluator_container_path]
         if self.config.entrypoint is not None:
             evaluator_arguments.extend(("--entrypoint", self.config.entrypoint))
-        evaluator_arguments.extend(("--readiness-timeout-seconds", str(setup_timeout_seconds)))
+        evaluator_arguments.extend(
+            (
+                "--readiness-timeout-seconds",
+                container_wait,
+                "--container-discovery-timeout-seconds",
+                container_wait,
+            )
+        )
         remote_setup = remote_evaluator_setup_command(requirements, preserve_bootstrap=True)
         if remote_setup is not None:
             evaluator_arguments.extend(

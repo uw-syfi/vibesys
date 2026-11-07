@@ -268,6 +268,7 @@ def run_environment_spec_from_args(
             modal_model_volume=args.modal_model_volume,
             modal_app=args.modal_app,
             modal_entrypoint=bundle.modal_entrypoint if bundle is not None else None,
+            modal_container_wait_seconds=args.modal_container_wait_seconds,
             use_skypilot=requested_environment == "skypilot",
             cluster_profile=getattr(args, "cluster_profile", None),
             cluster_profiles_file=getattr(args, "cluster_profiles_file", None),

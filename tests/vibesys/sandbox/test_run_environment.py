@@ -407,8 +407,10 @@ def test_cli_compatibility_flags_keep_options_scoped_to_selected_environment() -
     configured = make_run_environment_spec(
         use_modal=True,
         modal_entrypoint="examples/deployment/service.py",
+        modal_container_wait_seconds=7200,
     )
     assert configured.options["entrypoint"] == "examples/deployment/service.py"
+    assert configured.options["container_wait_seconds"] == 7200
 
     resources = RunResourceRequest(nodes=1, accelerators_per_node=4, accelerator_backend="rocm")
     skypilot = make_run_environment_spec(
@@ -454,6 +456,8 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
             modal_app="candidate",
             # Declared by the input bundle, so it is re-derived rather than recorded.
             modal_entrypoint="examples/deployment/service.py",
+            # Launch policy for the capacity at hand, given again on resume.
+            modal_container_wait_seconds=7200,
         )
     ) == RunEnvironmentRecord(
         name="modal",
@@ -1911,14 +1915,17 @@ def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_pat
     )
 
     helper = "/opt/vibesys-modal-evaluator.py"
-    prefix = f"python {helper} --readiness-timeout-seconds 1200 --"
+    prefix = (
+        f"python {helper} --readiness-timeout-seconds 1200 "
+        "--container-discovery-timeout-seconds 1200 --"
+    )
     assert session.view.paths.accuracy_command == (
         f"{prefix} uv run python accuracy_checker/checker.py"
     )
     assert session.view.paths.benchmark_command == (
         f"{prefix} uv run python benchmark/benchmark.py --concurrency 16"
     )
-    assert session.view.framework_setup_timeout_seconds == 1200
+    assert session.view.framework_setup_timeout_seconds == 2400
     assert any(
         container_path == helper and read_only
         for _, container_path, read_only in _as_mount_tuples(backend.calls[0][1]["resources"])
@@ -1949,7 +1956,7 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
     helper = "/opt/vibesys-modal-evaluator.py"
     prefix = (
         f"python {helper} --entrypoint 'examples/deployment/service with space.py' "
-        "--readiness-timeout-seconds 1200 --"
+        "--readiness-timeout-seconds 1200 --container-discovery-timeout-seconds 1200 --"
     )
     assert session.view.paths.accuracy_command == f"{prefix} trusted-check"
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
@@ -1993,6 +2000,58 @@ def test_modal_runtime_notes_name_the_file_the_trusted_evaluator_deploys(
     assert f"runs `modal deploy` on `{deployed}`" in notes
     assert "under the name `app`" in notes
     assert "no incumbent filename is fixed" not in notes
+
+
+def _option_value(arguments: list[str], option: str) -> str:
+    return arguments[arguments.index(option) + 1]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("wait", [1, 1200, 7200, 86_400])
+def test_the_operators_modal_container_wait_bounds_both_waits_and_the_gate(
+    tmp_path: Path, wait: int
+) -> None:
+    """Regression (#4099): every Modal gate waited a fixed 1200 s for readiness and 90 s for
+    discovery, so a container queued for a scarce GPU failed the gate as a broken candidate.
+
+    The operator's wait reaches the helper as both bounds, and the gate's extra budget is
+    both waits together, so neither wait is cut short by the gate's own timeout.
+    """
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("modal", {"container_wait_seconds": wait})),
+        _request(
+            tmp_path,
+            FakeBackend(),
+            accuracy_command="trusted-check",
+            benchmark_command="trusted-benchmark",
+        ),
+    )
+
+    for command in (session.view.paths.accuracy_command, session.view.paths.benchmark_command):
+        arguments = shlex.split(command or "")
+        helper_arguments = arguments[: arguments.index("--")]
+        assert _option_value(helper_arguments, "--readiness-timeout-seconds") == str(wait)
+        assert _option_value(helper_arguments, "--container-discovery-timeout-seconds") == str(wait)
+    assert session.view.framework_setup_timeout_seconds == 2 * wait
+
+
+@pytest.mark.parametrize(
+    ("options", "named"),
+    [
+        pytest.param({"container_wait_seconds": 0}, "container_wait_seconds", id="zero"),
+        pytest.param({"container_wait_seconds": -60}, "container_wait_seconds", id="negative"),
+        pytest.param({"container_wait_seconds": 86_401}, "container_wait_seconds", id="over-max"),
+        pytest.param({"container_wait_seconds": 600.5}, "container_wait_seconds", id="fraction"),
+        pytest.param({"container_wait_seconds": "600"}, "container_wait_seconds", id="text"),
+        pytest.param({"container_wait_seconds": True}, "container_wait_seconds", id="boolean"),
+        pytest.param({"container_wait": 600}, "container_wait", id="unknown-key"),
+    ],
+)
+def test_a_modal_environment_rejects_an_unbounded_wait_or_unknown_option_by_name(
+    options: dict[str, object], named: str
+) -> None:
+    with pytest.raises(ValueError, match=named):
+        build_run_environment(RunEnvironmentSpec("modal", options))
 
 
 _TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")
