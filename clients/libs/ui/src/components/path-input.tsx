@@ -17,7 +17,7 @@ interface ListState {
 /** A ref callback with one identity for good, so React calls it when the input mounts and never again. */
 const focusOnMount = (input: HTMLInputElement | null): void => input?.focus();
 
-/** What the owner runs for a key the input has no completion to use it on: Enter submits, Escape closes. */
+/** What the owner is called for on a key the input has no completion to use it on: Enter submits, Escape closes. */
 function ownerOf(
   key: string,
   owner: {readonly submit?: () => void; readonly escape?: () => void},
