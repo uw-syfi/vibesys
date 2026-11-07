@@ -39,6 +39,39 @@ describe('a generated run', () => {
     expect(generateScenario(options)).toEqual(generateScenario(options));
   });
 
+  it('a tree run is valid on the wire, spawns agents under agents, and folds a big group', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({min: 1, max: 500}),
+        fc.integer({min: 8, max: 30}),
+        fc.boolean(),
+        (seed, subagents, live) => {
+          const scenario = generateScenario({seed, subagents, live, tree: true});
+          scenario.changes.forEach((event, index) => {
+            expect(event.sequence).toBe(BigInt(index + 1));
+            decodeValidated(RunChangeSchema, encodeMessage(RunChangeSchema, event));
+          });
+          const state = scenario.changes.reduce(applyChange, emptyState);
+          const agents = runAgents(state, scenario.runId);
+          expect(agents).toHaveLength(subagents + 1);
+          const byId = new Map(agents.map(agent => [agent.id, agent]));
+          const depthOf = (id: string): number => {
+            const parent = byId.get(id)?.parentAgentId ?? '';
+            return parent === '' ? 0 : 1 + depthOf(parent);
+          };
+          expect(Math.max(...agents.map(agent => depthOf(agent.id)))).toBeGreaterThanOrEqual(3);
+          const siblings = new Map<string, number>();
+          for (const agent of agents) {
+            const key = `${agent.parentAgentId}/${agent.role}`;
+            siblings.set(key, (siblings.get(key) ?? 0) + 1);
+          }
+          expect(Math.max(...siblings.values())).toBeGreaterThanOrEqual(subagents - 8);
+        },
+      ),
+      {numRuns: 25},
+    );
+  });
+
   it('the long fixture has ten agents, both harnesses, and several open at once', () => {
     const scenario = generateScenario({seed: 11, subagents: 9, live: true});
     const state = scenario.changes.reduce(applyChange, emptyState);

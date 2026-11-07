@@ -17,6 +17,7 @@ import {
   Delivery,
   type Delta,
   DeltaSchema,
+  EditCallSchema,
   HandoffSchema,
   Harness,
   type Item,
@@ -28,17 +29,23 @@ import {
   type Message,
   MessageSchema,
   NoCandidateSchema,
+  OtherCallSchema,
   type Plan,
   PlannerHandoffSchema,
+  ReadCallSchema,
   ReceiptSchema,
   ReportKind,
   ReportSchema,
   type RunChange,
   RunStatus,
+  SearchCallSchema,
+  SubagentSettledSchema,
+  type ToolCall,
   type Turn,
   TurnStatus,
   TurnTrigger,
   type Usage,
+  UsageSchema,
   WorkerHandoffSchema,
 } from '@vibesys/orchestrator-proto';
 import {itemOf, planOf, runOf, turnOf, usageOf} from './builders.js';
@@ -52,6 +59,13 @@ export interface ScenarioOptions {
   readonly live: boolean;
   /** Extra read-and-try steps in each subagent's first turn, to make long histories (default 0). */
   readonly depth?: number;
+  /**
+   * Agents spawn each other: two planners under the lead, workers under them (more than enough under
+   * the first to fold), a helper spawned by a worker, a judge and a profiler; one worker fails. Steps
+   * use every kind of tool call, long arguments and long outputs, and parents take a second turn
+   * when their children report.
+   */
+  readonly tree?: boolean;
 }
 
 export interface Scenario {
@@ -103,7 +117,7 @@ const IDEAS = [
 ];
 
 /** One step of a turn: builds the item that happens `atMs` into turn `turnId`. */
-type Step = (atMs: number, turnId: string) => Item;
+type Step = (atMs: number, turnId: string, startedMs: number) => Item;
 
 class Builder {
   readonly rng: Rng;
@@ -115,6 +129,7 @@ class Builder {
   readonly #itemCount = new Map<string, number>();
   readonly #turnCount = new Map<string, number>();
   #counter = 0;
+  readonly #spent = new Map<string, number>();
 
   constructor(readonly options: ScenarioOptions) {
     this.rng = new Rng(options.seed);
@@ -152,9 +167,14 @@ class Builder {
     agent: Agent,
     kind: 'prompt' | 'reasoning' | 'assistant' | 'tool',
     text: string,
-    extra: {output?: string; exit?: number; status?: ItemStatus} = {},
+    extra: {
+      output?: string;
+      exit?: number;
+      status?: ItemStatus;
+      call?: ToolCall['call'];
+    } = {},
   ): Step {
-    return (atMs, turnId) => {
+    return (atMs, turnId, startedMs) => {
       const ordinal = (this.#itemCount.get(agent.id) ?? 0) + 1;
       this.#itemCount.set(agent.id, ordinal);
       return itemOf({
@@ -163,6 +183,7 @@ class Builder {
         agentId: agent.id,
         ordinal,
         atMs,
+        startedMs,
         kind,
         text,
         ...extra,
@@ -192,8 +213,10 @@ class Builder {
     this.log.push(startMs, {case: 'turn', value: open});
     let at = startMs;
     for (const step of steps) {
+      const before = at;
       at += this.rng.between(4, 40) * 1000;
-      const item = step(at, open.id);
+      // The host first saw the item a little after the step before it ended.
+      const item = step(at, open.id, before + Math.floor((at - before) / 3));
       this.log.push(at, {case: 'item', value: item});
       if (item.status === ItemStatus.RUNNING) this.progress(agent.id, item.id);
     }
@@ -215,9 +238,15 @@ class Builder {
     }
   }
 
+  /** What the agent's finished turns have cost so far, as the host would total it; absent before any. */
+  spentBy(agent: Agent): Usage | undefined {
+    const cost = this.#spent.get(agent.id);
+    return cost === undefined ? undefined : create(UsageSchema, {costUsd: cost});
+  }
+
   usage(agent: Agent): Usage {
     const claude = agent.harness === Harness.CLAUDE_CODE;
-    return usageOf({
+    const usage = usageOf({
       input: this.rng.between(2_000, 40_000),
       output: this.rng.between(300, 6_000),
       cacheRead: this.rng.between(10_000, 200_000),
@@ -226,6 +255,9 @@ class Builder {
       reasoning: claude ? undefined : this.rng.between(100, 3_000),
       cost: claude ? this.rng.between(5, 90) / 100 : undefined,
     });
+    if (usage.costUsd !== undefined)
+      this.#spent.set(agent.id, (this.#spent.get(agent.id) ?? 0) + usage.costUsd);
+    return usage;
   }
 }
 
@@ -244,6 +276,11 @@ function leadAgent(builder: Builder, status: AgentStatus): Agent {
     capabilities: create(CapabilitiesSchema, {steers: true, resumes: true}),
   });
 }
+
+const withSpent = (builder: Builder, agent: Agent): Agent => {
+  const usage = builder.spentBy(agent);
+  return usage === undefined ? agent : {...agent, usage};
+};
 
 /** The lead opens the run and plans; returns when its first turn ends. */
 function startRun(builder: Builder): number {
@@ -274,22 +311,57 @@ function startRun(builder: Builder): number {
       'No ideas exist yet. I am asking two planners to propose some.',
     ),
   ]);
-  builder.putAgent(end, leadAgent(builder, AgentStatus.WAITING));
+  builder.putAgent(end, withSpent(builder, leadAgent(builder, AgentStatus.WAITING)));
   return end;
 }
 
 interface Sub {
   readonly agent: Agent;
   readonly endMs: number;
+  /** The message the agent handed back to its parent, when it did. */
+  readonly handoffId?: string;
+  readonly parent: Agent;
 }
 
-function subagentOf(builder: Builder, index: number, startMs: number): Agent {
-  const role = ROLES[index] ?? AgentRole.WORKER;
+/** Which role an agent has and which agent spawned it (an index into the slots, or -1 for the lead). */
+interface Slot {
+  readonly role: AgentRole;
+  readonly parent: number;
+}
+
+function layoutOf(options: ScenarioOptions): Slot[] {
+  if (options.tree !== true) {
+    return ROLES.slice(0, Math.min(options.subagents, ROLES.length)).map(role => ({
+      role,
+      parent: -1,
+    }));
+  }
+  const workers = Math.max(3, options.subagents - 5);
+  const slots: Slot[] = [
+    {role: AgentRole.PLANNER, parent: -1},
+    {role: AgentRole.PLANNER, parent: -1},
+  ];
+  for (let at = 0; at < workers; at++) {
+    slots.push({role: AgentRole.WORKER, parent: at < workers - 3 ? 0 : 1});
+  }
+  slots.push({role: AgentRole.WORKER, parent: slots.length - 1});
+  slots.push({role: AgentRole.JUDGE, parent: -1}, {role: AgentRole.PROFILER, parent: -1});
+  return slots;
+}
+
+function subagentOf(
+  builder: Builder,
+  index: number,
+  startMs: number,
+  slot: Slot,
+  parent: Agent,
+): Agent {
+  const role = slot.role;
   const codex = index % 2 === 1;
   return create(AgentSchema, {
     id: `agent-${builder.options.seed}-${ROLE_NAME[role]}-${index + 1}`,
     runId: builder.runId,
-    parentAgentId: builder.leadId,
+    parentAgentId: parent.id,
     role,
     harness: codex ? Harness.CODEX : Harness.CLAUDE_CODE,
     stopStage: AgentStopStage.NONE,
@@ -321,6 +393,7 @@ function workSteps(
       exit: 0,
     }),
     ...investigation(builder, agent, builder.options.depth ?? 0),
+    ...(builder.options.tree === true ? richSteps(builder, agent) : []),
     ...(worker
       ? [
           builder.step(agent, 'tool', 'python bench.py', {
@@ -344,6 +417,79 @@ function workSteps(
   ];
 }
 
+const LONG_ARGUMENT = `python bench.py ${Array.from({length: 24}, (_, at) => `--variant tile-${64 + at * 8}-lds-${at}`).join(' ')}`;
+const LONG_PATH = `src/decode/${'very-long-directory-name/'.repeat(6)}kernels/fused_attention_residual_epilogue.cc`;
+const LONG_LINE = `trace ${'0123456789abcdef'.repeat(40)}`;
+
+/** Every kind of tool call, long arguments and outputs, a failure, an empty output, and thinking that runs long. */
+function richSteps(builder: Builder, agent: Agent): Step[] {
+  const reasoning = [
+    '**Plan.** The decode loop launches the router and the dispatch as two kernels.',
+    '',
+    '- fuse them so the expert ids stay in registers',
+    '- check accuracy first, then bench at batch 32 and 64',
+    '',
+    'A 128 tile may not fit next to the router state, so a 64 tile is the safer variant. '.repeat(
+      6,
+    ),
+  ].join('\n');
+  return [
+    builder.step(agent, 'reasoning', reasoning),
+    builder.step(agent, 'tool', 'src/decode/loop.py', {
+      call: {case: 'read', value: create(ReadCallSchema, {target: 'src/decode/loop.py'})},
+      output: Array.from({length: 40}, (_, at) => `${at + 1}: def decode_step_${at}(batch):`).join(
+        '\n',
+      ),
+      exit: 0,
+    }),
+    builder.step(agent, 'tool', LONG_PATH, {
+      call: {case: 'read', value: create(ReadCallSchema, {target: LONG_PATH})},
+      output: 'x = 1',
+      exit: 0,
+    }),
+    builder.step(agent, 'tool', 'src/decode/loop.py', {
+      call: {case: 'edit', value: create(EditCallSchema, {targets: ['src/decode/loop.py']})},
+      output: 'applied 3 hunks',
+      exit: 0,
+    }),
+    builder.step(agent, 'tool', 'decode_step', {
+      call: {case: 'search', value: create(SearchCallSchema, {pattern: 'decode_step'})},
+      output: 'src/decode.py:41\nsrc/decode/loop.py:7',
+      exit: 0,
+    }),
+    builder.step(agent, 'tool', '', {
+      call: {
+        case: 'other',
+        value: create(OtherCallSchema, {name: 'mcp__tools__bench', text: 'batch=64\ntrace=long'}),
+      },
+      output: '11,088 tok/s',
+    }),
+    builder.step(agent, 'tool', LONG_ARGUMENT, {
+      output: [
+        ...Array.from(
+          {length: 160},
+          (_, at) => `variant ${at}  ${1000 + at * 7} tok/s  p99 ${200 - at} ms`,
+        ),
+        LONG_LINE,
+      ].join('\n'),
+      exit: 0,
+    }),
+    builder.step(agent, 'tool', 'pytest -x tests/test_decode.py', {
+      output: 'FAILED tests/test_decode.py::test_case_3 - AssertionError',
+      exit: 1,
+      status: ItemStatus.FAILED,
+    }),
+    builder.step(agent, 'tool', 'true', {output: '', exit: 0}),
+    builder.step(agent, 'tool', '', {output: '', exit: 0}),
+    builder.step(
+      agent,
+      'assistant',
+      `The fused kernel passes except \`test_case_3\`:\n\n1. the router state is read before it is written\n2. ${'unbroken'.repeat(40)}\n\n\`\`\`\nbatch=64  11,088 tok/s\n\`\`\``,
+    ),
+    builder.step(agent, 'assistant', ''),
+  ];
+}
+
 /** `depth` more rounds of thinking and trying, so an agent's history can be long. */
 function investigation(builder: Builder, agent: Agent, depth: number): Step[] {
   const steps: Step[] = [];
@@ -359,13 +505,20 @@ function investigation(builder: Builder, agent: Agent, depth: number): Step[] {
   return steps;
 }
 
-function addSubagent(builder: Builder, index: number, after: number, tail: boolean): Sub {
+function addSubagent(
+  builder: Builder,
+  index: number,
+  after: number,
+  tail: boolean,
+  slot: Slot,
+  parent: Agent,
+): Sub {
   const startMs = after + builder.rng.between(5, 90) * 1000;
-  const agent = subagentOf(builder, index, startMs);
+  const agent = subagentOf(builder, index, startMs, slot, parent);
   builder.putAgent(startMs, {...agent, status: AgentStatus.LAUNCHING});
   builder.putAgent(startMs + 1500, agent);
   const spawn = builder.message(startMs, {
-    fromAgentId: builder.leadId,
+    fromAgentId: parent.id,
     toAgentId: agent.id,
     body: {case: 'brief', value: `Work as the ${ROLE_NAME[agent.role]}.`},
   });
@@ -382,7 +535,7 @@ function addSubagent(builder: Builder, index: number, after: number, tail: boole
     workSteps(builder, agent, idea, jobId, tail),
     tail,
   );
-  if (tail) return {agent, endMs: at};
+  if (tail) return {agent, endMs: at, parent};
   if (agent.role === AgentRole.WORKER) {
     const failed = index % 4 === 3;
     const jobEnd = at + builder.rng.between(1, 4) * MINUTE;
@@ -400,14 +553,39 @@ function addSubagent(builder: Builder, index: number, after: number, tail: boole
     });
     at = Math.max(at, jobEnd);
   }
+  if (builder.options.tree === true && index === 4) {
+    // One worker fails: it settles without a handoff.
+    builder.message(at + 1000, {
+      toAgentId: parent.id,
+      body: {
+        case: 'subagentSettled',
+        value: create(SubagentSettledSchema, {
+          agentId: agent.id,
+          status: AgentStatus.FAILED,
+          detail: 'The session was lost.',
+        }),
+      },
+    });
+    builder.putAgent(at + 1000, {
+      ...withSpent(builder, agent),
+      status: AgentStatus.FAILED,
+      endedAt: timestampFromMs(at + 1000),
+      endDetail: 'The session was lost.',
+    });
+    return {agent, endMs: at + 1000, parent};
+  }
   const handoff = handoffFor(agent.role, agent.planNumber, idea, index);
-  builder.message(at, {
+  const handed = builder.message(at, {
     fromAgentId: agent.id,
-    toAgentId: builder.leadId,
+    toAgentId: parent.id,
     body: {case: 'handoff', value: handoff},
   });
-  builder.putAgent(at + 1000, {...agent, status: AgentStatus.IDLE, handedOff: true});
-  return {agent, endMs: at + 1000};
+  builder.putAgent(at + 1000, {
+    ...withSpent(builder, agent),
+    status: AgentStatus.IDLE,
+    handedOff: true,
+  });
+  return {agent, endMs: at + 1000, handoffId: handed.id, parent};
 }
 
 /** The operator writes to a worker and the daemon answers with a receipt. */
@@ -451,17 +629,58 @@ function finishRun(builder: Builder, atMs: number): void {
   builder.log.push(atMs + 1000, {case: 'run', value: ended});
 }
 
+/** In a tree run each parent takes a second turn, woken by the last of its children to hand back. */
+function wakeParents(builder: Builder, lead: Agent, subs: readonly Sub[]): number[] {
+  const parents = [lead, ...subs.map(sub => sub.agent)];
+  return parents.flatMap(parent => {
+    const children = subs.filter(sub => sub.parent.id === parent.id && sub.handoffId !== undefined);
+    const last = children[children.length - 1];
+    if (last?.handoffId === undefined) return [];
+    const startMs = Math.max(...children.map(child => child.endMs)) + 3000;
+    const woken = parent.id === lead.id ? withSpent(builder, parent) : parent;
+    const end = builder.turn(
+      woken,
+      startMs,
+      {kind: TurnTrigger.HANDOFF, messageId: last.handoffId},
+      [
+        builder.step(
+          woken,
+          'reasoning',
+          'The children reported. Compare the claims before saying anything.',
+        ),
+        builder.step(
+          woken,
+          'assistant',
+          `${children.length} children reported back. I kept the best idea.`,
+        ),
+      ],
+    );
+    builder.putAgent(end + 1000, {
+      ...withSpent(builder, parent),
+      status: parent.id === lead.id ? AgentStatus.WAITING : AgentStatus.IDLE,
+    });
+    return [end + 1000];
+  });
+}
+
 export function generateScenario(options: ScenarioOptions): Scenario {
   const builder = new Builder(options);
   let now = startRun(builder);
   const subs: Sub[] = [];
-  const count = Math.min(options.subagents, ROLES.length);
-  for (let index = 0; index < count; index++) {
+  const slots = layoutOf(options);
+  const count = slots.length;
+  const lead = leadAgent(builder, AgentStatus.ACTIVE);
+  slots.forEach((slot, index) => {
     const tail = options.live && index >= count - 2;
-    subs.push(addSubagent(builder, index, now, tail));
+    const parent = slot.parent === -1 ? lead : (subs[slot.parent]?.agent ?? lead);
+    subs.push(addSubagent(builder, index, now, tail, slot, parent));
     now += builder.rng.between(20, 60) * 1000;
-  }
-  const lastEnd = Math.max(now, ...subs.map(sub => sub.endMs));
+  });
+  const lastEnd = Math.max(
+    now,
+    ...subs.map(sub => sub.endMs),
+    ...(options.tree === true ? wakeParents(builder, lead, subs) : []),
+  );
   const target = subs.find(sub => sub.agent.role === AgentRole.WORKER)?.agent;
   if (target !== undefined) operatorMessage(builder, target, lastEnd + 5000);
   if (!options.live) finishRun(builder, lastEnd + 30_000);

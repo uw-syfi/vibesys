@@ -8,6 +8,7 @@ import * as Effect from 'effect/Effect';
 import type * as Atom from 'effect/reactivity/Atom';
 import type * as Scope from 'effect/Scope';
 import type {HostKey, HostModel} from '../state/index.js';
+import {type AgentHistory, makeAgentHistory} from './agent-history.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
@@ -24,6 +25,8 @@ export interface HostSession {
   readonly model: Atom.Atom<HostModel>;
   readonly runs: RunsView;
   readonly agents: AgentView;
+  /** Reads of an agent's past: earlier pages and whole items. */
+  readonly history: AgentHistory;
   readonly costs: CostFeed;
   readonly commands: Commands;
 }
@@ -41,6 +44,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     model: store.atom,
     runs: yield* makeRunsView(parts),
     agents: yield* makeAgentView(parts),
+    history: yield* makeAgentHistory(parts),
     costs: yield* makeCostFeed(parts),
     commands: yield* makeCommands(parts),
   };

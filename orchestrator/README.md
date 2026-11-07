@@ -416,6 +416,13 @@ shows an agent's turns and the handoffs and reports a late watcher missed, and n
 in them (`WatchAgent` and `ListItems` page items). A run with more turns than a timeline window holds
 shows its earliest in the snapshot.
 
+A page of items leaves out the text of a reasoning item or the output of a tool call larger than
+`daemon.ElideOver` (4096 bytes), so that a page of an agent that thought and ran a lot stays small: the
+item is in the page with that text empty, and the page's `elisions` say which items and how large the
+text was. `GetItem` reads one item whole by its agent and ordinal. An item that arrives in a stream is
+always whole. An item carries `started_at`, when the host first saw it, beside `at`, when it was last
+updated, so a finished item took the difference; an item recorded before the host kept it has none.
+
 ### What a run has cost
 
 The host owns every number a screen shows of a run's cost: no client sums, splits or buckets anything.

@@ -33,6 +33,7 @@ const host: HostSnapshot = {
   freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [
   {key: 'local', label: 'This machine', connection: 'connected', freshness: 'live'},
@@ -68,6 +69,8 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
             retryStop: () => undefined,
             sendMessage: () => undefined,
             retrySend: () => undefined,
+            loadEarlier: () => undefined,
+            expand: () => undefined,
           }}
           retryHost={() => undefined}
           route={navigation.runs}
