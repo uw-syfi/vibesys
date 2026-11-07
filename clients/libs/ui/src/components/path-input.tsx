@@ -14,6 +14,18 @@ interface ListState {
   readonly dismissed: boolean;
 }
 
+/** A ref callback with one identity for good, so React calls it when the input mounts and never again. */
+const focusOnMount = (input: HTMLInputElement | null): void => input?.focus();
+
+/** What the owner runs for a key the input has no completion to use it on: Enter submits, Escape closes. */
+function ownerOf(
+  key: string,
+  owner: {readonly submit?: () => void; readonly escape?: () => void},
+): (() => void) | undefined {
+  if (key === 'Enter') return owner.submit;
+  return key === 'Escape' ? owner.escape : undefined;
+}
+
 const RESET: ListState = {active: null, dismissed: false};
 
 function step(state: ListState, key: string, count: number): ListState | null {
@@ -36,9 +48,18 @@ export function PathInput(props: {
   readonly change: (value: string) => void;
   readonly completions: readonly Completion[];
   readonly placeholder?: string;
+  /** Takes the completion a person picks (Enter or a press) in place of `change` with its value. */
+  readonly pick?: (completion: Completion) => void;
+  /** Takes the focus when it appears. */
+  readonly takeFocus?: boolean;
+  /** Called on Escape when the list of completions was not open to close first. */
+  readonly escape?: () => void;
+  /** Called on Enter when no completion is highlighted. */
+  readonly submit?: () => void;
 }): JSX.Element {
   const wiring = useFieldWiring('PathInput');
   const [state, setState] = useState<ListState>(RESET);
+  const [focusFirst] = useState(props.takeFocus === true);
   const {completions, change} = props;
   const listId = `${wiring.id}-completions`;
   const optionId = (index: number): string => `${listId}-${index}`;
@@ -46,7 +67,8 @@ export function PathInput(props: {
   const active = expanded && state.active !== null && state.active < completions.length;
   const take = (completion: Completion): void => {
     setState(RESET);
-    change(completion.value);
+    if (props.pick === undefined) change(completion.value);
+    else props.pick(completion);
   };
   const keyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     const highlighted = active && state.active !== null ? completions[state.active] : undefined;
@@ -56,9 +78,16 @@ export function PathInput(props: {
       return;
     }
     const next = completions.length === 0 ? null : step(state, event.key, completions.length);
-    if (next === null) return;
+    if (next !== null) {
+      event.preventDefault();
+      setState(next);
+      return;
+    }
+    // Enter with nothing highlighted, and Escape with no list to close, are the owner's.
+    const own = ownerOf(event.key, props);
+    if (own === undefined) return;
     event.preventDefault();
-    setState(next);
+    own();
   };
   return (
     <div className="vs-path-input">
@@ -70,6 +99,7 @@ export function PathInput(props: {
         data-mono
         data-mono-id
         value={props.value}
+        ref={focusFirst ? focusOnMount : undefined}
         placeholder={props.placeholder}
         spellCheck={false}
         autoComplete="off"

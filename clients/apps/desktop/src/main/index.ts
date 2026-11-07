@@ -6,7 +6,7 @@
  * Quitting closes the scope, which ends every call, gateway session and ssh master.
  */
 import {randomUUID} from 'node:crypto';
-import {userInfo} from 'node:os';
+import {homedir, userInfo} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import * as Effect from 'effect/Effect';
@@ -16,13 +16,20 @@ import * as Scope from 'effect/Scope';
 import {app, BrowserWindow, ipcMain, session, type WebContents} from 'electron';
 import {hostKey} from '../state/host.js';
 import {controlDirectory} from './control-directory.js';
-import {nodeFileLock, nodeReadFile, nodeSweepStaged, nodeWriteFile} from './files.js';
+import {
+  nodeFileLock,
+  nodeListDirectory,
+  nodeReadFile,
+  nodeSweepStaged,
+  nodeWriteFile,
+} from './files.js';
 import {installGatewayIpc, type RunCall} from './gateway.js';
 import {NodeGatewayArtifacts} from './gateway-artifacts.js';
 import {makeGatewayCalls} from './gateway-calls.js';
 import {makeGatewayDialers} from './gateway-dialers.js';
 import {makeLinkPool} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
+import {installMachinesIpc, serveMachines, sshArgsFor} from './machines.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
 import {
   installPreferencesIpc,
@@ -32,7 +39,8 @@ import {
 } from './preferences.js';
 import {NodeProcessSpawner} from './process.js';
 import {quit} from './quit.js';
-import {savedHosts} from './saved-hosts.js';
+import {makeSavedHostsStore, savedHostsPath} from './saved-hosts-store.js';
+import {makeSshConfigSource, SSH_CONFIG_ENV, sshConfigArgs} from './ssh-config.js';
 import {installViewerIpc, makeViewerStore} from './viewer.js';
 import {chromeCss, windowChrome, windowChromeOptions} from './window-chrome.js';
 import {trackWindow} from './window-lifetime.js';
@@ -75,14 +83,35 @@ async function wire(userData: string, preferences: PreferencesStore) {
     // Who this install is is stamped on every call to a host.
     const viewer = yield* makeViewerStore(preferences, {newId: randomUUID, userName}, log);
     const controlPath = join(yield* controlDirectory(process.getuid?.() ?? 0), '%C');
-    const pool = yield* makeLinkPool(controlPath, log);
+    // Left over from a save that was cut short: sweep the old staging files of the saved hosts.
+    yield* nodeSweepStaged(savedHostsPath(userData)).pipe(
+      Effect.catch(cause =>
+        Effect.sync(() => log(`could not sweep stale saved-hosts files: ${cause.message}`)),
+      ),
+    );
+    const hosts = makeSavedHostsStore(
+      userData,
+      {read: nodeReadFile, write: nodeWriteFile, lock: nodeFileLock},
+      log,
+    );
+    const explicitConfig = process.env[SSH_CONFIG_ENV];
+    const config = makeSshConfigSource(
+      {read: nodeReadFile, list: nodeListDirectory},
+      {config: explicitConfig ?? join(homedir(), '.ssh', 'config'), home: homedir()},
+      log,
+    );
+    const pool = yield* makeLinkPool(
+      controlPath,
+      log,
+      sshArgsFor(hosts, sshConfigArgs(explicitConfig)),
+    );
     const dialers = yield* makeGatewayDialers(pool, hostLog);
     const calls = yield* makeGatewayCalls(dialers, hostLog, viewer.metadata);
     // This machine's gateway may have to be started, which takes 0.3 s, and the window needs about
     // as long to load before its first call: start it now so that the two run side by side.
     yield* calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM);
-    const saved = yield* savedHosts(userData, nodeReadFile, log);
-    return {calls, saved, viewer};
+    const saved = (yield* hosts.list).map(host => host.key);
+    return {calls, saved, viewer, serveMachines: serveMachines(hosts, config)};
   }).pipe(
     Effect.provide(
       Layer.mergeAll(NodeProcessSpawner, NodeLocalHost, NodeGatewayArtifacts(GATEWAY_RESOURCES)),
@@ -173,7 +202,12 @@ async function start(): Promise<void> {
     {read: nodeReadFile, write: nodeWriteFile, lock: nodeFileLock},
     log,
   );
-  const {calls, saved, viewer} = await wire(app.getPath('userData'), preferences);
+  const {
+    calls,
+    saved,
+    viewer,
+    serveMachines: serve,
+  } = await wire(app.getPath('userData'), preferences);
   const windows = new Set<number>();
   const own = {
     has: (id: number) => windows.has(id),
@@ -189,6 +223,7 @@ async function start(): Promise<void> {
     own,
     run: effect => Effect.runPromise(effect),
   });
+  installMachinesIpc(ipcMain, {serve, own, run: effect => Effect.runPromise(effect)});
   installViewerIpc(ipcMain, {store: viewer, own, run: effect => Effect.runPromise(effect)});
   app.on('web-contents-created', (_event, contents) => confine(contents));
   const window = openWindow(startupHosts(asked, [...saved]));

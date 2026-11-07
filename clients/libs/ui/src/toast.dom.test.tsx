@@ -116,6 +116,22 @@ describe('a toast', () => {
     expect(container.querySelector('[aria-expanded]')).toBeNull();
   });
 
+  test('offers its one action, and pressing it tells the stack which toast it was', async () => {
+    const acted: string[] = [];
+    const container = await mount(
+      <ToastStack
+        label="Notifications"
+        toasts={[{id: 'gone', tone: 'neutral', title: 'Removed host-a', open: false, action: 'Undo'}]}
+        toggle={() => undefined}
+        dismiss={() => undefined}
+        act={id => acted.push(id)}
+      />,
+    );
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Note');
+    await click(named(container, 'Undo'));
+    expect(acted).toEqual(['gone']);
+  });
+
   test('is never a control named like an action beside it: only its two buttons are controls', async () => {
     const container = await mount(<Owner initial={[SAVE]} />);
     expect(buttons(container).map(button => button.getAttribute('aria-label'))).toEqual([

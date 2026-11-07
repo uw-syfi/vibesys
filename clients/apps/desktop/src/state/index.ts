@@ -184,11 +184,31 @@ export {
   withTheme,
 } from './settings/appearance.js';
 export {
+  type AddMachineEvent,
+  type AddMachineState,
+  addMachineStep,
+  emptyAddMachine,
+} from './settings/machines.js';
+export {
   type ResourceConnection,
   type ResourceHost,
   type ResourceRow,
   resourceRow,
 } from './settings/resources.js';
+export {
+  MATCH_LIMIT,
+  matchAliases,
+  parseSshConfig,
+  type SshConfigEntries,
+} from './settings/ssh-config.js';
+export {
+  parseSshCommand,
+  printSshCommand,
+  SshCommandError,
+  type SshTarget,
+  sshArgs,
+  targetFromInput,
+} from './settings/ssh-target.js';
 export {SETTINGS_TABS, type SettingsTab} from './settings/tabs.js';
 export {isBack, type KeyPress} from './shell/keys.js';
 export {

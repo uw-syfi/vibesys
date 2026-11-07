@@ -1,12 +1,13 @@
 /** Files held in memory, for the main process's readers and writers: what each wrote, by path. */
 import * as Effect from 'effect/Effect';
-import type {FileLock, ReadFile, WriteFile} from '../../main/files.js';
+import type {FileLock, ListDirectory, ReadFile, WriteFile} from '../../main/files.js';
 
 export interface MemoryFiles {
   readonly read: ReadFile;
   readonly write: WriteFile;
   /** One process: nothing else holds the file, so the lock runs its effect at once. */
   readonly lock: FileLock;
+  readonly list: ListDirectory;
   /** The bytes at `path` now, or undefined. */
   readonly at: (path: string) => Uint8Array | undefined;
   /** Every path written, in order. */
@@ -24,6 +25,15 @@ export function makeMemoryFiles(initial: Readonly<Record<string, Uint8Array>> = 
         written.push(path);
       }),
     lock: (_path, effect) => effect,
+    list: directory =>
+      Effect.sync(() =>
+        [...files.keys()]
+          .filter(
+            path =>
+              path.startsWith(`${directory}/`) && !path.slice(directory.length + 1).includes('/'),
+          )
+          .map(path => path.slice(directory.length + 1)),
+      ),
     at: path => files.get(path),
     written: () => written,
   };
