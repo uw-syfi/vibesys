@@ -187,7 +187,7 @@ func (m *machine) cliWith(env []string, args ...string) outcome {
 	// nothing of the user running the test, and its daemon is a sandbox daemon, which holds no
 	// machine lock and which the user's daemon lists while it runs.
 	cmd.Env = append(os.Environ(), roleVar+"="+roleCLI, production.EnvSandbox+"=1",
-		"XDG_RUNTIME_DIR="+filepath.Join(m.root, "rt"), "HOME="+filepath.Join(m.root, "home"), "VIBESYS_TASK=bench")
+		"XDG_RUNTIME_DIR="+filepath.Join(m.root, "rt"), "HOME="+filepath.Join(m.root, "home"), dockerConfigVariable(), "VIBESYS_TASK=bench")
 	cmd.Env = append(cmd.Env, env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -275,4 +275,19 @@ func TestRealCheckThatFailsFailsTheJobAndSavesNothing(t *testing.T) {
 	if r.code != exitFailed || m.samples() != 0 {
 		t.Fatalf("a measure of a commit that fails its check = %+v, %d samples taken", r, m.samples())
 	}
+}
+
+// dockerConfigVariable is the user's Docker client configuration, as DOCKER_CONFIG, for a tool
+// whose HOME the harness replaces. Docker finds its plugins (buildx, which a task's image is built
+// with) under the configuration of the real HOME, so a replaced HOME would hide them. A user who
+// set DOCKER_CONFIG keeps it.
+func dockerConfigVariable() string {
+	if dir := os.Getenv("DOCKER_CONFIG"); dir != "" {
+		return "DOCKER_CONFIG=" + dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "DOCKER_CONFIG="
+	}
+	return "DOCKER_CONFIG=" + filepath.Join(home, ".docker")
 }

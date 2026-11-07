@@ -432,3 +432,24 @@ func TestRemovingAContainerRemovesItsAnonymousVolumes(t *testing.T) {
 		t.Fatalf("volume %s is still there after its container was removed", volume)
 	}
 }
+
+// A command finds what the image's own PATH and ENV name, as a command run by hand in the image
+// does: the job environment adds the run's variables and takes nothing of the image's away.
+func TestACommandSeesTheImagesPathAndEnvironment(t *testing.T) {
+	scope := "t" + randomHex(6)
+	t.Cleanup(func() { removeScope(scope) })
+	image := "FROM " + baseImage + "\n" +
+		"RUN mkdir -p /opt/tool/bin && printf '#!/bin/sh\\necho found\\n' > /opt/tool/bin/tool && chmod 755 /opt/tool/bin/tool\n" +
+		"ENV PATH=/opt/tool/bin:${PATH}\nENV FROM_IMAGE=kept\n"
+	env, err := newProvider(clock.System{}, scope, nil, image).Environment(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, out := run(t, env, t.TempDir(), "sh", "-c", `command -v tool && echo "$FROM_IMAGE" && echo "$PATH"`)
+	if res.Kind != core.ExecExited || res.ExitCode != 0 {
+		t.Fatalf("outcome %+v, output %q", res, out)
+	}
+	if !strings.HasPrefix(out, "/opt/tool/bin/tool\nkept\n/opt/tool/bin:") {
+		t.Errorf("output %q: the image's PATH and ENV did not reach the command", out)
+	}
+}
