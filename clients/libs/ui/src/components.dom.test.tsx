@@ -8,6 +8,7 @@ import {createRoot} from 'react-dom/client';
 import {
   ActionPanel,
   AppFrame,
+  type BarRow,
   BarRows,
   BrandMark,
   Button,
@@ -1169,8 +1170,8 @@ describe('StackedBars with an axis', () => {
 });
 
 describe('BarRows', () => {
-  const columns = [{header: 'Turns'}, {header: 'Cost', strong: true}];
-  const rows = [
+  const columns = [{header: 'Turns'}, {header: 'Cost', strong: true}] as const;
+  const rows: readonly BarRow<2>[] = [
     {key: 'a', name: 'builder', series: 1, value: 200, figures: ['774', '$200']},
     {key: 'b', name: 'planner', series: 2, value: 50, figures: ['148', '$50']},
     {key: 'c', name: 'profiler', value: null, note: 'No price', figures: ['41', null]},

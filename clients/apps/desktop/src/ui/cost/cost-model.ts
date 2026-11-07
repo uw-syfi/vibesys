@@ -5,7 +5,7 @@
  * to the screen. The only arithmetic is the layout's own: how far along its cap the spend is, and
  * which buckets get a label.
  */
-import type {BarMark, BarRow, StackedBar, SwatchItem} from '@vibesys/ui';
+import type {BarColumn, BarMark, BarRow, StackedBar, SwatchItem} from '@vibesys/ui';
 import type {CostModel, CostUsage, CostView} from '../../state/index.js';
 import {
   type CostWords,
@@ -58,9 +58,12 @@ export interface CostScreenModel {
   readonly empty: boolean;
   readonly spend: SpendFigures;
   readonly chart: SpendChart | null;
-  readonly types: readonly BarRow[];
-  readonly models: readonly BarRow[];
-  readonly kinds: readonly BarRow[];
+  /** By agent type: agents, turns, tokens, cost. */
+  readonly types: readonly BarRow<4>[];
+  /** By model: turns, tokens, cost. */
+  readonly models: readonly BarRow<3>[];
+  /** By kind of token: tokens. */
+  readonly kinds: readonly BarRow<1>[];
 }
 
 /** What a row says is missing from its cost: all of it, or the turns that left it a floor. */
@@ -148,7 +151,26 @@ function chartOf(
   return {bars, marks, legend};
 }
 
-const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRow[] =>
+/**
+ * The headers of each table, built here beside its rows so that a header is always over the figure
+ * the row puts under it, wherever the table is drawn (the Cost screen, the report's card).
+ */
+export const TYPE_COLUMNS = [
+  {header: 'Agents'},
+  {header: 'Turns'},
+  {header: 'Tokens'},
+  {header: 'Cost', strong: true},
+] as const satisfies readonly BarColumn[];
+export const MODEL_COLUMNS = [
+  {header: 'Turns'},
+  {header: 'Tokens'},
+  {header: 'Cost', strong: true},
+] as const satisfies readonly BarColumn[];
+export const KIND_COLUMNS = [
+  {header: 'Tokens', strong: true},
+] as const satisfies readonly BarColumn[];
+
+const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRow<4>[] =>
   view.roles.map(role => ({
     key: `role-${role.role}`,
     name: words.role(role.role),
@@ -169,7 +191,7 @@ const modelRows = (
   words: CostWords,
 ) =>
   view.models.map(
-    (cost): BarRow => ({
+    (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
       ...(cost.model.model === '' ? {} : {mono: true}),
@@ -184,7 +206,7 @@ const modelRows = (
     }),
   );
 
-const kindRows = (view: CostView): BarRow[] =>
+const kindRows = (view: CostView): BarRow<1>[] =>
   KINDS.map(kind => ({
     key: kind.key,
     name: kind.label,

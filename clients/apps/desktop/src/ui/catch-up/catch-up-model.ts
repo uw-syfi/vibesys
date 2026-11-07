@@ -36,7 +36,8 @@ export interface Tiles {
     readonly turns: string;
     /** Turns the total leaves out for want of a price; null when none. */
     readonly unpriced: string | null;
-    readonly byType: readonly BarRow[];
+    /** By agent type: turns, cost. */
+    readonly byType: readonly BarRow<2>[];
   };
   readonly agents: {readonly started: string; readonly ended: string};
   readonly jobsMeasured: string;
