@@ -1,7 +1,7 @@
 import type {Agent} from '@vibesys/orchestrator-proto';
-import {Page, Stack, Text} from '@vibesys/ui';
+import {Button, Chip, Page, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {HistoryStatus} from '../../core/index.js';
+import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
@@ -52,6 +52,8 @@ export interface HostSnapshot {
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
   readonly costFeeds: Readonly<Record<string, CostFeedSnapshot>>;
+  /** Where the read of the open run's history (agents, turns, messages, check-ins) stands. */
+  readonly runHistory: RunHistoryStatus;
   /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
   readonly history: {
     readonly earlier: HistoryStatus;
@@ -159,6 +161,40 @@ function agentNote(
   };
 }
 
+/**
+ * Where the read of the open run's history stands, as a word beside the title: nothing once it is read,
+ * and a way to read it again when it failed.
+ */
+function HistoryStatusWord(props: {
+  readonly status: RunHistoryStatus;
+  readonly retry: () => void;
+}): JSX.Element | null {
+  const {status} = props;
+  switch (status._tag) {
+    case 'Idle':
+      return null;
+    case 'Loading':
+      return <Chip label="Reading history" tone="live" dot />;
+    case 'Failed':
+      return (
+        <Row gap="space-2">
+          <Chip label="History not read" tone="warn" dot />
+          <Button
+            text="Retry"
+            icon="refresh"
+            variant="quiet"
+            size="sm"
+            hint="Read the run's history again"
+            press={props.retry}
+          />
+        </Row>
+      );
+    default:
+      status satisfies never;
+      return null;
+  }
+}
+
 /** The title of a run's page: its name alone on the report, else the name and what is open. */
 function runTitle(
   state: HostSnapshot['model']['data'],
@@ -229,7 +265,12 @@ export function OrchestratorApp(props: {
       key="run"
       width="fill"
       state="ready"
-      header={<Text variant="title">{runTitle(state, route, names)}</Text>}
+      header={
+        <Row justify="between" wrap>
+          <Text variant="title">{runTitle(state, route, names)}</Text>
+          <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+        </Row>
+      }
     >
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />

@@ -372,14 +372,29 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	caller := t.s.agents[callerAgent(c)]
 	r.Run, r.Agent = caller.Run, caller.ID
 	run := t.s.runs[caller.Run]
-	run.ReportsPosted++
-	run.FinalReported = b.Report.Kind == ReportFinal
-	run = run.reported(t.in.At)
-	t.emit(run.ID, run)
+	// The report names its own id so that the run, which is written before it, can name the report it is
+	// summed up by.
+	id := MessageID(t.mint("message"))
+	check, answers := t.catchUpAsked(caller)
+	window := answers && b.Report.Kind == ReportProgress
 	report := b.Report
+	run.ReportsPosted++
 	report.Sequence = run.ReportsPosted
-	r.Message = t.post(Message{Run: caller.Run, From: caller.ID, Body: report}).ID
-	t.answerCatchUp(caller, r.Message)
+	if window {
+		// A report about a span of the run is not the run's report: it neither summarizes the run nor counts
+		// as the lead's scheduled one, and it says nothing of whether the lead has finished.
+		report.Scope = ReportScopeWindow
+	} else {
+		report.Scope = ReportScopeRun
+		run.FinalReported = report.Kind == ReportFinal
+		run.SummaryReport = id
+		run = run.reported(t.in.At)
+	}
+	t.emit(run.ID, run)
+	r.Message = t.post(Message{ID: id, Run: caller.Run, From: caller.ID, Body: report}).ID
+	if answers {
+		t.linkCatchUp(check, r.Message)
+	}
 	if run.FinalReported && run.LimitReached != "" {
 		// The lead did what the limit asked of it, so there is nothing to wait out.
 		t.beginStop(t.s.runs[run.ID], run.LimitReached.stopReason())

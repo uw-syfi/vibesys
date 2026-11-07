@@ -33,6 +33,7 @@ import {
   fleetScenario,
   measuredSearch,
   SERVING,
+  serveSummaries,
 } from '../../testing/orchestrator/index.js';
 import {FleetScreen} from './fleet-screen.js';
 import {freshnessPhrase} from './fleet-words.js';
@@ -140,9 +141,13 @@ function stateOf(
                       },
                     ],
                     headValue: run.result.value,
+                    bestValue: run.result.value,
                     ...(run.result.percent === undefined
                       ? {}
-                      : {percentOfBound: run.result.percent}),
+                      : {
+                          percentOfBound: run.result.percent,
+                          bestPercentOfBound: run.result.percent,
+                        }),
                   },
                 ],
               }),
@@ -150,7 +155,7 @@ function stateOf(
     ),
     sequence: 1n,
   };
-  return applySnapshot(emptyState, create(RunsSnapshotSchema, snapshot));
+  return serveSummaries(applySnapshot(emptyState, create(RunsSnapshotSchema, snapshot)));
 }
 
 const live = (id: string, task: string, more = {}) => ({
@@ -656,7 +661,7 @@ describe('the candidates cell of the fleet screen', () => {
     screen.unmount();
   });
 
-  it('is empty for a run of a host that serves no series, though it shows the head and the bound', () => {
+  it('is empty for a run of a host that serves no series, though it shows the best and the bound', () => {
     const {screen} = open([hostA]);
     const row = rowOf(screen, 'queue-rs');
     expect(cell(row, 'best').textContent).toBe('2,310 tok/s · 71%');
@@ -713,5 +718,24 @@ describe('the candidates cell of the fleet screen', () => {
       ),
       {seed: 21, numRuns: 40},
     );
+  });
+  it('says how many older runs the host left out, as the host said it, and nothing when it listed every run', () => {
+    const cut = (runsLeftOut: number): FleetHostInput => ({
+      ...hostA,
+      data: {...hostA.data, cut: {truncated: runsLeftOut > 0, runsLeftOut}},
+    });
+    const some = open([cut(7)]);
+    expect(some.screen.text()).toContain('7 older runs not shown');
+    some.screen.unmount();
+    const none = open([cut(0)]);
+    expect(none.screen.text()).not.toContain('not shown');
+    none.screen.unmount();
+    // Two hosts: the figure is of the hosts shown, and the host filter narrows it.
+    const both = open([
+      cut(7),
+      {...hostB, data: {...hostB.data, cut: {truncated: true, runsLeftOut: 5}}},
+    ]);
+    expect(both.screen.text()).toContain('12 older runs not shown');
+    both.screen.unmount();
   });
 });

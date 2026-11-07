@@ -28,7 +28,8 @@ service OrchestratorService {
   // Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
   // and reusing an id for another command is an error.
   rpc Dispatch(DispatchRequest) returns (DispatchResponse);
-  // Snapshot of runs and agents, then every change after its sequence.
+  // Snapshot of runs, then every change after its sequence, and a RunSummary each time a run's summary
+  // moves. What the snapshot holds of each run is the request's `detail`.
   rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
   // One agent: a page of items, then items and deltas after the sequence.
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
@@ -36,6 +37,9 @@ service OrchestratorService {
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
   // One item of an agent, whole: what a page left out.
   rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  // One run's history, paged: the agents, turns and check-ins it has and its messages, which a
+  // snapshot of detail SUMMARY leaves out.
+  rpc GetRunHistory(GetRunHistoryRequest) returns (GetRunHistoryResponse);
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
@@ -64,27 +68,122 @@ message HelloResponse {
 message WatchRunsRequest {
   // Zero starts with a snapshot; otherwise the stream continues after this sequence.
   uint64 after_sequence = 1;
+  // What the snapshot holds of each run. Unspecified is whole histories, as clients that read a run's
+  // transcript from the stream need them.
+  SnapshotDetail detail = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+// SnapshotDetail says what a snapshot of runs holds of each run.
+enum SnapshotDetail {
+  // Every listed run with its whole history: agents, turns, messages and check-ins, as much as fits the
+  // snapshot's byte budget. A run whose history was cut is the reason `truncated` is set.
+  SNAPSHOT_DETAIL_UNSPECIFIED = 0;
+  // The runs and their summaries, and nothing of their histories: the size of the snapshot follows the
+  // number of runs and not the length of their mailboxes. A run's history is read with GetRunHistory,
+  // and everything after the snapshot's sequence still arrives as changes.
+  SNAPSHOT_DETAIL_SUMMARY = 1;
 }
 
 message RunsSnapshot {
   repeated Run runs = 1;
+  // The agents of the listed runs; empty in a snapshot of detail SUMMARY.
   repeated Agent agents = 2;
   // The sequence the snapshot is current to.
   uint64 sequence = 3;
   // Every turn and message of those runs, so that a client that connects late can show when each
   // agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
-  // WatchAgent and ListItems page them.
+  // WatchAgent and ListItems page them. Empty in a snapshot of detail SUMMARY.
   repeated Turn turns = 4;
   repeated Message messages = 5;
   repeated SearchState searches = 6;
-  // Older run bundles or history were omitted to fit the snapshot byte budget.
-  // Search views omitted here follow as individual search responses.
+  // The snapshot left something out to fit its byte budget: the history of some run (detail
+  // UNSPECIFIED), or whole runs (`runs_left_out` says how many). Search views left out here follow as
+  // individual search responses.
   bool truncated = 7;
   // The check-ins of those runs, every viewer's, oldest first: the newest 64 of each viewer in each
   // run (truncated says when older ones were left out). Each is the whole check-in with its frozen
   // facts, so a client shows a past catch-up without asking for it again; a later change to one comes
   // as a RunChange.
   repeated CheckIn check_ins = 8;
+  // The summary of every run in `runs`, the same for every detail, one each. A client shows these and
+  // works out none of them: the report that sums a run up, the agents working and the head of each
+  // objective.
+  repeated RunSummary summaries = 9;
+  // How many runs the host has that are not in `runs`, because listing them would pass the byte
+  // budget: the oldest finished ones, never a live run before a finished one. Zero when every run is
+  // listed.
+  uint32 runs_left_out = 10;
+}
+
+// RunSummary is what a client shows of a run without reading its history. The host works every figure
+// out, so that the app derives none of them from messages and agents it may not hold: it is sent in a
+// snapshot, and again as a whole, replacing the one before, each time anything it says changes.
+message RunSummary {
+  option (buf.validate.message).cel = {
+    id: "run_summary.report_is_of_the_run"
+    message: "the report is the whole-run report of this run, never one that answered a check-in"
+    expression: "!has(this.report) || (this.report.run_id == this.run_id && has(this.report.report) && this.report.report.scope != 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_summary.working_within_total"
+    message: "agents_working cannot exceed agents_total"
+    expression: "this.agents_working <= this.agents_total"
+  };
+
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The newest report the lead posted about the whole run, whole: its time is when the lead last
+  // reported, and its kind says whether that was its last word. A report that answered a check-in
+  // covers a span of the run and is never this one, so a Catch me up answer does not replace it.
+  // Absent before the lead has posted a report about the run.
+  Message report = 2;
+  // How many of the run's agents are working: launching, in a turn, or waiting on subagents. Every
+  // client counts the same set, whatever it shows it for.
+  uint32 agents_working = 3;
+  // Every agent the run has had, over or not.
+  uint32 agents_total = 4;
+  // The same by type of agent, in the order of the role enum; a type with no agent is left out.
+  repeated RoleAgents roles = 5 [(buf.validate.field).repeated.max_items = 16];
+  // Where the run stands on each objective, in the order of the task's metrics, then the objectives that
+  // have a declared bound and no measurement.
+  repeated ObjectiveStanding objectives = 6 [(buf.validate.field).repeated.max_items = 64];
+}
+
+// RoleAgents counts the agents of one type in a run.
+message RoleAgents {
+  option (buf.validate.message).cel = {
+    id: "role_agents.working_within_total"
+    message: "working cannot exceed total"
+    expression: "this.working <= this.total"
+  };
+
+  AgentRole role = 1 [(buf.validate.field).enum.defined_only = true];
+  uint32 total = 2;
+  uint32 working = 3;
+}
+
+// ObjectiveStanding is where a run stands on one objective: its head and its best. They are two things.
+// The head is the candidate the run last promoted, and for a task of several objectives it is the best of
+// one of them, so on the others the head is not the best the run measured. Neither is worked out here:
+// both are read from what the run's search state already says (ObjectiveBounds, ObjectiveSeries).
+message ObjectiveStanding {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // The head's value, absent when the head has none for the objective.
+  optional double head_value = 2 [(buf.validate.field).double.finite = true];
+  // What the values are counted in, as the agents that declared the bound said; empty with no bound.
+  string unit = 3 [(buf.validate.field).string.max_bytes = 256];
+  // How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
+  // no bound or no head value.
+  optional double head_percent_of_bound = 4 [(buf.validate.field).double.finite = true];
+  // The best the run measured on the objective, in the objective's direction: the value of the newest
+  // point of its series that set a best, which is ObjectiveBounds.best_value when the run has a bound.
+  // Absent when the run measured nothing on the objective.
+  optional double best_value = 5 [(buf.validate.field).double.finite = true];
+  // How close best_value is to the standing bound, in percent, as ObjectiveBounds says it
+  // (best_percent_of_bound); absent with no bound or no best.
+  optional double best_percent_of_bound = 6 [(buf.validate.field).double.finite = true];
 }
 
 message WatchRunsResponse {
@@ -93,6 +192,9 @@ message WatchRunsResponse {
     RunsSnapshot snapshot = 1;
     RunChange change = 2;
     SearchState search = 3;
+    // A run's summary, whole: it replaces the one the client holds for the run. Not an event of the
+    // log, so it has no sequence: it is as of the moment it was sent, after the changes before it.
+    RunSummary summary = 4;
   }
 }
 
@@ -171,6 +273,36 @@ message GetItemResponse {
   Item item = 1 [(buf.validate.field).required = true];
   // The sequence the item is current to.
   uint64 sequence = 2;
+}
+
+message GetRunHistoryRequest {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Zero reads the first page; otherwise the next_cursor of the page before.
+  uint64 cursor = 2;
+}
+
+// GetRunHistoryResponse is one page of a run's history. The first page also holds what is not paged:
+// the agents, the turns and the check-ins. Everything is current to `sequence` of that page, and the
+// stream's changes after the client's own sequence keep it so: a client keeps a record it already
+// holds and adds the ones it does not.
+message GetRunHistoryResponse {
+  // The sequence this page is current to.
+  uint64 sequence = 1;
+  // First page only.
+  repeated Agent agents = 2;
+  // First page only: the turns of the run in start order, up to the host's timeline window.
+  repeated Turn turns = 3;
+  // First page only: the newest 64 check-ins of each viewer, oldest first.
+  repeated CheckIn check_ins = 4;
+  // The run's messages in the order they were made, as many as fit a page.
+  repeated Message messages = 5;
+  // Pass as cursor to read the next page. Zero when this was the last.
+  uint64 next_cursor = 6;
+  // First page only: the run has more turns than the timeline window holds, and the later ones are
+  // not here.
+  bool turns_left_out = 7;
+  // First page only: a viewer made more check-ins than the 64 held, and the older ones are not here.
+  bool check_ins_left_out = 8;
 }
 
 message WatchRunCostRequest {

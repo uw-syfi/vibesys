@@ -46,6 +46,7 @@ export {
   daemonTooOldText,
   PROTOCOL_VERSION,
 } from './protocol.js';
+export {makeRunHistory, type RunHistory, type RunHistoryStatus} from './run-history.js';
 export {makeRunsView, type RunsView} from './runs-view.js';
 export {type AppearanceStore, makeAppearance} from './settings/appearance.js';
 export {

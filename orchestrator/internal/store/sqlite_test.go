@@ -98,7 +98,7 @@ func TestScreenQueriesNeverScanOrSort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plans) < 11 {
+	if len(plans) < 12 {
 		t.Fatalf("explained only %d queries: %v", len(plans), plans)
 	}
 	for name, lines := range plans {

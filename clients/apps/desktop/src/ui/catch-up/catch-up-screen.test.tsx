@@ -64,6 +64,8 @@ const afterwards = (
     Effect.gen(function* () {
       const h = yield* hostHarness(daemon, {live: true});
       h.mount(h.session.runs.watch);
+      // The run's messages are of its history, which the run stream does not carry.
+      h.mount(h.session.runHistory.watch(runId));
       yield* h.elapse(60, 5);
       const press = () =>
         Effect.gen(function* () {

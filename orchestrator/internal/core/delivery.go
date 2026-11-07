@@ -6,9 +6,13 @@ import (
 	"time"
 )
 
-// post routes a new message. It is the one way a message enters the system.
+// post routes a new message. It is the one way a message enters the system. A message arrives with
+// no id unless the caller minted one to name it in an event that comes before it.
 func (t *tx) post(m Message) Message {
-	m.ID, m.At = MessageID(t.mint("message")), t.in.At
+	if m.ID == "" {
+		m.ID = MessageID(t.mint("message"))
+	}
+	m.At = t.in.At
 	run := t.s.runs[m.Run]
 	switch {
 	case !run.Status.Live():

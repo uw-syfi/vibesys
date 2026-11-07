@@ -35,6 +35,8 @@ const opened = (daemon: FakeDaemon, wrap?: Parameters<typeof hostHarness>[1]) =>
     const h = yield* hostHarness(daemon, wrap);
     const {id, items} = busiest(daemon);
     h.mount(h.session.runs.watch);
+    // The agent is of the run's history, which the run stream does not carry.
+    h.mount(h.session.runHistory.watch(daemon.scenario.runId));
     h.mount(h.session.agents.watch(id));
     yield* h.elapse(5);
     return {h, id, items};

@@ -484,7 +484,16 @@ func checkMessages(t *testing.T, seed uint64, s store.Store, m *model, run core.
 		if err != nil || !(reflect.DeepEqual(got, want) || (len(got) == 0 && len(want) == 0)) {
 			failf(t, seed, "messages of %q after %d: %v\n got  %+v\n want %+v", run, after, err, got, want)
 		}
+		for _, rec := range got {
+			one, ok, err := s.Message(rec.Message.ID)
+			if err != nil || !ok || !reflect.DeepEqual(one, rec.Message) {
+				failf(t, seed, "message %q of %q: %v, found %t\n got  %+v\n want %+v", rec.Message.ID, run, err, ok, one, rec.Message)
+			}
+		}
 		if len(got) == 0 {
+			if _, ok, err := s.Message("no-such-message"); err != nil || ok {
+				failf(t, seed, "a message that was never made: %v, found %t", err, ok)
+			}
 			return
 		}
 		after = got[len(got)-1].Seq

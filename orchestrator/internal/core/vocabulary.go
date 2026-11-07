@@ -120,6 +120,13 @@ func (s AgentStatus) Over() bool { return s == AgentEnded || s == AgentFailed ||
 // Resting says the session is open and no turn is running.
 func (s AgentStatus) Resting() bool { return s == AgentIdle || s == AgentWaiting }
 
+// Working says the agent is doing, or about to do, the run's work: its session is opening, a turn is
+// running, or it waits on subagents that are. It is the one definition of an agent that is working that
+// every count a client shows is made with.
+func (s AgentStatus) Working() bool {
+	return s == AgentLaunching || s == AgentActive || s == AgentWaiting
+}
+
 // StopStage is how far an agent's stop has come.
 type StopStage string
 
@@ -153,6 +160,20 @@ const (
 	VerdictPass       Verdict = "pass"
 	VerdictFail       Verdict = "fail"
 	VerdictUnmeasured Verdict = "unmeasured"
+)
+
+// ReportScope says what a report is about. The core sets it when it records the report, from the turn
+// the report is posted in: a lead never chooses it. The zero value is a report recorded before scope
+// existed, which is about the whole run.
+type ReportScope string
+
+// The scopes.
+const (
+	// ReportScopeRun is a report about the whole run. The run's summary is the newest of these.
+	ReportScopeRun ReportScope = "run"
+	// ReportScopeWindow is a progress report that answers a check-in: it covers the check-in's window and
+	// no more, so it is never the run's summary and does not count as the lead's scheduled report.
+	ReportScopeWindow ReportScope = "window"
 )
 
 // ReportKind says what a report is for.
