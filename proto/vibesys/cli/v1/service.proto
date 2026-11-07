@@ -546,6 +546,12 @@ message ListWorkstreamsRequest {
 }
 
 message ListWorkstreamsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_workstreams.each_number_once"
+    message: "a workstream is listed once, under its own number"
+    expression: "this.workstreams.map(w, w.number).unique()"
+  };
+
   // By number.
   repeated Workstream workstreams = 1;
 }

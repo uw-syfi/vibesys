@@ -5097,9 +5097,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\acreated\x18\x02 \x01(\bR\acreated\"\xa6\x01\n" +
 	"\x16ListWorkstreamsRequest\x12=\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12M\n" +
-	"\bstatuses\x18\x02 \x03(\x0e2 .vibesys.cli.v1.WorkstreamStatusB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\bstatuses\"W\n" +
+	"\bstatuses\x18\x02 \x03(\x0e2 .vibesys.cli.v1.WorkstreamStatusB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\bstatuses\"\xe3\x01\n" +
 	"\x17ListWorkstreamsResponse\x12<\n" +
-	"\vworkstreams\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.WorkstreamR\vworkstreams\"\xb5\x03\n" +
+	"\vworkstreams\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.WorkstreamR\vworkstreams:\x89\x01\xbaH\x85\x01\x1a\x82\x01\n" +
+	"!list_workstreams.each_number_once\x121a workstream is listed once, under its own number\x1a*this.workstreams.map(w, w.number).unique()\"\xb5\x03\n" +
 	"\x15EditWorkstreamRequest\x12=\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12\x1f\n" +
 	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12$\n" +
