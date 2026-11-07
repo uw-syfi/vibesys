@@ -106,16 +106,21 @@
 }
 .vs-rail-item .vs-text {
   color: inherit;
+  /* The smallest sans label of the type scale, medium weight, on one line. */
+  font-weight: 500;
   white-space: nowrap;
 }
+/*
+ * A hover is the selection's shape in a lighter tint, and neither touches its neighbour (the group's
+ * gap). The rail's own ground is `--panel-2`, so the tints are of the accent over it.
+ */
 .vs-rail-item:hover {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
   color: var(--text);
 }
 .vs-rail-item[data-active] {
-  border-color: var(--accent);
-  background: var(--selection);
-  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  color: var(--accent);
 }
 .vs-rail-item:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
