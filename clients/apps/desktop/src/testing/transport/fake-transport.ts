@@ -34,7 +34,12 @@ export type Step =
   /** Let virtual time pass. */
   | {readonly sleep: Duration.Input}
   /** Do nothing more until the call is given up on. */
-  | {readonly hang: true};
+  | {readonly hang: true}
+  /**
+   * Deliver each frame `follow` emits, as it is emitted, until the call is given up on: a stream
+   * that stays open and carries what happens after it opened. `follow` returns how to stop.
+   */
+  | {readonly follow: (emit: (frame: Uint8Array) => void) => () => void};
 
 export interface Recording {
   /** What the `nth` call (0-based, counted per method) to `target` does. */
@@ -93,6 +98,26 @@ interface Sink {
   readonly overflowed: Effect.Effect<void>;
 }
 
+/** Delivers what `follow` emits until the sink refuses a frame or the call is given up on. */
+const followed = (follow: (emit: (frame: Uint8Array) => void) => () => void, sink: Sink) =>
+  Effect.gen(function* () {
+    const frames = yield* Queue.unbounded<Uint8Array>();
+    return yield* Effect.acquireUseRelease(
+      Effect.sync(() =>
+        follow(frame => {
+          Queue.offerUnsafe(frames, frame);
+        }),
+      ),
+      () =>
+        Effect.gen(function* () {
+          while (true) {
+            if (!(yield* sink.frame(yield* Queue.take(frames)))) return false;
+          }
+        }),
+      stop => Effect.sync(stop),
+    );
+  });
+
 /** Whether the playback goes on after a step. */
 const runStep = (step: Step, sink: Sink): Effect.Effect<boolean> => {
   if ('sleep' in step) return Effect.as(Effect.sleep(step.sleep), true);
@@ -100,6 +125,7 @@ const runStep = (step: Step, sink: Sink): Effect.Effect<boolean> => {
   if ('end' in step) return Effect.as(sink.failed(endedBy(step.end)), false);
   if ('close' in step) return Effect.as(sink.closed, false);
   if ('overflow' in step) return Effect.as(sink.overflowed, false);
+  if ('follow' in step) return followed(step.follow, sink);
   return Effect.never;
 };
 

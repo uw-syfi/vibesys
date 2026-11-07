@@ -239,11 +239,13 @@ export class FakeDaemon {
       : undefined;
   }
 
-  /** Carry out a command: the same id answers with the same receipt. */
-  dispatch(command: Command): Receipt {
+  /**
+   * Carry out a command: the same id answers with the same receipt. `at` is the host's clock for
+   * the command, which a fixture sets to place a check-in's window; the log's own clock by default.
+   */
+  dispatch(command: Command, at: number = this.#now()): Receipt {
     const seen = this.#receipts.get(command.id);
     if (seen !== undefined) return seen;
-    const at = this.#now();
     const {body} = command;
     const receipt = oneofIs(body, 'sendMessage', COMMAND_KINDS)
       ? this.#sendMessage(command.id, body.value.agentId, body.value.text, at)

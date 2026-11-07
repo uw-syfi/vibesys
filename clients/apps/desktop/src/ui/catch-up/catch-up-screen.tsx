@@ -278,7 +278,7 @@ export function CatchUpScreen(props: {
   const shown = props.rows.find(read => read.checkIn.id === picked) ?? props.rows[0];
   return (
     <Stack gap="space-4">
-      <Row gap="space-3" wrap apart>
+      <Row gap="space-3" wrap justify="between">
         <Breadcrumb
           label="Where you are"
           items={[

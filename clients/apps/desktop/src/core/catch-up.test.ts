@@ -35,7 +35,7 @@ const dispatched = (h: HostHarness): string[] =>
 /** A host session over `daemon`, watching the run stream so what the host commits arrives. */
 const watching = (daemon: FakeDaemon, options: Parameters<typeof hostHarness>[1] = {}) =>
   Effect.gen(function* () {
-    const h = yield* hostHarness(daemon, {closeStreams: true, ...options});
+    const h = yield* hostHarness(daemon, {live: true, ...options});
     h.mount(h.session.runs.watch);
     yield* h.elapse(60, 5);
     return h;
@@ -242,7 +242,8 @@ describe('the press of Catch me up', () => {
   seeded('sends a press once while it is still on its way', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const h = yield* watching(new FakeDaemon(live), {
+        // No run stream is mounted, so only the reply to the press can settle it.
+        const h = yield* hostHarness(new FakeDaemon(live), {
           wrap: base => ({
             respond: (target, nth) => {
               const steps = base.respond(target, nth);

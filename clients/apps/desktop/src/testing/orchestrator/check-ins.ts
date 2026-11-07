@@ -35,7 +35,7 @@ import fc from 'fast-check';
 const viewerOf = (id: string, label = `${id}'s laptop`) => create(ViewerSchema, {id, label});
 
 /** What a role spent in a window, with the cost left out when `costUsd` is absent (never zero). */
-function roleSpend(
+export function roleSpend(
   role: AgentRole,
   turns: number,
   unpricedTurns: number,
@@ -54,7 +54,7 @@ function roleSpend(
 }
 
 /** The best value of an objective up to `atMs`, from the job and commit that made it. */
-function bestValue(value: number, atMs: number, job: string): BestValue {
+export function bestValue(value: number, atMs: number, job: string): BestValue {
   return create(BestValueSchema, {
     value,
     jobId: job,

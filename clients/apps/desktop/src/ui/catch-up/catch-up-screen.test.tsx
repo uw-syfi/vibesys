@@ -62,7 +62,7 @@ const afterwards = (
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const h = yield* hostHarness(daemon, {closeStreams: true});
+      const h = yield* hostHarness(daemon, {live: true});
       h.mount(h.session.runs.watch);
       yield* h.elapse(60, 5);
       const press = () =>

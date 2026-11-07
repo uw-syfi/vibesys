@@ -8,7 +8,9 @@
  * one that has no view for the run); one `host=<key>` per host to show (this machine when none);
  * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
  * long, `down=<n>` has the host at that position lose its link after its first snapshot);
- * `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
+ * `catchUp=<none|history|writing|written|pending|failed>` gives the viewer check-ins already made
+ * on the run (none when absent), and a press of Catch me up makes another that stays pending while
+ * the lead writes; `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
  * memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
@@ -40,6 +42,7 @@ import {
   ThemeDocumentLive,
 } from '../../ui/shell/browser-layers.js';
 import {ConnectedShell} from '../../ui/shell/connected.js';
+import {CATCH_UP_SHAPES, seedCheckIns} from '../orchestrator/check-in-fixtures.js';
 import {
   ENDED_RUN,
   LONG_NAMES,
@@ -147,7 +150,9 @@ const daemon = new FakeDaemon({
 });
 const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
-const served = daemonRecording(daemon);
+const shape = query.get('catchUp') ?? 'none';
+seedCheckIns(daemon, scenario, CATCH_UP_SHAPES.find(each => each === shape) ?? 'none');
+const served = daemonRecording(daemon, {live: true});
 /** A host that predates the cost stream answers every other method and not this one. */
 const withoutCostStream = {
   respond: (...call: Parameters<typeof served.respond>) =>

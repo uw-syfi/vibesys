@@ -50,6 +50,11 @@ export interface DaemonOptions {
   readonly dispatch?: (nth: number) => DispatchFate;
   /** A stream ends cleanly after its frames instead of staying open. */
   readonly closeStreams?: boolean;
+  /**
+   * The run stream stays open and carries each change the daemon commits after it opened, as the
+   * real host's does, instead of holding its first frames for ever.
+   */
+  readonly live?: boolean;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -136,6 +141,25 @@ function costSteps(
   return [{frame}, ...tail];
 }
 
+/** A step that carries each change the daemon commits from now on, as it commits it, in the log's order. */
+function followRuns(daemon: FakeDaemon): Step {
+  let sent = daemon.sequence;
+  return {
+    follow: emit =>
+      daemon.watch(() => {
+        for (const event of daemon.changesAfter(sent)) {
+          sent = event.sequence;
+          emit(
+            toBinary(
+              WatchRunsResponseSchema,
+              create(WatchRunsResponseSchema, {body: {case: 'change', value: event}}),
+            ),
+          );
+        }
+      }),
+  };
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -188,7 +212,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
       if (search.revision > (seen.get(search.runId) ?? 0n))
         steps.push(encode({body: {case: 'search', value: search}}));
     }
-    return [...steps, ...tail];
+    return [...steps, ...(options.live === true ? [followRuns(daemon)] : tail)];
   };
 
   const watchAgent = (target: CallTarget): ReadonlyArray<Step> => {
