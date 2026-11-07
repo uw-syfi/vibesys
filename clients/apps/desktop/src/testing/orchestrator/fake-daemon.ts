@@ -178,31 +178,18 @@ export class FakeDaemon {
   /** How many runs the host says its snapshot left out, for a test of a host with more runs than it lists. */
   runsLeftOut = 0;
 
-  /** The search views the host holds, one per run it reads. */
-  #searches(): SearchState[] {
-    return this.scenario.searches !== undefined
-      ? [...this.scenario.searches]
-      : this.scenario.search === true
-        ? [
-            searchFixture(
-              this.scenario.runId,
-              this.scenario.endMs,
-              this.scenario.searchStale ?? false,
-              this.scenario.searchTruncated ?? false,
-            ),
-          ]
-        : [];
-  }
-
   /** The search views the host holds now. */
   searches(): SearchState[] {
-    return this.#searches();
+    return [...this.snapshot().searches];
   }
 
   /** The summary the host serves of each run it lists, as it stands now. */
   summaries(): RunSummary[] {
-    const state = this.#state(this.#visible);
-    const searches = this.#searches();
+    return [...this.snapshot().summaries];
+  }
+
+  /** The summary of each run in `state`, read with the search views the host holds. */
+  #summariesOf(state: OrchestratorState, searches: readonly SearchState[]): RunSummary[] {
     return Object.keys(state.runs)
       .sort()
       .map(runId =>
@@ -220,18 +207,35 @@ export class FakeDaemon {
    */
   snapshot(detail: SnapshotDetail = SnapshotDetail.UNSPECIFIED): RunsSnapshot {
     const state = this.#state(this.#visible);
-    const summary = detail === SnapshotDetail.SUMMARY;
-    return create(RunsSnapshotSchema, {
+    const whole = create(RunsSnapshotSchema, {
       runs: Object.values(state.runs),
-      summaries: this.summaries(),
-      agents: summary ? [] : Object.values(state.agents),
-      turns: summary ? [] : Object.values(state.turns),
-      messages: summary ? [] : Object.values(state.messages),
-      checkIns: summary ? [] : Object.values(state.checkIns),
+      agents: Object.values(state.agents),
+      turns: Object.values(state.turns),
+      messages: Object.values(state.messages),
+      checkIns: Object.values(state.checkIns),
       sequence: state.sequence,
-      searches: this.#searches(),
+      searches:
+        this.scenario.searches !== undefined
+          ? [...this.scenario.searches]
+          : this.scenario.search === true
+            ? [
+                searchFixture(
+                  this.scenario.runId,
+                  this.scenario.endMs,
+                  this.scenario.searchStale ?? false,
+                  this.scenario.searchTruncated ?? false,
+                ),
+              ]
+            : [],
+    });
+    return create(RunsSnapshotSchema, {
+      ...whole,
+      summaries: this.#summariesOf(state, whole.searches),
       runsLeftOut: this.runsLeftOut,
       truncated: this.runsLeftOut > 0,
+      ...(detail === SnapshotDetail.SUMMARY
+        ? {agents: [], turns: [], messages: [], checkIns: []}
+        : {}),
     });
   }
 
