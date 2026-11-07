@@ -223,6 +223,8 @@ from vs_runtime._run_control import (
 )
 from vs_runtime._run_end import recorded_ending
 from vs_runtime._run_environment import (
+    MAX_MODAL_CONTAINER_WAIT_SECONDS,
+    MODAL_CONTAINER_WAIT_SECONDS,
     AgentPaths,
     DockerEnvironment,
     DockerEnvironmentConfig,
@@ -517,6 +519,8 @@ __all__ = [
     "CONTROL_ID_PATTERN",
     "CONTROL_REQUEST",
     "DEFAULT_RETRY_SECONDS",
+    "MAX_MODAL_CONTAINER_WAIT_SECONDS",
+    "MODAL_CONTAINER_WAIT_SECONDS",
     "PACKAGE_ROOT_TOKEN",
     "PAUSE_FOR_OPERATOR",
     "PROVIDER_OUTAGE",

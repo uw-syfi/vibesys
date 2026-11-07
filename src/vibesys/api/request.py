@@ -45,6 +45,8 @@ from vs_agent.api.images import (
 )
 from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
+    MAX_MODAL_CONTAINER_WAIT_SECONDS,
+    MODAL_CONTAINER_WAIT_SECONDS,
     EditorImagePlan,
     RunEnvironmentSpec,
     TaskImageError,
@@ -102,6 +104,8 @@ def load_objective(bundle: InputBundle) -> str:
 
 
 __all__ = [
+    "MAX_MODAL_CONTAINER_WAIT_SECONDS",
+    "MODAL_CONTAINER_WAIT_SECONDS",
     "REPOSITORY_SLUG",
     "DockerBuildRunner",
     "EditorImagePlan",

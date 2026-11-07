@@ -620,6 +620,16 @@ SkyPilot profile selection, profiles-file path, and executable are machine-local
 launch policy. Supply them again on resume when they are not available from the
 current CLI/config file.
 
+`--modal-container-wait-seconds SECONDS` bounds how long each Modal gate waits for
+the deployed candidate's container: once for it to answer `/health`, and again
+for it to be found for the measurement. Modal queues a container until a GPU of
+the requested type is free, so raise the wait for a scarce GPU such as `L4`. The
+default is 1200 seconds and the most is 86400 (one day). Each gate's own time
+limit grows by both waits. A gate that runs out of time while Modal lists no
+container of the app says Modal may still be waiting for GPU capacity. The wait
+is launch policy, like the SkyPilot profile: it is not recorded, so give it again
+on resume.
+
 Only v5 descriptor-backed runs can be resumed. Earlier run schemas are not
 supported by this CLI.
 

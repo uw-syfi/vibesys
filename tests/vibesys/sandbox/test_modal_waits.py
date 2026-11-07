@@ -182,3 +182,47 @@ def test_find_app_container_keeps_to_its_deadline(
     assert all(at <= timeout + _ROUNDING for at in listed_at), "no listing starts past the deadline"
     assert all(0 < pause <= 5.0 for pause in clock.sleeps)
     assert warmed == [URL] * len(clock.sleeps)
+
+
+@settings(max_examples=examples(pr=20, nightly=500), deadline=None)
+@given(timeout=st.floats(1.0, 300.0), listed_once=st.booleans())
+def test_find_app_container_says_why_it_found_no_container(
+    timeout: float, *, listed_once: bool
+) -> None:
+    """A wait that saw Modal list no container of the app names the bound and GPU capacity.
+
+    A wait that never read a listing reports why the listing failed instead, and claims
+    nothing about capacity it could not see.
+    """
+    clock = AdvancingClock()
+    listings: list[ContainerListing | ListingFailed] = []
+
+    def list_containers(_workspace: str) -> ContainerListing | ListingFailed:
+        listing = (
+            ContainerListing(())
+            if listed_once and not listings
+            else ListingFailed("modal exited 1")
+        )
+        listings.append(listing)
+        return listing
+
+    with pytest.raises(TimeoutError) as raised:
+        find_app_container(
+            APP,
+            started_since=None,
+            workspace="/workspace",
+            base_url=URL,
+            timeout_seconds=timeout,
+            clock=clock,
+            list_containers=list_containers,
+            warm=lambda _url: False,
+        )
+
+    message = str(raised.value)
+    assert message.startswith(f"no running container found for Modal app {APP}: ")
+    if listed_once:
+        assert f"none started within {timeout:g} s" in message
+        assert "Modal may still be waiting for capacity for its GPU" in message
+    else:
+        assert message.endswith("modal exited 1")
+        assert "capacity" not in message

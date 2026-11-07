@@ -27,6 +27,7 @@ from vs_sandbox.modal_evaluator import (
     health_ready,
     observe_container,
     started_since_deploy,
+    unready_container_note,
 )
 
 _APP = "my-app"
@@ -273,3 +274,29 @@ def test_the_last_marker_is_the_reading(code: int) -> None:
 @given(status=st.integers(0, 599))
 def test_only_http_200_is_ready(status: int) -> None:
     assert health_ready(status) == (status == 200)
+
+
+_NAME = st.text(alphabet="abc-0123", min_size=1, max_size=8)
+_LIVES = st.one_of(
+    st.builds(ContainerStarting, st.lists(_NAME, max_size=3).map(tuple)),
+    st.builds(ContainerRunning, _NAME),
+    st.builds(ContainerUnknown, st.one_of(st.none(), _NAME)),
+)
+
+
+@given(life=_LIVES, waited=st.floats(1.0, 86_400.0))
+def test_only_a_readiness_timeout_with_no_container_listed_points_at_capacity(
+    life: ContainerStarting | ContainerRunning | ContainerUnknown, waited: float
+) -> None:
+    """A gate points at GPU capacity exactly when no started container of the deployed version
+    was listed, and names each listed container it passed over."""
+    note = unready_container_note(life, _APP, waited)
+
+    assert _APP in note
+    assert ("capacity" in note) == isinstance(life, ContainerStarting)
+    if isinstance(life, ContainerRunning):
+        assert life.container_id in note
+    if isinstance(life, ContainerStarting):
+        assert all(container in note for container in life.passed_over)
+    if isinstance(life, ContainerUnknown) and life.raw is not None:
+        assert life.raw in note

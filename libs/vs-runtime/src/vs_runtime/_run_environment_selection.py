@@ -107,7 +107,10 @@ def run_environment_record(spec: RunEnvironmentSpec) -> RunEnvironmentRecord:
     Only operator-selected options are recorded, under the spec's own option
     names. The candidate's Modal entrypoint is deliberately excluded: it is
     declared by the input bundle and re-derived on every launch, so recording
-    it would make a legitimate task edit look like a resume mismatch.
+    it would make a legitimate task edit look like a resume mismatch. The Modal
+    container wait is excluded too: like a SkyPilot profile, it is launch policy
+    for the capacity at hand, not part of what the run measures, so a resume
+    takes it from its own flags.
     """
     return RunEnvironmentRecord(
         name=_recorded_environment_name(spec.name),
@@ -187,6 +190,7 @@ def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR09
     modal_model_volume: str | None = None,
     modal_app: str = "vibesys",
     modal_entrypoint: str | None = None,
+    modal_container_wait_seconds: int | None = None,
     use_skypilot: bool = False,
     cluster_profile: str | None = None,
     cluster_profiles_file: Path | None = None,
@@ -231,6 +235,8 @@ def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR09
         }
         if modal_entrypoint is not None:
             options["entrypoint"] = modal_entrypoint
+        if modal_container_wait_seconds is not None:
+            options["container_wait_seconds"] = modal_container_wait_seconds
         return RunEnvironmentSpec(
             name="modal",
             options=options,

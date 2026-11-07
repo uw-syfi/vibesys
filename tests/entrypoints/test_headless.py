@@ -177,12 +177,36 @@ def test_run_environment_spec_uses_task_modal_entrypoint(tmp_path: Path) -> None
         modal_gpu="H100!",
         modal_model_volume=None,
         modal_app="vibesys",
+        modal_container_wait_seconds=None,
     )
 
     spec = run_environment_spec_from_args(args)
 
     assert spec.name == "modal"
     assert spec.options["entrypoint"] == "deploy/service.py"
+    assert "container_wait_seconds" not in spec.options
+
+
+def test_cli_sets_the_modal_container_wait(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+
+    args = parse_cli_invocation(
+        ["--input", str(project), "--modal", "--modal-container-wait-seconds", "7200"]
+    ).args
+
+    assert run_environment_spec_from_args(args).options["container_wait_seconds"] == 7200
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "86401", "1.5", "soon"])
+def test_cli_rejects_a_modal_container_wait_outside_its_bound_by_flag(
+    tmp_path: Path, value: str
+) -> None:
+    project = _write_input_project(tmp_path)
+
+    with pytest.raises(ConfigurationError, match="--modal-container-wait-seconds"):
+        parse_cli_invocation(
+            ["--input", str(project), "--modal", "--modal-container-wait-seconds", value]
+        )
 
 
 def test_cli_selects_documented_skypilot_environment(tmp_path: Path) -> None:
@@ -2186,6 +2210,8 @@ def test_fresh_run_records_the_selected_run_environment(tmp_path: Path) -> None:
         modal_gpu="A100-80GB",
         modal_model_volume="weights",
         modal_app="run-app",
+        # Launch policy for the capacity at hand: not recorded, given again on resume.
+        modal_container_wait_seconds=7200,
     )
 
     record = run_environment_record(run_environment_spec_from_args(args))
@@ -2206,6 +2232,11 @@ def test_resume_without_run_environment_flags_restores_the_recorded_environment(
     assert args.modal_model_volume == "weights"
     assert args.modal_app == "run-app"
     assert run_environment_record(run_environment_spec_from_args(args)) == _MODAL_ENVIRONMENT
+
+    waiting = parse_cli_invocation(["--resume", run_id, "--modal-container-wait-seconds", "7200"])
+    spec = run_environment_spec_from_args(waiting.args)
+    assert spec.options["container_wait_seconds"] == 7200
+    assert run_environment_record(spec) == _MODAL_ENVIRONMENT
 
 
 def test_resume_restores_the_external_slurm_config_path(

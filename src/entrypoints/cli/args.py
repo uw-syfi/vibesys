@@ -32,6 +32,7 @@ from vibesys.api import (
 )
 from vibesys.api.metrics import Objective
 from vibesys.api.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
+from vibesys.api.request import MAX_MODAL_CONTAINER_WAIT_SECONDS, MODAL_CONTAINER_WAIT_SECONDS
 from vs_agent.api import SHIPPED_PROVIDERS
 from vs_project.api import ProjectStateError, validate_run_id
 
@@ -436,6 +437,19 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Default Modal App name (suggested to the implementer). Default: vibesys.",
     )
     parser.add_argument(
+        "--modal-container-wait-seconds",
+        type=_modal_container_wait_seconds,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "How long a Modal gate waits for the deployed candidate's container: for it to "
+            "answer /health, and again for it to be found for the measurement. Raise it for "
+            "a scarce GPU whose containers queue for capacity. "
+            f"Default: {MODAL_CONTAINER_WAIT_SECONDS}; at most {MAX_MODAL_CONTAINER_WAIT_SECONDS}. "
+            "Not recorded with the run: give it again on --resume."
+        ),
+    )
+    parser.add_argument(
         "--skypilot",
         action="store_true",
         help=(
@@ -622,6 +636,14 @@ def _positive_int(value: str) -> int:
         message = f"expected a positive whole number, got {value!r}"
         raise argparse.ArgumentTypeError(message)
     return number
+
+
+def _modal_container_wait_seconds(value: str) -> int:
+    seconds = _positive_int(value)
+    if seconds > MAX_MODAL_CONTAINER_WAIT_SECONDS:
+        message = f"expected at most {MAX_MODAL_CONTAINER_WAIT_SECONDS} seconds, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return seconds
 
 
 def _role_setting(value: str) -> tuple[str, str]:
