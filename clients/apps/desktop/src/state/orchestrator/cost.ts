@@ -55,6 +55,8 @@ export interface RoleCostView {
   /** Turns that reported tokens and no cost: the type's cost leaves them out. */
   readonly unpricedTurns: number;
   readonly usage: CostUsage;
+  /** All the type's tokens, as the host added them up. */
+  readonly totalTokens: number;
 }
 
 export interface ModelCostView {
@@ -62,6 +64,8 @@ export interface ModelCostView {
   readonly turns: number;
   readonly unpricedTurns: number;
   readonly usage: CostUsage;
+  /** All the model's tokens, as the host added them up. */
+  readonly totalTokens: number;
 }
 
 export interface SpendBucketView {
@@ -94,6 +98,8 @@ export interface CostView {
   };
   /** What the turns that finished in the hour before `asOfMs` cost; null when none is priced. */
   readonly lastHourUsd: number | null;
+  /** The host left a model out of the lists of models, or cut a model's name; every other figure is whole. */
+  readonly modelsTruncated: boolean;
 }
 
 const count = (n: bigint | undefined): number | null => (n === undefined ? null : Number(n));
@@ -141,6 +147,7 @@ const roleView = (role: RoleCost): RoleCostView => ({
   turns: role.turns,
   unpricedTurns: role.unpricedTurns,
   usage: usageView(role.usage, 'roles.usage'),
+  totalTokens: Number(role.totalTokens),
 });
 
 const modelCostView = (cost: ModelCost): ModelCostView => ({
@@ -148,6 +155,7 @@ const modelCostView = (cost: ModelCost): ModelCostView => ({
   turns: cost.turns,
   unpricedTurns: cost.unpricedTurns,
   usage: usageView(cost.usage, 'models.usage'),
+  totalTokens: Number(cost.totalTokens),
 });
 
 const bucketView = (bucket: SpendBucket): SpendBucketView => ({
@@ -190,6 +198,7 @@ export function readCost(cost: RunCost): CostRead {
           buckets: series.buckets.map(bucketView),
         },
         lastHourUsd: cost.lastHourUsd ?? null,
+        modelsTruncated: cost.modelsTruncated,
       },
     };
   } catch (error) {

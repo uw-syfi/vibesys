@@ -395,14 +395,20 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 	if err != nil {
 		return nil, none, err
 	}
+	if err := np.Origin.Check("plan.origin"); err != nil {
+		return nil, none, err
+	}
+	origin := np.Origin
 	plan := core.Plan{
-		Number:    core.PlanNumber(len(l.plans) + 1),
-		Title:     np.Title,
-		Body:      np.Body,
-		Status:    core.PlanOpen,
-		CreatedAt: np.At,
-		UpdatedAt: np.At,
-		GainBound: np.GainBound,
+		Number:      core.PlanNumber(len(l.plans) + 1),
+		Title:       np.Title,
+		Body:        np.Body,
+		Status:      core.PlanOpen,
+		CreatedAt:   origin.At,
+		UpdatedAt:   origin.At,
+		GainBound:   np.GainBound,
+		Origin:      &origin,
+		Transitions: []core.PlanTransition{{Status: core.PlanOpen, Origin: origin}},
 	}
 	return PutPlan{Plan: plan}, Copy(plan), nil
 }
@@ -418,6 +424,12 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if !l.hasPlan(number) {
 		return nil, none, notFound("plan %d", number)
 	}
+	if err := edit.Origin.Check("edit.origin"); err != nil {
+		return nil, none, err
+	}
+	if edit.Status != nil && !edit.Status.Valid() {
+		return nil, none, invalid("edit.Status", fmt.Sprintf("%q is not a plan status", *edit.Status))
+	}
 	plan := Copy(l.plans[number-1])
 	if edit.Title != nil {
 		plan.Title = *edit.Title
@@ -425,8 +437,9 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if edit.Body != nil {
 		plan.Body = *edit.Body
 	}
-	if edit.Status != nil {
+	if edit.Status != nil && *edit.Status != plan.Status {
 		plan.Status = *edit.Status
+		plan.Transitions = append(plan.Transitions, core.PlanTransition{Status: plan.Status, Origin: edit.Origin})
 	}
 	if edit.GainBound != nil {
 		plan.GainBound = edit.GainBound
@@ -434,7 +447,7 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)
 	}
-	plan.UpdatedAt = edit.At
+	plan.UpdatedAt = edit.Origin.At
 	return PutPlan{Plan: plan}, Copy(plan), nil
 }
 

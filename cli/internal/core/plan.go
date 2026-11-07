@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -89,6 +90,13 @@ type PlanComment struct {
 	Agent string
 }
 
+// PlanTransition is one time a plan took a status, and who made it so.
+type PlanTransition struct {
+	Status PlanStatus
+	// Origin is who set the status, and when: the call's run and agent, and the daemon's clock.
+	Origin RecordOrigin
+}
+
 // Plan is stored the way an issue is: a number the store assigns, a free-form markdown body and
 // comments.
 type Plan struct {
@@ -101,6 +109,44 @@ type Plan struct {
 	UpdatedAt time.Time
 	// GainBound is the plan's bound on its possible gain, nil when it states none.
 	GainBound *GainBound
+	// Workstream is the workstream the plan belongs to, 0 for none.
+	Workstream WorkstreamNumber
+	// Origin is who made the plan and when, nil on a plan saved before store format 6.
+	Origin *RecordOrigin
+	// Transitions are the statuses the plan took, oldest first: its creation as open, then each
+	// edit that set a status it did not have. Empty on a plan saved before store format 6, and then
+	// they start with its first status change after that.
+	Transitions []PlanTransition
+}
+
+// CheckHistory says whether the plan's origin and transitions are as a store keeps them: each
+// origin has its time, each transition has a status and differs from the one before it, the last
+// transition is the plan's status, and a plan with an origin starts open, as that origin made it.
+// The error is a *Failure of kind FailureInvalidInput that names the field.
+func (p Plan) CheckHistory() error {
+	if p.Origin != nil {
+		if err := p.Origin.Check("origin"); err != nil {
+			return err
+		}
+	}
+	for i, t := range p.Transitions {
+		if !t.Status.Valid() {
+			return failf(FailureInvalidInput, "transitions[%d].status: %q is not a plan status", i, t.Status)
+		}
+		if err := t.Origin.Check(fmt.Sprintf("transitions[%d].origin", i)); err != nil {
+			return err
+		}
+		if i > 0 && t.Status == p.Transitions[i-1].Status {
+			return failf(FailureInvalidInput, "transitions[%d].status: the plan already had status %q", i, t.Status)
+		}
+	}
+	if n := len(p.Transitions); n > 0 && p.Transitions[n-1].Status != p.Status {
+		return failf(FailureInvalidInput, "status: %q is not the status of the last transition, %q", p.Status, p.Transitions[n-1].Status)
+	}
+	if p.Origin != nil && (len(p.Transitions) == 0 || p.Transitions[0].Status != PlanOpen || !p.Transitions[0].Origin.Same(*p.Origin)) {
+		return failf(FailureInvalidInput, "transitions[0]: a plan made at its origin starts open, set by that origin")
+	}
+	return nil
 }
 
 // NewPlan is a request to create a plan. The store assigns the number and the open status.
@@ -108,7 +154,8 @@ type NewPlan struct {
 	Title     string
 	Body      string
 	GainBound *GainBound
-	At        time.Time
+	// Origin is who makes the plan and when, which is its creation time.
+	Origin RecordOrigin
 }
 
 // PlanEdit changes a plan. A nil field is left as it is, and the whole edit is one change.
@@ -119,7 +166,9 @@ type PlanEdit struct {
 	// GainBound replaces the plan's bound. A bound is replaced and never cleared.
 	GainBound *GainBound
 	Comment   *PlanComment
-	At        time.Time
+	// Origin is who makes the edit and when, which is the plan's new update time, and the origin of
+	// the transition when the edit sets a status the plan does not have.
+	Origin RecordOrigin
 }
 
 // PlanFilter selects plans. Fields combine with AND and the zero value matches every plan.

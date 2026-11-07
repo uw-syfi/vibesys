@@ -51,6 +51,7 @@ export function servedCost(view: CostView, runId: string): RunCost {
         turns: role.turns,
         unpricedTurns: role.unpricedTurns,
         usage: usageOf(role.usage),
+        totalTokens: BigInt(role.totalTokens),
       }),
     ),
     models: view.models.map(cost =>
@@ -59,6 +60,7 @@ export function servedCost(view: CostView, runId: string): RunCost {
         turns: cost.turns,
         unpricedTurns: cost.unpricedTurns,
         usage: usageOf(cost.usage),
+        totalTokens: BigInt(cost.totalTokens),
       }),
     ),
     series: {
@@ -76,5 +78,6 @@ export function servedCost(view: CostView, runId: string): RunCost {
       ),
     },
     lastHourUsd: view.lastHourUsd ?? undefined,
+    modelsTruncated: view.modelsTruncated,
   });
 }

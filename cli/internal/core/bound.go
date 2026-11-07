@@ -3,7 +3,6 @@ package core
 import (
 	"math"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -13,18 +12,6 @@ import (
 // newest, so the log keeps every version with who declared it and when. The framework compares
 // nothing with a bound and requires none: it records what an agent states, checks it is well formed
 // and about an objective the task has, and serves it.
-
-// RecordOrigin is who made a record an agent writes through the CLI, and when. The daemon fills it
-// from the identity the call carried and its own clock; a request never carries one.
-type RecordOrigin struct {
-	// Run and Agent are empty for a call from outside a run.
-	Run   RunID
-	Agent string
-	At    time.Time
-}
-
-// MaxOriginBytes is the longest run id or agent name a record's origin holds.
-const MaxOriginBytes = 256
 
 // The limits on what a bound holds, which keep a runaway write from filling the store and a view
 // of it within its byte budget.
@@ -102,14 +89,11 @@ func (b NewBound) Check() error {
 		return failf(FailureInvalidInput, "direction: %q is not a direction", b.Direction)
 	case math.IsNaN(b.Value) || math.IsInf(b.Value, 0) || b.Value <= 0:
 		return failf(FailureInvalidInput, "value: a bound is a finite number above 0, got %v", b.Value)
-	case b.Origin.At.IsZero():
-		return failf(FailureInvalidInput, "origin.at: a bound has the time it was declared")
-	case len(b.Origin.Run) > MaxOriginBytes:
-		return failf(FailureInvalidInput, "origin.run: %d bytes is over the limit of %d", len(b.Origin.Run), MaxOriginBytes)
-	case len(b.Origin.Agent) > MaxOriginBytes:
-		return failf(FailureInvalidInput, "origin.agent: %d bytes is over the limit of %d", len(b.Origin.Agent), MaxOriginBytes)
 	case strings.ContainsAny(b.Unit, "\r\n"):
 		return failf(FailureInvalidInput, "unit: a unit is one line")
+	}
+	if err := b.Origin.Check("origin"); err != nil {
+		return err
 	}
 	if err := checkBoundText("unit", b.Unit, MaxBoundUnitBytes); err != nil {
 		return err

@@ -78,16 +78,98 @@ describe('the preferences file', () => {
     }),
   );
 
-  it.effect(
-    'treats a damaged file as nothing saved, says so, and replaces it on the next save',
-    () =>
-      Effect.gen(function* () {
-        const {store, files, logged} = storeOver({[FILE]: Uint8Array.of(0xff, 0xff, 0xff)});
-        expect(yield* store.read).toBeNull();
+  it.effect('reads a damaged file as nothing saved, and says so', () =>
+    Effect.gen(function* () {
+      const {store, logged} = storeOver({[FILE]: Uint8Array.of(0xff, 0xff, 0xff)});
+      expect(yield* store.read).toBeNull();
+      expect(logged.join()).toContain(FILE);
+    }),
+  );
+
+  it.effect('never replaces a file it cannot read, whatever the bytes are', () =>
+    Effect.gen(function* () {
+      const valid = (bytes: Uint8Array) => {
+        try {
+          validatedFromBinary(DesktopPreferencesSchema, bytes);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      // A file a newer app wrote: valid wire format, but a version this app does not know.
+      const newer = toBinary(
+        DesktopPreferencesSchema,
+        create(DesktopPreferencesSchema, {
+          version: 2,
+          appearance: {mode: 1, light: 1, dark: 4},
+          notificationsEnabled: false,
+          archived: [create(DesktopRunRefSchema, {host: 'local', runId: 'run-a'})],
+        }),
+      );
+      const samples = [
+        newer,
+        Uint8Array.of(0xff, 0xff, 0xff),
+        ...fc.sample(fc.uint8Array({maxLength: 24}), {numRuns: 60, seed: 11}),
+      ].filter(bytes => bytes.length > 0 && !valid(bytes));
+      expect(samples.length).toBeGreaterThan(10);
+      for (const bytes of samples) {
+        const {store, files, logged} = storeOver({[FILE]: bytes});
+        const error = yield* Effect.flip(store.write(appearanceToBytes(dark)));
+        expect(error.message).toContain(FILE);
+        expect(files.at(FILE)).toBe(bytes);
+        expect(files.written()).toEqual([]);
         expect(logged.join()).toContain(FILE);
-        yield* store.write(appearanceToBytes(dark));
-        expect(stored(files.at(FILE)).appearance).toBeDefined();
-      }),
+      }
+    }),
+  );
+
+  it.effect('writes back a field only a newer app knows', () =>
+    Effect.gen(function* () {
+      const known = toBinary(
+        DesktopPreferencesSchema,
+        create(DesktopPreferencesSchema, {
+          version: 1,
+          appearance: {mode: 1, light: 1, dark: 4},
+          notificationsEnabled: false,
+        }),
+      );
+      // Field 99, varint 5: the tag is 99 << 3 = 792, as the varint 0x98 0x06.
+      const extra = Uint8Array.of(0x98, 0x06, 0x05);
+      const {store, files} = storeOver({[FILE]: Uint8Array.of(...known, ...extra)});
+      yield* store.write(appearanceToBytes(dark));
+      const after = stored(files.at(FILE));
+      expect(after.notificationsEnabled).toBe(false);
+      expect(after.$unknown?.map(field => field.no)).toEqual([99]);
+    }),
+  );
+
+  it.effect('runs saves one at a time, so a save never reads before the last one has written', () =>
+    Effect.gen(function* () {
+      const memory = makeMemoryFiles();
+      let active = 0;
+      let deepest = 0;
+      const files = {
+        read: (path: string) =>
+          Effect.gen(function* () {
+            active += 1;
+            deepest = Math.max(deepest, active);
+            yield* Effect.yieldNow;
+            return yield* memory.read(path);
+          }),
+        write: (path: string, bytes: Uint8Array) =>
+          Effect.gen(function* () {
+            yield* Effect.yieldNow;
+            yield* memory.write(path, bytes);
+            active -= 1;
+          }),
+      };
+      const store = makePreferencesStore('/data', files, () => undefined);
+      yield* Effect.all(
+        [appearanceToBytes(dark), appearanceToBytes({...dark, mode: 'light'})].map(store.write),
+        {concurrency: 'unbounded'},
+      );
+      expect(deepest).toBe(1);
+    }),
   );
 
   it.effect('refuses bytes that are not a valid appearance and leaves the file alone', () =>
@@ -108,6 +190,60 @@ describe('the viewer in the preferences file', () => {
       const viewer = viewerToBytes({id: 'install-1', label: 'ana'});
       yield* store.writeViewer(viewer);
       expect(yield* store.readViewer).toEqual(viewer);
+    }),
+  );
+
+  it.effect('is saved over the file as it was, and an appearance saved later keeps it', () =>
+    Effect.gen(function* () {
+      const before = toBinary(
+        DesktopPreferencesSchema,
+        create(DesktopPreferencesSchema, {
+          version: 1,
+          appearance: {mode: 1, light: 1, dark: 4},
+          notificationsEnabled: false,
+          archived: [create(DesktopRunRefSchema, {host: 'local', runId: 'run-a'})],
+        }),
+      );
+      const {store, files} = storeOver({[FILE]: before});
+      yield* store.writeViewer(viewerToBytes({id: 'install-1', label: 'ana'}));
+      const after = stored(files.at(FILE));
+      expect(after.notificationsEnabled).toBe(false);
+      expect(after.archived.map(run => run.runId)).toEqual(['run-a']);
+      expect(after.viewer?.id).toBe('install-1');
+      yield* store.write(appearanceToBytes(dark));
+      expect(stored(files.at(FILE)).viewer?.id).toBe('install-1');
+    }),
+  );
+
+  it.effect('is never saved over a file this app cannot read, which is left alone', () =>
+    Effect.gen(function* () {
+      const damaged = Uint8Array.of(0xff, 0xff, 0xff);
+      const {store, files, logged} = storeOver({[FILE]: damaged});
+      expect(yield* store.readViewer).toBeNull();
+      const error = yield* Effect.flip(
+        store.writeViewer(viewerToBytes({id: 'install-1', label: 'ana'})),
+      );
+      expect(error.message).toContain('left as it is');
+      expect(files.at(FILE)).toEqual(damaged);
+      expect(files.written()).toEqual([]);
+      expect(logged.join('\n')).toContain(FILE);
+    }),
+  );
+
+  it.effect('two saves made at the same moment, a viewer and an appearance, lose neither', () =>
+    Effect.gen(function* () {
+      const {store, files} = storeOver();
+      yield* Effect.all(
+        [
+          store.writeViewer(viewerToBytes({id: 'install-1', label: 'ana'})),
+          store.write(appearanceToBytes(dark)),
+        ],
+        {concurrency: 'unbounded'},
+      );
+      const after = stored(files.at(FILE));
+      expect(after.viewer?.id).toBe('install-1');
+      const bytes = yield* store.read;
+      expect(bytes === null ? null : appearanceFromBytes(bytes)).toEqual(dark);
     }),
   );
 

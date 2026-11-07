@@ -46,8 +46,9 @@ message RunCost {
   // comes last, in the order of the role names.
   repeated RoleCost roles = 8 [(buf.validate.field).repeated.max_items = 16];
   // One entry for each model the run's agents ran on, most costly first; a model with no priced
-  // turn comes last, in the order of its harness and name.
-  repeated ModelCost models = 9;
+  // turn comes last, in the order of its harness and name. When the run ran on more models than fit,
+  // the first ones are kept (the most costly) and models_truncated says so.
+  repeated ModelCost models = 9 [(buf.validate.field).repeated.max_items = 64];
   SpendSeries series = 10 [(buf.validate.field).required = true];
   // What the turns that finished in the hour before as_of cost. Absent when no turn of the run is
   // priced. It is a rate in dollars an hour for as long as the run has been going that long.
@@ -55,6 +56,10 @@ message RunCost {
     finite: true
     gte: 0
   }];
+  // True when the view leaves something of the models out: a model past the limit of models (here
+  // and in every bucket's by_model), or a model name cut to fit. Every figure that is not a list of
+  // models, the total and every bucket's cost_usd among them, still counts every turn.
+  bool models_truncated = 12;
 }
 
 // RoleCost is what the agents of one type, such as the workers, have cost.
@@ -75,6 +80,9 @@ message RoleCost {
   uint32 unpriced_turns = 4;
   // Tokens by kind, and the cost of the priced turns: absent when none is priced.
   Usage usage = 5 [(buf.validate.field).required = true];
+  // All the tokens of the type: the sum of the five kinds in usage, a kind no turn reported counting
+  // as none. The host adds them up so that no client does.
+  uint64 total_tokens = 6;
 }
 
 // ModelRef names the model an agent ran on, as the agent's own harness and model.
@@ -83,8 +91,9 @@ message ModelRef {
     defined_only: true
     not_in: [0]
   }];
-  // Empty is the harness's own default model.
-  string model = 2;
+  // Empty is the harness's own default model. A name longer than the limit is cut to it, at a
+  // character boundary, and the view says so in RunCost.models_truncated.
+  string model = 2 [(buf.validate.field).string.max_bytes = 256];
 }
 
 // ModelCost is what one model has cost, across the agents that ran on it.
@@ -99,6 +108,9 @@ message ModelCost {
   uint32 turns = 2;
   uint32 unpriced_turns = 3;
   Usage usage = 4 [(buf.validate.field).required = true];
+  // All the tokens of the model: the sum of the five kinds in usage, a kind no turn reported
+  // counting as none.
+  uint64 total_tokens = 5;
 }
 
 // SpendSeries is the cost of the run over time: consecutive buckets of one width from the run's
@@ -127,8 +139,10 @@ message SpendBucket {
     finite: true
     gte: 0
   }];
-  // That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket.
-  repeated ModelSpend by_model = 3;
+  // That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket
+  // and a model RunCost.models left out. cost_usd is the cost of every model, so it can exceed the
+  // sum of by_model when RunCost.models_truncated is set.
+  repeated ModelSpend by_model = 3 [(buf.validate.field).repeated.max_items = 64];
 }
 
 // ModelSpend is the cost one model added to one bucket.

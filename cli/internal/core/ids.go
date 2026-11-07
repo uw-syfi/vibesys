@@ -30,6 +30,9 @@ type RunID string
 // PlanNumber is a plan's number, assigned by the store. Zero means no plan.
 type PlanNumber uint32
 
+// WorkstreamNumber is a workstream's number, assigned by the store. Zero means no workstream.
+type WorkstreamNumber uint32
+
 // CallContext identifies who made a call and about what, once the daemon resolved what the caller
 // sent. It fills the envelope of the event the call appends.
 type CallContext struct {

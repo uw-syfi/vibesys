@@ -230,13 +230,26 @@ func (g *gen) comment() core.PlanComment {
 	return core.PlanComment{Text: g.text(), At: g.instant(), Agent: g.text()}
 }
 
+// plan is a plan with every field set, as an event can carry it. Its transitions are the ones a
+// store keeps: it starts open, set by its origin, and its last transition is its status.
 func (g *gen) plan() core.Plan {
-	return core.Plan{
-		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(),
-		Status:   []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)],
-		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
-		GainBound: &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
+	status := []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)]
+	origin := g.origin()
+	transitions := []core.PlanTransition{{Status: core.PlanOpen, Origin: origin}}
+	if status != core.PlanOpen {
+		transitions = append(transitions, core.PlanTransition{Status: status, Origin: g.origin()})
 	}
+	return core.Plan{
+		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(), Status: status,
+		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
+		GainBound:  &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
+		Workstream: core.WorkstreamNumber(1 + g.pick(5)), Origin: &origin, Transitions: transitions,
+	}
+}
+
+// origin is who made a record, with every field set.
+func (g *gen) origin() core.RecordOrigin {
+	return core.RecordOrigin{Run: core.RunID(g.name()), Agent: g.name(), At: g.instant()}
 }
 
 // job is a job with every field set, as an event can carry it.

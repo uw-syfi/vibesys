@@ -116,7 +116,9 @@ type SearchState struct {
 	Troubles         []*v1.JobTrouble       `protobuf:"bytes,10,rep,name=troubles,proto3" json:"troubles,omitempty"`
 	UnattributedJobs uint32                 `protobuf:"varint,11,opt,name=unattributed_jobs,json=unattributedJobs,proto3" json:"unattributed_jobs,omitempty"`
 	Truncated        bool                   `protobuf:"varint,12,opt,name=truncated,proto3" json:"truncated,omitempty"`
-	// The performance bounds the run's agents declared, one entry per objective, by objective name.
+	// The performance bounds that stand for the run, one entry per objective, by objective name: those
+	// its agents declared, and those a person declared outside any run (RecordOrigin.run_id empty),
+	// which stand for every run of the task.
 	// Kept whole under the byte budget: a few small entries, bounded by construction.
 	Bounds        []*ObjectiveBounds `protobuf:"bytes,13,rep,name=bounds,proto3" json:"bounds,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -263,7 +265,10 @@ type ObjectiveBounds struct {
 	// the head has gone past it, which says the bound was too modest. For an objective that is
 	// maximized it is head_value over the bound, and for one that is minimized the bound over
 	// head_value, so more is better for both. Absent when head_value is, and when either number is not
-	// above zero.
+	// above zero. It takes the bound to be in the unit of the head's measurements, as a bound is
+	// declared (ObjectiveBound.value); the orchestrator cannot check it, because a measurement keeps
+	// no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
+	// another unit gives a wrong percent. The version's unit is served for a reader to judge.
 	PercentOfBound *float64 `protobuf:"fixed64,5,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

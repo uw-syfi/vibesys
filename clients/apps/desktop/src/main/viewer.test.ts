@@ -123,13 +123,16 @@ describe('the viewer of this install', () => {
     }),
   );
 
-  it.effect('makes a new one, and says so, when the saved one is damaged', () =>
+  it.effect('lasts for the run, and leaves a damaged file as it is, so no data in it is lost', () =>
     Effect.gen(function* () {
-      const {made, files, logged} = over({[FILE]: Uint8Array.of(0xff, 0xff, 0xff)});
+      const damaged = Uint8Array.of(0xff, 0xff, 0xff);
+      const {made, files, logged} = over({[FILE]: damaged});
       const store = yield* made();
       expect(yield* store.viewer).toEqual({id: 'install-1', label: 'ana'});
+      expect(yield* store.viewer).toEqual({id: 'install-1', label: 'ana'});
+      expect(files.at(FILE)).toEqual(damaged);
+      expect(files.written()).toEqual([]);
       expect(logged.join('\n')).toContain(FILE);
-      expect(stored(files.at(FILE)).viewer?.id).toBe('install-1');
     }),
   );
 

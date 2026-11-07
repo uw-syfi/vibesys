@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"fmt"
+
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -104,19 +106,31 @@ func ToPlanComment(c *cliv1.PlanComment) core.PlanComment {
 	return core.PlanComment{Text: c.GetText(), At: toTime(c.GetAt()), Agent: c.GetAgent()}
 }
 
+// PlanTransition returns the contract's message for a transition.
+func PlanTransition(t core.PlanTransition) *cliv1.PlanTransition {
+	return &cliv1.PlanTransition{Status: PlanStatus(t.Status), Origin: RecordOrigin(t.Origin)}
+}
+
 // Plan returns the contract's message for a plan.
 func Plan(p core.Plan) *cliv1.Plan {
 	out := &cliv1.Plan{
-		Number:    uint32(p.Number),
-		Title:     p.Title,
-		Body:      p.Body,
-		Status:    PlanStatus(p.Status),
-		CreatedAt: timestamp(p.CreatedAt),
-		UpdatedAt: timestamp(p.UpdatedAt),
-		GainBound: GainBound(p.GainBound),
+		Number:     uint32(p.Number),
+		Title:      p.Title,
+		Body:       p.Body,
+		Status:     PlanStatus(p.Status),
+		CreatedAt:  timestamp(p.CreatedAt),
+		UpdatedAt:  timestamp(p.UpdatedAt),
+		GainBound:  GainBound(p.GainBound),
+		Workstream: uint32(p.Workstream),
+	}
+	if p.Origin != nil {
+		out.Origin = RecordOrigin(*p.Origin)
 	}
 	for _, c := range p.Comments {
 		out.Comments = append(out.Comments, PlanComment(c))
+	}
+	for _, t := range p.Transitions {
+		out.Transitions = append(out.Transitions, PlanTransition(t))
 	}
 	return out
 }
@@ -143,9 +157,21 @@ func ToPlan(p *cliv1.Plan) (core.Plan, error) {
 	out := core.Plan{
 		Number: core.PlanNumber(p.GetNumber()), Title: p.GetTitle(), Body: p.GetBody(), Status: status,
 		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()), GainBound: bound,
+		Workstream: core.WorkstreamNumber(p.GetWorkstream()),
+	}
+	if p.GetOrigin() != nil {
+		origin := toRecordOrigin(p.GetOrigin())
+		out.Origin = &origin
 	}
 	for _, c := range p.GetComments() {
 		out.Comments = append(out.Comments, ToPlanComment(c))
+	}
+	for i, t := range p.GetTransitions() {
+		ts, err := ToPlanStatus(fmt.Sprintf("plan.transitions[%d].status", i), t.GetStatus())
+		if err != nil {
+			return core.Plan{}, err
+		}
+		out.Transitions = append(out.Transitions, core.PlanTransition{Status: ts, Origin: toRecordOrigin(t.GetOrigin())})
 	}
 	return out, nil
 }

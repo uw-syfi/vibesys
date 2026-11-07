@@ -20,9 +20,13 @@ const (
 // objective, by name, with every version of the bound oldest first, so a chart can draw the bound as
 // it stood at each moment, and with how close the head is to the bound that stands.
 //
-// Only the bounds this run declared are shown: the store holds those of every run of the task, as it
-// holds their jobs, and a bound declared in an earlier run says nothing of this one. A declaration
-// made outside a run has no run and belongs to none. It never aliases the facts.
+// The bounds shown are the run's own and those a person declared outside any run: the store holds
+// those of every run of the task, as it holds their jobs, and a bound declared in an earlier run says
+// nothing of this one. A declaration with no run (RecordOrigin.run_id empty, a person at a terminal)
+// is the person's statement of what the task can reach, not an agent's derivation for one run, so it
+// stands for every run of the task: it is a version like any other, and it is the standing one when it
+// is the newest declared for its objective. The version's origin says who declared it. An empty run
+// id is matched by declaredFor and nowhere else.
 //
 // The result says whether anything was left out: an objective past the limit (the ones whose newest
 // bound is oldest go), versions past the limit (the oldest go), and versions of another direction than
@@ -30,7 +34,7 @@ const (
 func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.ObjectiveBounds, truncated bool) {
 	byObjective := map[string][]*cli.ObjectiveBound{}
 	for _, f := range facts {
-		if b := f.GetBound(); b != nil && b.GetOrigin().GetRunId() == run {
+		if b := f.GetBound(); b != nil && declaredFor(b, run) {
 			byObjective[b.GetObjective()] = append(byObjective[b.GetObjective()], b)
 		}
 	}
@@ -63,6 +67,12 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 	}
 	slices.SortFunc(out, func(a, b *pb.ObjectiveBounds) int { return cmp.Compare(a.Objective, b.Objective) })
 	return out, truncated
+}
+
+// declaredFor says a bound stands for the run: the run declared it, or no run did (a person did).
+func declaredFor(b *cli.ObjectiveBound, run string) bool {
+	declared := b.GetOrigin().GetRunId()
+	return declared == run || declared == ""
 }
 
 func standingSeq(b *pb.ObjectiveBounds) uint64 { return b.Versions[len(b.Versions)-1].GetSeq() }

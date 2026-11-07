@@ -139,6 +139,9 @@ func (l *Ledger) restorePlans(plans []core.Plan) error {
 		if err != nil {
 			return err
 		}
+		if err := held.CheckHistory(); err != nil {
+			return internal("plan %d: %v", held.Number, err)
+		}
 		l.plans = append(l.plans, held)
 	}
 	return nil

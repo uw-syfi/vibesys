@@ -9,6 +9,8 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Job } from "./job_pb.js";
 import { file_vibesys_cli_v1_job } from "./job_pb.js";
+import type { RecordOrigin } from "./record_pb.js";
+import { file_vibesys_cli_v1_record } from "./record_pb.js";
 import type { Verdict } from "./verdict_pb.js";
 import { file_vibesys_cli_v1_verdict } from "./verdict_pb.js";
 import type { Message } from "@bufbuild/protobuf";
@@ -17,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/plan.proto.
  */
 export const file_vibesys_cli_v1_plan: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJ0Cg1QbGFuR2FpbkJvdW5kEh8KBXNoYXJlGAEgASgBQhC6SA0SC0ABKQAAAAAAAAAAEkIKC3JlbGF0aXZlX3RvGAIgASgOMiEudmliZXN5cy5jbGkudjEuUGxhbkdhaW5SZWZlcmVuY2VCCrpIB4IBBBABIAAiUgoLUGxhbkNvbW1lbnQSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkioQIKBFBsYW4SDgoGbnVtYmVyGAEgASgNEg0KBXRpdGxlGAIgASgJEgwKBGJvZHkYAyABKAkSKgoGc3RhdHVzGAQgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1cxItCghjb21tZW50cxgFIAMoCzIbLnZpYmVzeXMuY2xpLnYxLlBsYW5Db21tZW50Ei4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKCmdhaW5fYm91bmQYCCABKAsyHS52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkJvdW5kIlcKCUxpbmtlZEpvYhIgCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2ISKAoHdmVyZGljdBgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QiVwoIUGxhblZpZXcSIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4SJwoEam9icxgCIAMoCzIZLnZpYmVzeXMuY2xpLnYxLkxpbmtlZEpvYiLhBAoNUGxhbkdhaW5DaGVjaxIfCgVzaGFyZRgBIAEoAUIQukgNEgtAASkAAAAAAAAAABI6CgZhbnN3ZXIYAiABKA4yHi52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkFuc3dlckIKukgHggEEEAEgABIPCgdjb3VudGVkGAMgASgNEjEKCGJsb2NrZXJzGAQgAygLMh8udmliZXN5cy5jbGkudjEuUGxhbkdhaW5CbG9ja2VyOq4DukiqAxrvAQoncGxhbl9nYWluX2NoZWNrLmFuc3dlcl9mb2xsb3dzX2Jsb2NrZXJzEmN0aGUgYW5zd2VyIGlzIGFsbCB1bmRlciBleGFjdGx5IHdoZW4gdGhlcmUgaXMgbm8gYmxvY2tlciwgYW5kIGEgYmxvY2tlciBpcyBvbmUgb2YgdGhlIGNvdW50ZWQgcGxhbnMaXyh0aGlzLmFuc3dlciA9PSAxKSA9PSAodGhpcy5ibG9ja2Vycy5zaXplKCkgPT0gMCkgJiYgdWludCh0aGlzLmJsb2NrZXJzLnNpemUoKSkgPD0gdGhpcy5jb3VudGVkGrUBCiZwbGFuX2dhaW5fY2hlY2suYmxvY2tlcnNfYXJlX25vdF91bmRlchI9YSBibG9ja2VyIHN0YXRlcyBubyBib3VuZCwgb3Igb25lIHRoYXQgaXMgbm90IGJlbG93IHRoZSBzaGFyZRpMdGhpcy5ibG9ja2Vycy5hbGwoYiwgIWhhcyhiLmdhaW5fYm91bmQpIHx8IGIuZ2Fpbl9ib3VuZC5zaGFyZSA+PSB0aGlzLnNoYXJlKSKkAQoPUGxhbkdhaW5CbG9ja2VyEhcKBm51bWJlchgBIAEoDUIHukgEKgIgABINCgV0aXRsZRgCIAEoCRI2CgZzdGF0dXMYAyABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzQgq6SAeCAQQYARgEEjEKCmdhaW5fYm91bmQYBCABKAsyHS52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkJvdW5kKp4BCgpQbGFuU3RhdHVzEhsKF1BMQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFAoQUExBTl9TVEFUVVNfT1BFThABEhYKElBMQU5fU1RBVFVTX0NIT1NFThACEhMKD1BMQU5fU1RBVFVTX1dPThADEhYKElBMQU5fU1RBVFVTX1BBUktFRBAEEhgKFFBMQU5fU1RBVFVTX1JFSkVDVEVEEAUqWgoRUGxhbkdhaW5SZWZlcmVuY2USIwofUExBTl9HQUlOX1JFRkVSRU5DRV9VTlNQRUNJRklFRBAAEiAKHFBMQU5fR0FJTl9SRUZFUkVOQ0VfSEVBRExJTkUQASp2Cg5QbGFuR2FpbkFuc3dlchIgChxQTEFOX0dBSU5fQU5TV0VSX1VOU1BFQ0lGSUVEEAASHgoaUExBTl9HQUlOX0FOU1dFUl9BTExfVU5ERVIQARIiCh5QTEFOX0dBSU5fQU5TV0VSX05PVF9BTExfVU5ERVIQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_verdict]);
+  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJ0Cg1QbGFuR2FpbkJvdW5kEh8KBXNoYXJlGAEgASgBQhC6SA0SC0ABKQAAAAAAAAAAEkIKC3JlbGF0aXZlX3RvGAIgASgOMiEudmliZXN5cy5jbGkudjEuUGxhbkdhaW5SZWZlcmVuY2VCCrpIB4IBBBABIAAiUgoLUGxhbkNvbW1lbnQSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkifgoOUGxhblRyYW5zaXRpb24SNgoGc3RhdHVzGAEgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1c0IKukgHggEEEAEgABI0CgZvcmlnaW4YAiABKAsyHC52aWJlc3lzLmNsaS52MS5SZWNvcmRPcmlnaW5CBrpIA8gBASLnBAoEUGxhbhIOCgZudW1iZXIYASABKA0SDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCRIqCgZzdGF0dXMYBCABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEi0KCGNvbW1lbnRzGAUgAygLMhsudmliZXN5cy5jbGkudjEuUGxhbkNvbW1lbnQSLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMQoKZ2Fpbl9ib3VuZBgIIAEoCzIdLnZpYmVzeXMuY2xpLnYxLlBsYW5HYWluQm91bmQSEgoKd29ya3N0cmVhbRgJIAEoDRIsCgZvcmlnaW4YCiABKAsyHC52aWJlc3lzLmNsaS52MS5SZWNvcmRPcmlnaW4SMwoLdHJhbnNpdGlvbnMYCyADKAsyHi52aWJlc3lzLmNsaS52MS5QbGFuVHJhbnNpdGlvbjrMAbpIyAEaxQEKInBsYW4uc3RhdHVzX2lzX3RoZV9sYXN0X3RyYW5zaXRpb24SOmEgcGxhbiB0aGF0IGhhcyB0cmFuc2l0aW9ucyBoYXMgdGhlIHN0YXR1cyBvZiB0aGUgbGFzdCBvbmUaY3RoaXMudHJhbnNpdGlvbnMuc2l6ZSgpID09IDAgfHwgdGhpcy50cmFuc2l0aW9uc1t0aGlzLnRyYW5zaXRpb25zLnNpemUoKSAtIDFdLnN0YXR1cyA9PSB0aGlzLnN0YXR1cyJXCglMaW5rZWRKb2ISIAoDam9iGAEgASgLMhMudmliZXN5cy5jbGkudjEuSm9iEigKB3ZlcmRpY3QYAiABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0IlcKCFBsYW5WaWV3EiIKBHBsYW4YASABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuEicKBGpvYnMYAiADKAsyGS52aWJlc3lzLmNsaS52MS5MaW5rZWRKb2Ii4QQKDVBsYW5HYWluQ2hlY2sSHwoFc2hhcmUYASABKAFCELpIDRILQAEpAAAAAAAAAAASOgoGYW5zd2VyGAIgASgOMh4udmliZXN5cy5jbGkudjEuUGxhbkdhaW5BbnN3ZXJCCrpIB4IBBBABIAASDwoHY291bnRlZBgDIAEoDRIxCghibG9ja2VycxgEIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlBsYW5HYWluQmxvY2tlcjquA7pIqgMa7wEKJ3BsYW5fZ2Fpbl9jaGVjay5hbnN3ZXJfZm9sbG93c19ibG9ja2VycxJjdGhlIGFuc3dlciBpcyBhbGwgdW5kZXIgZXhhY3RseSB3aGVuIHRoZXJlIGlzIG5vIGJsb2NrZXIsIGFuZCBhIGJsb2NrZXIgaXMgb25lIG9mIHRoZSBjb3VudGVkIHBsYW5zGl8odGhpcy5hbnN3ZXIgPT0gMSkgPT0gKHRoaXMuYmxvY2tlcnMuc2l6ZSgpID09IDApICYmIHVpbnQodGhpcy5ibG9ja2Vycy5zaXplKCkpIDw9IHRoaXMuY291bnRlZBq1AQomcGxhbl9nYWluX2NoZWNrLmJsb2NrZXJzX2FyZV9ub3RfdW5kZXISPWEgYmxvY2tlciBzdGF0ZXMgbm8gYm91bmQsIG9yIG9uZSB0aGF0IGlzIG5vdCBiZWxvdyB0aGUgc2hhcmUaTHRoaXMuYmxvY2tlcnMuYWxsKGIsICFoYXMoYi5nYWluX2JvdW5kKSB8fCBiLmdhaW5fYm91bmQuc2hhcmUgPj0gdGhpcy5zaGFyZSkipAEKD1BsYW5HYWluQmxvY2tlchIXCgZudW1iZXIYASABKA1CB7pIBCoCIAASDQoFdGl0bGUYAiABKAkSNgoGc3RhdHVzGAMgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1c0IKukgHggEEGAEYBBIxCgpnYWluX2JvdW5kGAQgASgLMh0udmliZXN5cy5jbGkudjEuUGxhbkdhaW5Cb3VuZCqeAQoKUGxhblN0YXR1cxIbChdQTEFOX1NUQVRVU19VTlNQRUNJRklFRBAAEhQKEFBMQU5fU1RBVFVTX09QRU4QARIWChJQTEFOX1NUQVRVU19DSE9TRU4QAhITCg9QTEFOX1NUQVRVU19XT04QAxIWChJQTEFOX1NUQVRVU19QQVJLRUQQBBIYChRQTEFOX1NUQVRVU19SRUpFQ1RFRBAFKloKEVBsYW5HYWluUmVmZXJlbmNlEiMKH1BMQU5fR0FJTl9SRUZFUkVOQ0VfVU5TUEVDSUZJRUQQABIgChxQTEFOX0dBSU5fUkVGRVJFTkNFX0hFQURMSU5FEAEqdgoOUGxhbkdhaW5BbnN3ZXISIAocUExBTl9HQUlOX0FOU1dFUl9VTlNQRUNJRklFRBAAEh4KGlBMQU5fR0FJTl9BTlNXRVJfQUxMX1VOREVSEAESIgoeUExBTl9HQUlOX0FOU1dFUl9OT1RfQUxMX1VOREVSEAJCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_record, file_vibesys_cli_v1_verdict]);
 
 /**
  * PlanGainBound is the most a plan could gain, as its planner states it: a share of a reference,
@@ -75,6 +77,33 @@ export const PlanCommentSchema: GenMessage<PlanComment> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_plan, 1);
 
 /**
+ * PlanTransition is one time a plan took a status, and who made it so. The first of a plan's is its
+ * creation, as open; each later one is an edit or a close that set a status the plan did not have.
+ *
+ * @generated from message vibesys.cli.v1.PlanTransition
+ */
+export type PlanTransition = Message<"vibesys.cli.v1.PlanTransition"> & {
+  /**
+   * @generated from field: vibesys.cli.v1.PlanStatus status = 1;
+   */
+  status: PlanStatus;
+
+  /**
+   * Who changed the status, and when: the run and agent the call carried, and vibesysd's clock.
+   *
+   * @generated from field: vibesys.cli.v1.RecordOrigin origin = 2;
+   */
+  origin?: RecordOrigin | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.PlanTransition.
+ * Use `create(PlanTransitionSchema)` to create a new message.
+ */
+export const PlanTransitionSchema: GenMessage<PlanTransition> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_plan, 2);
+
+/**
  * Plan is stored the way an issue is: a number the CLI assigns, a free-form markdown body, and
  * comments that carry decisions and results.
  *
@@ -122,6 +151,33 @@ export type Plan = Message<"vibesys.cli.v1.Plan"> & {
    * @generated from field: vibesys.cli.v1.PlanGainBound gain_bound = 8;
    */
   gainBound?: PlanGainBound | undefined;
+
+  /**
+   * The workstream the plan belongs to, or 0 for none. It names a Workstream of the same task, and
+   * an agent sets it with --workstream on plan create and plan edit.
+   *
+   * @generated from field: uint32 workstream = 9;
+   */
+  workstream: number;
+
+  /**
+   * Who made the plan, and when. vibesysd fills it from the call's CallContext (VIBESYS_RUN and
+   * VIBESYS_AGENT, which the caller states and nothing authenticates) and its own clock; a request
+   * never carries it. Absent on a plan saved before store format 6, whose maker was not recorded.
+   *
+   * @generated from field: vibesys.cli.v1.RecordOrigin origin = 10;
+   */
+  origin?: RecordOrigin | undefined;
+
+  /**
+   * Every status the plan took, oldest first, and who set it: the plan's creation as open, then each
+   * edit or close that set a status the plan did not have. Setting the status it has changes
+   * nothing and adds none. Empty on a plan saved before store format 6; such a plan's first
+   * transition is its first status change after that, so its history before is not known.
+   *
+   * @generated from field: repeated vibesys.cli.v1.PlanTransition transitions = 11;
+   */
+  transitions: PlanTransition[];
 };
 
 /**
@@ -129,7 +185,7 @@ export type Plan = Message<"vibesys.cli.v1.Plan"> & {
  * Use `create(PlanSchema)` to create a new message.
  */
 export const PlanSchema: GenMessage<Plan> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 2);
+  messageDesc(file_vibesys_cli_v1_plan, 3);
 
 /**
  * LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -154,7 +210,7 @@ export type LinkedJob = Message<"vibesys.cli.v1.LinkedJob"> & {
  * Use `create(LinkedJobSchema)` to create a new message.
  */
 export const LinkedJobSchema: GenMessage<LinkedJob> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 3);
+  messageDesc(file_vibesys_cli_v1_plan, 4);
 
 /**
  * @generated from message vibesys.cli.v1.PlanView
@@ -176,7 +232,7 @@ export type PlanView = Message<"vibesys.cli.v1.PlanView"> & {
  * Use `create(PlanViewSchema)` to create a new message.
  */
 export const PlanViewSchema: GenMessage<PlanView> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 4);
+  messageDesc(file_vibesys_cli_v1_plan, 5);
 
 /**
  * PlanGainCheck is the answer to "is every plan that is still open or parked under this share of
@@ -220,7 +276,7 @@ export type PlanGainCheck = Message<"vibesys.cli.v1.PlanGainCheck"> & {
  * Use `create(PlanGainCheckSchema)` to create a new message.
  */
 export const PlanGainCheckSchema: GenMessage<PlanGainCheck> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 5);
+  messageDesc(file_vibesys_cli_v1_plan, 6);
 
 /**
  * PlanGainBlocker is a plan that keeps PlanGainCheck from being all under.
@@ -258,7 +314,7 @@ export type PlanGainBlocker = Message<"vibesys.cli.v1.PlanGainBlocker"> & {
  * Use `create(PlanGainBlockerSchema)` to create a new message.
  */
 export const PlanGainBlockerSchema: GenMessage<PlanGainBlocker> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 6);
+  messageDesc(file_vibesys_cli_v1_plan, 7);
 
 /**
  * PlanStatus is where a plan stands. Agents own what a plan says and which status it takes: the

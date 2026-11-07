@@ -4,6 +4,7 @@ package vibesys.cli.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/record.proto";
 import "vibesys/cli/v1/verdict.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
@@ -49,9 +50,25 @@ message PlanComment {
   string agent = 3;
 }
 
+// PlanTransition is one time a plan took a status, and who made it so. The first of a plan's is its
+// creation, as open; each later one is an edit or a close that set a status the plan did not have.
+message PlanTransition {
+  PlanStatus status = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Who changed the status, and when: the run and agent the call carried, and vibesysd's clock.
+  RecordOrigin origin = 2 [(buf.validate.field).required = true];
+}
+
 // Plan is stored the way an issue is: a number the CLI assigns, a free-form markdown body, and
 // comments that carry decisions and results.
 message Plan {
+  option (buf.validate.message).cel = {
+    id: "plan.status_is_the_last_transition"
+    message: "a plan that has transitions has the status of the last one"
+    expression: "this.transitions.size() == 0 || this.transitions[this.transitions.size() - 1].status == this.status"
+  };
   uint32 number = 1;
   string title = 2;
   string body = 3;
@@ -61,6 +78,18 @@ message Plan {
   google.protobuf.Timestamp updated_at = 7;
   // The bound on the plan's possible gain. Absent when the plan states none.
   PlanGainBound gain_bound = 8;
+  // The workstream the plan belongs to, or 0 for none. It names a Workstream of the same task, and
+  // an agent sets it with --workstream on plan create and plan edit.
+  uint32 workstream = 9;
+  // Who made the plan, and when. vibesysd fills it from the call's CallContext (VIBESYS_RUN and
+  // VIBESYS_AGENT, which the caller states and nothing authenticates) and its own clock; a request
+  // never carries it. Absent on a plan saved before store format 6, whose maker was not recorded.
+  RecordOrigin origin = 10;
+  // Every status the plan took, oldest first, and who set it: the plan's creation as open, then each
+  // edit or close that set a status the plan did not have. Setting the status it has changes
+  // nothing and adds none. Empty on a plan saved before store format 6; such a plan's first
+  // transition is its first status change after that, so its history before is not known.
+  repeated PlanTransition transitions = 11;
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
