@@ -123,11 +123,14 @@ type harness struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	runs   sync.WaitGroup
+
+	// seen is the processes the case has waited for to reach Alive.
+	seen map[string]bool
 }
 
 func newHarness(t *testing.T, rig Rig) *harness {
 	t.Helper()
-	h := &harness{t: t, rig: rig, timers: NewTimers()}
+	h := &harness{t: t, rig: rig, timers: NewTimers(), seen: map[string]bool{}}
 	h.ctx, h.cancel = context.WithTimeout(context.Background(), Backstop)
 	h.world = rig.World(t)
 	h.checkout = rig.Checkout(t, h.world)
@@ -258,10 +261,25 @@ func (h *harness) reached(point string) {
 	}
 }
 
-// gone requires that the processes that ran Alive(name) have ended.
+// alive waits until each named process has reached Alive. A case waits for this before it lets
+// the run end, so that gone can ask about the process.
+func (h *harness) alive(names ...string) {
+	h.t.Helper()
+	for _, name := range names {
+		h.reached(AliveMark(name))
+		h.seen[name] = true
+	}
+}
+
+// gone requires that the processes that ran Alive(name) have ended. It refuses a process the
+// case did not see alive: a process the run ended before it reached Alive never marks it, so
+// World.Gone waits for it until the Backstop and reports a process that is dead as running.
 func (h *harness) gone(names ...string) {
 	h.t.Helper()
 	for _, name := range names {
+		if !h.seen[name] {
+			h.t.Fatalf("the case asks whether %q is gone but never waited for it to be alive: call alive before the run ends", name)
+		}
 		if !h.world.Gone(h.ctx, name) {
 			h.t.Fatalf("the process %q still runs after the run ended", name)
 		}
@@ -464,7 +482,7 @@ func caseFingerprint(h *harness) {
 func caseCancel(h *harness) {
 	r := h.start(h.exec(tree()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	r.cancel()
 	out := r.wait()
 	expect(h.t, out, core.ExecCancelled)
@@ -474,7 +492,7 @@ func caseCancel(h *harness) {
 func caseLimit(h *harness) {
 	r := h.start(h.exec(tree()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	h.limitTimer().Fire()
 	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
@@ -505,7 +523,7 @@ func stubborn() Program {
 func caseCancelTerminates(h *harness) {
 	r := h.start(h.exec(cleaning()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	r.cancel()
 	out := r.wait()
 	expect(h.t, out, core.ExecCancelled)
@@ -519,7 +537,7 @@ func caseCancelTerminates(h *harness) {
 func caseLimitTerminates(h *harness) {
 	r := h.start(h.exec(cleaning()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	h.limitTimer().Fire()
 	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
@@ -535,7 +553,7 @@ func caseLimitTerminates(h *harness) {
 func graceEnds(h *harness, trigger func(r *running), kind core.ExecKind) {
 	r := h.start(h.exec(stubborn()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	armed := h.timers.Armed()
 	trigger(r)
 	grace := h.graceTimer(armed + 1)
@@ -562,8 +580,7 @@ func caseServiceLimitTerminates(h *harness) {
 	r := h.start(h.withService(cleaning(), svc, nil))
 	h.reached("up")
 	h.reached("service-up")
-	h.reached(AliveMark("child"))
-	h.reached(AliveMark("service-child"))
+	h.alive("main", "child", "service", "service-child")
 	h.limitTimer().Fire()
 	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
@@ -575,7 +592,7 @@ func caseServiceLimitTerminates(h *harness) {
 
 func caseLeftovers(h *harness) {
 	r := h.start(h.exec(Program{Child(Alive("child"), Hold(Forever)), Hold("go"), Exit(3)}))
-	h.reached(AliveMark("child"))
+	h.alive("child")
 	h.world.Release("go")
 	out := r.wait()
 	expectExit(h.t, out, 3)
@@ -590,7 +607,7 @@ func caseCallerDies(h *harness) {
 	}
 	kill := h.rig.Spawn(h.t, h.world, h.exec(tree()))
 	h.reached("up")
-	h.reached(AliveMark("child"))
+	h.alive("main", "child")
 	kill()
 	h.gone("main", "child")
 }
@@ -616,8 +633,7 @@ func caseServiceNoProbe(h *harness) {
 	x := h.withService(Program{Mark("ran"), Hold("go"), Exit(0)}, serviceProgram(), nil)
 	r := h.start(x)
 	h.reached("ran")
-	h.reached(AliveMark("service"))
-	h.reached(AliveMark("service-child"))
+	h.alive("service", "service-child")
 	h.world.Release("go")
 	out := r.wait()
 	expectExit(h.t, out, 0)
@@ -634,6 +650,8 @@ func caseServiceProbe(h *harness) {
 	if h.world.Marked("ran") {
 		h.t.Fatalf("the command ran before the service was ready")
 	}
+	// The service is up before it may become ready, so gone can see it end.
+	h.alive("service", "service-child")
 	h.world.SetFlag("ready")
 	pause.Fire()
 	out := r.wait()
@@ -649,7 +667,7 @@ func caseServiceNeverReady(h *harness) {
 	r := h.start(x)
 	limit := h.limitTimer()
 	h.timer(2)
-	h.reached(AliveMark("service-child"))
+	h.alive("service", "service-child")
 	limit.Fire()
 	out := r.wait()
 	expect(h.t, out, core.ExecServiceNotReady)
@@ -664,7 +682,7 @@ func caseServiceExitsEarly(h *harness) {
 	x := h.withService(Program{Mark("ran"), Exit(0)}, svc, Program{UnlessFlag("ready")})
 	r := h.start(x)
 	h.timer(2) // the first probe failed and the environment is waiting to try again
-	h.reached(AliveMark("service-child"))
+	h.alive("service", "service-child")
 	h.world.Release("die")
 	out := r.wait()
 	expect(h.t, out, core.ExecServiceExited)
@@ -678,8 +696,7 @@ func caseServiceExitsLate(h *harness) {
 	svc := Program{Alive("service"), Child(Alive("service-child"), Hold(Forever)), Hold("die"), Exit(2)}
 	r := h.start(h.withService(tree(), svc, nil))
 	h.reached("up")
-	h.reached(AliveMark("child"))
-	h.reached(AliveMark("service-child"))
+	h.alive("main", "child", "service", "service-child")
 	h.world.Release("die")
 	out := r.wait()
 	expect(h.t, out, core.ExecServiceExited)
@@ -690,7 +707,7 @@ func caseServiceCancelWaiting(h *harness) {
 	x := h.withService(Program{Mark("ran"), Exit(0)}, serviceProgram(), Program{UnlessFlag("ready")})
 	r := h.start(x)
 	h.timer(2)
-	h.reached(AliveMark("service-child"))
+	h.alive("service", "service-child")
 	r.cancel()
 	out := r.wait()
 	expect(h.t, out, core.ExecCancelled)
@@ -703,8 +720,7 @@ func caseServiceCancelWaiting(h *harness) {
 func caseServiceLimit(h *harness) {
 	r := h.start(h.withService(tree(), serviceProgram(), nil))
 	h.reached("up")
-	h.reached(AliveMark("child"))
-	h.reached(AliveMark("service-child"))
+	h.alive("main", "child", "service", "service-child")
 	h.limitTimer().Fire()
 	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
@@ -717,8 +733,7 @@ func caseServiceCallerDies(h *harness) {
 	}
 	kill := h.rig.Spawn(h.t, h.world, h.withService(tree(), serviceProgram(), nil))
 	h.reached("up")
-	h.reached(AliveMark("child"))
-	h.reached(AliveMark("service-child"))
+	h.alive("main", "child", "service", "service-child")
 	kill()
 	h.gone("main", "child", "service", "service-child")
 }
