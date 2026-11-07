@@ -32,7 +32,7 @@ import {
   grpcCodeOf,
   type LinkFailed,
 } from './errors.js';
-import {type GatewaySession, openSession} from './grpc-session.js';
+import {type CallFailed, type GatewaySession, openSession} from './grpc-session.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 
@@ -74,7 +74,7 @@ const helloBytes = toBinary(
 );
 
 /** The handshake: the gateway must answer with the schema hash this client was built with. */
-const hello = (session: GatewaySession): Effect.Effect<void, GrpcFailed> =>
+const hello = (session: GatewaySession): Effect.Effect<void, CallFailed> =>
   session.unary(HELLO_METHOD, helloBytes).pipe(
     Effect.flatMap(bytes =>
       Effect.try({
@@ -108,7 +108,7 @@ export type SessionOpener = (
   duplex: Duplex,
 ) => Effect.Effect<GatewaySession, GrpcFailed, Scope.Scope>;
 
-type DialError = GrpcFailed | GatewayFailed | GatewayRefused | LinkFailed;
+type DialError = CallFailed | GatewayFailed | GatewayRefused | LinkFailed;
 
 /** Dial, open the session and shake hands; on any failure nothing stays open. */
 const openOnce = (
@@ -200,10 +200,7 @@ const silent = (session: GatewaySession): Effect.Effect<void> =>
     }),
   );
 
-const lostError = new GrpcFailed({
-  code: GrpcCode.UNAVAILABLE,
-  message: 'gateway connection lost',
-});
+const lostError = new GatewayFailed({message: 'gateway connection lost'});
 
 /** A connection that dials at once and ends with the scope it is made in. */
 export const makeGatewayConnection = (
@@ -253,7 +250,7 @@ export const makeGatewayConnection = (
     );
 
     /** `run` on the ready session, ended when that session is lost. */
-    const onSession = <A>(run: (session: GatewaySession) => Effect.Effect<A, GrpcFailed>) =>
+    const onSession = <A>(run: (session: GatewaySession) => Effect.Effect<A, CallFailed>) =>
       Effect.flatMap(ready, session =>
         Effect.raceFirst(run(session), Effect.andThen(session.lost, Effect.fail(lostError))),
       );

@@ -18,7 +18,7 @@ describe('the status a call ends with', () => {
   it('carries the peer status and its words unchanged: a refusal is the host answering', () => {
     fc.assert(
       fc.property(fc.integer({min: 1, max: 999}), fc.string({minLength: 1}), (code, detail) => {
-        expect(callStatus(String(code), detail)).toEqual({code, message: detail});
+        expect(callStatus(String(code), detail)).toEqual({code, message: detail, answered: true});
       }),
     );
   });
@@ -29,6 +29,8 @@ describe('the status a call ends with', () => {
         const end = callStatus(status, detail);
         if (status !== undefined && /^\d{1,3}$/.test(status)) return;
         expect(end?.code).toBe(UNAVAILABLE);
+        // The link ended it, so it is not the host's word.
+        expect(end?.answered).toBe(false);
       }),
     );
   });

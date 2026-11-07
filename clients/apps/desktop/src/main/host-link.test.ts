@@ -398,6 +398,8 @@ interface SshOptions {
   readonly lacking?: readonly string[];
   /** The host already holds the program. */
   readonly provisioned?: boolean;
+  /** The first orchestrator Hellos the link loses: cut without a status, or dropped. */
+  readonly lostHellos?: {readonly how: 'cut' | 'drop'; readonly count: number};
   /**
    * The window's run feed: not mounted, mounted and answered at once, or mounted with its first
    * frame held back for the test to deliver.
@@ -413,6 +415,8 @@ const sshHost = (options: SshOptions) =>
     for (const name of options.lacking ?? []) host.state.lacking.add(name);
     host.state.provisioned = options.provisioned ?? false;
     const pending: FakeCall[] = [];
+    const logs: string[] = [];
+    let lost = options.lostHellos?.count ?? 0;
     const {unserving} = options;
     const identity = toBinary(
       IdentifyResponseSchema,
@@ -441,6 +445,10 @@ const sshHost = (options: SshOptions) =>
       if (unserving !== undefined && call.method.startsWith(`/${OrchestratorService.typeName}/`))
         return call.end(14, 'the orchestrator is not served by this process');
       if (call.method === HELLO) {
+        if (lost > 0) {
+          lost -= 1;
+          return options.lostHellos?.how === 'cut' ? call.endWithoutStatus() : peer.drop();
+        }
         call.send(helloReply);
         return call.end();
       }
@@ -464,9 +472,10 @@ const sshHost = (options: SshOptions) =>
       const pool = yield* makeLinkPool('/tmp/vsd-1/%C', () => {});
       return yield* makeGatewayDialers(pool, () => {});
     }).pipe(Effect.provide(Layer.mergeAll(host.spawner.layer, fakeLocalHost().layer, built)));
-    const calls = yield* makeGatewayCalls(dialers, () => {});
+    const calls = yield* makeGatewayCalls(dialers, (_host, line) => logs.push(line));
     const seen = yield* windowOver(calls, peer, options.feed !== 'off');
-    return {...seen, calls, peer, host, pending};
+    const identifies = () => peer.methods.filter(name => name === IDENTIFY).length;
+    return {...seen, calls, peer, host, pending, logs, identifies};
   });
 type SshWorld = Effect.Success<ReturnType<typeof sshHost>>;
 
@@ -492,6 +501,13 @@ const failure = Schema.Union([
     lacking: Schema.Array(Schema.Literals(HOST_PREREQUISITES.map(({name}) => name)))
       .check(Schema.isMinLength(1))
       .check(Schema.isMaxLength(4)),
+  }),
+  // A link that loses the first Hellos is redialed: no host answered, so none is asked why, and
+  // each loss is logged once.
+  Schema.Struct({
+    kind: Schema.Literal('lost'),
+    how: Schema.Literals(['cut', 'drop']),
+    count: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 3})),
   }),
   // A host that says why it does not serve: what it refuses for good is shown and not retried,
   // what may pass (held by another process) is waited out.
@@ -603,6 +619,17 @@ const playPrerequisite = (lacking: readonly string[]) =>
     expect(world.connection()._tag).toBe('Unusable');
   });
 
+const playLost = (how: 'cut' | 'drop', count: number) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, lostHellos: {how, count}});
+    expect(yield* world.until(() => world.live(), 120_000)).not.toBeNull();
+    const failedHellos = world.logs.filter(line => line.startsWith(`gateway call failed: ${HELLO}`));
+    // Each lost Hello is named once, and nothing asked the host `Identify`: no host answered.
+    expect(failedHellos).toHaveLength(count);
+    expect(world.identifies()).toBe(0);
+    expect(world.logs.filter(line => line.includes(IDENTIFY))).toEqual([]);
+  });
+
 const REFUSED_CAUSE = {
   [StateRefusal.NETWORK_FILESYSTEM]: 'state-network-filesystem',
   [StateRefusal.UNKNOWN_FILESYSTEM]: 'state-unknown-filesystem',
@@ -619,6 +646,8 @@ const playUnserved = (reason: UnservedReason, stateRefusal: StateRefusal) =>
       yield* world.elapse(60_000, 1000);
       expect(world.connection()._tag).not.toBe('Unusable');
       expect(world.hellos()).toBeGreaterThan(1);
+      // The host answered UNAVAILABLE, so it was asked why.
+      expect(world.identifies()).toBeGreaterThan(0);
       return;
     }
     yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
@@ -821,6 +850,8 @@ it.effect.prop(
             return yield* playBuild(failure.platform, failure.built);
           case 'prerequisite':
             return yield* playPrerequisite(failure.lacking);
+          case 'lost':
+            return yield* playLost(failure.how, failure.count);
           case 'unserved':
             return yield* playUnserved(failure.reason, failure.stateRefusal);
           case 'slow':

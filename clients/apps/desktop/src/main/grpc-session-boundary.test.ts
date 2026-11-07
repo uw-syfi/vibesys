@@ -12,7 +12,7 @@ import * as Schema from 'effect/Schema';
 import * as TestClock from 'effect/testing/TestClock';
 import {REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {fakeGateway, HELLO} from '../testing/main/fake-gateway.js';
-import {GrpcFailed} from './errors.js';
+import {GatewayFailed, GrpcFailed, grpcCodeOf} from './errors.js';
 import {openSession} from './grpc-session.js';
 
 const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values);
@@ -136,9 +136,11 @@ describe('gateway session', () => {
           yield* received(peer, 1);
           peer.calls[0]?.endWithoutStatus();
           const failure = yield* Fiber.join(running);
-          expect(failure).toBeInstanceOf(GrpcFailed);
-          // UNAVAILABLE (14), the status the client redials; UNKNOWN (2) would be shown as a refusal.
-          expect(failure.code).toBe(14);
+          // The link's failure, not the host's answer: it carries no status, which the client
+          // redials (a status such as UNKNOWN (2) would be shown as a refusal), and which is
+          // never read as a host answering UNAVAILABLE.
+          expect(failure).toBeInstanceOf(GatewayFailed);
+          expect(grpcCodeOf(failure)).toBeUndefined();
         }),
       ),
   );
@@ -156,7 +158,7 @@ describe('gateway session', () => {
           );
           yield* received(peer, 1);
           peer.calls[0]?.end(code, 'said so');
-          expect((yield* Fiber.join(running)).code).toBe(code);
+          expect(grpcCodeOf(yield* Fiber.join(running))).toBe(code);
         }),
       ),
     {arbitrary: {runs: 16}},
@@ -198,7 +200,7 @@ describe('gateway session', () => {
         yield* received(peer, 1);
         peer.calls[0]?.send(bytes(7));
         const failure = yield* Fiber.join(running);
-        expect(failure.code).toBe(13);
+        expect(grpcCodeOf(failure)).toBe(13);
         expect(failure.message).toContain('refused');
       }),
     ),
@@ -234,8 +236,8 @@ describe('gateway session', () => {
         yield* received(peer, 1);
         peer.drop();
         yield* session.lost;
-        expect((yield* Fiber.join(running)).code).toBe(14);
-        expect((yield* Effect.flip(session.unary(SERVE, bytes()))).code).toBe(14);
+        expect(yield* Fiber.join(running)).toBeInstanceOf(GatewayFailed);
+        expect(yield* Effect.flip(session.unary(SERVE, bytes()))).toBeInstanceOf(GatewayFailed);
       }),
     ),
   );
@@ -247,7 +249,7 @@ describe('gateway session', () => {
         const session = yield* openSession(peer.connect());
         expect((yield* Effect.flip(session.unary('Serve', bytes()))).message).toContain('invalid');
         const huge = new Uint8Array(64 * 1024 * 1024 + 1);
-        expect((yield* Effect.flip(session.unary(SERVE, huge))).code).toBe(8);
+        expect(grpcCodeOf(yield* Effect.flip(session.unary(SERVE, huge)))).toBe(8);
         expect(peer.methods).toEqual([]);
       }),
     ),
@@ -262,7 +264,7 @@ describe('gateway session', () => {
         yield* received(peer, 1);
         // The bound is on silence, between one and two windows after the last bytes.
         yield* TestClock.adjust(`${2 * REPLY_STALL_MS} millis`);
-        expect((yield* Fiber.join(running)).code).toBe(4);
+        expect(grpcCodeOf(yield* Fiber.join(running))).toBe(4);
       }),
     ),
   );
@@ -316,7 +318,7 @@ describe('gateway session', () => {
           yield* received(peer, 2);
           peer.calls[1]?.send(new Uint8Array(ORCHESTRATOR_MAX_MESSAGE_BYTES + 1));
           peer.calls[1]?.end();
-          expect((yield* Fiber.join(oversized)).code).toBe(8);
+          expect(grpcCodeOf(yield* Fiber.join(oversized))).toBe(8);
         }),
       ),
   );

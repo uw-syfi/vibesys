@@ -13,10 +13,17 @@ import type * as Scope from 'effect/Scope';
 import {REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {decodeFrames, encodeFrame, isFault} from '../state/grpc-frames.js';
 import {callStatus} from '../state/grpc-status.js';
-import {GrpcCode, GrpcFailed} from './errors.js';
+import {GatewayFailed, GrpcCode, GrpcFailed} from './errors.js';
 
 /** How long a call is watched for progress: to its end, or until its first reply message. */
 type Watch = 'to-end' | 'to-first-reply';
+
+/**
+ * How a call fails: `GrpcFailed` is the host's own answer (a status it sent); `GatewayFailed` is
+ * the link's: the session or stream was cut, or answered with no status. The two are kept apart
+ * because only a host that answered can be asked why, and a lost link is redialed.
+ */
+export type CallFailed = GrpcFailed | GatewayFailed;
 
 export interface GatewaySession {
   /**
@@ -32,9 +39,9 @@ export interface GatewaySession {
     bytes: Uint8Array,
     receive: (message: Uint8Array) => void,
     watch?: Watch,
-  ) => Effect.Effect<void, GrpcFailed>;
+  ) => Effect.Effect<void, CallFailed>;
   /** A call with exactly one reply, watched to its end. */
-  readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, GrpcFailed>;
+  readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, CallFailed>;
   /** Completes when the session ended: the peer closed it, said goaway, or the scope closed. */
   readonly lost: Effect.Effect<void>;
   /**
@@ -51,8 +58,7 @@ const METHOD = /^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/;
 type Stream = ReturnType<ClientHttp2Session['request']>;
 type Receive = (message: Uint8Array) => void;
 
-const unavailable = (message: string): GrpcFailed =>
-  new GrpcFailed({code: GrpcCode.UNAVAILABLE, message});
+const cut = (message: string): GatewayFailed => new GatewayFailed({message});
 
 /** The metadata every call of a session carries: gRPC metadata is HTTP/2 headers, in lowercase. */
 export type CallMetadata = Readonly<Record<string, string>>;
@@ -63,7 +69,7 @@ const startStream = (
   method: string,
   frame: Uint8Array,
   metadata: CallMetadata,
-): Stream | GrpcFailed => {
+): Stream | CallFailed => {
   if (!METHOD.test(method))
     return new GrpcFailed({code: GrpcCode.INTERNAL, message: `invalid gRPC method: ${method}`});
   try {
@@ -77,7 +83,7 @@ const startStream = (
     stream.end(frame);
     return stream;
   } catch (cause) {
-    return unavailable(`gateway session closed: ${String(cause)}`);
+    return cut(`gateway session closed: ${String(cause)}`);
   }
 };
 
@@ -88,7 +94,7 @@ const startStream = (
 const watchStream = (
   stream: Stream,
   receive: Receive,
-  finish: (error?: GrpcFailed) => void,
+  finish: (error?: CallFailed) => void,
   settled: () => boolean,
   receiveLimit: number,
   heard: () => void,
@@ -102,7 +108,7 @@ const watchStream = (
     if (value['grpc-message'] !== undefined) detail = String(value['grpc-message']);
     const http = value[':status'];
     if (http !== undefined && String(http) !== '200')
-      finish(unavailable(`gRPC HTTP status ${String(http)}`));
+      finish(cut(`gRPC HTTP status ${String(http)}`));
   };
   const deliver = (messages: readonly Uint8Array[]): void => {
     for (const message of messages) {
@@ -125,7 +131,7 @@ const watchStream = (
   };
   stream.on('response', headers);
   stream.on('trailers', headers);
-  stream.on('error', error => finish(unavailable(error.message)));
+  stream.on('error', error => finish(cut(error.message)));
   stream.on('data', (chunk: Buffer) => {
     heard();
     if (settled()) return;
@@ -135,14 +141,17 @@ const watchStream = (
     deliver(decoded.messages);
   });
   stream.on('end', () => {
-    // A stream that ends with no status was cut, not answered: `callStatus` makes it UNAVAILABLE,
-    // which the client redials, rather than a status of the host's own, which it would not.
+    // A stream that ends with no status was cut, not answered: it is the link's failure, which
+    // the client redials, rather than a status of the host's own.
     if (rest.byteLength !== 0)
       return finish(new GrpcFailed({code: GrpcCode.DATA_LOSS, message: 'truncated gRPC message'}));
     const failure = callStatus(status, detail);
-    finish(failure === undefined ? undefined : new GrpcFailed(failure));
+    if (failure === undefined) return finish(undefined);
+    finish(
+      failure.answered ? new GrpcFailed(failure) : new GatewayFailed({message: failure.message}),
+    );
   });
-  stream.on('close', () => finish(unavailable('gRPC connection closed')));
+  stream.on('close', () => finish(cut('gRPC connection closed')));
 };
 
 /** What one call has heard and delivered, which its watch reads. */
@@ -165,12 +174,13 @@ const startCall = (
   method: string,
   bytes: Uint8Array,
   receive: Receive,
-): Effect.Effect<void, GrpcFailed> =>
-  Effect.callback<void, GrpcFailed>(resume => {
+): Effect.Effect<void, CallFailed> =>
+  Effect.callback<void, CallFailed>(resume => {
     const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
     if (isFault(frame)) return resume(Effect.fail(new GrpcFailed(frame)));
     const stream = startStream(http2, method, frame, metadata);
-    if (stream instanceof GrpcFailed) return resume(Effect.fail(stream));
+    if (stream instanceof GrpcFailed || stream instanceof GatewayFailed)
+      return resume(Effect.fail(stream));
     let settled = false;
     watchStream(
       stream,
@@ -207,7 +217,7 @@ const startCall = (
  * Fails when a whole window passes with nothing heard on the call. Never ends otherwise: it is
  * raced against the call, and a watch `to-first-reply` stops watching once the first reply came.
  */
-const stalled = (tally: Tally, watch: Watch): Effect.Effect<never, GrpcFailed> =>
+const stalled = (tally: Tally, watch: Watch): Effect.Effect<never, CallFailed> =>
   Effect.gen(function* () {
     while (true) {
       const before = tally.heard;
