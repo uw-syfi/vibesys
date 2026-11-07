@@ -51,6 +51,10 @@ const (
 	Refusal_REFUSAL_TIME_LIMIT_REACHED Refusal = 12
 	// The run reached its cost limit: it starts no new agent.
 	Refusal_REFUSAL_COST_LIMIT_REACHED Refusal = 13
+	// A catch-up was asked for with no viewer: the call carried no vibesys-viewer-id and
+	// vibesys-viewer-label metadata. A client that goes through the daemon is refused with an error
+	// naming the field before this is ever decided; this is what the decision itself says.
+	Refusal_REFUSAL_NO_VIEWER Refusal = 14
 )
 
 // Enum value maps for Refusal.
@@ -69,6 +73,7 @@ var (
 		11: "REFUSAL_HANDOFF_NOT_YOURS",
 		12: "REFUSAL_TIME_LIMIT_REACHED",
 		13: "REFUSAL_COST_LIMIT_REACHED",
+		14: "REFUSAL_NO_VIEWER",
 	}
 	Refusal_value = map[string]int32{
 		"REFUSAL_UNSPECIFIED":        0,
@@ -84,6 +89,7 @@ var (
 		"REFUSAL_HANDOFF_NOT_YOURS":  11,
 		"REFUSAL_TIME_LIMIT_REACHED": 12,
 		"REFUSAL_COST_LIMIT_REACHED": 13,
+		"REFUSAL_NO_VIEWER":          14,
 	}
 )
 
@@ -132,6 +138,7 @@ type RunChange struct {
 	//	*RunChange_Item
 	//	*RunChange_Message
 	//	*RunChange_Receipt
+	//	*RunChange_CheckIn
 	Body          isRunChange_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -249,6 +256,15 @@ func (x *RunChange) GetReceipt() *Receipt {
 	return nil
 }
 
+func (x *RunChange) GetCheckIn() *CheckIn {
+	if x != nil {
+		if x, ok := x.Body.(*RunChange_CheckIn); ok {
+			return x.CheckIn
+		}
+	}
+	return nil
+}
+
 type isRunChange_Body interface {
 	isRunChange_Body()
 }
@@ -278,6 +294,12 @@ type RunChange_Receipt struct {
 	Receipt *Receipt `protobuf:"bytes,15,opt,name=receipt,proto3,oneof"`
 }
 
+type RunChange_CheckIn struct {
+	// A check-in made, or changed as its facts were worked out or its report was posted. The whole
+	// check-in, so a client replaces by id.
+	CheckIn *CheckIn `protobuf:"bytes,16,opt,name=check_in,json=checkIn,proto3,oneof"`
+}
+
 func (*RunChange_Run) isRunChange_Body() {}
 
 func (*RunChange_Agent) isRunChange_Body() {}
@@ -289,6 +311,8 @@ func (*RunChange_Item) isRunChange_Body() {}
 func (*RunChange_Message) isRunChange_Body() {}
 
 func (*RunChange_Receipt) isRunChange_Body() {}
+
+func (*RunChange_CheckIn) isRunChange_Body() {}
 
 // Delta is progress on a running item. It is never stored and never reaches the decision core: the
 // next item_updated for the same item replaces it.
@@ -880,6 +904,56 @@ func (x *PostReport) GetReport() *Report {
 	return nil
 }
 
+// RequestCatchUp is the press of Catch me up. The host records a check-in for the viewer who pressed
+// it, covering everything since that viewer's last check-in in the run, works its facts out, and on a
+// run that can be asked also asks the lead for a report covering the window. The viewer is not in the
+// body: it is the call's metadata (see Viewer), and a call without it is refused. The receipt answers
+// at once with the check-in's id, and a press while the viewer's last check-in is still being worked
+// out answers with that one. Allowed on a run that is over.
+type RequestCatchUp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCatchUp) Reset() {
+	*x = RequestCatchUp{}
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCatchUp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCatchUp) ProtoMessage() {}
+
+func (x *RequestCatchUp) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCatchUp.ProtoReflect.Descriptor instead.
+func (*RequestCatchUp) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RequestCatchUp) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 // Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
 // from the connection or the agent's session, so that a caller cannot claim to be someone else.
 type Command struct {
@@ -895,6 +969,7 @@ type Command struct {
 	//	*Command_SendMessage
 	//	*Command_PostHandoff
 	//	*Command_PostReport
+	//	*Command_RequestCatchUp
 	Body          isCommand_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -902,7 +977,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -914,7 +989,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +1002,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Command) GetId() string {
@@ -1007,6 +1082,15 @@ func (x *Command) GetPostReport() *PostReport {
 	return nil
 }
 
+func (x *Command) GetRequestCatchUp() *RequestCatchUp {
+	if x != nil {
+		if x, ok := x.Body.(*Command_RequestCatchUp); ok {
+			return x.RequestCatchUp
+		}
+	}
+	return nil
+}
+
 type isCommand_Body interface {
 	isCommand_Body()
 }
@@ -1039,6 +1123,10 @@ type Command_PostReport struct {
 	PostReport *PostReport `protobuf:"bytes,16,opt,name=post_report,json=postReport,proto3,oneof"`
 }
 
+type Command_RequestCatchUp struct {
+	RequestCatchUp *RequestCatchUp `protobuf:"bytes,17,opt,name=request_catch_up,json=requestCatchUp,proto3,oneof"`
+}
+
 func (*Command_StartRun) isCommand_Body() {}
 
 func (*Command_StopRun) isCommand_Body() {}
@@ -1052,6 +1140,8 @@ func (*Command_SendMessage) isCommand_Body() {}
 func (*Command_PostHandoff) isCommand_Body() {}
 
 func (*Command_PostReport) isCommand_Body() {}
+
+func (*Command_RequestCatchUp) isCommand_Body() {}
 
 // Receipt is the answer to a command, and the same answer to each retry of it.
 type Receipt struct {
@@ -1069,13 +1159,16 @@ type Receipt struct {
 	Sequence uint64 `protobuf:"varint,8,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	// Set with REFUSAL_AGENT_NOT_ALLOWED: what the run may use, so the caller can ask again.
 	AllowedAgents []*AllowedAgent `protobuf:"bytes,9,rep,name=allowed_agents,json=allowedAgents,proto3" json:"allowed_agents,omitempty"`
+	// The check-in a RequestCatchUp made, or for a press while the viewer's last check-in is being worked
+	// out, that one. The message the lead was asked with, if it was, is message_id.
+	CheckInId     string `protobuf:"bytes,10,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Receipt) Reset() {
 	*x = Receipt{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1087,7 +1180,7 @@ func (x *Receipt) String() string {
 func (*Receipt) ProtoMessage() {}
 
 func (x *Receipt) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1100,7 +1193,7 @@ func (x *Receipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Receipt.ProtoReflect.Descriptor instead.
 func (*Receipt) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Receipt) GetCommandId() string {
@@ -1159,11 +1252,18 @@ func (x *Receipt) GetAllowedAgents() []*AllowedAgent {
 	return nil
 }
 
+func (x *Receipt) GetCheckInId() string {
+	if x != nil {
+		return x.CheckInId
+	}
+	return ""
+}
+
 var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xda\x03\n" +
+	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%vibesys/orchestrator/v1/checkin.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\x99\x04\n" +
 	"\tRunChange\x12#\n" +
 	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x122\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12\x15\n" +
@@ -1174,7 +1274,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x04turn\x18\f \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x123\n" +
 	"\x04item\x18\r \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x12<\n" +
 	"\amessage\x18\x0e \x01(\v2 .vibesys.orchestrator.v1.MessageH\x00R\amessage\x12<\n" +
-	"\areceipt\x18\x0f \x01(\v2 .vibesys.orchestrator.v1.ReceiptH\x00R\areceiptB\r\n" +
+	"\areceipt\x18\x0f \x01(\v2 .vibesys.orchestrator.v1.ReceiptH\x00R\areceipt\x12=\n" +
+	"\bcheck_in\x18\x10 \x01(\v2 .vibesys.orchestrator.v1.CheckInH\x00R\acheckInB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"\x9b\x01\n" +
 	"\x05Delta\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12 \n" +
@@ -1224,7 +1325,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\ahandoff\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.HandoffB\x06\xbaH\x03\xc8\x01\x01R\ahandoff\"M\n" +
 	"\n" +
 	"PostReport\x12?\n" +
-	"\x06report\x18\x01 \x01(\v2\x1f.vibesys.orchestrator.v1.ReportB\x06\xbaH\x03\xc8\x01\x01R\x06report\"\x9d\x04\n" +
+	"\x06report\x18\x01 \x01(\v2\x1f.vibesys.orchestrator.v1.ReportB\x06\xbaH\x03\xc8\x01\x01R\x06report\"0\n" +
+	"\x0eRequestCatchUp\x12\x1e\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xf2\x04\n" +
 	"\aCommand\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12@\n" +
 	"\tstart_run\x18\n" +
@@ -1237,8 +1340,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\fsend_message\x18\x0e \x01(\v2$.vibesys.orchestrator.v1.SendMessageH\x00R\vsendMessage\x12I\n" +
 	"\fpost_handoff\x18\x0f \x01(\v2$.vibesys.orchestrator.v1.PostHandoffH\x00R\vpostHandoff\x12F\n" +
 	"\vpost_report\x18\x10 \x01(\v2#.vibesys.orchestrator.v1.PostReportH\x00R\n" +
-	"postReportB\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\x91\x03\n" +
+	"postReport\x12S\n" +
+	"\x10request_catch_up\x18\x11 \x01(\v2'.vibesys.orchestrator.v1.RequestCatchUpH\x00R\x0erequestCatchUpB\r\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\xb1\x03\n" +
 	"\aReceipt\x12&\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcommandId\x12D\n" +
@@ -1249,7 +1353,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
 	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
-	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgentsJ\x04\b\x02\x10\x03R\x0ecommand_digest*\x9f\x03\n" +
+	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents\x12\x1e\n" +
+	"\vcheck_in_id\x18\n" +
+	" \x01(\tR\tcheckInIdJ\x04\b\x02\x10\x03R\x0ecommand_digest*\xb6\x03\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1264,7 +1370,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x12\x1d\n" +
 	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\v\x12\x1e\n" +
 	"\x1aREFUSAL_TIME_LIMIT_REACHED\x10\f\x12\x1e\n" +
-	"\x1aREFUSAL_COST_LIMIT_REACHED\x10\r\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x1aREFUSAL_COST_LIMIT_REACHED\x10\r\x12\x15\n" +
+	"\x11REFUSAL_NO_VIEWER\x10\x0e\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once
@@ -1279,7 +1386,7 @@ func file_vibesys_orchestrator_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_vibesys_orchestrator_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(Refusal)(0),                  // 0: vibesys.orchestrator.v1.Refusal
 	(*RunChange)(nil),             // 1: vibesys.orchestrator.v1.RunChange
@@ -1292,54 +1399,58 @@ var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(*SendMessage)(nil),           // 8: vibesys.orchestrator.v1.SendMessage
 	(*PostHandoff)(nil),           // 9: vibesys.orchestrator.v1.PostHandoff
 	(*PostReport)(nil),            // 10: vibesys.orchestrator.v1.PostReport
-	(*Command)(nil),               // 11: vibesys.orchestrator.v1.Command
-	(*Receipt)(nil),               // 12: vibesys.orchestrator.v1.Receipt
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(*Run)(nil),                   // 14: vibesys.orchestrator.v1.Run
-	(*Agent)(nil),                 // 15: vibesys.orchestrator.v1.Agent
-	(*Turn)(nil),                  // 16: vibesys.orchestrator.v1.Turn
-	(*Item)(nil),                  // 17: vibesys.orchestrator.v1.Item
-	(*Message)(nil),               // 18: vibesys.orchestrator.v1.Message
-	(Harness)(0),                  // 19: vibesys.orchestrator.v1.Harness
-	(*AllowedAgent)(nil),          // 20: vibesys.orchestrator.v1.AllowedAgent
-	(*durationpb.Duration)(nil),   // 21: google.protobuf.Duration
-	(AgentRole)(0),                // 22: vibesys.orchestrator.v1.AgentRole
-	(*Handoff)(nil),               // 23: vibesys.orchestrator.v1.Handoff
-	(*Report)(nil),                // 24: vibesys.orchestrator.v1.Report
-	(Delivery)(0),                 // 25: vibesys.orchestrator.v1.Delivery
+	(*RequestCatchUp)(nil),        // 11: vibesys.orchestrator.v1.RequestCatchUp
+	(*Command)(nil),               // 12: vibesys.orchestrator.v1.Command
+	(*Receipt)(nil),               // 13: vibesys.orchestrator.v1.Receipt
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*Run)(nil),                   // 15: vibesys.orchestrator.v1.Run
+	(*Agent)(nil),                 // 16: vibesys.orchestrator.v1.Agent
+	(*Turn)(nil),                  // 17: vibesys.orchestrator.v1.Turn
+	(*Item)(nil),                  // 18: vibesys.orchestrator.v1.Item
+	(*Message)(nil),               // 19: vibesys.orchestrator.v1.Message
+	(*CheckIn)(nil),               // 20: vibesys.orchestrator.v1.CheckIn
+	(Harness)(0),                  // 21: vibesys.orchestrator.v1.Harness
+	(*AllowedAgent)(nil),          // 22: vibesys.orchestrator.v1.AllowedAgent
+	(*durationpb.Duration)(nil),   // 23: google.protobuf.Duration
+	(AgentRole)(0),                // 24: vibesys.orchestrator.v1.AgentRole
+	(*Handoff)(nil),               // 25: vibesys.orchestrator.v1.Handoff
+	(*Report)(nil),                // 26: vibesys.orchestrator.v1.Report
+	(Delivery)(0),                 // 27: vibesys.orchestrator.v1.Delivery
 }
 var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
-	13, // 0: vibesys.orchestrator.v1.RunChange.at:type_name -> google.protobuf.Timestamp
-	14, // 1: vibesys.orchestrator.v1.RunChange.run:type_name -> vibesys.orchestrator.v1.Run
-	15, // 2: vibesys.orchestrator.v1.RunChange.agent:type_name -> vibesys.orchestrator.v1.Agent
-	16, // 3: vibesys.orchestrator.v1.RunChange.turn:type_name -> vibesys.orchestrator.v1.Turn
-	17, // 4: vibesys.orchestrator.v1.RunChange.item:type_name -> vibesys.orchestrator.v1.Item
-	18, // 5: vibesys.orchestrator.v1.RunChange.message:type_name -> vibesys.orchestrator.v1.Message
-	12, // 6: vibesys.orchestrator.v1.RunChange.receipt:type_name -> vibesys.orchestrator.v1.Receipt
-	19, // 7: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
-	3,  // 8: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
-	20, // 9: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	21, // 10: vibesys.orchestrator.v1.StartRun.max_time:type_name -> google.protobuf.Duration
-	21, // 11: vibesys.orchestrator.v1.StartRun.summary_every:type_name -> google.protobuf.Duration
-	22, // 12: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	3,  // 13: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
-	23, // 14: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	24, // 15: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
-	4,  // 16: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
-	5,  // 17: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
-	6,  // 18: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
-	7,  // 19: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
-	8,  // 20: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
-	9,  // 21: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
-	10, // 22: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
-	0,  // 23: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
-	25, // 24: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	20, // 25: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	14, // 0: vibesys.orchestrator.v1.RunChange.at:type_name -> google.protobuf.Timestamp
+	15, // 1: vibesys.orchestrator.v1.RunChange.run:type_name -> vibesys.orchestrator.v1.Run
+	16, // 2: vibesys.orchestrator.v1.RunChange.agent:type_name -> vibesys.orchestrator.v1.Agent
+	17, // 3: vibesys.orchestrator.v1.RunChange.turn:type_name -> vibesys.orchestrator.v1.Turn
+	18, // 4: vibesys.orchestrator.v1.RunChange.item:type_name -> vibesys.orchestrator.v1.Item
+	19, // 5: vibesys.orchestrator.v1.RunChange.message:type_name -> vibesys.orchestrator.v1.Message
+	13, // 6: vibesys.orchestrator.v1.RunChange.receipt:type_name -> vibesys.orchestrator.v1.Receipt
+	20, // 7: vibesys.orchestrator.v1.RunChange.check_in:type_name -> vibesys.orchestrator.v1.CheckIn
+	21, // 8: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
+	3,  // 9: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
+	22, // 10: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	23, // 11: vibesys.orchestrator.v1.StartRun.max_time:type_name -> google.protobuf.Duration
+	23, // 12: vibesys.orchestrator.v1.StartRun.summary_every:type_name -> google.protobuf.Duration
+	24, // 13: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	3,  // 14: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
+	25, // 15: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	26, // 16: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
+	4,  // 17: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
+	5,  // 18: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
+	6,  // 19: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
+	7,  // 20: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
+	8,  // 21: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
+	9,  // 22: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
+	10, // 23: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
+	11, // 24: vibesys.orchestrator.v1.Command.request_catch_up:type_name -> vibesys.orchestrator.v1.RequestCatchUp
+	0,  // 25: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
+	27, // 26: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	22, // 27: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_events_proto_init() }
@@ -1347,6 +1458,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 	if File_vibesys_orchestrator_v1_events_proto != nil {
 		return
 	}
+	file_vibesys_orchestrator_v1_checkin_proto_init()
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
 	file_vibesys_orchestrator_v1_tool_options_proto_init()
 	file_vibesys_orchestrator_v1_events_proto_msgTypes[0].OneofWrappers = []any{
@@ -1356,13 +1468,14 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 		(*RunChange_Item)(nil),
 		(*RunChange_Message)(nil),
 		(*RunChange_Receipt)(nil),
+		(*RunChange_CheckIn)(nil),
 	}
 	file_vibesys_orchestrator_v1_events_proto_msgTypes[1].OneofWrappers = []any{
 		(*Delta_Text)(nil),
 		(*Delta_CommandOutput)(nil),
 	}
 	file_vibesys_orchestrator_v1_events_proto_msgTypes[3].OneofWrappers = []any{}
-	file_vibesys_orchestrator_v1_events_proto_msgTypes[10].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[11].OneofWrappers = []any{
 		(*Command_StartRun)(nil),
 		(*Command_StopRun)(nil),
 		(*Command_SpawnAgent)(nil),
@@ -1370,6 +1483,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 		(*Command_SendMessage)(nil),
 		(*Command_PostHandoff)(nil),
 		(*Command_PostReport)(nil),
+		(*Command_RequestCatchUp)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1377,7 +1491,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_events_proto_rawDesc), len(file_vibesys_orchestrator_v1_events_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

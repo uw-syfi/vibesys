@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/stored_options.proto";
@@ -88,5 +89,7 @@ message Event {
     Message message_updated = 14;
     // Every command ends in one, so a refused command is idempotent across a restart too.
     ReceiptRecord receipt_recorded = 15;
+    // The whole check-in. It has no private part, so it is the public message.
+    CheckIn check_in_updated = 16;
   }
 }
