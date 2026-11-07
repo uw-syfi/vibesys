@@ -7,6 +7,7 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
+  type Agent,
   AgentRole,
   AgentSchema,
   AgentStatus,
@@ -14,15 +15,19 @@ import {
   Delivery,
   Direction,
   Harness,
+  type Message,
   MessageSchema,
   ReportKind,
   ReportSchema,
+  type Run,
   RunSchema,
   RunStatus,
   type SearchState,
   SearchStateSchema,
   UsageSchema,
 } from '@vibesys/orchestrator-proto';
+import {isLive} from '../../state/orchestrator/fleet.js';
+import {ms} from '../../state/orchestrator/time.js';
 import {ChangeLog, Rng} from './log.js';
 import type {Scenario} from './scenario.js';
 
@@ -115,86 +120,112 @@ function searchOf(rng: Rng, runId: string, atMs: number): SearchState {
   });
 }
 
+/** When one run of the fleet began and ended, and how it stands: a function of its place in the fleet. */
+interface Timing {
+  readonly live: boolean;
+  readonly startMs: number;
+  readonly endMs: number | undefined;
+  readonly status: RunStatus;
+}
+
+function timingOf(rng: Rng, options: FleetOptions, index: number): Timing {
+  const live = index < options.live;
+  const startMs = options.nowMs - (live ? (1 + rng.int(60)) * HOUR : (2 + index) * HOUR * 3);
+  if (live) {
+    const status = rng.int(8) === 0 ? RunStatus.STOPPING : RunStatus.RUNNING;
+    return {live, startMs, endMs: undefined, status};
+  }
+  const status = rng.int(5) === 0 ? RunStatus.FAILED : RunStatus.ENDED;
+  return {live, startMs, endMs: startMs + (1 + rng.int(40)) * HOUR, status};
+}
+
+function nameOf(options: FleetOptions, index: number): string {
+  const name = NAMES[index % NAMES.length] ?? 'run';
+  const long = options.longEvery !== undefined && index % options.longEvery === 0;
+  return long ? `${name} with a task name that runs on and on and on and on` : name;
+}
+
+function runOf(rng: Rng, options: FleetOptions, id: string, index: number): Run {
+  const timing = timingOf(rng, options, index);
+  const cost = Math.round(rng.next() * 1500 * 100) / 100;
+  return create(RunSchema, {
+    id,
+    repository: 'decode-service',
+    task: nameOf(options, index),
+    status: timing.status,
+    leadAgentId: `${id}-lead`,
+    fanoutLimit: 4,
+    createdAt: timestampFromMs(timing.startMs),
+    ...(timing.endMs === undefined ? {} : {endedAt: timestampFromMs(timing.endMs)}),
+    usage: create(UsageSchema, rng.int(10) === 0 ? {} : {costUsd: cost}),
+    ...(rng.int(3) === 0 ? {maxCostUsd: Math.ceil(cost / 100 + 1) * 100} : {}),
+  });
+}
+
+function agentStatusOf(rng: Rng, live: boolean, lead: boolean): AgentStatus {
+  if (!live) return AgentStatus.ENDED;
+  if (lead) return AgentStatus.WAITING;
+  return rng.int(4) === 0 ? AgentStatus.IDLE : AgentStatus.ACTIVE;
+}
+
+function agentOf(rng: Rng, run: Run, index: number): Agent {
+  const lead = index === 0;
+  const startMs = (ms(run.createdAt) ?? 0) + MINUTE;
+  return create(AgentSchema, {
+    id: `${run.id}-${lead ? 'lead' : `a${index}`}`,
+    runId: run.id,
+    parentAgentId: lead ? '' : run.leadAgentId,
+    role: lead ? AgentRole.LEAD : AgentRole.WORKER,
+    harness: Harness.CODEX,
+    status: agentStatusOf(rng, isLive(run.status), lead),
+    session: 1,
+    stopStage: AgentStopStage.NONE,
+    startedAt: timestampFromMs(startMs),
+  });
+}
+
+function reportOf(run: Run, atMs: number): Message {
+  return create(MessageSchema, {
+    id: `${run.id}-report`,
+    runId: run.id,
+    fromAgentId: run.leadAgentId,
+    delivery: Delivery.CONSUMED,
+    at: timestampFromMs(atMs),
+    body: {
+      case: 'report',
+      value: create(ReportSchema, {headline: 'Progress', kind: ReportKind.PROGRESS}),
+    },
+  });
+}
+
+/** One run of the fleet with its agents, its report (most runs have one) and its search state. */
+function pushRun(
+  rng: Rng,
+  options: FleetOptions,
+  log: ChangeLog,
+  searches: SearchState[],
+  index: number,
+): void {
+  const run = runOf(rng, options, `${options.prefix}-run-${index}`, index);
+  const startMs = ms(run.createdAt) ?? options.nowMs;
+  log.push(startMs, {case: 'run', value: run});
+  const agents = 1 + rng.int(5);
+  for (let agent = 0; agent < agents; agent++)
+    log.push(startMs + MINUTE, {case: 'agent', value: agentOf(rng, run, agent)});
+  if (rng.int(4) !== 0) {
+    const reportAt = (ms(run.endedAt) ?? options.nowMs) - (1 + rng.int(90)) * MINUTE;
+    log.push(reportAt, {case: 'message', value: reportOf(run, reportAt)});
+  }
+  if (rng.int(6) !== 0) searches.push(searchOf(rng, run.id, options.nowMs));
+}
+
 export function fleetScenario(options: FleetOptions): Scenario & {
   readonly searches: readonly SearchState[];
 } {
   const rng = new Rng(options.seed);
   const log = new ChangeLog(`${options.prefix}-run-0`);
   const searches: SearchState[] = [];
-  for (let index = 0; index < options.runs; index++) {
-    const id = `${options.prefix}-run-${index}`;
-    const live = index < options.live;
-    const startMs = options.nowMs - (live ? (1 + rng.int(60)) * HOUR : (2 + index) * HOUR * 3);
-    const endMs = live ? undefined : startMs + (1 + rng.int(40)) * HOUR;
-    const status = live
-      ? rng.int(8) === 0
-        ? RunStatus.STOPPING
-        : RunStatus.RUNNING
-      : rng.int(5) === 0
-        ? RunStatus.FAILED
-        : RunStatus.ENDED;
-    const long = options.longEvery !== undefined && index % options.longEvery === 0;
-    const name = long
-      ? `${NAMES[index % NAMES.length]} with a task name that runs on and on and on and on`
-      : (NAMES[index % NAMES.length] ?? 'run');
-    const cost = Math.round(rng.next() * 1500 * 100) / 100;
-    log.push(startMs, {
-      case: 'run',
-      value: create(RunSchema, {
-        id,
-        repository: 'decode-service',
-        task: name,
-        status,
-        leadAgentId: `${id}-lead`,
-        fanoutLimit: 4,
-        createdAt: timestampFromMs(startMs),
-        ...(endMs === undefined ? {} : {endedAt: timestampFromMs(endMs)}),
-        usage: create(UsageSchema, rng.int(10) === 0 ? {} : {costUsd: cost}),
-        ...(rng.int(3) === 0 ? {maxCostUsd: Math.ceil(cost / 100 + 1) * 100} : {}),
-      }),
-    });
-    const agents = 1 + rng.int(5);
-    for (let agent = 0; agent < agents; agent++) {
-      log.push(startMs + MINUTE, {
-        case: 'agent',
-        value: create(AgentSchema, {
-          id: `${id}-${agent === 0 ? 'lead' : `a${agent}`}`,
-          runId: id,
-          parentAgentId: agent === 0 ? '' : `${id}-lead`,
-          role: agent === 0 ? AgentRole.LEAD : AgentRole.WORKER,
-          harness: Harness.CODEX,
-          status: !live
-            ? AgentStatus.ENDED
-            : agent === 0
-              ? AgentStatus.WAITING
-              : rng.int(4) === 0
-                ? AgentStatus.IDLE
-                : AgentStatus.ACTIVE,
-          session: 1,
-          stopStage: AgentStopStage.NONE,
-          startedAt: timestampFromMs(startMs + MINUTE),
-        }),
-      });
-    }
-    if (rng.int(4) !== 0) {
-      const reportAt = (endMs ?? options.nowMs) - (1 + rng.int(90)) * MINUTE;
-      log.push(reportAt, {
-        case: 'message',
-        value: create(MessageSchema, {
-          id: `${id}-report`,
-          runId: id,
-          fromAgentId: `${id}-lead`,
-          delivery: Delivery.CONSUMED,
-          at: timestampFromMs(reportAt),
-          body: {
-            case: 'report',
-            value: create(ReportSchema, {headline: 'Progress', kind: ReportKind.PROGRESS}),
-          },
-        }),
-      });
-    }
-    if (rng.int(6) !== 0) searches.push(searchOf(rng, id, options.nowMs));
-  }
+  for (let index = 0; index < options.runs; index++) pushRun(rng, options, log, searches, index);
   return {
     runId: `${options.prefix}-run-0`,
     changes: log.changes,
