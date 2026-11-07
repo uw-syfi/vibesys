@@ -493,7 +493,12 @@ check-in's `ask_message_id` says so.
   answering, away), or the window holds more than the contract allows, the answer is `WindowFactsFailed` and
   the check-in is `FAILED` with the reason; it does not move where the viewer's next window starts. A restart
   finds the effect in the outbox and carries it out again, and a second answer for a settled check-in changes
-  nothing.
+  nothing. The job log of a live run is **read afresh** for the facts (`daemon.JobLog`, a stream of its own
+  whose first view is the whole state), after the window ended: the view the host keeps for serving follows a
+  stream and can be behind it, and a result recorded inside a window that reaches it after the facts froze
+  would be in no window. A run that is over uses its one final read. A record the host keeps that cannot be
+  read (the store) is tried five times and then fails the check-in, so a viewer's next press, which waits for
+  the last check-in to settle, is never held for ever.
 - **The ask.** A run that can be asked (live, no limit reached, its lead has not given its final report) is
   sent a `CatchUpRequest` message in the same commit that freezes the facts, so the request is worded from
   them: a template states the check-in's own figures (spend, agents, measurements, each objective's best at

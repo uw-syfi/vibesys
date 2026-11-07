@@ -43,7 +43,7 @@ func TestEveryResultIsCountedInItsWindowWhateverReachesTheKeptViewWhen(t *testin
 			case 0, 1:
 				rig.Clock.Advance(time.Duration(1+r.IntN(30)) * time.Second)
 				at := rig.Clock.Now()
-				log.Record(measure(fmt.Sprint("j", step), run.ID, at, "tput", float64(step))...)
+				log.Record(measure(fmt.Sprint("j", step), run.ID, at, "tput", float64(step)))
 				recorded = append(recorded, at)
 			case 2:
 				// The kept view catches up, sometimes.

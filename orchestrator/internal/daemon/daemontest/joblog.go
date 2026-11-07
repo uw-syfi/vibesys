@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
@@ -14,7 +13,7 @@ import (
 // chooses), while a read made now, which is what ReadJobLog is, sees every result recorded before it.
 type JobLog struct {
 	mu    sync.Mutex
-	facts []*cli.TaskFact
+	facts search.Facts
 	// Reads counts the reads made.
 	Reads int
 	// Err, when set, is what a read fails with, and Reason, when set, is why the view it returns cannot
@@ -24,7 +23,7 @@ type JobLog struct {
 }
 
 // Record adds facts to the log, as the job service does when a job ends.
-func (l *JobLog) Record(facts ...*cli.TaskFact) {
+func (l *JobLog) Record(facts search.Facts) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.facts = append(l.facts, facts...)
