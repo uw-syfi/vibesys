@@ -15,7 +15,7 @@ import {AddMachine} from './add-machine.js';
 /** Runs `effect` and hands its answer to `then`; the entry owns where it runs. */
 export type MachineDispatch = <A>(effect: Effect.Effect<A>, then: (value: A) => void) => void;
 
-/** What the Resources tab shows of the machines controls: the Add machine bar, a remove, and the toasts of a removal. */
+/** What the Machines page shows of the machines controls: the Add machine bar, a remove, and the toasts of a removal. */
 export interface MachineControls {
   /** The Add machine button, or the open input in its place. */
   readonly bar: ReactNode;

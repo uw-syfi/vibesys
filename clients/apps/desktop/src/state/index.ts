@@ -192,16 +192,16 @@ export {
   withTheme,
 } from './settings/appearance.js';
 export {
+  type MachineHost,
+  type MachineRow,
+  machineRow,
+} from './settings/machine-rows.js';
+export {
   type AddMachineEvent,
   type AddMachineState,
   addMachineStep,
   emptyAddMachine,
 } from './settings/machines.js';
-export {
-  type ResourceHost,
-  type ResourceRow,
-  resourceRow,
-} from './settings/resources.js';
 export {
   MATCH_LIMIT,
   matchAliases,
@@ -216,7 +216,6 @@ export {
   sshArgs,
   targetFromInput,
 } from './settings/ssh-target.js';
-export {SETTINGS_TABS, type SettingsTab} from './settings/tabs.js';
 export {isBack, type KeyPress} from './shell/keys.js';
 export {
   type Destination,

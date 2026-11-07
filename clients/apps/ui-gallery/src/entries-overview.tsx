@@ -80,17 +80,12 @@ export const OVERVIEW_ENTRIES: Pick<
         top={
           <>
             <RailItem icon="mark" label="Home" hideLabel press={noop} />
-            <RailItem icon="plus" label="New" press={noop} />
-            <RailItem
-              icon="grid"
-              label="Runs"
-              active
-              badge={{count: 2, label: '2 need you'}}
-              press={noop}
-            />
+            <RailItem icon="list" label="Runs" active press={noop} />
+            <RailItem icon="usage" label="Cost" press={noop} />
+            <RailItem icon="monitor" label="Machines" press={noop} />
           </>
         }
-        bottom={<RailItem icon="gear" label="Settings" press={noop} />}
+        bottom={<RailItem icon="sliders" label="Settings" press={noop} />}
       >
         <Text>The main area holds a Page.</Text>
       </RailFrame>

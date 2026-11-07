@@ -1,5 +1,5 @@
 /**
- * Where the person is in the whole app: a destination of the rail (the runs, or the settings) and,
+ * Where the person is in the whole app: a destination of the rail (the runs, the cost, the machines, or the settings) and,
  * for each, where they were last. Leaving a destination keeps its place, so Settings and back
  * returns to the run that was open. A plain reducer, so every move is a value and a test can walk
  * any sequence of them.
@@ -11,10 +11,9 @@ import {
   NO_FLEET_FILTER,
 } from '../orchestrator/fleet.js';
 import {initialRoute, type Route, type RouteAction, routeReducer} from '../route.js';
-import {SETTINGS_TABS, type SettingsTab} from '../settings/tabs.js';
 
 /** The rail's destinations. */
-export type Destination = 'runs' | 'settings';
+export type Destination = 'runs' | 'cost' | 'machines' | 'settings';
 
 /** What the run list shows and where it was left: kept while a run, or another destination, shows. */
 export interface FleetPlace extends FleetFilter {
@@ -28,8 +27,6 @@ export interface Navigation {
   readonly runs: Route;
   /** The run list's filters and selected row. Kept while a run or another destination shows. */
   readonly fleet: FleetPlace;
-  /** The tab the settings destination shows. Kept while another destination shows. */
-  readonly settingsTab: SettingsTab;
 }
 
 export type NavigationAction =
@@ -40,8 +37,11 @@ export type NavigationAction =
   | {readonly type: 'filter-runs-by-state'; readonly state: FleetState}
   /** The list's host filter: one host, or null for every host. */
   | {readonly type: 'filter-runs-by-host'; readonly host: string | null}
+  /** The rail's Cost: the cost of every run together. */
+  | {readonly type: 'open-cost'}
+  /** The rail's Machines: every machine the app is connected to. */
+  | {readonly type: 'open-machines'}
   | {readonly type: 'open-settings'}
-  | {readonly type: 'pick-settings-tab'; readonly tab: SettingsTab}
   /** Escape or Alt+Left: one step back, never out of the app. */
   | {readonly type: 'back'};
 
@@ -58,8 +58,9 @@ const KINDS = {
   'open-runs': true,
   'filter-runs-by-state': true,
   'filter-runs-by-host': true,
+  'open-cost': true,
+  'open-machines': true,
   'open-settings': true,
-  'pick-settings-tab': true,
   back: true,
 } as const satisfies Record<NavigationKind, true>;
 
@@ -70,7 +71,6 @@ export const initialNavigation: Navigation = {
   destination: 'runs',
   runs: initialRoute,
   fleet: {...NO_FLEET_FILTER, selected: null},
-  settingsTab: SETTINGS_TABS[0],
 };
 
 /**
@@ -115,7 +115,7 @@ export function navigationReducer(navigation: Navigation, action: NavigationActi
         runs: navigation.destination === 'runs' ? initialRoute : navigation.runs,
       };
     case 'filter-runs-by-state':
-      // The list's own controls: they mean nothing while a run or the settings show.
+      // The list's own controls: they mean nothing while a run or another destination shows.
       return onList(navigation)
         ? {...navigation, fleet: {...navigation.fleet, state: action.state}}
         : navigation;
@@ -123,15 +123,15 @@ export function navigationReducer(navigation: Navigation, action: NavigationActi
       return onList(navigation)
         ? {...navigation, fleet: {...navigation.fleet, host: action.host}}
         : navigation;
+    case 'open-cost':
+      return {...navigation, destination: 'cost'};
+    case 'open-machines':
+      return {...navigation, destination: 'machines'};
     case 'open-settings':
       return {...navigation, destination: 'settings'};
-    case 'pick-settings-tab':
-      return navigation.destination === 'settings'
-        ? {...navigation, settingsTab: action.tab}
-        : navigation;
     case 'back':
-      return navigation.destination === 'settings'
-        ? {...navigation, destination: 'runs'}
-        : {...navigation, runs: stepBack(navigation.runs)};
+      return navigation.destination === 'runs'
+        ? {...navigation, runs: stepBack(navigation.runs)}
+        : {...navigation, destination: 'runs'};
   }
 }
