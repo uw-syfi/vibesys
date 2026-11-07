@@ -24,6 +24,19 @@ const dayClock = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+const dayDate = new Intl.DateTimeFormat('en-US', {
+  timeZone: ZONE,
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
+
+/** `Tue Nov 3` in Seattle. */
+function dateOf(atMs: number): string {
+  const part = new Map(dayDate.formatToParts(atMs).map(each => [each.type, each.value]));
+  return `${part.get('weekday')} ${part.get('month')} ${part.get('day')}`;
+}
+
 const wallClock = new Intl.DateTimeFormat('en-US', {
   timeZone: ZONE,
   hourCycle: 'h23',
@@ -61,7 +74,9 @@ export const formatDayTime = (atMs: number): string => dayClock.format(atMs);
  */
 export function axisLabel(atMs: number, spanMs: number): string {
   if (spanMs < 600_000) return clockSeconds.format(atMs);
-  return spanMs < DAY_MS ? clock.format(atMs) : dayClock.format(atMs);
+  if (spanMs < DAY_MS) return clock.format(atMs);
+  // A tick at midnight is a day: the date alone, not a clock time that is the same on every label.
+  return (atMs + zoneOffsetMs(atMs)) % DAY_MS === 0 ? dateOf(atMs) : dayClock.format(atMs);
 }
 
 /** `14s`, `3m 05s`, `2h 10m`: how long something took, in figures that line up. */
