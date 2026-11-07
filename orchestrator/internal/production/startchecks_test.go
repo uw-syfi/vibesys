@@ -119,6 +119,19 @@ func TestCheckRepositoryAsksTheRepositoryAloneAndRefusesAsAStartDoes(t *testing.
 	}
 }
 
+// A repository with something wrong is refused with that, even by a daemon that cannot launch yet;
+// a good one on such a daemon is refused as NotReady.
+func TestCheckRepositoryNamesTheRepositoryBeforeTheDaemonsReadiness(t *testing.T) {
+	tree := fakeTree{"/repo/.git": true}
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: brokenParts("no session holder"), Tree: tree}
+	if r := refusal(t, func() error { _, err := checks.CheckRepository("/missing"); return err }()); r.NotReady || !strings.Contains(r.Reason, "/missing") {
+		t.Fatalf("a missing repository gave %+v, want the repository's refusal", r)
+	}
+	if r := refusal(t, func() error { _, err := checks.CheckRepository("/repo"); return err }()); !r.NotReady {
+		t.Fatalf("a good repository on a daemon that cannot launch gave %+v, want NotReady", r)
+	}
+}
+
 // A daemon with a part missing refuses every start, with the part's own reason, before it looks at
 // the repository.
 func TestADaemonWithAPartMissingRefusesEveryStartWithItsReason(t *testing.T) {

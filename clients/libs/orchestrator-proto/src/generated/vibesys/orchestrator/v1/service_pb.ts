@@ -1032,9 +1032,9 @@ export const OrchestratorService: GenService<{
     output: typeof WatchRunCostResponseSchema;
   },
   /**
-   * Whether a run could start in this repository, answered by the first part of the check a StartRun
-   * dispatch makes (the launcher, an absolute path that exists and is the root of a git work tree),
-   * without starting or recording anything. For the operator only; the task is not looked at, so a
+   * Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+   * makes that needs the repository alone (an absolute path that exists and is the root of a git work
+   * tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
    * client can ask while its operator is still filling in the rest.
    *
    * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.CheckRepository

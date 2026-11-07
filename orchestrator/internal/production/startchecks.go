@@ -91,17 +91,20 @@ type StartChecks struct {
 // PartsCheck is nil when every part can be used now, and otherwise says which cannot and why.
 type PartsCheck interface{ Check() error }
 
-// CheckRepository implements daemon.StartChecks: the part of a start's check that needs the
-// repository alone. It refuses a daemon with no launcher, and a repository path that is not
-// absolute, does not exist or is not the root of a git work tree, and returns the repository with
-// its symbolic links resolved.
-func (c StartChecks) CheckRepository(repository string) (string, error) {
+// ready is nil when the daemon can launch agents at all, whatever the repository holds.
+func (c StartChecks) ready() error {
 	if _, none := c.Sidecars.(NoSidecars); none {
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
+		return &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
 	}
 	if err := c.Parts.Check(); err != nil {
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + err.Error(), NotReady: true}
+		return &daemon.StartRefusal{Reason: "no agent can be launched: " + err.Error(), NotReady: true}
 	}
+	return nil
+}
+
+// path refuses a repository path that is not absolute, does not exist or is not the root of a git
+// work tree, and returns the path with its symbolic links resolved.
+func (c StartChecks) path(repository string) (string, error) {
 	refuse := func(format string, args ...any) (string, error) {
 		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
 	}
@@ -119,14 +122,30 @@ func (c StartChecks) CheckRepository(repository string) (string, error) {
 	return repository, nil
 }
 
-// CheckStart implements daemon.StartChecks. In order it refuses what CheckRepository does, a task
+// CheckRepository implements daemon.StartChecks: the part of a start's check that needs the
+// repository alone, for a path still being typed. It refuses what is wrong with the path first, so
+// an operator sees it even on a host that cannot launch agents yet, and then a daemon that cannot
+// launch. It returns the repository with its symbolic links resolved.
+func (c StartChecks) CheckRepository(repository string) (string, error) {
+	repository, err := c.path(repository)
+	if err != nil {
+		return "", err
+	}
+	return repository, c.ready()
+}
+
+// CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
+// repository path that is not absolute, does not exist or is not the root of a git work tree, a task
 // name that is not one plain folder name, a task the repository does not hold under
 // .vibesys/tasks, and a repository whose latest commit cannot feed the subagents: they work in
 // copies made from it, so it must exist and hold the task. Edits to the task's files that are not
 // committed are the lead's to judge, as its skill says. It returns the repository with its
 // symbolic links resolved.
 func (c StartChecks) CheckStart(repository, task string) (string, error) {
-	repository, err := c.CheckRepository(repository)
+	if err := c.ready(); err != nil {
+		return "", err
+	}
+	repository, err := c.path(repository)
 	if err != nil {
 		return "", err
 	}
