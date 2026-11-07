@@ -58,6 +58,26 @@ export function placeLabels(
   return kept.map(box => ({index: box.index, left: box.left}));
 }
 
+/**
+ * Whether every label of an axis `width` pixels wide can be drawn centred on its own share: none
+ * reaches past either end and none comes within `gap` of its neighbour. `labels` come in order.
+ */
+export function labelsFit(
+  labels: readonly AxisLabel[],
+  width: number,
+  glyph: number = SECTION_GLYPH,
+  gap: number = LABEL_GAP,
+): boolean {
+  let right = Number.NEGATIVE_INFINITY;
+  for (const label of labels) {
+    const own = label.text.length * glyph;
+    const left = label.share * width - own / 2;
+    if (left < 0 || left + own > width || left < right + gap) return false;
+    right = left + own;
+  }
+  return true;
+}
+
 /** A zero width is no layout at all (a hidden element, a test renderer): treat it as unmeasured. */
 function measured(width: number): number | null {
   return width > 0 ? width : null;

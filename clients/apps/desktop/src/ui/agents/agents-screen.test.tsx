@@ -4,7 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {applyChange, type Branch, emptyState, spawnTree} from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {AgentsScreen, guidesOf} from './agents-screen.js';
-import {axisLabel, formatDayTime, formatSpan, formatTime, formatUsd} from './time.js';
+import {axisLabel, formatDayTime, formatSpan, formatTime, formatUsd, zoneOffsetMs} from './time.js';
 
 const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object|NaN/;
 
@@ -103,6 +103,42 @@ describe('moments and spans', () => {
     expect(axisLabel(atMs, 60_000)).toBe('10:30:05 AM');
     expect(axisLabel(atMs, 3_600_000)).toBe('10:30 AM');
     expect(axisLabel(atMs, 3 * 86_400_000)).toBe('Tue 10:30 AM');
+    expect(axisLabel(Date.UTC(2026, 10, 3, 8), 3 * 86_400_000)).toBe('Tue Nov 3');
+  });
+
+  it('labels a tick at Seattle midnight on a day axis with its date and no clock time', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({min: 18_000, max: 21_000}),
+        fc.integer({min: 86_400_000, max: 40 * 86_400_000}),
+        (day, span) => {
+          // The midnight that starts Seattle's day number `day` since the epoch.
+          const guess = day * 86_400_000;
+          const midnight = guess - zoneOffsetMs(guess);
+          const label = axisLabel(midnight, span);
+          expect(label).not.toMatch(/\d:\d\d/);
+          expect(label).toMatch(/^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}$/);
+        },
+      ),
+    );
+  });
+
+  it('knows how far Seattle is from UTC, in daylight time and out of it, so a day axis ticks at its midnights', () => {
+    expect(zoneOffsetMs(Date.UTC(2026, 6, 1, 12))).toBe(-7 * 3_600_000);
+    expect(zoneOffsetMs(Date.UTC(2026, 10, 3, 12))).toBe(-8 * 3_600_000);
+    fc.assert(
+      fc.property(fc.integer({min: 1_600_000_000_000, max: 1_900_000_000_000}), atMs => {
+        const offset = zoneOffsetMs(atMs);
+        expect([-7, -8]).toContain(offset / 3_600_000);
+        expect(formatTime(atMs + 0)).toBe(
+          new Date(atMs + offset).toLocaleTimeString('en-US', {
+            timeZone: 'UTC',
+            hour: 'numeric',
+            minute: '2-digit',
+          }),
+        );
+      }),
+    );
   });
 
   it('writes spans in figures of equal width and never negative', () => {

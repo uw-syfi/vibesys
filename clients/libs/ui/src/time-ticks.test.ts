@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {fittedTimeTicks, placeLabels, timeTicks} from './index.js';
+import {fittedTimeTicks, labelsFit, placeLabels, timeTicks} from './index.js';
 
 /** A small seeded generator, so a failing case repeats. */
 function random(seed: number): () => number {
@@ -89,5 +89,32 @@ describe('fittedTimeTicks', () => {
       width => fittedTimeTicks(from, to, width, label).length,
     );
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
+  });
+
+  test('keep every label centred inside the axis and clear of its neighbours, with no sliding', () => {
+    const next = random(21);
+    for (let trial = 0; trial < 400; trial += 1) {
+      const [from, to] = spanOf(next);
+      const width = 60 + next() * 1500;
+      const ticks = fittedTimeTicks(from, to, width, label);
+      expect(
+        labelsFit(
+          ticks.map(tick => ({share: (tick.at - from) / (to - from), text: tick.label})),
+          width,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test('tick a day axis at the midnights of the clock it is given, whatever its offset', () => {
+    const next = random(33);
+    for (let trial = 0; trial < 300; trial += 1) {
+      const [from] = spanOf(next);
+      const to =
+        from + (2 + Math.floor(next() * 12)) * 86_400_000 + Math.floor(next() * 40_000_000);
+      const offset = (Math.floor(next() * 48) - 24) * 1_800_000;
+      const ticks = fittedTimeTicks(from, to, 1200, label, () => offset);
+      for (const tick of ticks) expect((tick.at + offset) % 3_600_000).toBe(0);
+    }
   });
 });

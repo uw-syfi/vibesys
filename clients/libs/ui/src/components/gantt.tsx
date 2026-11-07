@@ -8,7 +8,7 @@ import {Icon} from './icon.js';
 import {placeLabels, useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
-import {fittedTimeTicks} from './time-ticks.js';
+import {fittedTimeTicks, type ZoneOffset} from './time-ticks.js';
 import {useWindowed} from './windowing.js';
 
 /**
@@ -75,9 +75,14 @@ export interface GanttTick {
   readonly label: string;
 }
 
-/** A time axis the Gantt ticks itself, at even, tidy intervals that fit its width, labelled by `label`. */
+/**
+ * A time axis the Gantt ticks itself, at even, tidy intervals that fit its width, labelled by `label`.
+ * Ticks of an hour or more fall on whole hours and days of the clock whose offset from UTC `zone`
+ * tells (UTC when it is not given), the clock `label` writes in.
+ */
 export interface GanttAxis {
   readonly label: (at: number, spanMs: number) => string;
+  readonly zone?: ZoneOffset;
 }
 
 /** The part of the axis in view. */
@@ -228,14 +233,15 @@ function AxisRow(props: {
 }): JSX.Element {
   const {view} = props;
   const [measure, width] = useInlineSize();
-  // An axis of tidy time ticks is drawn to the width it has; explicit ticks are filtered to the view.
-  const shown =
-    'label' in props.ticks
-      ? fittedTimeTicks(view.from, view.to, width, props.ticks.label)
-      : props.ticks.filter(tick => tick.at >= view.from && tick.at <= view.to);
-  // Once the track is measured only the labels that can be read side by side are drawn.
+  // A time axis draws each tick centred on its moment, at the width it has. Given ticks are
+  // filtered to the view and, once the track is measured, only those that can be read side by side stay.
+  const ticks = props.ticks;
+  const timed = 'label' in ticks;
+  const shown = timed
+    ? fittedTimeTicks(view.from, view.to, width, ticks.label, ticks.zone)
+    : ticks.filter(tick => tick.at >= view.from && tick.at <= view.to);
   const placed =
-    width === null
+    width === null || timed
       ? null
       : placeLabels(
           shown.map(tick => ({share: shareOf(tick.at, view.from, view.to), text: tick.label})),
@@ -264,6 +270,7 @@ function AxisRow(props: {
               key={tick.at}
               className="vs-gantt-tick"
               data-placed={left === null ? undefined : ''}
+              data-centred={timed || undefined}
               style={place}
             >
               {tick.label}

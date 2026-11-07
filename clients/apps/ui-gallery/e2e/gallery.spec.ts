@@ -321,3 +321,61 @@ test('disabled buttons keep their appearance when hovered', async ({page}) => {
     expect(await appearance()).toEqual(idle);
   }
 });
+
+test('the section navigation of a narrow page has one highlight per item, apart, on the content edge', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 480, height: 800});
+  for (const theme of await themeNames(page)) {
+    await open(page, theme);
+    const entry = page.locator('[data-gallery-entry="SectionLayout"]');
+    const second = entry.getByRole('button', {name: 'Machines'});
+    await second.scrollIntoViewIfNeeded();
+    await second.hover();
+    const read = () =>
+      entry.evaluate(element => {
+        const box = (target: Element) => target.getBoundingClientRect();
+        const paint = (target: Element) => getComputedStyle(target).backgroundColor;
+        const nav = element.querySelector('.vs-section-nav');
+        const content = element.querySelector('.vs-section-content');
+        if (nav === null || content === null) throw new Error('the section layout is not drawn');
+        const items = Array.from(nav.querySelectorAll('.vs-sidebar-item')).map(item => ({
+          rect: box(item).toJSON(),
+          itemPaint: paint(item),
+          linkPaint: paint(item.querySelector('.vs-sidebar-link') ?? item),
+        }));
+        return {
+          items,
+          navLeft: box(nav).left,
+          contentLeft: box(content).left,
+          gap: Number.parseFloat(getComputedStyle(nav).columnGap),
+        };
+      });
+    const drawn = await read();
+    expect(drawn.items).toHaveLength(3);
+    // One shape per item: the press target inside it paints nothing, hovered or not.
+    for (const item of drawn.items)
+      expect(item.linkPaint, `${theme}: link paint`).toBe('rgba(0, 0, 0, 0)');
+    // The hovered item is the one highlight; the others in the row are not painted.
+    expect(drawn.items[1]?.itemPaint).not.toBe('rgba(0, 0, 0, 0)');
+    // Highlights never touch: neighbours in a row, or in a column, are a group gap apart.
+    expect(drawn.gap).toBeGreaterThanOrEqual(8);
+    drawn.items.slice(1).forEach((item, index) => {
+      const before = drawn.items[index]?.rect;
+      if (before === undefined) return;
+      const apart =
+        item.rect.top >= before.bottom
+          ? item.rect.top - before.bottom
+          : item.rect.left - before.right;
+      expect(apart, `${theme}: items ${index} and ${index + 1}`).toBeGreaterThanOrEqual(
+        drawn.gap - 0.5,
+      );
+    });
+    // The navigation and its first item share the content's left edge.
+    expect(Math.abs(drawn.navLeft - drawn.contentLeft), `${theme}: nav edge`).toBeLessThan(0.5);
+    expect(
+      Math.abs((drawn.items[0]?.rect.left ?? 0) - drawn.contentLeft),
+      `${theme}: item edge`,
+    ).toBeLessThan(0.5);
+  }
+});
