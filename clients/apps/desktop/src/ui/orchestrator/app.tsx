@@ -1,13 +1,14 @@
 import {Page, pageState, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {
-  CommandProgress,
-  FeedStatus,
-  HostConnectionState,
-  HostModel,
-  Route,
-  RouteAction,
-  RunView,
+import {
+  type CommandProgress,
+  type FeedStatus,
+  freshnessOf,
+  type HostConnectionState,
+  type HostModel,
+  type Route,
+  type RouteAction,
+  type RunView,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -19,7 +20,9 @@ import {StartRunForm} from './start-run-form.js';
 
 const TITLE = 'Runs';
 const RUN_TITLES = {
+  report: 'Report',
   timeline: 'Search and activity',
+  agents: 'Agents',
   cost: 'Cost',
   handoffs: 'Handoffs and reports',
   ideas: 'Ideas',
@@ -37,6 +40,8 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
+  /** The status of each run's cost stream a screen has open, by run id. */
+  readonly costFeeds: Readonly<Record<string, FeedStatus>>;
 }
 
 /** What the person has asked for, how it is going, and the ways to ask for more. */
@@ -68,6 +73,60 @@ function runsNote(host: HostSnapshot, retry: (host: string) => void): Connection
   };
 }
 
+/** The title of a run's page: its name alone on the report, else the name and what is open. */
+function runTitle(
+  state: HostSnapshot['model']['data'],
+  route: Extract<Route, {screen: 'run'}>,
+  names: ReturnType<typeof agentNames>,
+): string {
+  const task = state.runs[route.runId]?.task ?? 'Run';
+  const agent = route.agentId === null ? undefined : state.agents[route.agentId];
+  if (agent !== undefined) return `${task}: ${nameOf(names, agent)}`;
+  return route.view === 'report' ? task : `${task}: ${RUN_TITLES[route.view]}`;
+}
+
+/** The list of every connected host's runs, and the form that starts one. */
+function RunsPage(props: {
+  readonly hosts: readonly HostSnapshot[];
+  readonly commands: AppCommands;
+  readonly retryHost: (host: string) => void;
+  readonly go: (action: RouteAction) => void;
+}): JSX.Element {
+  const {hosts, commands, go} = props;
+  return (
+    <Page
+      key="runs"
+      width="wide"
+      state={pageState(hosts.length === 0)}
+      header={
+        <Text variant="title">
+          {hosts.some(host => host.connection._tag === 'Unusable')
+            ? 'Runs unavailable'
+            : commands.start?._tag === 'Refused'
+              ? 'Start run refused'
+              : TITLE}
+        </Text>
+      }
+    >
+      <Stack gap="space-4">
+        <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
+        <StartRunForm
+          hosts={hosts.map(({key, label}) => ({key, label}))}
+          progress={commands.start}
+          start={commands.startRun}
+          retry={commands.retryStart}
+          openRun={(host, runId) => go({type: 'open-run', host, runId})}
+        />
+        <RunList
+          unreadHosts={hosts.filter(host => host.runsFeed._tag !== 'Live').map(host => host.label)}
+          hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
+          open={(host, runId) => go({type: 'open-run', host, runId})}
+        />
+      </Stack>
+    </Page>
+  );
+}
+
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
 export function OrchestratorApp(props: {
   readonly hosts: readonly HostSnapshot[];
@@ -82,40 +141,7 @@ export function OrchestratorApp(props: {
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
-    return (
-      <Page
-        key="runs"
-        width="wide"
-        state={pageState(hosts.length === 0)}
-        header={
-          <Text variant="title">
-            {hosts.some(host => host.connection._tag === 'Unusable')
-              ? 'Runs unavailable'
-              : commands.start?._tag === 'Refused'
-                ? 'Start run refused'
-                : TITLE}
-          </Text>
-        }
-      >
-        <Stack gap="space-4">
-          <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
-          <StartRunForm
-            hosts={hosts.map(({key, label}) => ({key, label}))}
-            progress={commands.start}
-            start={commands.startRun}
-            retry={commands.retryStart}
-            openRun={(host, runId) => go({type: 'open-run', host, runId})}
-          />
-          <RunList
-            unreadHosts={hosts
-              .filter(host => host.runsFeed._tag !== 'Live')
-              .map(host => host.label)}
-            hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
-            open={(host, runId) => go({type: 'open-run', host, runId})}
-          />
-        </Stack>
-      </Page>
-    );
+    return <RunsPage hosts={hosts} commands={commands} retryHost={props.retryHost} go={go} />;
   }
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
@@ -129,7 +155,6 @@ export function OrchestratorApp(props: {
   const {runId} = route;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const names = agentNames(state, runId);
-  const title = `${state.runs[runId]?.task ?? 'Run'}: ${agent === undefined ? RUN_TITLES[route.view] : nameOf(names, agent)}`;
   const notes = [
     runsNote(host, props.retryHost),
     ...(agent === undefined
@@ -146,7 +171,12 @@ export function OrchestratorApp(props: {
         ]),
   ];
   return (
-    <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
+    <Page
+      key="run"
+      width="fill"
+      state="ready"
+      header={<Text variant="title">{runTitle(state, route, names)}</Text>}
+    >
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />
         <RunScreen
@@ -154,6 +184,8 @@ export function OrchestratorApp(props: {
           host={host.label}
           runId={runId}
           nowMs={props.nowMs}
+          freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
+          costFeed={host.costFeeds[runId] ?? ({_tag: 'Opening'} as const)}
           view={route.view}
           agentId={route.agentId}
           stopProgress={commands.stop[runId]}

@@ -276,7 +276,26 @@
 /* --- chart: drawn in pixels, as wide as its box ------------------------------------------------------- */
 
 .vs-chart-box {
+  position: relative;
   min-width: 0;
+}
+/*
+ * A reference's label when it carries a hint: HTML over the drawing, at the right end of its line,
+ * so the hint opens as a chip's does (inputs.css). It is placed by the chart in pixels of the plot.
+ */
+.vs-chart-reference-label {
+  position: absolute;
+  /* Above its line by its own height and a gap. Not a transform: a transformed element would
+     become the containing block of the fixed hint drawn from it. */
+  top: calc(var(--reference-top) - var(--text-section-line) - var(--space-1));
+  right: var(--reference-right);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--text-section-line);
+  white-space: nowrap;
+  cursor: help;
 }
 .vs-chart {
   display: block;

@@ -261,9 +261,20 @@ function Caption(props: {
   );
 }
 
-/** Dashed reference lines, each labelled at its right end. */
+/**
+ * A dashed line across the plot at `y`, labelled at its right end. With a `hint` the label is a
+ * control the pointer or the keyboard focus opens an account on (the line's provenance: what the
+ * value is and who said so); without one it is drawn text.
+ */
+export interface ChartReference {
+  readonly y: number;
+  readonly label: string;
+  readonly hint?: string;
+}
+
+/** Dashed reference lines, each labelled at its right end (a hinted one's label is HTML). */
 function References(props: {
-  readonly lines: readonly {readonly y: number; readonly label: string}[];
+  readonly lines: readonly ChartReference[];
   readonly plot: Plot;
   readonly at: Scale;
 }): JSX.Element {
@@ -279,14 +290,63 @@ function References(props: {
             y1={at.y(line.y)}
             y2={at.y(line.y)}
           />
-          <text className="vs-chart-label" x={plot.right - 6} y={at.y(line.y) - 6} textAnchor="end">
-            {line.label}
-          </text>
+          {line.hint === undefined ? (
+            <text
+              className="vs-chart-label"
+              x={plot.right - 6}
+              y={at.y(line.y) - 6}
+              textAnchor="end"
+            >
+              {line.label}
+            </text>
+          ) : null}
         </g>
       ))}
     </>
   );
 }
+
+/**
+ * The labels of the references that carry a hint, over the drawing at the right end of their lines.
+ * They are HTML, so the hint can be drawn as a chip's is (under the label, on hover and on focus) and
+ * a keyboard reaches it.
+ */
+function ReferenceLabels(props: {
+  readonly lines: readonly ChartReference[];
+  readonly plot: Plot;
+  readonly at: Scale;
+  readonly width: number;
+}): JSX.Element {
+  const {plot, at} = props;
+  return (
+    <>
+      {props.lines.flatMap(line => {
+        if (line.hint === undefined) return [];
+        const style: StyleWithVars = {
+          '--reference-top': `${at.y(line.y)}px`,
+          '--reference-right': `${props.width - plot.right + REFERENCE_INSET}px`,
+        };
+        const hint = line.hint;
+        return [
+          <span
+            key={`${line.label}:${line.y}`}
+            className="vs-chart-reference-label"
+            style={style}
+            // As a chip's hint: the provenance is information a keyboard and a screen reader must
+            // reach, which a `title` is not, so a label with a hint is a tab stop. It is no button.
+            tabIndex={hint === undefined ? undefined : 0}
+            aria-description={hint}
+          >
+            {line.label}
+          </span>,
+        ];
+      })}
+    </>
+  );
+}
+
+/** How far a reference's label stands from the plot's right edge, as the drawn label does. */
+const REFERENCE_INSET = 6;
 
 /** What stands on and under the x axis besides its labels: the marks on it, and the caption. */
 function Footer(props: {
@@ -320,7 +380,7 @@ interface ChartProps {
   /** What the line's first step is of (`Input`), written above it. */
   readonly start?: string;
   /** Dashed lines, each labelled at the right end. */
-  readonly references?: readonly {readonly y: number; readonly label: string}[];
+  readonly references?: readonly ChartReference[];
   /** Where the reader stands on the x axis: a line there, and the dots and line after it dimmed. */
   readonly cursor?: number;
   /** Small marks on the x axis, at these x values. */
@@ -393,6 +453,7 @@ export function Chart(props: ChartProps): JSX.Element {
   const xTicks = props.xTicks ?? [];
   const yTicks = props.yTicks ?? [];
   const marks = props.marks ?? [];
+  const references = props.references ?? [];
   const [measure, measured] = useInlineSize();
   const [tip, setTip] = useState<Told>();
   const clip = useId().replaceAll(':', '');
@@ -424,7 +485,7 @@ export function Chart(props: ChartProps): JSX.Element {
           caption={props.caption}
           markLabel={props.markLabel}
         />
-        <References lines={props.references ?? []} plot={plot} at={at} />
+        <References lines={references} plot={plot} at={at} />
         {first === undefined || props.start === undefined ? null : (
           <text className="vs-chart-label" x={plot.left + 6} y={at.y(first.y) - 8}>
             {props.start}
@@ -457,6 +518,7 @@ export function Chart(props: ChartProps): JSX.Element {
         )}
         {tip === undefined ? null : <Tip tip={tip} plot={plot} />}
       </svg>
+      <ReferenceLabels lines={references} plot={plot} at={at} width={width} />
     </div>
   );
 }
@@ -572,7 +634,17 @@ function Point(props: {
       />
     </>
   );
-  if (id === undefined || pick === undefined) return <g>{body}</g>;
+  if (id === undefined || pick === undefined) {
+    // A point nothing opens still says what it is: its tip, on hover.
+    return said === undefined ? (
+      <g>{body}</g>
+    ) : (
+      // biome-ignore lint/a11y/noStaticElementInteractions: hover only names a point, which a picked point also does through its label; there is no action to give a role to. Alternatives: a focusable role for a point with no action (a tab stop that does nothing), or no hover for it (a chart of points no one can name).
+      <g onMouseEnter={enter} onMouseLeave={leave}>
+        {body}
+      </g>
+    );
+  }
   return (
     // biome-ignore lint/a11y/useSemanticElements: an SVG point cannot be a <button>; the group carries the button role, name, state and keys instead.
     <g

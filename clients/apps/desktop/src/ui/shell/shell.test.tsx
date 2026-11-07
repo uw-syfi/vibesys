@@ -32,6 +32,7 @@ const host: HostSnapshot = {
   connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  costFeeds: {},
 };
 const resources: readonly ResourceRow[] = [
   {key: 'local', label: 'This machine', connection: 'connected', freshness: 'live'},
@@ -123,7 +124,8 @@ describe('the window shell', () => {
     expect(screen.controls('Runs').length).toBeGreaterThan(1);
     screen.press(screen.control('Settings'));
     screen.press(screen.control('Runs'));
-    expect(screen.controls('Timeline')).toHaveLength(1);
+    // The run opens on its report, whose agents card is the way to the agents.
+    expect(screen.controls('Open agents')).toHaveLength(1);
     screen.unmount();
   });
 
@@ -149,6 +151,7 @@ describe('the window shell', () => {
       return first;
     };
     screen.press(row());
+    screen.press(screen.control('Open agents'));
     const [agent] = screen.container.querySelectorAll<HTMLElement>('[role="treeitem"]');
     if (agent === undefined) throw new Error('the run lists no agent');
     screen.press(agent);

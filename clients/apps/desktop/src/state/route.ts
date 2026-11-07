@@ -2,7 +2,7 @@
  * Where the user is: the run list, or one run with an agent picked and one of its views. A plain
  * reducer, so every move is a value and a test can walk any sequence of them.
  */
-export type RunView = 'timeline' | 'cost' | 'handoffs' | 'ideas';
+export type RunView = 'report' | 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas';
 
 export type Route =
   | {readonly screen: 'runs'}
@@ -31,7 +31,7 @@ export function routeReducer(route: Route, action: RouteAction): Route {
         screen: 'run',
         host: action.host,
         runId: action.runId,
-        view: 'timeline',
+        view: 'report',
         agentId: null,
       };
     case 'close-run':

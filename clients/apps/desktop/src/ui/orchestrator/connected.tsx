@@ -56,12 +56,24 @@ const watchAgent = (
       get(found.session.agents.watch(agentId));
   });
 
+/** One run's cost stream on its host, followed while this is mounted (while the report shows). */
+const watchCost = (
+  hosts: readonly ConnectedHost[],
+  host: string | undefined,
+  runId: string | undefined,
+): Atom.Atom<void> =>
+  Atom.make(get => {
+    const found = hosts.find(candidate => candidate.key === host);
+    if (found !== undefined && runId !== undefined) get(found.session.costs.watch(runId));
+  });
+
 /** Everything the screens show, read from the sessions. */
 const snapshots = (
   hosts: readonly ConnectedHost[],
   issues: Issues,
   openHost: string | undefined,
   openAgent: string | null | undefined,
+  costRun: string | undefined,
 ): Atom.Atom<{
   readonly hosts: readonly HostSnapshot[];
   readonly progress: AppCommandsProgress;
@@ -91,6 +103,10 @@ const snapshots = (
           openHost === key && openAgent !== null && openAgent !== undefined
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
             : {},
+        costFeeds:
+          openHost === key && costRun !== undefined
+            ? {[costRun]: get(session.costs.status(costRun))}
+            : {},
       })),
       progress: {
         start: progressOf(issues.start),
@@ -117,12 +133,15 @@ export function ConnectedApp(props: {
   const {hosts, dispatch, route, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
+  // The cost is followed only while the report that shows it is on screen.
+  const costRun = route.screen === 'run' && route.view === 'report' ? route.runId : undefined;
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
+  useAtomMount(useMemo(() => watchCost(hosts, openHost, costRun), [hosts, openHost, costRun]));
   const clock = useAtomValue(nowMs);
   const view = useAtomValue(
     useMemo(
-      () => snapshots(hosts, issues, openHost, openAgent),
-      [hosts, issues, openHost, openAgent],
+      () => snapshots(hosts, issues, openHost, openAgent, costRun),
+      [hosts, issues, openHost, openAgent, costRun],
     ),
   );
   const sessionOf = (host: string): HostSession | undefined =>

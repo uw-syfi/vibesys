@@ -51,10 +51,15 @@ export const initialNavigation: Navigation = {
   settingsTab: SETTINGS_TABS[0],
 };
 
-/** One step back inside the runs: the agent first, then the run. */
+/**
+ * One step back inside the runs: the agent first, then a screen of the run's own back to its report,
+ * then the run itself (the report is where a run opens, so it is the last step before the list).
+ */
 function stepBack(route: Route): Route {
   if (route.screen === 'runs') return route;
-  return routeReducer(route, route.agentId === null ? {type: 'close-run'} : {type: 'close-agent'});
+  if (route.agentId !== null) return routeReducer(route, {type: 'close-agent'});
+  if (route.view !== 'report') return routeReducer(route, {type: 'show', view: 'report'});
+  return routeReducer(route, {type: 'close-run'});
 }
 
 export function navigationReducer(navigation: Navigation, action: NavigationAction): Navigation {

@@ -16,6 +16,12 @@ export interface ParetoPoint extends Tradeoff {
   /** What hovering names it; its `id` if absent. */
   readonly label?: string;
   readonly state: ParetoState;
+  /**
+   * Whether the caller's source says no other measured point beats this one. When any point of the
+   * chart says so (true or false) the chart draws the frontier it is told and works out none; a
+   * chart whose points say nothing works it out from the two axes, as of the `cursor`.
+   */
+  readonly onFrontier?: boolean;
 }
 
 /** What one axis measures, in what unit, and which way is better. */
@@ -213,6 +219,12 @@ export function ParetoChart(props: {
   readonly y: ParetoAxis;
   readonly cursor?: number;
   readonly highlighted?: readonly string[];
+  /**
+   * Whether the frontier's points are joined by a staircase (true unless false). A frontier told by
+   * the caller over more than two objectives is not a staircase on any two of them: its points are
+   * marked and not joined.
+   */
+  readonly joined?: boolean;
   readonly size?: ParetoSize;
   /** Whether the chart draws its own key under it (the roles of its points); true unless false. */
   readonly legend?: boolean;
@@ -232,7 +244,10 @@ export function ParetoChart(props: {
   const cursor = props.cursor ?? Number.POSITIVE_INFINITY;
   const seen = points.filter(p => p.time <= cursor);
   const competing = seen.filter(p => p.state !== 'failed');
-  const frontier = frontierAt(competing, {x: x.direction, y: y.direction}, cursor);
+  const told = points.some(p => p.onFrontier !== undefined);
+  const frontier = told
+    ? competing.filter(p => p.onFrontier === true)
+    : frontierAt(competing, {x: x.direction, y: y.direction}, cursor);
   const onFrontier = new Set(frontier.map(p => p.id));
   // Left to right: the end with the worst x, which has the best y, first.
   const placed = [...frontier]
@@ -260,7 +275,7 @@ export function ParetoChart(props: {
         aria-label={`${props.label}. ${frontier.length} of ${competing.length} passed points are on the frontier.`}
       >
         <Axes frame={frame} x={x} y={y} height={height} />
-        {frontier.some(point => point.state !== 'input') ? (
+        {props.joined !== false && frontier.some(point => point.state !== 'input') ? (
           <path className="vs-pareto-frontier" d={staircase(placed, plot)} />
         ) : null}
         {drawn.map(point => (
