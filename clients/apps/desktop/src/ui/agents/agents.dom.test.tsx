@@ -176,6 +176,16 @@ describe('an agent page', () => {
     expect(shown(state)).not.toContain('not shown');
   });
 
+  it('counts its turns in the singular for one', () => {
+    for (const agent of Object.values(state.agents)) {
+      const screen = page(agent);
+      const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
+      expect(screen.container.textContent).not.toContain('1 turns');
+      expect(screen.container.textContent).toContain(`${turns} ${turns === 1 ? 'turn' : 'turns'}`);
+      screen.unmount();
+    }
+  });
+
   it('names its place in the spawn tree only when it has one: the lead is at the top', () => {
     const lead = Object.values(state.agents).find(agent => agent.parentAgentId === '');
     const child = Object.values(state.agents).find(agent => agent.parentAgentId !== '');

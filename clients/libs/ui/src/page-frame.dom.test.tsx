@@ -327,6 +327,11 @@ describe('Gantt columns', () => {
     );
   });
 
+  test('drops the machine column in a narrow window, so the bars keep a track', () => {
+    const tree = css('gantt-tree.css');
+    expect(tree).toMatch(/@media \(max-width: 760px\)[^@]*\.vs-gantt-tag\s*\{\s*display:\s*none/);
+  });
+
   test('gives the track the room a tag and a name do not need', () => {
     const tree = css('gantt-tree.css');
     expect(tree).toMatch(

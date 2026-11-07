@@ -99,7 +99,7 @@ export function MessageBox(props: {
   return (
     <Card section={`Message ${roleWord(props.agent.role)}`}>
       <Stack gap="space-3">
-        <Field label="Your message" help={capabilityLine(props.agent)}>
+        <Field label="Your message">
           <TextInput
             value={shown}
             change={setDraft}
@@ -111,6 +111,7 @@ export function MessageBox(props: {
           <Button
             text={sending ? 'Sending' : 'Send'}
             label="Send message"
+            hint={capabilityLine(props.agent)}
             variant="primary"
             press={() => {
               setDraft(shown);

@@ -8,6 +8,18 @@
     1fr
     var(--gantt-figure);
 }
+/* A narrow window gives the bars the room of the machine column, which says the same on every row. */
+@media (max-width: 760px) {
+  .vs-gantt[data-tags] .vs-gantt-row {
+    grid-template-columns:
+      clamp(calc(var(--gantt-label) * 0.55), 30%, var(--gantt-label-max))
+      1fr
+      var(--gantt-figure);
+  }
+  .vs-gantt[data-tags] .vs-gantt-tag {
+    display: none;
+  }
+}
 .vs-gantt-seg[data-kind="err"] {
   background: var(--err);
 }

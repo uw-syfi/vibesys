@@ -39,9 +39,11 @@ function Placement(props: {
           {`${formatDayTime(from)} to ${formatDayTime(to)}`}
         </Text>
         <Text variant="small" tone="muted">
-          {[formatSpan(to - from), ...(cost === '' ? [] : [cost]), `${props.turns} turns`].join(
-            ' · ',
-          )}
+          {[
+            formatSpan(to - from),
+            ...(cost === '' ? [] : [cost]),
+            `${props.turns} ${props.turns === 1 ? 'turn' : 'turns'}`,
+          ].join(' · ')}
         </Text>
       </Row>
     </Card>
