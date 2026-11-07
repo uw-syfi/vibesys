@@ -86,6 +86,7 @@ const snapshots = (
         label,
         model: get(session.model),
         connection: get(session.connection.state),
+        freshness: get(session.connection.freshness),
         runsFeed: get(session.runs.status),
         agentFeeds:
           openHost === key && openAgent !== null && openAgent !== undefined

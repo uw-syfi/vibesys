@@ -77,6 +77,23 @@ clock, start no work and import no Effect services. Display text is never an
 input to a control decision. A full state replaces the previous state only at
 its committed boundary; ordered changes apply after it.
 
+### Link liveness
+
+How long a phase may take and whether the link is alive are different questions, answered
+separately. Each phase of dialing a host has the bound that fits what it waits for: bringing
+the ssh link up and short commands by the clock, the copy of the host program by its progress
+(a chunk not accepted within a stall window ends it, a slow copy that keeps moving never is),
+and the handshake once the program runs. Nothing bounds a dial as a whole, so a slow first
+connection finishes. An open session is alive while bytes arrive from the host, however slowly.
+A session silent for a window is probed with the handshake; one silent through a second window
+is lost and redialed, so a hung link is noticed within the silence bound (`state/liveness.ts`).
+
+The end of a call separates a lost link from a refusal. A stream that ends with no gRPC status,
+a closed socket and an ssh exit are a lost link, which the reconnect policy redials. A status is
+the host's own word and is shown as such, never retried. The connection exposes each host's
+freshness as data (live, reconnecting or stale, and when the host last spoke); screens show it and
+compute nothing from the clock.
+
 Dependency rules keep pure state free of effects, services free of the renderer
 and main process, and the renderer free of main-process and preload internals.
 Lint rules restrict ambient time, randomness, Promise APIs and execution of

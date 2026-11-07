@@ -47,8 +47,8 @@ export interface FakeGateway {
   /** End every open connection, as a dropped link does. */
   drop(): void;
   /**
-   * Stop delivering bytes in both directions on every connection, open or new, as a link that
-   * hangs does: nothing is lost and nothing arrives. Calls issued after it are never received.
+   * Stop delivering bytes in both directions on every connection open now, as a link that hangs
+   * does: nothing is lost and nothing arrives. A connection made afterwards is healthy.
    */
   hang(): void;
   /** Deliver what a hang held back, and carry on. */
@@ -57,11 +57,11 @@ export interface FakeGateway {
   onCall: ((call: FakeCall) => void) | undefined;
 }
 
-/** A pipe that holds every chunk back while `held()` says so. */
-function gate(held: () => boolean, waiting: Set<() => void>): Transform {
+/** A pipe that holds every chunk back while its connection is hung. */
+function gate(hold: {held: boolean}, waiting: Set<() => void>): Transform {
   return new Transform({
     transform(chunk, _encoding, callback) {
-      if (!held()) return callback(null, chunk);
+      if (!hold.held) return callback(null, chunk);
       const release = (): void => callback(null, chunk);
       waiting.add(release);
     },
@@ -69,9 +69,9 @@ function gate(held: () => boolean, waiting: Set<() => void>): Transform {
 }
 
 /** A pair of duplexes wired back to back through pipes that a hang can hold. */
-function duplexPair(held: () => boolean, waiting: Set<() => void>): [Duplex, Duplex] {
-  const aToB = gate(held, waiting);
-  const bToA = gate(held, waiting);
+function duplexPair(hold: {held: boolean}, waiting: Set<() => void>): [Duplex, Duplex] {
+  const aToB = gate(hold, waiting);
+  const bToA = gate(hold, waiting);
   return [
     Duplex.from({readable: bToA, writable: aToB}),
     Duplex.from({readable: aToB, writable: bToA}),
@@ -152,14 +152,14 @@ export function fakeGateway(): FakeGateway {
   const calls: FakeCall[] = [];
   const methods: string[] = [];
   const waiting = new Set<() => void>();
-  let hung = false;
+  const holds = new Set<{held: boolean}>();
   const gateway: FakeGateway = {
     onCall: undefined,
     hang: () => {
-      hung = true;
+      for (const hold of holds) hold.held = true;
     },
     resume: () => {
-      hung = false;
+      for (const hold of holds) hold.held = false;
       const release = [...waiting];
       waiting.clear();
       for (const next of release) next();
@@ -168,7 +168,9 @@ export function fakeGateway(): FakeGateway {
     calls,
     methods,
     connect: () => {
-      const [client, peer] = duplexPair(() => hung, waiting);
+      const hold = {held: false};
+      holds.add(hold);
+      const [client, peer] = duplexPair(hold, waiting);
       // Destroying one end aborts the pair; no one is left to read that as a fault.
       client.on('error', () => {});
       peer.on('error', () => {});
