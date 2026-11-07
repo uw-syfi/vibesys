@@ -347,7 +347,13 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, 
 		return nil, true, nil
 	}
 	spec := job.Spec
-	spec.Environment = queuedEnvironment(spec)
+	if spec.Environment == core.EnvironmentAuto {
+		// A submission decides the environment before it queues the job (keyFlow, placeFlow), so only
+		// a command job queued by an older daemon has none. Guessing the host would run a task with a
+		// Dockerfile outside its image, without the tools the image has, so the job is refused.
+		return nil, false, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"job %s was queued without an environment, by an older daemon; submit it again to run it in the task's image, or with --env host to run it on the host", job.ID)}
+	}
 	if c, ok := spec.Settings.(core.CommandSettings); ok && c.Timeout <= 0 {
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c

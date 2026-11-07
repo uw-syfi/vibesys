@@ -1,9 +1,10 @@
 /**
  * Everything the app holds about one host: its connection, the folded model, the streams (the runs,
- * one agent's, one run's cost) and the commands. Built once per host in a `Scope`; nothing dials
- * until a screen mounts a view or submits a command.
+ * one agent's, one run's cost, the host's machine stats) and the commands. Built once per host in a
+ * `Scope`; nothing dials until a screen mounts a view or submits a command.
  */
 
+import {HostService} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import type * as Atom from 'effect/reactivity/Atom';
 import type * as Scope from 'effect/Scope';
@@ -11,12 +12,14 @@ import type {HostKey, HostModel} from '../state/index.js';
 import {type AgentHistory, makeAgentHistory} from './agent-history.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
 import {type CatchUp, makeCatchUp} from './catch-up.js';
+import {makeClient} from './client/make-client.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
 import {makeHostReadiness} from './host-control.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
+import {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
@@ -34,6 +37,8 @@ export interface HostSession {
   /** Reads of a run's history, which a snapshot of runs does not hold. */
   readonly runHistory: RunHistory;
   readonly costs: CostFeed;
+  /** The CPU, memory and GPUs of the machine the host runs on. */
+  readonly machine: MachineStatsFeed;
   readonly commands: Commands;
   /** The press of Catch me up, over `commands`. */
   readonly catchUp: CatchUp;
@@ -57,6 +62,11 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     history: yield* makeAgentHistory(parts),
     runHistory: yield* makeRunHistory(parts),
     costs: yield* makeCostFeed(parts),
+    machine: yield* makeMachineStatsFeed({
+      client: yield* makeClient(HostService, host),
+      connection,
+      ambient,
+    }),
     commands,
     catchUp: yield* makeCatchUp(commands),
   };

@@ -31,8 +31,8 @@ type PlacementDemand struct {
 	Host ResourceID
 }
 
-// Options implements Demand. The job's environment is decided: a job of EnvironmentAuto is given
-// as the kind it runs in.
+// Options implements Demand. A job of EnvironmentAuto, which only an older daemon queued and which
+// a launch refuses (App.prepare), claims the host as a host job does.
 //
 // A job that started holds the placement it started on, which its pinned environment names
 // (core.Fingerprint.Placement), so its only option is that one. A job of a store of an earlier

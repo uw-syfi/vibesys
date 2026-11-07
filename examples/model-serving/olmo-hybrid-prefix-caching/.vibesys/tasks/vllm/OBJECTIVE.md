@@ -1,6 +1,6 @@
 # Objective — Olmo-Hybrid-7B prefix-caching workload
 
-Maximize **aggregate output token throughput (tok/s)** on a single **NVIDIA L4** GPU for a long-shared-prefix batch workload, while keeping accuracy within the accuracy checker's tolerance. Build an OpenAI-compatible `/v1/completions` server.
+Maximize **aggregate output token throughput (tok/s)** on a single **NVIDIA L4** GPU for a long-shared-prefix batch workload, while passing the accuracy gate below. Build an OpenAI-compatible `/v1/completions` server.
 
 Target model: `allenai/Olmo-Hybrid-7B` — a hybrid attention model that interleaves linear-attention layers with full-attention layers (3 linear : 1 full, 32 layers total). KV state is therefore heterogeneous: full-attention layers hold a paged KV cache; linear-attention layers hold a recurrent state.
 
@@ -49,6 +49,20 @@ The shared prefix is **always 32 k tokens, always identical across all 20 reques
 ## Headline metric
 
 `aggregate_throughput_tok_per_sec` printed by `benchmark/benchmark.py` as the `Primary metric:` line. This is `total_output_tokens / wall_clock` across the 20 requests after warmup. This is the only number `perf_metric` should record.
+
+## Accuracy gate
+
+Every candidate must pass the accuracy checker,
+[`.vibesys/shared/accuracy_checker/checker.py`](../../shared/accuracy_checker/checker.py).
+It sends ten fixed prompts to the running server's `/v1/completions` as token IDs
+(`prompt: list[int]`), non-streaming (`stream: false`), with `temperature: 0`, each
+prompt's own `max_tokens`, and EOS honored (no `ignore_eos`). Each `choices[0].text`
+must equal the Hugging Face `transformers` greedy reference for that prompt exactly
+(bfloat16, eager attention, decoded with `skip_special_tokens=True`), stored in
+`reference_outputs.json` beside the checker. Where the plain-torch and
+flash-linear-attention kernels give different references, either text passes. All ten
+must match. The checker needs only the standard library; run it against your server
+with `python .vibesys/shared/accuracy_checker/checker.py --url http://localhost:8000`.
 
 ## Notes
 

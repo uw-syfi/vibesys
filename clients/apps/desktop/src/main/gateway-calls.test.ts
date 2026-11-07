@@ -2,7 +2,7 @@ import type {Duplex} from 'node:stream';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {ListItemsRequestSchema, ListItemsResponseSchema} from '@vibesys/orchestrator-proto';
-import {DesktopRefusal} from '@vibesys/proto';
+import {DesktopRefusal, SubscribeRequestSchema, SubscribeResponseSchema} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Fiber from 'effect/Fiber';
@@ -24,6 +24,7 @@ const request = toBinary(
   create(ListItemsRequestSchema, {agentId: 'agent-1', beforeOrdinal: 1, pageSize: 10}),
 );
 const reply = toBinary(ListItemsResponseSchema, create(ListItemsResponseSchema, {page: {}}));
+const SUBSCRIBE = '/vibesys.api.v1.HostService/Subscribe';
 
 /** A world of fake gateways, one per host, and a record of the dials. */
 function world(options: {failing?: ReadonlySet<HostKey>} = {}) {
@@ -183,6 +184,44 @@ describe('gateway calls', () => {
       expect([...w.dials].sort()).toEqual([HOST_A, HOST_B].sort());
       yield* Scope.close(scope, Exit.void);
     }),
+  );
+
+  it.effect(
+    "forwards the host's Subscribe, and refuses the host's methods the app does not use",
+    () =>
+      Effect.gen(function* () {
+        const w = world();
+        const {made, scope} = yield* calls(w);
+        const topic = toBinary(
+          SubscribeRequestSchema,
+          create(SubscribeRequestSchema, {topic: {case: 'machineStats', value: {}}}),
+        );
+        const frame = toBinary(
+          SubscribeResponseSchema,
+          create(SubscribeResponseSchema, {frame: {case: 'heartbeat', value: {}}}),
+        );
+        const heard: Uint8Array[] = [];
+        const stream = yield* Effect.forkChild(
+          made.stream(HOST_A, SUBSCRIBE, topic, bytes => heard.push(bytes)),
+        );
+        // A refused call ends before reaching the host.
+        yield* untilTrue(
+          () => w.peer(HOST_A).calls.length === 1 || stream.pollUnsafe() !== undefined,
+        );
+        expect(w.peer(HOST_A).calls[0]?.method).toBe(SUBSCRIBE);
+        w.peer(HOST_A).calls[0]?.send(frame);
+        w.peer(HOST_A).calls[0]?.end();
+        yield* Fiber.join(stream);
+        expect(heard).toEqual([frame]);
+        const tail = yield* Effect.flip(
+          made.unary(HOST_A, '/vibesys.api.v1.HostService/Tail', new Uint8Array()),
+        );
+        expect(tail).toMatchObject({
+          _tag: 'GatewayRefused',
+          refusal: DesktopRefusal.METHOD_NOT_AVAILABLE,
+        });
+        yield* Scope.close(scope, Exit.void);
+      }),
   );
 
   it.effect(

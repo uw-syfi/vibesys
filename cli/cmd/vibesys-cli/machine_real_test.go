@@ -171,7 +171,7 @@ func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
 	defer logFile.Close()
 	cmd := exec.Command(self, "daemon", "run")
 	cmd.Dir = m.repo
-	cmd.Env = append(append(os.Environ(), roleVar+"="+roleCLI, "HOME="+filepath.Join(m.root, "home")), env...)
+	cmd.Env = append(append(os.Environ(), roleVar+"="+roleCLI, "HOME="+filepath.Join(m.root, "home"), dockerConfigVariable()), env...)
 	cmd.Stdout, cmd.Stderr, cmd.ExtraFiles = logFile, logFile, []*os.File{w}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
