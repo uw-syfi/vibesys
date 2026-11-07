@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
 // node is a running job's node, reached with steps of the job.
@@ -48,21 +49,27 @@ end`
 // heldMarker is the line holdScript prints once it runs.
 const heldMarker = "vibesys-held"
 
-// Hold implements apptainer.Node.
+// Hold implements apptainer.Node. A step that does not reach the login node is started again as
+// remote.Reconnect says.
 func (n *node) Hold(ctx context.Context) (io.Closer, error) {
+	return remote.Reconnect(ctx, n.c.cfg.Timers, func() (io.Closer, bool, error) { return n.holdOnce(ctx) })
+}
+
+// holdOnce makes one attempt of Hold, and reports whether it did not reach the login node.
+func (n *node) holdOnce(ctx context.Context) (io.Closer, bool, error) {
 	cmd := n.c.cfg.Shell.Command(context.Background(), n.step("/bin/sh", "-c", holdScript, "vs-hold"))
 	in, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var errb lockedBuffer
 	cmd.Stderr = &errb
 	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot hold the allocation %s: %v", n.job, err)
+		return nil, false, unavailable("cannot hold the allocation %s: %v", n.job, err)
 	}
 	h := &hold{n: n, cmd: cmd, in: in, done: make(chan struct{})}
 	held := make(chan bool, 1)
@@ -81,16 +88,17 @@ func (n *node) Hold(ctx context.Context) (io.Closer, error) {
 	select {
 	case ok := <-held:
 		if ok {
-			return h, nil
+			return h, false, nil
 		}
 		_ = h.Close()
-		return nil, unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
+		return nil, remote.Unreached(n.c.cfg.Shell, h.waitErr, errb.String()),
+			unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
 	case <-limit:
 		_ = h.Close()
-		return nil, unavailable("the step that holds the allocation %s did not start within %v", n.job, CallTimeout)
+		return nil, false, unavailable("the step that holds the allocation %s did not start within %v", n.job, CallTimeout)
 	case <-ctx.Done():
 		_ = h.Close()
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 }
 
@@ -158,21 +166,27 @@ const (
 	releasedMarker = "vibesys-released"
 )
 
-// Claim implements apptainer.Node.
+// Claim implements apptainer.Node. A step that does not reach the login node is started again as
+// remote.Reconnect says: it never ran, so it claimed nothing.
 func (n *node) Claim(ctx context.Context) (io.Closer, error) {
+	return remote.Reconnect(ctx, n.c.cfg.Timers, func() (io.Closer, bool, error) { return n.claimOnce(ctx) })
+}
+
+// claimOnce makes one attempt of Claim, and reports whether it did not reach the login node.
+func (n *node) claimOnce(ctx context.Context) (io.Closer, bool, error) {
 	cmd := n.c.cfg.Shell.Command(context.Background(), n.step("/bin/sh", "-c", claimScript, "vs-claim"))
 	in, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var errb lockedBuffer
 	cmd.Stderr = &errb
 	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot claim the allocation %s: %v", n.job, err)
+		return nil, false, unavailable("cannot claim the allocation %s: %v", n.job, err)
 	}
 	cl := &claim{hold: hold{n: n, cmd: cmd, in: in, done: make(chan struct{})}, errb: &errb}
 	first := make(chan string, 1)
@@ -193,19 +207,20 @@ func (n *node) Claim(ctx context.Context) (io.Closer, error) {
 	case line := <-first:
 		switch line {
 		case heldMarker:
-			return cl, nil
+			return cl, false, nil
 		case takenMarker:
 			_ = cl.Close()
-			return nil, apptainer.ErrTaken
+			return nil, false, apptainer.ErrTaken
 		}
 		_ = cl.Close()
-		return nil, unavailable("the step that claims the allocation %s did not start: %s", n.job, clip(errb.String()))
+		return nil, remote.Unreached(n.c.cfg.Shell, cl.waitErr, errb.String()),
+			unavailable("the step that claims the allocation %s did not start: %s", n.job, clip(errb.String()))
 	case <-limit:
 		_ = cl.Close()
-		return nil, unavailable("the step that claims the allocation %s did not start within %v", n.job, CallTimeout)
+		return nil, false, unavailable("the step that claims the allocation %s did not start within %v", n.job, CallTimeout)
 	case <-ctx.Done():
 		_ = cl.Close()
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 }
 
