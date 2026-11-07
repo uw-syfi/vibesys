@@ -6,7 +6,7 @@
  * receipt it already holds.
  */
 import {create} from '@bufbuild/protobuf';
-import {type Command, CommandSchema} from '@vibesys/orchestrator-proto';
+import {type Command, CommandSchema, oneofIs} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Atom from 'effect/reactivity/Atom';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
@@ -66,7 +66,18 @@ const noReceipt = new InvalidMessage({
  * start is held back by it.
  */
 const refusedStart = (parts: HostParts, command: Command) =>
-  command.body.case === 'startRun' ? parts.connection.blocked : Effect.succeed(undefined);
+  oneofIs(command.body, 'startRun', {
+    startRun: true,
+    stopRun: true,
+    spawnAgent: true,
+    stopAgent: true,
+    sendMessage: true,
+    postHandoff: true,
+    postReport: true,
+    requestCatchUp: true,
+  })
+    ? parts.connection.blocked
+    : Effect.succeed(undefined);
 
 /**
  * Waits for a Ready connection (a command is not sent into the void), then sends once. A call
