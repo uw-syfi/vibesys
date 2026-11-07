@@ -1,4 +1,4 @@
-package hosted
+package production
 
 import (
 	"errors"
@@ -27,7 +27,7 @@ func TestStateRefusalNamesWhatIsWrongWithThePlace(t *testing.T) {
 		{"another cause", errors.New("the state directory cannot be written"), pb.StateRefusal_STATE_REFUSAL_UNSPECIFIED},
 	}
 	for _, c := range cases {
-		if got := stateRefusalOf(c.err); got != c.want {
+		if got := StateRefusalOf(c.err); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
