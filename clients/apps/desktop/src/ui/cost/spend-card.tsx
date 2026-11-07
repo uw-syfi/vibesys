@@ -3,13 +3,16 @@ import type {JSX} from 'react';
 import type {SpendFigures} from './cost-model.js';
 import {NOT_REPORTED} from './words.js';
 
+/** The mark of a cost that is a floor, set close to its figure by a narrow space. */
+const FLOOR = '≥\u2005';
+
 /**
  * What a run has cost against its cap and how fast it is spending: the figures of the Cost screen's
  * first card, for any screen that shows a run's cost in brief (`costScreenModel(view, words).spend`).
  */
 export function SpendCard(props: {readonly spend: SpendFigures}): JSX.Element {
   const {spend} = props;
-  const figure = `${spend.floor ? '≥ ' : ''}${spend.figure ?? NOT_REPORTED}`;
+  const figure = `${spend.floor ? FLOOR : ''}${spend.figure ?? NOT_REPORTED}`;
   return (
     <Card section="Spend">
       <Stack gap="space-4">

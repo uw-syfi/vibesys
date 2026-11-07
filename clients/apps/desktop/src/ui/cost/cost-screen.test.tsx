@@ -164,7 +164,7 @@ describe('the Cost screen over served views', () => {
     expect(textOf(html)).toContain('Stale');
     expect(textOf(html)).toContain('did not answer in time');
     expect(textOf(html)).toContain('Retry');
-    expect(html).toContain('≥ $318');
+    expect(html).toContain('≥\u2005$318');
     // It is a line in the screen, not a full-width banner.
     expect(html).not.toMatch(/banner/i);
   });

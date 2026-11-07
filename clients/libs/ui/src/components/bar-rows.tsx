@@ -52,7 +52,7 @@ function widthOf(column: BarColumn, at: number, rows: readonly BarRow[]): number
  * place, and each figure column is as wide as its widest figure and header and right-aligned in
  * tabular figures, so a digit gained moves nothing. A bar is as wide as its row's `value` is of
  * the largest, a layout scale only; the figures are the caller's words. A row with no `value`
- * draws no bar. When the width cannot hold a readable name, bar and figures, the bars give way
+ * draws no bar. A row's `note` follows its name, and drops under it when the name leaves no room. When the width cannot hold a readable name, bar and figures, the bars give way
  * first. `label` names the table; `barLabel` names the bar column for assistive technology.
  */
 export function BarRows(props: {
@@ -103,18 +103,20 @@ export function BarRows(props: {
                 <th scope="row" className="vs-bar-rows-name">
                   <span className="vs-bar-rows-lead">
                     {row.series === undefined ? null : <Swatch series={row.series} />}
-                    <span
-                      className="vs-bar-rows-label"
-                      data-mono={row.mono === true || undefined}
-                      title={row.name}
-                    >
-                      {row.name}
+                    <span className="vs-bar-rows-text">
+                      <span
+                        className="vs-bar-rows-label"
+                        data-mono={row.mono === true || undefined}
+                        title={row.name}
+                      >
+                        {row.name}
+                      </span>
+                      {row.note === undefined ? null : (
+                        <Text variant="small" tone="muted">
+                          {row.note}
+                        </Text>
+                      )}
                     </span>
-                    {row.note === undefined ? null : (
-                      <Text variant="small" tone="muted">
-                        {row.note}
-                      </Text>
-                    )}
                   </span>
                 </th>
                 <td data-role="bar">

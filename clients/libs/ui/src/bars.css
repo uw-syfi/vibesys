@@ -91,7 +91,11 @@
   table-layout: fixed;
 }
 .vs-bar-rows-name-col {
-  width: 38%;
+  width: 36%;
+}
+/* With no bar the name takes what the figures leave. */
+.vs-bar-rows[data-bar="off"] .vs-bar-rows-name-col {
+  width: auto;
 }
 .vs-bar-rows col[style] {
   width: var(--col-width);
@@ -150,10 +154,16 @@
   gap: var(--space-3);
   min-width: 0;
 }
-.vs-bar-rows-label {
+.vs-bar-rows-text {
   min-width: 0;
+}
+.vs-bar-rows-label {
+  display: inline-block;
+  max-width: 100%;
+  margin-right: var(--space-3);
   overflow: hidden;
   text-overflow: ellipsis;
+  vertical-align: bottom;
   white-space: nowrap;
   font-family: var(--text-body-strong-family);
   font-size: var(--text-body-strong-size);
@@ -165,8 +175,8 @@
   font-size: var(--text-code-size);
   font-weight: var(--text-code-weight);
 }
-.vs-bar-rows-lead > .vs-text {
-  flex: none;
+.vs-bar-rows-text > .vs-text {
+  white-space: nowrap;
 }
 .vs-bar-rows-track {
   display: block;
@@ -182,4 +192,17 @@
   border-radius: var(--radius-sm);
   background: var(--seg-color, var(--accent));
   transition: width var(--duration-base) var(--easing);
+}
+
+/* --- a legend's names are cut with an ellipsis rather than pushed out of their card ------------ */
+
+.vs-serieslegend .vs-dotlegend-item {
+  min-width: 0;
+  max-width: 100%;
+}
+.vs-serieslegend .vs-dotlegend-item > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -86,9 +86,9 @@ function openCost(host: HostSnapshot) {
 describe('the Cost view under a run', () => {
   it('is a tab of the run that shows the served figures, and leaving it shows none', () => {
     const {screen} = openCost(hostWith(COSTS, live));
-    expect(screen.text()).not.toContain('≥ $318');
+    expect(screen.text()).not.toContain('≥\u2005$318');
     screen.press(screen.control('Cost'));
-    expect(screen.text()).toContain('≥ $318');
+    expect(screen.text()).toContain('≥\u2005$318');
     expect(screen.text()).toContain('of $500');
     expect(screen.text()).toContain('By agent type');
     screen.press(screen.control('Timeline'));
@@ -153,7 +153,7 @@ describe('the Cost view under a run', () => {
     screen.press(screen.control('Cost'));
     // The last view stays on screen, marked stale, with the way to try again beside it.
     expect(screen.text()).toContain('Stale');
-    expect(screen.text()).toContain('≥ $318');
+    expect(screen.text()).toContain('≥\u2005$318');
     screen.press(screen.control('Retry cost'));
     expect(retries).toEqual([`local/${scenario.runId}`]);
     screen.unmount();

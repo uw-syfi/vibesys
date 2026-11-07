@@ -44,7 +44,7 @@ function Header(props: {
   const {label, tone} = statusOf(props.freshness, props.runOver);
   const failed = props.status._tag === 'Failed' ? props.status.fault : null;
   return (
-    <Row gap="space-3" wrap justify="between">
+    <Row gap="space-3" wrap>
       <Chip label={label} tone={tone} dot />
       {failed === null ? null : (
         <Row gap="space-3" wrap>
