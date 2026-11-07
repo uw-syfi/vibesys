@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"math"
 	"slices"
-	"strings"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -51,11 +50,9 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 		for _, b := range kept {
 			entry.Versions = append(entry.Versions, cloneBound(b))
 		}
-		if value, unit, ok := headValue(head, objective, standing.GetDirection()); ok {
+		if value, ok := headValue(head, objective, standing.GetDirection()); ok {
 			entry.HeadValue = &value
-			if unitsDiffer(standing.GetUnit(), unit) {
-				entry.UnitMismatch = true
-			} else if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
+			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
 				entry.PercentOfBound = &percent
 			}
 		}
@@ -78,14 +75,6 @@ func declaredFor(b *cli.ObjectiveBound, run string) bool {
 	return declared == run || declared == ""
 }
 
-// unitsDiffer says the head measured in a unit other than the bound's. A measurement that does not say
-// its unit (measured is empty) is not known to differ, so it does not: the bound is compared as it
-// always was. A bound whose unit is empty against a measurement that names one differs, since the two
-// are not said to be the same.
-func unitsDiffer(bound, measured string) bool {
-	return strings.TrimSpace(measured) != "" && strings.TrimSpace(bound) != strings.TrimSpace(measured)
-}
-
 func standingSeq(b *pb.ObjectiveBounds) uint64 { return b.Versions[len(b.Versions)-1].GetSeq() }
 
 func cloneBound(b *cli.ObjectiveBound) *cli.ObjectiveBound {
@@ -101,38 +90,27 @@ func cloneBound(b *cli.ObjectiveBound) *cli.ObjectiveBound {
 // objective, and when the head says it measured the objective in another direction than the bound's,
 // since a share of a bound in the other direction would mean nothing. A measurement that does not say
 // which way an objective it reports besides the scored metric improves takes the bound's direction.
-//
-// The second result is the unit the measurement counts the value in: the unit of the metric it scores,
-// or of the objective's metric, and empty when the measurement does not say.
-func headValue(head *cli.Head, objective string, direction cli.Direction) (float64, string, bool) {
+func headValue(head *cli.Head, objective string, direction cli.Direction) (float64, bool) {
 	m := head.GetCurrent().GetResult().GetMeasure()
 	if m == nil {
-		return 0, "", false
+		return 0, false
 	}
-	finite := func(v float64, unit string, ok bool) (float64, string, bool) {
-		ok = ok && !math.IsNaN(v) && !math.IsInf(v, 0)
-		return v, unit, ok
-	}
+	finite := func(v float64, ok bool) (float64, bool) { return v, ok && !math.IsNaN(v) && !math.IsInf(v, 0) }
 	if scored := m.GetMetric(); scored.GetName() == objective {
-		return finite(m.GetValue(), scored.GetUnit(), scored.GetDirection() == direction)
+		return finite(m.GetValue(), scored.GetDirection() == direction)
 	}
 	for _, o := range m.GetObservations() {
 		if o.GetName() != objective || o.Value == nil {
 			continue
 		}
-		unit := ""
 		for _, metric := range m.GetObjectives().GetMetrics() {
-			if metric.GetName() != objective {
-				continue
+			if metric.GetName() == objective && metric.GetDirection() != direction {
+				return 0, false
 			}
-			if metric.GetDirection() != direction {
-				return 0, "", false
-			}
-			unit = metric.GetUnit()
 		}
-		return finite(o.GetValue(), unit, true)
+		return finite(o.GetValue(), true)
 	}
-	return 0, "", false
+	return 0, false
 }
 
 // PercentOfBound is how close a value is to the bound of its objective, in percent: 100 at the

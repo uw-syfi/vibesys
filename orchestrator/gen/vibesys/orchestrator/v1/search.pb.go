@@ -259,22 +259,19 @@ type ObjectiveBounds struct {
 	Versions []*v1.ObjectiveBound `protobuf:"bytes,3,rep,name=versions,proto3" json:"versions,omitempty"`
 	// The head's value on the objective, the number percent_of_bound is a share of. Absent when the
 	// run has no head, the head has no value for the objective, or the head measured the objective in
-	// another direction than the bound's. It is not absent for a unit mismatch: the number is shown,
-	// and only its share of the bound is withheld.
+	// another direction than the bound's.
 	HeadValue *float64 `protobuf:"fixed64,4,opt,name=head_value,json=headValue,proto3,oneof" json:"head_value,omitempty"`
 	// How close the head is to the standing bound, in percent: 100 at the bound, and above 100 when
 	// the head has gone past it, which says the bound was too modest. For an objective that is
 	// maximized it is head_value over the bound, and for one that is minimized the bound over
 	// head_value, so more is better for both. Absent when head_value is, and when either number is not
-	// above zero.
+	// above zero. It takes the bound to be in the unit of the head's measurements, as a bound is
+	// declared (ObjectiveBound.value); the orchestrator cannot check it, because a measurement keeps
+	// no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
+	// another unit gives a wrong percent. The version's unit is served for a reader to judge.
 	PercentOfBound *float64 `protobuf:"fixed64,5,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
-	// True when the head measured the objective in a unit other than the standing bound's, so that
-	// head_value and the bound are not numbers of the same thing and percent_of_bound is left absent.
-	// It is set only when the measurement says its unit: one that does not is not a mismatch, since
-	// nothing says the two differ.
-	UnitMismatch  bool `protobuf:"varint,6,opt,name=unit_mismatch,json=unitMismatch,proto3" json:"unit_mismatch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ObjectiveBounds) Reset() {
@@ -340,13 +337,6 @@ func (x *ObjectiveBounds) GetPercentOfBound() float64 {
 		return *x.PercentOfBound
 	}
 	return 0
-}
-
-func (x *ObjectiveBounds) GetUnitMismatch() bool {
-	if x != nil {
-		return x.UnitMismatch
-	}
-	return false
 }
 
 type SearchHealth struct {
@@ -514,7 +504,7 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	" \x03(\v2\x1a.vibesys.cli.v1.JobTroubleB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\btroubles\x12+\n" +
 	"\x11unattributed_jobs\x18\v \x01(\rR\x10unattributedJobs\x12\x1c\n" +
 	"\ttruncated\x18\f \x01(\bR\ttruncated\x12J\n" +
-	"\x06bounds\x18\r \x03(\v2(.vibesys.orchestrator.v1.ObjectiveBoundsB\b\xbaH\x05\x92\x01\x02\x10@R\x06bounds\"\xd9\x04\n" +
+	"\x06bounds\x18\r \x03(\v2(.vibesys.orchestrator.v1.ObjectiveBoundsB\b\xbaH\x05\x92\x01\x02\x10@R\x06bounds\"\xb4\x04\n" +
 	"\x0fObjectiveBounds\x12(\n" +
 	"\tobjective\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +
@@ -524,8 +514,7 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\xbaH\a\x92\x01\x04\b\x01\x10@R\bversions\x12+\n" +
 	"\n" +
 	"head_value\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12?\n" +
-	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01\x12#\n" +
-	"\runit_mismatch\x18\x06 \x01(\bR\funitMismatch:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
+	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
 	".objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n" +
 	"\v_head_valueB\x13\n" +
 	"\x11_percent_of_bound\"\xa2\x01\n" +

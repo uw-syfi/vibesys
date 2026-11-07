@@ -123,11 +123,6 @@ export interface ObjectiveBoundsView {
   readonly history: readonly BoundVersionView[];
   readonly headValue: number | undefined;
   readonly percentOfBound: number | undefined;
-  /**
-   * The head measured the objective in another unit than the bound's, so `headValue` and the bound
-   * are not of the same thing: the orchestrator sent no `percentOfBound` for it.
-   */
-  readonly unitMismatch: boolean;
 }
 
 function boundVersion(version: ObjectiveBound): BoundVersionView {
@@ -156,7 +151,6 @@ export function objectiveBounds(search: SearchState): readonly ObjectiveBoundsVi
             history,
             headValue: entry.headValue,
             percentOfBound: entry.percentOfBound,
-            unitMismatch: entry.unitMismatch,
           },
         ];
   });

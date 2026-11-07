@@ -7,7 +7,6 @@
 package cliv1
 
 import (
-	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -75,14 +74,9 @@ func (Direction) EnumDescriptor() ([]byte, []int) {
 }
 
 type Metric struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Direction Direction              `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
-	// What the metric's values are counted in, such as "tok/s" or "ms", when the measurement says. A
-	// reader that compares a measurement with a declared bound (ObjectiveBound.unit) uses it to tell
-	// that the two are in different units. Absent when the measurement does not say, which a reader
-	// takes as "not known", not as any unit.
-	Unit          *string `protobuf:"bytes,3,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Direction     Direction              `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -129,13 +123,6 @@ func (x *Metric) GetDirection() Direction {
 		return x.Direction
 	}
 	return Direction_DIRECTION_UNSPECIFIED
-}
-
-func (x *Metric) GetUnit() string {
-	if x != nil && x.Unit != nil {
-		return *x.Unit
-	}
-	return ""
 }
 
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
@@ -724,12 +711,10 @@ var File_vibesys_cli_v1_result_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\n" +
-	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\x82\x01\n" +
+	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"U\n" +
 	"\x06Metric\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x127\n" +
-	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\x12\"\n" +
-	"\x04unit\x18\x03 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@H\x00R\x04unit\x88\x01\x01B\a\n" +
-	"\x05_unit\"^\n" +
+	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\"^\n" +
 	"\vObservation\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06values\x18\x02 \x03(\x01R\x06values\x12\x19\n" +
@@ -842,7 +827,6 @@ func file_vibesys_cli_v1_result_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
-	file_vibesys_cli_v1_result_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_result_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_result_proto_msgTypes[7].OneofWrappers = []any{
 		(*Result_Check)(nil),

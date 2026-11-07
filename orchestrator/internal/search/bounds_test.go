@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -184,94 +183,6 @@ func TestAPersonsBoundOutsideAnyRunStandsForTheRun(t *testing.T) {
 	}
 	if only := byObjective(project(t, boundFact(1, "", "ttft_ms", minimize, 74)), "ttft_ms"); only == nil {
 		t.Error("a bound declared outside any run, with no agent's, is not shown")
-	}
-}
-
-// withUnits says in what unit a head measured the objectives it names, as a daemon that reports the
-// units of its metrics does.
-func withUnits(head *cli.TaskFact, units map[string]string) *cli.TaskFact {
-	m := head.GetHead().GetCurrent().GetResult().GetMeasure()
-	metrics := []*cli.Metric{m.GetMetric()}
-	if m.Objectives != nil {
-		metrics = m.GetObjectives().GetMetrics()
-	}
-	for _, metric := range append(metrics, m.GetMetric()) {
-		if unit, ok := units[metric.GetName()]; ok && unit != "" {
-			metric.Unit = proto.String(unit)
-		}
-	}
-	return head
-}
-
-// A head measured in another unit than the bound has no share of it: the number is shown, the percent
-// is absent, and the bound is marked. A measurement that says nothing of its unit is not known to
-// differ and is compared as before.
-func TestAHeadInAnotherUnitThanTheBoundHasNoPercent(t *testing.T) {
-	directions := map[string]cli.Direction{"ttft_ms": minimize}
-	head := func(units map[string]string) *cli.TaskFact {
-		return withUnits(headOf("tok_s", maximize, 7500, map[string]float64{"ttft_ms": 148}, directions), units)
-	}
-	bounds := []*cli.TaskFact{
-		{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
-			Seq: 1, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 1}},
-			Objective: "tok_s", Direction: maximize, Value: 15000, Unit: "tok/s", Note: "derived",
-		}}},
-		{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
-			Seq: 2, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 2}},
-			Objective: "ttft_ms", Direction: minimize, Value: 74, Unit: "ms", Note: "derived",
-		}}},
-	}
-	cases := []struct {
-		name     string
-		units    map[string]string
-		mismatch map[string]bool
-	}{
-		{"the same units", map[string]string{"tok_s": "tok/s", "ttft_ms": "ms"}, nil},
-		{"units that differ by surrounding space only", map[string]string{"tok_s": " tok/s ", "ttft_ms": "ms"}, nil},
-		{"a measurement that says no unit", nil, nil},
-		{"the scored metric in another unit", map[string]string{"tok_s": "req/s", "ttft_ms": "ms"}, map[string]bool{"tok_s": true}},
-		{"an observation in another unit", map[string]string{"tok_s": "tok/s", "ttft_ms": "s"}, map[string]bool{"ttft_ms": true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := project(t, append(slices.Clone(bounds), head(tc.units))...)
-			for _, objective := range []string{"tok_s", "ttft_ms"} {
-				b := byObjective(s, objective)
-				if b.UnitMismatch != tc.mismatch[objective] {
-					t.Errorf("%s: unit_mismatch = %v, want %v", objective, b.UnitMismatch, tc.mismatch[objective])
-				}
-				if b.HeadValue == nil {
-					t.Errorf("%s: the head's value is withheld; only its share of the bound is", objective)
-				}
-				if (b.PercentOfBound != nil) == tc.mismatch[objective] {
-					t.Errorf("%s: percent %v with unit_mismatch %v", objective, b.PercentOfBound, b.UnitMismatch)
-				}
-			}
-		})
-	}
-}
-
-// Whatever units the bound and the head are in, a percent is shown exactly when the head does not say
-// a unit that is not the bound's, and a mismatch is never marked together with a percent.
-func TestUnitMismatchIsMarkedExactlyWhenTheUnitsDiffer(t *testing.T) {
-	r := rand.New(rand.NewSource(3))
-	units := []string{"", "tok/s", "ms", "s", " ms", "MS"}
-	for range 200 {
-		bound, measured := units[r.Intn(len(units))], units[r.Intn(len(units))]
-		if bound == "" {
-			bound = "ms" // a declared bound always names its unit
-		}
-		fact := &cli.TaskFact{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
-			Seq: 1, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 1}},
-			Objective: "ttft_ms", Direction: minimize, Value: 74, Unit: bound, Note: "derived",
-		}}}
-		s := project(t, fact, withUnits(headOf("ttft_ms", minimize, 148, nil, nil), map[string]string{"ttft_ms": measured}))
-		b := byObjective(s, "ttft_ms")
-		differ := strings.TrimSpace(measured) != "" && strings.TrimSpace(measured) != strings.TrimSpace(bound)
-		if b.UnitMismatch != differ || (b.PercentOfBound == nil) != differ || b.HeadValue == nil {
-			t.Fatalf("bound %q, measured %q: unit_mismatch %v, percent %v, head %v; want a mismatch exactly when %v",
-				bound, measured, b.UnitMismatch, b.PercentOfBound, b.HeadValue, differ)
-		}
 	}
 }
 
