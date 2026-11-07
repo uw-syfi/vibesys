@@ -201,16 +201,25 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 	if err != nil {
 		return nil, err
 	}
-	// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
-	converter, err := localsif.New(p.Getenv("PATH"))
-	if err != nil {
-		return nil, err
+	s, a := pl.GetSlurm(), pl.GetApptainer()
+	runtime := apptainer.RuntimeApptainer
+	var converter apptainer.Converter
+	var localDir string
+	if a.GetRuntime() == cliv1.ContainerRuntime_CONTAINER_RUNTIME_PYXIS {
+		// The login node makes each image's squashfs from its files, streamed from here.
+		runtime = apptainer.RuntimePyxis
+	} else {
+		// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
+		sif, err := localsif.New(p.Getenv("PATH"))
+		if err != nil {
+			return nil, err
+		}
+		converter, localDir = sif, p.localScratch(a)
 	}
 	ssh := remote.SSH{Host: pl.GetRemote().GetHost(), Program: orDefault(pl.GetRemote().GetSshCommand(), "ssh")}
-	s, a := pl.GetSlurm(), pl.GetApptainer()
 	cluster, err := clustercli.New(clustercli.Config{
 		Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
-		Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
+		Runtime: runtime, Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
 	})
 	if err != nil {
 		return nil, err
@@ -231,7 +240,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 		},
-		NodeScripts: scripts, Converter: converter, LocalDir: p.localScratch(a),
+		NodeScripts: scripts, Runtime: runtime, Converter: converter, LocalDir: localDir,
 		ConvertTimeout: seconds(a.GetConvertTimeoutSeconds(), apptainer.DefaultConvertTimeout),
 	})
 	if err != nil {

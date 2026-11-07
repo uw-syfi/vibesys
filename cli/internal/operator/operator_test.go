@@ -186,6 +186,9 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"a choice of where to convert":              {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert = \"node\"", 1), "placements.mi210.apptainer.convert"},
 		"a negative conversion bound":               {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert_timeout_seconds = -1", 1), "convert_timeout_seconds"},
 		"an unknown rocm key":                       {strings.Replace(apptainerPlacement, "[placements.mi210.resources.rocm]", "[placements.mi210.resources.rocm]\ndevices = \"all\"", 1), "placements.mi210.resources.rocm.devices"},
+		"an unknown runtime":                        {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"docker\"", 1), "runtime"},
+		"an apptainer program under pyxis":          {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nprogram = \"apptainer\"", 1), "program"},
+		"a local scratch directory under pyxis":     {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nlocal_scratch_dir = \"/scratch/me\"", 1), "local_scratch_dir"},
 	}
 	for name, c := range cases {
 		_, err := operator.Parse([]byte(c.text))
@@ -242,6 +245,11 @@ func TestAnApptainerPlacementIsRead(t *testing.T) {
 	a := c.GetPlacements()["mi210"].GetApptainer()
 	if err != nil || a.GetLocalScratchDir() != "/scratch/me" || a.GetConvertTimeoutSeconds() != 7200 {
 		t.Errorf("the conversion's settings: %v, %v", a, err)
+	}
+	text = strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"", 1)
+	c, err = operator.Parse([]byte(text))
+	if a := c.GetPlacements()["mi210"].GetApptainer(); err != nil || a.GetRuntime() != cliv1.ContainerRuntime_CONTAINER_RUNTIME_PYXIS {
+		t.Errorf("the pyxis runtime: %v, %v", a, err)
 	}
 }
 

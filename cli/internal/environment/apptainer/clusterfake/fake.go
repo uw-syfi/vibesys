@@ -13,7 +13,10 @@
 package clusterfake
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -111,7 +114,7 @@ func (c *Cluster) Say(script, out string) {
 }
 
 // SetFaults makes the calls named by op fail with what f returns, or none with nil. The ops are
-// "has", "read", "publish", "submit", "state", "jobs", "cancel", "hold", "readnode", "port", "start"
+// "has", "read", "publish", "squash", "submit", "state", "jobs", "cancel", "hold", "readnode", "port", "start"
 // and "signal".
 func (c *Cluster) SetFaults(f func(op string) error) {
 	c.mu.Lock()
@@ -304,6 +307,59 @@ func (cl *Client) Publish(ctx context.Context, path string, r io.Reader) error {
 	defer cl.c.mu.Unlock()
 	cl.c.files[path] = data
 	cl.c.published[path]++
+	return nil
+}
+
+// Squasher is what the fake says made a squashfs.
+const Squasher = "sqfstar version 4.6.1 (fake)"
+
+// Squash implements apptainer.Cluster: the squashfs is the archive itself, kept when the archive
+// is whole and ends with the marker of the content, as sqfstar's of it would hold the same files.
+func (cl *Client) Squash(ctx context.Context, path, content string, rootfs io.Reader) (string, error) {
+	if err := cl.enter(ctx, "squash"); err != nil {
+		return "", err
+	}
+	if _, ok := cl.c.File(path); ok {
+		return Squasher, nil
+	}
+	data, err := io.ReadAll(rootfs)
+	if err != nil {
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: the root file system's stream was cut short: " + err.Error()}
+	}
+	if err := wholeRootFS(data, content); err != nil {
+		return "", err
+	}
+	cl.c.mu.Lock()
+	defer cl.c.mu.Unlock()
+	if _, ok := cl.c.files[path]; !ok {
+		cl.c.files[path] = data
+		cl.c.published[path]++
+	}
+	return Squasher, nil
+}
+
+// wholeRootFS checks that the archive is whole: a tar archive whose last entry is the marker of
+// the content.
+func wholeRootFS(data []byte, content string) error {
+	r := tar.NewReader(bytes.NewReader(data))
+	var last string
+	var body []byte
+	for {
+		h, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: sqfstar: the tarfile appears to be truncated or corrupted: " + err.Error()}
+		}
+		last = h.Name
+		if body, err = io.ReadAll(r); err != nil {
+			return &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: sqfstar: the tarfile appears to be truncated or corrupted: " + err.Error()}
+		}
+	}
+	if last != apptainer.ImageMarker || string(body) != content+"\n" {
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("clusterfake: the squashfs's last file is %q holding %q, not the marker of %s", last, body, content)}
+	}
 	return nil
 }
 

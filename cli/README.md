@@ -785,7 +785,8 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
-| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
+| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF, or on streaming its files and making its squashfs under `pyxis` (3600 by default). See "The apptainer placement". |
+| `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -896,6 +897,33 @@ start without it, saying to install it.
   then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
+
+### The pyxis runtime
+
+An `apptainer` placement with `runtime = "pyxis"` runs its containers with Slurm's Pyxis plugin
+over Enroot instead of Apptainer, for a cluster whose nodes have no Apptainer. Everything above
+holds but how an image reaches the cluster and how a process runs in it:
+
+- Nothing is converted on this machine, which needs no Apptainer. Unless the cluster has it, an
+  image's files are streamed over ssh, as a container of it has them (`docker export`), to the login
+  node, whose `sqfstar` (squashfs-tools 4.6 or later) makes them `images/<digest>.sqsh` under
+  `remote_workspace_root`, with `.built-by` beside it. Neither side writes the image unpacked to a
+  disk. The image's environment is written to its `/etc/environment`, which Enroot reads; Docker's
+  own files (`/.dockerenv`, the devices under `/dev`) are left out, as Enroot's own import leaves
+  them out. The stream ends with a file naming the image's content (`/.vibesys-image`), and the
+  squashfs is renamed into place only once it has that file, so one cut short is never there. Makers
+  of one image on one login node take turns (`flock`), and one that finds the squashfs made keeps it.
+  `convert_timeout_seconds` bounds the stream and the squashfs.
+- Each of a container's processes is a step of the allocation, `srun --jobid --overlap
+  --container-image=<squashfs>`, read-only (`--container-readonly`) and unnamed, so nothing of it
+  outlives the step, with the container's mounts, its directory (`--container-workdir`), its home
+  at `/tmp` (a directory of the node's, made by a step before, which every process of the container
+  shares), and none of the user's home, the image's entrypoint or a root remapping. The step is
+  started with an empty environment but `PATH` and the container's variables, which win over the
+  image's (`--container-env`), so nothing of the login node's environment reaches the container;
+  Slurm's own variables of the step, and the site's, do. The
+  site's Enroot binds the node's `/dev`, with its GPUs, and its own files (`/etc/hosts` among them)
+  into every container, and Pyxis passes in the variables in which Slurm names the GPUs it assigned.
 
 ### Placements are interchangeable
 

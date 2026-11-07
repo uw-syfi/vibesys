@@ -496,6 +496,52 @@ the resources, the stop) hold unchanged; only how a container exists differs.
   the wrapper's start marker on standard error tells) or whose ssh exit is 255
   is unknown, never the command's exit.
 
+### Pyxis and Enroot: a runtime of the apptainer kind, not a kind of its own
+
+A cluster whose nodes run containers with Slurm's Pyxis plugin over Enroot,
+and have no Apptainer, is the `apptainer` kind with `runtime = "pyxis"`, not a
+placement kind of its own: the allocation, the holder, the steps, the signals,
+the facts read on the node, the staging and the image's naming by content are
+the same, and only what an image becomes and how a process enters it differ.
+A new kind would have duplicated the engine and the operator's sections for
+two functions' worth of difference.
+
+- The image becomes an Enroot squashfs, made on the login node from the image's
+  files as a container has them (`docker export`), streamed over ssh into
+  `sqfstar`, so the image is never unpacked on a disk at either end and only
+  the files cross the network once. The other ways were worse: Enroot's own
+  `enroot import dockerd://` needs Enroot on the caller's machine, which a
+  Docker host does not have; `docker save` into the login node's Podman and
+  `enroot import podman://` stores every layer again in Podman's storage, on a
+  home file system with a quota, and unpacks the image a second time; building
+  the squashfs here needs squashfs-tools here. The stream is rewritten on the
+  way as Enroot's own import would: the image's environment is written to
+  `/etc/environment` (which Enroot reads, and which is the only part of the
+  image's config a container here uses, since the engine runs its own command
+  and never the entrypoint), the image's volumes are not mounted (an empty
+  `/etc/fstab`), and Docker's `/.dockerenv` and devices are left out. `sqfstar`
+  accepts a stream cut short between two entries as a whole one, so the stream
+  ends with `/.vibesys-image`, naming the image's content, and the squashfs is
+  renamed into place only when it holds that file.
+- Each process is a step `srun --container-image=<squashfs>`, read-only and
+  unnamed. A named container (`--container-name`) would let a container's
+  writes outside its mounts persist from one process to the next, as under
+  Docker, but it outlives its step and must be removed with the container,
+  and the `apptainer` kind already promises read-only image files; an unnamed
+  one is mounted from the squashfs for the step (the site's Enroot mounts
+  squashfs images rather than unpacking them) and gone with it. The
+  container's home is a directory of the node's mounted at `/tmp`, made by a
+  step of its own first, since Pyxis mounts only what exists, so every process
+  of the container shares one `/tmp`, as under Apptainer.
+- Pyxis gives a container the step's environment beneath the image's own, so
+  the step starts from `env -i` with only `PATH` and the container's variables,
+  which `--container-env` puts above the image's. The site's Enroot
+  configuration decides what else every container gets: on the site this was
+  checked on, the node's `/dev` (with the GPUs), `/proc`, `/sys`, a private
+  `/tmp` beneath the home, and a few files of `/etc`, and none of the shared
+  file system, so no site bind path leaks in. Slurm's variables naming the GPUs
+  it assigned are in the step's environment, which Pyxis passes in.
+
 ### One daemon per user per machine, and a sandbox beside it
 
 One daemon serves a user on a machine: it holds a lock in the user's machine

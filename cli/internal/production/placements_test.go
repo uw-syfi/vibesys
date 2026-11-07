@@ -155,6 +155,29 @@ func TestAnApptainerPlacementNeedsApptainerHere(t *testing.T) {
 	}
 }
 
+// An apptainer placement of the pyxis runtime converts nothing on this machine, so it needs no
+// apptainer here: the login node makes the images' squashfs.
+func TestAPyxisPlacementNeedsNoApptainerHere(t *testing.T) {
+	p := Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: func(string) string { return "" }}
+	op := parse(t, `
+[placements.mi300]
+kind = "apptainer"
+[placements.mi300.remote]
+host = "host-a"
+remote_workspace_root = "/scratch/user/vibesys"
+[placements.mi300.slurm]
+partition = "part-a"
+gres = "gpu:4"
+[placements.mi300.apptainer]
+runtime = "pyxis"
+submit_arguments = ["--account=acct-a"]
+[placements.mi300.resources.rocm]
+`)
+	if _, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key"); err != nil {
+		t.Errorf("a pyxis placement without apptainer here: %v", err)
+	}
+}
+
 func sameClaims(a, b map[string][]core.Claim) bool {
 	for name, cs := range b {
 		if !slices.Equal(a[name], cs) {

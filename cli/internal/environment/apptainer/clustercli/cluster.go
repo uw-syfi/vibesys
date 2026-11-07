@@ -55,6 +55,8 @@ type Config struct {
 	Submit []string
 	// Program is the apptainer program on the nodes; empty is DefaultProgram.
 	Program string
+	// Runtime is what runs a box's processes on the nodes.
+	Runtime apptainer.Runtime
 	// Poll is the pause between two reads of a cancelled job's state; zero is DefaultPoll.
 	Poll time.Duration
 }
@@ -233,6 +235,55 @@ func (c *counting) Read(p []byte) (int, error) {
 		c.err = err
 	}
 	return n, err
+}
+
+// squashScript makes $1 a squashfs of the tar archive on its input with sqfstar, under a lock of
+// the login node per path, unless it is there, and prints what made it. The squashfs is written to
+// a file of its own beside $1 and renamed to $1 once ImageMarker in it holds $2: sqfstar takes a
+// stream cut short between two entries for a whole one, and the marker is the stream's last entry.
+const squashScript = `set -e
+mkdir -p "$(dirname "$1")"
+exec 9>"${TMPDIR:-/tmp}/vibesys-squash-$(id -u)-$(basename "$1").lock"
+flock 9
+by=$(sqfstar -version 2>&1 | head -n 1)
+if [ -e "$1" ]; then printf '` + squashedMarker + ` %s\n' "$by"; exit 0; fi
+t="$1.tmp.$(hostname).$$"
+trap 'rm -f "$t"' EXIT
+trap 'exit 1' HUP INT TERM
+sqfstar -quiet -no-progress -all-root -comp zstd -Xcompression-level 3 -b 1M "$t" >&2
+m=$(unsquashfs -cat "$t" ` + apptainer.ImageMarker + `)
+if [ "$m" != "$2" ]; then echo "the squashfs's marker holds '$m', not '$2': its stream was cut short" >&2; exit 1; fi
+mv -f "$t" "$1"
+printf '` + squashedMarker + ` %s\n' "$by"`
+
+// squashedMarker starts the line squashScript prints once the squashfs is there.
+const squashedMarker = "vibesys-squashed"
+
+// Squash implements apptainer.Cluster.
+func (c *Cluster) Squash(ctx context.Context, p, content string, rootfs io.Reader) (string, error) {
+	if err := checkPath(p); err != nil {
+		return "", err
+	}
+	count := &counting{r: rootfs}
+	cmd := c.cfg.Shell.Command(ctx, []string{"/bin/sh", "-c", squashScript, "vs-apptainer", p, content})
+	var out, errb lockedBuffer
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = count, &out, &errb
+	err := cmd.Run()
+	by, made := strings.CutPrefix(strings.TrimSpace(out.String()), squashedMarker+" ")
+	switch {
+	case err == nil && made:
+		// A squashfs already there is kept, and the stream is then not read to its end.
+		return by, nil
+	case ctx.Err() != nil:
+		return "", ctx.Err()
+	case count.err != nil:
+		return "", fmt.Errorf("streaming to %s: %w", p, count.err)
+	}
+	failed := unavailable("making the squashfs %s on %s failed: %v %s", p, c.cfg.Shell.Where(), err, clip(errb.String()))
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && c.cfg.Shell.Lost(exit.ExitCode()) {
+		return "", fmt.Errorf("%w (%w)", failed, apptainer.ErrConnectionLost)
+	}
+	return "", failed
 }
 
 // Submit implements apptainer.Cluster. The job holds its node with a sleep until it is cancelled

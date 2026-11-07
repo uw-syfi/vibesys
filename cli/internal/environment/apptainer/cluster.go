@@ -58,6 +58,13 @@ type Cluster interface {
 	// own, and the path is one of them, whole. A copy whose connection to the cluster failed
 	// returns an error that wraps ErrConnectionLost.
 	Publish(ctx context.Context, path string, r io.Reader) error
+	// Squash makes the path an Enroot squashfs of the root file system rootfs gives (a tar archive
+	// that RootFS wrote, whose last entry is ImageMarker holding content), whole: one made from a
+	// stream cut short, or whose marker does not hold content, is never there. A path that is
+	// already there is kept, and rootfs is then not read to its end. Squashes of one path at once
+	// on one login node make it one at a time. It returns what made the squashfs, with its
+	// version, for a person.
+	Squash(ctx context.Context, path, content string, rootfs io.Reader) (string, error)
 
 	// Submit asks for a batch allocation that holds one node until it is cancelled or its time
 	// limit, and returns the job's id. Slurm never requeues it.
@@ -145,7 +152,8 @@ const (
 type Box struct {
 	// Name names the box; every one of its processes carries it, in EnvBox.
 	Name string
-	// Image is the path of the SIF on the shared file system, run read-only.
+	// Image is the path of the image on the shared file system, run read-only: a SIF under the
+	// apptainer runtime, an Enroot squashfs under pyxis.
 	Image string
 	// Dir is the working directory of every process.
 	Dir string
@@ -153,8 +161,9 @@ type Box struct {
 	Mounts []docker.Mount
 	// Env is set for every process, over the image's own environment, which is otherwise clean.
 	Env map[string]string
-	// ROCm gives the box the node's AMD GPUs (apptainer --rocm), and the variables in which Slurm
-	// names the GPUs it assigned, when it set them.
+	// ROCm gives the box the node's AMD GPUs (apptainer --rocm; under pyxis, the site's Enroot
+	// binds the node's /dev into every container), and the variables in which Slurm names the GPUs
+	// it assigned, when it set them.
 	ROCm bool
 }
 
