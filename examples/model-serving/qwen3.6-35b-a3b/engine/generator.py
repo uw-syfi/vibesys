@@ -1,9 +1,11 @@
-"""Run Qwen3.6-35B-A3B with Transformers, one request at a time.
+"""Run Qwen3.6-35B-A3B with Transformers: prefill one request at a time, decode them together.
 
 ``Generator.load`` loads the BF16 checkpoint sharded over every visible GPU
-(``device_map="auto"``), or onto the CPU when there is none. ``start`` returns a
-``Generation`` whose ``steps`` prefill the prompt in fixed chunks and then decode
-one token per step. Nothing here is thread-safe: one thread owns a Generator.
+(``device_map="auto"``), or onto the CPU when there is none. ``start`` prefills
+one prompt in fixed chunks and returns its ``Generation``; ``next_step`` picks
+that request's next token, and ``decode`` runs one forward pass that feeds the
+last token of every running generation at once. Nothing here is thread-safe:
+one thread owns a Generator.
 
 The prefix cache keeps deep copies of the model cache (attention KV plus the
 Gated DeltaNet convolution and recurrent states). A recurrent state cannot be
@@ -19,7 +21,6 @@ from __future__ import annotations
 import copy
 import json
 from collections import OrderedDict
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from typing import Any
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache, GenerationConfig
 
+from engine import batching, experts
 from engine.protocol import ChatRequest, FinishReason, RequestError, Sampling
 
 CHECKPOINT = json.loads((Path(__file__).with_name("checkpoint.json")).read_text())
@@ -39,9 +41,10 @@ def experts_implementation(hip_version: str | None) -> str | None:
     torch 2.9.1+rocm6.4 build raises "grouped gemm is not supported on ROCM"
     when that kernel runs, after Transformers' availability check has passed
     (an MI250 reports compute capability 9.0), so on ROCm every request would
-    fail. ``eager`` loops over the selected experts with ordinary matmuls.
+    fail. Transformers' ``eager`` alternative synchronizes with the host once
+    per selected expert, so ROCm uses ``engine.experts`` instead.
     """
-    return "eager" if hip_version else None
+    return experts.NAME if hip_version else None
 
 
 @dataclass(frozen=True)
@@ -94,46 +97,42 @@ class PrefixCache:
 
 
 class Generation:
-    """One request's prefill and decode, run by iterating ``steps``."""
+    """One request after prefill: its cache, the logits for its next token, and its progress."""
 
     def __init__(
         self,
         generator: Generator,
-        prompt: tuple[int, ...],
         sampling: Sampling,
-        reused: int,
-        cache: DynamicCache | None,
+        cached_tokens: int,
+        cache: DynamicCache,
+        logits: torch.Tensor,
+        max_tokens: int,
     ) -> None:
         self._generator = generator
-        self._prompt = prompt
         self._sampling = sampling
-        self.cached_tokens = reused
-        self._cache = cache
-        self._max_tokens = (
-            sampling.max_tokens
-            if sampling.max_tokens is not None
-            else generator.max_model_len - len(prompt)
-        )
+        self.cached_tokens = cached_tokens
+        self.cache = cache
+        self.logits = logits
+        self._max_tokens = max_tokens
+        self._count = 0
+        self.last_token: int | None = None
+        self.done = False
+        self._rng = None
+        if sampling.seed is not None:
+            self._rng = torch.Generator(device=logits.device).manual_seed(sampling.seed)
 
-    def steps(self) -> Iterator[Step]:
-        """Prefill, then yield tokens until a stop condition; the caller may stop early."""
+    def next_step(self) -> Step:
+        """Pick the next token from the current logits; ``decode`` must run before the next call."""
         g = self._generator
-        with torch.inference_mode():
-            cache = self._cache if self._cache is not None else DynamicCache(config=g.model.config)
-            logits = g.prefill(self._prompt, self.cached_tokens, cache)
-            rng = None
-            if self._sampling.seed is not None:
-                rng = torch.Generator(device=logits.device).manual_seed(self._sampling.seed)
-            for count in range(1, self._max_tokens + 1):
-                token = g.pick(logits, self._sampling, count - 1, rng)
-                if token in g.eos_ids and not self._sampling.ignore_eos:
-                    yield Step(token, emit=False, finish="stop")
-                    return
-                finish: FinishReason | None = "length" if count == self._max_tokens else None
-                yield Step(token, emit=True, finish=finish)
-                if finish is not None:
-                    return
-                logits = g.forward([token], cache)
+        token = g.pick(self.logits, self._sampling, self._count, self._rng)
+        self._count += 1
+        self.last_token = token
+        if token in g.eos_ids and not self._sampling.ignore_eos:
+            self.done = True
+            return Step(token, emit=False, finish="stop")
+        finish: FinishReason | None = "length" if self._count == self._max_tokens else None
+        self.done = finish is not None
+        return Step(token, emit=True, finish=finish)
 
 
 class Generator:
@@ -157,6 +156,10 @@ class Generator:
         self._chunk = chunk_tokens
         self._prefix_cache = PrefixCache(chunk_tokens, prefix_cache_tokens, prefix_cache_entries)
         self._device = model.get_input_embeddings().weight.device
+        # Decode counters, shown on /health: tokens fed per step tell whether requests were batched.
+        self.decode_steps = 0
+        self.decoded_tokens = 0
+        self.largest_batch = 0
         think_end = tokenizer.convert_tokens_to_ids("</think>")
         self.think_end_id = (
             think_end
@@ -166,16 +169,17 @@ class Generator:
 
     @classmethod
     def load(
-        cls, model: str, revision: str | None, *, experts: str | None = None, **options: int
+        cls, model: str, revision: str | None, *, experts_impl: str | None = None, **options: int
     ) -> Generator:
         """Load BF16 weights, sharded over all visible GPUs, else on the CPU.
 
-        ``experts`` names the MoE experts implementation; None chooses
+        ``experts_impl`` names the MoE experts implementation; None chooses
         ``experts_implementation(torch.version.hip)``.
         """
         tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
         device_map = "auto" if torch.cuda.is_available() else None
-        chosen = experts or experts_implementation(torch.version.hip)
+        experts.register()
+        chosen = experts_impl or experts_implementation(torch.version.hip)
         lm = AutoModelForCausalLM.from_pretrained(
             model,
             revision=revision,
@@ -216,7 +220,7 @@ class Generator:
         return tuple(self.tokenizer.encode(text, add_special_tokens=False))
 
     def start(self, prompt: tuple[int, ...], sampling: Sampling) -> Generation:
-        """Validate lengths and look up the prefix cache; work starts when ``steps`` is iterated."""
+        """Validate lengths, reuse the longest usable snapshot, and prefill the rest of the prompt."""
         if not prompt:
             raise RequestError("prompt must contain at least one token")
         if any(t >= self.model.config.vocab_size for t in prompt):
@@ -229,7 +233,42 @@ class Generator:
             )
         with torch.inference_mode():
             reused, cache = self._prefix_cache.lookup(prompt)
-        return Generation(self, prompt, sampling, reused, cache)
+            if cache is None:
+                cache = DynamicCache(config=self.model.config)
+            logits = self.prefill(prompt, reused, cache)
+        max_tokens = sampling.max_tokens if sampling.max_tokens is not None else budget
+        return Generation(self, sampling, reused, cache, logits, max_tokens)
+
+    def decode(self, generations: list[Generation]) -> None:
+        """Feed each generation's last token in one forward pass and store its next logits.
+
+        One request runs alone on its own cache. Several are stacked into one
+        batch: left-padded attention keys and values, a padding mask, and each
+        request's own position.
+        """
+        self.decode_steps += 1
+        self.decoded_tokens += len(generations)
+        self.largest_batch = max(self.largest_batch, len(generations))
+        with torch.inference_mode():
+            if len(generations) == 1:
+                g = generations[0]
+                g.logits = self.forward([g.last_token], g.cache)
+                return
+            merged, lengths = batching.merge([g.cache for g in generations])
+            out = self.model(
+                input_ids=torch.tensor([[g.last_token] for g in generations], device=self._device),
+                attention_mask=batching.padding_mask(lengths, self._device),
+                position_ids=torch.tensor([[length] for length in lengths], device=self._device),
+                past_key_values=merged,
+                use_cache=True,
+                logits_to_keep=1,
+            )
+            logits = out.logits[:, -1].float()
+            for g, cache, row in zip(
+                generations, batching.split(merged, lengths), logits, strict=True
+            ):
+                g.cache = cache
+                g.logits = row
 
     def forward(self, ids: list[int] | tuple[int, ...], cache: DynamicCache) -> torch.Tensor:
         """Run ``ids`` through the model on top of ``cache``; logits of the last position."""

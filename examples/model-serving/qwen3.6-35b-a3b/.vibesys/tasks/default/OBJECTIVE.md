@@ -4,7 +4,8 @@ Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` across
 2 NVIDIA H100 80GB GPUs. There is no vLLM or SGLang checkout. The project root
 holds a baseline engine, `engine/`, which `main.py` deploys on Modal as
 `python -m engine.server`: Transformers runs the BF16 checkpoint sharded over
-both GPUs, one request at a time, with a snapshot prefix cache. It runs and
+both GPUs, prefilling one request at a time and decoding running requests as
+one batch, with a snapshot prefix cache. It runs and
 meets the service contract, but it is unoptimized and is not a validated
 performance baseline. Replace its pieces with your own: weight sharding, expert
 routing and top-k dispatch, the fused grouped-GEMM MoE experts, the KV cache, a

@@ -4,10 +4,11 @@
 
 Serves ``GET /health``, ``GET /v1/models``, ``POST /v1/completions`` and
 ``POST /v1/chat/completions``, streaming (SSE) or not. Connection threads parse
-requests and write responses; one worker thread owns the model and runs the
-queued requests to completion in arrival order. The port opens only after the
-weights are loaded, so a readiness probe on ``/health`` passes once the server
-can answer.
+requests and write responses; one worker thread owns the model. It repeats one
+loop: prefill each newly arrived request, one at a time, then pick one token
+for every running request and feed all of them back in a single batched decode
+step. The port opens only after the weights are loaded, so a readiness probe on
+``/health`` passes once the server can answer.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from engine import protocol
+from engine import experts, protocol
 from engine.generator import CHECKPOINT, Generation, Generator, Step
 from engine.protocol import ChatRequest, CompletionRequest, Envelope, RequestError, Usage
 from engine.text import Detokenizer, StopMatcher
@@ -30,38 +31,84 @@ from engine.text import Detokenizer, StopMatcher
 _DONE = object()
 
 
+@dataclass(frozen=True)
+class AwaitDecode:
+    """Yielded by a job after it has handled one token and needs the next decode step."""
+
+    generation: Generation
+
+
 @dataclass
 class Job:
-    """A request handed to the worker; the worker answers on ``events``."""
+    """A request handed to the worker; the worker answers on ``events``.
 
-    run: Callable[[], Iterator[dict[str, Any]]]
+    ``run`` yields the request's response events, and an ``AwaitDecode`` after
+    each token that is not its last.
+    """
+
+    run: Callable[[], Iterator[dict[str, Any] | AwaitDecode]]
     events: queue.Queue = field(default_factory=queue.Queue)
     cancelled: threading.Event = field(default_factory=threading.Event)
 
 
-class Worker:
-    """Runs jobs one at a time on its own thread, the only thread that touches the model."""
+def _internal(exc: Exception) -> RequestError:
+    return RequestError(f"internal error: {type(exc).__name__}: {exc}", 500)
 
-    def __init__(self) -> None:
+
+class Worker:
+    """The only thread that touches the model: prefills new jobs, then decodes all running jobs together."""
+
+    def __init__(self, generator: Generator) -> None:
+        self._generator = generator
         self._jobs: queue.Queue[Job] = queue.Queue()
         threading.Thread(target=self._loop, name="engine-worker", daemon=True).start()
 
     def submit(self, job: Job) -> None:
         self._jobs.put(job)
 
+    @staticmethod
+    def _advance(job: Job, events: Iterator[dict[str, Any] | AwaitDecode]) -> Generation | None:
+        """Run ``job`` up to its next decode step; None once it has ended."""
+        try:
+            for event in events:
+                if job.cancelled.is_set():
+                    break
+                if isinstance(event, AwaitDecode):
+                    return event.generation
+                job.events.put(event)
+        except RequestError as exc:
+            job.events.put(exc)
+        except Exception as exc:  # report to the client; the worker keeps serving
+            job.events.put(_internal(exc))
+        job.events.put(_DONE)
+        return None
+
     def _loop(self) -> None:
+        running: list[tuple[Job, Iterator[dict[str, Any] | AwaitDecode]]] = []
         while True:
-            job = self._jobs.get()
+            block = not running
+            while True:
+                try:
+                    job = self._jobs.get(block=block)
+                except queue.Empty:
+                    break
+                block = False
+                running.append((job, job.run()))
+            waiting = []
+            for job, events in running:
+                generation = self._advance(job, events)
+                if generation is not None:
+                    waiting.append((job, events, generation))
+            running = [(job, events) for job, events, _ in waiting]
+            if not waiting:
+                continue
             try:
-                for event in job.run():
-                    if job.cancelled.is_set():
-                        break
-                    job.events.put(event)
-            except RequestError as exc:
-                job.events.put(exc)
-            except Exception as exc:  # report to the client; the worker keeps serving
-                job.events.put(RequestError(f"internal error: {type(exc).__name__}: {exc}", 500))
-            job.events.put(_DONE)
+                self._generator.decode([generation for _, _, generation in waiting])
+            except Exception as exc:  # the step failed for every request in it
+                for job, _, _ in waiting:
+                    job.events.put(_internal(exc))
+                    job.events.put(_DONE)
+                running = []
 
 
 class _Output:
@@ -109,25 +156,28 @@ class _Output:
 
 
 def _run(
-    generator: Generator, generation: Generation, output: _Output, usage: Usage
+    generation: Generation, output: _Output, usage: Usage
 ) -> Iterator[tuple[Step, str, str, protocol.FinishReason | None]]:
-    """Drive a generation; yield (step, reasoning delta, content delta, finish) per token."""
-    steps = generation.steps()
-    for step in steps:
+    """Yield (step, reasoning delta, content delta, finish) per token until the request ends.
+
+    The caller yields ``AwaitDecode`` after each unfinished step, so the worker
+    has decoded the token before this generator resumes.
+    """
+    while True:
+        step = generation.next_step()
         usage.completion_tokens += int(step.emit)
         reasoning, content = output.push(step)
         finish = "stop" if output.stopped else step.finish
         if finish is not None:
             r_tail, c_tail = ("", "") if output.stopped else output.flush()
             yield step, reasoning + r_tail, content + c_tail, finish
-            steps.close()
             return
         yield step, reasoning, content, None
 
 
 def completion_job(
     generator: Generator, model: str, request: CompletionRequest
-) -> Iterator[dict[str, Any]]:
+) -> Iterator[dict[str, Any] | AwaitDecode]:
     """Events for ``/v1/completions``: chunks when streaming, else one response."""
     prompt = (
         generator.encode_text(request.prompt) if isinstance(request.prompt, str) else request.prompt
@@ -138,7 +188,7 @@ def completion_job(
     output = _Output(generator, request.sampling.stop, thinking=False)
     token_ids: list[int] = []
     finish: protocol.FinishReason = "length"
-    for step, _, text, finish_now in _run(generator, generation, output, usage):
+    for step, _, text, finish_now in _run(generation, output, usage):
         if step.emit:
             token_ids.append(step.token_id)
         if request.stream:
@@ -150,6 +200,8 @@ def completion_job(
                 request.return_token_ids,
             )
         finish = finish_now or finish
+        if finish_now is None:
+            yield AwaitDecode(generation)
     if request.stream:
         if request.include_usage:
             yield protocol.usage_chunk(env, usage)
@@ -159,7 +211,9 @@ def completion_job(
         )
 
 
-def chat_job(generator: Generator, model: str, request: ChatRequest) -> Iterator[dict[str, Any]]:
+def chat_job(
+    generator: Generator, model: str, request: ChatRequest
+) -> Iterator[dict[str, Any] | AwaitDecode]:
     """Events for ``/v1/chat/completions``; reasoning streams as ``reasoning_content``."""
     prompt = generator.encode_chat(request)
     generation = generator.start(prompt, request.sampling)
@@ -172,7 +226,7 @@ def chat_job(generator: Generator, model: str, request: ChatRequest) -> Iterator
         yield protocol.chat_chunk(
             env, {"role": "assistant", "content": ""}, None, None, request.return_token_ids
         )
-    for step, reasoning, content, finish_now in _run(generator, generation, output, usage):
+    for step, reasoning, content, finish_now in _run(generation, output, usage):
         if step.emit:
             token_ids.append(step.token_id)
         if request.stream:
@@ -190,6 +244,8 @@ def chat_job(generator: Generator, model: str, request: ChatRequest) -> Iterator
                 request.return_token_ids,
             )
         finish = finish_now or finish
+        if finish_now is None:
+            yield AwaitDecode(generation)
     if request.stream:
         if request.include_usage:
             yield protocol.usage_chunk(env, usage)
@@ -223,7 +279,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._send_json(200, {"status": "ok"})
+            g = self.server.generator
+            stats = {
+                "decode_steps": g.decode_steps,
+                "decoded_tokens": g.decoded_tokens,
+                "largest_batch": g.largest_batch,
+            }
+            self._send_json(200, {"status": "ok", **stats})
         elif self.path == "/v1/models":
             card = {
                 "id": self.server.model_name,
@@ -305,7 +367,7 @@ class _Server(ThreadingHTTPServer):
         super().__init__(address, _Handler)
         self.generator = generator
         self.model_name = model_name
-        self.worker = Worker()
+        self.worker = Worker(generator)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -335,9 +397,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--experts-implementation",
-        choices=("eager", "grouped_mm", "batched_mm"),
+        choices=("eager", "grouped_mm", "batched_mm", experts.NAME),
         default=None,
-        help="Transformers MoE experts implementation (default: eager on ROCm, Transformers' own elsewhere)",
+        help=f"Transformers MoE experts implementation (default: {experts.NAME} on ROCm, Transformers' own elsewhere)",
     )
     args = parser.parse_args(argv)
     revision = args.revision
@@ -350,7 +412,7 @@ def main(argv: list[str] | None = None) -> None:
         chunk_tokens=args.prefill_chunk_tokens,
         prefix_cache_tokens=args.prefix_cache_tokens,
         prefix_cache_entries=args.prefix_cache_entries,
-        experts=args.experts_implementation,
+        experts_impl=args.experts_implementation,
     )
     server = _Server((args.host, args.port), generator, args.served_model_name or args.model)
     print(f"engine: serving {args.model} on http://{args.host}:{args.port}", flush=True)

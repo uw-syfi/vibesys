@@ -9,10 +9,12 @@ prefix-cache reuse that never changes what is generated.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
 import pytest
+from engine import experts
 from engine.generator import experts_implementation
 
 from conftest import CHUNK, Server
@@ -238,15 +240,58 @@ def test_requests_the_server_cannot_honor_are_refused(
 
 
 @pytest.mark.parametrize("hip", ["6.4.43484-123eb5128", "7.0.0"])
-def test_rocm_builds_load_the_eager_experts(hip: str) -> None:
+def test_rocm_builds_load_the_matmul_experts(hip: str) -> None:
     """torch 2.9.1+rocm6.4 raises on torch._grouped_mm, Transformers' default experts kernel."""
-    assert experts_implementation(hip) == "eager"
+    assert experts_implementation(hip) == experts.NAME
 
 
 def test_cuda_and_cpu_builds_keep_the_transformers_default() -> None:
     assert experts_implementation(None) is None
 
 
-def test_the_eager_experts_path_serves_exact_lengths(eager_server: Server) -> None:
-    chunks, usage = _completion(eager_server, list(range(60, 90)), 9)
+def test_the_rocm_experts_path_serves_exact_lengths(rocm_experts_server: Server) -> None:
+    chunks, usage = _completion(rocm_experts_server, list(range(60, 90)), 9)
     assert len(_ids(chunks)) == usage["completion_tokens"] == 9
+
+
+def _solo_and_together(
+    server: Server, requests: list[tuple[list[int], int]]
+) -> tuple[list, list, dict]:
+    solo = [_ids(_completion(server, prompt, n)[0]) for prompt, n in requests]
+    before = httpx.get(f"{server.url}/health").json()
+    with ThreadPoolExecutor(len(requests)) as pool:
+        futures = [pool.submit(_completion, server, prompt, n) for prompt, n in requests]
+        together = [_ids(f.result(timeout=_TIMEOUT)[0]) for f in futures]
+    after = httpx.get(f"{server.url}/health").json()
+    return solo, together, {k: after[k] - before[k] for k in ("decode_steps", "decoded_tokens")}
+
+
+@pytest.mark.parametrize("which", ["cold_server", "rocm_experts_server"])
+def test_concurrent_requests_decode_together_and_match_their_solo_outputs(
+    which: str, request: pytest.FixtureRequest
+) -> None:
+    """Different prompt lengths (padding) and output lengths (the batch shrinks as requests end).
+
+    Also on the experts implementation ROCm uses, whose decode and prefill paths differ.
+    """
+    server = request.getfixturevalue(which)
+    requests = [
+        ([11 + (i * 17 + j * 5) % 250 for j in range(9 + 7 * i)], 6 + 5 * i) for i in range(6)
+    ]
+    solo, together, delta = _solo_and_together(server, requests)
+    assert together == solo
+    assert [len(ids) for ids in together] == [n for _, n in requests]
+    # Fewer forward passes than tokens decoded: the requests shared decode steps.
+    assert delta["decoded_tokens"] > delta["decode_steps"]
+
+
+def test_batched_decode_keeps_prefix_cache_usage_accurate(server: Server) -> None:
+    prompts = [[200 + (i * 31 + j) % 100 for j in range(3 * CHUNK + i)] for i in range(4)]
+    for prompt in prompts:
+        _completion(server, prompt, 2)
+    with ThreadPoolExecutor(len(prompts)) as pool:
+        futures = [pool.submit(_completion, server, prompt, 10) for prompt in prompts]
+        results = [f.result(timeout=_TIMEOUT) for f in futures]
+    for prompt, (chunks, usage) in zip(prompts, results, strict=True):
+        assert usage["prompt_tokens_details"]["cached_tokens"] == len(prompt) - 1
+        assert usage["completion_tokens"] == len(_ids(chunks)) == 10

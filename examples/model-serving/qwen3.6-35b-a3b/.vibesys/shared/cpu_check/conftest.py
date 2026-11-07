@@ -132,11 +132,13 @@ def cold_server(
 
 
 @pytest.fixture(scope="session")
-def eager_server(checkpoint: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Server]:
+def rocm_experts_server(
+    checkpoint: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[Server]:
     """The same weights with the MoE experts implementation the engine uses on ROCm."""
     yield from _serve(
         checkpoint,
-        tmp_path_factory.mktemp("logs") / "eager.log",
+        tmp_path_factory.mktemp("logs") / "rocm-experts.log",
         "--experts-implementation",
-        "eager",
+        "baseline_matmul",
     )

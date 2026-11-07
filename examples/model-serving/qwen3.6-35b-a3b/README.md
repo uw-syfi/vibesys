@@ -23,8 +23,11 @@ OpenAI-compatible server that runs and is slow:
   sharded over every visible GPU with `device_map="auto"`. The same code runs on
   two H100s, four MI210s or one MI300X. It refuses to start
   rather than offload weights to the host.
-- One worker thread serves requests one at a time, in arrival order. There is
-  no batching and no fused or custom kernel.
+- One worker thread prefills new requests one at a time, in arrival order, then
+  runs one decode step for every running request together: their caches are
+  joined into one batch, shorter attention caches left-padded and masked, and
+  split again after the step. Greedy outputs match those of the same request
+  served alone; the CPU check holds this. There is no fused or custom kernel.
 - A prefix cache keeps snapshots of the model cache: at prefill-chunk
   boundaries, and after all but the last token of each prompt. Usage reports
   the reused tokens as `prompt_tokens_details.cached_tokens`, which TraceLab's
@@ -92,9 +95,13 @@ uv pip install -r requirements-agentx.txt
 This torch build cannot run `torch._grouped_mm`, Transformers' default MoE
 experts kernel: it raises "grouped gemm is not supported on ROCM" at the first
 forward pass, even though Transformers' availability check passes (an MI250
-reports compute capability 9.0). The baseline engine therefore loads
-`experts_implementation="eager"` whenever `torch.version.hip` is set
-(`--experts-implementation` overrides it).
+reports compute capability 9.0). Transformers' `eager` experts run, but
+synchronize with the host once per selected expert, so decode is slow. The
+baseline engine therefore registers its own experts implementation,
+`baseline_matmul` in `engine/experts.py`, and loads it whenever
+`torch.version.hip` is set (`--experts-implementation` overrides it). It uses
+only ordinary matmuls: Transformers' `batched_mm` for decode-sized inputs, and
+for prefill chunks a loop over the experts that received tokens.
 
 Neither AMD task supplies a validated comparison baseline. The baseline engine
 uses Transformers' reference DeltaNet and MoE code; that it runs does not

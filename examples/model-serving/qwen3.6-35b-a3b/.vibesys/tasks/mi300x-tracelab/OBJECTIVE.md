@@ -6,8 +6,9 @@ MI300X GPU**. The candidate lives in the project root, outside trusted
 
 The project root holds a baseline engine, `engine/`, launched from the project
 root as `python -m engine.server --host <host> --port <port>`. It runs the BF16
-checkpoint with Transformers, sharded over every visible GPU, one request at a
-time, with a snapshot prefix cache. It meets the service contract below but is
+checkpoint with Transformers, sharded over every visible GPU, prefilling one
+request at a time and decoding running requests as one batch, with a snapshot
+prefix cache. It meets the service contract below but is
 unoptimized and is not a validated performance baseline. Making the ROCm serving
 path fast, by changing or replacing any part of it, is the task. Keep that
 launch command working: the project README gives it as the service command.
@@ -35,8 +36,9 @@ Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
 See [the project README](../../../README.md) for AMD environment setup. The
 ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
-not supported on ROCM"), so the baseline loads Transformers' eager experts on
-ROCm; a grouped expert GEMM needs a kernel of your own or another library.
+not supported on ROCM"), so on ROCm the baseline loads its own experts
+implementation built from ordinary matmuls (`engine/experts.py`); a grouped
+expert GEMM needs a kernel of your own or another library.
 
 ## Correctness and service interface
 
