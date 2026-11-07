@@ -48,8 +48,6 @@ export function ReportScreen(props: {
   readonly openCost: () => void;
   /** What each agent is called on screen, by agent id. */
   readonly names: ReadonlyMap<string, string>;
-  /** The state of every connection that is not working, above the report; nothing when all work. */
-  readonly notice: ReactNode;
   /** Where the read of the run's history stands, among the state words beside the title. */
   readonly reading: ReactNode;
   /** The check-in span the ideas are narrowed to on arrival (from Catch me up); null for the run's own. */
@@ -104,8 +102,11 @@ export function ReportScreen(props: {
         />
       }
     >
-      {props.notice}
-      <CommandLine progress={props.stopProgress} done="Stop" retry={props.retryStop} />
+      <CommandLine
+        progress={over ? undefined : props.stopProgress}
+        done="Stop"
+        retry={props.retryStop}
+      />
       <LeadSummary summary={report.summary} nowMs={props.nowMs} />
       <ObjectiveTiles objectives={report.objectives} />
       <ChartColumns>

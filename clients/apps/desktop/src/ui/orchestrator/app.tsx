@@ -410,7 +410,6 @@ function ReportDestination(props: {
       openAgents={() => go({type: 'show', view: 'agents'})}
       openCost={() => go({type: 'show', view: 'cost'})}
       names={agentNames(state, runId)}
-      notice={null}
       reading={props.reading}
       ideasWindow={props.ideasWindow}
     />

@@ -20,7 +20,7 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
   }),
   fc.record({
     type: fc.constant('show-ideas' as const),
-    window: fc.record({fromMs: fc.nat(1000), toMs: fc.nat(2000)}),
+    window: fc.record({plans: fc.array(fc.nat(100))}),
   }),
   fc.record({type: fc.constant('pick-agent' as const), agentId: fc.constantFrom('a', 'b')}),
   fc.constant({type: 'close-agent' as const}),
@@ -65,7 +65,7 @@ describe('the ideas window of the route', () => {
     fc.assert(
       fc.property(
         fc.array(action, {maxLength: 20}),
-        fc.record({fromMs: fc.nat(1000), toMs: fc.nat(2000)}),
+        fc.record({plans: fc.array(fc.nat(100))}),
         action,
         (moves, window, next) => {
           const route = moves.reduce(routeReducer, initialRoute);
@@ -83,7 +83,7 @@ describe('the ideas window of the route', () => {
   });
 
   it('is nothing on the run list', () => {
-    expect(routeReducer(initialRoute, {type: 'show-ideas', window: {fromMs: 1, toMs: 2}})).toBe(
+    expect(routeReducer(initialRoute, {type: 'show-ideas', window: {plans: [1, 2]}})).toBe(
       initialRoute,
     );
   });

@@ -1,6 +1,7 @@
 import {Card, Chip, KeyValue, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
+import {withShortCommits} from '../../commit-text.js';
 import {formatAge, seattleMoment} from './format.js';
 
 const FIELD_LABELS: Readonly<Record<Exclude<SummaryField, 'openForUser'>, string>> = {
@@ -22,7 +23,7 @@ export function LeadSummary(props: {
   const {summary} = props;
   const ask = summary?.fields.find(({field}) => field === 'openForUser');
   const rest = (summary?.fields ?? []).flatMap(({field, text}) =>
-    field === 'openForUser' ? [] : [{key: FIELD_LABELS[field], value: text}],
+    field === 'openForUser' ? [] : [{key: FIELD_LABELS[field], value: withShortCommits(text)}],
   );
   return (
     <Card section="Lead summary">
@@ -36,11 +37,11 @@ export function LeadSummary(props: {
             </Text>
             {summary.final ? <Chip label="Final" tone="ok" /> : null}
           </Row>
-          <Text as="p">{summary.headline}</Text>
+          <Text as="p">{withShortCommits(summary.headline)}</Text>
           {ask === undefined ? null : (
             <Row gap="space-3" align="start" wrap>
               <Chip label="Needs you" tone="warn" dot />
-              <Text variant="body-strong">{ask.text}</Text>
+              <Text variant="body-strong">{withShortCommits(ask.text)}</Text>
             </Row>
           )}
           {rest.length === 0 ? null : <KeyValue items={rest} />}

@@ -270,7 +270,7 @@ describe('the fleet screen', () => {
     expect(cell(row, 'host').textContent).toContain('This Mac');
     expect(cell(row, 'status').textContent).toContain('Running');
     expect(cell(row, 'status').textContent).toContain('Report 23m ago');
-    expect(cell(row, 'best').textContent).toBe('2,310 tok/s · 71%');
+    expect(cell(row, 'best').textContent).toBe('2.31k tok/s · 71%');
     expect(cell(row, 'agents').textContent).toBe('3');
     expect(cell(row, 'cost').textContent).toBe('$318of $500');
     expect(cell(row, 'name').textContent).toContain('5h 20m');
@@ -668,7 +668,7 @@ describe('the candidates cell of the fleet screen', () => {
   it('is empty for a run of a host that serves no series, though it shows the best and the bound', () => {
     const {screen} = open([hostA]);
     const row = rowOf(screen, 'queue-rs');
-    expect(cell(row, 'best').textContent).toBe('2,310 tok/s · 71%');
+    expect(cell(row, 'best').textContent).toBe('2.31k tok/s · 71%');
     expect(cell(row, 'trend').querySelector('svg')).toBeNull();
     expect(cell(row, 'trend').textContent).toBe('');
     screen.unmount();

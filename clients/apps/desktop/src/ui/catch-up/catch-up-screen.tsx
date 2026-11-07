@@ -36,6 +36,7 @@ import {
   type ReportWords,
   type SummaryModel,
   type Tiles,
+  windowPlans,
 } from './catch-up-model.js';
 
 /** What the page says of a press that did not make a check-in. */
@@ -352,7 +353,7 @@ export function CatchUpScreen(props: {
           main={
             <Window
               model={catchUpModel(shown, props.words)}
-              showIdeas={() => props.goIdeas({fromMs: shown.sinceMs, toMs: shown.atMs})}
+              showIdeas={() => props.goIdeas({plans: windowPlans(shown)})}
             />
           }
         />
