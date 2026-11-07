@@ -1,5 +1,6 @@
 /** What the person asked for, as the commands the host takes. */
 import {create} from '@bufbuild/protobuf';
+import {DurationSchema} from '@bufbuild/protobuf/wkt';
 import {
   AgentSpecSchema,
   SendMessageSchema,
@@ -16,8 +17,12 @@ export function startIntent(request: StartRunRequest): Intent {
       repository: request.repository,
       task: request.task,
       fanoutLimit: request.fanoutLimit,
-      lead: create(AgentSpecSchema, {harness: request.lead.harness}),
+      lead: create(AgentSpecSchema, {harness: request.lead.harness, model: request.lead.model}),
       brief: request.brief,
+      ...(request.maxTimeSeconds === null
+        ? {}
+        : {maxTime: create(DurationSchema, {seconds: BigInt(request.maxTimeSeconds)})}),
+      ...(request.maxCostUsd === null ? {} : {maxCostUsd: request.maxCostUsd}),
     }),
   };
 }

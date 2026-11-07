@@ -64,8 +64,16 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     snapshot.searches.map(search => [search.runId, search.revision]),
   );
   const cut = {truncated: snapshot.truncated, runsLeftOut: snapshot.runsLeftOut};
+  const models = snapshot.models ?? null;
   if (snapshot.sequence < state.sequence && state.gap === null) {
-    return {...state, searches, searchRevisions, summaries: summariesOf(snapshot.summaries), cut};
+    return {
+      ...state,
+      searches,
+      searchRevisions,
+      summaries: summariesOf(snapshot.summaries),
+      cut,
+      models,
+    };
   }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
   const runs = byId(snapshot.runs);
@@ -77,6 +85,7 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     runs,
     summaries: summariesOf(snapshot.summaries),
     cut,
+    models,
     histories: {},
     costs: costsOfRuns(state.costs, runs),
     agents: byId(snapshot.agents),
