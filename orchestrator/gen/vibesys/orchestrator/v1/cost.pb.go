@@ -590,6 +590,369 @@ func (x *ModelSpend) GetCostUsd() float64 {
 	return 0
 }
 
+// HostCost is what every run the host holds has cost, live and ended, worked out by the host from the
+// finished turns of their agents, in the terms RunCost uses: the same turns, the same pricing, the same
+// unpriced turns and the same lists. A client shows these numbers and computes none of them: no sum,
+// ranking, split, rate or bucket is left to it. With no `since`, its total is the sum of the totals of
+// RunCost over the runs it counts.
+//
+// A run is counted unless it ended before the request's `since`. A run that never opened (its lead
+// never ran a turn) is counted like any other, and has cost nothing. A turn is counted when it
+// finished, and with a `since`, when it finished at or after it. The agents are those of the counted
+// runs, whether or not they ran a turn in the window.
+//
+// It is a whole view: each message replaces the one before it.
+type HostCost struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The log sequence the view is current to.
+	Sequence uint64 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// The instant the view is worked out at: the host's clock while a counted run is live, and once none
+	// is, the latest end among the counted runs, so that the view of a host with nothing live never
+	// changes. It is never before the first bucket's start.
+	AsOf *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=as_of,json=asOf,proto3" json:"as_of,omitempty"`
+	// What the finished turns of every counted run cost. Its tokens are the tokens by kind. cost_usd is
+	// absent when no turn is priced, never zero.
+	Total *Usage `protobuf:"bytes,3,opt,name=total,proto3" json:"total,omitempty"`
+	// How many runs the view counts: those in `runs` and those in `other_runs`.
+	RunCount uint32 `protobuf:"varint,4,opt,name=run_count,json=runCount,proto3" json:"run_count,omitempty"`
+	// How many turns have finished, and how many of them are unpriced. An unpriced turn adds its tokens
+	// and itself to every figure and never a dollar, so a cost with an unpriced turn behind it is a
+	// lower bound, as RunCost says.
+	Turns         uint32 `protobuf:"varint,5,opt,name=turns,proto3" json:"turns,omitempty"`
+	UnpricedTurns uint32 `protobuf:"varint,6,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
+	// The most costly runs, most costly first, at most 32; a run with no priced turn comes after those,
+	// in the order of the run ids. The runs it leaves out are summed in other_runs.
+	Runs []*HostRunCost `protobuf:"bytes,7,rep,name=runs,proto3" json:"runs,omitempty"`
+	// The runs that are not in `runs`, added up. Absent when every counted run is listed.
+	OtherRuns *OtherRunsCost `protobuf:"bytes,8,opt,name=other_runs,json=otherRuns,proto3,oneof" json:"other_runs,omitempty"`
+	// One entry for each type of agent the counted runs have, most costly first, as RunCost.roles is,
+	// summed over the runs.
+	Roles []*RoleCost `protobuf:"bytes,9,rep,name=roles,proto3" json:"roles,omitempty"`
+	// One entry for each model the counted runs' agents ran on, most costly first, as RunCost.models
+	// is, summed over the runs. When more models ran than fit, the first ones are kept and
+	// models_truncated says so.
+	Models []*ModelCost `protobuf:"bytes,10,rep,name=models,proto3" json:"models,omitempty"`
+	// The cost over time: from the start of the window (the request's `since`, or the start of the
+	// first counted run) to as_of, in buckets of one width the host picks from the ladder RunCost's
+	// series uses.
+	Series *SpendSeries `protobuf:"bytes,11,opt,name=series,proto3" json:"series,omitempty"`
+	// What the turns that finished in the hour before as_of cost, across the counted runs. Absent when
+	// no counted turn is priced.
+	LastHourUsd *float64 `protobuf:"fixed64,12,opt,name=last_hour_usd,json=lastHourUsd,proto3,oneof" json:"last_hour_usd,omitempty"`
+	// True when the view leaves something of the models out, exactly as RunCost.models_truncated says.
+	// Every figure that is not a list of models still counts every turn.
+	ModelsTruncated bool `protobuf:"varint,13,opt,name=models_truncated,json=modelsTruncated,proto3" json:"models_truncated,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *HostCost) Reset() {
+	*x = HostCost{}
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostCost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostCost) ProtoMessage() {}
+
+func (x *HostCost) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostCost.ProtoReflect.Descriptor instead.
+func (*HostCost) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_cost_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HostCost) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *HostCost) GetAsOf() *timestamppb.Timestamp {
+	if x != nil {
+		return x.AsOf
+	}
+	return nil
+}
+
+func (x *HostCost) GetTotal() *Usage {
+	if x != nil {
+		return x.Total
+	}
+	return nil
+}
+
+func (x *HostCost) GetRunCount() uint32 {
+	if x != nil {
+		return x.RunCount
+	}
+	return 0
+}
+
+func (x *HostCost) GetTurns() uint32 {
+	if x != nil {
+		return x.Turns
+	}
+	return 0
+}
+
+func (x *HostCost) GetUnpricedTurns() uint32 {
+	if x != nil {
+		return x.UnpricedTurns
+	}
+	return 0
+}
+
+func (x *HostCost) GetRuns() []*HostRunCost {
+	if x != nil {
+		return x.Runs
+	}
+	return nil
+}
+
+func (x *HostCost) GetOtherRuns() *OtherRunsCost {
+	if x != nil {
+		return x.OtherRuns
+	}
+	return nil
+}
+
+func (x *HostCost) GetRoles() []*RoleCost {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+func (x *HostCost) GetModels() []*ModelCost {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
+func (x *HostCost) GetSeries() *SpendSeries {
+	if x != nil {
+		return x.Series
+	}
+	return nil
+}
+
+func (x *HostCost) GetLastHourUsd() float64 {
+	if x != nil && x.LastHourUsd != nil {
+		return *x.LastHourUsd
+	}
+	return 0
+}
+
+func (x *HostCost) GetModelsTruncated() bool {
+	if x != nil {
+		return x.ModelsTruncated
+	}
+	return false
+}
+
+// HostRunCost is what one run has cost, as a line of the host's list of runs by cost.
+type HostRunCost struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	RunId string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// What the run is called: its task, cut to the limit at a character boundary when it is longer.
+	Name   string    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Status RunStatus `protobuf:"varint,3,opt,name=status,proto3,enum=vibesys.orchestrator.v1.RunStatus" json:"status,omitempty"`
+	// The most the run may cost, as Run.max_cost_usd. Absent when the run has no cost limit.
+	MaxCostUsd *float64 `protobuf:"fixed64,4,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
+	// The finished turns the window counts of the run, and how many of them are unpriced.
+	Turns         uint32 `protobuf:"varint,5,opt,name=turns,proto3" json:"turns,omitempty"`
+	UnpricedTurns uint32 `protobuf:"varint,6,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
+	// Tokens by kind and the cost of the priced turns: absent when none is priced. With no `since` this
+	// is RunCost.total of the run.
+	Usage *Usage `protobuf:"bytes,7,opt,name=usage,proto3" json:"usage,omitempty"`
+	// All the tokens of the run: the sum of the five kinds in usage, a kind no turn reported counting as
+	// none.
+	TotalTokens   uint64 `protobuf:"varint,8,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostRunCost) Reset() {
+	*x = HostRunCost{}
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostRunCost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostRunCost) ProtoMessage() {}
+
+func (x *HostRunCost) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostRunCost.ProtoReflect.Descriptor instead.
+func (*HostRunCost) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_cost_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *HostRunCost) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *HostRunCost) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HostRunCost) GetStatus() RunStatus {
+	if x != nil {
+		return x.Status
+	}
+	return RunStatus_RUN_STATUS_UNSPECIFIED
+}
+
+func (x *HostRunCost) GetMaxCostUsd() float64 {
+	if x != nil && x.MaxCostUsd != nil {
+		return *x.MaxCostUsd
+	}
+	return 0
+}
+
+func (x *HostRunCost) GetTurns() uint32 {
+	if x != nil {
+		return x.Turns
+	}
+	return 0
+}
+
+func (x *HostRunCost) GetUnpricedTurns() uint32 {
+	if x != nil {
+		return x.UnpricedTurns
+	}
+	return 0
+}
+
+func (x *HostRunCost) GetUsage() *Usage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *HostRunCost) GetTotalTokens() uint64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
+// OtherRunsCost is what the runs HostCost.runs does not list have cost, added up.
+type OtherRunsCost struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many runs are summed here; at least one, since the message is absent otherwise.
+	Runs          uint32 `protobuf:"varint,1,opt,name=runs,proto3" json:"runs,omitempty"`
+	Turns         uint32 `protobuf:"varint,2,opt,name=turns,proto3" json:"turns,omitempty"`
+	UnpricedTurns uint32 `protobuf:"varint,3,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
+	Usage         *Usage `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	TotalTokens   uint64 `protobuf:"varint,5,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OtherRunsCost) Reset() {
+	*x = OtherRunsCost{}
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OtherRunsCost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OtherRunsCost) ProtoMessage() {}
+
+func (x *OtherRunsCost) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_cost_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OtherRunsCost.ProtoReflect.Descriptor instead.
+func (*OtherRunsCost) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_cost_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *OtherRunsCost) GetRuns() uint32 {
+	if x != nil {
+		return x.Runs
+	}
+	return 0
+}
+
+func (x *OtherRunsCost) GetTurns() uint32 {
+	if x != nil {
+		return x.Turns
+	}
+	return 0
+}
+
+func (x *OtherRunsCost) GetUnpricedTurns() uint32 {
+	if x != nil {
+		return x.UnpricedTurns
+	}
+	return 0
+}
+
+func (x *OtherRunsCost) GetUsage() *Usage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *OtherRunsCost) GetTotalTokens() uint64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
 var File_vibesys_orchestrator_v1_cost_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_cost_proto_rawDesc = "" +
@@ -645,7 +1008,48 @@ const file_vibesys_orchestrator_v1_cost_proto_rawDesc = "" +
 	"\n" +
 	"ModelSpend\x12?\n" +
 	"\x05model\x18\x01 \x01(\v2!.vibesys.orchestrator.v1.ModelRefB\x06\xbaH\x03\xc8\x01\x01R\x05model\x12+\n" +
-	"\bcost_usd\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsdBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\bcost_usd\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsd\"\xf7\a\n" +
+	"\bHostCost\x12\x1a\n" +
+	"\bsequence\x18\x01 \x01(\x04R\bsequence\x127\n" +
+	"\x05as_of\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x04asOf\x12<\n" +
+	"\x05total\x18\x03 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05total\x12\x1b\n" +
+	"\trun_count\x18\x04 \x01(\rR\brunCount\x12\x14\n" +
+	"\x05turns\x18\x05 \x01(\rR\x05turns\x12%\n" +
+	"\x0eunpriced_turns\x18\x06 \x01(\rR\runpricedTurns\x12B\n" +
+	"\x04runs\x18\a \x03(\v2$.vibesys.orchestrator.v1.HostRunCostB\b\xbaH\x05\x92\x01\x02\x10 R\x04runs\x12J\n" +
+	"\n" +
+	"other_runs\x18\b \x01(\v2&.vibesys.orchestrator.v1.OtherRunsCostH\x00R\totherRuns\x88\x01\x01\x12A\n" +
+	"\x05roles\x18\t \x03(\v2!.vibesys.orchestrator.v1.RoleCostB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12D\n" +
+	"\x06models\x18\n" +
+	" \x03(\v2\".vibesys.orchestrator.v1.ModelCostB\b\xbaH\x05\x92\x01\x02\x10@R\x06models\x12D\n" +
+	"\x06series\x18\v \x01(\v2$.vibesys.orchestrator.v1.SpendSeriesB\x06\xbaH\x03\xc8\x01\x01R\x06series\x129\n" +
+	"\rlast_hour_usd\x18\f \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\vlastHourUsd\x88\x01\x01\x12)\n" +
+	"\x10models_truncated\x18\r \x01(\bR\x0fmodelsTruncated:\x97\x02\xbaH\x93\x02\x1aa\n" +
+	"\x18host_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\x1a\xad\x01\n" +
+	"\x13host_cost.run_count\x128run_count is the runs listed plus the runs in other_runs\x1a\\this.run_count == uint(size(this.runs)) + (has(this.other_runs) ? this.other_runs.runs : 0u)B\r\n" +
+	"\v_other_runsB\x10\n" +
+	"\x0e_last_hour_usd\"\xe9\x03\n" +
+	"\vHostRunCost\x12\x1e\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\x1e\n" +
+	"\x04name\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04name\x12F\n" +
+	"\x06status\x18\x03 \x01(\x0e2\".vibesys.orchestrator.v1.RunStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x127\n" +
+	"\fmax_cost_usd\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
+	"maxCostUsd\x88\x01\x01\x12\x14\n" +
+	"\x05turns\x18\x05 \x01(\rR\x05turns\x12%\n" +
+	"\x0eunpriced_turns\x18\x06 \x01(\rR\runpricedTurns\x12<\n" +
+	"\x05usage\x18\a \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\x12!\n" +
+	"\ftotal_tokens\x18\b \x01(\x04R\vtotalTokens:j\xbaHg\x1ae\n" +
+	"\x1chost_run_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turnsB\x0f\n" +
+	"\r_max_cost_usd\"\xb8\x02\n" +
+	"\rOtherRunsCost\x12\x1b\n" +
+	"\x04runs\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x04runs\x12\x14\n" +
+	"\x05turns\x18\x02 \x01(\rR\x05turns\x12%\n" +
+	"\x0eunpriced_turns\x18\x03 \x01(\rR\runpricedTurns\x12<\n" +
+	"\x05usage\x18\x04 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\x12!\n" +
+	"\ftotal_tokens\x18\x05 \x01(\x04R\vtotalTokens:l\xbaHi\x1ag\n" +
+	"\x1eother_runs_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turnsBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_cost_proto_rawDescOnce sync.Once
@@ -659,7 +1063,7 @@ func file_vibesys_orchestrator_v1_cost_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_cost_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_cost_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_vibesys_orchestrator_v1_cost_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_orchestrator_v1_cost_proto_goTypes = []any{
 	(*RunCost)(nil),               // 0: vibesys.orchestrator.v1.RunCost
 	(*RoleCost)(nil),              // 1: vibesys.orchestrator.v1.RoleCost
@@ -668,34 +1072,48 @@ var file_vibesys_orchestrator_v1_cost_proto_goTypes = []any{
 	(*SpendSeries)(nil),           // 4: vibesys.orchestrator.v1.SpendSeries
 	(*SpendBucket)(nil),           // 5: vibesys.orchestrator.v1.SpendBucket
 	(*ModelSpend)(nil),            // 6: vibesys.orchestrator.v1.ModelSpend
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(*Usage)(nil),                 // 8: vibesys.orchestrator.v1.Usage
-	(AgentRole)(0),                // 9: vibesys.orchestrator.v1.AgentRole
-	(Harness)(0),                  // 10: vibesys.orchestrator.v1.Harness
-	(*durationpb.Duration)(nil),   // 11: google.protobuf.Duration
+	(*HostCost)(nil),              // 7: vibesys.orchestrator.v1.HostCost
+	(*HostRunCost)(nil),           // 8: vibesys.orchestrator.v1.HostRunCost
+	(*OtherRunsCost)(nil),         // 9: vibesys.orchestrator.v1.OtherRunsCost
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*Usage)(nil),                 // 11: vibesys.orchestrator.v1.Usage
+	(AgentRole)(0),                // 12: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 13: vibesys.orchestrator.v1.Harness
+	(*durationpb.Duration)(nil),   // 14: google.protobuf.Duration
+	(RunStatus)(0),                // 15: vibesys.orchestrator.v1.RunStatus
 }
 var file_vibesys_orchestrator_v1_cost_proto_depIdxs = []int32{
-	7,  // 0: vibesys.orchestrator.v1.RunCost.as_of:type_name -> google.protobuf.Timestamp
-	8,  // 1: vibesys.orchestrator.v1.RunCost.total:type_name -> vibesys.orchestrator.v1.Usage
+	10, // 0: vibesys.orchestrator.v1.RunCost.as_of:type_name -> google.protobuf.Timestamp
+	11, // 1: vibesys.orchestrator.v1.RunCost.total:type_name -> vibesys.orchestrator.v1.Usage
 	1,  // 2: vibesys.orchestrator.v1.RunCost.roles:type_name -> vibesys.orchestrator.v1.RoleCost
 	3,  // 3: vibesys.orchestrator.v1.RunCost.models:type_name -> vibesys.orchestrator.v1.ModelCost
 	4,  // 4: vibesys.orchestrator.v1.RunCost.series:type_name -> vibesys.orchestrator.v1.SpendSeries
-	9,  // 5: vibesys.orchestrator.v1.RoleCost.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	8,  // 6: vibesys.orchestrator.v1.RoleCost.usage:type_name -> vibesys.orchestrator.v1.Usage
-	10, // 7: vibesys.orchestrator.v1.ModelRef.harness:type_name -> vibesys.orchestrator.v1.Harness
+	12, // 5: vibesys.orchestrator.v1.RoleCost.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	11, // 6: vibesys.orchestrator.v1.RoleCost.usage:type_name -> vibesys.orchestrator.v1.Usage
+	13, // 7: vibesys.orchestrator.v1.ModelRef.harness:type_name -> vibesys.orchestrator.v1.Harness
 	2,  // 8: vibesys.orchestrator.v1.ModelCost.model:type_name -> vibesys.orchestrator.v1.ModelRef
-	8,  // 9: vibesys.orchestrator.v1.ModelCost.usage:type_name -> vibesys.orchestrator.v1.Usage
-	7,  // 10: vibesys.orchestrator.v1.SpendSeries.start:type_name -> google.protobuf.Timestamp
-	11, // 11: vibesys.orchestrator.v1.SpendSeries.width:type_name -> google.protobuf.Duration
+	11, // 9: vibesys.orchestrator.v1.ModelCost.usage:type_name -> vibesys.orchestrator.v1.Usage
+	10, // 10: vibesys.orchestrator.v1.SpendSeries.start:type_name -> google.protobuf.Timestamp
+	14, // 11: vibesys.orchestrator.v1.SpendSeries.width:type_name -> google.protobuf.Duration
 	5,  // 12: vibesys.orchestrator.v1.SpendSeries.buckets:type_name -> vibesys.orchestrator.v1.SpendBucket
-	7,  // 13: vibesys.orchestrator.v1.SpendBucket.start:type_name -> google.protobuf.Timestamp
+	10, // 13: vibesys.orchestrator.v1.SpendBucket.start:type_name -> google.protobuf.Timestamp
 	6,  // 14: vibesys.orchestrator.v1.SpendBucket.by_model:type_name -> vibesys.orchestrator.v1.ModelSpend
 	2,  // 15: vibesys.orchestrator.v1.ModelSpend.model:type_name -> vibesys.orchestrator.v1.ModelRef
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	10, // 16: vibesys.orchestrator.v1.HostCost.as_of:type_name -> google.protobuf.Timestamp
+	11, // 17: vibesys.orchestrator.v1.HostCost.total:type_name -> vibesys.orchestrator.v1.Usage
+	8,  // 18: vibesys.orchestrator.v1.HostCost.runs:type_name -> vibesys.orchestrator.v1.HostRunCost
+	9,  // 19: vibesys.orchestrator.v1.HostCost.other_runs:type_name -> vibesys.orchestrator.v1.OtherRunsCost
+	1,  // 20: vibesys.orchestrator.v1.HostCost.roles:type_name -> vibesys.orchestrator.v1.RoleCost
+	3,  // 21: vibesys.orchestrator.v1.HostCost.models:type_name -> vibesys.orchestrator.v1.ModelCost
+	4,  // 22: vibesys.orchestrator.v1.HostCost.series:type_name -> vibesys.orchestrator.v1.SpendSeries
+	15, // 23: vibesys.orchestrator.v1.HostRunCost.status:type_name -> vibesys.orchestrator.v1.RunStatus
+	11, // 24: vibesys.orchestrator.v1.HostRunCost.usage:type_name -> vibesys.orchestrator.v1.Usage
+	11, // 25: vibesys.orchestrator.v1.OtherRunsCost.usage:type_name -> vibesys.orchestrator.v1.Usage
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_cost_proto_init() }
@@ -705,13 +1123,15 @@ func file_vibesys_orchestrator_v1_cost_proto_init() {
 	}
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
 	file_vibesys_orchestrator_v1_cost_proto_msgTypes[0].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_cost_proto_msgTypes[7].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_cost_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_cost_proto_rawDesc), len(file_vibesys_orchestrator_v1_cost_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

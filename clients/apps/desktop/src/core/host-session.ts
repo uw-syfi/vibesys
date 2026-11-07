@@ -17,6 +17,7 @@ import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
 import {makeHostReadiness} from './host-control.js';
+import {type HostCostFeed, makeHostCostFeed} from './host-cost-feed.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
@@ -37,6 +38,8 @@ export interface HostSession {
   /** Reads of a run's history, which a snapshot of runs does not hold. */
   readonly runHistory: RunHistory;
   readonly costs: CostFeed;
+  /** What every run of the host has cost, in the window a screen asks for. */
+  readonly hostCosts: HostCostFeed;
   /** The CPU, memory and GPUs of the machine the host runs on. */
   readonly machine: MachineStatsFeed;
   readonly commands: Commands;
@@ -62,6 +65,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     history: yield* makeAgentHistory(parts),
     runHistory: yield* makeRunHistory(parts),
     costs: yield* makeCostFeed(parts),
+    hostCosts: yield* makeHostCostFeed(parts),
     machine: yield* makeMachineStatsFeed({
       client: yield* makeClient(HostService, host),
       connection,

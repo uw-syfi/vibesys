@@ -85,6 +85,7 @@ export {
   type RoleCostView,
   readCost,
   type SpendBucketView,
+  type SpendSeriesView,
 } from './orchestrator/cost.js';
 export {
   FLEET_STATES,
@@ -109,6 +110,7 @@ export {
   applyAgentFeed,
   applyChange,
   applyCost,
+  applyHostCost,
   applyRunHistory,
   applySearch,
   applySnapshot,
@@ -117,6 +119,16 @@ export {
   type OlderFrame,
   type RunHistoryFrame,
 } from './orchestrator/fold.js';
+export {
+  type HostCostRead,
+  type HostCostView,
+  type HostCostWindow,
+  type HostRunCostView,
+  type OtherRunsCostView,
+  readHostCost,
+  sinceWindow,
+  windowSinceMs,
+} from './orchestrator/host-cost.js';
 export {type ItemOf, itemIs} from './orchestrator/items.js';
 export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
 export {

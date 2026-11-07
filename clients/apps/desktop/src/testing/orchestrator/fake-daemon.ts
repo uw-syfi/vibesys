@@ -16,6 +16,7 @@ import {
   ElisionSchema,
   type GetRunHistoryResponse,
   GetRunHistoryResponseSchema,
+  type HostCost,
   type Item,
   type ItemsPage,
   ItemsPageSchema,
@@ -118,6 +119,7 @@ export class FakeDaemon {
   readonly #receipts = new Map<string, Receipt>();
   readonly #watchers = new Set<() => void>();
   readonly #costs = new Map<string, RunCost>();
+  readonly #hostCosts = new Map<string, HostCost>();
   readonly #started: StartRun[] = [];
   #models: ModelCatalog | undefined;
 
@@ -179,6 +181,21 @@ export class FakeDaemon {
   /** The newest cost view of a run, or undefined when the host has none to send. */
   costOf(runId: string): RunCost | undefined {
     return this.#costs.get(runId);
+  }
+
+  /**
+   * Set the whole host cost view the host works out for a window: everything it holds when `sinceMs`
+   * is null, or the turns that finished at or after that instant. The Fake computes none: a test says
+   * what the host would send, and a stream opened after it starts with this view.
+   */
+  publishHostCost(cost: HostCost, sinceMs: number | null = null): void {
+    this.#hostCosts.set(String(sinceMs), cost);
+    for (const watcher of this.#watchers) invokeCallback(watcher);
+  }
+
+  /** The newest host cost view of a window, or undefined when the host has none to send. */
+  hostCostOf(sinceMs: number | null): HostCost | undefined {
+    return this.#hostCosts.get(String(sinceMs));
   }
 
   /** Call `listener` whenever events are committed; returns how to stop. */
