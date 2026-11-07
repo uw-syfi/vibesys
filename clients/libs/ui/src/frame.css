@@ -43,6 +43,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
 }
 .vs-crumb-figure {
   color: var(--ok);
@@ -50,11 +51,13 @@
   font-size: var(--text-code-size);
   line-height: var(--text-code-line);
 }
+/* The trail stays on one line: a step that is a name a person chose gives way, cut with an ellipsis
+   (its whole text on hover), instead of the trail breaking between a step and the slash before it. */
 .vs-crumbs ol {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -63,6 +66,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
 }
 .vs-crumb-sep {
   display: flex;
@@ -72,6 +76,10 @@
   pointer-events: none;
 }
 .vs-crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   padding: var(--space-1) var(--space-2);
   border: 0;
@@ -1626,7 +1634,15 @@ button.vs-crumb:focus-visible {
   flex-wrap: nowrap;
   flex: 0 1 auto;
 }
+/* A name a person chose is cut with an ellipsis (its whole text on hover) before it can push the
+   figure out of the row; the note gives way first. */
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-title > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
+  flex: 0 4 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1866,6 +1882,13 @@ button.vs-dotlegend-item:focus-visible {
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
+}
+/* The name of what a tile measures is one line, cut with an ellipsis (its whole text on hover), so
+   tiles of a row keep one height. */
+.vs-tile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vs-tile-figure {
   display: flex;

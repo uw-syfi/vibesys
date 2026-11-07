@@ -9,7 +9,15 @@ import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Chart, type ParetoAxis, ParetoChart, type ParetoPoint} from './index.js';
+import {
+  Chart,
+  ChartPanel,
+  Chip,
+  MetricTile,
+  type ParetoAxis,
+  ParetoChart,
+  type ParetoPoint,
+} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -211,5 +219,34 @@ describe('ParetoChart with a frontier it is told', () => {
     ];
     const joined = await mount(<ParetoChart label="t" points={points} x={x} y={y} />);
     expect(joined.querySelector('.vs-pareto-frontier')).not.toBeNull();
+  });
+});
+
+describe('names a person chose', () => {
+  const LONG = 'a-name-that-someone-chose-and-that-is-far-too-long-for-any-slot';
+
+  test('a chart panel and a tile say their whole name on hover, the name being one line', async () => {
+    const root = await mount(
+      <>
+        <ChartPanel title={LONG} oneLine figure="1.2 ms">
+          <span />
+        </ChartPanel>
+        <MetricTile name={LONG} figure="7" />
+      </>,
+    );
+    const titles = [...root.querySelectorAll('[title]')].map(each => each.getAttribute('title'));
+    expect(titles.filter(title => title === LONG)).toHaveLength(2);
+    expect(root.querySelector('.vs-tile-name')?.textContent).toBe(LONG);
+  });
+
+  test('a clipped chip keeps its label whole in the page and says it on hover', async () => {
+    const root = await mount(<Chip label={LONG} mono clip />);
+    const chip = root.querySelector('.vs-chip');
+    expect(chip?.getAttribute('data-clip')).toBe('true');
+    expect(chip?.getAttribute('title')).toBe(LONG);
+    expect(chip?.querySelector('.vs-chip-label')?.textContent).toBe(LONG);
+    const plain = await mount(<Chip label="Running" />);
+    expect(plain.querySelector('.vs-chip-label')).toBeNull();
+    expect(plain.querySelector('.vs-chip')?.getAttribute('title')).toBeNull();
   });
 });

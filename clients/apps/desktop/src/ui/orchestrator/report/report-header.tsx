@@ -108,7 +108,7 @@ export function ReportHeader(props: {
                 hint={`The search service was lost ${formatAge(props.report.search.sinceMs === 0 ? 0 : props.nowMs - props.report.search.sinceMs)}. The measurements shown were the last read.`}
               />
             ) : null}
-            <Chip label={props.host} mono />
+            <Chip label={props.host} mono clip />
             <Text variant="small" title={header.endedMs === null ? 'Running for' : 'Ran for'}>
               {formatElapsed(header.elapsedMs)}
             </Text>

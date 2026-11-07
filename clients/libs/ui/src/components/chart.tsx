@@ -836,7 +836,9 @@ export function ChartPanel(props: {
     <section className="vs-chart-panel" aria-label={props.title}>
       <div className="vs-chart-panel-head" data-one-line={props.oneLine || undefined}>
         <span className="vs-chart-panel-title">
-          <Text variant="item">{props.title}</Text>
+          <Text variant="item" title={props.title}>
+            {props.title}
+          </Text>
           {props.note === undefined ? null : (
             <span className="vs-chart-panel-note" title={props.note}>
               <Text variant="small" tone="muted">

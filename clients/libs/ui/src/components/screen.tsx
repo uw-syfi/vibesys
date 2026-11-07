@@ -69,13 +69,19 @@ export function Breadcrumb(props: {
               </span>
             )}
             {item.press === undefined ? (
-              <span className="vs-crumb" data-mono={item.mono || undefined} aria-current="location">
+              <span
+                className="vs-crumb"
+                data-mono={item.mono || undefined}
+                title={item.label}
+                aria-current="location"
+              >
                 {item.label}
               </span>
             ) : (
               <button
                 type="button"
                 className="vs-crumb"
+                title={item.label}
                 data-mono={item.mono || undefined}
                 onClick={item.press}
               >
