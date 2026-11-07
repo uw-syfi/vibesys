@@ -27,7 +27,7 @@ func (f fakeHost) Unserved() *pb.Unserved { return f.unserved }
 
 type noParts struct{}
 
-func (noParts) Readiness() []*pb.PartReadiness { return nil }
+func (noParts) Readiness(context.Context) []*pb.PartReadiness { return nil }
 
 // control serves a HostControlService over a fake host and reports every call of its Stop.
 func control(t *testing.T, host fakeHost) (pb.HostControlServiceClient, <-chan struct{}) {

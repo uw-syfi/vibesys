@@ -74,11 +74,11 @@ func TestARepairedInstallIsUsedByTheNextStartCheckAndLaunch(t *testing.T) {
 // The readiness of every part is typed, and Check agrees with it.
 func TestReadinessSaysWhyEachPartIsOrIsNotReady(t *testing.T) {
 	dir, find := diskRelease(t, good)
-	parts := Parts{Find: find, Files: OSFiles{}}
+	parts := Parts{Find: find, Files: OSFiles{}, Runner: speaks{protocol: RequiredJobToolProtocol}}
 	if err := parts.Check(); err != nil {
 		t.Fatalf("a whole release is not ready: %v", err)
 	}
-	for _, r := range parts.Readiness() {
+	for _, r := range parts.Readiness(context.Background()) {
 		if r.GetReady().GetOrigin() != pb.PartOrigin_PART_ORIGIN_RELEASE {
 			t.Errorf("%v: %v, want ready from the release", r.GetPart(), r)
 		}
@@ -86,7 +86,7 @@ func TestReadinessSaysWhyEachPartIsOrIsNotReady(t *testing.T) {
 
 	removeFrom(t, dir, "bin/vibesys-cli")
 	got := map[pb.HostPart]*pb.PartReadiness{}
-	for _, r := range parts.Readiness() {
+	for _, r := range parts.Readiness(context.Background()) {
 		got[r.GetPart()] = r
 	}
 	job := got[pb.HostPart_HOST_PART_JOB_TOOL].GetProblem()

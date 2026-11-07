@@ -751,6 +751,18 @@ it, never another build), then, for a host in no release, the first `vibesys-cli
 the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
 is unset.
 
+Whichever tool is picked is also asked which revision of its contract it speaks (`--version --json`,
+a `BuildVersions`, which starts no daemon), and one below `RequiredJobToolProtocol` (the revision that
+added the task schema this release's tasks are written in; pinned to `task_schema_02_since` in
+`proto/vibesys/cli/v1/conformance/protocol.json`) is refused by name: a build that predates the
+question counts as too old. A desktop install puts only `vibesys-host` on a machine, so the job tool
+there is whatever was installed beside it earlier, and nothing else vouches that it matches. The
+answer is part of the host's readiness, the one list `Identify` returns for everything a run needs
+(`parts`: session holder, skills, job tool, each ready or a typed problem, `TOO_OLD` among the
+reasons), which the desktop app reads when its link is Ready and again before it sends a start, so a
+mismatch is a label on the host and a refused start before any agent spends tokens, not a failure in
+the middle of a run. A part a run will need is added to that list, not checked somewhere else.
+
 When a run starts the host asks that tool, in the host's own environment: `daemon ensure --json`
 makes sure of a daemon and answers with its socket and its runtime directory, so the host holds no
 rule for where it is. A start the tool cannot answer is refused, in the tool's words: for one, a

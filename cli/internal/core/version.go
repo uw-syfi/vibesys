@@ -20,7 +20,11 @@ const (
 	//
 	// 4: a submission names the placement its docker job runs on. A daemon of 3 would drop the
 	// field and run the job on its one placement, which is not what was asked.
-	ProtocolVersion uint32 = 4
+	//
+	// 5: a task of schema 0.2 (two images, an evaluator package) is read and run. A build of 4 or
+	// below reads only schema 0.1 and refuses a manifest with an [evaluator] table, which the
+	// orchestrator reads as a job tool too old for its tasks (TaskSchema02Since).
+	ProtocolVersion uint32 = 5
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -39,6 +43,12 @@ const (
 // version a client needs of a daemon to watch a task; conformance/protocol.json holds the same
 // number for the other side of the contract, and a test holds this to it.
 const WatchTaskSince uint32 = 3
+
+// TaskSchema02Since is the protocol version that added task schema 0.2. It is the one definition of
+// the version a job tool needs to run the tasks this release ships; conformance/protocol.json holds
+// the same number for the orchestrator, which asks the tool for its version before it starts a run,
+// and a test holds this to it.
+const TaskSchema02Since uint32 = 5
 
 // Versions is what one build carries, less the build identity (BuildVersions.binary_version),
 // which names a build and is not a version to order.

@@ -32,16 +32,19 @@ import {
   type ObjectiveReport,
   rowObjectives,
 } from '../../state/index.js';
+import {causeLabel} from '../refusal-words.js';
 import {
   ago,
   dollars,
   FRESHNESS_WORD,
-  freshnessPhrase,
+  hostPhrase,
+  hostTone,
   percent,
   resultHint,
   resultWords,
   seattle,
   span,
+  unreadTitle,
 } from './fleet-words.js';
 import {runWord} from './words.js';
 
@@ -138,25 +141,25 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
       header: 'Host',
       size: 'wide',
       optional: true,
-      hint: row => `${row.host.label}\n${freshnessPhrase(row.host.freshness, row.host.staleForMs)}`,
+      hint: row => `${row.host.label}\n${hostPhrase(row.host)}`,
       cell: row => (
         <CellLines
           main={
             <CellInline nowrap>
               <StatusDot
-                tone={FRESHNESS_WORD[row.host.freshness].tone}
-                label={FRESHNESS_WORD[row.host.freshness].label}
+                tone={hostTone(row.host)}
+                label={
+                  row.host.refusal === null
+                    ? FRESHNESS_WORD[row.host.freshness].label
+                    : causeLabel(row.host.refusal)
+                }
               />
               <Text>
                 <MiddleText text={row.host.label} />
               </Text>
             </CellInline>
           }
-          note={
-            row.host.freshness === 'live'
-              ? null
-              : freshnessPhrase(row.host.freshness, row.host.staleForMs)
-          }
+          note={row.host.freshness === 'live' ? null : hostPhrase(row.host)}
         />
       ),
     },
@@ -282,9 +285,9 @@ function HostFilter(props: {
 }): JSX.Element | null {
   const {hosts} = props;
   const word = (host: FleetHostView): string =>
-    host.freshness === 'live'
+    host.freshness === 'live' && host.refusal === null
       ? host.label
-      : `${host.label} · ${freshnessPhrase(host.freshness, host.staleForMs)}`;
+      : `${host.label} · ${hostPhrase(host)}`;
   if (hosts.length > 1) {
     // One control however many hosts there are: a row of buttons for each host would take a row
     // of its own in a narrow window.
@@ -307,8 +310,8 @@ function HostFilter(props: {
     );
   }
   const [only] = hosts;
-  return only === undefined || only.freshness === 'live' ? null : (
-    <Chip label={word(only)} tone={FRESHNESS_WORD[only.freshness].tone} dot clip />
+  return only === undefined || (only.freshness === 'live' && only.refusal === null) ? null : (
+    <Chip label={word(only)} tone={hostTone(only)} dot clip />
   );
 }
 
@@ -412,7 +415,7 @@ export function FleetScreen(props: {
         {rows.length === 0 ? (
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
           <EmptyState
-            title={unread ? 'Not read yet' : 'No runs'}
+            title={unread ? unreadTitle(view.hosts) : 'No runs'}
             align="start"
             // The header's own New run is the one a screen with rows has; this one is the way out of
             // having none.

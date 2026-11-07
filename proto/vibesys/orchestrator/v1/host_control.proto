@@ -122,6 +122,9 @@ enum PartProblemReason {
   PART_PROBLEM_REASON_RELEASE_INCOMPLETE = 2;
   // The operator's choice cannot be used.
   PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED = 3;
+  // The part is there and runs, but it is older than this host needs: it does not speak the
+  // revision of its contract that the host was built against, or does not answer which it speaks.
+  PART_PROBLEM_REASON_TOO_OLD = 4;
 }
 
 message Serving {}

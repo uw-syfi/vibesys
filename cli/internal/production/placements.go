@@ -35,6 +35,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/resource/rocm"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // machines are the environments this machine's jobs run in, and the placements a docker job can
@@ -119,6 +120,13 @@ func static() bool {
 
 // TaskSchemas names the task schema versions this build reads, as --version prints them.
 func TaskSchemas() string { return task.SchemasText() }
+
+// BuildVersions is what this build speaks, as `--version --json` prints it: the identity `binary` and
+// the revisions of the contract, so a program that would use this tool learns whether it can without
+// starting a daemon.
+func BuildVersions(binary string) *cliv1.BuildVersions {
+	return wire.BuildVersions(binary, core.CurrentVersions())
+}
 
 // scopeOf is the scope of a placement's work, keyed by a directory: the daemon's runtime directory,
 // or a run's. The placement of a file of the earlier shape keeps the scope the daemon's one

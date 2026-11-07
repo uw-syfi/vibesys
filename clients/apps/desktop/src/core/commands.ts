@@ -60,6 +60,15 @@ const noReceipt = new InvalidMessage({
 });
 
 /**
+ * A run is not started on a host that says it cannot run one (a part it needs is missing or too
+ * old): that is refused here, in the host's typed words, before any agent is launched. The host
+ * checks the same when the start reaches it; this is the answer that names the cause. Nothing but a
+ * start is held back by it.
+ */
+const refusedStart = (parts: HostParts, command: Command) =>
+  command.body.case === 'startRun' ? parts.blocked : Effect.succeed(undefined);
+
+/**
  * Waits for a Ready connection (a command is not sent into the void), then sends once. A call
  * that failed because of the link tells the connection, so a dropped link is noticed even when no
  * feed is mounted to see it.
@@ -78,6 +87,8 @@ const dispatchOnce = (parts: HostParts, command: Command) =>
       } as const;
     }
     const epoch = ready.success;
+    const blocked = yield* refusedStart(parts, command);
+    if (blocked !== undefined) return failedWith(command, blocked);
     const sent = yield* parts.client
       .dispatch({command}, {deadline: COMMAND_DEADLINE})
       .pipe(Effect.result);

@@ -447,7 +447,15 @@ describe('the fleet of runs', () => {
     expect(view.live).toEqual([]);
     expect(view.history).toEqual([]);
     expect(view.hosts).toEqual([
-      {key: 'a', label: 'A', freshness: 'empty', staleForMs: null, runs: 0, runsLeftOut: 0},
+      {
+        key: 'a',
+        label: 'A',
+        freshness: 'empty',
+        staleForMs: null,
+        refusal: null,
+        runs: 0,
+        runsLeftOut: 0,
+      },
     ]);
   });
 });

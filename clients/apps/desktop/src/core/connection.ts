@@ -31,7 +31,7 @@ import {
 } from '../state/index.js';
 import {type AppError, InvalidMessage, isRetryable} from './errors.js';
 import {faultOf} from './fault.js';
-import type {WhyUnserved} from './host-control.js';
+import type {HostBlock, HostReadiness, WhyUnserved} from './host-control.js';
 import type {OrchestratorClient} from './orchestrator-client.js';
 import {CLIENT_BUILD} from './protocol.js';
 import {
@@ -82,6 +82,8 @@ interface Wiring {
   readonly policy: ReconnectPolicy;
   /** What the host says it refuses, asked after an UNAVAILABLE handshake. */
   readonly whyUnserved: WhyUnserved;
+  /** What the host says stands in the way of a run, asked when the link is Ready. */
+  readonly blocked: HostBlock;
   readonly state: SubscriptionRef.SubscriptionRef<HostConnectionState>;
   /** The Clock time the host last said anything, or null. */
   readonly lastHeard: SubscriptionRef.SubscriptionRef<number | null>;
@@ -124,6 +126,18 @@ const failedHello = (w: Wiring, error: AppError, failures: number) =>
     return yield* afterFailure(w, refused ?? error, failuresAfter(w.policy, failures, null));
   });
 
+/** Records what the host says stands in the way of a run on the Ready epoch it was asked in. */
+const noteBlock = (w: Wiring, epoch: number) =>
+  Effect.gen(function* () {
+    const refused = yield* w.blocked;
+    if (refused === undefined) return;
+    yield* SubscriptionRef.update(w.state, state =>
+      state._tag === 'Ready' && state.epoch === epoch
+        ? {...state, blocked: {cause: refused.cause, detail: refused.detail}}
+        : state,
+    );
+  });
+
 /** One pass of the loop: dial, then stay until the connection is lost. Answers the next count. */
 const connectOnce = (w: Wiring, failures: number, epoch: number) =>
   Effect.gen(function* () {
@@ -157,6 +171,8 @@ const connectOnce = (w: Wiring, failures: number, epoch: number) =>
     const readyAt = yield* Clock.currentTimeMillis;
     yield* SubscriptionRef.set(w.lastHeard, readyAt);
     yield* SubscriptionRef.set(w.state, {_tag: 'Ready', epoch: next, daemon});
+    // The runs can be read at once; what stands in the way of starting one is learned beside them.
+    yield* Effect.forkChild(noteBlock(w, next));
     const error = yield* Deferred.await(lost);
     yield* Ref.set(w.current, null);
     const readyFor = (yield* Clock.currentTimeMillis) - readyAt;
@@ -174,13 +190,17 @@ const dialForever = (w: Wiring) =>
 export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
   client: OrchestratorClient,
   policy: ReconnectPolicy = defaultReconnect,
-  whyUnserved: WhyUnserved = Effect.succeed(undefined),
+  readiness: HostReadiness = {
+    whyUnserved: Effect.succeed(undefined),
+    blocked: Effect.succeed(undefined),
+  },
 ) {
   const scope = yield* Effect.scope;
   const w: Wiring = {
     client,
     policy,
-    whyUnserved,
+    whyUnserved: readiness.whyUnserved,
+    blocked: readiness.blocked,
     state: yield* SubscriptionRef.make<HostConnectionState>(idleConnection),
     lastHeard: yield* SubscriptionRef.make<number | null>(null),
     current: yield* Ref.make<OpenEpoch | null>(null),

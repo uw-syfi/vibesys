@@ -16,6 +16,7 @@ import {
   type NavigationAction,
   type OrchestratorState,
   type Route,
+  refusalCauseOf,
   runReport,
   staleForMs,
 } from '../../state/index.js';
@@ -92,6 +93,7 @@ const fleetInput = (host: HostSnapshot, nowMs: number): FleetHostInput => ({
   data: host.model.data,
   freshness: freshnessOf(host.connection, host.runsFeed, hasData(host)),
   staleForMs: staleForMs(host.freshness, nowMs),
+  refusal: refusalCauseOf(host.connection),
 });
 
 function runsNote(

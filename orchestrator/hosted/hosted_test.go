@@ -3,6 +3,7 @@ package hosted_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -122,9 +123,12 @@ func TestNoCLIToGiveTheAgentsIsAProblemOfTheJobTool(t *testing.T) {
 	}
 }
 
+// speakingTool is a job tool that says which protocol it speaks, as the host asks of every tool.
+var speakingTool = fmt.Sprintf("#!/bin/sh\nprintf '{\"protocol_version\": %d}\\n'\n", production.RequiredJobToolProtocol)
+
 func TestAnExecutableCLISettingIsAJobToolTheOperatorChose(t *testing.T) {
 	cli := filepath.Join(t.TempDir(), "vibesys-cli")
-	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(cli, []byte(speakingTool), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	x := start(t, &pb.HostConfig{JobTool: cli})
@@ -152,7 +156,7 @@ func TestARepairedInstallIsSeenByARunningHost(t *testing.T) {
 	if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_RELEASE_INCOMPLETE || !strings.Contains(problem.GetDetail(), "bin/vibesys-cli") {
 		t.Fatalf("problem %v, want the release's missing tool named", problem)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "bin", "vibesys-cli"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bin", "vibesys-cli"), []byte(speakingTool), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	id := identify(t, x, "1.0.0")
