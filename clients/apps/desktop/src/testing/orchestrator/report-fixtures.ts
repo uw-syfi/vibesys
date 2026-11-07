@@ -230,7 +230,8 @@ export function measuredSearch(
       const headValue = head?.values[at];
       const values = candidates.map(candidate => candidate.values[at] ?? 0);
       const bestValue = values.reduce<number | undefined>(
-        (best, value) => (best === undefined || beats(objective.direction, value, best) ? value : best),
+        (best, value) =>
+          best === undefined || beats(objective.direction, value, best) ? value : best,
         undefined,
       );
       return [
