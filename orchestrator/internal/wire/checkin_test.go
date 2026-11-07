@@ -82,7 +82,7 @@ func TestWhatTheCoreMakesOfACheckInHoldsToTheContract(t *testing.T) {
 	facts := core.WindowFacts{
 		Spend: core.Spend{Turns: 2, Unpriced: 1, Roles: []core.RoleSpend{{Role: core.RoleLead, Turns: 2, Unpriced: 1}}},
 		Objectives: []core.ObjectiveMove{
-			{Metric: "tput", Direction: core.Maximize, End: best},
+			{Metric: "tput", Direction: core.Maximize, Unit: "tok/s", End: best},
 			{Metric: "lat", Direction: core.Minimize, Start: best, End: best},
 		},
 		PlansCreated: []uint32{1}, Reports: []core.MessageID{"m"},

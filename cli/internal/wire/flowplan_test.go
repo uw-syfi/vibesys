@@ -46,12 +46,14 @@ func anyFlowPlan(r *rand.Rand) flow.Plan {
 	p.Kind = core.JobMeasure
 	p.Samples = uint32(1 + r.IntN(9))
 	p.Benchmark = anyCommand(r)
-	p.Metric = core.Metric{Name: pick(r, "ops", "latency"), Direction: pick(r, core.Maximize, core.Minimize)}
+	p.Metric = core.Metric{Name: pick(r, "ops", "latency"), Direction: pick(r, core.Maximize, core.Minimize), Unit: pick(r, "", "tok/s", "ms", "µs 🧪")}
 	if r.IntN(2) == 0 {
 		p.Result = task.Result{Protocol2: true}
 		if r.IntN(2) == 0 {
+			ttft := core.Metric{Name: "ttft", Direction: pick(r, core.Maximize, core.Minimize), Unit: pick(r, "", "ms", "s")}
+			p.Others = []core.Metric{ttft}
 			p.Objectives = core.Objectives{
-				Metrics:       []core.Metric{p.Metric, {Name: "ttft", Direction: pick(r, core.Maximize, core.Minimize)}},
+				Metrics:       []core.Metric{p.Metric, ttft},
 				RelativeNoise: pick(r, 0, 0.02),
 			}
 			if r.IntN(2) == 0 {

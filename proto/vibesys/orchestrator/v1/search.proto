@@ -84,7 +84,7 @@ message ObjectiveGain {
     finite: true
     gt: 0
   }];
-  // The best value itself, in the unit of the measurements.
+  // The best value itself, in the unit of the measurements (ObjectiveSeries.unit).
   double best_value = 3 [(buf.validate.field).double.finite = true];
   double baseline_value = 4 [(buf.validate.field).double.finite = true];
 }
@@ -128,6 +128,22 @@ message WorkstreamView {
   repeated ObjectiveGain best = 6 [(buf.validate.field).repeated.max_items = 8];
 }
 
+// BoundUnitCheck says whether a declared bound is counted in the unit of the measurements it bounds.
+// A unit is a label for people and nothing converts it, so the two are the same when their text is.
+enum BoundUnitCheck {
+  BOUND_UNIT_CHECK_UNSPECIFIED = 0;
+  // Every measurement served against the bound is counted in the bound's unit.
+  BOUND_UNIT_CHECK_MATCH = 1;
+  // A measurement served against the bound is counted in another unit than the bound's: the bound
+  // is unverified, and no share of it is served for that measurement.
+  BOUND_UNIT_CHECK_MISMATCH = 2;
+  // The unit of a measurement is not known (the task declares none, or the result was saved before
+  // units were kept), or there is no measurement to check: nothing says the bound matches, and
+  // nothing says it does not. A share of the bound is served all the same, so a reader must show it
+  // as unverified.
+  BOUND_UNIT_CHECK_UNKNOWN = 3;
+}
+
 // ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
 // earlier version of it, so a chart can draw the bound as it stood at each moment.
 message ObjectiveBounds {
@@ -161,10 +177,7 @@ message ObjectiveBounds {
   // the head has gone past it, which says the bound was too modest. For an objective that is
   // maximized it is head_value over the bound, and for one that is minimized the bound over
   // head_value, so more is better for both. Absent when head_value is, and when either number is not
-  // above zero. It takes the bound to be in the unit of the head's measurements, as a bound is
-  // declared (ObjectiveBound.value); the orchestrator cannot check it, because a measurement keeps
-  // no unit (the evaluator's unit is a label for people, never parsed), so a bound declared in
-  // another unit gives a wrong percent. The version's unit is served for a reader to judge.
+  // above zero, and when the head's unit is another than the bound's (unit_check says so).
   optional double percent_of_bound = 5 [(buf.validate.field).double = {
     finite: true
     gt: 0
@@ -177,11 +190,23 @@ message ObjectiveBounds {
   // the objective improves the other way than the bound does.
   optional double best_value = 6 [(buf.validate.field).double.finite = true];
   // How close best_value is to the standing bound, in percent, defined as percent_of_bound is for
-  // the head's value (with the same unit caveat). Absent when best_value is, and when either number
-  // is not above zero.
+  // the head's value. Absent when best_value is, when either number is not above zero, and when the
+  // best's unit is another than the bound's.
   optional double best_percent_of_bound = 7 [(buf.validate.field).double = {
     finite: true
     gt: 0
+  }];
+  // The unit head_value and best_value are counted in: the unit the measurements of the objective
+  // record. Empty when it is unknown, and when the two are counted in different units, which
+  // unit_check then says (the unit of the best is served first).
+  string measured_unit = 8 [(buf.validate.field).string.max_bytes = 64];
+  // Whether the standing bound's unit (the unit of the last version) is that of head_value and
+  // best_value. MISMATCH when either is counted in another unit, else UNKNOWN when either is counted
+  // in none that is known or neither exists, else MATCH. The bound's unit and measured_unit are both
+  // served, so a reader names both when they differ.
+  BoundUnitCheck unit_check = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
   }];
 }
 
@@ -209,6 +234,11 @@ message ObjectiveSeries {
     min_items: 1
     max_items: 400
   }];
+  // What the points are counted in, as the task declares the objective (a label for people). Empty
+  // when it is unknown: the task declares none, or a point of the series is of a result saved
+  // before units were kept. A point counted in another unit than the newest known one is left out,
+  // as one of the other direction is.
+  string unit = 4 [(buf.validate.field).string.max_bytes = 64];
 }
 
 // MeasuredPoint is one measurement of one candidate on one objective.

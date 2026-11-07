@@ -59,7 +59,7 @@ func (m *Measurement) add(job JobID, o MeasureOutcome) {
 	for _, ob := range o.Observations {
 		i := slices.IndexFunc(m.Outcome.Observations, func(p Observation) bool { return p.Name == ob.Name })
 		if i < 0 {
-			m.Outcome.Observations = append(m.Outcome.Observations, Observation{Name: ob.Name})
+			m.Outcome.Observations = append(m.Outcome.Observations, Observation{Name: ob.Name, Unit: ob.Unit})
 			i = len(m.Outcome.Observations) - 1
 		}
 		m.Outcome.Observations[i].Values = append(m.Outcome.Observations[i].Values, ob.Values...)

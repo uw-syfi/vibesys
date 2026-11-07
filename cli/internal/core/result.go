@@ -15,6 +15,10 @@ const (
 type Metric struct {
 	Name      string
 	Direction Direction
+	// Unit is what the metric is counted in, as the task declares it: a label for people that
+	// nothing converts. Empty is unknown (the task declares none, or the result predates units),
+	// and an unknown unit is no match for any other.
+	Unit string
 }
 
 // Observation is a named series of auxiliary readings kept beside the scored metric. It is never
@@ -22,6 +26,8 @@ type Metric struct {
 type Observation struct {
 	Name   string
 	Values []float64
+	// Unit is what the values are counted in, as Metric.Unit says it. Empty is unknown.
+	Unit string
 }
 
 // Outcome is what a saved result recorded: exactly one of CheckOutcome and MeasureOutcome.

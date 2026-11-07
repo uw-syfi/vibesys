@@ -36,6 +36,11 @@ func (g *gen) text() string {
 	return texts[g.pick(len(texts))]
 }
 
+// units are labels a task might declare for an objective, within the 64 bytes the contract allows.
+var units = []string{"tok/s", "ms", "µs", "GB/s", "requests per second", "%", "unit with  spaces", "ops/s 🧪"}
+
+func (g *gen) unit() string { return units[g.pick(len(units))] }
+
 func (g *gen) name() string { return fmt.Sprintf("n%x", g.r.Uint32()) }
 
 var floats = []float64{
@@ -152,16 +157,16 @@ func (g *gen) outcome(measure bool) core.Outcome {
 		return core.CheckOutcome{Duration: time.Duration(1 + g.r.Int64N(1<<50))}
 	}
 	return core.MeasureOutcome{
-		Metric:       core.Metric{Name: g.text(), Direction: []core.Direction{core.Maximize, core.Minimize}[g.pick(2)]},
+		Metric:       g.metric(),
 		Samples:      g.floats(),
-		Observations: []core.Observation{{Name: g.text(), Values: g.floats()}, {Name: g.text(), Values: g.floats()}},
+		Observations: []core.Observation{{Name: g.text(), Values: g.floats(), Unit: g.unit()}, {Name: g.text(), Values: g.floats(), Unit: g.unit()}},
 		CheckJob:     core.JobID(g.name()),
 		Objectives:   g.objectives(),
 	}
 }
 
 func (g *gen) metric() core.Metric {
-	return core.Metric{Name: g.text(), Direction: []core.Direction{core.Maximize, core.Minimize}[g.pick(2)]}
+	return core.Metric{Name: g.text(), Direction: []core.Direction{core.Maximize, core.Minimize}[g.pick(2)], Unit: g.unit()}
 }
 
 // objectives are the objectives of a multi-objective task, which a store holds whatever they

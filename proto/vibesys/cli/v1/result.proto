@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
@@ -17,6 +18,11 @@ enum Direction {
 message Metric {
   string name = 1;
   Direction direction = 2;
+  // What the metric is counted in, such as "tok/s" or "ms", as the task's objectives.toml declares
+  // it (TaskObjective.unit). A label for people: nothing converts it. Empty when the task declares
+  // none, and in a result saved before units were kept: the unit is then unknown, which no reader
+  // may take for a match with any other unit.
+  string unit = 3 [(buf.validate.field).string.max_bytes = 64];
 }
 
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
@@ -28,6 +34,8 @@ message Observation {
   // MeasureResult.value is for the scored metric. The daemon computes it, so no reader recomputes
   // it. Absent when there are no values, and from a daemon or a saved result older than this field.
   optional double value = 3;
+  // What the series is counted in, as Metric.unit says it for an objective. Empty when unknown.
+  string unit = 4 [(buf.validate.field).string.max_bytes = 64];
 }
 
 // Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose

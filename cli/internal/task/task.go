@@ -573,7 +573,7 @@ func score(t *Task, bench *benchSection, metric string, o *cliv1.TaskObjectives)
 		}
 		t.Objectives.RelativeNoise = o.GetPareto().GetRelativeNoise()
 		for _, a := range axes {
-			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction})
+			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction, Unit: a.unit})
 			if a.noise != nil {
 				t.Objectives.Noise = append(t.Objectives.Noise, core.ObjectiveNoise{Name: a.name, RelativeNoise: *a.noise})
 			}
@@ -710,7 +710,7 @@ func resultOf(t *Task, b *benchSection, metric string, axes []axis) error {
 			return invalid("%s: has no objective for the metric %q; declare it with its direction", ObjectiveName, r.Metric)
 		}
 		t.Result = Result{JSONArgument: r.JSONArgument, Field: r.Metric}
-		t.Metric = core.Metric{Name: r.Metric, Direction: a.direction}
+		t.Metric = core.Metric{Name: r.Metric, Direction: a.direction, Unit: a.unit}
 	case b.ResultProtocol == 2:
 		t.Result = Result{Protocol2: true}
 		scored := metric
@@ -724,10 +724,10 @@ func resultOf(t *Task, b *benchSection, metric string, axes []axis) error {
 		if !ok {
 			return invalid("%s: has no objective for the metric %q; declare it with its direction", ObjectiveName, scored)
 		}
-		t.Metric = core.Metric{Name: scored, Direction: a.direction}
+		t.Metric = core.Metric{Name: scored, Direction: a.direction, Unit: a.unit}
 		for _, other := range axes {
 			if other.name != scored {
-				t.Others = append(t.Others, core.Metric{Name: other.name, Direction: other.direction})
+				t.Others = append(t.Others, core.Metric{Name: other.name, Direction: other.direction, Unit: other.unit})
 			}
 		}
 	case b.ResultProtocol != 0:
