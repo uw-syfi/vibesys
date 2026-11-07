@@ -5,6 +5,7 @@ import {
   agentNames,
   applyChange,
   emptyState,
+  itemIs,
   type OrchestratorState,
   transcript,
 } from '../../state/index.js';
@@ -109,7 +110,7 @@ describe('the transcript screen', () => {
     const id = worker?.id ?? '';
     // The run stream leaves nothing out; a page does, so mark one item as a page would.
     const target = Object.values(state.items).find(
-      one => one.agentId === id && one.body.case === 'tool',
+      one => one.agentId === id && itemIs(one, 'tool'),
     );
     const elided = {...state, elided: {[target?.id ?? '']: 5_000}};
     const data = transcript(elided, id, scenario.endMs);

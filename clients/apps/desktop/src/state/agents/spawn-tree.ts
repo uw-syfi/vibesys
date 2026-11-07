@@ -22,9 +22,9 @@ import {
   type Message,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
+import {noteOf} from '../orchestrator/messages.js';
 import type {OrchestratorState} from '../orchestrator/state.js';
 import {ms} from '../orchestrator/time.js';
-import {noteOf} from './messages.js';
 import {type AgentName, agentNames, startOrder} from './names.js';
 
 /** Where an agent stands, as a bar's color: working, finished, or failed. */

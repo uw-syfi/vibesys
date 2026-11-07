@@ -37,6 +37,9 @@ const (
 	TimerKind_TIMER_KIND_LEAD_IDLE TimerKind = 4
 	// How long the lead has to finish after its run reached a limit, before the run is stopped.
 	TimerKind_TIMER_KIND_LIMIT_GRACE TimerKind = 5
+	// When a lead that work has moved under is next asked for a progress report. Named by the time, so a
+	// timer of an earlier schedule fires harmlessly.
+	TimerKind_TIMER_KIND_SUMMARY_DUE TimerKind = 6
 )
 
 // Enum value maps for TimerKind.
@@ -48,6 +51,7 @@ var (
 		3: "TIMER_KIND_LAUNCH_DEADLINE",
 		4: "TIMER_KIND_LEAD_IDLE",
 		5: "TIMER_KIND_LIMIT_GRACE",
+		6: "TIMER_KIND_SUMMARY_DUE",
 	}
 	TimerKind_value = map[string]int32{
 		"TIMER_KIND_UNSPECIFIED":     0,
@@ -56,6 +60,7 @@ var (
 		"TIMER_KIND_LAUNCH_DEADLINE": 3,
 		"TIMER_KIND_LEAD_IDLE":       4,
 		"TIMER_KIND_LIMIT_GRACE":     5,
+		"TIMER_KIND_SUMMARY_DUE":     6,
 	}
 )
 
@@ -797,21 +802,22 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"2\n" +
 	"\x10ReleaseCheckouts\x12\x1e\n" +
-	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xa0\x03\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\x8c\x03\n" +
 	"\bArmTimer\x12B\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.TimerKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12=\n" +
 	"\asession\x18\x03 \x01(\v2#.vibesys.orchestrator.v1.SessionRefR\asession\x12;\n" +
-	"\afire_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06fireAt:\xb3\x01\xbaH\xaf\x01\x1a\xac\x01\n" +
-	"\x11arm_timer.session\x12^a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not\x1a7has(this.session) == (this.kind == 2 || this.kind == 3)*\xb5\x01\n" +
+	"\afire_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06fireAt:\x9f\x01\xbaH\x9b\x01\x1a\x98\x01\n" +
+	"\x11arm_timer.session\x12Ja stop grace and a launch deadline name a session; the other timers do not\x1a7has(this.session) == (this.kind == 2 || this.kind == 3)*\xd1\x01\n" +
 	"\tTimerKind\x12\x1a\n" +
 	"\x16TIMER_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17TIMER_KIND_RUN_DEADLINE\x10\x01\x12\x19\n" +
 	"\x15TIMER_KIND_STOP_GRACE\x10\x02\x12\x1e\n" +
 	"\x1aTIMER_KIND_LAUNCH_DEADLINE\x10\x03\x12\x18\n" +
 	"\x14TIMER_KIND_LEAD_IDLE\x10\x04\x12\x1a\n" +
-	"\x16TIMER_KIND_LIMIT_GRACE\x10\x05BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x16TIMER_KIND_LIMIT_GRACE\x10\x05\x12\x1a\n" +
+	"\x16TIMER_KIND_SUMMARY_DUE\x10\x06BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_effects_proto_rawDescOnce sync.Once

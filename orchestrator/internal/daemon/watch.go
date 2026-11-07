@@ -35,6 +35,10 @@ type watch[R any] struct {
 	delta    func(*pb.Delta) (R, bool)
 	latest   func(*pb.SearchState) (R, bool)
 	current  func(core.State) []R
+	// settle, when set, is called at the end of every Poll with the sequence the stream is current to,
+	// and returns what the events of the batch and the time since have added up to. A stream whose
+	// frames are whole views uses it to send one view for a batch of events, not one for each.
+	settle func(sent uint64) []R
 }
 
 // open starts the stream. With after zero the first response is a snapshot; otherwise the stream
@@ -152,6 +156,9 @@ func (w *watch[R]) Poll() ([]R, error) {
 				out = append(out, r)
 			}
 		}
+	}
+	if w.settle != nil {
+		out = append(out, w.settle(w.sent)...)
 	}
 	return w.checked(out)
 }

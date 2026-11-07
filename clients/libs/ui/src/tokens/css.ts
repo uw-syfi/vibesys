@@ -80,6 +80,8 @@ function scaleDeclarations(): string[] {
     ]),
     ...Object.entries(MOTION.duration).map(([token, ms]) => `--duration-${token}: ${ms}ms;`),
     `--easing: ${MOTION.easing};`,
+    `--easing-enter: ${MOTION.easingEnter};`,
+    `--easing-exit: ${MOTION.easingExit};`,
     ...SERIES.map((color, slot) => `--series-${slot}: ${color};`),
   ];
 }
@@ -109,6 +111,26 @@ function reducedMotion(): string {
   return media('prefers-reduced-motion: reduce', block(':root', zeroed));
 }
 
+/**
+ * A theme change is a crossfade, not a flash. Each color role is registered as a `<color>`, which
+ * makes it animatable, and the root transitions every role over `--duration-slow`; every color in
+ * the page follows, since each is the role's value. The transition is declared only once the page
+ * has shown a theme (`data-theme-motion`, set by `applyTheme` from its second call), so the first
+ * theme is shown as it is and nothing fades in from the default. Reduced motion zeroes the duration.
+ */
+function themeMotion(): string[] {
+  const roles = COLOR_ROLES.map(role => `--${role}`);
+  return [
+    ...roles.map(
+      role =>
+        `@property ${role} {\n  syntax: "<color>";\n  inherits: true;\n  initial-value: transparent;\n}`,
+    ),
+    block(':root[data-theme-motion]', [
+      `transition: ${roles.map(role => `${role} var(--duration-slow) var(--easing)`).join(', ')};`,
+    ]),
+  ];
+}
+
 function themeBlocks(): string[] {
   const names = Object.keys(THEMES) as ThemeName[];
   return [
@@ -132,6 +154,7 @@ export function renderTokensCss(primitives: string): string {
     HEADER,
     block(':root', [...scaleDeclarations(), ...derivedDeclarations(), ...aliases]),
     ...themeBlocks(),
+    ...themeMotion(),
     reducedMotion(),
     primitives.trim(),
   ].join('\n')}\n`;

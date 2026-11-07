@@ -2,11 +2,14 @@ package wire_test
 
 import (
 	"math/rand/v2"
+	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -319,5 +322,41 @@ func TestAMessageMissingItsBodyIsRefused(t *testing.T) {
 	}
 	if _, _, err := wire.ParseSessionEvent(session, encoded(&pb.SessionEvent{Offset: 1})); err == nil {
 		t.Error("a sidecar event with no body was accepted")
+	}
+}
+
+// The interval between a lead's progress reports is at least five minutes or absent. Zero is an
+// interval, not "off", so it is refused and names the field; a start that wants fewer reports names a
+// longer interval.
+func TestAnIntervalBetweenReportsIsFiveMinutesOrMoreOrAbsent(t *testing.T) {
+	start := func(every *durationpb.Duration) *pb.Command {
+		return &pb.Command{Id: "c", Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
+			Repository: "repo", Task: "task", Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}, SummaryEvery: every,
+		}}}
+	}
+	for _, tc := range []struct {
+		name  string
+		every *durationpb.Duration
+		want  time.Duration
+		ok    bool
+	}{
+		{"absent", nil, 0, true}, {"five minutes", durationpb.New(5 * time.Minute), 5 * time.Minute, true},
+		{"a day", durationpb.New(24 * time.Hour), 24 * time.Hour, true},
+		{"zero", durationpb.New(0), 0, false}, {"just under five minutes", durationpb.New(5*time.Minute - time.Nanosecond), 0, false},
+		{"a negative one", durationpb.New(-time.Hour), 0, false},
+	} {
+		c, err := wire.ParseCommand(encoded(start(tc.every)), core.Operator{})
+		if tc.ok != (err == nil) {
+			t.Fatalf("%s: err %v, want accepted: %t", tc.name, err, tc.ok)
+		}
+		if !tc.ok {
+			if !strings.Contains(err.Error(), "summary_every") {
+				t.Errorf("%s: the refusal %q does not name the field", tc.name, err)
+			}
+			continue
+		}
+		if got := c.Body.(core.StartRun).SummaryEvery; got != tc.want {
+			t.Errorf("%s: the command asks for %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

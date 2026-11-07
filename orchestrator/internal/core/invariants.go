@@ -50,6 +50,9 @@ func (s State) Violations() []string {
 		for _, breach := range run.limitBreaches() {
 			bad("run %s %s", run.ID, breach)
 		}
+		for _, breach := range run.summaryBreaches() {
+			bad("run %s %s", run.ID, breach)
+		}
 		if run.LeadReminders > MaxLeadReminders {
 			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)
 		}
@@ -96,6 +99,28 @@ func (run Run) limitBreaches() []string {
 	limited := run.StopReason == StopTimeLimit || run.StopReason == StopCostLimit
 	if limited && (run.LimitReached == "" || run.StopReason != run.LimitReached.stopReason()) {
 		found = append(found, fmt.Sprintf("stopped for %s having reached %q", run.StopReason, run.LimitReached))
+	}
+	return found
+}
+
+// summaryBreaches says how a run's report schedule disagrees with the run: a request is waiting only
+// for a run that has a schedule, can be asked, and whose request is not due before the interval has
+// passed.
+func (run Run) summaryBreaches() []string {
+	if run.NextSummaryAt.IsZero() {
+		return nil
+	}
+	var found []string
+	if run.SummaryEvery <= 0 {
+		found = append(found, "has a request for a report due and no schedule")
+	}
+	if !run.asksForReports() {
+		found = append(found, fmt.Sprintf("has a request for a report due at %v while it is %s, has reached %q and its final report stands: %t",
+			run.NextSummaryAt, run.Status, run.LimitReached, run.FinalReported))
+	}
+	if run.NextSummaryAt.Before(run.LastSummaryAt.Add(run.SummaryEvery)) {
+		found = append(found, fmt.Sprintf("is to be asked for a report at %v, before %v, the interval after %v",
+			run.NextSummaryAt, run.LastSummaryAt.Add(run.SummaryEvery), run.LastSummaryAt))
 	}
 	return found
 }

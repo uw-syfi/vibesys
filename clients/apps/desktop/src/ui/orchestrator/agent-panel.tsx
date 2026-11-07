@@ -1,14 +1,15 @@
-import {
-  type Agent,
-  Delivery,
-  type Message,
-  oneofIs,
-  type Receipt,
-} from '@vibesys/orchestrator-proto';
+import {type Agent, Delivery, type Message, type Receipt} from '@vibesys/orchestrator-proto';
 import {Breadcrumb, Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {CommandProgress} from '../../state/index.js';
-import {agentNames, agentPlace, messagesOf, ms, type OrchestratorState} from '../../state/index.js';
+import {
+  agentNames,
+  agentPlace,
+  messageIs,
+  messagesOf,
+  ms,
+  type OrchestratorState,
+} from '../../state/index.js';
 import {AgentTranscript, type HistoryAccess} from '../agents/agent-transcript.js';
 import {agentLabel} from '../agents/labels.js';
 import {formatUsd} from '../agents/time.js';
@@ -81,22 +82,7 @@ function SentMessages(props: {
       {props.sent.map(message => (
         <SentMessage
           key={message.id}
-          text={
-            oneofIs(message.body, 'text', {
-              text: true,
-              handoff: true,
-              report: true,
-              jobFinished: true,
-              subagentSettled: true,
-              brief: true,
-              leadBrief: true,
-              handoffReminder: true,
-              leadIdleReminder: true,
-              runLimitReached: true,
-            })
-              ? message.body.value
-              : ''
-          }
+          text={messageIs(message, 'text') ? message.body.value : ''}
           atMs={ms(message.at)}
           line={storedLine(message)}
         />
@@ -216,20 +202,7 @@ export function AgentPanel(props: {
         agent={agent}
         progress={props.sendProgress}
         sent={messagesOf(state, agent.id).filter(
-          message =>
-            message.fromAgentId === '' &&
-            oneofIs(message.body, 'text', {
-              text: true,
-              handoff: true,
-              report: true,
-              jobFinished: true,
-              subagentSettled: true,
-              brief: true,
-              leadBrief: true,
-              handoffReminder: true,
-              leadIdleReminder: true,
-              runLimitReached: true,
-            }),
+          message => message.fromAgentId === '' && messageIs(message, 'text'),
         )}
         send={props.send}
         retry={props.retrySend}

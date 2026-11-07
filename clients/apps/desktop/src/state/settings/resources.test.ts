@@ -1,0 +1,74 @@
+import {create} from '@bufbuild/protobuf';
+import {describe, expect, it} from '@effect/vitest';
+import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
+import fc from 'fast-check';
+import type {HostConnectionState} from '../connection.js';
+import type {FeedStatus} from '../feed.js';
+import {freshnessOf} from '../freshness.js';
+import {type ResourceConnection, resourceRow} from './resources.js';
+
+const fault = {kind: 'TransportFailed', detail: 'link lost', retryable: true} as const;
+
+const connections: readonly HostConnectionState[] = [
+  {_tag: 'Idle'},
+  {_tag: 'Connecting', attempt: 1},
+  {_tag: 'Waiting', attempt: 2, fault, retryAtMs: 5},
+  {_tag: 'Incompatible', side: 'client-too-old'},
+  {_tag: 'Unusable', fault},
+];
+
+const feeds: readonly FeedStatus[] = [
+  {_tag: 'Opening'},
+  {_tag: 'Live'},
+  {_tag: 'Failed', fault},
+] as const;
+
+describe('a resource row', () => {
+  it('is the host as the app knows it: its name, how the link stands and how fresh what is shown is', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...connections),
+        fc.constantFrom(...feeds),
+        fc.boolean(),
+        (connection, runsFeed, hasData) => {
+          const row = resourceRow({
+            key: 'ssh:host-a',
+            label: 'host-a',
+            connection,
+            runsFeed,
+            hasData,
+          });
+          expect(row).toMatchObject({key: 'ssh:host-a', label: 'host-a'});
+          expect(row.freshness).toBe(freshnessOf(connection, runsFeed, hasData));
+        },
+      ),
+    );
+  });
+
+  it('says each way a link can stand, and no two ways the same', () => {
+    const ready: HostConnectionState = {
+      _tag: 'Ready',
+      epoch: 1,
+      daemon: create(BuildVersionsSchema),
+    };
+    const stood = [...connections, ready].map(
+      connection =>
+        resourceRow({
+          key: 'local',
+          label: 'This machine',
+          connection,
+          runsFeed: {_tag: 'Live'},
+          hasData: true,
+        }).connection,
+    );
+    const expected: ResourceConnection[] = [
+      'idle',
+      'connecting',
+      'reconnecting',
+      'incompatible',
+      'unreachable',
+      'connected',
+    ];
+    expect(stood).toEqual(expected);
+  });
+});

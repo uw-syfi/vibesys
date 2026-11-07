@@ -23,6 +23,7 @@ import {
   Rejection,
   type RunChange,
   RunChangeSchema,
+  type RunCost,
   type RunsSnapshot,
   RunsSnapshotSchema,
 } from '@vibesys/orchestrator-proto';
@@ -72,6 +73,7 @@ export class FakeDaemon {
   #visible: number;
   readonly #receipts = new Map<string, Receipt>();
   readonly #watchers = new Set<() => void>();
+  readonly #costs = new Map<string, RunCost>();
 
   constructor(
     readonly scenario: Scenario,
@@ -93,6 +95,20 @@ export class FakeDaemon {
   commit(count: number): void {
     this.#visible = Math.min(this.#log.length, this.#visible + count);
     for (const watcher of this.#watchers) invokeCallback(watcher);
+  }
+
+  /**
+   * Set the whole cost view the host works out for a run. The Fake computes none: a test says what
+   * the host would send, and a stream opened after it starts with this view.
+   */
+  publishCost(cost: RunCost): void {
+    this.#costs.set(cost.runId, cost);
+    for (const watcher of this.#watchers) invokeCallback(watcher);
+  }
+
+  /** The newest cost view of a run, or undefined when the host has none to send. */
+  costOf(runId: string): RunCost | undefined {
+    return this.#costs.get(runId);
   }
 
   /** Call `listener` whenever events are committed; returns how to stop. */

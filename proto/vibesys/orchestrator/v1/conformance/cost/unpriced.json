@@ -1,0 +1,75 @@
+{
+  "cost": {
+    "runId": "run-1",
+    "sequence": "41",
+    "asOf": "2026-11-01T09:10:00Z",
+    "total": {
+      "inputTokens": "5000",
+      "outputTokens": "40"
+    },
+    "turns": 1,
+    "unpricedTurns": 1,
+    "roles": [
+      {
+        "role": "AGENT_ROLE_WORKER",
+        "agents": 1,
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "5000",
+          "outputTokens": "40"
+        }
+      }
+    ],
+    "models": [
+      {
+        "model": {
+          "harness": "HARNESS_CODEX",
+          "model": "model-x"
+        },
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "5000",
+          "outputTokens": "40"
+        }
+      }
+    ],
+    "series": {
+      "start": "2026-11-01T09:00:00Z",
+      "width": "60s",
+      "buckets": [
+        {
+          "start": "2026-11-01T09:00:00Z"
+        },
+        {
+          "start": "2026-11-01T09:01:00Z"
+        },
+        {
+          "start": "2026-11-01T09:02:00Z"
+        },
+        {
+          "start": "2026-11-01T09:03:00Z"
+        },
+        {
+          "start": "2026-11-01T09:04:00Z"
+        },
+        {
+          "start": "2026-11-01T09:05:00Z"
+        },
+        {
+          "start": "2026-11-01T09:06:00Z"
+        },
+        {
+          "start": "2026-11-01T09:07:00Z"
+        },
+        {
+          "start": "2026-11-01T09:08:00Z"
+        },
+        {
+          "start": "2026-11-01T09:09:00Z"
+        }
+      ]
+    }
+  }
+}

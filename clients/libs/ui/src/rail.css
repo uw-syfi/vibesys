@@ -69,11 +69,20 @@
   align-items: stretch;
   gap: var(--space-2);
 }
+.vs-rail-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: var(--hairline) solid var(--line);
+}
 .vs-rail-item {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
   min-height: var(--control);
   margin: 0;
@@ -85,6 +94,11 @@
   font: inherit;
   cursor: pointer;
   -webkit-app-region: no-drag;
+  /* A hover or a selection answers the touch, quickly. */
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    border-color var(--duration-fast) var(--easing),
+    color var(--duration-fast) var(--easing);
 }
 .vs-rail-item .vs-text {
   color: inherit;
@@ -95,7 +109,7 @@
   color: var(--text);
 }
 .vs-rail-item[data-active] {
-  border-color: var(--line);
+  border-color: var(--accent);
   background: var(--selection);
   color: var(--text);
 }

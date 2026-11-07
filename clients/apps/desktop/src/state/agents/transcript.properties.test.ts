@@ -21,6 +21,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {itemOf} from '../../testing/orchestrator/builders.js';
+import {itemIs} from '../orchestrator/items.js';
 import {emptyState, type OrchestratorState} from '../orchestrator/state.js';
 import {type Entry, type Transcript, transcript} from './transcript.js';
 
@@ -207,33 +208,40 @@ const itemEntries = (entries: readonly Entry[]): Entry[] =>
   );
 
 const hasWords = (item: Item, state: OrchestratorState): boolean => {
-  const {body} = item;
-  if (body.case === 'tool') return true;
-  if (body.case === 'assistant') return body.value.text !== '';
-  if (body.case === 'reasoning')
-    return body.value.text !== '' || state.elided[item.id] !== undefined;
+  if (itemIs(item, 'tool')) return true;
+  if (itemIs(item, 'assistant')) return item.body.value.text !== '';
+  if (itemIs(item, 'reasoning'))
+    return item.body.value.text !== '' || state.elided[item.id] !== undefined;
   return false;
 };
 
-/** An event comes after every item of its turn that began at or before it, and before the first that began after. */
+const startOf = (item: Item): number =>
+  Number(item.startedAt?.seconds ?? item.at?.seconds ?? 0n) * 1000;
+
+/**
+ * An event comes right before the first item of its turn (in item order, whether or not the item
+ * draws anything) that began after it: so the items drawn before it are those that precede that one.
+ */
 function expectEventPlace(
   entries: readonly Entry[],
-  started: ReadonlyMap<string, number>,
+  items: readonly Item[],
   entry: Entry,
   index: number,
 ): void {
   if (entry.kind !== 'spawn' && entry.kind !== 'join') return;
-  const first = entries
+  const divider = entries
     .slice(0, index)
     .reduce((found, other, at) => (other.kind === 'turn' ? at : found), 0);
-  const turnEnd = entries.findIndex((other, at) => at > index && other.kind === 'turn');
-  const items = (from: number, to: number | undefined) =>
-    entries.slice(from, to).filter(other => started.has(other.key));
-  for (const other of items(first, index)) {
-    expect(started.get(other.key) ?? 0).toBeLessThanOrEqual(entry.atMs);
-  }
-  const after = items(index + 1, turnEnd === -1 ? undefined : turnEnd)[0];
-  if (after !== undefined) expect(entry.atMs).toBeLessThan(started.get(after.key) ?? 0);
+  const turn = entries[divider];
+  if (turn?.kind !== 'turn') throw new Error('an event follows a divider');
+  const own = items.filter(item => item.turnId === turn.turnId);
+  const cut = own.findIndex(item => startOf(item) > entry.atMs);
+  const before = (cut === -1 ? own : own.slice(0, cut)).map(item => `item:${item.id}`);
+  const drawnBefore = entries
+    .slice(divider + 1, index)
+    .map(other => other.key)
+    .filter(key => key.startsWith('item:'));
+  expect(drawnBefore).toEqual(before.filter(key => entries.some(other => other.key === key)));
 }
 
 /** A span is there only when the host said when the item began. */
@@ -363,14 +371,8 @@ describe('a transcript', () => {
     fc.assert(
       fc.property(world, spec => {
         const {result, items} = read(spec);
-        const started = new Map(
-          items.map(item => [
-            `item:${item.id}`,
-            Number(item.startedAt?.seconds ?? item.at?.seconds ?? 0n) * 1000,
-          ]),
-        );
         result.entries.forEach((entry, index) => {
-          expectEventPlace(result.entries, started, entry, index);
+          expectEventPlace(result.entries, items, entry, index);
         });
       }),
     );

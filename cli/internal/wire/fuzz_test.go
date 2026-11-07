@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -261,6 +262,36 @@ func FuzzDecodePlan(f *testing.F) {
 		}
 		if !reflect.DeepEqual(again, first) {
 			t.Fatalf("a decoded plan changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+func FuzzDecodeBound(f *testing.F) {
+	at := timestamppb.New(time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC))
+	valid := &cliv1.ObjectiveBound{
+		Seq: 2, Origin: &cliv1.RecordOrigin{RunId: "run-1", Agent: "lead", At: at}, Objective: "tok_s",
+		Direction: cliv1.Direction_DIRECTION_MAXIMIZE, Value: 15600, Unit: "tok/s", Note: "bandwidth over bytes per token",
+	}
+	seedMessages(f, &cliv1.ObjectiveBound{}, valid,
+		&cliv1.ObjectiveBound{Seq: 1, Objective: "ttft", Direction: cliv1.Direction_DIRECTION_MINIMIZE, Value: 74},
+		&cliv1.ObjectiveBound{Seq: 1, Objective: "x", Direction: 99, Value: 1},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.ObjectiveBound{}
+		decode(t, data, message)
+		first, err := wire.ToBound("bound", message)
+		if err != nil {
+			return
+		}
+		if first.Direction != core.Maximize && first.Direction != core.Minimize {
+			t.Fatalf("a decoded bound has the direction %q, which is not one", first.Direction)
+		}
+		again, err := wire.ToBound("bound", wire.Bound(first))
+		if err != nil {
+			t.Fatalf("a decoded bound %+v is refused once encoded again: %v", first, err)
+		}
+		if !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded bound changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
 		}
 	})
 }

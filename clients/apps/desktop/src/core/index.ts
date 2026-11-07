@@ -15,6 +15,7 @@ export {
   type HostConnectionApi,
   makeHostConnection,
 } from './connection.js';
+export {type CostFeed, makeCostFeed} from './cost-feed.js';
 export {
   type AppError,
   AuthenticationFailed,
@@ -46,5 +47,22 @@ export {
   PROTOCOL_VERSION,
 } from './protocol.js';
 export {makeRunsView, type RunsView} from './runs-view.js';
+export {type AppearanceStore, makeAppearance} from './settings/appearance.js';
+export {
+  Preferences,
+  PreferencesError,
+  PreferencesFromWindow,
+  preferencesOver,
+} from './settings/preferences.js';
+export {
+  appearanceFromBytes,
+  appearanceToBytes,
+  PREFERENCES_READ_CHANNEL,
+  PREFERENCES_WRITE_CHANNEL,
+  type PreferencesBridge,
+} from './settings/preferences-codec.js';
+export {SystemAppearance} from './settings/system-appearance.js';
+export {ThemeDocument} from './settings/theme-document.js';
+export {KeyPresses, makeNavigation, type NavigationStore} from './shell/navigation.js';
 export {type CallTarget, GatewayTransport} from './transport/gateway-transport.js';
 export {GatewayPorts, GatewayPortsFromWindow, GatewayTransportLive} from './transport/live.js';

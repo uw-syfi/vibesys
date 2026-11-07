@@ -43,6 +43,8 @@ const (
 	DaemonService_EditPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/EditPlan"
 	DaemonService_CommentPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/CommentPlan"
 	DaemonService_ClosePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/ClosePlan"
+	DaemonService_DeclareBound_FullMethodName     = "/vibesys.cli.v1.DaemonService/DeclareBound"
+	DaemonService_ListBounds_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListBounds"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -104,6 +106,11 @@ type DaemonServiceClient interface {
 	EditPlan(ctx context.Context, in *EditPlanRequest, opts ...grpc.CallOption) (*EditPlanResponse, error)
 	CommentPlan(ctx context.Context, in *CommentPlanRequest, opts ...grpc.CallOption) (*CommentPlanResponse, error)
 	ClosePlan(ctx context.Context, in *ClosePlanRequest, opts ...grpc.CallOption) (*ClosePlanResponse, error)
+	// DeclareBound records the performance bound an agent states for an objective of the task, as a
+	// new version that supersedes the bound standing for it. Nothing is overwritten.
+	DeclareBound(ctx context.Context, in *DeclareBoundRequest, opts ...grpc.CallOption) (*DeclareBoundResponse, error)
+	// ListBounds lists every declared bound of the task, oldest first.
+	ListBounds(ctx context.Context, in *ListBoundsRequest, opts ...grpc.CallOption) (*ListBoundsResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -390,6 +397,26 @@ func (c *daemonServiceClient) ClosePlan(ctx context.Context, in *ClosePlanReques
 	return out, nil
 }
 
+func (c *daemonServiceClient) DeclareBound(ctx context.Context, in *DeclareBoundRequest, opts ...grpc.CallOption) (*DeclareBoundResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeclareBoundResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DeclareBound_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListBounds(ctx context.Context, in *ListBoundsRequest, opts ...grpc.CallOption) (*ListBoundsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBoundsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListBounds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -449,6 +476,11 @@ type DaemonServiceServer interface {
 	EditPlan(context.Context, *EditPlanRequest) (*EditPlanResponse, error)
 	CommentPlan(context.Context, *CommentPlanRequest) (*CommentPlanResponse, error)
 	ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error)
+	// DeclareBound records the performance bound an agent states for an objective of the task, as a
+	// new version that supersedes the bound standing for it. Nothing is overwritten.
+	DeclareBound(context.Context, *DeclareBoundRequest) (*DeclareBoundResponse, error)
+	// ListBounds lists every declared bound of the task, oldest first.
+	ListBounds(context.Context, *ListBoundsRequest) (*ListBoundsResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -530,6 +562,12 @@ func (UnimplementedDaemonServiceServer) CommentPlan(context.Context, *CommentPla
 }
 func (UnimplementedDaemonServiceServer) ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClosePlan not implemented")
+}
+func (UnimplementedDaemonServiceServer) DeclareBound(context.Context, *DeclareBoundRequest) (*DeclareBoundResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeclareBound not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListBounds(context.Context, *ListBoundsRequest) (*ListBoundsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBounds not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -956,6 +994,42 @@ func _DaemonService_ClosePlan_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_DeclareBound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeclareBoundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DeclareBound(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DeclareBound_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DeclareBound(ctx, req.(*DeclareBoundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListBounds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBoundsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListBounds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListBounds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListBounds(ctx, req.(*ListBoundsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1042,6 +1116,14 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClosePlan",
 			Handler:    _DaemonService_ClosePlan_Handler,
+		},
+		{
+			MethodName: "DeclareBound",
+			Handler:    _DaemonService_DeclareBound_Handler,
+		},
+		{
+			MethodName: "ListBounds",
+			Handler:    _DaemonService_ListBounds_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

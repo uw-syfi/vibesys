@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import * as Effect from 'effect/Effect';
-import {transcript, unbrokenFrom} from '../state/index.js';
+import {itemIs, transcript, unbrokenFrom} from '../state/index.js';
 import {
   ELIDE_OVER,
   FakeDaemon,
@@ -106,13 +106,12 @@ describe('reading an item whole', () => {
       const data = (yield* h.model).data;
       expect(data.elided[first.id]).toBeUndefined();
       expect(Object.keys(data.elided)).toHaveLength(elided.length - 1);
-      const body = data.items[first.id]?.body;
-      const whole =
-        body?.case === 'tool'
-          ? body.value.output
-          : body?.case === 'reasoning'
-            ? body.value.text
-            : '';
+      const read = data.items[first.id];
+      const whole = itemIs(read, 'tool')
+        ? read.body.value.output
+        : itemIs(read, 'reasoning')
+          ? read.body.value.text
+          : '';
       expect(new TextEncoder().encode(whole).length).toBeGreaterThan(ELIDE_OVER);
     }),
   );

@@ -29,15 +29,16 @@ plan reader is a placeholder in production and the job source is left unwired un
 | Package | Holds | May import |
 | --- | --- | --- |
 | `internal/core` | State, `Decide`, the role table. No I/O, clock or randomness | Nothing of this module |
+| `internal/cost` | What a run has cost, worked out from its finished turns: the `Ledger` and its `View`. No I/O, clock or randomness | `core` |
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
-| `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `gen` |
+| `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `cost`, `gen` |
 | `internal/prompts` | The words an agent is sent for a message: Go templates, goldens from the Python renderer they replaced | `core` |
 | `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
 | `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
 | `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |
 | `internal/hub` | Live deltas to the clients watching an agent: merged, bounded, never stored | `core`, `gen` |
-| `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `store`, `jobs`, `wire`, `hub`, `gen` |
+| `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `cost`, `store`, `jobs`, `wire`, `hub`, `gen` |
 | `internal/daemon/daemontest` | The Fakes and the `Rig` that wire a whole daemon in memory | `daemon` and what it imports |
 | `internal/client` | The client library and `connect`, over the public service API | `gen` only |
 | `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `clientcli/attachview`, `client`, `gen` |
@@ -218,7 +219,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 `vibesys-host serve --root ROOT` when none serves.
 
 ```sh
-vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
+vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--summary-every DURATION] [--detach] [--json]
 vibesys-client run list                       # runs, newest first; starts that never ran are hidden, `--all` shows them
 vibesys-client run attach [RUN] [--agent AGENT] [--full-history]  # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
@@ -277,6 +278,31 @@ stalled: it is not reminded, and `run get` says so. A question put to it, which 
 work, so it stays finished. A wait for a report on a stalled run goes on to its timeout, which names the stall;
 one on a finished lead (`--after N` with N its final report) goes on to its timeout too, and the timeout says
 the lead's report is final, so the answer is in its reply (`run attach`).
+
+The orchestrator also asks the lead for a progress report about once an hour, so that a client can show a
+summary of the run with its age (the time of the latest report). `--summary-every 30m` sets the interval:
+at least five minutes, an hour when none is given, and a start that gives `0` is refused, so a run that wants
+fewer reports names a longer interval. The schedule is three fields of the run, folded from events like the
+rest (`summary_every` and `next_summary_at` are in `Run`, the time it is counted from is kept in the store):
+
+- work moves when a message about work reaches the run: an agent started, a handoff, a job's end, or an
+  agent that stopped without a handoff. A job starting, the operator speaking, the lead's own turns and the
+  orchestrator's reminders do not move it;
+- the first movement since the lead last reported or was last asked sets `next_summary_at` to the interval
+  after that report or request, or to that moment if it has passed, and arms `TimerSummaryDue` for it. A run
+  where nothing moved is never asked, so a client shows how old its latest report is, however old;
+- when that timer fires for the time the run still holds, the lead gets one `ReportDue` message (a template
+  words it; the turn it starts is a `schedule` turn) and answers with `post_report`, kind `progress`. A
+  request the lead has not read yet is not repeated: the movement since counts as asked;
+- a report the lead posts on its own, of either kind, restarts the interval from its time and cancels the
+  request that was waiting, so the timer armed for it fires for nothing. A run that is stopping, has reached
+  a limit, or whose lead has given a final report (until it starts new work) is not asked. A run recorded
+  before the schedule existed has no interval and is never asked.
+
+A request is a message like those the lead gets for a finished job: it steers into a turn that is running,
+or waits for the next one, and no fan-out limit or busy lead turns it away. The simulation holds every one
+of these rules against its own account of the schedule over random interleavings of timers, restarts,
+reports and stops.
 
 `vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the
 orchestrator, and `vibesys-client host` is its client. It never starts a host to ask a question:
@@ -395,6 +421,41 @@ item is in the page with that text empty, and the page's `elisions` say which it
 text was. `GetItem` reads one item whole by its agent and ordinal. An item that arrives in a stream is
 always whole. An item carries `started_at`, when the host first saw it, beside `at`, when it was last
 updated, so a finished item took the difference; an item recorded before the host kept it has none.
+
+### What a run has cost
+
+The host owns every number a screen shows of a run's cost: no client sums, splits or buckets anything.
+`WatchRunCost(run_id)` streams a `RunCost`, the whole view, when it opens and the whole view again after
+each change, so a client keeps the latest and combines nothing. It is a stream of its own and not a part
+of `WatchRuns`: cost is read for one run on one screen, so a client pays for the breakdown only while it
+watches, a new breakdown is one more field of one message, and the run stream and its readers do not
+change. `Run.usage` and `Run.max_cost_usd` stay on the run stream for the lists that show a run's spend.
+
+A `RunCost` holds, for the finished turns of the run (the turns `Run.usage` counts):
+
+- the total, with its tokens by kind, and the run's cost limit;
+- one entry for each type of agent (`AgentRole`), with how many agents of the type the run has had, its
+  turns, its tokens and its cost, and the same for each model (an agent's harness and model);
+- the spend over time as buckets from the run's start to the instant of the view, each with its start, its
+  cost and its cost by model; the host picks the bucket width from a fixed ladder (one minute to a week)
+  so the series stays at 48 buckets or fewer however long the run goes on, and a turn is in the bucket its
+  end falls in;
+- the cost of the turns that finished in the hour before the view, which is a rate in dollars an hour for
+  a run that has gone on that long.
+
+A turn is **priced** when its provider reported a cost and **unpriced** when it reported tokens and no
+cost. An unpriced turn is counted, with its tokens, in every figure and adds no dollar: a price is never
+made up. A cost with unpriced turns behind it is a lower bound, and `unpriced_turns` (also on each type
+and model) says how many. A cost no turn reported is absent, never zero, and so is the rate.
+
+The ledger (`internal/cost`) is a pure fold: the same turns in any order, told again or not, give the same
+view, and the total, the types, the models and the buckets each hold exactly the total's cost. A stream
+reads the run's turns from the store once when it opens, a window at a time, where nothing commits (as the
+snapshot's reads of turns do), and adds each turn that ends from then on, so a view costs the size of the
+view and not of the run. The view is as of a time:
+the host's clock while the run lives (so a stream sends a fresh view each `daemon.CostRefresh` even when
+nothing happens, and the last hour does not stand still) and the run's end once it is over (so a finished
+run's view never changes and is sent once).
 
 ### The `run attach` view
 

@@ -41,6 +41,11 @@ func (b *backend) Commit(change ledger.Change) error {
 		return b.publish(planPath(b.root, c.Plan.Number), &cliv1.PlanFile{Format: formatVersion, Plan: wire.Plan(c.Plan)})
 	case ledger.AddPromotion:
 		return b.publish(promotionPath(b.root, c.Seq), &cliv1.PromotionFile{Format: formatVersion, Seq: c.Seq, Promotion: wire.Promotion(c.Promotion)})
+	case ledger.AddBound:
+		if err := b.ensureBoundsDir(); err != nil {
+			return err
+		}
+		return b.publish(boundPath(b.root, c.Bound.Seq), &cliv1.BoundFile{Format: formatVersion, Bound: wire.Bound(c.Bound)})
 	case ledger.SetFrontier:
 		return b.publish(frontierPath(b.root, c.Frontier.Revision), frontierToFile(c.Frontier))
 	case ledger.AddEvent:
@@ -108,6 +113,29 @@ func (b *backend) writeFile(name string, data []byte) error {
 		return err
 	}
 	return f.Close()
+}
+
+// ensureBoundsDir makes the bounds directory and its entry in the store's root durable, once per
+// Recover. A store made by this build has the directory from the start. A store made before it
+// has none until the first declaration, which makes it. A directory found on disk may have been
+// made by a call that died before it synced the root, so the first write syncs again.
+func (b *backend) ensureBoundsDir() error {
+	dir := path.Join(b.root, boundsDir)
+	if b.durableDirs[dir] {
+		return nil
+	}
+	_, err := b.fs.ReadDir(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return b.ensureDir(b.root, boundsDir)
+	case err != nil:
+		return err
+	}
+	if err := b.fs.SyncDir(b.root); err != nil {
+		return err
+	}
+	b.durableDirs[dir] = true
+	return nil
 }
 
 // ensureDir makes the directory name under parent, and makes its entry durable, once per

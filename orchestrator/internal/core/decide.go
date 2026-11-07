@@ -154,7 +154,10 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, MaxCostUSD: b.MaxCostUSD, CreatedAt: t.in.At,
-		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow),
+		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow), SummaryEvery: b.SummaryEvery, LastSummaryAt: t.in.At,
+	}
+	if run.SummaryEvery == 0 {
+		run.SummaryEvery = DefaultSummaryEvery
 	}
 	if b.MaxTime > 0 {
 		run.Deadline = t.in.At.Add(b.MaxTime)
@@ -365,6 +368,7 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	run := t.s.runs[caller.Run]
 	run.ReportsPosted++
 	run.FinalReported = b.Report.Kind == ReportFinal
+	run = run.reported(t.in.At)
 	t.emit(run.ID, run)
 	report := b.Report
 	report.Sequence = run.ReportsPosted

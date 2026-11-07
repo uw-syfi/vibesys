@@ -76,7 +76,7 @@
 }
 /* Motion: a row that arrives draws in, and bars follow the axis as it grows. */
 .vs-gantt-row[data-entering] {
-  animation: vs-enter var(--duration-fast) var(--easing);
+  animation: vs-enter var(--duration-base) var(--easing-enter);
 }
 .vs-gantt-bar {
   transition:

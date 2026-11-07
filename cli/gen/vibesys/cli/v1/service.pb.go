@@ -3315,6 +3315,226 @@ func (x *ClosePlanResponse) GetPlan() *Plan {
 	return nil
 }
 
+type DeclareBoundRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Context *CallContext           `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	// The full commit of the checkout the agent works in. The daemon reads the task as the commit has
+	// it, to check that the objective is one the task declares and to learn which way it improves.
+	Commit        string  `protobuf:"bytes,2,opt,name=commit,proto3" json:"commit,omitempty"`
+	Objective     string  `protobuf:"bytes,3,opt,name=objective,proto3" json:"objective,omitempty"`
+	Value         float64 `protobuf:"fixed64,4,opt,name=value,proto3" json:"value,omitempty"`
+	Unit          string  `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`
+	Note          string  `protobuf:"bytes,6,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeclareBoundRequest) Reset() {
+	*x = DeclareBoundRequest{}
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeclareBoundRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeclareBoundRequest) ProtoMessage() {}
+
+func (x *DeclareBoundRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeclareBoundRequest.ProtoReflect.Descriptor instead.
+func (*DeclareBoundRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *DeclareBoundRequest) GetContext() *CallContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *DeclareBoundRequest) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *DeclareBoundRequest) GetObjective() string {
+	if x != nil {
+		return x.Objective
+	}
+	return ""
+}
+
+func (x *DeclareBoundRequest) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+func (x *DeclareBoundRequest) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *DeclareBoundRequest) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+type DeclareBoundResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The bound as recorded, with its place in the log, its origin and the direction the task gave.
+	Bound         *ObjectiveBound `protobuf:"bytes,1,opt,name=bound,proto3" json:"bound,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeclareBoundResponse) Reset() {
+	*x = DeclareBoundResponse{}
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeclareBoundResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeclareBoundResponse) ProtoMessage() {}
+
+func (x *DeclareBoundResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeclareBoundResponse.ProtoReflect.Descriptor instead.
+func (*DeclareBoundResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *DeclareBoundResponse) GetBound() *ObjectiveBound {
+	if x != nil {
+		return x.Bound
+	}
+	return nil
+}
+
+type ListBoundsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Context       *CallContext           `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBoundsRequest) Reset() {
+	*x = ListBoundsRequest{}
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBoundsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBoundsRequest) ProtoMessage() {}
+
+func (x *ListBoundsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBoundsRequest.ProtoReflect.Descriptor instead.
+func (*ListBoundsRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *ListBoundsRequest) GetContext() *CallContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+type ListBoundsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every declared bound, oldest first.
+	Bounds        []*ObjectiveBound `protobuf:"bytes,1,rep,name=bounds,proto3" json:"bounds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBoundsResponse) Reset() {
+	*x = ListBoundsResponse{}
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBoundsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBoundsResponse) ProtoMessage() {}
+
+func (x *ListBoundsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBoundsResponse.ProtoReflect.Descriptor instead.
+func (*ListBoundsResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *ListBoundsResponse) GetBounds() []*ObjectiveBound {
+	if x != nil {
+		return x.Bounds
+	}
+	return nil
+}
+
 type WatchTaskRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The repository and the task. The run and the agent are not used.
@@ -3332,7 +3552,7 @@ type WatchTaskRequest struct {
 
 func (x *WatchTaskRequest) Reset() {
 	*x = WatchTaskRequest{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[53]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3344,7 +3564,7 @@ func (x *WatchTaskRequest) String() string {
 func (*WatchTaskRequest) ProtoMessage() {}
 
 func (x *WatchTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[53]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3357,7 +3577,7 @@ func (x *WatchTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchTaskRequest.ProtoReflect.Descriptor instead.
 func (*WatchTaskRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{53}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *WatchTaskRequest) GetContext() *CallContext {
@@ -3406,7 +3626,7 @@ type WatchTaskResponse struct {
 
 func (x *WatchTaskResponse) Reset() {
 	*x = WatchTaskResponse{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[54]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3418,7 +3638,7 @@ func (x *WatchTaskResponse) String() string {
 func (*WatchTaskResponse) ProtoMessage() {}
 
 func (x *WatchTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[54]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3431,7 +3651,7 @@ func (x *WatchTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchTaskResponse.ProtoReflect.Descriptor instead.
 func (*WatchTaskResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{54}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *WatchTaskResponse) GetEpoch() string {
@@ -3515,7 +3735,7 @@ type Reset struct {
 
 func (x *Reset) Reset() {
 	*x = Reset{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3527,7 +3747,7 @@ func (x *Reset) String() string {
 func (*Reset) ProtoMessage() {}
 
 func (x *Reset) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3540,7 +3760,7 @@ func (x *Reset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reset.ProtoReflect.Descriptor instead.
 func (*Reset) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{55}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{59}
 }
 
 // CaughtUp ends a Reset. Its epoch and sequence are the client's resume token.
@@ -3552,7 +3772,7 @@ type CaughtUp struct {
 
 func (x *CaughtUp) Reset() {
 	*x = CaughtUp{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[56]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3564,7 +3784,7 @@ func (x *CaughtUp) String() string {
 func (*CaughtUp) ProtoMessage() {}
 
 func (x *CaughtUp) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[56]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3577,7 +3797,7 @@ func (x *CaughtUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaughtUp.ProtoReflect.Descriptor instead.
 func (*CaughtUp) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{56}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{60}
 }
 
 // TaskFacts is 1 to 500 facts, each replacing the fact with the same key.
@@ -3590,7 +3810,7 @@ type TaskFacts struct {
 
 func (x *TaskFacts) Reset() {
 	*x = TaskFacts{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[57]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3602,7 +3822,7 @@ func (x *TaskFacts) String() string {
 func (*TaskFacts) ProtoMessage() {}
 
 func (x *TaskFacts) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[57]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3615,7 +3835,7 @@ func (x *TaskFacts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFacts.ProtoReflect.Descriptor instead.
 func (*TaskFacts) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{57}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *TaskFacts) GetFacts() []*TaskFact {
@@ -3625,8 +3845,8 @@ func (x *TaskFacts) GetFacts() []*TaskFact {
 	return nil
 }
 
-// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number or
-// trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
+// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number,
+// bound.seq or trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
 // of the daemon's hands; a key that stops existing is conveyed by a Reset, except a judgment, which
 // leaves the window of judged commits and is then stale by its against.
 type TaskFact struct {
@@ -3641,6 +3861,7 @@ type TaskFact struct {
 	//	*TaskFact_Head
 	//	*TaskFact_Health
 	//	*TaskFact_Trouble
+	//	*TaskFact_Bound
 	Fact          isTaskFact_Fact `protobuf_oneof:"fact"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3648,7 +3869,7 @@ type TaskFact struct {
 
 func (x *TaskFact) Reset() {
 	*x = TaskFact{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[58]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3660,7 +3881,7 @@ func (x *TaskFact) String() string {
 func (*TaskFact) ProtoMessage() {}
 
 func (x *TaskFact) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[58]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3673,7 +3894,7 @@ func (x *TaskFact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFact.ProtoReflect.Descriptor instead.
 func (*TaskFact) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{58}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *TaskFact) GetFact() isTaskFact_Fact {
@@ -3755,6 +3976,15 @@ func (x *TaskFact) GetTrouble() *JobTrouble {
 	return nil
 }
 
+func (x *TaskFact) GetBound() *ObjectiveBound {
+	if x != nil {
+		if x, ok := x.Fact.(*TaskFact_Bound); ok {
+			return x.Bound
+		}
+	}
+	return nil
+}
+
 type isTaskFact_Fact interface {
 	isTaskFact_Fact()
 }
@@ -3791,6 +4021,10 @@ type TaskFact_Trouble struct {
 	Trouble *JobTrouble `protobuf:"bytes,8,opt,name=trouble,proto3,oneof"`
 }
 
+type TaskFact_Bound struct {
+	Bound *ObjectiveBound `protobuf:"bytes,9,opt,name=bound,proto3,oneof"`
+}
+
 func (*TaskFact_Job) isTaskFact_Fact() {}
 
 func (*TaskFact_Result) isTaskFact_Fact() {}
@@ -3806,6 +4040,8 @@ func (*TaskFact_Head) isTaskFact_Fact() {}
 func (*TaskFact_Health) isTaskFact_Fact() {}
 
 func (*TaskFact_Trouble) isTaskFact_Fact() {}
+
+func (*TaskFact_Bound) isTaskFact_Fact() {}
 
 // Judgment is how a measured commit compares with the head at `against`, or why it cannot be.
 type Judgment struct {
@@ -3823,7 +4059,7 @@ type Judgment struct {
 
 func (x *Judgment) Reset() {
 	*x = Judgment{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[59]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3835,7 +4071,7 @@ func (x *Judgment) String() string {
 func (*Judgment) ProtoMessage() {}
 
 func (x *Judgment) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[59]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3848,7 +4084,7 @@ func (x *Judgment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Judgment.ProtoReflect.Descriptor instead.
 func (*Judgment) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{59}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *Judgment) GetCommit() string {
@@ -3917,7 +4153,7 @@ type PromotionRecord struct {
 
 func (x *PromotionRecord) Reset() {
 	*x = PromotionRecord{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[60]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3929,7 +4165,7 @@ func (x *PromotionRecord) String() string {
 func (*PromotionRecord) ProtoMessage() {}
 
 func (x *PromotionRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[60]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3942,7 +4178,7 @@ func (x *PromotionRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PromotionRecord.ProtoReflect.Descriptor instead.
 func (*PromotionRecord) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{60}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *PromotionRecord) GetSeq() uint64 {
@@ -3971,7 +4207,7 @@ type JobTrouble struct {
 
 func (x *JobTrouble) Reset() {
 	*x = JobTrouble{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[61]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3983,7 +4219,7 @@ func (x *JobTrouble) String() string {
 func (*JobTrouble) ProtoMessage() {}
 
 func (x *JobTrouble) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[61]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3996,7 +4232,7 @@ func (x *JobTrouble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobTrouble.ProtoReflect.Descriptor instead.
 func (*JobTrouble) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{61}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *JobTrouble) GetJobId() string {
@@ -4026,7 +4262,7 @@ type Head struct {
 
 func (x *Head) Reset() {
 	*x = Head{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[62]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4038,7 +4274,7 @@ func (x *Head) String() string {
 func (*Head) ProtoMessage() {}
 
 func (x *Head) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[62]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4051,7 +4287,7 @@ func (x *Head) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Head.ProtoReflect.Descriptor instead.
 func (*Head) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{62}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *Head) GetState() isHead_State {
@@ -4108,7 +4344,7 @@ type StoreHealth struct {
 
 func (x *StoreHealth) Reset() {
 	*x = StoreHealth{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[63]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4120,7 +4356,7 @@ func (x *StoreHealth) String() string {
 func (*StoreHealth) ProtoMessage() {}
 
 func (x *StoreHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[63]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4133,7 +4369,7 @@ func (x *StoreHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreHealth.ProtoReflect.Descriptor instead.
 func (*StoreHealth) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{63}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *StoreHealth) GetState() isStoreHealth_State {
@@ -4186,7 +4422,7 @@ type Live struct {
 
 func (x *Live) Reset() {
 	*x = Live{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[64]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4198,7 +4434,7 @@ func (x *Live) String() string {
 func (*Live) ProtoMessage() {}
 
 func (x *Live) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[64]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4211,7 +4447,7 @@ func (x *Live) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Live.ProtoReflect.Descriptor instead.
 func (*Live) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{64}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{68}
 }
 
 // Away says it could not be read now. The facts sent before stay as they were.
@@ -4225,7 +4461,7 @@ type Away struct {
 
 func (x *Away) Reset() {
 	*x = Away{}
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[65]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4237,7 +4473,7 @@ func (x *Away) String() string {
 func (*Away) ProtoMessage() {}
 
 func (x *Away) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_service_proto_msgTypes[65]
+	mi := &file_vibesys_cli_v1_service_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4250,7 +4486,7 @@ func (x *Away) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Away.ProtoReflect.Descriptor instead.
 func (*Away) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{65}
+	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *Away) GetReason() AwayReason {
@@ -4271,7 +4507,7 @@ var File_vibesys_cli_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xc0\x01\n" +
+	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xc0\x01\n" +
 	"\vCallContext\x12)\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\t\xbaH\x06r\x042\x02^/R\n" +
@@ -4479,7 +4715,23 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12\x18\n" +
 	"\acomment\x18\x04 \x01(\tR\acomment\"=\n" +
 	"\x11ClosePlanResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xbe\x01\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\x8c\x02\n" +
+	"\x13DeclareBoundRequest\x125\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\x12(\n" +
+	"\tobjective\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12&\n" +
+	"\x05value\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\x05value\x12\x1d\n" +
+	"\x04unit\x18\x05 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x04unit\x12\x1e\n" +
+	"\x04note\x18\x06 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04note\"T\n" +
+	"\x14DeclareBoundResponse\x12<\n" +
+	"\x05bound\x18\x01 \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\x06\xbaH\x03\xc8\x01\x01R\x05bound\"R\n" +
+	"\x11ListBoundsRequest\x12=\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\"\xbb\x02\n" +
+	"\x12ListBoundsResponse\x126\n" +
+	"\x06bounds\x18\x01 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundR\x06bounds:\xec\x01\xbaH\xe8\x01\x1a\xe5\x01\n" +
+	"#list_bounds.places_end_at_the_count\x12^the places of the bounds count 1, 2, ... without a gap, so the last place is the number listed\x1a^this.bounds.size() == 0 || this.bounds[this.bounds.size() - 1].seq == uint(this.bounds.size())\"\xbe\x01\n" +
 	"\x10WatchTaskRequest\x12=\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\tR\x05epoch\x12%\n" +
@@ -4496,7 +4748,7 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"\bCaughtUp\"H\n" +
 	"\tTaskFacts\x12;\n" +
-	"\x05facts\x18\x01 \x03(\v2\x18.vibesys.cli.v1.TaskFactB\v\xbaH\b\x92\x01\x05\b\x01\x10\xf4\x03R\x05facts\"\xb4\x03\n" +
+	"\x05facts\x18\x01 \x03(\v2\x18.vibesys.cli.v1.TaskFactB\v\xbaH\b\x92\x01\x05\b\x01\x10\xf4\x03R\x05facts\"\xec\x03\n" +
 	"\bTaskFact\x12'\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobH\x00R\x03job\x120\n" +
 	"\x06result\x18\x02 \x01(\v2\x16.vibesys.cli.v1.ResultH\x00R\x06result\x126\n" +
@@ -4505,7 +4757,8 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x04plan\x18\x05 \x01(\v2\x14.vibesys.cli.v1.PlanH\x00R\x04plan\x12*\n" +
 	"\x04head\x18\x06 \x01(\v2\x14.vibesys.cli.v1.HeadH\x00R\x04head\x125\n" +
 	"\x06health\x18\a \x01(\v2\x1b.vibesys.cli.v1.StoreHealthH\x00R\x06health\x126\n" +
-	"\atrouble\x18\b \x01(\v2\x1a.vibesys.cli.v1.JobTroubleH\x00R\atroubleB\r\n" +
+	"\atrouble\x18\b \x01(\v2\x1a.vibesys.cli.v1.JobTroubleH\x00R\atrouble\x126\n" +
+	"\x05bound\x18\t \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundH\x00R\x05boundB\r\n" +
 	"\x04fact\x12\x05\xbaH\x02\b\x01\"\xef\x01\n" +
 	"\bJudgment\x12-\n" +
 	"\x06commit\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\x12/\n" +
@@ -4551,7 +4804,7 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"AwayReason\x12\x1b\n" +
 	"\x17AWAY_REASON_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bAWAY_REASON_OWNED_ELSEWHERE\x10\x01\x12\x1b\n" +
-	"\x17AWAY_REASON_UNAVAILABLE\x10\x022\x88\x0f\n" +
+	"\x17AWAY_REASON_UNAVAILABLE\x10\x022\xb8\x10\n" +
 	"\rDaemonService\x12D\n" +
 	"\x05Hello\x12\x1c.vibesys.cli.v1.HelloRequest\x1a\x1d.vibesys.cli.v1.HelloResponse\x12G\n" +
 	"\x06Status\x12\x1d.vibesys.cli.v1.StatusRequest\x1a\x1e.vibesys.cli.v1.StatusResponse\x12A\n" +
@@ -4577,7 +4830,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\bViewPlan\x12\x1f.vibesys.cli.v1.ViewPlanRequest\x1a .vibesys.cli.v1.ViewPlanResponse\x12M\n" +
 	"\bEditPlan\x12\x1f.vibesys.cli.v1.EditPlanRequest\x1a .vibesys.cli.v1.EditPlanResponse\x12V\n" +
 	"\vCommentPlan\x12\".vibesys.cli.v1.CommentPlanRequest\x1a#.vibesys.cli.v1.CommentPlanResponse\x12P\n" +
-	"\tClosePlan\x12 .vibesys.cli.v1.ClosePlanRequest\x1a!.vibesys.cli.v1.ClosePlanResponseB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\tClosePlan\x12 .vibesys.cli.v1.ClosePlanRequest\x1a!.vibesys.cli.v1.ClosePlanResponse\x12Y\n" +
+	"\fDeclareBound\x12#.vibesys.cli.v1.DeclareBoundRequest\x1a$.vibesys.cli.v1.DeclareBoundResponse\x12S\n" +
+	"\n" +
+	"ListBounds\x12!.vibesys.cli.v1.ListBoundsRequest\x1a\".vibesys.cli.v1.ListBoundsResponseB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_service_proto_rawDescOnce sync.Once
@@ -4592,7 +4848,7 @@ func file_vibesys_cli_v1_service_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
+var file_vibesys_cli_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_vibesys_cli_v1_service_proto_goTypes = []any{
 	(SubmitDisposition)(0),           // 0: vibesys.cli.v1.SubmitDisposition
 	(WaitOutcomeKind)(0),             // 1: vibesys.cli.v1.WaitOutcomeKind
@@ -4650,192 +4906,206 @@ var file_vibesys_cli_v1_service_proto_goTypes = []any{
 	(*CommentPlanResponse)(nil),      // 53: vibesys.cli.v1.CommentPlanResponse
 	(*ClosePlanRequest)(nil),         // 54: vibesys.cli.v1.ClosePlanRequest
 	(*ClosePlanResponse)(nil),        // 55: vibesys.cli.v1.ClosePlanResponse
-	(*WatchTaskRequest)(nil),         // 56: vibesys.cli.v1.WatchTaskRequest
-	(*WatchTaskResponse)(nil),        // 57: vibesys.cli.v1.WatchTaskResponse
-	(*Reset)(nil),                    // 58: vibesys.cli.v1.Reset
-	(*CaughtUp)(nil),                 // 59: vibesys.cli.v1.CaughtUp
-	(*TaskFacts)(nil),                // 60: vibesys.cli.v1.TaskFacts
-	(*TaskFact)(nil),                 // 61: vibesys.cli.v1.TaskFact
-	(*Judgment)(nil),                 // 62: vibesys.cli.v1.Judgment
-	(*PromotionRecord)(nil),          // 63: vibesys.cli.v1.PromotionRecord
-	(*JobTrouble)(nil),               // 64: vibesys.cli.v1.JobTrouble
-	(*Head)(nil),                     // 65: vibesys.cli.v1.Head
-	(*StoreHealth)(nil),              // 66: vibesys.cli.v1.StoreHealth
-	(*Live)(nil),                     // 67: vibesys.cli.v1.Live
-	(*Away)(nil),                     // 68: vibesys.cli.v1.Away
-	(Component)(0),                   // 69: vibesys.cli.v1.Component
-	(*BuildVersions)(nil),            // 70: vibesys.cli.v1.BuildVersions
-	(Compatibility)(0),               // 71: vibesys.cli.v1.Compatibility
-	(*timestamppb.Timestamp)(nil),    // 72: google.protobuf.Timestamp
-	(*MachineDaemon)(nil),            // 73: vibesys.cli.v1.MachineDaemon
-	(*LeaseHolder)(nil),              // 74: vibesys.cli.v1.LeaseHolder
-	(*JobSpec)(nil),                  // 75: vibesys.cli.v1.JobSpec
-	(*Job)(nil),                      // 76: vibesys.cli.v1.Job
-	(*durationpb.Duration)(nil),      // 77: google.protobuf.Duration
-	(JobState)(0),                    // 78: vibesys.cli.v1.JobState
-	(JobKind)(0),                     // 79: vibesys.cli.v1.JobKind
-	(*JobWait)(nil),                  // 80: vibesys.cli.v1.JobWait
-	(*Result)(nil),                   // 81: vibesys.cli.v1.Result
-	(*Measurement)(nil),              // 82: vibesys.cli.v1.Measurement
-	(*Comparison)(nil),               // 83: vibesys.cli.v1.Comparison
-	(*Promotion)(nil),                // 84: vibesys.cli.v1.Promotion
-	(*PromoteRefusal)(nil),           // 85: vibesys.cli.v1.PromoteRefusal
-	(*FrontierDecision)(nil),         // 86: vibesys.cli.v1.FrontierDecision
-	(*FrontierEntry)(nil),            // 87: vibesys.cli.v1.FrontierEntry
-	(*CurrentResult)(nil),            // 88: vibesys.cli.v1.CurrentResult
-	(*NoCurrentResult)(nil),          // 89: vibesys.cli.v1.NoCurrentResult
-	(*PlanGainBound)(nil),            // 90: vibesys.cli.v1.PlanGainBound
-	(*Plan)(nil),                     // 91: vibesys.cli.v1.Plan
-	(PlanStatus)(0),                  // 92: vibesys.cli.v1.PlanStatus
-	(*PlanView)(nil),                 // 93: vibesys.cli.v1.PlanView
-	(*Failure)(nil),                  // 94: vibesys.cli.v1.Failure
+	(*DeclareBoundRequest)(nil),      // 56: vibesys.cli.v1.DeclareBoundRequest
+	(*DeclareBoundResponse)(nil),     // 57: vibesys.cli.v1.DeclareBoundResponse
+	(*ListBoundsRequest)(nil),        // 58: vibesys.cli.v1.ListBoundsRequest
+	(*ListBoundsResponse)(nil),       // 59: vibesys.cli.v1.ListBoundsResponse
+	(*WatchTaskRequest)(nil),         // 60: vibesys.cli.v1.WatchTaskRequest
+	(*WatchTaskResponse)(nil),        // 61: vibesys.cli.v1.WatchTaskResponse
+	(*Reset)(nil),                    // 62: vibesys.cli.v1.Reset
+	(*CaughtUp)(nil),                 // 63: vibesys.cli.v1.CaughtUp
+	(*TaskFacts)(nil),                // 64: vibesys.cli.v1.TaskFacts
+	(*TaskFact)(nil),                 // 65: vibesys.cli.v1.TaskFact
+	(*Judgment)(nil),                 // 66: vibesys.cli.v1.Judgment
+	(*PromotionRecord)(nil),          // 67: vibesys.cli.v1.PromotionRecord
+	(*JobTrouble)(nil),               // 68: vibesys.cli.v1.JobTrouble
+	(*Head)(nil),                     // 69: vibesys.cli.v1.Head
+	(*StoreHealth)(nil),              // 70: vibesys.cli.v1.StoreHealth
+	(*Live)(nil),                     // 71: vibesys.cli.v1.Live
+	(*Away)(nil),                     // 72: vibesys.cli.v1.Away
+	(Component)(0),                   // 73: vibesys.cli.v1.Component
+	(*BuildVersions)(nil),            // 74: vibesys.cli.v1.BuildVersions
+	(Compatibility)(0),               // 75: vibesys.cli.v1.Compatibility
+	(*timestamppb.Timestamp)(nil),    // 76: google.protobuf.Timestamp
+	(*MachineDaemon)(nil),            // 77: vibesys.cli.v1.MachineDaemon
+	(*LeaseHolder)(nil),              // 78: vibesys.cli.v1.LeaseHolder
+	(*JobSpec)(nil),                  // 79: vibesys.cli.v1.JobSpec
+	(*Job)(nil),                      // 80: vibesys.cli.v1.Job
+	(*durationpb.Duration)(nil),      // 81: google.protobuf.Duration
+	(JobState)(0),                    // 82: vibesys.cli.v1.JobState
+	(JobKind)(0),                     // 83: vibesys.cli.v1.JobKind
+	(*JobWait)(nil),                  // 84: vibesys.cli.v1.JobWait
+	(*Result)(nil),                   // 85: vibesys.cli.v1.Result
+	(*Measurement)(nil),              // 86: vibesys.cli.v1.Measurement
+	(*Comparison)(nil),               // 87: vibesys.cli.v1.Comparison
+	(*Promotion)(nil),                // 88: vibesys.cli.v1.Promotion
+	(*PromoteRefusal)(nil),           // 89: vibesys.cli.v1.PromoteRefusal
+	(*FrontierDecision)(nil),         // 90: vibesys.cli.v1.FrontierDecision
+	(*FrontierEntry)(nil),            // 91: vibesys.cli.v1.FrontierEntry
+	(*CurrentResult)(nil),            // 92: vibesys.cli.v1.CurrentResult
+	(*NoCurrentResult)(nil),          // 93: vibesys.cli.v1.NoCurrentResult
+	(*PlanGainBound)(nil),            // 94: vibesys.cli.v1.PlanGainBound
+	(*Plan)(nil),                     // 95: vibesys.cli.v1.Plan
+	(PlanStatus)(0),                  // 96: vibesys.cli.v1.PlanStatus
+	(*PlanView)(nil),                 // 97: vibesys.cli.v1.PlanView
+	(*ObjectiveBound)(nil),           // 98: vibesys.cli.v1.ObjectiveBound
+	(*Failure)(nil),                  // 99: vibesys.cli.v1.Failure
 }
 var file_vibesys_cli_v1_service_proto_depIdxs = []int32{
-	69,  // 0: vibesys.cli.v1.HelloRequest.component:type_name -> vibesys.cli.v1.Component
-	70,  // 1: vibesys.cli.v1.HelloRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
-	70,  // 2: vibesys.cli.v1.HelloResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
-	71,  // 3: vibesys.cli.v1.HelloResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
-	70,  // 4: vibesys.cli.v1.DaemonEnsureResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
-	70,  // 5: vibesys.cli.v1.StatusResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
-	72,  // 6: vibesys.cli.v1.StatusResponse.started_at:type_name -> google.protobuf.Timestamp
+	73,  // 0: vibesys.cli.v1.HelloRequest.component:type_name -> vibesys.cli.v1.Component
+	74,  // 1: vibesys.cli.v1.HelloRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
+	74,  // 2: vibesys.cli.v1.HelloResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
+	75,  // 3: vibesys.cli.v1.HelloResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
+	74,  // 4: vibesys.cli.v1.DaemonEnsureResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
+	74,  // 5: vibesys.cli.v1.StatusResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
+	76,  // 6: vibesys.cli.v1.StatusResponse.started_at:type_name -> google.protobuf.Timestamp
 	12,  // 7: vibesys.cli.v1.StatusResponse.environment:type_name -> vibesys.cli.v1.InheritedVariable
-	73,  // 8: vibesys.cli.v1.StatusResponse.sandboxes:type_name -> vibesys.cli.v1.MachineDaemon
+	77,  // 8: vibesys.cli.v1.StatusResponse.sandboxes:type_name -> vibesys.cli.v1.MachineDaemon
 	9,   // 9: vibesys.cli.v1.StatusResponse.leases:type_name -> vibesys.cli.v1.HeldLease
 	10,  // 10: vibesys.cli.v1.StatusResponse.lease_conflicts:type_name -> vibesys.cli.v1.LeaseConflict
 	11,  // 11: vibesys.cli.v1.StatusResponse.other_daemons:type_name -> vibesys.cli.v1.DaemonProcess
-	72,  // 12: vibesys.cli.v1.HeldLease.since:type_name -> google.protobuf.Timestamp
-	74,  // 13: vibesys.cli.v1.LeaseConflict.holder:type_name -> vibesys.cli.v1.LeaseHolder
+	76,  // 12: vibesys.cli.v1.HeldLease.since:type_name -> google.protobuf.Timestamp
+	78,  // 13: vibesys.cli.v1.LeaseConflict.holder:type_name -> vibesys.cli.v1.LeaseHolder
 	3,   // 14: vibesys.cli.v1.SubmitRequest.context:type_name -> vibesys.cli.v1.CallContext
-	75,  // 15: vibesys.cli.v1.SubmitRequest.spec:type_name -> vibesys.cli.v1.JobSpec
-	76,  // 16: vibesys.cli.v1.SubmitResponse.job:type_name -> vibesys.cli.v1.Job
+	79,  // 15: vibesys.cli.v1.SubmitRequest.spec:type_name -> vibesys.cli.v1.JobSpec
+	80,  // 16: vibesys.cli.v1.SubmitResponse.job:type_name -> vibesys.cli.v1.Job
 	0,   // 17: vibesys.cli.v1.SubmitResponse.disposition:type_name -> vibesys.cli.v1.SubmitDisposition
 	3,   // 18: vibesys.cli.v1.WatchRequest.context:type_name -> vibesys.cli.v1.CallContext
-	76,  // 19: vibesys.cli.v1.WatchResponse.job:type_name -> vibesys.cli.v1.Job
+	80,  // 19: vibesys.cli.v1.WatchResponse.job:type_name -> vibesys.cli.v1.Job
 	3,   // 20: vibesys.cli.v1.WaitRequest.context:type_name -> vibesys.cli.v1.CallContext
-	77,  // 21: vibesys.cli.v1.WaitRequest.timeout:type_name -> google.protobuf.Duration
-	76,  // 22: vibesys.cli.v1.WaitResponse.job:type_name -> vibesys.cli.v1.Job
+	81,  // 21: vibesys.cli.v1.WaitRequest.timeout:type_name -> google.protobuf.Duration
+	80,  // 22: vibesys.cli.v1.WaitResponse.job:type_name -> vibesys.cli.v1.Job
 	23,  // 23: vibesys.cli.v1.WaitResponse.outcome:type_name -> vibesys.cli.v1.WaitOutcome
 	1,   // 24: vibesys.cli.v1.WaitOutcome.kind:type_name -> vibesys.cli.v1.WaitOutcomeKind
-	76,  // 25: vibesys.cli.v1.WaitOutcome.jobs:type_name -> vibesys.cli.v1.Job
+	80,  // 25: vibesys.cli.v1.WaitOutcome.jobs:type_name -> vibesys.cli.v1.Job
 	3,   // 26: vibesys.cli.v1.CancelRequest.context:type_name -> vibesys.cli.v1.CallContext
-	76,  // 27: vibesys.cli.v1.CancelResponse.job:type_name -> vibesys.cli.v1.Job
+	80,  // 27: vibesys.cli.v1.CancelResponse.job:type_name -> vibesys.cli.v1.Job
 	3,   // 28: vibesys.cli.v1.AddNoteRequest.context:type_name -> vibesys.cli.v1.CallContext
-	76,  // 29: vibesys.cli.v1.AddNoteResponse.job:type_name -> vibesys.cli.v1.Job
+	80,  // 29: vibesys.cli.v1.AddNoteResponse.job:type_name -> vibesys.cli.v1.Job
 	3,   // 30: vibesys.cli.v1.ListJobsRequest.context:type_name -> vibesys.cli.v1.CallContext
-	78,  // 31: vibesys.cli.v1.ListJobsRequest.states:type_name -> vibesys.cli.v1.JobState
-	79,  // 32: vibesys.cli.v1.ListJobsRequest.kind:type_name -> vibesys.cli.v1.JobKind
-	76,  // 33: vibesys.cli.v1.ListJobsResponse.jobs:type_name -> vibesys.cli.v1.Job
-	80,  // 34: vibesys.cli.v1.ListJobsResponse.waits:type_name -> vibesys.cli.v1.JobWait
+	82,  // 31: vibesys.cli.v1.ListJobsRequest.states:type_name -> vibesys.cli.v1.JobState
+	83,  // 32: vibesys.cli.v1.ListJobsRequest.kind:type_name -> vibesys.cli.v1.JobKind
+	80,  // 33: vibesys.cli.v1.ListJobsResponse.jobs:type_name -> vibesys.cli.v1.Job
+	84,  // 34: vibesys.cli.v1.ListJobsResponse.waits:type_name -> vibesys.cli.v1.JobWait
 	3,   // 35: vibesys.cli.v1.ReadLogsRequest.context:type_name -> vibesys.cli.v1.CallContext
 	3,   // 36: vibesys.cli.v1.ShowRequest.context:type_name -> vibesys.cli.v1.CallContext
-	81,  // 37: vibesys.cli.v1.ShowResponse.results:type_name -> vibesys.cli.v1.Result
-	82,  // 38: vibesys.cli.v1.ShowResponse.measurements:type_name -> vibesys.cli.v1.Measurement
+	85,  // 37: vibesys.cli.v1.ShowResponse.results:type_name -> vibesys.cli.v1.Result
+	86,  // 38: vibesys.cli.v1.ShowResponse.measurements:type_name -> vibesys.cli.v1.Measurement
 	3,   // 39: vibesys.cli.v1.CompareRequest.context:type_name -> vibesys.cli.v1.CallContext
-	83,  // 40: vibesys.cli.v1.CompareResponse.comparison:type_name -> vibesys.cli.v1.Comparison
+	87,  // 40: vibesys.cli.v1.CompareResponse.comparison:type_name -> vibesys.cli.v1.Comparison
 	3,   // 41: vibesys.cli.v1.PromoteRequest.context:type_name -> vibesys.cli.v1.CallContext
-	84,  // 42: vibesys.cli.v1.PromoteResponse.promoted:type_name -> vibesys.cli.v1.Promotion
-	85,  // 43: vibesys.cli.v1.PromoteResponse.refused:type_name -> vibesys.cli.v1.PromoteRefusal
-	86,  // 44: vibesys.cli.v1.PromoteResponse.frontier:type_name -> vibesys.cli.v1.FrontierDecision
+	88,  // 42: vibesys.cli.v1.PromoteResponse.promoted:type_name -> vibesys.cli.v1.Promotion
+	89,  // 43: vibesys.cli.v1.PromoteResponse.refused:type_name -> vibesys.cli.v1.PromoteRefusal
+	90,  // 44: vibesys.cli.v1.PromoteResponse.frontier:type_name -> vibesys.cli.v1.FrontierDecision
 	3,   // 45: vibesys.cli.v1.AddToFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
-	86,  // 46: vibesys.cli.v1.AddToFrontierResponse.decision:type_name -> vibesys.cli.v1.FrontierDecision
+	90,  // 46: vibesys.cli.v1.AddToFrontierResponse.decision:type_name -> vibesys.cli.v1.FrontierDecision
 	3,   // 47: vibesys.cli.v1.ListFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
-	87,  // 48: vibesys.cli.v1.ListFrontierResponse.members:type_name -> vibesys.cli.v1.FrontierEntry
+	91,  // 48: vibesys.cli.v1.ListFrontierResponse.members:type_name -> vibesys.cli.v1.FrontierEntry
 	3,   // 49: vibesys.cli.v1.CurrentResultRequest.context:type_name -> vibesys.cli.v1.CallContext
-	88,  // 50: vibesys.cli.v1.CurrentResultResponse.current:type_name -> vibesys.cli.v1.CurrentResult
-	89,  // 51: vibesys.cli.v1.CurrentResultResponse.none:type_name -> vibesys.cli.v1.NoCurrentResult
+	92,  // 50: vibesys.cli.v1.CurrentResultResponse.current:type_name -> vibesys.cli.v1.CurrentResult
+	93,  // 51: vibesys.cli.v1.CurrentResultResponse.none:type_name -> vibesys.cli.v1.NoCurrentResult
 	3,   // 52: vibesys.cli.v1.CreatePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	90,  // 53: vibesys.cli.v1.CreatePlanRequest.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	91,  // 54: vibesys.cli.v1.CreatePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	94,  // 53: vibesys.cli.v1.CreatePlanRequest.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	95,  // 54: vibesys.cli.v1.CreatePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
 	3,   // 55: vibesys.cli.v1.ListPlansRequest.context:type_name -> vibesys.cli.v1.CallContext
-	92,  // 56: vibesys.cli.v1.ListPlansRequest.statuses:type_name -> vibesys.cli.v1.PlanStatus
-	91,  // 57: vibesys.cli.v1.ListPlansResponse.plans:type_name -> vibesys.cli.v1.Plan
+	96,  // 56: vibesys.cli.v1.ListPlansRequest.statuses:type_name -> vibesys.cli.v1.PlanStatus
+	95,  // 57: vibesys.cli.v1.ListPlansResponse.plans:type_name -> vibesys.cli.v1.Plan
 	3,   // 58: vibesys.cli.v1.ViewPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	93,  // 59: vibesys.cli.v1.ViewPlanResponse.view:type_name -> vibesys.cli.v1.PlanView
+	97,  // 59: vibesys.cli.v1.ViewPlanResponse.view:type_name -> vibesys.cli.v1.PlanView
 	3,   // 60: vibesys.cli.v1.EditPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	92,  // 61: vibesys.cli.v1.EditPlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
-	90,  // 62: vibesys.cli.v1.EditPlanRequest.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	91,  // 63: vibesys.cli.v1.EditPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	96,  // 61: vibesys.cli.v1.EditPlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
+	94,  // 62: vibesys.cli.v1.EditPlanRequest.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	95,  // 63: vibesys.cli.v1.EditPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
 	3,   // 64: vibesys.cli.v1.CommentPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	91,  // 65: vibesys.cli.v1.CommentPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	95,  // 65: vibesys.cli.v1.CommentPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
 	3,   // 66: vibesys.cli.v1.ClosePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	92,  // 67: vibesys.cli.v1.ClosePlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
-	91,  // 68: vibesys.cli.v1.ClosePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
-	3,   // 69: vibesys.cli.v1.WatchTaskRequest.context:type_name -> vibesys.cli.v1.CallContext
-	58,  // 70: vibesys.cli.v1.WatchTaskResponse.reset:type_name -> vibesys.cli.v1.Reset
-	60,  // 71: vibesys.cli.v1.WatchTaskResponse.facts:type_name -> vibesys.cli.v1.TaskFacts
-	59,  // 72: vibesys.cli.v1.WatchTaskResponse.caught_up:type_name -> vibesys.cli.v1.CaughtUp
-	61,  // 73: vibesys.cli.v1.TaskFacts.facts:type_name -> vibesys.cli.v1.TaskFact
-	76,  // 74: vibesys.cli.v1.TaskFact.job:type_name -> vibesys.cli.v1.Job
-	81,  // 75: vibesys.cli.v1.TaskFact.result:type_name -> vibesys.cli.v1.Result
-	62,  // 76: vibesys.cli.v1.TaskFact.judgment:type_name -> vibesys.cli.v1.Judgment
-	63,  // 77: vibesys.cli.v1.TaskFact.promotion:type_name -> vibesys.cli.v1.PromotionRecord
-	91,  // 78: vibesys.cli.v1.TaskFact.plan:type_name -> vibesys.cli.v1.Plan
-	65,  // 79: vibesys.cli.v1.TaskFact.head:type_name -> vibesys.cli.v1.Head
-	66,  // 80: vibesys.cli.v1.TaskFact.health:type_name -> vibesys.cli.v1.StoreHealth
-	64,  // 81: vibesys.cli.v1.TaskFact.trouble:type_name -> vibesys.cli.v1.JobTrouble
-	83,  // 82: vibesys.cli.v1.Judgment.comparison:type_name -> vibesys.cli.v1.Comparison
-	94,  // 83: vibesys.cli.v1.Judgment.refused:type_name -> vibesys.cli.v1.Failure
-	84,  // 84: vibesys.cli.v1.PromotionRecord.promotion:type_name -> vibesys.cli.v1.Promotion
-	94,  // 85: vibesys.cli.v1.JobTrouble.failure:type_name -> vibesys.cli.v1.Failure
-	88,  // 86: vibesys.cli.v1.Head.current:type_name -> vibesys.cli.v1.CurrentResult
-	89,  // 87: vibesys.cli.v1.Head.none:type_name -> vibesys.cli.v1.NoCurrentResult
-	67,  // 88: vibesys.cli.v1.StoreHealth.live:type_name -> vibesys.cli.v1.Live
-	68,  // 89: vibesys.cli.v1.StoreHealth.away:type_name -> vibesys.cli.v1.Away
-	2,   // 90: vibesys.cli.v1.Away.reason:type_name -> vibesys.cli.v1.AwayReason
-	94,  // 91: vibesys.cli.v1.Away.failure:type_name -> vibesys.cli.v1.Failure
-	4,   // 92: vibesys.cli.v1.DaemonService.Hello:input_type -> vibesys.cli.v1.HelloRequest
-	6,   // 93: vibesys.cli.v1.DaemonService.Status:input_type -> vibesys.cli.v1.StatusRequest
-	13,  // 94: vibesys.cli.v1.DaemonService.Stop:input_type -> vibesys.cli.v1.StopRequest
-	17,  // 95: vibesys.cli.v1.DaemonService.Submit:input_type -> vibesys.cli.v1.SubmitRequest
-	19,  // 96: vibesys.cli.v1.DaemonService.Watch:input_type -> vibesys.cli.v1.WatchRequest
-	21,  // 97: vibesys.cli.v1.DaemonService.Wait:input_type -> vibesys.cli.v1.WaitRequest
-	56,  // 98: vibesys.cli.v1.DaemonService.WatchTask:input_type -> vibesys.cli.v1.WatchTaskRequest
-	24,  // 99: vibesys.cli.v1.DaemonService.Cancel:input_type -> vibesys.cli.v1.CancelRequest
-	26,  // 100: vibesys.cli.v1.DaemonService.AddNote:input_type -> vibesys.cli.v1.AddNoteRequest
-	28,  // 101: vibesys.cli.v1.DaemonService.ListJobs:input_type -> vibesys.cli.v1.ListJobsRequest
-	15,  // 102: vibesys.cli.v1.DaemonService.ForgetRepository:input_type -> vibesys.cli.v1.ForgetRepositoryRequest
-	30,  // 103: vibesys.cli.v1.DaemonService.ReadLogs:input_type -> vibesys.cli.v1.ReadLogsRequest
-	32,  // 104: vibesys.cli.v1.DaemonService.Show:input_type -> vibesys.cli.v1.ShowRequest
-	34,  // 105: vibesys.cli.v1.DaemonService.Compare:input_type -> vibesys.cli.v1.CompareRequest
-	36,  // 106: vibesys.cli.v1.DaemonService.Promote:input_type -> vibesys.cli.v1.PromoteRequest
-	42,  // 107: vibesys.cli.v1.DaemonService.CurrentResult:input_type -> vibesys.cli.v1.CurrentResultRequest
-	38,  // 108: vibesys.cli.v1.DaemonService.AddToFrontier:input_type -> vibesys.cli.v1.AddToFrontierRequest
-	40,  // 109: vibesys.cli.v1.DaemonService.ListFrontier:input_type -> vibesys.cli.v1.ListFrontierRequest
-	44,  // 110: vibesys.cli.v1.DaemonService.CreatePlan:input_type -> vibesys.cli.v1.CreatePlanRequest
-	46,  // 111: vibesys.cli.v1.DaemonService.ListPlans:input_type -> vibesys.cli.v1.ListPlansRequest
-	48,  // 112: vibesys.cli.v1.DaemonService.ViewPlan:input_type -> vibesys.cli.v1.ViewPlanRequest
-	50,  // 113: vibesys.cli.v1.DaemonService.EditPlan:input_type -> vibesys.cli.v1.EditPlanRequest
-	52,  // 114: vibesys.cli.v1.DaemonService.CommentPlan:input_type -> vibesys.cli.v1.CommentPlanRequest
-	54,  // 115: vibesys.cli.v1.DaemonService.ClosePlan:input_type -> vibesys.cli.v1.ClosePlanRequest
-	5,   // 116: vibesys.cli.v1.DaemonService.Hello:output_type -> vibesys.cli.v1.HelloResponse
-	8,   // 117: vibesys.cli.v1.DaemonService.Status:output_type -> vibesys.cli.v1.StatusResponse
-	14,  // 118: vibesys.cli.v1.DaemonService.Stop:output_type -> vibesys.cli.v1.StopResponse
-	18,  // 119: vibesys.cli.v1.DaemonService.Submit:output_type -> vibesys.cli.v1.SubmitResponse
-	20,  // 120: vibesys.cli.v1.DaemonService.Watch:output_type -> vibesys.cli.v1.WatchResponse
-	22,  // 121: vibesys.cli.v1.DaemonService.Wait:output_type -> vibesys.cli.v1.WaitResponse
-	57,  // 122: vibesys.cli.v1.DaemonService.WatchTask:output_type -> vibesys.cli.v1.WatchTaskResponse
-	25,  // 123: vibesys.cli.v1.DaemonService.Cancel:output_type -> vibesys.cli.v1.CancelResponse
-	27,  // 124: vibesys.cli.v1.DaemonService.AddNote:output_type -> vibesys.cli.v1.AddNoteResponse
-	29,  // 125: vibesys.cli.v1.DaemonService.ListJobs:output_type -> vibesys.cli.v1.ListJobsResponse
-	16,  // 126: vibesys.cli.v1.DaemonService.ForgetRepository:output_type -> vibesys.cli.v1.ForgetRepositoryResponse
-	31,  // 127: vibesys.cli.v1.DaemonService.ReadLogs:output_type -> vibesys.cli.v1.ReadLogsResponse
-	33,  // 128: vibesys.cli.v1.DaemonService.Show:output_type -> vibesys.cli.v1.ShowResponse
-	35,  // 129: vibesys.cli.v1.DaemonService.Compare:output_type -> vibesys.cli.v1.CompareResponse
-	37,  // 130: vibesys.cli.v1.DaemonService.Promote:output_type -> vibesys.cli.v1.PromoteResponse
-	43,  // 131: vibesys.cli.v1.DaemonService.CurrentResult:output_type -> vibesys.cli.v1.CurrentResultResponse
-	39,  // 132: vibesys.cli.v1.DaemonService.AddToFrontier:output_type -> vibesys.cli.v1.AddToFrontierResponse
-	41,  // 133: vibesys.cli.v1.DaemonService.ListFrontier:output_type -> vibesys.cli.v1.ListFrontierResponse
-	45,  // 134: vibesys.cli.v1.DaemonService.CreatePlan:output_type -> vibesys.cli.v1.CreatePlanResponse
-	47,  // 135: vibesys.cli.v1.DaemonService.ListPlans:output_type -> vibesys.cli.v1.ListPlansResponse
-	49,  // 136: vibesys.cli.v1.DaemonService.ViewPlan:output_type -> vibesys.cli.v1.ViewPlanResponse
-	51,  // 137: vibesys.cli.v1.DaemonService.EditPlan:output_type -> vibesys.cli.v1.EditPlanResponse
-	53,  // 138: vibesys.cli.v1.DaemonService.CommentPlan:output_type -> vibesys.cli.v1.CommentPlanResponse
-	55,  // 139: vibesys.cli.v1.DaemonService.ClosePlan:output_type -> vibesys.cli.v1.ClosePlanResponse
-	116, // [116:140] is the sub-list for method output_type
-	92,  // [92:116] is the sub-list for method input_type
-	92,  // [92:92] is the sub-list for extension type_name
-	92,  // [92:92] is the sub-list for extension extendee
-	0,   // [0:92] is the sub-list for field type_name
+	96,  // 67: vibesys.cli.v1.ClosePlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
+	95,  // 68: vibesys.cli.v1.ClosePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	3,   // 69: vibesys.cli.v1.DeclareBoundRequest.context:type_name -> vibesys.cli.v1.CallContext
+	98,  // 70: vibesys.cli.v1.DeclareBoundResponse.bound:type_name -> vibesys.cli.v1.ObjectiveBound
+	3,   // 71: vibesys.cli.v1.ListBoundsRequest.context:type_name -> vibesys.cli.v1.CallContext
+	98,  // 72: vibesys.cli.v1.ListBoundsResponse.bounds:type_name -> vibesys.cli.v1.ObjectiveBound
+	3,   // 73: vibesys.cli.v1.WatchTaskRequest.context:type_name -> vibesys.cli.v1.CallContext
+	62,  // 74: vibesys.cli.v1.WatchTaskResponse.reset:type_name -> vibesys.cli.v1.Reset
+	64,  // 75: vibesys.cli.v1.WatchTaskResponse.facts:type_name -> vibesys.cli.v1.TaskFacts
+	63,  // 76: vibesys.cli.v1.WatchTaskResponse.caught_up:type_name -> vibesys.cli.v1.CaughtUp
+	65,  // 77: vibesys.cli.v1.TaskFacts.facts:type_name -> vibesys.cli.v1.TaskFact
+	80,  // 78: vibesys.cli.v1.TaskFact.job:type_name -> vibesys.cli.v1.Job
+	85,  // 79: vibesys.cli.v1.TaskFact.result:type_name -> vibesys.cli.v1.Result
+	66,  // 80: vibesys.cli.v1.TaskFact.judgment:type_name -> vibesys.cli.v1.Judgment
+	67,  // 81: vibesys.cli.v1.TaskFact.promotion:type_name -> vibesys.cli.v1.PromotionRecord
+	95,  // 82: vibesys.cli.v1.TaskFact.plan:type_name -> vibesys.cli.v1.Plan
+	69,  // 83: vibesys.cli.v1.TaskFact.head:type_name -> vibesys.cli.v1.Head
+	70,  // 84: vibesys.cli.v1.TaskFact.health:type_name -> vibesys.cli.v1.StoreHealth
+	68,  // 85: vibesys.cli.v1.TaskFact.trouble:type_name -> vibesys.cli.v1.JobTrouble
+	98,  // 86: vibesys.cli.v1.TaskFact.bound:type_name -> vibesys.cli.v1.ObjectiveBound
+	87,  // 87: vibesys.cli.v1.Judgment.comparison:type_name -> vibesys.cli.v1.Comparison
+	99,  // 88: vibesys.cli.v1.Judgment.refused:type_name -> vibesys.cli.v1.Failure
+	88,  // 89: vibesys.cli.v1.PromotionRecord.promotion:type_name -> vibesys.cli.v1.Promotion
+	99,  // 90: vibesys.cli.v1.JobTrouble.failure:type_name -> vibesys.cli.v1.Failure
+	92,  // 91: vibesys.cli.v1.Head.current:type_name -> vibesys.cli.v1.CurrentResult
+	93,  // 92: vibesys.cli.v1.Head.none:type_name -> vibesys.cli.v1.NoCurrentResult
+	71,  // 93: vibesys.cli.v1.StoreHealth.live:type_name -> vibesys.cli.v1.Live
+	72,  // 94: vibesys.cli.v1.StoreHealth.away:type_name -> vibesys.cli.v1.Away
+	2,   // 95: vibesys.cli.v1.Away.reason:type_name -> vibesys.cli.v1.AwayReason
+	99,  // 96: vibesys.cli.v1.Away.failure:type_name -> vibesys.cli.v1.Failure
+	4,   // 97: vibesys.cli.v1.DaemonService.Hello:input_type -> vibesys.cli.v1.HelloRequest
+	6,   // 98: vibesys.cli.v1.DaemonService.Status:input_type -> vibesys.cli.v1.StatusRequest
+	13,  // 99: vibesys.cli.v1.DaemonService.Stop:input_type -> vibesys.cli.v1.StopRequest
+	17,  // 100: vibesys.cli.v1.DaemonService.Submit:input_type -> vibesys.cli.v1.SubmitRequest
+	19,  // 101: vibesys.cli.v1.DaemonService.Watch:input_type -> vibesys.cli.v1.WatchRequest
+	21,  // 102: vibesys.cli.v1.DaemonService.Wait:input_type -> vibesys.cli.v1.WaitRequest
+	60,  // 103: vibesys.cli.v1.DaemonService.WatchTask:input_type -> vibesys.cli.v1.WatchTaskRequest
+	24,  // 104: vibesys.cli.v1.DaemonService.Cancel:input_type -> vibesys.cli.v1.CancelRequest
+	26,  // 105: vibesys.cli.v1.DaemonService.AddNote:input_type -> vibesys.cli.v1.AddNoteRequest
+	28,  // 106: vibesys.cli.v1.DaemonService.ListJobs:input_type -> vibesys.cli.v1.ListJobsRequest
+	15,  // 107: vibesys.cli.v1.DaemonService.ForgetRepository:input_type -> vibesys.cli.v1.ForgetRepositoryRequest
+	30,  // 108: vibesys.cli.v1.DaemonService.ReadLogs:input_type -> vibesys.cli.v1.ReadLogsRequest
+	32,  // 109: vibesys.cli.v1.DaemonService.Show:input_type -> vibesys.cli.v1.ShowRequest
+	34,  // 110: vibesys.cli.v1.DaemonService.Compare:input_type -> vibesys.cli.v1.CompareRequest
+	36,  // 111: vibesys.cli.v1.DaemonService.Promote:input_type -> vibesys.cli.v1.PromoteRequest
+	42,  // 112: vibesys.cli.v1.DaemonService.CurrentResult:input_type -> vibesys.cli.v1.CurrentResultRequest
+	38,  // 113: vibesys.cli.v1.DaemonService.AddToFrontier:input_type -> vibesys.cli.v1.AddToFrontierRequest
+	40,  // 114: vibesys.cli.v1.DaemonService.ListFrontier:input_type -> vibesys.cli.v1.ListFrontierRequest
+	44,  // 115: vibesys.cli.v1.DaemonService.CreatePlan:input_type -> vibesys.cli.v1.CreatePlanRequest
+	46,  // 116: vibesys.cli.v1.DaemonService.ListPlans:input_type -> vibesys.cli.v1.ListPlansRequest
+	48,  // 117: vibesys.cli.v1.DaemonService.ViewPlan:input_type -> vibesys.cli.v1.ViewPlanRequest
+	50,  // 118: vibesys.cli.v1.DaemonService.EditPlan:input_type -> vibesys.cli.v1.EditPlanRequest
+	52,  // 119: vibesys.cli.v1.DaemonService.CommentPlan:input_type -> vibesys.cli.v1.CommentPlanRequest
+	54,  // 120: vibesys.cli.v1.DaemonService.ClosePlan:input_type -> vibesys.cli.v1.ClosePlanRequest
+	56,  // 121: vibesys.cli.v1.DaemonService.DeclareBound:input_type -> vibesys.cli.v1.DeclareBoundRequest
+	58,  // 122: vibesys.cli.v1.DaemonService.ListBounds:input_type -> vibesys.cli.v1.ListBoundsRequest
+	5,   // 123: vibesys.cli.v1.DaemonService.Hello:output_type -> vibesys.cli.v1.HelloResponse
+	8,   // 124: vibesys.cli.v1.DaemonService.Status:output_type -> vibesys.cli.v1.StatusResponse
+	14,  // 125: vibesys.cli.v1.DaemonService.Stop:output_type -> vibesys.cli.v1.StopResponse
+	18,  // 126: vibesys.cli.v1.DaemonService.Submit:output_type -> vibesys.cli.v1.SubmitResponse
+	20,  // 127: vibesys.cli.v1.DaemonService.Watch:output_type -> vibesys.cli.v1.WatchResponse
+	22,  // 128: vibesys.cli.v1.DaemonService.Wait:output_type -> vibesys.cli.v1.WaitResponse
+	61,  // 129: vibesys.cli.v1.DaemonService.WatchTask:output_type -> vibesys.cli.v1.WatchTaskResponse
+	25,  // 130: vibesys.cli.v1.DaemonService.Cancel:output_type -> vibesys.cli.v1.CancelResponse
+	27,  // 131: vibesys.cli.v1.DaemonService.AddNote:output_type -> vibesys.cli.v1.AddNoteResponse
+	29,  // 132: vibesys.cli.v1.DaemonService.ListJobs:output_type -> vibesys.cli.v1.ListJobsResponse
+	16,  // 133: vibesys.cli.v1.DaemonService.ForgetRepository:output_type -> vibesys.cli.v1.ForgetRepositoryResponse
+	31,  // 134: vibesys.cli.v1.DaemonService.ReadLogs:output_type -> vibesys.cli.v1.ReadLogsResponse
+	33,  // 135: vibesys.cli.v1.DaemonService.Show:output_type -> vibesys.cli.v1.ShowResponse
+	35,  // 136: vibesys.cli.v1.DaemonService.Compare:output_type -> vibesys.cli.v1.CompareResponse
+	37,  // 137: vibesys.cli.v1.DaemonService.Promote:output_type -> vibesys.cli.v1.PromoteResponse
+	43,  // 138: vibesys.cli.v1.DaemonService.CurrentResult:output_type -> vibesys.cli.v1.CurrentResultResponse
+	39,  // 139: vibesys.cli.v1.DaemonService.AddToFrontier:output_type -> vibesys.cli.v1.AddToFrontierResponse
+	41,  // 140: vibesys.cli.v1.DaemonService.ListFrontier:output_type -> vibesys.cli.v1.ListFrontierResponse
+	45,  // 141: vibesys.cli.v1.DaemonService.CreatePlan:output_type -> vibesys.cli.v1.CreatePlanResponse
+	47,  // 142: vibesys.cli.v1.DaemonService.ListPlans:output_type -> vibesys.cli.v1.ListPlansResponse
+	49,  // 143: vibesys.cli.v1.DaemonService.ViewPlan:output_type -> vibesys.cli.v1.ViewPlanResponse
+	51,  // 144: vibesys.cli.v1.DaemonService.EditPlan:output_type -> vibesys.cli.v1.EditPlanResponse
+	53,  // 145: vibesys.cli.v1.DaemonService.CommentPlan:output_type -> vibesys.cli.v1.CommentPlanResponse
+	55,  // 146: vibesys.cli.v1.DaemonService.ClosePlan:output_type -> vibesys.cli.v1.ClosePlanResponse
+	57,  // 147: vibesys.cli.v1.DaemonService.DeclareBound:output_type -> vibesys.cli.v1.DeclareBoundResponse
+	59,  // 148: vibesys.cli.v1.DaemonService.ListBounds:output_type -> vibesys.cli.v1.ListBoundsResponse
+	123, // [123:149] is the sub-list for method output_type
+	97,  // [97:123] is the sub-list for method input_type
+	97,  // [97:97] is the sub-list for extension type_name
+	97,  // [97:97] is the sub-list for extension extendee
+	0,   // [0:97] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_service_proto_init() }
@@ -4843,6 +5113,7 @@ func file_vibesys_cli_v1_service_proto_init() {
 	if File_vibesys_cli_v1_service_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_bound_proto_init()
 	file_vibesys_cli_v1_failure_proto_init()
 	file_vibesys_cli_v1_frontier_proto_init()
 	file_vibesys_cli_v1_job_proto_init()
@@ -4866,12 +5137,12 @@ func file_vibesys_cli_v1_service_proto_init() {
 		(*CurrentResultResponse_None)(nil),
 	}
 	file_vibesys_cli_v1_service_proto_msgTypes[47].OneofWrappers = []any{}
-	file_vibesys_cli_v1_service_proto_msgTypes[54].OneofWrappers = []any{
+	file_vibesys_cli_v1_service_proto_msgTypes[58].OneofWrappers = []any{
 		(*WatchTaskResponse_Reset_)(nil),
 		(*WatchTaskResponse_Facts)(nil),
 		(*WatchTaskResponse_CaughtUp)(nil),
 	}
-	file_vibesys_cli_v1_service_proto_msgTypes[58].OneofWrappers = []any{
+	file_vibesys_cli_v1_service_proto_msgTypes[62].OneofWrappers = []any{
 		(*TaskFact_Job)(nil),
 		(*TaskFact_Result)(nil),
 		(*TaskFact_Judgment)(nil),
@@ -4880,16 +5151,17 @@ func file_vibesys_cli_v1_service_proto_init() {
 		(*TaskFact_Head)(nil),
 		(*TaskFact_Health)(nil),
 		(*TaskFact_Trouble)(nil),
+		(*TaskFact_Bound)(nil),
 	}
-	file_vibesys_cli_v1_service_proto_msgTypes[59].OneofWrappers = []any{
+	file_vibesys_cli_v1_service_proto_msgTypes[63].OneofWrappers = []any{
 		(*Judgment_Comparison)(nil),
 		(*Judgment_Refused)(nil),
 	}
-	file_vibesys_cli_v1_service_proto_msgTypes[62].OneofWrappers = []any{
+	file_vibesys_cli_v1_service_proto_msgTypes[66].OneofWrappers = []any{
 		(*Head_Current)(nil),
 		(*Head_None)(nil),
 	}
-	file_vibesys_cli_v1_service_proto_msgTypes[63].OneofWrappers = []any{
+	file_vibesys_cli_v1_service_proto_msgTypes[67].OneofWrappers = []any{
 		(*StoreHealth_Live)(nil),
 		(*StoreHealth_Away)(nil),
 	}
@@ -4899,7 +5171,7 @@ func file_vibesys_cli_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_service_proto_rawDesc), len(file_vibesys_cli_v1_service_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   66,
+			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -155,8 +155,12 @@ test('the workspace scan reads stylesheets and sources under the scan roots, not
 
 // The real tree: it must pass, and deleting any token's definitions must fail naming that token.
 const REAL_SOURCES = readWorkspaceSources(WORKSPACE_ROOT);
+// Every way the check reads a definition: a declaration, a style-object key, and `@property`.
 const DECLARATION = (name, flags) =>
-  new RegExp(String.raw`(?<![\w-])${name}(?=\s*:)|(?<=['"\`])${name}(?=['"\`]\s*:)`, flags);
+  new RegExp(
+    String.raw`(?<![\w-])${name}(?=\s*:)|(?<=['"\`])${name}(?=['"\`]\s*:)|(?<=@property\s+)${name}(?![\w-])`,
+    flags,
+  );
 
 /** Every name a shipped file references without a fallback. */
 function referencedNames(files) {

@@ -4,6 +4,7 @@ import {ElisionSchema, type Item, ItemStatus, ItemsPageSchema} from '@vibesys/or
 import fc from 'fast-check';
 import {itemOf} from '../../testing/orchestrator/builders.js';
 import {type AgentFrame, applyAgentFeed} from './fold.js';
+import {itemIs} from './items.js';
 import {emptyState, type OrchestratorState} from './state.js';
 
 const ID = 'item';
@@ -75,8 +76,8 @@ const run = (list: readonly Arrival[]): OrchestratorState =>
   list.reduce((state, arrival) => applyAgentFeed(state, frameOf(arrival)), emptyState);
 
 const outputOf = (state: OrchestratorState): string | undefined => {
-  const body = state.items[ID]?.body;
-  return body?.case === 'tool' ? body.value.output : undefined;
+  const item = state.items[ID];
+  return itemIs(item, 'tool') ? item.body.value.output : undefined;
 };
 
 describe('an item a page left out the text of', () => {

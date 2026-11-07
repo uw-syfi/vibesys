@@ -1,13 +1,13 @@
 /* A conversation read top to bottom: one left edge, one measure, folded detail. Imported by components.css. */
 
-.vs-transcript {
+.vs-conversation {
   position: relative;
   min-width: 0;
 }
-.vs-transcript[data-size="fill"] {
+.vs-conversation[data-size="fill"] {
   height: 100%;
 }
-.vs-transcript-pane {
+.vs-conversation-pane {
   box-sizing: border-box;
   height: 75dvh;
   margin: 0 auto;
@@ -18,60 +18,60 @@
   /* The measure: rows never run wider than a page of text reads well, and share its left edge. */
   max-width: var(--content-narrow);
 }
-.vs-transcript[data-size="fill"] > .vs-transcript-pane {
+.vs-conversation[data-size="fill"] > .vs-conversation-pane {
   height: 100%;
 }
-.vs-transcript-pane:focus-visible {
+.vs-conversation-pane:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
 }
-.vs-transcript-row {
+.vs-conversation-row {
   min-width: 0;
   padding: var(--space-3) 0;
 }
-.vs-transcript-gap {
+.vs-conversation-gap {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.vs-transcript-earlier {
+.vs-conversation-earlier {
   display: flex;
   justify-content: center;
   padding: var(--space-4) 0;
 }
-.vs-transcript-jump {
+.vs-conversation-jump {
   position: absolute;
   right: var(--space-4);
   bottom: var(--space-4);
 }
 
 /* The rule between two turns: a line, a label, a line. Figures keep one width. */
-.vs-transcript-rule {
+.vs-conversation-rule {
   display: flex;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) 0;
 }
-.vs-transcript-rule::before,
-.vs-transcript-rule::after {
+.vs-conversation-rule::before,
+.vs-conversation-rule::after {
   content: "";
   flex: 1;
   border-top: var(--hairline) solid var(--line);
 }
-.vs-transcript-trail {
+.vs-conversation-trail {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 /* What started the turn: at the end of the line, with who sent it above. */
-.vs-transcript-bubble {
+.vs-conversation-bubble {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--space-2);
   min-width: 0;
 }
-.vs-transcript-from {
+.vs-conversation-from {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -80,12 +80,12 @@
   font-size: var(--text-caption-size);
   line-height: var(--text-caption-line);
 }
-.vs-transcript-bubble > .vs-chat-message {
+.vs-conversation-bubble > .vs-chat-message {
   width: 100%;
 }
 
 /* A row that leads to another conversation. */
-.vs-transcript-link {
+.vs-conversation-link {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -96,13 +96,13 @@
   background: var(--panel);
   color: var(--muted);
 }
-.vs-transcript-link .vs-button {
+.vs-conversation-link .vs-button {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vs-transcript-link .vs-transcript-trail {
+.vs-conversation-link .vs-conversation-trail {
   margin-left: auto;
   color: var(--muted);
   font-family: var(--text-code-family);
@@ -111,15 +111,15 @@
 }
 
 /* Motion: a row that arrives at the end draws in; a body that opens draws in too. */
-.vs-transcript-row[data-entering] {
-  animation: vs-enter var(--duration-fast) var(--easing);
+.vs-conversation-row[data-entering] {
+  animation: vs-enter var(--duration-base) var(--easing-enter);
 }
 .vs-collapsible-body {
-  animation: vs-enter var(--duration-fast) var(--easing);
+  animation: vs-enter var(--duration-base) var(--easing-enter);
 }
 
 /* Code and output are never reflowed: a long line scrolls inside its block and never widens the page. */
-.vs-transcript .vs-code-block-body {
+.vs-conversation .vs-code-block-body {
   white-space: pre;
   overflow-wrap: normal;
 }

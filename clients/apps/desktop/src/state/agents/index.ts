@@ -1,5 +1,4 @@
 /** The agents feature's reads of the state: the spawn tree and the transcript. */
-export {type MessageNote, noteOf} from './messages.js';
 export {type AgentName, agentNames, startOrder} from './names.js';
 export {
   type AgentRow,

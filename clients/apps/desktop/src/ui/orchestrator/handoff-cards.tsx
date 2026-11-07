@@ -3,12 +3,11 @@ import {
   JobOutcome,
   JudgeVerdict,
   type Message,
-  oneofIs,
   type Report,
 } from '@vibesys/orchestrator-proto';
 import {Card, Chip, EmptyState, KeyValue, type KeyValueItem, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {ms, type OrchestratorState} from '../../state/index.js';
+import {messageIs, ms, type OrchestratorState} from '../../state/index.js';
 import {agentNames, nameOf} from './names.js';
 import {formatClock, jobWord} from './words.js';
 
@@ -18,35 +17,9 @@ export function verdictOf(
   from: string,
 ): {readonly label: string; readonly tone: 'neutral' | 'live' | 'ok' | 'warn' | 'err'} | null {
   const job = Object.values(state.messages).find(
-    message =>
-      oneofIs(message.body, 'jobFinished', {
-        text: true,
-        handoff: true,
-        report: true,
-        jobFinished: true,
-        subagentSettled: true,
-        brief: true,
-        leadBrief: true,
-        handoffReminder: true,
-        leadIdleReminder: true,
-        runLimitReached: true,
-      }) && message.body.value.submittedByAgentId === from,
+    message => messageIs(message, 'jobFinished') && message.body.value.submittedByAgentId === from,
   );
-  if (
-    oneofIs(job?.body, 'jobFinished', {
-      text: true,
-      handoff: true,
-      report: true,
-      jobFinished: true,
-      subagentSettled: true,
-      brief: true,
-      leadBrief: true,
-      handoffReminder: true,
-      leadIdleReminder: true,
-      runLimitReached: true,
-    }) &&
-    job.body.value.outcome !== JobOutcome.UNSPECIFIED
-  ) {
+  if (messageIs(job, 'jobFinished') && job.body.value.outcome !== JobOutcome.UNSPECIFIED) {
     const word = jobWord(job.body.value.outcome);
     return {label: `Its benchmark job: ${word.label}`, tone: word.tone};
   }
@@ -211,32 +184,7 @@ export function HandoffCards(props: {
   const names = agentNames(props.state, props.runId);
   const messages = Object.values(props.state.messages)
     .filter(message => message.runId === props.runId)
-    .filter(
-      message =>
-        oneofIs(message.body, 'handoff', {
-          text: true,
-          handoff: true,
-          report: true,
-          jobFinished: true,
-          subagentSettled: true,
-          brief: true,
-          leadBrief: true,
-          handoffReminder: true,
-          leadIdleReminder: true,
-          runLimitReached: true,
-        }) ||
-        oneofIs(message.body, 'report', {
-          text: true,
-          report: true,
-          jobFinished: true,
-          subagentSettled: true,
-          brief: true,
-          leadBrief: true,
-          handoffReminder: true,
-          leadIdleReminder: true,
-          runLimitReached: true,
-        }),
-    )
+    .filter(message => messageIs(message, 'handoff') || messageIs(message, 'report'))
     .sort((a, b) => (ms(a.at) ?? 0) - (ms(b.at) ?? 0));
   if (messages.length === 0) {
     return (
@@ -246,18 +194,7 @@ export function HandoffCards(props: {
   return (
     <Stack gap="space-4" align="start">
       {messages.map(message =>
-        oneofIs(message.body, 'handoff', {
-          text: true,
-          handoff: true,
-          report: true,
-          jobFinished: true,
-          subagentSettled: true,
-          brief: true,
-          leadBrief: true,
-          handoffReminder: true,
-          leadIdleReminder: true,
-          runLimitReached: true,
-        }) ? (
+        messageIs(message, 'handoff') ? (
           <HandoffCard
             key={message.id}
             message={message}
@@ -265,17 +202,7 @@ export function HandoffCards(props: {
             names={names}
             state={props.state}
           />
-        ) : oneofIs(message.body, 'report', {
-            text: true,
-            report: true,
-            jobFinished: true,
-            subagentSettled: true,
-            brief: true,
-            leadBrief: true,
-            handoffReminder: true,
-            leadIdleReminder: true,
-            runLimitReached: true,
-          }) ? (
+        ) : messageIs(message, 'report') ? (
           <ReportCard key={message.id} message={message} report={message.body.value} />
         ) : null,
       )}

@@ -16,6 +16,7 @@ import {
   TurnStatus,
   type Usage,
 } from '@vibesys/orchestrator-proto';
+import {messageIs} from './messages.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
 
@@ -195,37 +196,9 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
     }),
   }));
   const jobs = Object.values(state.messages)
-    .filter(
-      message =>
-        message.runId === runId &&
-        oneofIs(message.body, 'jobFinished', {
-          text: true,
-          handoff: true,
-          report: true,
-          jobFinished: true,
-          subagentSettled: true,
-          brief: true,
-          leadBrief: true,
-          handoffReminder: true,
-          leadIdleReminder: true,
-          runLimitReached: true,
-        }),
-    )
+    .filter(message => message.runId === runId && messageIs(message, 'jobFinished'))
     .flatMap((message): JobBar[] => {
-      const job = oneofIs(message.body, 'jobFinished', {
-        text: true,
-        handoff: true,
-        report: true,
-        jobFinished: true,
-        subagentSettled: true,
-        brief: true,
-        leadBrief: true,
-        handoffReminder: true,
-        leadIdleReminder: true,
-        runLimitReached: true,
-      })
-        ? message.body.value
-        : null;
+      const job = messageIs(message, 'jobFinished') ? message.body.value : null;
       const fact = state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId);
       const startMs = ms(fact?.startedAt) ?? ms(fact?.submittedAt);
       const endMs = ms(fact?.finishedAt) ?? ms(message.at);
@@ -344,7 +317,12 @@ export interface UsageReport {
   readonly byRole: Readonly<Partial<Record<AgentRole, UsageTotals>>>;
 }
 
-/** What a run's turns have cost, by agent, by role and in total. */
+/**
+ * What a run's turns have cost, by agent, by role and in total. It sums the turns the client holds,
+ * which the host does not promise to send in full, so it is not the run's cost: that is `CostView`
+ * (`state.costs`, worked out by the host). Only the old Cost screen reads this, and the screen that
+ * replaces it deletes it.
+ */
 export function usageOf(state: OrchestratorState, runId: string): UsageReport {
   let run = noUsage;
   const byAgent: Record<string, UsageTotals> = {};

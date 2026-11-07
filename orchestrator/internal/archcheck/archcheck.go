@@ -36,11 +36,12 @@ var rules = map[string][]string{
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "internal/wire", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
 	"internal/production":              {"release", "privatesocket", "hostlock", "hostconfig", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/mcp", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
+	"internal/cost":                    {"internal/core"},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
 	"internal/prompts":                 {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
-	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/wire":                    {"internal/core", "internal/cost", "gen/vibesys/orchestrator/"},
 	"internal/archcheck":               {"gen/vibesys/orchestrator/"},
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs", "hostlock"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
@@ -58,7 +59,7 @@ var rules = map[string][]string{
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
 	"internal/names":                   {"gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/cost", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
@@ -102,7 +103,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"clientcli", "clientcli/attachview", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"clientcli", "clientcli/attachview", "internal/cost", "internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}

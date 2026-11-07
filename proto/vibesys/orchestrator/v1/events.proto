@@ -80,6 +80,11 @@ message StartRun {
   // How long the run may take, counted from its start by the host, so that a client's clock is not
   // in it. Absent when the run has no time limit.
   google.protobuf.Duration max_time = 9 [(buf.validate.field).duration.gt = {seconds: 0}];
+  // How often the run's lead is asked for a progress report while the run's work moves, counted by the
+  // host. At least five minutes. Absent takes the default of one hour; zero is not "off", it is refused,
+  // so a run that wants fewer reports sets a longer interval. The lead is asked only when work moved
+  // since it last reported or was last asked, and a report it posts on its own restarts the interval.
+  google.protobuf.Duration summary_every = 10 [(buf.validate.field).duration.gte = {seconds: 300}];
 }
 
 message StopRun {

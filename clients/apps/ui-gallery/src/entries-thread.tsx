@@ -2,6 +2,8 @@ import {
   Card,
   ChatMessage,
   Collapsible,
+  Conversation,
+  type ConversationItem,
   Message,
   type MessageVariant,
   type ReplyField,
@@ -11,8 +13,6 @@ import {
   Thread,
   type ThreadItem,
   ToolCall,
-  Transcript,
-  type TranscriptItem,
   TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
@@ -294,7 +294,7 @@ function TurnResultDemo(): JSX.Element {
   );
 }
 
-const TRANSCRIPT: readonly TranscriptItem[] = [
+const CONVERSATION: readonly ConversationItem[] = [
   {kind: 'rule', id: 'r1', label: 'Turn 207 · Wed 2:02 AM · $1.12'},
   {
     kind: 'bubble',
@@ -366,7 +366,7 @@ export const THREAD_ENTRIES: Readonly<
       | 'ToolCall'
       | 'StructuredReply'
       | 'Thread'
-      | 'Transcript'
+      | 'Conversation'
       | 'TurnResult'
     >,
     GalleryEntry
@@ -392,12 +392,12 @@ export const THREAD_ENTRIES: Readonly<
       </Card>
     ),
   },
-  Transcript: {
+  Conversation: {
     render: () => (
       <Card>
-        <Transcript
+        <Conversation
           label="A conversation"
-          items={TRANSCRIPT}
+          items={CONVERSATION}
           earlier={{text: 'Earlier turns', loading: false, load: noop}}
         />
       </Card>

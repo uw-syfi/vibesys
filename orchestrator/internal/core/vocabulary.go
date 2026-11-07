@@ -27,6 +27,10 @@ const (
 	// LimitGrace is how long a lead has to finish after its run reached a limit. When it has passed,
 	// or when the lead has given its final report, the run stops.
 	LimitGrace = 10 * time.Minute
+	// DefaultSummaryEvery is how often a run's lead is asked for a progress report while the run's work
+	// moves, when the start did not say. The least an operator may ask for is five minutes, which the
+	// contract's validation holds; the core takes the value it is given.
+	DefaultSummaryEvery = time.Hour
 )
 
 // The harnesses. The empty harness means "the lead's", on a spawn only.
@@ -129,7 +133,7 @@ const (
 // TurnTrigger is what started a turn.
 type TurnTrigger string
 
-// The triggers. TriggerSchedule is part of the contract and nothing starts such a turn yet.
+// The triggers. TriggerSchedule is the wakeup of a timer: the lead's progress report coming due.
 const (
 	TriggerBrief           TurnTrigger = "brief"
 	TriggerOperator        TurnTrigger = "operator"
@@ -280,4 +284,6 @@ const (
 	TimerLeadIdle       TimerKind = "lead_idle"
 	// TimerLimitGrace ends the wait for a lead that was told its run reached a limit.
 	TimerLimitGrace TimerKind = "limit_grace"
+	// TimerSummaryDue is when a lead that work has moved under is next asked for a progress report.
+	TimerSummaryDue TimerKind = "summary_due"
 )

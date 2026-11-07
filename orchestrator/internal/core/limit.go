@@ -25,6 +25,7 @@ func (t *tx) reachLimit(id RunID, limit RunLimit) {
 		return
 	}
 	run.LimitReached, run.LimitReachedAt = limit, t.in.At
+	run = run.unscheduled()
 	t.emit(id, run)
 	if run.FinalReported {
 		t.beginStop(t.s.runs[id], limit.stopReason())

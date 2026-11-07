@@ -26,10 +26,11 @@ import {
   type Turn,
   TurnStatus,
 } from '@vibesys/orchestrator-proto';
+import {itemIs} from '../orchestrator/items.js';
+import {type MessageNote, noteOf} from '../orchestrator/messages.js';
 import type {OrchestratorState} from '../orchestrator/state.js';
 import {ms} from '../orchestrator/time.js';
 import {unbrokenFrom} from '../orchestrator/views.js';
-import {type MessageNote, noteOf} from './messages.js';
 import {type AgentName, agentNames} from './names.js';
 import type {SpawnState} from './spawn-tree.js';
 
@@ -244,6 +245,7 @@ const partyOf = (message: Message, note: MessageNote): Party => {
     case 'job':
     case 'settled':
     case 'reminder':
+    case 'report-due':
     case 'limit':
       return {kind: 'host'};
     default:
@@ -371,7 +373,7 @@ function entriesOfTurn(
       costUsd: turn.usage?.costUsd ?? null,
       outcome: OUTCOME[turn.status],
     },
-    ...incomingOf(state, turn, started ? undefined : own.find(item => item.body.case === 'prompt')),
+    ...incomingOf(state, turn, started ? undefined : own.find(item => itemIs(item, 'prompt'))),
   ];
   const body: Entry[] = [];
   let next = 0;

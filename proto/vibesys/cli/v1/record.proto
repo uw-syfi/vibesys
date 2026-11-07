@@ -1,0 +1,18 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// RecordOrigin is who made a record that an agent writes through the CLI, and when. vibesysd fills
+// it from the identity the call carried (CallContext) and its own clock: a request never carries
+// one, so an agent cannot state another's name or another time. Every such record kind carries it:
+// a record's reader learns the run and the agent from here and nowhere else.
+message RecordOrigin {
+  // Empty for a call from outside a run, such as a person at a terminal.
+  string run_id = 1 [(buf.validate.field).string.max_bytes = 256];
+  string agent = 2 [(buf.validate.field).string.max_bytes = 256];
+  google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
+}

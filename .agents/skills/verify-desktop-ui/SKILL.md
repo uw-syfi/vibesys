@@ -66,6 +66,26 @@ command-line image upload: link a build artifact or a page the reviewer can
 open, or give the file's location and ask the person to drag it into the PR.
 Unenforced: no check reads the field; the PR template asks for it.
 
+## Feel and alignment pass
+
+Run it on the built app and on the fixture page, with a script (Playwright's
+Electron launch for the app, a browser for the fixture page), and read numbers,
+not impressions:
+
+- **Feel.** Install a `PerformanceObserver` for `longtask` and `layout-shift`, press every
+  control of the journey, and time each press to the second animation frame after it. A press
+  answers within two frames, a long task (over 50 ms) belongs to start-up and never to a press,
+  and no press moves the layout. Record the window with `recordVideo`, never the screen.
+- **Alignment.** At a narrow (640 px), a default (1280 px) and a wide (1760 px) window, on a
+  fixture with long names and empty values, read the bounding boxes: the title, the lists and
+  the cards share their left edge, header cells and cells share theirs, rows are evenly spaced,
+  numbers are right-aligned in tabular figures, and the page never scrolls sideways. A name a
+  person chose is cut with an ellipsis and its whole text on hover; a word of ours wraps.
+- **Themes.** Every theme, in its mode, and the operating system's mode flipped live.
+
+Wait for the page's own states (`document.getAnimations()` for the finite animations, never
+the infinite ones), never for a duration. Unenforced: the script is run by the author.
+
 ## Judge the screens (the critic step)
 
 Before opening the PR, open every screen of the sheet that your change can

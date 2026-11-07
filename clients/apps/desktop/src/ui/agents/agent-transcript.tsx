@@ -1,5 +1,5 @@
 import {AgentStatus, RunLimit} from '@vibesys/orchestrator-proto';
-import {Transcript, type TranscriptItem} from '@vibesys/ui';
+import {Conversation, type ConversationItem} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus} from '../../core/index.js';
 import {
@@ -50,6 +50,8 @@ function noteWords(note: MessageNote, labelOf: (agentId: string) => string): str
       return `${labelOf(note.agentId)} stopped: ${note.status === AgentStatus.FAILED ? 'failed' : 'finished'}.`;
     case 'reminder':
       return 'A reminder to finish what it still owes.';
+    case 'report-due':
+      return 'Asked for a progress report.';
     case 'limit':
       return LIMIT_WORD[note.limit];
     default:
@@ -98,7 +100,7 @@ const OUTCOME = {
 
 type Of<K extends Entry['kind']> = Extract<Entry, {kind: K}>;
 
-function turnItem(entry: Of<'turn'>): TranscriptItem {
+function turnItem(entry: Of<'turn'>): ConversationItem {
   const cost = entry.costUsd === null ? '' : ` · ${formatUsd(entry.costUsd)}`;
   return {
     kind: 'rule',
@@ -107,7 +109,7 @@ function turnItem(entry: Of<'turn'>): TranscriptItem {
   };
 }
 
-function thoughtItem(entry: Of<'thought'>, context: Context): TranscriptItem {
+function thoughtItem(entry: Of<'thought'>, context: Context): ConversationItem {
   const span = entry.spanMs === null ? 'Thought' : `Thought for ${formatSpan(entry.spanMs)}`;
   const waiting = notice(entry.elidedBytes, entry.ordinal, context);
   return {
@@ -119,7 +121,7 @@ function thoughtItem(entry: Of<'thought'>, context: Context): TranscriptItem {
   };
 }
 
-function toolItem(entry: Of<'tool'>, context: Context): TranscriptItem {
+function toolItem(entry: Of<'tool'>, context: Context): ConversationItem {
   const words = describeCall(entry.call);
   const waiting = notice(entry.elidedBytes, entry.ordinal, context);
   const unwritten = waiting !== undefined || (entry.state === 'running' && entry.output === '');
@@ -142,7 +144,7 @@ const JOINED = {
   'handed-back': {label: 'Done', tone: 'ok'},
 } as const;
 
-function joinItem(entry: Of<'join'>, context: Context): TranscriptItem {
+function joinItem(entry: Of<'join'>, context: Context): ConversationItem {
   return {
     kind: 'link',
     id: entry.key,
@@ -154,7 +156,7 @@ function joinItem(entry: Of<'join'>, context: Context): TranscriptItem {
   };
 }
 
-function itemOf(entry: Entry, context: Context): TranscriptItem[] {
+function itemOf(entry: Entry, context: Context): ConversationItem[] {
   switch (entry.kind) {
     case 'turn':
       return [turnItem(entry)];
@@ -202,7 +204,7 @@ function labelsOf(names: ReadonlyMap<string, AgentName>): (agentId: string) => s
 }
 
 /** The items of a transcript, one per row it draws. */
-export function itemsOf(data: TranscriptData, context: Context): TranscriptItem[] {
+export function itemsOf(data: TranscriptData, context: Context): ConversationItem[] {
   return data.entries.flatMap(entry => itemOf(entry, context));
 }
 
@@ -240,7 +242,7 @@ export function AgentTranscript(props: {
   );
   const earlier = data.earlier;
   return (
-    <Transcript
+    <Conversation
       label={`${labelsOf(agentNames(state, agent.runId))(agentId)}, turn by turn`}
       items={items}
       earlier={

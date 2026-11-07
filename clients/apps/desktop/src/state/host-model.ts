@@ -3,11 +3,12 @@
  * how far each agent's stream has been applied. The cursor lives inside the value, so the data and
  * the cursor can only change together.
  */
-import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
+import type {WatchRunCostResponse, WatchRunsResponse} from '@vibesys/orchestrator-proto';
 import {
   type AgentFrame,
   applyAgentFeed,
   applyChange,
+  applyCost,
   applySearch,
   applySnapshot,
 } from './orchestrator/fold.js';
@@ -19,7 +20,7 @@ export interface HostModel {
   readonly agentCursors: Readonly<Record<string, bigint>>;
 }
 
-/** One frame of either stream, tagged with where it came from. */
+/** One frame of any of the streams, tagged with where it came from. */
 export type HostFrame =
   | {readonly from: 'runs'; readonly body: WatchRunsResponse['body']}
   | {readonly from: 'agent'; readonly agentId: string; readonly frame: AgentFrame}
@@ -27,7 +28,9 @@ export type HostFrame =
    * An answer to a request about an agent's past (an older page, one item whole). It folds like an
    * agent frame but says nothing about where the agent's stream is, so no cursor moves.
    */
-  | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame};
+  | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame}
+  /** A run's whole cost view, as the host works it out. */
+  | {readonly from: 'cost'; readonly response: WatchRunCostResponse};
 
 export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
 
@@ -37,6 +40,10 @@ export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
  */
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
   if (frame.from === 'history') return {...model, data: applyAgentFeed(model.data, frame.frame)};
+  if (frame.from === 'cost') {
+    const {cost} = frame.response;
+    return cost === undefined ? model : {...model, data: applyCost(model.data, cost)};
+  }
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;
     const at = frame.frame.sequence > before ? frame.frame.sequence : before;

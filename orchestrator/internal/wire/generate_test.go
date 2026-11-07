@@ -23,8 +23,10 @@ func fill(r *rand.Rand, m protoreflect.Message) {
 		return
 	}
 	if m.Descriptor().FullName() == "google.protobuf.Duration" {
-		// A positive whole number of seconds, which is what the contract asks of a limit.
-		m.Set(m.Descriptor().Fields().ByName("seconds"), protoreflect.ValueOfInt64(1+r.Int64N(1<<20)))
+		// At least the five minutes the contract asks of the interval between reports, which is also
+		// positive, as a limit must be, with a part of a second to carry.
+		m.Set(m.Descriptor().Fields().ByName("seconds"), protoreflect.ValueOfInt64(300+r.Int64N(1<<20)))
+		m.Set(m.Descriptor().Fields().ByName("nanos"), protoreflect.ValueOfInt32(r.Int32N(1_000_000_000)))
 		return
 	}
 	oneofs := m.Descriptor().Oneofs()

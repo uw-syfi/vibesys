@@ -1,7 +1,7 @@
 /**
- * Everything the app holds about one host: its connection, the folded model, the two streams and
- * the commands. Built once per host in a `Scope`; nothing dials until a screen mounts a view or
- * submits a command.
+ * Everything the app holds about one host: its connection, the folded model, the streams (the runs,
+ * one agent's, one run's cost) and the commands. Built once per host in a `Scope`; nothing dials
+ * until a screen mounts a view or submits a command.
  */
 
 import * as Effect from 'effect/Effect';
@@ -12,6 +12,7 @@ import {type AgentHistory, makeAgentHistory} from './agent-history.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
+import {type CostFeed, makeCostFeed} from './cost-feed.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
@@ -26,6 +27,7 @@ export interface HostSession {
   readonly agents: AgentView;
   /** Reads of an agent's past: earlier pages and whole items. */
   readonly history: AgentHistory;
+  readonly costs: CostFeed;
   readonly commands: Commands;
 }
 
@@ -43,6 +45,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     runs: yield* makeRunsView(parts),
     agents: yield* makeAgentView(parts),
     history: yield* makeAgentHistory(parts),
+    costs: yield* makeCostFeed(parts),
     commands: yield* makeCommands(parts),
   };
 });

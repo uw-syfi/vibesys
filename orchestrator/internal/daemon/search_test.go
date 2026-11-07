@@ -176,6 +176,46 @@ func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 	}
 }
 
+// A bound an agent of the run declared reaches the app in the run's view, with the head's percent of
+// it, and a revision changes the view: the bound is the daemon's fact, shown as it was declared.
+func TestADeclaredBoundReachesTheViewOfItsRun(t *testing.T) {
+	r := daemontest.NewRig(t)
+	store := new(search.Store)
+	r.Daemon.Search = store
+	run, _ := beginRun(t, r)
+	declared := func(seq uint64, run core.RunID, value float64) *cli.TaskFact {
+		return &cli.TaskFact{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
+			Seq: seq, Origin: &cli.RecordOrigin{RunId: string(run), Agent: "lead", At: timestamppb.New(time.Unix(int64(seq), 0))},
+			Objective: "tok_s", Direction: cli.Direction_DIRECTION_MAXIMIZE, Value: value, Unit: "tok/s", Note: "bandwidth",
+		}}}
+	}
+	head := &cli.TaskFact{Fact: &cli.TaskFact_Head{Head: &cli.Head{State: &cli.Head_Current{Current: &cli.CurrentResult{
+		Head: "a", Result: &cli.Result{Outcome: &cli.Result_Measure{Measure: &cli.MeasureResult{
+			Metric: &cli.Metric{Name: "tok_s", Direction: cli.Direction_DIRECTION_MAXIMIZE}, Value: 7800,
+		}}},
+	}}}}}
+	view := func() *pb.SearchState {
+		r.Settle(t)
+		w, frames, err := r.Service.WatchRunsFrom(core.Operator{}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer w.Close()
+		return client.WatchRunsSnapshot(frames[0]).Searches[0]
+	}
+
+	store.Put(run.ID, search.View{Reason: core.Readable, Facts: search.Facts{declared(1, run.ID, 15600), declared(2, "another-run", 1), head}})
+	first := view()
+	if len(first.Bounds) != 1 || len(first.Bounds[0].Versions) != 1 || first.Bounds[0].PercentOfBound == nil || *first.Bounds[0].PercentOfBound != 50 {
+		t.Fatalf("bounds = %v, want this run's one bound with the head at 50%% of it", first.Bounds)
+	}
+	store.Put(run.ID, search.View{Reason: core.Readable, Facts: search.Facts{declared(1, run.ID, 15600), declared(3, run.ID, 10000), head}})
+	second := view()
+	if second.Revision <= first.Revision || len(second.Bounds[0].Versions) != 2 || *second.Bounds[0].PercentOfBound != 78 {
+		t.Fatalf("after a revision: revision %d then %d, bounds %v; want two versions and the head at 78%% of the standing 10000", first.Revision, second.Revision, second.Bounds)
+	}
+}
+
 func TestUnchangedTickPublishesNothingIncludingEndedRuns(t *testing.T) {
 	r := daemontest.NewRig(t)
 	store := new(search.Store)

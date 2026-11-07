@@ -66,6 +66,7 @@
     "@vitejs/plugin-react": "5.0.4",
     "electron": "44.6.0",
     "fast-check": "4.10.2",
+    "happy-dom": "20.14.5",
     "typescript": "^5.8.3",
     "vite": "7.1.5",
     "vitest": "5.0.5"

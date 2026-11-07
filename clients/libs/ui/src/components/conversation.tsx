@@ -17,27 +17,27 @@ const ESTIMATED_ROW = 72;
 const NEAR_TOP = SIZE.row * 4;
 
 /** Who wrote a message: a name, which opens its author when it can. */
-export interface TranscriptAuthor {
+export interface ConversationAuthor {
   readonly label: string;
   readonly press?: () => void;
 }
 
 /**
- * One row of a `Transcript`. Rows share one left edge and one measure; only a `bubble`, the
+ * One row of a `Conversation`. Rows share one left edge and one measure; only a `bubble`, the
  * message that started the turn, sits at the end of the line.
  */
-export type TranscriptItem =
-  /** A thin rule across the transcript with a label, where a new section begins. */
+export type ConversationItem =
+  /** A thin rule across the conversation with a label, where a new section begins. */
   | {readonly kind: 'rule'; readonly id: string; readonly label: string}
-  /** What was said to the one whose transcript this is, with who said it and when. */
+  /** What was said to the one whose conversation this is, with who said it and when. */
   | {
       readonly kind: 'bubble';
       readonly id: string;
-      readonly author: TranscriptAuthor;
+      readonly author: ConversationAuthor;
       readonly at: string;
       readonly text: string;
     }
-  /** What the one whose transcript this is wrote, as Markdown. */
+  /** What the one whose conversation this is wrote, as Markdown. */
   | {readonly kind: 'said'; readonly id: string; readonly text: string}
   /** Its thinking, folded under a line such as "Thought for 14s". */
   | {
@@ -73,30 +73,30 @@ export type TranscriptItem =
     };
 
 /** Whether the earlier rows are being read, and how to ask for them. */
-export interface TranscriptEarlier {
+export interface ConversationEarlier {
   readonly text: string;
   readonly loading: boolean;
   readonly load: () => void;
 }
 
-function LinkRow(props: {readonly item: Extract<TranscriptItem, {kind: 'link'}>}): JSX.Element {
+function LinkRow(props: {readonly item: Extract<ConversationItem, {kind: 'link'}>}): JSX.Element {
   const {item} = props;
   return (
-    <div className="vs-transcript-link">
+    <div className="vs-conversation-link">
       <Icon name={item.icon} />
       <Button variant="quiet" size="sm" text={item.title} press={item.press} />
       {item.chip === undefined ? null : <Chip label={item.chip.label} tone={item.chip.tone} />}
-      <span className="vs-transcript-trail">{item.trail}</span>
+      <span className="vs-conversation-trail">{item.trail}</span>
     </div>
   );
 }
 
-function Bubble(props: {readonly item: Extract<TranscriptItem, {kind: 'bubble'}>}): JSX.Element {
+function Bubble(props: {readonly item: Extract<ConversationItem, {kind: 'bubble'}>}): JSX.Element {
   const {item} = props;
   const {author} = item;
   return (
-    <div className="vs-transcript-bubble">
-      <span className="vs-transcript-from">
+    <div className="vs-conversation-bubble">
+      <span className="vs-conversation-from">
         {author.press === undefined ? (
           <Text variant="small" tone="muted">
             {author.label}
@@ -104,7 +104,7 @@ function Bubble(props: {readonly item: Extract<TranscriptItem, {kind: 'bubble'}>
         ) : (
           <Button variant="quiet" size="sm" text={author.label} press={author.press} />
         )}
-        <span className="vs-transcript-trail">{item.at}</span>
+        <span className="vs-conversation-trail">{item.at}</span>
       </span>
       <ChatMessage side="end" text={item.text} />
     </div>
@@ -112,7 +112,7 @@ function Bubble(props: {readonly item: Extract<TranscriptItem, {kind: 'bubble'}>
 }
 
 function Row(props: {
-  readonly item: TranscriptItem;
+  readonly item: ConversationItem;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
@@ -120,9 +120,9 @@ function Row(props: {
   switch (item.kind) {
     case 'rule':
       return (
-        <div className="vs-transcript-rule">
+        <div className="vs-conversation-rule">
           <Text variant="small" tone="muted">
-            <span className="vs-transcript-trail">{item.label}</span>
+            <span className="vs-conversation-trail">{item.label}</span>
           </Text>
         </div>
       );
@@ -172,10 +172,10 @@ function Row(props: {
  * arrive. A thinking block or a tool call opens and closes by the reader; `opened` hears each change
  * so a body that is read on demand can be asked for. Long lines of code scroll inside their block.
  */
-export function Transcript(props: {
+export function Conversation(props: {
   readonly label: string;
-  readonly items: readonly TranscriptItem[];
-  readonly earlier?: TranscriptEarlier | null;
+  readonly items: readonly ConversationItem[];
+  readonly earlier?: ConversationEarlier | null;
   readonly opened?: (id: string, open: boolean) => void;
   /** `fill` takes the height of its container; the default is most of the window's. */
   readonly size?: 'default' | 'fill';
@@ -206,10 +206,10 @@ export function Transcript(props: {
     }
   };
   return (
-    <div className="vs-transcript" data-size={props.size ?? 'default'}>
+    <div className="vs-conversation" data-size={props.size ?? 'default'}>
       <ul
         ref={win.scroller}
-        className="vs-transcript-pane"
+        className="vs-conversation-pane"
         aria-label={props.label}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
@@ -220,7 +220,7 @@ export function Transcript(props: {
         onKeyDown={win.touched}
       >
         {earlier == null ? null : (
-          <li className="vs-transcript-earlier">
+          <li className="vs-conversation-earlier">
             <Button
               variant="secondary"
               size="sm"
@@ -230,7 +230,7 @@ export function Transcript(props: {
             />
           </li>
         )}
-        <li aria-hidden="true" className="vs-transcript-gap" style={{height: win.before}} />
+        <li aria-hidden="true" className="vs-conversation-gap" style={{height: win.before}} />
         {items.slice(win.first, win.last).map((item, offset) => {
           const slot = win.slotOf(win.first + offset);
           const open = flipped.has(item.id);
@@ -238,7 +238,7 @@ export function Transcript(props: {
             <li
               key={item.id}
               ref={slot.measure}
-              className="vs-transcript-row"
+              className="vs-conversation-row"
               data-kind={item.kind}
               data-entering={entering.has(item.id) || undefined}
               aria-posinset={slot.index + 1}
@@ -248,10 +248,10 @@ export function Transcript(props: {
             </li>
           );
         })}
-        <li aria-hidden="true" className="vs-transcript-gap" style={{height: win.after}} />
+        <li aria-hidden="true" className="vs-conversation-gap" style={{height: win.after}} />
       </ul>
       {win.behind ? (
-        <span className="vs-transcript-jump">
+        <span className="vs-conversation-jump">
           <NewBelow text="New below" press={win.jump} />
         </span>
       ) : null}

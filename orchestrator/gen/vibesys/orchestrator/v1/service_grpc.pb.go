@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrchestratorService_Hello_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
-	OrchestratorService_Dispatch_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
-	OrchestratorService_WatchRuns_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
-	OrchestratorService_WatchAgent_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
-	OrchestratorService_ListItems_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
-	OrchestratorService_GetItem_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
+	OrchestratorService_Hello_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
+	OrchestratorService_Dispatch_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
+	OrchestratorService_WatchRuns_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
+	OrchestratorService_WatchAgent_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
+	OrchestratorService_ListItems_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
+	OrchestratorService_GetItem_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
+	OrchestratorService_WatchRunCost_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -46,6 +47,9 @@ type OrchestratorServiceClient interface {
 	ListItems(ctx context.Context, in *ListItemsRequest, opts ...grpc.CallOption) (*ListItemsResponse, error)
 	// One item of an agent, whole: what a page left out.
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
+	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
+	// host works it out, so the client sums nothing.
+	WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error)
 }
 
 type orchestratorServiceClient struct {
@@ -134,6 +138,25 @@ func (c *orchestratorServiceClient) GetItem(ctx context.Context, in *GetItemRequ
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &OrchestratorService_ServiceDesc.Streams[2], OrchestratorService_WatchRunCost_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRunCostRequest, WatchRunCostResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OrchestratorService_WatchRunCostClient = grpc.ServerStreamingClient[WatchRunCostResponse]
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -153,6 +176,9 @@ type OrchestratorServiceServer interface {
 	ListItems(context.Context, *ListItemsRequest) (*ListItemsResponse, error)
 	// One item of an agent, whole: what a page left out.
 	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
+	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
+	// host works it out, so the client sums nothing.
+	WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -180,6 +206,9 @@ func (UnimplementedOrchestratorServiceServer) ListItems(context.Context, *ListIt
 }
 func (UnimplementedOrchestratorServiceServer) GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetItem not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error {
+	return status.Error(codes.Unimplemented, "method WatchRunCost not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -296,6 +325,17 @@ func _OrchestratorService_GetItem_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_WatchRunCost_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRunCostRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(OrchestratorServiceServer).WatchRunCost(m, &grpc.GenericServerStream[WatchRunCostRequest, WatchRunCostResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OrchestratorService_WatchRunCostServer = grpc.ServerStreamingServer[WatchRunCostResponse]
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -329,6 +369,11 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WatchAgent",
 			Handler:       _OrchestratorService_WatchAgent_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WatchRunCost",
+			Handler:       _OrchestratorService_WatchRunCost_Handler,
 			ServerStreams: true,
 		},
 	},

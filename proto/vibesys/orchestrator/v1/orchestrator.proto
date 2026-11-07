@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
 
@@ -89,7 +90,7 @@ enum TurnTrigger {
   TURN_TRIGGER_OPERATOR = 2;
   TURN_TRIGGER_HANDOFF = 3;
   TURN_TRIGGER_JOB_FINISHED = 4;
-  // Reserved for scheduled wakeups. Nothing starts such a turn yet.
+  // A wakeup the orchestrator scheduled: the lead is asked for a progress report (ReportDue).
   TURN_TRIGGER_SCHEDULE = 5;
   // A message from another agent.
   TURN_TRIGGER_MESSAGE = 6;
@@ -259,6 +260,16 @@ message Run {
   // finished or the grace period has passed.
   RunLimit limit_reached = 23 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp limit_reached_at = 24;
+  // How often the lead is asked for a progress report while the run's work moves (StartRun.summary_every,
+  // or its default of one hour when the start did not say). Absent on a run recorded before the
+  // schedule existed: such a run is never asked.
+  google.protobuf.Duration summary_every = 25;
+  // When the lead is next asked for a progress report. Set exactly while work has moved since the
+  // lead last reported or was last asked, and the run is live with no limit reached and no final
+  // report standing; it never falls before the previous report or request plus summary_every.
+  // Absent otherwise: a quiet run is not asked, so the age of its latest report is the time that
+  // passed since it, however long.
+  google.protobuf.Timestamp next_summary_at = 26;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -669,6 +680,17 @@ message LeadIdleReminder {
   uint32 judges_started = 4;
 }
 
+// ReportDue asks a lead for a progress report: work has moved in its run since it last reported or was
+// last asked, and summary_every has passed. The lead answers with post_report, kind progress. It carries
+// the facts a template words; the lead decides what the report says.
+message ReportDue {
+  // The run's summary_every, in seconds.
+  uint32 every_seconds = 1;
+  // How many reports the lead has posted in the run so far, so that the words can tell a first report
+  // from a later one.
+  uint32 reports_posted = 2;
+}
+
 // RunLimitReached tells a lead that its run has reached a limit, so that it finishes: it posts its
 // final report and starts nothing new.
 message RunLimitReached {
@@ -717,6 +739,7 @@ message Message {
     HandoffReminder handoff_reminder = 17;
     LeadIdleReminder lead_idle_reminder = 18;
     RunLimitReached run_limit_reached = 19;
+    ReportDue report_due = 20;
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * A `Transcript`: its rows read in order with the thinking and tool calls folded, opening one tells
+ * A `Conversation`: its rows read in order with the thinking and tool calls folded, opening one tells
  * the caller (so a body read on demand can be asked for), the rows before the first are asked for by
  * a button and by a scroll near the top, only rows that arrive at the end draw in, and what is long
  * stays inside its row.
@@ -9,7 +9,7 @@ import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Transcript, type TranscriptEarlier, type TranscriptItem} from './index.js';
+import {Conversation, type ConversationEarlier, type ConversationItem} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -32,8 +32,8 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
-const said = (id: string, text = id): TranscriptItem => ({kind: 'said', id, text});
-const thought = (id: string): TranscriptItem => ({
+const said = (id: string, text = id): ConversationItem => ({kind: 'said', id, text});
+const thought = (id: string): ConversationItem => ({
   kind: 'thought',
   id,
   label: 'Thought for 14s',
@@ -41,8 +41,8 @@ const thought = (id: string): TranscriptItem => ({
 });
 const tool = (
   id: string,
-  extra: Partial<Extract<TranscriptItem, {kind: 'tool'}>> = {},
-): TranscriptItem => ({
+  extra: Partial<Extract<ConversationItem, {kind: 'tool'}>> = {},
+): ConversationItem => ({
   kind: 'tool',
   id,
   name: 'Command',
@@ -54,13 +54,13 @@ const tool = (
 });
 
 interface Props {
-  readonly items: readonly TranscriptItem[];
-  readonly earlier?: TranscriptEarlier | null;
+  readonly items: readonly ConversationItem[];
+  readonly earlier?: ConversationEarlier | null;
   readonly opened?: (id: string, open: boolean) => void;
 }
 
 const view = (props: Props) => (
-  <Transcript
+  <Conversation
     label="A conversation"
     items={props.items}
     {...(props.earlier === undefined ? {} : {earlier: props.earlier})}
@@ -76,9 +76,9 @@ async function mounted(props: Props) {
   return {container, root, show: (next: Props) => act(async () => root.render(view(next)))};
 }
 
-const rows = (container: HTMLElement) => [...container.querySelectorAll('.vs-transcript-row')];
+const rows = (container: HTMLElement) => [...container.querySelectorAll('.vs-conversation-row')];
 
-describe('a transcript', () => {
+describe('a conversation', () => {
   test('keeps its rows in order, thinking and a call folded to one line', async () => {
     const {container} = await mounted({items: [said('a'), thought('b'), tool('c'), said('d')]});
     expect(rows(container).map(row => row.getAttribute('data-kind'))).toEqual([
@@ -118,7 +118,7 @@ describe('a transcript', () => {
 
   test('asks for earlier rows by its button, unless they are being read', async () => {
     const loads: string[] = [];
-    const earlier = (loading: boolean): TranscriptEarlier => ({
+    const earlier = (loading: boolean): ConversationEarlier => ({
       text: 'Earlier turns',
       loading,
       load: () => loads.push('load'),
@@ -140,13 +140,13 @@ describe('a transcript', () => {
 
   test('asks for earlier rows when scrolled near the top, and not when scrolled away from it', async () => {
     const loads: string[] = [];
-    const earlier: TranscriptEarlier = {
+    const earlier: ConversationEarlier = {
       text: 'Earlier',
       loading: false,
       load: () => loads.push('x'),
     };
     const {container} = await mounted({items: [said('a'), said('b')], earlier});
-    const pane = container.querySelector('.vs-transcript-pane') as HTMLElement;
+    const pane = container.querySelector('.vs-conversation-pane') as HTMLElement;
     pane.scrollTop = 2_000;
     await act(async () => pane.dispatchEvent(new UIEvent('scroll', {bubbles: true})));
     expect(loads).toEqual([]);
@@ -173,7 +173,7 @@ describe('a transcript', () => {
   test('keeps the rows a reader is looking at where they were when older ones arrive', async () => {
     const first = [said('b'), said('c')];
     const {container, show} = await mounted({items: first});
-    const pane = container.querySelector('.vs-transcript-pane') as HTMLElement;
+    const pane = container.querySelector('.vs-conversation-pane') as HTMLElement;
     pane.scrollTop = 40;
     await act(async () => pane.dispatchEvent(new UIEvent('scroll', {bubbles: true})));
     const before = pane.scrollTop;

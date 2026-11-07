@@ -85,6 +85,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"result":     resultCommand,
 	"frontier":   frontierCommand,
 	"plan":       planCommand,
+	"bound":      boundCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
@@ -115,6 +116,10 @@ commands:
   frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   plan check-gain --under <share>                say whether every open or parked plan's gain bound is below it
+  bound declare --objective <name> --value <v> --unit <u> --note <how derived> [--commit rev]
+                                                 state the best an objective can reach; a revision is
+                                                 a new entry, and nothing is replaced
+  bound list [--objective <name>]                every declared bound, oldest first, the current one marked
   daemon status|stop|restart [--force]           manage the daemon
   upgrade                                        replace this binary with the newest release
 

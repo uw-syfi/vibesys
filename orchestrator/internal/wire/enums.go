@@ -167,6 +167,7 @@ var (
 		core.TimerLaunchDeadline: pb.TimerKind_TIMER_KIND_LAUNCH_DEADLINE,
 		core.TimerLeadIdle:       pb.TimerKind_TIMER_KIND_LEAD_IDLE,
 		core.TimerLimitGrace:     pb.TimerKind_TIMER_KIND_LIMIT_GRACE,
+		core.TimerSummaryDue:     pb.TimerKind_TIMER_KIND_SUMMARY_DUE,
 	})
 )
 

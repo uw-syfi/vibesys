@@ -50,6 +50,19 @@ type Run struct {
 	// NeverOpened says the run failed without its lead ever running a turn: a start that did not
 	// happen. It is set when the run ends and never changes.
 	NeverOpened bool
+	// SummaryEvery is how often the lead is asked for a progress report while the run's work moves: the
+	// start's, or DefaultSummaryEvery when it named none. Zero only on a run recorded before the
+	// schedule existed, which is never asked.
+	SummaryEvery time.Duration
+	// LastSummaryAt is the time the next request is counted from: when the run started, or its lead
+	// last posted a report, or was last asked for one, whichever is latest.
+	LastSummaryAt time.Time
+	// NextSummaryAt is when the lead is next asked for a progress report, and the zero time when it is
+	// not going to be. It is set exactly while work has moved (see moved) since LastSummaryAt in a run
+	// that is live, has reached no limit and whose lead has not finished; it is then LastSummaryAt plus
+	// SummaryEvery, or the moment the work moved if that is later. The timer armed for it is answered
+	// only while it still names this time.
+	NextSummaryAt time.Time
 }
 
 // Checkout is a working copy of a run's repository that one agent made.
@@ -154,10 +167,10 @@ func (u Usage) merged(newer Usage) Usage {
 	return out
 }
 
-// plus returns the sum of two usages. A field neither reports stays nil, and one only a side
+// Plus returns the sum of two usages. A field neither reports stays nil, and one only a side
 // reports is that side's, so a provider that reports tokens and no dollars adds up to tokens and no
 // dollars, never to a zero cost.
-func (u Usage) plus(o Usage) Usage {
+func (u Usage) Plus(o Usage) Usage {
 	sum := func(a, b *uint64) *uint64 {
 		switch {
 		case a == nil:
@@ -367,6 +380,13 @@ type (
 		MaxCost float64
 		Grace   time.Duration
 	}
+	// ReportDue asks the lead for a progress report: work has moved in its run since it last reported or
+	// was last asked, and Every has passed. Reports is how many it has posted so far. The lead answers
+	// with a report of kind progress, and decides what it says.
+	ReportDue struct {
+		Every   time.Duration
+		Reports uint32
+	}
 	// SubagentSettled tells the lead a subagent stopped working without a handoff.
 	SubagentSettled struct {
 		Agent  AgentID
@@ -401,6 +421,7 @@ func (SubagentSettled) messageBody()  {}
 func (HandoffReminder) messageBody()  {}
 func (RunLimitReached) messageBody()  {}
 func (LeadIdleReminder) messageBody() {}
+func (ReportDue) messageBody()        {}
 
 // Message is typed mail between agents and the operator.
 type Message struct {
@@ -432,6 +453,8 @@ func (m Message) trigger() TurnTrigger {
 		return TriggerSubagentSettled
 	case HandoffReminder, LeadIdleReminder, RunLimitReached:
 		return TriggerReminder
+	case ReportDue:
+		return TriggerSchedule
 	}
 	if m.From == "" {
 		return TriggerOperator

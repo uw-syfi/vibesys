@@ -129,6 +129,13 @@ type Task struct {
 	Profile *Command
 }
 
+// Declared is every objective the task declares, which way each improves: the scored metric first,
+// then the other metrics its benchmark reports, in the order the task lists them. A task that
+// declares one metric has that one.
+func (t Task) Declared() []core.Metric {
+	return append([]core.Metric{t.Metric}, t.Others...)
+}
+
 // Setup is what the task declares that decides where its jobs run.
 func (t Task) Setup() core.TaskSetup {
 	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile, TwoImages: t.Candidate != nil}

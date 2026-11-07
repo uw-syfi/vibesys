@@ -86,6 +86,41 @@ func TestEventsOfOtherAgentsDoNotReachAWatcher(t *testing.T) {
 	}
 }
 
+// A watcher of one run gets the stored events of that run and no others, and no delta, whichever
+// agent they concern.
+func TestAWatcherOfOneRunGetsOnlyItsEvents(t *testing.T) {
+	h := hub.New(hub.DefaultLimits)
+	sub := h.Subscribe(hub.Interest{Run: "run-a"})
+	mine, theirs := itemEvent(1, "a", "i1", "x", false), itemEvent(2, "b", "i2", "x", false)
+	mine.Change.RunId, theirs.Change.RunId = "run-a", "run-b"
+	h.PublishStored(theirs)
+	h.PublishStored(mine)
+	h.PublishDelta(textDelta("a", "i3", "x"))
+	h.Flush()
+	got, lagged := sub.Take()
+	if lagged || len(got) != 1 || got[0].Stored == nil || got[0].Stored.Change.GetSequence() != 1 {
+		t.Fatalf("got %v lagged=%v, want the one event of run-a", got, lagged)
+	}
+}
+
+// A watcher that asked for ticks is woken at the end of every merge window with nothing published, and
+// one that did not is left alone.
+func TestTicksWakeOnlyTheWatchersThatAskedForThem(t *testing.T) {
+	h := hub.New(hub.DefaultLimits)
+	ticking, quiet := h.Subscribe(hub.Interest{Run: "run-a", Ticks: true}), h.Subscribe(hub.Interest{Run: "run-a"})
+	h.Flush()
+	select {
+	case <-ticking.Ready():
+	default:
+		t.Fatal("a watcher that asked for ticks was not woken by the end of a window")
+	}
+	select {
+	case <-quiet.Ready():
+		t.Fatal("a watcher that did not ask for ticks was woken")
+	default:
+	}
+}
+
 func TestASlowClientLagsAndTheWriterIsNeverBlocked(t *testing.T) {
 	h := hub.New(hub.Limits{MaxItems: 3, MaxBytes: 1 << 20})
 	sub := h.Subscribe(hub.Interest{Everything: true})

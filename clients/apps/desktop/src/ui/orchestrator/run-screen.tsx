@@ -122,7 +122,7 @@ export function RunScreen(props: {
         <Breadcrumb
           label="Where you are"
           items={[
-            {id: 'runs', label: 'Runs'},
+            {id: 'runs', label: 'Runs', press: props.goRuns},
             {id: props.runId, label: run.task},
           ]}
         />

@@ -53,6 +53,11 @@ type Interest struct {
 	Everything bool
 	// Agent asks for one agent's stored events and its deltas. Ignored when Everything is set.
 	Agent core.AgentID
+	// Run asks for the stored events of one run and no delta. Ignored when Everything or Agent is set.
+	Run core.RunID
+	// Ticks asks to be woken at the end of every merge window, for a watcher whose view changes
+	// with the time and not only with an event.
+	Ticks bool
 }
 
 // Message is one thing for a client: exactly one field is set.
@@ -236,7 +241,8 @@ func (s *Subscription) signal() {
 }
 
 func (s *Subscription) wantsStored(st Stored) bool {
-	return s.interest.Everything || (s.interest.Agent != "" && s.interest.Agent == st.Agent)
+	in := s.interest
+	return in.Everything || (in.Agent != "" && in.Agent == st.Agent) || (in.Run != "" && in.Run == core.RunID(st.Change.GetRunId()))
 }
 
 // lag drops everything queued, because the client must start from a snapshot anyway.
@@ -349,6 +355,9 @@ func (s *Subscription) drop(item core.ItemID) {
 }
 
 func (s *Subscription) flush() {
+	if s.interest.Ticks {
+		s.signal()
+	}
 	if len(s.order) == 0 {
 		return
 	}
