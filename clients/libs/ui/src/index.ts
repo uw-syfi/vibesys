@@ -8,7 +8,7 @@ export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
 export {AppFrame} from './components/app-frame.js';
 export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-chart.js';
-export {type BarColumn, type BarRow, BarRows} from './components/bar-rows.js';
+export {type BarColumn, type BarFigures, type BarRow, BarRows} from './components/bar-rows.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,

@@ -11,7 +11,13 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CostView, FeedStatus, Freshness} from '../../state/index.js';
-import {type CostScreenModel, costScreenModel} from './cost-model.js';
+import {
+  type CostScreenModel,
+  costScreenModel,
+  KIND_COLUMNS,
+  MODEL_COLUMNS,
+  TYPE_COLUMNS,
+} from './cost-model.js';
 import {SpendCard} from './spend-card.js';
 import {type CostWords, formatAxisUsd} from './words.js';
 
@@ -96,12 +102,7 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
           label="Cost by agent type"
           nameHeader="Type"
           barLabel="Share of the largest cost"
-          columns={[
-            {header: 'Agents'},
-            {header: 'Turns'},
-            {header: 'Tokens'},
-            {header: 'Cost', strong: true},
-          ]}
+          columns={TYPE_COLUMNS}
           rows={model.types}
         />
       </Card>
@@ -112,7 +113,7 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
               label="Cost by model"
               nameHeader="Model"
               barLabel="Share of the largest cost"
-              columns={[{header: 'Turns'}, {header: 'Tokens'}, {header: 'Cost', strong: true}]}
+              columns={MODEL_COLUMNS}
               rows={model.models}
             />
           </Card>
@@ -123,7 +124,7 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
               label="Tokens by kind"
               nameHeader="Kind"
               barLabel="Share of the largest count"
-              columns={[{header: 'Tokens', strong: true}]}
+              columns={KIND_COLUMNS}
               rows={model.kinds}
             />
           </Card>
