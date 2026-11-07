@@ -45,6 +45,10 @@ _ALLOWED: dict[tuple[str, str], str] = {
     ("libs/vs-runtime/src/vs_runtime/_input_project.py", "_project_name"): (
         "reads a third-party pyproject.toml (project name)"
     ),
+    ("src/entrypoints/examples.py", "outside_path_sources"): (
+        "reads a third-party pyproject.toml (uv sources); the light entrypoint cannot "
+        "import vs_runtime, which holds the same allowlisted read"
+    ),
     ("src/entrypoints/cli/config.py", "_restore_project_config"): (
         "probes the raw file for explicitly set keys; load_config_and_skills validates it"
     ),

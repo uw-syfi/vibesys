@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
 from tests.support.example_materializer import (
     check_copy_tracked_contract,
 )
+from tests.support.example_registry import (
+    REPO_ROOT,
+    example_root,
+    load_registry,
+    path_source_failures,
+)
 
 from entrypoints.examples import GitExampleMaterializer, default_checkout, run
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S
+
+if TYPE_CHECKING:
+    from entrypoints.example_catalog import ExampleEntry
+
+REGISTRY = load_registry()
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -73,6 +85,34 @@ def test_untracked_files_stay_behind_and_the_copy_is_one_clean_commit(tmp_path: 
     assert _git(destination, "status", "--porcelain") == ""
 
 
+def test_a_path_source_outside_the_example_is_vendored_and_rewritten(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    example = checkout / "examples" / "serving" / "demo"
+    library = checkout / "sdk" / "toolkit"
+    (library / "src").mkdir(parents=True)
+    (library / "src" / "toolkit.py").write_text("X = 1\n", encoding="utf-8")
+    (library / "pyproject.toml").write_text('[project]\nname = "toolkit"\n', encoding="utf-8")
+    example.mkdir(parents=True)
+    (example / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\ndependencies = ["toolkit"]\n'
+        "[tool.uv.sources]\ntoolkit = { path = '../../../sdk/toolkit' }\n",
+        encoding="utf-8",
+    )
+    _git(checkout, "init", "--quiet")
+    _git(checkout, "add", "--all")
+    _git(checkout, "commit", "--quiet", "--message", "catalog")
+    destination = tmp_path / "project"
+
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
+        checkout, PurePosixPath("examples/serving/demo"), destination, message="Start"
+    )
+
+    assert "path = 'vendor/toolkit'" in (destination / "pyproject.toml").read_text()
+    assert (destination / "vendor" / "toolkit" / "src" / "toolkit.py").is_file()
+    assert (destination / "vendor" / "toolkit" / "pyproject.toml").is_file()
+    assert _git(destination, "status", "--porcelain") == ""
+
+
 def test_new_from_the_real_catalog_creates_a_runnable_project(tmp_path: Path) -> None:
     destination = tmp_path / "stack"
 
@@ -95,3 +135,28 @@ def test_new_from_the_real_catalog_creates_a_runnable_project(tmp_path: Path) ->
     assert _git(destination, "log", "--format=%s").splitlines() == [
         "Start from VibeSys example data-structures/stack"
     ]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(e, id=e.path)
+        for e in REGISTRY.example
+        if not e.external_repo and (example_root(e) / "pyproject.toml").is_file()
+    ],
+)
+def test_a_copied_example_resolves_its_path_dependencies(
+    entry: ExampleEntry, tmp_path: Path
+) -> None:
+    """``vibesys example new`` copies an example outside the checkout, where uv must still resolve it.
+
+    Every ``[tool.uv.sources]`` path of the copy must hold a project, and the example's
+    ``requires-python`` must admit no Python the dependency refuses (``uv lock`` fails
+    otherwise).
+    """
+    project = tmp_path / "project"
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
+        REPO_ROOT, PurePosixPath(entry.path), project, message="Start"
+    )
+    failures = path_source_failures(project)
+    assert not failures, f"{entry.path}: " + "; ".join(failures)

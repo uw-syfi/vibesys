@@ -8,6 +8,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.example_registry import (
+    example_root,
+    load_registry,
+    outside_path_sources,
+    path_source_failures,
+)
 from tests.support.real_git import REAL_GIT
 from tests.support.task_project import task_path, write_task
 
@@ -580,3 +586,38 @@ strip_git = false
         _provision(input_root, tmp_path / "copy", workspace_sources=(source,))
 
     assert not (tmp_path / "copy").exists()
+
+
+def _provisionable_examples() -> list[object]:
+    """Each registered example with a path source outside it, and a task needing no Git source."""
+    params = []
+    for entry in load_registry().example:
+        root = example_root(entry)
+        if entry.external_repo or not outside_path_sources(root):
+            continue
+        tasks = [
+            task.name.value
+            for task in Project.open(root).discover_tasks()
+            if "workspace" not in tomllib.loads(task.manifest_path.read_text())
+        ]
+        if tasks:
+            params.append(pytest.param(root, tasks[0], id=entry.path))
+    return params
+
+
+@pytest.mark.parametrize(("root", "task"), _provisionable_examples())
+def test_a_provisioned_example_resolves_its_path_dependencies(
+    root: Path, task: str, tmp_path: Path
+) -> None:
+    """``--project examples/... --runs-dir`` copies an example away from the checkout."""
+    destination = tmp_path / "copy"
+
+    provision_project(
+        root,
+        destination,
+        spec=ProjectProvisioningSpec(
+            materializer=_materializer(destination), task_name=task, input_project_dir=root
+        ),
+    )
+
+    assert path_source_failures(destination) == []
