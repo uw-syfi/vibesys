@@ -77,6 +77,12 @@ func FactKey(f *pb.TaskFact) (string, error) {
 		if b.Trouble.GetJobId() != "" {
 			return "trouble/" + b.Trouble.GetJobId(), nil
 		}
+	case *pb.TaskFact_Bound:
+		// A bound is keyed by its place in the task's log, as the contract says: every version is a
+		// fact of its own and none replaces another.
+		if b.Bound.GetSeq() > 0 {
+			return fmt.Sprint("bound/", b.Bound.GetSeq()), nil
+		}
 	}
 	return "", fmt.Errorf("invalid task fact %v", f)
 }

@@ -430,14 +430,17 @@
  * the hint, and it flips to the other side of the chip at the window's edge.
  */
 .vs-chip[aria-description],
-.vs-chart-figure[aria-description] {
+.vs-chart-figure[aria-description],
+.vs-chart-reference-label[aria-description] {
   anchor-name: --vs-chip-hint;
   anchor-scope: --vs-chip-hint;
 }
 .vs-chip[aria-description]:hover::after,
 .vs-chip[aria-description]:focus-visible::after,
 .vs-chart-figure[aria-description]:hover::after,
-.vs-chart-figure[aria-description]:focus-visible::after {
+.vs-chart-reference-label[aria-description]:hover::after,
+.vs-chart-figure[aria-description]:focus-visible::after,
+.vs-chart-reference-label[aria-description]:focus-visible::after {
   content: attr(aria-description) / "";
   position: fixed;
   position-anchor: --vs-chip-hint;
@@ -457,6 +460,17 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   pointer-events: none;
+}
+/* A chip whose label is a name a person chose gives way to the room it has. */
+.vs-chip[data-clip] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.vs-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .vs-chip[data-mono-id] {
   font-family: var(--text-code-family);

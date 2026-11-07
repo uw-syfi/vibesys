@@ -38,7 +38,7 @@ import {RunScreen} from './run-screen.js';
 import {SearchPanels} from './search-panels.js';
 import {describeCall, harnessWord} from './words.js';
 
-const VIEWS: readonly RunView[] = ['timeline', 'cost', 'handoffs'];
+const VIEWS: readonly RunView[] = ['report', 'timeline', 'cost', 'handoffs'];
 /** Names of the protocol that must never reach a person. */
 const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object/;
 
@@ -61,6 +61,8 @@ function screen(
       host="host-a"
       runId={runId}
       nowMs={nowMs}
+      freshness="live"
+      staleForMs={null}
       view={view}
       costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}

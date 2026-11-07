@@ -12,7 +12,9 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
   fc.record({
     type: fc.constant('show' as const),
     view: fc.constantFrom(
+      'report' as const,
       'timeline' as const,
+      'agents' as const,
       'cost' as const,
       'handoffs' as const,
       'ideas' as const,
@@ -24,13 +26,13 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
 );
 
 describe('the route', () => {
-  it('starts on the run list and opens a run on its timeline with no agent', () => {
+  it('starts on the run list and opens a run on its report with no agent', () => {
     const route = routeReducer(initialRoute, {type: 'open-run', host: 'host-a', runId: 'run-1'});
     expect(route).toEqual({
       screen: 'run',
       host: 'host-a',
       runId: 'run-1',
-      view: 'timeline',
+      view: 'report',
       agentId: null,
     });
   });
@@ -50,19 +52,20 @@ describe('the route', () => {
         const route = moves.reduce(routeReducer, initialRoute);
         expect(routeReducer(route, {type: 'close-run'})).toEqual(initialRoute);
         const reopened = routeReducer(route, {type: 'open-run', host: 'host-b', runId: 'run-2'});
-        expect(reopened).toMatchObject({agentId: null, view: 'timeline'});
+        expect(reopened).toMatchObject({agentId: null, view: 'report'});
       }),
     );
   });
 });
 
 describe('which cost stream is followed', () => {
-  it('is the run whose Cost view is showing, and none on any other screen', () => {
+  it('is the run whose report or Cost view is showing, and none on any other screen', () => {
     fc.assert(
       fc.property(fc.array(action, {maxLength: 30}), moves => {
         const route = moves.reduce(routeReducer, initialRoute);
         const target = costTarget(route);
-        if (route.screen === 'run' && route.view === 'cost' && route.agentId === null) {
+        const shown = route.screen === 'run' && (route.view === 'cost' || route.view === 'report');
+        if (route.screen === 'run' && shown && route.agentId === null) {
           expect(target).toEqual({host: route.host, runId: route.runId});
         } else {
           expect(target).toBeNull();
@@ -73,7 +76,9 @@ describe('which cost stream is followed', () => {
 
   it('opens when the Cost view is picked, and closes when an agent covers it or the run closes', () => {
     const open = routeReducer(initialRoute, {type: 'open-run', host: 'host-a', runId: 'run-1'});
-    expect(costTarget(open)).toBeNull();
+    // A run opens on its report, which shows the spend, so the stream opens with it.
+    expect(costTarget(open)).toEqual({host: 'host-a', runId: 'run-1'});
+    expect(costTarget(routeReducer(open, {type: 'show', view: 'agents'}))).toBeNull();
     const cost = routeReducer(open, {type: 'show', view: 'cost'});
     expect(costTarget(cost)).toEqual({host: 'host-a', runId: 'run-1'});
     expect(costTarget(routeReducer(cost, {type: 'pick-agent', agentId: 'a'}))).toBeNull();

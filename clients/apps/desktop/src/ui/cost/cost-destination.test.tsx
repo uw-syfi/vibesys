@@ -92,8 +92,11 @@ function openCost(host: HostSnapshot) {
 describe('the Cost view under a run', () => {
   it('is a tab of the run that shows the served figures, and leaving it shows none', () => {
     const {screen} = openCost(hostWith(COSTS, live));
-    expect(screen.text()).not.toContain('≥\u2005$318');
-    screen.press(screen.control('Cost'));
+    // The run opens on its report, which shows the spend in brief and links to the Cost view.
+    expect(screen.text()).toContain('≥\u2005$318');
+    expect(screen.container.querySelector('[role="tablist"]')).toBeNull();
+    screen.press(screen.control('Open cost'));
+    expect(screen.container.querySelector('[role="tablist"]')).not.toBeNull();
     expect(screen.text()).toContain('≥\u2005$318');
     expect(screen.text()).toContain('of $500');
     expect(screen.text()).toContain('By agent type');
@@ -102,9 +105,11 @@ describe('the Cost view under a run', () => {
     screen.unmount();
   });
 
-  it('watches the cost stream only while the Cost tab is showing', () => {
+  it('watches the cost stream only while the report or the Cost tab is showing', () => {
     const {screen, log} = openCost(hostWith(COSTS, live));
     const watching = () => JSON.parse(log.at(-1) ?? 'null');
+    expect(watching()).toEqual({host: 'local', runId: scenario.runId});
+    screen.press(screen.control('Open agents'));
     expect(watching()).toBeNull();
     screen.press(screen.control('Cost'));
     expect(watching()).toEqual({host: 'local', runId: scenario.runId});
@@ -117,7 +122,7 @@ describe('the Cost view under a run', () => {
 
   it('shows loading, with no figures and no banner, until the host has sent a view', () => {
     const {screen} = openCost(hostWith({}, {status: {_tag: 'Opening'}, freshness: 'empty'}));
-    screen.press(screen.control('Cost'));
+    screen.press(screen.control('Open cost'));
     expect(screen.text()).toContain('Loading');
     expect(screen.text()).not.toContain('By agent type');
     screen.unmount();
@@ -136,7 +141,7 @@ describe('the Cost view under a run', () => {
         },
       ),
     );
-    screen.press(screen.control('Cost'));
+    screen.press(screen.control('Open cost'));
     expect(screen.text()).toContain('Unavailable');
     expect(screen.text()).toContain('too old');
     expect(screen.container.querySelectorAll('button').length).toBeGreaterThan(0);
@@ -156,7 +161,7 @@ describe('the Cost view under a run', () => {
         freshness: 'stale',
       }),
     );
-    screen.press(screen.control('Cost'));
+    screen.press(screen.control('Open cost'));
     // The last view stays on screen, marked stale, with the way to try again beside it.
     expect(screen.text()).toContain('Stale');
     expect(screen.text()).toContain('≥\u2005$318');

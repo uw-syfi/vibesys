@@ -181,6 +181,7 @@ export function reportMessageOf(
   atMs: number,
   headline: string,
   changed = '',
+  sequence = 1,
 ): Message {
   return create(MessageSchema, {
     id,
@@ -190,7 +191,7 @@ export function reportMessageOf(
     at: timestampFromMs(atMs),
     body: {
       case: 'report',
-      value: create(ReportSchema, {headline, changed, kind: ReportKind.PROGRESS, sequence: 1}),
+      value: create(ReportSchema, {headline, changed, kind: ReportKind.PROGRESS, sequence}),
     },
   });
 }

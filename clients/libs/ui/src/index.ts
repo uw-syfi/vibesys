@@ -27,6 +27,7 @@ export {
   type ChartLegendMark,
   ChartPanel,
   type ChartPoint,
+  type ChartReference,
   type ChartSize,
   type ChartTick,
   type ChartTip,
