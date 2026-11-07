@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from bun_targets import TARGETS
-from fetch_bun import BunFetchError, _download, fetch_bun
+from fetch_bun import BunFetchError, _download, fetch_bun, host_target
 
 from vs_sim.api.testing import join_or_fail
 
@@ -65,6 +65,29 @@ def test_fetch_bun_rejects_a_checksum_mismatch_before_writing_output(tmp_path: P
         )
 
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "target"),
+    [
+        ("Darwin", "arm64", "macos-arm64"),
+        ("Linux", "x86_64", "linux-x86_64"),
+        ("Linux", "AMD64", "linux-x86_64"),
+        ("Linux", "aarch64", "linux-aarch64"),
+        ("Linux", "arm64", "linux-aarch64"),
+    ],
+)
+def test_host_target_names_a_pinned_archive_for_every_supported_host(
+    system: str, machine: str, target: str
+) -> None:
+    assert host_target(system, machine) == target
+    assert target in TARGETS
+
+
+@pytest.mark.parametrize(("system", "machine"), [("Darwin", "x86_64"), ("Windows", "AMD64")])
+def test_host_target_refuses_a_host_with_no_pinned_archive(system: str, machine: str) -> None:
+    with pytest.raises(BunFetchError, match="Unsupported Bun target"):
+        host_target(system, machine)
 
 
 def test_fetch_bun_rejects_an_archive_without_the_expected_runtime(tmp_path: Path) -> None:

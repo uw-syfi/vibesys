@@ -190,6 +190,11 @@ max_path_length = 40
 		"marker outside":    base + "[[installs]]\nname = \"i\"\ndirectory = \"d\"\nmarker = \"e/m\"\ncommand = [\"x\"]\ncommand_directory = \"d\"\n",
 		"flag with space":   base + "[[env_flags]]\nname = \"X\"\nflag = \"a b\"\n",
 		"escaping root":     base + "[instructions]\nroots = [\"../x\"]\n",
+		"fetch without pin": base + "[[programs]]\nname = \"a\"\ncache_directories = [\"/c\"]\nfetch = [\"f\", \"{cache}\"]\n",
+		"fetch alone":       base + "[[programs]]\nname = \"a\"\nexact_from = { file = \"f\", pattern = '(x)' }\nfetch = [\"f\", \"{cache}\"]\n",
+		"cache alone":       base + "[[programs]]\nname = \"a\"\nexact_from = { file = \"f\", pattern = '(x)' }\ncache_directories = [\"/c\"]\n",
+		"fetch no cache":    base + "[[programs]]\nname = \"a\"\nexact_from = { file = \"f\", pattern = '(x)' }\ncache_directories = [\"/c\"]\nfetch = [\"f\"]\n",
+		"relative cache":    base + "[[programs]]\nname = \"a\"\nexact_from = { file = \"f\", pattern = '(x)' }\ncache_directories = [\"c\"]\nfetch = [\"f\", \"{cache}\"]\n",
 	} {
 		if _, err := doctor.ParseConfig("p.toml", bad); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -35,7 +35,12 @@ hint = "install uv (https://docs.astral.sh/uv/)"
 name = "bun"
 # The client tests resolve imports differently under another Bun, so only the pinned one will do.
 exact_from = { file = "packaging/fetch_bun.py", pattern = 'BUN_VERSION = "([0-9.]+)"' }
-hint = "install the pinned Bun (see BUN_VERSION in packaging/fetch_bun.py, or `python packaging/fetch_bun.py --help`) and put it first on PATH"
+# `--fix` fetches the pinned official release (checksum verified, the script CI uses) into the first
+# of these per-user directories whose variable is set; the gate and `repoctl test` find a copy there
+# on their own when PATH has another version, and `--env` puts it first on PATH.
+cache_directories = ["$XDG_CACHE_HOME/vibesys/bun-{version}", "$HOME/.cache/vibesys/bun-{version}"]
+fetch = ["python3", "packaging/fetch_bun.py", "--output", "{cache}/bun"]
+hint = "install the pinned Bun (see BUN_VERSION in packaging/fetch_bun.py) and put it first on PATH"
 
 [[programs]]
 name = "buf"

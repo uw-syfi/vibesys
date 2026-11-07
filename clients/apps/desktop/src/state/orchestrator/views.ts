@@ -1,6 +1,6 @@
 /**
  * Reads of the state for the screens: the agent tree, an agent's turns and thread, the timeline,
- * fan-out over time, and usage. Pure functions of the state and, where a running thing has no end
+ * and fan-out over time. Pure functions of the state and, where a running thing has no end
  * yet, of `nowMs`, which the caller passes (no clock here).
  */
 import {
@@ -14,7 +14,6 @@ import {
   oneofIs,
   type Turn,
   TurnStatus,
-  type Usage,
 } from '@vibesys/orchestrator-proto';
 import {messageIs} from './messages.js';
 import type {OrchestratorState} from './state.js';
@@ -272,67 +271,4 @@ export function fanoutOverTime(state: OrchestratorState, runId: string): FanoutP
     else points.push({atMs: edge.at, live});
   }
   return points;
-}
-
-/** A sum of usage where a field no turn reported stays absent, never zero. */
-export interface UsageTotals {
-  readonly turns: number;
-  readonly inputTokens: number | null;
-  readonly cacheReadTokens: number | null;
-  readonly cacheCreationTokens: number | null;
-  readonly outputTokens: number | null;
-  readonly reasoningTokens: number | null;
-  readonly costUsd: number | null;
-}
-
-const noUsage: UsageTotals = {
-  turns: 0,
-  inputTokens: null,
-  cacheReadTokens: null,
-  cacheCreationTokens: null,
-  outputTokens: null,
-  reasoningTokens: null,
-  costUsd: null,
-};
-
-function plus(sum: number | null, add: bigint | number | undefined): number | null {
-  return add === undefined ? sum : (sum ?? 0) + Number(add);
-}
-
-function addUsage(totals: UsageTotals, usage: Usage | undefined): UsageTotals {
-  return {
-    turns: totals.turns + 1,
-    inputTokens: plus(totals.inputTokens, usage?.inputTokens),
-    cacheReadTokens: plus(totals.cacheReadTokens, usage?.cacheReadTokens),
-    cacheCreationTokens: plus(totals.cacheCreationTokens, usage?.cacheCreationTokens),
-    outputTokens: plus(totals.outputTokens, usage?.outputTokens),
-    reasoningTokens: plus(totals.reasoningTokens, usage?.reasoningTokens),
-    costUsd: plus(totals.costUsd, usage?.costUsd),
-  };
-}
-
-export interface UsageReport {
-  readonly run: UsageTotals;
-  readonly byAgent: Readonly<Record<string, UsageTotals>>;
-  readonly byRole: Readonly<Partial<Record<AgentRole, UsageTotals>>>;
-}
-
-/**
- * What a run's turns have cost, by agent, by role and in total. It sums the turns the client holds,
- * which the host does not promise to send in full, so it is not the run's cost: that is `CostView`
- * (`state.costs`, worked out by the host). Only the old Cost screen reads this, and the screen that
- * replaces it deletes it.
- */
-export function usageOf(state: OrchestratorState, runId: string): UsageReport {
-  let run = noUsage;
-  const byAgent: Record<string, UsageTotals> = {};
-  const byRole: Partial<Record<AgentRole, UsageTotals>> = {};
-  for (const agent of runAgents(state, runId)) {
-    for (const turn of agentTurns(state, agent.id)) {
-      run = addUsage(run, turn.usage);
-      byAgent[agent.id] = addUsage(byAgent[agent.id] ?? noUsage, turn.usage);
-      byRole[agent.role] = addUsage(byRole[agent.role] ?? noUsage, turn.usage);
-    }
-  }
-  return {run, byAgent, byRole};
 }

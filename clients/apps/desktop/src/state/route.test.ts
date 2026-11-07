@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {initialRoute, type RouteAction, routeReducer} from './route.js';
+import {costTarget, initialRoute, type RouteAction, routeReducer} from './route.js';
 
 const action: fc.Arbitrary<RouteAction> = fc.oneof(
   fc.record({
@@ -52,5 +52,31 @@ describe('the route', () => {
         expect(reopened).toMatchObject({agentId: null, view: 'timeline'});
       }),
     );
+  });
+});
+
+describe('which cost stream is followed', () => {
+  it('is the run whose Cost view is showing, and none on any other screen', () => {
+    fc.assert(
+      fc.property(fc.array(action, {maxLength: 30}), moves => {
+        const route = moves.reduce(routeReducer, initialRoute);
+        const target = costTarget(route);
+        if (route.screen === 'run' && route.view === 'cost' && route.agentId === null) {
+          expect(target).toEqual({host: route.host, runId: route.runId});
+        } else {
+          expect(target).toBeNull();
+        }
+      }),
+    );
+  });
+
+  it('opens when the Cost view is picked, and closes when an agent covers it or the run closes', () => {
+    const open = routeReducer(initialRoute, {type: 'open-run', host: 'host-a', runId: 'run-1'});
+    expect(costTarget(open)).toBeNull();
+    const cost = routeReducer(open, {type: 'show', view: 'cost'});
+    expect(costTarget(cost)).toEqual({host: 'host-a', runId: 'run-1'});
+    expect(costTarget(routeReducer(cost, {type: 'pick-agent', agentId: 'a'}))).toBeNull();
+    expect(costTarget(routeReducer(cost, {type: 'close-run'}))).toBeNull();
+    expect(costTarget(routeReducer(cost, {type: 'show', view: 'timeline'}))).toBeNull();
   });
 });

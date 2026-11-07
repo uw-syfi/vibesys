@@ -4,6 +4,7 @@ import type {JSX} from 'react';
 import type {HistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
+  type CostFeedSnapshot,
   type FeedStatus,
   type FleetHostInput,
   type FleetPlace,
@@ -47,6 +48,8 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
+  /** How each run's cost stream stands while its Cost view is showing, by run id. */
+  readonly costFeeds: Readonly<Record<string, CostFeedSnapshot>>;
   /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
   readonly history: {
     readonly earlier: HistoryStatus;
@@ -73,6 +76,9 @@ export interface AppCommands {
   /** Read the item at `ordinal` of an agent whole. */
   readonly expand: (host: string, agentId: string, ordinal: number) => void;
 }
+
+/** A cost stream that has not answered yet. */
+const OPENING_COST: CostFeedSnapshot = {status: {_tag: 'Opening'}, freshness: 'empty'};
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
@@ -157,6 +163,8 @@ export function OrchestratorApp(props: {
   readonly commands: AppCommands;
   /** The person pressed Retry on a host's connection or feed. */
   readonly retryHost: (host: string) => void;
+  /** The person pressed Retry on a run's cost stream. */
+  readonly retryCost: (host: string, runId: string) => void;
   /** Where the person is; the caller owns it so it can watch what that screen needs. */
   readonly route: Route;
   /** The run list's filters and selected row, which the caller keeps while a run is open. */
@@ -211,6 +219,8 @@ export function OrchestratorApp(props: {
           runId={runId}
           nowMs={props.nowMs}
           view={route.view}
+          costFeed={host.costFeeds[runId] ?? OPENING_COST}
+          retryCost={() => props.retryCost(host.key, runId)}
           agentId={route.agentId}
           stopProgress={commands.stop[runId]}
           stop={() => commands.stopRun(host.key, runId)}

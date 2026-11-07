@@ -1,5 +1,6 @@
 import {
   AreaChart,
+  BarRows,
   Breadcrumb,
   Button,
   Card,
@@ -951,6 +952,17 @@ export const FRAME_ENTRIES = {
           to="Oct 15, 19:10"
           bars={USAGE_BARS}
         />
+        <StackedBars
+          label="Tokens over time with an axis"
+          unit="tokens"
+          bars={USAGE_BARS}
+          valueFormat={value => `${value}k`}
+          marks={[
+            {at: 0, text: '0 h'},
+            {at: 2, text: '1 h'},
+            {at: 4, text: '2 h'},
+          ]}
+        />
         <SwatchLegend
           label="Roles"
           items={[
@@ -978,6 +990,46 @@ export const FRAME_ENTRIES = {
           {key: REVIEWER_LOWER, name: REVIEWER_LOWER, series: 3, values: [0, 3, 8, 13, 6, 2, 9]},
         ]}
         format={value => `$${value}`}
+      />
+    ),
+  },
+  BarRows: {
+    render: () => (
+      <BarRows
+        label="Cost by agent type"
+        nameHeader="Type"
+        barLabel="Share of cost"
+        columns={[{header: 'Agents'}, {header: 'Turns'}, {header: 'Cost', strong: true}]}
+        rows={[
+          {
+            key: 'builder',
+            name: BUILDER_LOWER,
+            series: 1,
+            value: 205,
+            figures: ['\u00d717', '774', '$205'],
+          },
+          {
+            key: 'planner',
+            name: PLANNER_LOWER,
+            series: 7,
+            value: 37,
+            figures: ['\u00d72', '148', '$37'],
+          },
+          {
+            key: 'long',
+            name: 'a role whose name is much too long to fit in its column',
+            series: 3,
+            value: 5,
+            figures: ['\u00d71', '33', '$5'],
+          },
+          {
+            key: 'none',
+            name: REVIEWER_LOWER,
+            value: null,
+            note: 'No price',
+            figures: ['\u00d71', '41', null],
+          },
+        ]}
       />
     ),
   },

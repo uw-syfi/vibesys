@@ -33,6 +33,7 @@ const host: HostSnapshot = {
   freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  costFeeds: {},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 /** A second host that has said nothing yet, so the list offers a host filter. */
@@ -44,6 +45,7 @@ const quiet: HostSnapshot = {
   freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  costFeeds: {},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [
@@ -84,6 +86,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
             expand: () => undefined,
           }}
           retryHost={() => undefined}
+          retryCost={() => undefined}
           route={navigation.runs}
           fleet={navigation.fleet}
           go={go}
