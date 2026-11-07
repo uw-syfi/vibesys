@@ -1,9 +1,16 @@
 # Qwen3.6 AgentX serving on 4 AMD MI210 GPUs
 
-Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on
-**4 AMD MI210 GPUs**. This project supplies no candidate engine or validated
-AMD baseline. Implementing and optimizing the ROCm serving path is the task.
-The candidate lives in the project root, outside trusted `.vibesys/` inputs.
+Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on **4 AMD
+MI210 GPUs**. The candidate lives in the project root, outside trusted
+`.vibesys/` inputs.
+
+The project root holds a baseline engine, `engine/`, launched from the project
+root as `python -m engine.server --host <host> --port <port>`. It runs the BF16
+checkpoint with Transformers, sharded over every visible GPU, one request at a
+time, with a snapshot prefix cache. It meets the service contract below but is
+unoptimized and is not a validated performance baseline. Making the ROCm serving
+path fast, by changing or replacing any part of it, is the task. Keep that
+launch command working: the project README gives it as the service command.
 
 Partition BF16 weights across the four GPUs. Explore tensor, expert or pipeline
 parallelism, or two replicas of two GPUs each. Include collective and dispatch
@@ -21,8 +28,9 @@ skip experts, or change precision to improve the measurement.
 
 Serve the text-only coding workload; no vision throughput is scored. Preserve
 all text-model weights and the checkpoint's tokenizer/template semantics.
-PyTorch and Transformers may supply weight loading and reference operations;
-the candidate must own its serving path rather than proxy an existing server.
+PyTorch and Transformers may supply weight loading and model operations, as
+they do in the baseline; the candidate must own its serving path rather than
+proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
 See [the project README](../../../README.md) for AMD environment setup.

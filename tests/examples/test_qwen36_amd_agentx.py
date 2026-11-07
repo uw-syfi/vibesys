@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import runpy
 import tomllib
 from pathlib import Path
@@ -46,6 +47,37 @@ def test_amd_tasks_share_workload_but_declare_distinct_hardware(workload: str) -
         assert {item["name"] for item in objectives["objective"]} == set(_REPLAY.METRICS)
         assert objectives["pareto"]["relative_noise"] == 0.03
         assert _REPLAY.REVISION in (root / "reference/meta.json").read_text()
+
+
+def test_the_baseline_engine_serves_the_checkpoint_every_task_pins() -> None:
+    pinned = json.loads((_PROJECT / "engine/checkpoint.json").read_text())
+    assert pinned == {"model": _REPLAY.MODEL, "revision": _REPLAY.REVISION}
+    metas = list((_PROJECT / ".vibesys/tasks").glob("*/reference/meta.json"))
+    assert metas
+    for meta in metas:
+        assert json.loads(meta.read_text()) == {
+            "model_id": pinned["model"],
+            "revision": pinned["revision"],
+        }
+
+
+def _pins(lines: list[str]) -> dict[str, str]:
+    pins = {}
+    for line in lines:
+        name, sep, version = line.split("#", 1)[0].strip().strip('",').partition("==")
+        if sep:
+            pins[name] = version
+    return pins
+
+
+def test_the_engine_environments_pin_the_same_versions() -> None:
+    """The CUDA, ROCm and CPU-check environments differ only in their torch build."""
+    cuda = _pins((_PROJECT / "requirements.txt").read_text().splitlines())
+    rocm = _pins((_PROJECT / "requirements-agentx.txt").read_text().splitlines())
+    check = tomllib.loads((_PROJECT / ".vibesys/shared/cpu_check/pyproject.toml").read_text())
+    cpu = _pins(check["project"]["dependencies"])
+    assert cuda.pop("torch") == cpu.pop("torch") == "2.9.1"
+    assert cuda == rocm == cpu
 
 
 def test_recorded_sample_is_pinned_and_contains_every_round() -> None:

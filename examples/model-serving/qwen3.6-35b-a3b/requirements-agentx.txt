@@ -1,4 +1,5 @@
-# Install ROCm PyTorch separately as described in README.md.
+# Baseline engine (engine/) and service checker on the AMD tasks. Install ROCm PyTorch
+# (torch==2.9.1+rocm6.4) separately first, as described in README.md.
 transformers==5.22.1
 accelerate==1.12.0
 httpx==0.28.1

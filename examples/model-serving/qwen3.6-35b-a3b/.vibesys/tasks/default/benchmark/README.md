@@ -2,8 +2,8 @@
 
 Request Factory replays 64 independent streamed `/v1/completions` requests
 under saturated load, with maximum concurrency 16. Each prompt has 256 tokens
-and requests up to 128 output tokens. The workload targets the from-scratch
-sparse-MoE Qwen3.6-35B-A3B server across 2 H100s.
+and requests up to 128 output tokens. The workload targets the sparse-MoE
+Qwen3.6-35B-A3B server across 2 H100s.
 
 Exact token lengths replace the old approximate word count, and the fixed
 trace replaces the legacy 30-second duration window. RF counts completion

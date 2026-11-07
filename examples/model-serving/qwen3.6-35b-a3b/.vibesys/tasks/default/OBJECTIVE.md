@@ -1,12 +1,16 @@
-# Objective - Qwen3.6-35B-A3B From-Scratch 2xH100 Serving
+# Objective - Qwen3.6-35B-A3B 2xH100 Serving
 
-Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` from
-scratch across 2 NVIDIA H100 80GB GPUs. No serving engine is provided: unlike
-the `-vllm` variant, there is no vLLM or SGLang checkout. Implement the whole stack yourself: weight loading and sharding,
-expert routing and top-k dispatch, the fused grouped-GEMM MoE experts, the KV
-cache, a request scheduler, and the HTTP server. `torch` and `transformers` are
-available as utilities (weight loading, tokenizer, reference ops), not as a
-serving engine.
+Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` across
+2 NVIDIA H100 80GB GPUs. There is no vLLM or SGLang checkout. The project root
+holds a baseline engine, `engine/`, which `main.py` deploys on Modal as
+`python -m engine.server`: Transformers runs the BF16 checkpoint sharded over
+both GPUs, one request at a time, with a snapshot prefix cache. It runs and
+meets the service contract, but it is unoptimized and is not a validated
+performance baseline. Replace its pieces with your own: weight sharding, expert
+routing and top-k dispatch, the fused grouped-GEMM MoE experts, the KV cache, a
+request scheduler, and the HTTP server. `torch` and `transformers` are
+available as utilities (weight loading, tokenizer, reference ops); the measured
+serving path should become your own.
 
 Qwen3.6-35B-A3B is a sparse Mixture-of-Experts model: 35B total parameters but
 only ~3B activated per token (256 experts, 8 routed + 1 shared per token). At
