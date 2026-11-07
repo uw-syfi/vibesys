@@ -6,6 +6,8 @@
  * `cost=<priced|ended|none|empty|long|old|absent>` picks the cost the host serves for it (priced and
  * unpriced turns when absent from the address; `old` is a host without the cost stream, `absent`
  * one that has no view for the run); one `host=<key>` per host to show (this machine when none);
+ * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
+ * long, `down=<n>` has the host at that position lose its link after its first snapshot);
  * `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
  * memory, so a reload starts again from the address.
  */
@@ -43,11 +45,11 @@ import {
   NO_TURNS,
   PRICED_AND_UNPRICED,
 } from '../orchestrator/cost-views.js';
-import {FakeDaemon, generateScenario, methodPathOf} from '../orchestrator/index.js';
+import {FakeDaemon, fleetScenario, generateScenario, methodPathOf} from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
-import {makeFakeTransport} from '../transport/index.js';
+import {makeFakeTransport, type Recording} from '../transport/index.js';
 
 const DEFAULT_SCENARIO = '5-4-live';
 const THIS_MACHINE = {key: 'local', label: 'This machine'} as const;
@@ -82,6 +84,51 @@ const COSTS: Readonly<Record<string, CostView>> = {
 };
 
 const query = new URLSearchParams(window.location.search);
+const named = hostsOfAddress(window.location.search);
+const shown = named.length === 0 ? [THIS_MACHINE] : named;
+
+/** The host at position `down` loses its link after its first snapshot: its run stream ends. */
+const downAt = query.has('down') ? Number(query.get('down')) : undefined;
+
+/** Each host's own fleet, from `fleet=<runs>-<live>`: the same shape, a different seed. */
+function fleetRecording(spec: string): Recording {
+  const [runs = '12', live = '4'] = spec.split('-');
+  const nowMs = Date.now();
+  const bases = new Map(
+    shown.map((host, index) => [
+      host.key,
+      daemonRecording(
+        new FakeDaemon(
+          fleetScenario({
+            seed: 11 + index,
+            prefix: `h${index}`,
+            runs: Number(runs),
+            live: Number(live),
+            nowMs,
+            ...(query.has('long') ? {longEvery: 3} : {}),
+          }),
+        ),
+      ),
+    ]),
+  );
+  // The transport counts calls to a method across hosts; a host's own count says which call is its first.
+  const calls = new Map<string, number>();
+  return {
+    respond: (target, nth) => {
+      const steps = bases.get(target.host)?.respond(target, nth) ?? [];
+      const down = downAt !== undefined && shown[downAt]?.key === target.host;
+      const own = calls.get(`${target.host}|${target.method}`) ?? 0;
+      calls.set(`${target.host}|${target.method}`, own + 1);
+      if (!down) return steps;
+      if (target.method === methodPathOf('Hello') && own > 0)
+        return [{end: {message: 'link lost', status: RpcStatus.UNAVAILABLE}}];
+      return target.method === methodPathOf('WatchRuns')
+        ? [...steps.slice(0, -1), {end: {message: 'link lost', status: RpcStatus.UNAVAILABLE}}]
+        : steps;
+    },
+  };
+}
+
 const scenario = scenarioOf(window.location.search);
 const daemon = new FakeDaemon({
   ...scenario,
@@ -99,21 +146,27 @@ const withoutCostStream = {
       ? [{end: {message: 'no such method', status: RpcStatus.UNIMPLEMENTED}}]
       : served.respond(...call),
 };
+const fleetSpec = query.get('fleet');
 const fake = makeFakeTransport(
-  query.has('login-failed')
-    ? {
-        respond: () => [
-          {end: {linkProblem: DesktopLinkProblem.AUTH, message: 'Permission denied (publickey).'}},
-        ],
-      }
-    : query.get('cost') === 'old'
-      ? withoutCostStream
-      : served,
+  fleetSpec !== null
+    ? fleetRecording(fleetSpec)
+    : query.has('login-failed')
+      ? {
+          respond: () => [
+            {
+              end: {
+                linkProblem: DesktopLinkProblem.AUTH,
+                message: 'Permission denied (publickey).',
+              },
+            },
+          ],
+        }
+      : query.get('cost') === 'old'
+        ? withoutCostStream
+        : served,
 );
 const saved = savedAppearance(query);
 const preferences = makeFakePreferencesBridge(saved === undefined ? {} : {saved});
-const named = hostsOfAddress(window.location.search);
-const shown = named.length === 0 ? [THIS_MACHINE] : named;
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('fixture.html has no #root');

@@ -16,8 +16,9 @@ import type {
   CostFeedSnapshot,
   CostTarget,
   FeedStatus,
+  FleetPlace,
+  NavigationAction,
   Route,
-  RouteAction,
 } from '../../state/index.js';
 import {costTarget} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
@@ -148,11 +149,12 @@ export function ConnectedApp(props: {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
   readonly route: Route;
-  readonly go: (action: RouteAction) => void;
+  readonly fleet: FleetPlace;
+  readonly go: (action: NavigationAction) => void;
   readonly issues: Issues;
   readonly setIssues: (update: (all: Issues) => Issues) => void;
 }): JSX.Element {
-  const {hosts, dispatch, route, go, issues, setIssues} = props;
+  const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
@@ -224,6 +226,7 @@ export function ConnectedApp(props: {
       nowMs={clock.value}
       commands={commands}
       route={route}
+      fleet={fleet}
       go={go}
       retryCost={(host, runId) => {
         const session = sessionOf(host);

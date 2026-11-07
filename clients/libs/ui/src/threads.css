@@ -467,3 +467,16 @@
     visibility: hidden;
   }
 }
+
+/*
+ * A chart panel's heading on one line: a name a person chose is cut with an ellipsis (its whole text
+ * on hover) before it can push the figure out of the row, and the note gives way first.
+ */
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-title > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
+  flex: 0 4 auto;
+}

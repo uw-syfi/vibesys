@@ -51,8 +51,6 @@
   font-size: var(--text-code-size);
   line-height: var(--text-code-line);
 }
-/* The trail stays on one line: a step that is a name a person chose gives way, cut with an ellipsis
-   (its whole text on hover), instead of the trail breaking between a step and the slash before it. */
 .vs-crumbs ol {
   display: flex;
   align-items: center;
@@ -1105,6 +1103,11 @@ button.vs-crumb:focus-visible {
   border-radius: var(--radius);
   cursor: pointer;
 }
+.vs-columnlist[data-lines="2"] .vs-columnlist-row {
+  min-height: calc(
+    var(--text-body-line) + var(--text-small-line) + var(--space-3) * 2 + var(--hairline) * 2
+  );
+}
 .vs-columnlist-row:hover {
   background: var(--panel-2);
 }
@@ -1198,6 +1201,12 @@ button.vs-crumb:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The words of a part, as flex items, are cut with their own ellipsis when the cell has no room. */
+.vs-columnlist-inline[data-nowrap] > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .vs-columnlist-mark {
   flex: none;
   width: var(--dot);
@@ -1211,6 +1220,13 @@ button.vs-crumb:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+/* Each line of a cell stays on one line and is cut with an ellipsis (the cell's hint has it whole). */
+.vs-columnlist-lines > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */
@@ -1634,15 +1650,7 @@ button.vs-crumb:focus-visible {
   flex-wrap: nowrap;
   flex: 0 1 auto;
 }
-/* A name a person chose is cut with an ellipsis (its whole text on hover) before it can push the
-   figure out of the row; the note gives way first. */
-.vs-chart-panel-head[data-one-line] .vs-chart-panel-title > .vs-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
-  flex: 0 4 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

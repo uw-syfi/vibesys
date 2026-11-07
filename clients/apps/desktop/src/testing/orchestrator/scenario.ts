@@ -70,10 +70,10 @@ export interface ScenarioOptions {
 }
 
 export interface Scenario {
+  /** The search facts of every run the scenario holds, when it holds several (`search` serves one). */
+  readonly searches?: readonly SearchState[];
   /** Serve the generic scripted search view with the run. */
   readonly search?: boolean;
-  /** Serve these search views with the run instead (the host's own, scripted by the caller). */
-  readonly searches?: readonly SearchState[];
   readonly searchStale?: boolean;
   readonly searchTruncated?: boolean;
   readonly runId: string;

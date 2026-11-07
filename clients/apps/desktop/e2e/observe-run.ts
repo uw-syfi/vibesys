@@ -112,12 +112,12 @@ async function launch(world: World, userData: string): Promise<ElectronApplicati
 }
 
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
-  const runs = page.getByRole('table', {name: 'Runs on all connected hosts'});
-  // The row reads: task, status, number of agents, host, start time.
-  const row = runs.getByRole('row', {
-    name: new RegExp(`^${world.task}\\s+Running\\s+${world.agents.length}\\b`),
-  });
+  // A running run is in the list of live runs; a row is named by its run (the task) and says the
+  // rest, its state first, in its description.
+  const live = page.getByRole('listbox', {name: 'Live runs'});
+  const row = live.getByRole('option', {name: new RegExp(`^${world.task}\\b`)});
   await expect(row).toBeVisible();
+  await expect(row).toContainText('Running');
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
   // Stop is offered only while a run runs.

@@ -51,7 +51,8 @@ export interface Crumb {
  * Where the reader is: every zoom level from the top, each but the last a link back to it. The
  * last names what the panes show now. A `figure` after the last level (a result, such as a gain)
  * reads in the ok color, so the same line can also name a chain, such as the path to the best
- * result.
+ * result. The trail stays on one line: a step that is a name a person chose is cut with an ellipsis
+ * (its whole text on hover) instead of the trail breaking between a step and the slash before it.
  */
 export function Breadcrumb(props: {
   readonly label: string;
