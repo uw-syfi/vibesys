@@ -62,7 +62,7 @@ export function WorkstreamsCard(props: {
         <Text tone="muted">No workstreams</Text>
       ) : (
         <Table
-          label="Workstreams"
+          label="Workstream list"
           rows={props.workstreams}
           rowKey={row => String(row.number)}
           middle
@@ -95,6 +95,7 @@ export function WorkstreamsCard(props: {
             {
               key: 'gain',
               header: 'Gain',
+              mono: true,
               align: 'end',
               cell: row => {
                 const first = row.gains[0];

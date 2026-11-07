@@ -155,7 +155,7 @@ export function IdeasCard(props: {
         ) : (
           <div ref={focusRow}>
             <Table
-              label="Ideas"
+              label="Idea list"
               rows={rows}
               rowKey={row => String(row.planNumber)}
               {...(props.selected === null ? {} : {selected: String(props.selected)})}
@@ -196,6 +196,7 @@ export function IdeasCard(props: {
                 {
                   key: 'gain',
                   header: 'Gain',
+                  mono: true,
                   align: 'end',
                   cell: row => <GainCell gains={row.gains} units={props.units} />,
                 },

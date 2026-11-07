@@ -596,7 +596,7 @@ describe('the ideas and workstreams of the report', () => {
     const inRun = (served?.ideas ?? []).filter(view => view.inRun);
     expect(inRun.length).toBeGreaterThan(0);
     expect(inRun.length).toBeLessThan(12);
-    const rows = rowsOf(screen.container, 'Ideas');
+    const rows = rowsOf(screen.container, 'Idea list');
     expect(rows).toHaveLength(inRun.length);
     for (const view of inRun) {
       const row = rows.find(cells => cells[0] === `#${view.planNumber}`);
@@ -624,7 +624,7 @@ describe('the ideas and workstreams of the report', () => {
   it('shows the workstreams with the host’s counts and best gain, and no count of its own', () => {
     const {screen} = render({ideas: 12});
     const served = stateOf({ideas: 12}).searches[RUN];
-    const rows = rowsOf(screen.container, 'Workstreams');
+    const rows = rowsOf(screen.container, 'Workstream list');
     expect(rows).toHaveLength(served?.workstreamViews.length ?? -1);
     for (const view of served?.workstreamViews ?? []) {
       const total = view.kept + view.rejected + view.open + view.parked;
@@ -660,9 +660,9 @@ describe('the ideas and workstreams of the report', () => {
     const to = Math.max(...times);
     const {screen} = render({ideas: 12, window: {fromMs: from, toMs: to}});
     const inside = times.filter(at => at > from && at <= to).length;
-    expect(rowsOf(screen.container, 'Ideas')).toHaveLength(inside);
+    expect(rowsOf(screen.container, 'Idea list')).toHaveLength(inside);
     choose(screen.container, 'All 12');
-    expect(rowsOf(screen.container, 'Ideas')).toHaveLength(12);
+    expect(rowsOf(screen.container, 'Idea list')).toHaveLength(12);
     screen.unmount();
   });
 
@@ -706,7 +706,7 @@ describe('the ideas and workstreams of the report', () => {
     const show = screen.control(`Show idea ${plan}`);
     screen.press(show);
     const current = screen.container.querySelector(
-      'table[aria-label="Ideas"] tr[aria-current="true"]',
+      'table[aria-label="Idea list"] tr[aria-current="true"]',
     );
     expect(current?.textContent).toContain(`#${plan}`);
     screen.unmount();

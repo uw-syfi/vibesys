@@ -175,9 +175,10 @@ function TileCards(props: {readonly tiles: Tiles; readonly showIdeas: () => void
             </Stack>
           )}
         </Card>
-        <Card
-          section="Ideas"
-          action={
+        <Card section="Ideas">
+          <Row gap="space-7" rowGap="space-4" align="end" wrap>
+            <Stat label="Created" value={tiles.ideas.created} />
+            <Stat label="Changed" value={tiles.ideas.changed} />
             <Button
               text="Show"
               label="Show ideas of this window"
@@ -185,11 +186,6 @@ function TileCards(props: {readonly tiles: Tiles; readonly showIdeas: () => void
               size="sm"
               press={props.showIdeas}
             />
-          }
-        >
-          <Row gap="space-7" rowGap="space-4" wrap>
-            <Stat label="Created" value={tiles.ideas.created} />
-            <Stat label="Changed" value={tiles.ideas.changed} />
           </Row>
         </Card>
         <Card section="Agents">
