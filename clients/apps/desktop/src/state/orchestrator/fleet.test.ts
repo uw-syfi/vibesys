@@ -12,16 +12,20 @@ import {
   ReportSchema,
   ReportScope,
   type Run,
+  RunLimit,
   RunSchema,
   RunStatus,
   type RunSummary,
   RunSummarySchema,
+  SearchStateSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {Freshness} from '../freshness.js';
 import {HOST_STATUS_KINDS, type HostStatus} from '../host-status.js';
 import {
+  ATTENTION_KINDS,
   FLEET_STATES,
+  type FleetAttention,
   type FleetFilter,
   type FleetHostInput,
   type FleetRow,
@@ -31,6 +35,35 @@ import {
   NO_FLEET_FILTER,
 } from './fleet.js';
 import {emptyState, type OrchestratorState} from './state.js';
+
+/** A whole-second time as milliseconds; the specs below set no fraction of a second. */
+const secondsMs = (at: {readonly seconds: bigint} | undefined): number | null =>
+  at === undefined ? null : Number(at.seconds) * 1000;
+
+/**
+ * Why a run wants a look, read straight off the facts the host keeps of it: a live run for its
+ * stall, its stuck jobs, its limit and its final report; a run that is over only for the checkouts
+ * it kept.
+ */
+function reasonsOf(run: Run, troubles: number): FleetAttention[] {
+  const kept = run.keptCheckouts.length;
+  if (!isLive(run.status)) return kept > 0 ? [{kind: 'kept', checkouts: kept}] : [];
+  const sinceMs = secondsMs(run.stalledSince);
+  const limit = {
+    [RunLimit.UNSPECIFIED]: null,
+    [RunLimit.TIME]: 'time',
+    [RunLimit.COST]: 'cost',
+  } as const;
+  const reached = limit[run.limitReached];
+  return [
+    ...(sinceMs === null ? [] : [{kind: 'stalled', sinceMs} as const]),
+    ...(troubles === 0 ? [] : [{kind: 'troubles', jobs: troubles} as const]),
+    ...(reached === null
+      ? []
+      : [{kind: 'limit', limit: reached, atMs: secondsMs(run.limitReachedAt)} as const]),
+    ...(run.finalReported ? [{kind: 'final'} as const] : []),
+  ];
+}
 
 const STATUSES = [
   RunStatus.STARTING,
@@ -72,6 +105,14 @@ interface RunSpec {
   readonly budget: number | undefined;
   readonly summary: SummarySpec | undefined;
   readonly noise: NoiseSpec;
+  /** The facts the host keeps of why the run may want a look, each set or not at random. */
+  readonly stalledMs: number | undefined;
+  readonly troubles: number;
+  readonly limit: RunLimit;
+  readonly limitMs: number | undefined;
+  readonly finalReported: boolean;
+  readonly kept: number;
+  readonly deadlineMs: number | undefined;
 }
 
 const summarySpec: fc.Arbitrary<SummarySpec> = fc.record({
@@ -122,6 +163,22 @@ const runSpec: fc.Arbitrary<RunSpec> = fc.record({
   budget: fc.option(fc.double({min: 1, max: 9000, noNaN: true}), {nil: undefined}),
   summary: fc.option(summarySpec, {nil: undefined}),
   noise: noiseSpec,
+  stalledMs: fc.option(
+    fc.integer({min: 1, max: 40}).map(n => n * 1000),
+    {nil: undefined},
+  ),
+  troubles: fc.integer({min: 0, max: 3}),
+  limit: fc.constantFrom(RunLimit.UNSPECIFIED, RunLimit.TIME, RunLimit.COST),
+  limitMs: fc.option(
+    fc.integer({min: 1, max: 40}).map(n => n * 1000),
+    {nil: undefined},
+  ),
+  finalReported: fc.boolean(),
+  kept: fc.integer({min: 0, max: 3}),
+  deadlineMs: fc.option(
+    fc.integer({min: 1, max: 40}).map(n => n * 60_000),
+    {nil: undefined},
+  ),
 });
 
 function summaryOf(runId: string, spec: SummarySpec): RunSummary {
@@ -177,6 +234,12 @@ function dataOf(specs: readonly RunSpec[], noise = true): OrchestratorState {
       neverOpened: spec.neverOpened,
       ...(spec.cost === undefined ? {} : {usage: {costUsd: spec.cost}}),
       ...(spec.budget === undefined ? {} : {maxCostUsd: spec.budget}),
+      ...(spec.stalledMs === undefined ? {} : {stalledSince: timestampFromMs(spec.stalledMs)}),
+      limitReached: spec.limit,
+      ...(spec.limitMs === undefined ? {} : {limitReachedAt: timestampFromMs(spec.limitMs)}),
+      finalReported: spec.finalReported,
+      keptCheckouts: Array.from({length: spec.kept}, (_, index) => ({agentId: `w${index}`})),
+      ...(spec.deadlineMs === undefined ? {} : {deadline: timestampFromMs(spec.deadlineMs)}),
     }),
   );
   const agents = noise
@@ -217,6 +280,25 @@ function dataOf(specs: readonly RunSpec[], noise = true): OrchestratorState {
     ),
     agents: Object.fromEntries(agents.map(agent => [agent.id, agent])),
     messages: Object.fromEntries(messages.map(message => [message.id, message])),
+    searches: Object.fromEntries(
+      unique.flatMap(spec =>
+        spec.troubles === 0
+          ? []
+          : [
+              [
+                spec.id,
+                create(SearchStateSchema, {
+                  runId: spec.id,
+                  revision: 1n,
+                  troubles: Array.from({length: spec.troubles}, (_, index) => ({
+                    jobId: `${spec.id}-job-${index}`,
+                    failure: {message: 'No worker'},
+                  })),
+                }),
+              ] as const,
+            ],
+      ),
+    ),
   };
 }
 
@@ -419,7 +501,7 @@ describe('the fleet of runs', () => {
 
   // The fleet derives nothing: a host that held any agents and any messages (a window report among
   // them, which the host marks and the fleet never inspects) shows the rows of a host that held none.
-  it('reads nothing but runs and their summaries: the agents and messages held change no row', () => {
+  it('reads nothing but runs, their summaries and their searches: the agents and messages held change no row', () => {
     fc.assert(
       fc.property(fleet, hosts => {
         const bare = hosts.map(host => ({
@@ -440,6 +522,36 @@ describe('the fleet of runs', () => {
           expect(row.costUsd).toBe(run?.usage?.costUsd ?? null);
           expect(row.budgetUsd).toBe(run?.maxCostUsd ?? null);
         }
+      }),
+    );
+  });
+
+  it('says a live run wants a look exactly for each fact the host keeps of it, the most pressing first', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        for (const row of shown(hosts, NO_FLEET_FILTER)) {
+          const data = hosts.find(each => each.key === row.host.key)?.data;
+          const run = data?.runs[row.runId];
+          if (run === undefined) throw new Error('a row is of a run the host holds');
+          const kinds = row.attention.map(attention => attention.kind);
+          // Each reason at most once, in the order of `ATTENTION_KINDS`.
+          expect(kinds).toEqual(ATTENTION_KINDS.filter(kind => kinds.includes(kind)));
+          expect(row.attention).toEqual(
+            reasonsOf(run, data?.searches[run.id]?.troubles.length ?? 0),
+          );
+          expect(row.deadlineMs).toBe(secondsMs(run.deadline));
+        }
+      }),
+    );
+  });
+
+  it('never says a run wants a look for how its host is read: freshness changes no reason', () => {
+    fc.assert(
+      fc.property(fleet, fc.constantFrom(...FRESHNESS), (hosts, freshness) => {
+        const reasons = (each: readonly FleetHostInput[]) =>
+          shown(each, NO_FLEET_FILTER).map(row => [row.key, row.attention]);
+        const refreshed = hosts.map(host => ({...host, freshness, staleForMs: null}));
+        expect(reasons(refreshed)).toEqual(reasons(hosts));
       }),
     );
   });

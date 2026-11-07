@@ -3,12 +3,14 @@
  * with the filters of the Runs screen applied. A plain fold over what the hosts have said; it reads
  * no clock and starts no work, and it derives nothing the host serves: the report a run is summed up
  * by, the agents working, the best on each objective, a percent of a bound, a cost and a time are
- * shown as sent (the run's `RunSummary`), and absent exactly when the host sent none. The screen
- * formats.
+ * shown as sent (the run's `RunSummary`), and absent exactly when the host sent none. Why a run wants
+ * a look is read from the facts the host keeps for it (a stall, stuck jobs, a limit, a final report,
+ * kept checkouts), never guessed from a duration. The screen formats.
  */
 import {
   type ObjectiveStanding,
   type Run,
+  RunLimit,
   RunStatus,
   type RunSummary,
   type SearchState,
@@ -81,6 +83,32 @@ const objectiveOf = (standing: ObjectiveStanding): FleetObjective => ({
   percentOfBound: standing.bestPercentOfBound ?? null,
 });
 
+/**
+ * Why a run wants the operator's look: each a fact the host keeps for the run. Only a live run can
+ * stall, have stuck jobs, reach a limit or have finished its work; only a run that is over keeps
+ * checkouts.
+ */
+export type FleetAttention =
+  /** Nothing can move the run since `sinceMs`: no agent works, no message waits and no job runs. */
+  | {readonly kind: 'stalled'; readonly sinceMs: number}
+  /** Jobs of the run that are not final and that nothing is working on. */
+  | {readonly kind: 'troubles'; readonly jobs: number}
+  /** The run reached its time or its cost limit: its lead was told to finish. */
+  | {readonly kind: 'limit'; readonly limit: 'time' | 'cost'; readonly atMs: number | null}
+  /** The lead posted its final report and started no new work since. */
+  | {readonly kind: 'final'}
+  /** The run left working copies holding changes git does not have, for the operator to decide on. */
+  | {readonly kind: 'kept'; readonly checkouts: number};
+
+/** Every kind of `FleetAttention`, the most pressing first: the order a row lists its reasons in. */
+export const ATTENTION_KINDS: readonly FleetAttention['kind'][] = [
+  'stalled',
+  'troubles',
+  'limit',
+  'final',
+  'kept',
+];
+
 export interface FleetRow {
   /** Unique across hosts: the host and the run, the same key a route is made from. */
   readonly key: string;
@@ -117,6 +145,10 @@ export interface FleetRow {
   readonly lastReportMs: number | null;
   /** The host could not serve the run's report: it is missing, not posted by no one. */
   readonly reportUnavailable: boolean;
+  /** When the run reaches its time limit, or null for a run with none. */
+  readonly deadlineMs: number | null;
+  /** Why the run wants a look, in the order of `ATTENTION_KINDS`; empty when nothing does. */
+  readonly attention: readonly FleetAttention[];
 }
 
 /** A host as the filter strip shows it, with its run count under the state filter. */
@@ -147,7 +179,35 @@ const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set([
 /** Whether a run in `status` is still working. */
 export const isLive = (status: RunStatus): boolean => LIVE_STATUSES.has(status);
 
-function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): FleetRow {
+const LIMIT: Readonly<Record<RunLimit, 'time' | 'cost' | null>> = {
+  [RunLimit.UNSPECIFIED]: null,
+  [RunLimit.TIME]: 'time',
+  [RunLimit.COST]: 'cost',
+};
+
+/** Why the run wants a look, the most pressing first: pushed in the order of `ATTENTION_KINDS`. */
+function attentionOf(run: Run, search: SearchState | undefined): readonly FleetAttention[] {
+  if (!isLive(run.status)) {
+    const checkouts = run.keptCheckouts.length;
+    return checkouts === 0 ? [] : [{kind: 'kept', checkouts}];
+  }
+  const found: FleetAttention[] = [];
+  const stalled = ms(run.stalledSince);
+  if (stalled !== null) found.push({kind: 'stalled', sinceMs: stalled});
+  const jobs = search?.troubles.length ?? 0;
+  if (jobs > 0) found.push({kind: 'troubles', jobs});
+  const limit = LIMIT[run.limitReached];
+  if (limit !== null) found.push({kind: 'limit', limit, atMs: ms(run.limitReachedAt)});
+  if (run.finalReported) found.push({kind: 'final'});
+  return found;
+}
+
+function rowOf(
+  host: FleetHostRef,
+  summary: RunSummary | undefined,
+  search: SearchState | undefined,
+  run: Run,
+): FleetRow {
   return {
     key: fleetKey(host.key, run.id),
     host,
@@ -166,6 +226,8 @@ function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): F
     agentsRunning: summary?.agentsWorking ?? null,
     lastReportMs: ms(summary?.report?.at),
     reportUnavailable: summary?.reportUnavailable ?? false,
+    deadlineMs: ms(run.deadline),
+    attention: attentionOf(run, search),
   };
 }
 
@@ -183,7 +245,7 @@ export function fleetRows(hosts: readonly FleetHostInput[]): readonly FleetRow[]
     };
     return Object.values(host.data.runs)
       .filter(run => !run.neverOpened)
-      .map(run => rowOf(ref, host.data.summaries[run.id], run));
+      .map(run => rowOf(ref, host.data.summaries[run.id], host.data.searches[run.id], run));
   });
 }
 

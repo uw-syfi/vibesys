@@ -1,3 +1,4 @@
+import {RunStatus} from '@vibesys/orchestrator-proto';
 import {
   Button,
   CellInline,
@@ -18,12 +19,14 @@ import {
   Stack,
   StatusDot,
   Text,
+  withoutPaths,
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   FLEET_STATES,
   type FleetFilter,
   type FleetHostInput,
+  type FleetHostRef,
   type FleetHostView,
   type FleetPlace,
   type FleetRow,
@@ -39,6 +42,7 @@ import {HostStatusChip} from '../host-status-chip.js';
 import {hostStatusWord} from '../host-status-words.js';
 import {
   ago,
+  attentionWords,
   dollars,
   percent,
   resultHint,
@@ -67,9 +71,12 @@ const isFresh = (row: FleetRow, nowMs: number): boolean => {
   return at !== null && nowMs >= at && nowMs - at < FRESH_MS;
 };
 
-/** How long the run has gone, or went. */
-const elapsed = (row: FleetRow, nowMs: number): string | null =>
-  row.startedMs === null ? null : span((row.endedMs ?? nowMs) - row.startedMs);
+/** A run still starting or running says for how long in its chip: `Running 5h 20m`. */
+function statusLabel(row: FleetRow, nowMs: number): string {
+  const {label} = runStateWord(row.setup, row.status);
+  const counting = row.status === RunStatus.STARTING || row.status === RunStatus.RUNNING;
+  return counting && row.startedMs !== null ? `${label} ${span(nowMs - row.startedMs)}` : label;
+}
 
 /** A run's objectives as the lines of the Best cell: the first two, and how many more. */
 function resultLines(row: FleetRow): readonly string[] {
@@ -84,18 +91,67 @@ function resultLines(row: FleetRow): readonly string[] {
   return more > 0 ? [...lines.slice(0, -1), `${lines.at(-1)} +${more}`] : lines;
 }
 
-/** What a row says for the status cell's second line: the report's age while live, the end time after. */
+/** What a row says when nothing wants a look: the report's age while live, the end time after. */
 function whenLine(row: FleetRow, nowMs: number, clock: DisplayClock): string {
   if (!row.live) return row.endedMs === null ? '' : clock.datedMoment(row.endedMs);
   return row.lastReportMs === null ? 'No report' : `Report ${ago(nowMs - row.lastReportMs)}`;
 }
 
-const whenHint = (row: FleetRow, nowMs: number, clock: DisplayClock): string => {
-  if (!row.live) return row.endedMs === null ? '' : `Ended ${clock.datedMoment(row.endedMs)}`;
+/**
+ * The Status cell's second line: the most pressing reason to look and how many more there are;
+ * else that the host could not serve the report; else `whenLine`.
+ */
+function statusNote(row: FleetRow, nowMs: number, clock: DisplayClock): ReactNode {
+  const [first, ...others] = row.attention;
+  if (first === undefined) {
+    return row.reportUnavailable ? (
+      <Chip label="Report unavailable" tone="warn" />
+    ) : (
+      whenLine(row, nowMs, clock)
+    );
+  }
+  const words = attentionWords(first, nowMs, clock);
+  return (
+    <Text variant="small" tone={words.tone}>
+      {others.length === 0 ? words.label : `${words.label} +${others.length}`}
+    </Text>
+  );
+}
+
+/** The report a live row was last summed up by, for the pointer. */
+function reportHint(row: FleetRow, nowMs: number, clock: DisplayClock): string {
+  if (!row.live) return '';
+  if (row.reportUnavailable) return 'Report unavailable: the host could not serve it';
   return row.lastReportMs === null
     ? 'The lead has not posted a report'
     : `Last report ${ago(nowMs - row.lastReportMs)}, ${clock.datedMoment(row.lastReportMs)}`;
-};
+}
+
+/** The Status cell whole, for the pointer: how long, every reason to look, the report and the limit. */
+function statusHint(row: FleetRow, nowMs: number, clock: DisplayClock): string {
+  const {label} = runStateWord(row.setup, row.status);
+  const since =
+    row.endedMs !== null
+      ? `${label} ${clock.datedMoment(row.endedMs)}${row.startedMs === null ? '' : `, after ${span(row.endedMs - row.startedMs)}`}`
+      : row.startedMs === null
+        ? label
+        : `${label}, started ${clock.datedMoment(row.startedMs)}`;
+  return [
+    since,
+    ...row.attention.map(attention => {
+      const words = attentionWords(attention, nowMs, clock);
+      return `${words.label}: ${words.hint}`;
+    }),
+    reportHint(row, nowMs, clock),
+    row.deadlineMs === null ? '' : `Time limit ${clock.datedMoment(row.deadlineMs)}`,
+  ]
+    .filter(line => line !== '')
+    .join('\n');
+}
+
+/** A host's name, and after it the host's one status when it is not live: ` · Stale 14m`. */
+const hostWords = (host: FleetHostRef): string =>
+  host.status.kind === 'live' ? host.label : `${host.label} · ${hostStatusWord(host.status).label}`;
 
 /** The columns that name a run and say how it stands, and where it is. */
 function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColumn<FleetRow>[] {
@@ -104,22 +160,15 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       key: 'name',
       header: 'Run',
       size: 'fill',
-      hint: row =>
-        [
-          rowTitle(row),
-          row.repository,
-          row.startedMs === null ? '' : `Started ${clock.datedMoment(row.startedMs)}`,
-        ]
-          .filter(line => line !== '')
-          .join('\n'),
+      hint: row => [rowTitle(row), row.repository, `On ${hostWords(row.host)}`].join('\n'),
       cell: row => (
         <CellLines
           main={<Text variant="body-strong">{rowTitle(row)}</Text>}
           note={
             <Text variant="small" tone="muted">
-              {elapsed(row, nowMs)}
-              {/* The Host column gives way when the list is narrow; its word moves here. */}
-              <span data-narrow-only>{` \u00b7 ${row.host.label}`}</span>
+              {withoutPaths(row.repository)}
+              {/* The Host column gives way when the list is narrow; its words move here. */}
+              <span data-narrow-only>{` \u00b7 ${hostWords(row.host)}`}</span>
             </Text>
           }
         />
@@ -130,22 +179,22 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       header: 'Status',
       size: 'wide',
       narrow: 'short',
-      hint: row => whenHint(row, nowMs, clock) || undefined,
-      cell: row => {
-        const word = runStateWord(row.setup, row.status);
-        return (
-          <CellLines
-            main={<Chip label={word.label} tone={word.tone} dot />}
-            note={
-              row.reportUnavailable ? (
-                <Chip label="Report unavailable" tone="warn" />
-              ) : (
-                whenLine(row, nowMs, clock)
-              )
-            }
-          />
-        );
-      },
+      hint: row => statusHint(row, nowMs, clock),
+      cell: row => (
+        <CellLines
+          main={
+            <Chip
+              label={statusLabel(row, nowMs)}
+              tone={runStateWord(row.setup, row.status).tone}
+              dot
+              // The label grows with a live run's running time; cut it instead of spilling into
+              // Best when the column is narrow, rather than leaving the row's own wider hint.
+              clip
+            />
+          }
+          note={statusNote(row, nowMs, clock)}
+        />
+      ),
     },
     {
       key: 'host',
@@ -214,6 +263,10 @@ function figureColumns(
       header: 'Best',
       size: 'wide',
       narrow: 'short',
+      note: {
+        label: '% of bound',
+        hint: 'A percent after a result is how close it is to the bound the agents declared, as the host served it',
+      },
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);
@@ -263,8 +316,9 @@ const columns = (
 
 const describe = (row: FleetRow, nowMs: number, clock: DisplayClock): string =>
   [
-    `On ${row.host.label}`,
-    runStateWord(row.setup, row.status).label,
+    `On ${hostWords(row.host)}`,
+    statusLabel(row, nowMs),
+    ...row.attention.map(attention => attentionWords(attention, nowMs, clock).label),
     resultLines(row).join(', '),
     row.costUsd === null ? undefined : dollars(row.costUsd),
     whenLine(row, nowMs, clock),
@@ -296,10 +350,6 @@ function HostFilter(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element | null {
   const {hosts} = props;
-  const word = (host: FleetHostView): string =>
-    host.status.kind === 'live'
-      ? host.label
-      : `${host.label} · ${hostStatusWord(host.status).label}`;
   if (hosts.length > 1) {
     // One control however many hosts there are: a row of buttons for each host would take a row
     // of its own in a narrow window.
@@ -312,7 +362,7 @@ function HostFilter(props: {
           value={props.host ?? ALL_HOSTS}
           options={[
             {value: ALL_HOSTS, label: 'All hosts'},
-            ...hosts.map(host => ({value: host.key, label: word(host)})),
+            ...hosts.map(host => ({value: host.key, label: hostWords(host)})),
           ]}
           change={host =>
             props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})

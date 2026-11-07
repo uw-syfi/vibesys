@@ -99,6 +99,7 @@ export {
 } from './orchestrator/cost.js';
 export {
   FLEET_STATES,
+  type FleetAttention,
   type FleetFilter,
   type FleetHostInput,
   type FleetHostRef,
