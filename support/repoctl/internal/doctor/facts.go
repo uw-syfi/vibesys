@@ -108,9 +108,14 @@ type ProgramFacts struct {
 	Required string
 	// RequiredError says why the repository's pin could not be read.
 	RequiredError string
-	// OnPath lists the copies in PATH order; InRepo the copies in the repository directories.
+	// OnPath lists the copies in PATH order; InRepo the copies in the repository directories;
+	// Cached the copies in the per-user cache directories.
 	OnPath []Copy
 	InRepo []Copy
+	Cached []Copy
+	// CacheDirectory is where a fetch installs the pinned copy, "" when the program has no
+	// fetch or none of its cache directories could be resolved.
+	CacheDirectory string
 }
 
 // InstallFacts is what was found for one configured install.
@@ -159,19 +164,12 @@ type Facts struct {
 // Gather reads the machine into Facts. A probe that fails is recorded as a fact (an unreadable
 // pin, an unknown file system) and never stops the others.
 func Gather(cfg Config, root string, host Host) Facts {
-	f := Facts{Root: root, Env: map[string]string{}, LinkedWorktree: host.LinkedWorktree(), HooksPath: host.GitConfig("core.hooksPath")}
-	names := append([]string{"PATH", "TMPDIR"}, cfg.Temp.candidateVariables()...)
-	for _, flag := range cfg.EnvFlags {
-		names = append(names, flag.Name)
-	}
-	for _, n := range names {
-		f.Env[n] = host.Getenv(n)
-	}
+	f := Facts{Root: root, Env: readEnv(cfg, host), LinkedWorktree: host.LinkedWorktree(), HooksPath: host.GitConfig("core.hooksPath")}
 	if err := host.PlanChanges(); err != nil {
 		f.PlanError = err.Error()
 	}
 	for _, p := range cfg.Programs {
-		f.Programs = append(f.Programs, gatherProgram(p, root, f.Env["PATH"], host))
+		f.Programs = append(f.Programs, gatherProgram(p, root, f.Env, host))
 	}
 	for _, in := range cfg.Installs {
 		f.Installs = append(f.Installs, InstallFacts{
@@ -187,10 +185,26 @@ func Gather(cfg Config, root string, host Host) Facts {
 	return f
 }
 
+// readEnv reads the environment variables the policy depends on.
+func readEnv(cfg Config, host Host) map[string]string {
+	names := append([]string{"PATH", "TMPDIR"}, cfg.Temp.candidateVariables()...)
+	for _, flag := range cfg.EnvFlags {
+		names = append(names, flag.Name)
+	}
+	for _, p := range cfg.Programs {
+		names = append(names, p.cacheVariables()...)
+	}
+	env := map[string]string{}
+	for _, n := range names {
+		env[n] = host.Getenv(n)
+	}
+	return env
+}
+
 // maxCopiesProbed bounds how many copies of one program are asked for a version.
 const maxCopiesProbed = 8
 
-func gatherProgram(p ProgramConfig, root, path string, host Host) ProgramFacts {
+func gatherProgram(p ProgramConfig, root string, env map[string]string, host Host) ProgramFacts {
 	pf := ProgramFacts{Name: p.Name}
 	pin := p.MinimumFrom
 	if pin == nil {
@@ -221,7 +235,18 @@ func gatherProgram(p ProgramConfig, root, path string, host Host) ProgramFacts {
 		}
 		return copies
 	}
-	pf.OnPath = find(filepath.SplitList(path))
+	pf.OnPath = find(filepath.SplitList(env["PATH"]))
+	var cacheDirs []string
+	for _, template := range p.CacheDirectories {
+		dir, ok := expandCandidate(strings.ReplaceAll(template, versionPlaceholder, pf.Required), env)
+		if ok && pf.Required != "" {
+			cacheDirs = append(cacheDirs, dir)
+		}
+	}
+	if len(cacheDirs) > 0 {
+		pf.CacheDirectory = cacheDirs[0]
+	}
+	pf.Cached = find(cacheDirs)
 	repoDirs := make([]string, len(p.RepoDirectories))
 	for i, d := range p.RepoDirectories {
 		repoDirs[i] = filepath.Join(root, d)

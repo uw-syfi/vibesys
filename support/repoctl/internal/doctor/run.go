@@ -33,17 +33,49 @@ func Run(cfg Config, root string, host Host, opts Options, out io.Writer) error 
 		}
 		if repaired == 0 {
 			fmt.Fprintln(out, "\ndoctor: nothing to repair automatically")
-			return verdict(findings)
+			return fixVerdict(cfg, root, host, findings)
 		}
 		fmt.Fprintln(out, "\ndoctor: checking again")
 		findings = Evaluate(cfg, Gather(cfg, root, host))
 	}
 	report(out, findings)
-	if exports := Exports(findings); len(exports) > 0 {
+	if len(Exports(findings)) > 0 {
 		fmt.Fprintln(out, "\ndoctor: these environment changes complete the fixes; apply them to this shell with")
 		fmt.Fprintln(out, "  eval \"$(./support/repoctl/repoctl doctor --env)\"")
 	}
+	if opts.Fix {
+		return fixVerdict(cfg, root, host, findings)
+	}
 	return verdict(findings)
+}
+
+// fixVerdict is the exit status of a run that repaired: a check that fails only because the
+// shell has not yet evaluated the exports is not a failure of the run, so that
+// `doctor --fix && eval "$(doctor --env)"` goes on to the eval. The status says whether the
+// machine is in order once the exports are applied.
+func fixVerdict(cfg Config, root string, host Host, findings []Finding) error {
+	exports := Exports(findings)
+	if len(exports) == 0 {
+		return verdict(findings)
+	}
+	return verdict(Evaluate(cfg, Gather(cfg, root, exportedHost{host, exports})))
+}
+
+// exportedHost is a Host whose environment is the one a shell would have after evaluating the
+// exports.
+type exportedHost struct {
+	Host
+	exports []Export
+}
+
+func (h exportedHost) Getenv(name string) string {
+	value := h.Host.Getenv(name)
+	for _, e := range h.exports {
+		if e.Name == name {
+			value = e.Apply(value)
+		}
+	}
+	return value
 }
 
 func verdict(findings []Finding) error {

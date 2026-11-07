@@ -62,6 +62,25 @@ func Exports(findings []Finding) []Export {
 	return MergeExports(all)
 }
 
+// PinnedProgramExports returns the PATH changes that make the exactly pinned programs resolve to
+// their pinned copy, for the programs whose first copy on PATH is the wrong version while the
+// pinned one is in a repository or cache directory. It reads only the programs, so a command that
+// must not fail on the rest of the machine's setup (the gate) can adopt it before running; nothing
+// is fetched, and a program with no pinned copy anywhere adds nothing.
+func PinnedProgramExports(cfg Config, root string, host Host) []Export {
+	f := Facts{Root: root, Env: readEnv(cfg, host)}
+	for _, p := range cfg.Programs {
+		f.Programs = append(f.Programs, gatherProgram(p, root, f.Env, host))
+	}
+	var all []Export
+	for i, p := range cfg.Programs {
+		if p.ExactFrom != nil {
+			all = append(all, programFinding(cfg, p, f.Programs[i], f).Exports...)
+		}
+	}
+	return MergeExports(all)
+}
+
 // Failed counts the findings with status Fail.
 func Failed(findings []Finding) int {
 	n := 0
@@ -147,7 +166,7 @@ func programFinding(policy Config, cfg ProgramConfig, p ProgramFacts, f Facts) F
 		return Finding{Check: check, Status: Fail, Message: p.RequiredError,
 			Fix: "restore the pin the doctor policy (.repoctl/doctor.toml) reads"}
 	}
-	install := installRemedy(cfg, root)
+	install := installRemedy(cfg, p, root)
 	prepend := func(dir string) []Export { return []Export{{Name: "PATH", Value: dir, Prepend: true}} }
 	need := ""
 	if p.Required != "" {
@@ -173,7 +192,7 @@ func programFinding(policy Config, cfg ProgramConfig, p ProgramFacts, f Facts) F
 	if len(p.OnPath) > 0 {
 		first = fmt.Sprintf("the first on PATH is %s", orUnknown(p.OnPath[0].Version))
 	}
-	for _, c := range append(append([]Copy{}, p.InRepo...), p.OnPath...) {
+	for _, c := range append(append(append([]Copy{}, p.InRepo...), p.Cached...), p.OnPath...) {
 		if satisfies(p, c, cfg.ExactFrom != nil) && shadows(policy, f, c.Directory, cfg.Name) == "" {
 			return Finding{Check: check, Status: Fail,
 				Message: fmt.Sprintf("%s needs%s but %s; %s %s is in %s", cfg.Name, need, first, cfg.Name, c.Version, c.Directory),
@@ -194,7 +213,16 @@ func pathFix(dir string) string {
 	return fmt.Sprintf("put it first on PATH: eval \"$(./support/repoctl/repoctl doctor --env)\", or %s", Export{Name: "PATH", Value: dir, Prepend: true}.Line())
 }
 
-func installRemedy(cfg ProgramConfig, root string) []Action {
+// installRemedy is the repair for a program no acceptable copy of which exists: the fetch of the
+// pinned copy into the cache when the policy has one, else the install command.
+func installRemedy(cfg ProgramConfig, p ProgramFacts, root string) []Action {
+	if len(cfg.Fetch) > 0 && p.CacheDirectory != "" {
+		argv := make([]string, len(cfg.Fetch))
+		for i, word := range cfg.Fetch {
+			argv[i] = strings.ReplaceAll(word, cachePlaceholder, p.CacheDirectory)
+		}
+		return []Action{{Kind: ActionRun, Dir: root, Argv: argv}}
+	}
 	if len(cfg.Fix) == 0 {
 		return nil
 	}

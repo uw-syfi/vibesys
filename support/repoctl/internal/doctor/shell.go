@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -25,6 +26,14 @@ func (e Export) Line() string {
 		return fmt.Sprintf("export %s=%s\"${%s:+:$%s}\"", e.Name, Quote(e.Value), e.Name, e.Name)
 	}
 	return fmt.Sprintf("export %s=%s", e.Name, Quote(e.Value))
+}
+
+// Apply returns what the variable holds after the export, given what it held before.
+func (e Export) Apply(current string) string {
+	if e.Prepend && current != "" {
+		return e.Value + string(os.PathListSeparator) + current
+	}
+	return e.Value
 }
 
 // MergeExports drops an export a later one makes redundant: a repeated prepend of the same
