@@ -3,9 +3,16 @@ backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
+# The accuracy checker and the benchmark reach the candidate only over its HTTP API.
+interface = "service"
 
 [accuracy]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/vllm/accuracy_checker/checker.py"]
+# The clip directory is named so that a run environment that stages only the directories
+# a command names (Modal) copies it next to the checker.
+command = [
+  "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/vllm/accuracy_checker/checker.py",
+  "--audio-dir", "${PROJECT_ROOT}/.vibesys/tasks/vllm/test_audio",
+]
 timeout_seconds = 120
 
 [benchmark]

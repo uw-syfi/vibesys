@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "model_id": "UsefulSensors/moonshine-streaming-medium",
+    "revision": "57b843633a8c183cadf6699ffa761377a933a866",
+    "source": "make_references.py: HF MoonshineStreamingModel + proj_out, greedy, at most 256 tokens",
+    "device": "cpu",
+    "dtype": "float32",
+    "torch": "2.9.1+cpu",
+    "transformers": "5.7.0"
+  },
+  "clips": [
+    {
+      "file": "sample1.wav",
+      "sha256": "180f2007149c2a454f347e18c0f3033ff2a70b9b6c74b7b504b838f2f1fdd45c",
+      "text": "Going along slushy country roads and speaking to damp audiences in draughty schoolrooms day after day for a fortnight, he'll have to put in an appearance at some place of worship on Sunday morning, and he can come to us immediately afterwards."
+    },
+    {
+      "file": "sample_30s.wav",
+      "sha256": "bab444b3da5c9dc507399547f42370f15c75bfb20e3c354d92c35b22686ba874",
+      "text": "going along slushy country roads and speaking to damp audiences in drafty schoolrooms day after day for a fortnight. He'll have to put in an appearance at some place of worship on Sunday morning and he can come to us immediately afterwards. I have a dream that one day this nation will rise up and live out the true meaning of its creed. And so, my fellow Americans,"
+    }
+  ]
+}

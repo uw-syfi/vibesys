@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "model_id": "openai/whisper-large-v3",
+    "revision": "06f233fe06e710322aca913c1bc4249a0d71fce1",
+    "source": "make_references.py: reference/reference.py reference_transcribe (HF WhisperForConditionalGeneration.generate, greedy)",
+    "device": "cpu",
+    "dtype": "float32",
+    "torch": "2.9.1+cpu",
+    "transformers": "5.7.0"
+  },
+  "clips": [
+    {
+      "file": "sample1.wav",
+      "sha256": "5bc474ec55cd50e7192d793a63c1b456fd205ea05737fc3fdffb99f46f61500a",
+      "text": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel."
+    },
+    {
+      "file": "sample2.wav",
+      "sha256": "176552bf16159cbdadd0ca838a26dc85356984cd191c6e792ffcb879d814ac00",
+      "text": "Nor is Mr. Quilter's manner less interesting than his matter."
+    },
+    {
+      "file": "sample3.wav",
+      "sha256": "3fd51bc4cee9b2b23c204f6034c049c1ebc67d404d67d0815a4a440aacc93190",
+      "text": "he tells us that at this festive season of the year with christmas and roast beef looming before us similes drawn from eating and its results occur most readily to the mind"
+    },
+    {
+      "file": "sample4.wav",
+      "sha256": "5b91b2fc1c6db455e4e4873c80ab7831538897e9ad3227e58edd2c2c07ced772",
+      "text": "He has grave doubts whether Sir Frederick Leighton's work is really Greek after all, and can discover in it but little of rocky Ithaca."
+    }
+  ]
+}

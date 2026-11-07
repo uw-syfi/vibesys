@@ -1,69 +1,110 @@
-"""Accuracy checker for the whisper-large-v3 offline ASR serving candidate.
+"""Accuracy checker for the whisper-large-v3 offline ASR server (service-style).
 
-Verifies the custom serving implementation transcribes consistently with the
-HuggingFace `WhisperForConditionalGeneration` reference. The candidate must
-expose, importable from `main.py` on `sys.path`:
+Sends every test clip to the running server's transcription endpoint,
+`POST /v1/audio/transcriptions`, with the request the benchmark's Request Factory
+client sends, and compares each transcript with the Hugging Face reference
+transcript of that clip stored in `references.json` beside this file (see the
+README for how it was made). A clip passes when the two are equal after
+normalization (lowercase, punctuation stripped, whitespace collapsed) or share at
+least `--threshold` of their words (word-set overlap, default 0.9). Exit 0 iff
+every clip passes.
 
-    class VibeServeModel:
-        @classmethod
-        def from_pretrained(cls, model_dir, device, dtype) -> "VibeServeModel": ...
-        def transcribe(self, audio: np.ndarray, sampling_rate: int = 16000) -> str: ...
+The checker imports nothing from the candidate, loads no model, and needs only
+Python's standard library, its own directory and the clip directory, so it runs
+next to the server wherever the run environment puts the server.
 
-Gate: for every test clip, the candidate transcript must either match the
-reference exactly (after normalization) or reach a minimum word-overlap ratio
-against it. Exit 0 iff every clip passes.
+Usage (the server must already be running):
 
-Usage:
-    uv run python accuracy_checker/checker.py [--model-dir <dir>] [--threshold 0.9]
+    python checker.py [--url http://localhost:8000] [--audio-dir ../test_audio]
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
-import time
+import urllib.request
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import NamedTuple
 
-import soundfile as sf
-import torch
+HERE = Path(__file__).resolve().parent
+# The form fields the benchmark's Request Factory client sends with each clip
+# (`--model whisper-large-v3 --backend openai-transcriptions --temperature 0`).
+FORM_FIELDS = {"model": "whisper-large-v3", "response_format": "json", "temperature": "0.0"}
 
-# The read-only reference lives in the sibling reference/ directory.
-sys.path.insert(0, str((Path(__file__).parent.parent / "reference").resolve()))
-from reference import load_reference, reference_transcribe
-
-
-def _load_custom_model_class():
-    # Running this file puts its own directory on sys.path, not the repository root, where the
-    # candidate's main.py lives.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-    try:
-        from main import VibeServeModel
-    except ImportError as exc:
-        raise RuntimeError(
-            "Could not import VibeServeModel from main.py.\n"
-            "Expected main.py to export a class VibeServeModel with:\n"
-            "  - VibeServeModel.from_pretrained(model_dir, device, dtype) -> model\n"
-            "  - model.transcribe(audio_array, sampling_rate=16000) -> str\n"
-        ) from exc
-    return VibeServeModel
+#: Sends one request body to a URL and returns the response body; raises OSError on a
+#: transport failure or a non-2xx status.
+Post = Callable[[str, bytes, str], bytes]
 
 
-def load_test_samples(audio_dir: Path):
-    manifest_path = audio_dir / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"manifest.json not found in {audio_dir}")
-    with open(manifest_path) as f:
-        manifest = json.load(f)
-    samples = []
-    for entry in manifest:
-        arr, sr = sf.read(str(audio_dir / entry["file"]), dtype="float32")
-        if arr.ndim > 1:
-            arr = arr.mean(axis=1)
-        desc = f"{entry['file']} ({entry['duration_s']:.1f}s)"
-        samples.append((desc, arr, sr, entry.get("text", "")))
-    return samples
+class Clip(NamedTuple):
+    file: str
+    wav: bytes
+    reference: str
+
+
+def load_clips(references: Path, audio_dir: Path) -> list[Clip]:
+    """The clips `references.json` names, read from `audio_dir` and checked by digest."""
+    clips = []
+    for entry in json.loads(references.read_text(encoding="utf-8"))["clips"]:
+        path = audio_dir / entry["file"]
+        wav = path.read_bytes()
+        digest = hashlib.sha256(wav).hexdigest()
+        if digest != entry["sha256"]:
+            message = (
+                f"{path}: sha256 {digest} differs from {entry['sha256']} in {references}; "
+                "regenerate the references with make_references.py"
+            )
+            raise ValueError(message)
+        clips.append(Clip(entry["file"], wav, entry["text"]))
+    return clips
+
+
+# ---------- transport ----------
+
+
+def encode_form(fields: dict[str, str], filename: str, content: bytes) -> tuple[bytes, str]:
+    """A multipart/form-data body with `fields` and `content` as the `file` part."""
+    boundary = f"vibesys-{hashlib.sha256(content).hexdigest()}"
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        "Content-Type: audio/wav\r\n\r\n".encode()
+    )
+    parts.append(content)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def http_post(url: str, body: bytes, content_type: str, *, timeout: float) -> bytes:
+    request = urllib.request.Request(
+        url, data=body, method="POST", headers={"Content-Type": content_type}
+    )
+    # The server is colocated; never route the request through an environment proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
+        return response.read()
+
+
+def transcribe(post: Post, url: str, clip: Clip) -> str:
+    body, content_type = encode_form(FORM_FIELDS, clip.file, clip.wav)
+    payload = json.loads(post(url, body, content_type))
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str):
+        message = f"response has no string 'text' field: {str(payload)[:200]!r}"
+        raise ValueError(message)
+    return text.strip()
+
+
+# ---------- text comparison ----------
 
 
 def normalize_text(s: str) -> str:
@@ -74,7 +115,8 @@ def normalize_text(s: str) -> str:
 
 
 def word_overlap_ratio(ref: str, hyp: str) -> float:
-    rw, hw = set(normalize_text(ref).split()), set(normalize_text(hyp).split())
+    rw = set(normalize_text(ref).split())
+    hw = set(normalize_text(hyp).split())
     if not rw and not hw:
         return 1.0
     if not rw or not hw:
@@ -92,63 +134,59 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
     return False, f"MISMATCH (word overlap {overlap:.1%} < {threshold:.0%}):\n{detail}"
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-dir", type=str, default="../model")
-    parser.add_argument("--audio-dir", type=str, default=None)
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--threshold", type=float, default=0.9)
-    args = parser.parse_args()
+# ---------- main ----------
 
-    model_dir = str(Path(args.model_dir).resolve())
-    dtype = torch.float16
-    device = args.device if torch.cuda.is_available() else "cpu"
-    if device == "cpu":
-        dtype = torch.float32
 
-    audio_dir = (
-        Path(args.audio_dir).resolve()
-        if args.audio_dir
-        else (Path(__file__).parent.parent / "test_audio").resolve()
-    )
-    print(f"Loading test audio from: {audio_dir}")
-    test_samples = load_test_samples(audio_dir)
-    print(f"  Loaded {len(test_samples)} samples\n")
-
-    print(f"Loading HF reference (WhisperForConditionalGeneration) on {device} ...")
-    t0 = time.perf_counter()
-    ref_model, ref_proc = load_reference(model_dir, device, dtype)
-    print(f"  HF model loaded in {time.perf_counter() - t0:.1f}s")
-    print("Generating reference outputs ...")
-    ref_outputs = [
-        reference_transcribe(ref_model, ref_proc, audio, sr) for _desc, audio, sr, _ in test_samples
-    ]
-    del ref_model, ref_proc
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    print("  HF model unloaded.\n")
-
-    print(f"Loading custom model (VibeServeModel) on {device} ...")
-    t0 = time.perf_counter()
-    custom_model = _load_custom_model_class().from_pretrained(model_dir, device, dtype)
-    print(f"  Custom model loaded in {time.perf_counter() - t0:.1f}s\n")
-
-    total, passed = len(test_samples), 0
+def run_gate(clips: list[Clip], transcribe_clip: Callable[[Clip], str], threshold: float) -> bool:
+    total = len(clips)
+    passed = 0
     print("=" * 70)
-    print(f"Running {total} test cases (threshold={args.threshold:.0%} word overlap)")
+    print(f"Running {total} test cases (threshold={threshold:.0%} word overlap)")
     print("=" * 70)
-    for i, (desc, audio, sr, _gt) in enumerate(test_samples, 1):
-        print(f"\n[{i}/{total}] {desc}")
-        custom_text = custom_model.transcribe(audio, sampling_rate=sr).strip()
-        ok, detail = compare_outputs(ref_outputs[i - 1], custom_text, args.threshold)
+    for i, clip in enumerate(clips, 1):
+        print(f"\n[{i}/{total}] {clip.file}")
+        try:
+            custom_text = transcribe_clip(clip)
+        except (OSError, ValueError) as exc:
+            print(f"  FAIL - request failed: {exc}")
+            continue
+        ok, detail = compare_outputs(clip.reference, custom_text, threshold)
         print(("  PASS - " if ok else "  FAIL - ") + detail)
         passed += int(ok)
-
     print("\n" + "=" * 70)
     print(f"Results: {passed}/{total} passed, {total - passed}/{total} failed")
     print("=" * 70)
-    sys.exit(0 if passed == total else 1)
+    return passed == total
+
+
+def main(argv: list[str] | None = None, post: Post | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
+    parser.add_argument("--endpoint", default="/v1/audio/transcriptions")
+    parser.add_argument(
+        "--audio-dir",
+        type=Path,
+        default=HERE.parent / "test_audio",
+        help="Directory holding the clips references.json names (default: ../test_audio)",
+    )
+    parser.add_argument("--references", type=Path, default=HERE / "references.json")
+    parser.add_argument(
+        "--threshold", type=float, default=0.9, help="Minimum word overlap ratio to pass"
+    )
+    parser.add_argument("--timeout", type=float, default=120.0, help="Seconds per request")
+    args = parser.parse_args(argv)
+
+    try:
+        clips = load_clips(args.references, args.audio_dir)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Cannot load the test clips: {exc!r}")
+        return 1
+    url = args.url.rstrip("/") + args.endpoint
+    print(f"Transcribing {len(clips)} clips from {args.audio_dir} via {url}\n")
+    post = post or partial(http_post, timeout=args.timeout)
+    ok = run_gate(clips, partial(transcribe, post, url), args.threshold)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,100 +1,105 @@
-"""
-Accuracy checker: verify that the custom moonshine-streaming-medium serving
-implementation produces transcriptions consistent with the HuggingFace
-`MoonshineStreamingModel` reference.
+"""Accuracy checker for the moonshine-streaming-medium server (service-style).
 
-The custom side is expected to expose:
+Sends every test clip to the running server's offline transcription endpoint,
+`POST /v1/audio/transcriptions`, with the request the benchmark's offline mode
+sends, and compares each transcript with the Hugging Face reference transcript of
+that clip stored in `references.json` beside this file (see the README for how it
+was made). A clip passes when the two are equal after normalization (lowercase,
+punctuation stripped, whitespace collapsed) or share at least `--threshold` of
+their words (word-set overlap, default 0.7). Exit 0 iff every clip passes.
 
-    class VibeServeModel:
-        @classmethod
-        def from_pretrained(cls, model_dir, device, dtype) -> "VibeServeModel": ...
-        def transcribe(self, audio: np.ndarray, sampling_rate: int = 16000) -> str: ...
+The checker imports nothing from the candidate, loads no model, and needs only
+Python's standard library, its own directory and the clip directory, so it runs
+next to the server wherever the run environment puts the server.
 
-importable from `main.py` on `sys.path`.
+Usage (the server must already be running):
 
-Usage:
-    .venv/bin/python checker.py --model-dir <local model dir>
+    python checker.py [--url http://localhost:8000] [--audio-dir ../test_audio]
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
-import time
+import urllib.request
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import NamedTuple
 
-import numpy as np
-import soundfile as sf
-import torch
+HERE = Path(__file__).resolve().parent
+# The form fields the benchmark's offline mode sends with each clip.
+FORM_FIELDS = {"model": "moonshine"}
 
-
-def _load_custom_model_class():
-    # Running this file puts its own directory on sys.path, not the repository root, where the
-    # candidate's main.py lives.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-    try:
-        from main import VibeServeModel
-    except ImportError as exc:
-        raise RuntimeError(
-            "Could not import VibeServeModel from main.py.\n"
-            "Expected main.py to export:\n"
-            "  class VibeServeModel with:\n"
-            "    - VibeServeModel.from_pretrained(model_dir, device, dtype) -> model\n"
-            "    - model.transcribe(audio_array, sampling_rate=16000) -> str\n"
-        ) from exc
-    return VibeServeModel
+#: Sends one request body to a URL and returns the response body; raises OSError on a
+#: transport failure or a non-2xx status.
+Post = Callable[[str, bytes, str], bytes]
 
 
-# ---------- audio loading ----------
+class Clip(NamedTuple):
+    file: str
+    wav: bytes
+    reference: str
 
 
-def load_test_samples(audio_dir: Path):
-    manifest_path = audio_dir / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"manifest.json not found in {audio_dir}")
-    with open(manifest_path) as f:
-        manifest = json.load(f)
-    samples = []
-    for entry in manifest:
-        wav_path = audio_dir / entry["file"]
-        arr, sr = sf.read(str(wav_path), dtype="float32")
-        if arr.ndim > 1:
-            arr = arr.mean(axis=1)
-        desc = f"{entry['file']} ({entry['duration_s']:.1f}s)"
-        samples.append((desc, arr, sr, entry["text"]))
-    return samples
+def load_clips(references: Path, audio_dir: Path) -> list[Clip]:
+    """The clips `references.json` names, read from `audio_dir` and checked by digest."""
+    clips = []
+    for entry in json.loads(references.read_text(encoding="utf-8"))["clips"]:
+        path = audio_dir / entry["file"]
+        wav = path.read_bytes()
+        digest = hashlib.sha256(wav).hexdigest()
+        if digest != entry["sha256"]:
+            message = (
+                f"{path}: sha256 {digest} differs from {entry['sha256']} in {references}; "
+                "regenerate the references with make_references.py"
+            )
+            raise ValueError(message)
+        clips.append(Clip(entry["file"], wav, entry["text"]))
+    return clips
 
 
-# ---------- HF reference ----------
+# ---------- transport ----------
 
 
-@torch.inference_mode()
-def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int) -> str:
-    """Greedy decode with HF MoonshineStreamingModel + a separately-loaded
-    proj_out (lm_head) projection.  Matches the offline-transcribe contract."""
+def encode_form(fields: dict[str, str], filename: str, content: bytes) -> tuple[bytes, str]:
+    """A multipart/form-data body with `fields` and `content` as the `file` part."""
+    boundary = f"vibesys-{hashlib.sha256(content).hexdigest()}"
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        "Content-Type: audio/wav\r\n\r\n".encode()
+    )
+    parts.append(content)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
-    device = next(model.parameters()).device
-    dtype = next(model.parameters()).dtype
-    audio_t = torch.from_numpy(audio).to(device).to(dtype).unsqueeze(0)
-    am = torch.ones_like(audio_t, dtype=torch.long)
-    enc = model.encoder(audio_t, attention_mask=am)
-    enc_h = enc.last_hidden_state
-    cur = torch.tensor([[model.config.decoder_start_token_id]], device=device, dtype=torch.long)
-    out: list[int] = []
-    pkv = None
-    for _ in range(256):
-        d = model.decoder(
-            input_ids=cur, encoder_hidden_states=enc_h, past_key_values=pkv, use_cache=True
-        )
-        nxt = int(proj_out(d.last_hidden_state)[0, -1].argmax().item())
-        if nxt == model.config.eos_token_id:
-            break
-        out.append(nxt)
-        cur = torch.tensor([[nxt]], device=device, dtype=torch.long)
-        pkv = d.past_key_values
-    return tokenizer.decode(out, skip_special_tokens=True).strip()
+
+def http_post(url: str, body: bytes, content_type: str, *, timeout: float) -> bytes:
+    request = urllib.request.Request(
+        url, data=body, method="POST", headers={"Content-Type": content_type}
+    )
+    # The server is colocated; never route the request through an environment proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
+        return response.read()
+
+
+def transcribe(post: Post, url: str, clip: Clip) -> str:
+    body, content_type = encode_form(FORM_FIELDS, clip.file, clip.wav)
+    payload = json.loads(post(url, body, content_type))
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str):
+        message = f"response has no string 'text' field: {str(payload)[:200]!r}"
+        raise ValueError(message)
+    return text.strip()
 
 
 # ---------- text comparison ----------
@@ -130,97 +135,56 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
 # ---------- main ----------
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model-dir", type=str, default="../model", help="Local path to model weights directory"
-    )
-    parser.add_argument(
-        "--audio-dir",
-        type=str,
-        default=None,
-        help="Directory with test audio + manifest.json (default: ../test_audio)",
-    )
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--threshold", type=float, default=0.7, help="Minimum word overlap ratio to pass"
-    )
-    args = parser.parse_args()
-
-    model_dir = str(Path(args.model_dir).resolve())
-    dtype = torch.float16
-
-    if args.audio_dir:
-        audio_dir = Path(args.audio_dir).resolve()
-    else:
-        audio_dir = (Path(__file__).parent.parent / "test_audio").resolve()
-
-    print(f"Loading test audio from: {audio_dir}")
-    test_samples = load_test_samples(audio_dir)
-    print(f"  Loaded {len(test_samples)} samples\n")
-
-    # ---- HF reference ----
-    print(f"Loading HF reference (MoonshineStreamingModel) on {args.device} ...")
-    from safetensors.torch import load_file
-    from tokenizers import Tokenizer
-    from transformers import AutoModel
-
-    t0 = time.perf_counter()
-    ref_model = AutoModel.from_pretrained(
-        model_dir, torch_dtype=dtype, device_map=args.device
-    ).eval()
-    # proj_out (lm_head) is part of MoonshineStreamingForConditionalGeneration; AutoModel
-    # loads the base MoonshineStreamingModel without it.  Load the weight separately.
-    try:
-        sd = load_file(str(Path(model_dir) / "model.safetensors"))
-    except FileNotFoundError:
-        # fall back to .bin
-        sd = torch.load(str(Path(model_dir) / "pytorch_model.bin"), map_location="cpu")
-    proj_out = torch.nn.Linear(
-        ref_model.config.hidden_size, ref_model.config.vocab_size, bias=False
-    )
-    proj_out.weight.data = sd["proj_out.weight"]
-    proj_out = proj_out.to(args.device).to(dtype)
-    tokenizer = Tokenizer.from_file(str(Path(model_dir) / "tokenizer.json"))
-    print(f"  HF model loaded in {time.perf_counter() - t0:.1f}s")
-
-    print("Generating reference outputs ...")
-    ref_outputs: list[str] = []
-    for _desc, audio, sr, _ in test_samples:
-        ref_outputs.append(transcribe_reference(ref_model, proj_out, tokenizer, audio, sr))
-
-    del ref_model, proj_out, sd
-    torch.cuda.empty_cache()
-    print("  HF model unloaded.\n")
-
-    # ---- custom model ----
-    print(f"Loading custom model (VibeServeModel) on {args.device} ...")
-    t0 = time.perf_counter()
-    VibeServeModel = _load_custom_model_class()
-    custom_model = VibeServeModel.from_pretrained(model_dir, args.device, dtype)
-    print(f"  Custom model loaded in {time.perf_counter() - t0:.1f}s\n")
-
-    # ---- run tests ----
-    total = len(test_samples)
+def run_gate(clips: list[Clip], transcribe_clip: Callable[[Clip], str], threshold: float) -> bool:
+    total = len(clips)
     passed = 0
     print("=" * 70)
-    print(f"Running {total} test cases (threshold={args.threshold:.0%} word overlap)")
+    print(f"Running {total} test cases (threshold={threshold:.0%} word overlap)")
     print("=" * 70)
-
-    for i, (desc, audio, sr, _gt) in enumerate(test_samples, 1):
-        print(f"\n[{i}/{total}] {desc}")
-        ref_text = ref_outputs[i - 1]
-        custom_text = custom_model.transcribe(audio, sampling_rate=sr).strip()
-        ok, detail = compare_outputs(ref_text, custom_text, args.threshold)
+    for i, clip in enumerate(clips, 1):
+        print(f"\n[{i}/{total}] {clip.file}")
+        try:
+            custom_text = transcribe_clip(clip)
+        except (OSError, ValueError) as exc:
+            print(f"  FAIL - request failed: {exc}")
+            continue
+        ok, detail = compare_outputs(clip.reference, custom_text, threshold)
         print(("  PASS - " if ok else "  FAIL - ") + detail)
-        if ok:
-            passed += 1
-
+        passed += int(ok)
     print("\n" + "=" * 70)
     print(f"Results: {passed}/{total} passed, {total - passed}/{total} failed")
     print("=" * 70)
-    sys.exit(0 if passed == total else 1)
+    return passed == total
+
+
+def main(argv: list[str] | None = None, post: Post | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
+    parser.add_argument("--endpoint", default="/v1/audio/transcriptions")
+    parser.add_argument(
+        "--audio-dir",
+        type=Path,
+        default=HERE.parent / "test_audio",
+        help="Directory holding the clips references.json names (default: ../test_audio)",
+    )
+    parser.add_argument("--references", type=Path, default=HERE / "references.json")
+    parser.add_argument(
+        "--threshold", type=float, default=0.7, help="Minimum word overlap ratio to pass"
+    )
+    parser.add_argument("--timeout", type=float, default=60.0, help="Seconds per request")
+    args = parser.parse_args(argv)
+
+    try:
+        clips = load_clips(args.references, args.audio_dir)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"Cannot load the test clips: {exc!r}")
+        return 1
+    url = args.url.rstrip("/") + args.endpoint
+    print(f"Transcribing {len(clips)} clips from {args.audio_dir} via {url}\n")
+    post = post or partial(http_post, timeout=args.timeout)
+    ok = run_gate(clips, partial(transcribe, post, url), args.threshold)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

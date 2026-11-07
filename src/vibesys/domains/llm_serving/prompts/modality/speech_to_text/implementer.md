@@ -24,7 +24,11 @@ Keep this interface working across all rounds, even as internals change.
 - **Model name in `/v1/models`**: Read the model name from `config.json` (e.g. `config._name_or_path`), not from the filesystem path. `/model` is a mount point, not the model's name.
 - **Mel spectrogram**: When implementing `_hz_to_mel()` and `_mel_to_hz()`, these functions receive BOTH scalar and array inputs. Do NOT use boolean indexing or in-place assignment on the result — use `np.where()` instead.
 - **Use `transformers` for feature extraction**: You can use `WhisperFeatureExtractor.from_pretrained("/model")` for audio preprocessing. Only the model architecture (encoder, decoder, attention) needs to be custom.
+{% if interface == "inprocess" %}
 - **Test the real model path**: At least one test must call `VibeServeModel.from_pretrained("/model", "cuda", torch.float16)` to verify real model loading works; do not only test with stubs.
+{% else %}
+- **Test the real model path**: At least one test must start the server on the real weights in `/model` and transcribe a real audio file through the HTTP API; do not only test with stubs.
+{% endif %}
 
 ## API contract
 
