@@ -208,8 +208,11 @@ export type ObjectiveSeries = Message<"vibesys.orchestrator.v1.ObjectiveSeries">
   direction: Direction;
 
   /**
-   * Oldest first, by the time the measurement was recorded. When the run has more than fit, the
-   * oldest are left out and the state is marked truncated.
+   * Oldest first, by the time the measurement was recorded (the job's end when the result states
+   * none). When the run has more than fit, the points that set a best are kept before the others,
+   * and the oldest of each go first, and the state is marked truncated. So a cut series always
+   * holds its newest best-so-far point, which is the best the run reached, and holds every
+   * best-so-far point while there are at most 400 of them.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.MeasuredPoint points = 3;
    */
@@ -257,8 +260,10 @@ export type MeasuredPoint = Message<"vibesys.orchestrator.v1.MeasuredPoint"> & {
   value: number;
 
   /**
-   * The point is better than every earlier point of the objective, in its direction: the best so far
-   * steps here. The first point is always one.
+   * The point is better than every earlier measurement of the objective, in its direction, whether
+   * or not that one is in `points`: the best so far steps here. The first measurement is always one,
+   * and is in `points` unless the series was cut. The newest point marked is the best the run
+   * reached, and every series has one.
    *
    * @generated from field: bool best_so_far = 5;
    */
@@ -288,8 +293,10 @@ export type Tradeoff = Message<"vibesys.orchestrator.v1.Tradeoff"> & {
   objectives: TradeoffObjective[];
 
   /**
-   * Candidates measured on every one of the objectives, oldest first. Over the limit the oldest are
-   * left out and the state is marked truncated.
+   * Candidates measured on every one of the objectives, oldest first. Over the limit the candidates
+   * on the frontier are kept before the others, and the oldest of each go first, and the state is
+   * marked truncated: a frontier candidate is left out only when no candidate off the frontier is
+   * left.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.TradeoffPoint points = 2;
    */

@@ -32,14 +32,9 @@ const (
 // bound is oldest go), versions past the limit (the oldest go), and versions of another direction than
 // the newest one's, which no longer say anything about the objective as the task has it now.
 func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.ObjectiveBounds, truncated bool) {
-	byObjective := map[string][]*cli.ObjectiveBound{}
-	for _, f := range facts {
-		if b := f.GetBound(); b != nil && declaredFor(b, run) {
-			byObjective[b.GetObjective()] = append(byObjective[b.GetObjective()], b)
-		}
-	}
-	for objective, versions := range byObjective {
-		slices.SortFunc(versions, func(a, b *cli.ObjectiveBound) int { return cmp.Compare(a.GetSeq(), b.GetSeq()) })
+	declared := declaredBounds(facts, run)
+	heads := headReadings(head, standingBounds(declared))
+	for objective, versions := range declared {
 		standing := versions[len(versions)-1]
 		kept := slices.DeleteFunc(slices.Clone(versions), func(b *cli.ObjectiveBound) bool { return b.GetDirection() != standing.GetDirection() })
 		truncated = truncated || len(kept) != len(versions) || len(kept) > maxBoundVersions
@@ -50,7 +45,8 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 		for _, b := range kept {
 			entry.Versions = append(entry.Versions, cloneBound(b))
 		}
-		if value, ok := headValue(head, objective, standing.GetDirection()); ok {
+		if reading, ok := heads[objective]; ok && reading.direction == standing.GetDirection() {
+			value := reading.value
 			entry.HeadValue = &value
 			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
 				entry.PercentOfBound = &percent
@@ -69,12 +65,6 @@ func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.Object
 	return out, truncated
 }
 
-// declaredFor says a bound stands for the run: the run declared it, or no run did (a person did).
-func declaredFor(b *cli.ObjectiveBound, run string) bool {
-	declared := b.GetOrigin().GetRunId()
-	return declared == run || declared == ""
-}
-
 func standingSeq(b *pb.ObjectiveBounds) uint64 { return b.Versions[len(b.Versions)-1].GetSeq() }
 
 func cloneBound(b *cli.ObjectiveBound) *cli.ObjectiveBound {
@@ -84,33 +74,19 @@ func cloneBound(b *cli.ObjectiveBound) *cli.ObjectiveBound {
 	}
 }
 
-// headValue is the head's value on an objective, the number its percent of the bound is a share of:
-// the measurement's value for the metric it scores, and the mean of the samples of another objective,
-// which the daemon computes. It is not there when the run has no head or the head has no value for the
-// objective, and when the head says it measured the objective in another direction than the bound's,
-// since a share of a bound in the other direction would mean nothing. A measurement that does not say
-// which way an objective it reports besides the scored metric improves takes the bound's direction.
-func headValue(head *cli.Head, objective string, direction cli.Direction) (float64, bool) {
+// headReadings are the head's value on each objective, the numbers a percent of a bound is a share
+// of: the measurement's value for the metric it scores, and the mean of the samples of another
+// objective, which the daemon computes. They are read as any measure result is (readings), so the
+// head's number for an objective is the number the measured history holds for the same result. There
+// are none when the run has no head. The head's direction is for the caller to compare with the
+// bound's, since a share of a bound in the other direction would mean nothing.
+func headReadings(head *cli.Head, standing map[string]*cli.ObjectiveBound) map[string]objectiveValue {
 	m := head.GetCurrent().GetResult().GetMeasure()
 	if m == nil {
-		return 0, false
+		return nil
 	}
-	finite := func(v float64, ok bool) (float64, bool) { return v, ok && !math.IsNaN(v) && !math.IsInf(v, 0) }
-	if scored := m.GetMetric(); scored.GetName() == objective {
-		return finite(m.GetValue(), scored.GetDirection() == direction)
-	}
-	for _, o := range m.GetObservations() {
-		if o.GetName() != objective || o.Value == nil {
-			continue
-		}
-		for _, metric := range m.GetObjectives().GetMetrics() {
-			if metric.GetName() == objective && metric.GetDirection() != direction {
-				return 0, false
-			}
-		}
-		return finite(o.GetValue(), true)
-	}
-	return 0, false
+	values, _ := readings(m, standing)
+	return values
 }
 
 // PercentOfBound is how close a value is to the bound of its objective, in percent: 100 at the

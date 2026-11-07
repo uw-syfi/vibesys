@@ -100,8 +100,11 @@ message ObjectiveSeries {
     defined_only: true
     not_in: [0]
   }];
-  // Oldest first, by the time the measurement was recorded. When the run has more than fit, the
-  // oldest are left out and the state is marked truncated.
+  // Oldest first, by the time the measurement was recorded (the job's end when the result states
+  // none). When the run has more than fit, the points that set a best are kept before the others,
+  // and the oldest of each go first, and the state is marked truncated. So a cut series always
+  // holds its newest best-so-far point, which is the best the run reached, and holds every
+  // best-so-far point while there are at most 400 of them.
   repeated MeasuredPoint points = 3 [(buf.validate.field).repeated = {
     min_items: 1
     max_items: 400
@@ -124,8 +127,10 @@ message MeasuredPoint {
   google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
   // The headline number of the measurement on the objective, as the job service computed it.
   double value = 4 [(buf.validate.field).double.finite = true];
-  // The point is better than every earlier point of the objective, in its direction: the best so far
-  // steps here. The first point is always one.
+  // The point is better than every earlier measurement of the objective, in its direction, whether
+  // or not that one is in `points`: the best so far steps here. The first measurement is always one,
+  // and is in `points` unless the series was cut. The newest point marked is the best the run
+  // reached, and every series has one.
   bool best_so_far = 5;
 }
 
@@ -144,8 +149,10 @@ message Tradeoff {
     min_items: 2
     max_items: 8
   }];
-  // Candidates measured on every one of the objectives, oldest first. Over the limit the oldest are
-  // left out and the state is marked truncated.
+  // Candidates measured on every one of the objectives, oldest first. Over the limit the candidates
+  // on the frontier are kept before the others, and the oldest of each go first, and the state is
+  // marked truncated: a frontier candidate is left out only when no candidate off the frontier is
+  // left.
   repeated TradeoffPoint points = 2 [(buf.validate.field).repeated.max_items = 400];
 }
 
