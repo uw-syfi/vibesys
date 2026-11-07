@@ -2,7 +2,12 @@ import type {Duplex} from 'node:stream';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {ListItemsRequestSchema, ListItemsResponseSchema} from '@vibesys/orchestrator-proto';
-import {DesktopRefusal, SubscribeRequestSchema, SubscribeResponseSchema} from '@vibesys/proto';
+import {
+  DesktopRefusal,
+  HostService,
+  SubscribeRequestSchema,
+  SubscribeResponseSchema,
+} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Fiber from 'effect/Fiber';
@@ -24,7 +29,8 @@ const request = toBinary(
   create(ListItemsRequestSchema, {agentId: 'agent-1', beforeOrdinal: 1, pageSize: 10}),
 );
 const reply = toBinary(ListItemsResponseSchema, create(ListItemsResponseSchema, {page: {}}));
-const SUBSCRIBE = '/vibesys.api.v1.HostService/Subscribe';
+const hostMethod = (name: string) => `/${HostService.typeName}/${name}`;
+const SUBSCRIBE = hostMethod(HostService.method.subscribe.name);
 
 /** A world of fake gateways, one per host, and a record of the dials. */
 function world(options: {failing?: ReadonlySet<HostKey>} = {}) {
@@ -213,13 +219,19 @@ describe('gateway calls', () => {
         w.peer(HOST_A).calls[0]?.end();
         yield* Fiber.join(stream);
         expect(heard).toEqual([frame]);
-        const tail = yield* Effect.flip(
-          made.unary(HOST_A, '/vibesys.api.v1.HostService/Tail', new Uint8Array()),
-        );
-        expect(tail).toMatchObject({
-          _tag: 'GatewayRefused',
-          refusal: DesktopRefusal.METHOD_NOT_AVAILABLE,
-        });
+        const used = new Set([HostService.method.hello.name, HostService.method.subscribe.name]);
+        const unused = HostService.methods.filter(method => !used.has(method.name));
+        expect(unused).not.toEqual([]);
+        for (const method of unused) {
+          const refused = yield* Effect.flip(
+            made.unary(HOST_A, hostMethod(method.name), new Uint8Array()),
+          );
+          expect(refused).toMatchObject({
+            _tag: 'GatewayRefused',
+            refusal: DesktopRefusal.METHOD_NOT_AVAILABLE,
+          });
+        }
+        expect(w.peer(HOST_A).calls).toHaveLength(1);
         yield* Scope.close(scope, Exit.void);
       }),
   );
