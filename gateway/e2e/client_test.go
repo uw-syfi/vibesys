@@ -43,6 +43,11 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 		t.Errorf("get --json after the report: want one run, its agents and its report, got %v", &snapshot)
 	}
 
+	// What was recorded while the run lived must name a sidecar and an agent's process group, or the
+	// check below that none is left would pass with nothing to look at.
+	if len(sidecars) == 0 || len(groups) == 0 {
+		t.Fatalf("the run's sessions recorded %d sidecars and %d agent process groups while it lived\nserve log:\n%s", len(sidecars), len(groups), r.serveLog())
+	}
 	// Nobody stops the run: its final report did.
 	r.client("run", "wait", started.RunID, "--until", "ended", "--timeout", "80s")
 	var ended pb.RunsSnapshot
