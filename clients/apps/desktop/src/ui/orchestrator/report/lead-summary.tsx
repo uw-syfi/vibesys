@@ -18,7 +18,10 @@ export function LeadSummary(props: {
   readonly nowMs: number;
 }): JSX.Element {
   const {summary} = props;
-  const rest = (summary?.fields ?? []).map(({field, text}) => ({key: FIELD_LABELS[field], value: text}));
+  const rest = (summary?.fields ?? []).map(({field, text}) => ({
+    key: FIELD_LABELS[field],
+    value: text,
+  }));
   return (
     <Card section="Lead summary">
       {summary === undefined ? (
