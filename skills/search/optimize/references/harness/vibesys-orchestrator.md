@@ -46,13 +46,14 @@ measure before they hand off.
 
 ## Schedule periodic work
 
-You set no timer for the hourly report: the run asks for it. When work has moved since your last
-report (a subagent started, a handoff or a job's end reached you) and an hour has passed since that
-report, you are sent a message that says a progress report is due. Answer it with `post_report`
-(`kind` `progress`, `headline`, `changed`, `in_flight`, `decisions`, `open_for_user`), covering the
-whole run, and send one after each promotion as well. Any report you send, asked or not, starts the
-hour again. A run where nothing moved is not asked. The operator reads the report in the run; it is
-not a question and needs no reply.
+You set no timer for the progress report: the run asks for it. When work has moved since your last
+report (a subagent started, a handoff or a job's end reached you) and the run's report interval has
+passed since that report, you are sent a message that says a progress report is due. The interval
+is the run's own (one hour unless the operator chose another, never under five minutes), and the
+message says it. Answer with `post_report` (`kind` `progress`, `headline`, `changed`, `in_flight`,
+`decisions`, `open_for_user`), covering the whole run, and send one after each promotion as well.
+Any report you send, asked or not, starts the interval again. A run where nothing moved is not
+asked. The operator reads the report in the run; it is not a question and needs no reply.
 
 The operator can also press Catch me up, and you are then sent a message that names a span of time
 (from when they last looked to now). Answer it in the turn it starts with one `post_report` of kind
@@ -60,7 +61,7 @@ The operator can also press Catch me up, and you are then sent a message that na
 the report you post in its turn, so a report you posted before it does not answer it. It needs no
 other work from you.
 
-Every report has a `kind`. Use `progress` for the hourly report and the note after a promotion:
+Every report has a `kind`. Use `progress` for the periodic report and the note after a promotion:
 the run goes on. Use `final` once, as your last report, when the SKILL's Finish rule holds, or
 when you cannot go on and say why in its headline. An operator or a script that waits for the
 result waits for the `final` report; a `progress` report never satisfies it, so do not mark a

@@ -16,6 +16,7 @@ package cost
 import (
 	"cmp"
 	"maps"
+	"math"
 	"slices"
 	"time"
 
@@ -69,6 +70,8 @@ type RoleCost struct {
 	Unpriced uint32
 	// Usage is the tokens by kind and the cost of the priced turns, nil where none reported.
 	Usage core.Usage
+	// Tokens is TotalTokens of Usage.
+	Tokens uint64
 }
 
 // ModelCost is what one model has cost.
@@ -77,6 +80,8 @@ type ModelCost struct {
 	Turns    uint32
 	Unpriced uint32
 	Usage    core.Usage
+	// Tokens is TotalTokens of Usage.
+	Tokens uint64
 }
 
 // ModelSpend is what one model added to one bucket.
@@ -209,14 +214,36 @@ func (l *Ledger) Add(t core.Turn, a core.Agent) {
 	l.entries = append(l.entries, e)
 }
 
+// tokenKinds is every kind of token a usage reports.
+func tokenKinds(u core.Usage) []*uint64 {
+	return []*uint64{u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens, u.OutputTokens, u.ReasoningTokens}
+}
+
 // hasTokens says a turn reported any tokens.
 func hasTokens(u core.Usage) bool {
-	for _, n := range []*uint64{u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens, u.OutputTokens, u.ReasoningTokens} {
+	for _, n := range tokenKinds(u) {
 		if n != nil && *n > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// TotalTokens is all the tokens a usage reports: the sum of its five kinds, a kind it does not report
+// counting as none. The host adds them up so that no client does; the sum stops at the largest count
+// rather than wrapping.
+func TotalTokens(u core.Usage) uint64 {
+	var sum uint64
+	for _, n := range tokenKinds(u) {
+		if n == nil {
+			continue
+		}
+		if sum+*n < sum {
+			return math.MaxUint64
+		}
+		sum += *n
+	}
+	return sum
 }
 
 // unpriced says a turn reported tokens and no cost.
@@ -288,13 +315,13 @@ func (l *Ledger) View(run core.Run, now time.Time) View {
 	}
 	v.Total, v.Turns, v.Unpriced = total.usage, total.turns, total.unpriced
 	for role, t := range roles {
-		v.Roles = append(v.Roles, RoleCost{Role: role, Agents: agents[role], Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage})
+		v.Roles = append(v.Roles, RoleCost{Role: role, Agents: agents[role], Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
 	}
 	slices.SortFunc(v.Roles, func(a, b RoleCost) int {
 		return byCost(a.Usage.CostUSD, b.Usage.CostUSD, string(a.Role), string(b.Role))
 	})
 	for model, t := range models {
-		v.Models = append(v.Models, ModelCost{Model: model, Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage})
+		v.Models = append(v.Models, ModelCost{Model: model, Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
 	}
 	slices.SortFunc(v.Models, func(a, b ModelCost) int {
 		return byCost(a.Usage.CostUSD, b.Usage.CostUSD, a.Model.name(), b.Model.name())

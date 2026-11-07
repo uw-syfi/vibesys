@@ -2,6 +2,7 @@ package cost_test
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"reflect"
 	"testing"
@@ -526,5 +527,46 @@ func TestAnEmptyLedger(t *testing.T) {
 	v = l.View(run, start.Add(time.Minute))
 	if len(v.Roles) != 1 || v.Roles[0].Agents != 1 || v.Roles[0].Turns != 0 || v.Roles[0].Usage.CostUSD != nil {
 		t.Fatalf("an agent with no turn: %+v", v.Roles)
+	}
+}
+
+// Every type and model says how many tokens it used, in all: the sum of its five kinds. The types'
+// totals, the models' totals and the run's own kinds all add up to the same number, so a client never
+// sums.
+func TestEachGroupServesItsTokenTotal(t *testing.T) {
+	sum := func(kinds [5]uint64) (n uint64) {
+		for _, k := range kinds {
+			n += k
+		}
+		return n
+	}
+	forEachWorld(t, func(t *testing.T, w world, v cost.View) {
+		var byRole, byModel uint64
+		for _, r := range v.Roles {
+			if r.Tokens != sum(tokenKinds(r.Usage)) {
+				t.Errorf("type %v: %d tokens, its kinds add up to %d", r.Role, r.Tokens, sum(tokenKinds(r.Usage)))
+			}
+			byRole += r.Tokens
+		}
+		for _, m := range v.Models {
+			if m.Tokens != sum(tokenKinds(m.Usage)) {
+				t.Errorf("model %v: %d tokens, its kinds add up to %d", m.Model, m.Tokens, sum(tokenKinds(m.Usage)))
+			}
+			byModel += m.Tokens
+		}
+		if total := sum(tokenKinds(v.Total)); byRole != total || byModel != total {
+			t.Errorf("run %d tokens, types %d, models %d", total, byRole, byModel)
+		}
+	})
+}
+
+// Counts that would overflow stop at the largest count instead of wrapping to a small number.
+func TestTotalTokensStopsAtTheLargestCount(t *testing.T) {
+	big := uint64(math.MaxUint64 - 1)
+	if got := cost.TotalTokens(core.Usage{InputTokens: &big, OutputTokens: &big}); got != math.MaxUint64 {
+		t.Errorf("got %d, want the largest count", got)
+	}
+	if got := cost.TotalTokens(core.Usage{}); got != 0 {
+		t.Errorf("a usage with no tokens totals %d", got)
 	}
 }

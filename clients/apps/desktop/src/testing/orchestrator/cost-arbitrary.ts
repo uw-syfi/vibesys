@@ -36,6 +36,7 @@ const roleArb = fc.record({
   role: fc.constantFrom(AgentRole.LEAD, AgentRole.PLANNER, AgentRole.WORKER, AgentRole.JUDGE),
   agents: fc.nat({max: 60}),
   usage: usageArb,
+  totalTokens: fc.nat({max: 10 ** 12}),
   counts: turnsArb,
 });
 
@@ -56,39 +57,58 @@ export const costViewArb: fc.Arbitrary<CostView> = fc
       {minLength: 1, maxLength: 48},
     ),
     lastHourUsd: optional(money),
+    modelTokens: fc.array(fc.nat({max: 10 ** 12}), {minLength: 4, maxLength: 4}),
+    modelsTruncated: fc.boolean(),
   })
-  .map(({models, roles, counts, total, maxCostUsd, bucketMs, spends, lastHourUsd}): CostView => {
-    const costUsd = (at: number): number => spends[at]?.[0] ?? 0;
-    return {
-      runId: 'run-1',
-      sequence: 1n,
-      asOfMs: START + spends.length * bucketMs,
+  .map(
+    ({
+      models,
+      roles,
+      counts,
       total,
       maxCostUsd,
-      turns: counts.turns,
-      unpricedTurns: counts.unpricedTurns,
-      roles: roles.map(({role, agents, usage: u, counts: c}) => ({
-        role,
-        agents,
-        turns: c.turns,
-        unpricedTurns: c.unpricedTurns,
-        usage: u,
-      })),
-      models: models.map((model, at) => ({
-        model,
+      bucketMs,
+      spends,
+      lastHourUsd,
+      modelTokens,
+      modelsTruncated,
+    }): CostView => {
+      const costUsd = (at: number): number => spends[at]?.[0] ?? 0;
+      return {
+        runId: 'run-1',
+        sequence: 1n,
+        asOfMs: START + spends.length * bucketMs,
+        total,
+        maxCostUsd,
         turns: counts.turns,
         unpricedTurns: counts.unpricedTurns,
-        usage: usage({costUsd: costUsd(at)}),
-      })),
-      series: {
-        startMs: START,
-        bucketMs,
-        buckets: spends.map((row, at) => ({
-          startMs: START + at * bucketMs,
-          costUsd: row.reduce((sum, value) => sum + value, 0),
-          byModel: models.map((model, index) => ({model, costUsd: row[index] ?? 1e-6})),
+        roles: roles.map(({role, agents, usage: u, totalTokens, counts: c}) => ({
+          role,
+          agents,
+          turns: c.turns,
+          unpricedTurns: c.unpricedTurns,
+          usage: u,
+          // The host's number, drawn on its own: a screen shows it, so it need not match the kinds.
+          totalTokens,
         })),
-      },
-      lastHourUsd,
-    };
-  });
+        models: models.map((model, at) => ({
+          model,
+          turns: counts.turns,
+          unpricedTurns: counts.unpricedTurns,
+          usage: usage({costUsd: costUsd(at)}),
+          totalTokens: modelTokens[at] ?? 0,
+        })),
+        series: {
+          startMs: START,
+          bucketMs,
+          buckets: spends.map((row, at) => ({
+            startMs: START + at * bucketMs,
+            costUsd: row.reduce((sum, value) => sum + value, 0),
+            byModel: models.map((model, index) => ({model, costUsd: row[index] ?? 1e-6})),
+          })),
+        },
+        lastHourUsd,
+        modelsTruncated,
+      };
+    },
+  );

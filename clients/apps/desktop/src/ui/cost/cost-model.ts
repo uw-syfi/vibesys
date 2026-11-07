@@ -12,6 +12,7 @@ import {
   formatCount,
   formatElapsed,
   formatRate,
+  formatTokens,
   formatUsd,
   labelStride,
   modelKey,
@@ -156,6 +157,7 @@ const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRo
     figures: [
       `×${formatCount(role.agents)}`,
       formatCount(role.turns),
+      formatTokens(role.totalTokens),
       usdOrNothing(role.usage.costUsd, precision),
     ],
   }));
@@ -174,7 +176,11 @@ const modelRows = (
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),
-      figures: [formatCount(cost.turns), usdOrNothing(cost.usage.costUsd, precision)],
+      figures: [
+        formatCount(cost.turns),
+        formatTokens(cost.totalTokens),
+        usdOrNothing(cost.usage.costUsd, precision),
+      ],
     }),
   );
 

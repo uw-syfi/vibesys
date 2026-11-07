@@ -55,9 +55,10 @@ describe('declared performance bounds', () => {
         declared,
         fc.option(fc.double({min: 1, max: 1e9, noNaN: true}), {nil: undefined}),
         fc.option(fc.double({min: 1, max: 500, noNaN: true}), {nil: undefined}),
-        (versions, headValue, percentOfBound) => {
+        fc.boolean(),
+        (versions, headValue, percentOfBound, unitMismatch) => {
           const search = create(SearchStateSchema, {
-            bounds: [served('tok_s', versions, {headValue, percentOfBound})],
+            bounds: [served('tok_s', versions, {headValue, percentOfBound, unitMismatch})],
           });
           const [view] = objectiveBounds(search);
           expect(view?.objective).toBe('tok_s');
@@ -70,6 +71,8 @@ describe('declared performance bounds', () => {
           // there is none, whatever the numbers beside it would give.
           expect(view?.headValue).toBe(headValue);
           expect(view?.percentOfBound).toBe(percentOfBound);
+          // A bound the head measured in another unit says so, as the orchestrator served it.
+          expect(view?.unitMismatch).toBe(unitMismatch);
         },
       ),
       {seed: 49},

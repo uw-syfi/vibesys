@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -133,9 +134,9 @@ func TestPercentIsUndefinedWhereNothingMeaningfulIsGiven(t *testing.T) {
 	}
 }
 
-// The view of a run holds the bounds that run declared, one entry per objective by name, each with
-// every version oldest first and the standing bound last. The store holds the bounds of every run of
-// the task, so another run's, and one declared outside any run, are not this run's.
+// The view of a run holds the bounds that run declared and those a person declared outside any run, one
+// entry per objective by name, each with every version oldest first and the standing bound last. The
+// store holds the bounds of every run of the task, so another run's are not this run's.
 func TestTheViewHoldsThisRunsBoundsPerObjective(t *testing.T) {
 	s := project(t,
 		boundFact(3, "r", "tok_s", maximize, 12000),
@@ -156,14 +157,121 @@ func TestTheViewHoldsThisRunsBoundsPerObjective(t *testing.T) {
 	if fmt.Sprint(seqs) != "[1 3 6]" || tok.Direction != maximize || tok.Versions[2].Value != 13000 {
 		t.Fatalf("tok_s versions %v, direction %v, standing %v; want [1 3 6], maximize and 13000 standing", seqs, tok.Direction, tok.Versions[2].GetValue())
 	}
-	if lat := byObjective(s, "ttft_ms"); len(lat.Versions) != 1 || lat.Versions[0].Value != 74 || lat.Direction != minimize {
-		t.Fatalf("ttft_ms = %v: another run's bound and one outside any run must be left out", lat)
+	lat := byObjective(s, "ttft_ms")
+	if len(lat.Versions) != 2 || lat.Versions[0].Origin.RunId != "" || lat.Versions[1].Value != 74 || lat.Direction != minimize {
+		t.Fatalf("ttft_ms = %v: want the person's bound (no run) and then the run's standing 74", lat)
 	}
 	if s.Truncated {
 		t.Error("a view that left nothing of this run out is marked truncated")
 	}
 	if none := project(t, boundFact(1, "other", "tok_s", maximize, 1)); len(none.Bounds) != 0 {
 		t.Errorf("a run with no bounds of its own shows %v", none.Bounds)
+	}
+}
+
+// A bound a person declared outside any run stands for every run of the task, and stands as the
+// standing bound when it is the newest declared for its objective: a person's correction of what the
+// agents derived is the bound the head is measured against.
+func TestAPersonsBoundOutsideAnyRunStandsForTheRun(t *testing.T) {
+	s := project(t,
+		boundFact(1, "r", "tok_s", maximize, 20000),
+		boundFact(2, "", "tok_s", maximize, 15000),
+		headOf("tok_s", maximize, 7500, nil, nil),
+	)
+	tok := byObjective(s, "tok_s")
+	if tok == nil || len(tok.Versions) != 2 || tok.Versions[1].Value != 15000 || math.Abs(tok.GetPercentOfBound()-50) > 1e-9 {
+		t.Fatalf("tok_s = %v, want the person's 15000 standing and the head at 50 percent of it", tok)
+	}
+	if only := byObjective(project(t, boundFact(1, "", "ttft_ms", minimize, 74)), "ttft_ms"); only == nil {
+		t.Error("a bound declared outside any run, with no agent's, is not shown")
+	}
+}
+
+// withUnits says in what unit a head measured the objectives it names, as a daemon that reports the
+// units of its metrics does.
+func withUnits(head *cli.TaskFact, units map[string]string) *cli.TaskFact {
+	m := head.GetHead().GetCurrent().GetResult().GetMeasure()
+	metrics := []*cli.Metric{m.GetMetric()}
+	if m.Objectives != nil {
+		metrics = m.GetObjectives().GetMetrics()
+	}
+	for _, metric := range append(metrics, m.GetMetric()) {
+		if unit, ok := units[metric.GetName()]; ok && unit != "" {
+			metric.Unit = proto.String(unit)
+		}
+	}
+	return head
+}
+
+// A head measured in another unit than the bound has no share of it: the number is shown, the percent
+// is absent, and the bound is marked. A measurement that says nothing of its unit is not known to
+// differ and is compared as before.
+func TestAHeadInAnotherUnitThanTheBoundHasNoPercent(t *testing.T) {
+	directions := map[string]cli.Direction{"ttft_ms": minimize}
+	head := func(units map[string]string) *cli.TaskFact {
+		return withUnits(headOf("tok_s", maximize, 7500, map[string]float64{"ttft_ms": 148}, directions), units)
+	}
+	bounds := []*cli.TaskFact{
+		{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
+			Seq: 1, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 1}},
+			Objective: "tok_s", Direction: maximize, Value: 15000, Unit: "tok/s", Note: "derived",
+		}}},
+		{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
+			Seq: 2, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 2}},
+			Objective: "ttft_ms", Direction: minimize, Value: 74, Unit: "ms", Note: "derived",
+		}}},
+	}
+	cases := []struct {
+		name     string
+		units    map[string]string
+		mismatch map[string]bool
+	}{
+		{"the same units", map[string]string{"tok_s": "tok/s", "ttft_ms": "ms"}, nil},
+		{"units that differ by surrounding space only", map[string]string{"tok_s": " tok/s ", "ttft_ms": "ms"}, nil},
+		{"a measurement that says no unit", nil, nil},
+		{"the scored metric in another unit", map[string]string{"tok_s": "req/s", "ttft_ms": "ms"}, map[string]bool{"tok_s": true}},
+		{"an observation in another unit", map[string]string{"tok_s": "tok/s", "ttft_ms": "s"}, map[string]bool{"ttft_ms": true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := project(t, append(slices.Clone(bounds), head(tc.units))...)
+			for _, objective := range []string{"tok_s", "ttft_ms"} {
+				b := byObjective(s, objective)
+				if b.UnitMismatch != tc.mismatch[objective] {
+					t.Errorf("%s: unit_mismatch = %v, want %v", objective, b.UnitMismatch, tc.mismatch[objective])
+				}
+				if b.HeadValue == nil {
+					t.Errorf("%s: the head's value is withheld; only its share of the bound is", objective)
+				}
+				if (b.PercentOfBound != nil) == tc.mismatch[objective] {
+					t.Errorf("%s: percent %v with unit_mismatch %v", objective, b.PercentOfBound, b.UnitMismatch)
+				}
+			}
+		})
+	}
+}
+
+// Whatever units the bound and the head are in, a percent is shown exactly when the head does not say
+// a unit that is not the bound's, and a mismatch is never marked together with a percent.
+func TestUnitMismatchIsMarkedExactlyWhenTheUnitsDiffer(t *testing.T) {
+	r := rand.New(rand.NewSource(3))
+	units := []string{"", "tok/s", "ms", "s", " ms", "MS"}
+	for range 200 {
+		bound, measured := units[r.Intn(len(units))], units[r.Intn(len(units))]
+		if bound == "" {
+			bound = "ms" // a declared bound always names its unit
+		}
+		fact := &cli.TaskFact{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
+			Seq: 1, Origin: &cli.RecordOrigin{RunId: "r", At: &timestamppb.Timestamp{Seconds: 1}},
+			Objective: "ttft_ms", Direction: minimize, Value: 74, Unit: bound, Note: "derived",
+		}}}
+		s := project(t, fact, withUnits(headOf("ttft_ms", minimize, 148, nil, nil), map[string]string{"ttft_ms": measured}))
+		b := byObjective(s, "ttft_ms")
+		differ := strings.TrimSpace(measured) != "" && strings.TrimSpace(measured) != strings.TrimSpace(bound)
+		if b.UnitMismatch != differ || (b.PercentOfBound == nil) != differ || b.HeadValue == nil {
+			t.Fatalf("bound %q, measured %q: unit_mismatch %v, percent %v, head %v; want a mismatch exactly when %v",
+				bound, measured, b.UnitMismatch, b.PercentOfBound, b.HeadValue, differ)
+		}
 	}
 }
 
@@ -260,7 +368,7 @@ func TestEveryProjectionOfBoundsHoldsTheContractsRules(t *testing.T) {
 			run := []string{"r", "other", ""}[r.Intn(3)]
 			o := objectives[r.Intn(len(objectives))]
 			facts = append(facts, boundFact(seq, run, o, directions[o], float64(1+r.Intn(1000))))
-			if run == "r" {
+			if run == "r" || run == "" {
 				declared[o] = append(declared[o], seq)
 			}
 		}

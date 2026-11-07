@@ -58,6 +58,7 @@ export const PRICED_AND_UNPRICED: CostView = {
       turns: 774,
       unpricedTurns: 0,
       usage: usage({outputTokens: 2_000_000, costUsd: 205}),
+      totalTokens: 188_300_000,
     },
     {
       role: AgentRole.LEAD,
@@ -65,6 +66,7 @@ export const PRICED_AND_UNPRICED: CostView = {
       turns: 436,
       unpricedTurns: 12,
       usage: usage({outputTokens: 1_500_000, costUsd: 66}),
+      totalTokens: 61_000_000,
     },
     {
       role: AgentRole.JUDGE,
@@ -72,6 +74,7 @@ export const PRICED_AND_UNPRICED: CostView = {
       turns: 33,
       unpricedTurns: 0,
       usage: usage({outputTokens: 100_000, costUsd: 5}),
+      totalTokens: 1_950_000,
     },
     {
       role: AgentRole.PROFILER,
@@ -79,12 +82,31 @@ export const PRICED_AND_UNPRICED: CostView = {
       turns: 41,
       unpricedTurns: 41,
       usage: usage({inputTokens: 2_200_000}),
+      totalTokens: 2_200_000,
     },
   ],
   models: [
-    {model: MODEL_A, turns: 1100, unpricedTurns: 0, usage: usage({costUsd: 206})},
-    {model: MODEL_B, turns: 250, unpricedTurns: 0, usage: usage({costUsd: 88})},
-    {model: MODEL_DEFAULT, turns: 83, unpricedTurns: 41, usage: usage({costUsd: 24.4})},
+    {
+      model: MODEL_A,
+      turns: 1100,
+      unpricedTurns: 0,
+      usage: usage({costUsd: 206}),
+      totalTokens: 190_400_000,
+    },
+    {
+      model: MODEL_B,
+      turns: 250,
+      unpricedTurns: 0,
+      usage: usage({costUsd: 88}),
+      totalTokens: 52_100_000,
+    },
+    {
+      model: MODEL_DEFAULT,
+      turns: 83,
+      unpricedTurns: 41,
+      usage: usage({costUsd: 24.4}),
+      totalTokens: 22_500_000,
+    },
   ],
   series: {
     startMs: START,
@@ -109,6 +131,7 @@ export const PRICED_AND_UNPRICED: CostView = {
     ],
   },
   lastHourUsd: 14.2,
+  modelsTruncated: false,
 };
 
 /** The same run once it has ended: nothing unpriced, and the host's clock stopped at its end. */
@@ -136,6 +159,7 @@ export const NO_PRICES: CostView = {
       turns: 9,
       unpricedTurns: 9,
       usage: usage({inputTokens: 90_000, outputTokens: 4_000}),
+      totalTokens: 94_000,
     },
   ],
   models: [
@@ -144,10 +168,12 @@ export const NO_PRICES: CostView = {
       turns: 9,
       unpricedTurns: 9,
       usage: usage({inputTokens: 90_000, outputTokens: 4_000}),
+      totalTokens: 94_000,
     },
   ],
   series: {startMs: START, bucketMs: HOUR, buckets: [bucket(0, []), bucket(1, [])]},
   lastHourUsd: null,
+  modelsTruncated: false,
 };
 
 /** A run with no finished turn: there is nothing to split, and no price. */
@@ -163,14 +189,27 @@ export const NO_TURNS: CostView = {
   models: [],
   series: {startMs: START, bucketMs: 60_000, buckets: [bucket(0, [])]},
   lastHourUsd: null,
+  modelsTruncated: false,
 };
 
 /** Names no column can hold, and a model that shares its name with another on a second harness. */
 export const LONG_NAMES: CostView = {
   ...PRICED_AND_UNPRICED,
   models: [
-    {model: MODEL_LONG, turns: 1000, unpricedTurns: 0, usage: usage({costUsd: 250})},
-    {model: MODEL_A, turns: 400, unpricedTurns: 0, usage: usage({costUsd: 68.4})},
+    {
+      model: MODEL_LONG,
+      turns: 1000,
+      unpricedTurns: 0,
+      usage: usage({costUsd: 250}),
+      totalTokens: 140_000_000,
+    },
+    {
+      model: MODEL_A,
+      turns: 400,
+      unpricedTurns: 0,
+      usage: usage({costUsd: 68.4}),
+      totalTokens: 90_000_000,
+    },
   ],
   series: {
     ...PRICED_AND_UNPRICED.series,

@@ -29,7 +29,9 @@ message SearchState {
   repeated vibesys.cli.v1.JobTrouble troubles = 10 [(buf.validate.field).repeated.max_items = 500];
   uint32 unattributed_jobs = 11;
   bool truncated = 12;
-  // The performance bounds the run's agents declared, one entry per objective, by objective name.
+  // The performance bounds that stand for the run, one entry per objective, by objective name: those
+  // its agents declared, and those a person declared outside any run (RecordOrigin.run_id empty),
+  // which stand for every run of the task.
   // Kept whole under the byte budget: a few small entries, bounded by construction.
   repeated ObjectiveBounds bounds = 13 [(buf.validate.field).repeated.max_items = 64];
 }
@@ -61,7 +63,8 @@ message ObjectiveBounds {
   }];
   // The head's value on the objective, the number percent_of_bound is a share of. Absent when the
   // run has no head, the head has no value for the objective, or the head measured the objective in
-  // another direction than the bound's.
+  // another direction than the bound's. It is not absent for a unit mismatch: the number is shown,
+  // and only its share of the bound is withheld.
   optional double head_value = 4 [(buf.validate.field).double.finite = true];
   // How close the head is to the standing bound, in percent: 100 at the bound, and above 100 when
   // the head has gone past it, which says the bound was too modest. For an objective that is
@@ -72,6 +75,11 @@ message ObjectiveBounds {
     finite: true
     gt: 0
   }];
+  // True when the head measured the objective in a unit other than the standing bound's, so that
+  // head_value and the bound are not numbers of the same thing and percent_of_bound is left absent.
+  // It is set only when the measurement says its unit: one that does not is not a mismatch, since
+  // nothing says the two differ.
+  bool unit_mismatch = 6;
 }
 
 message SearchHealth {

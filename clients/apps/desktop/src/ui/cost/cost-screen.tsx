@@ -96,7 +96,12 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
           label="Cost by agent type"
           nameHeader="Type"
           barLabel="Share of the largest cost"
-          columns={[{header: 'Agents'}, {header: 'Turns'}, {header: 'Cost', strong: true}]}
+          columns={[
+            {header: 'Agents'},
+            {header: 'Turns'},
+            {header: 'Tokens'},
+            {header: 'Cost', strong: true},
+          ]}
           rows={model.types}
         />
       </Card>
@@ -107,7 +112,7 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
               label="Cost by model"
               nameHeader="Model"
               barLabel="Share of the largest cost"
-              columns={[{header: 'Turns'}, {header: 'Cost', strong: true}]}
+              columns={[{header: 'Turns'}, {header: 'Tokens'}, {header: 'Cost', strong: true}]}
               rows={model.models}
             />
           </Card>

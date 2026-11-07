@@ -54,14 +54,19 @@ type RunCost struct {
 	// comes last, in the order of the role names.
 	Roles []*RoleCost `protobuf:"bytes,8,rep,name=roles,proto3" json:"roles,omitempty"`
 	// One entry for each model the run's agents ran on, most costly first; a model with no priced
-	// turn comes last, in the order of its harness and name.
+	// turn comes last, in the order of its harness and name. When the run ran on more models than fit,
+	// the first ones are kept (the most costly) and models_truncated says so.
 	Models []*ModelCost `protobuf:"bytes,9,rep,name=models,proto3" json:"models,omitempty"`
 	Series *SpendSeries `protobuf:"bytes,10,opt,name=series,proto3" json:"series,omitempty"`
 	// What the turns that finished in the hour before as_of cost. Absent when no turn of the run is
 	// priced. It is a rate in dollars an hour for as long as the run has been going that long.
-	LastHourUsd   *float64 `protobuf:"fixed64,11,opt,name=last_hour_usd,json=lastHourUsd,proto3,oneof" json:"last_hour_usd,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LastHourUsd *float64 `protobuf:"fixed64,11,opt,name=last_hour_usd,json=lastHourUsd,proto3,oneof" json:"last_hour_usd,omitempty"`
+	// True when the view leaves something of the models out: a model past the limit of models (here
+	// and in every bucket's by_model), or a model name cut to fit. Every figure that is not a list of
+	// models, the total and every bucket's cost_usd among them, still counts every turn.
+	ModelsTruncated bool `protobuf:"varint,12,opt,name=models_truncated,json=modelsTruncated,proto3" json:"models_truncated,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RunCost) Reset() {
@@ -171,6 +176,13 @@ func (x *RunCost) GetLastHourUsd() float64 {
 	return 0
 }
 
+func (x *RunCost) GetModelsTruncated() bool {
+	if x != nil {
+		return x.ModelsTruncated
+	}
+	return false
+}
+
 // RoleCost is what the agents of one type, such as the workers, have cost.
 type RoleCost struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -180,7 +192,10 @@ type RoleCost struct {
 	Turns         uint32 `protobuf:"varint,3,opt,name=turns,proto3" json:"turns,omitempty"`
 	UnpricedTurns uint32 `protobuf:"varint,4,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
 	// Tokens by kind, and the cost of the priced turns: absent when none is priced.
-	Usage         *Usage `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	Usage *Usage `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	// All the tokens of the type: the sum of the five kinds in usage, a kind no turn reported counting
+	// as none. The host adds them up so that no client does.
+	TotalTokens   uint64 `protobuf:"varint,6,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -250,11 +265,19 @@ func (x *RoleCost) GetUsage() *Usage {
 	return nil
 }
 
+func (x *RoleCost) GetTotalTokens() uint64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
 // ModelRef names the model an agent ran on, as the agent's own harness and model.
 type ModelRef struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Harness Harness                `protobuf:"varint,1,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
-	// Empty is the harness's own default model.
+	// Empty is the harness's own default model. A name longer than the limit is cut to it, at a
+	// character boundary, and the view says so in RunCost.models_truncated.
 	Model         string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -311,6 +334,9 @@ type ModelCost struct {
 	Turns         uint32                 `protobuf:"varint,2,opt,name=turns,proto3" json:"turns,omitempty"`
 	UnpricedTurns uint32                 `protobuf:"varint,3,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
 	Usage         *Usage                 `protobuf:"bytes,4,opt,name=usage,proto3" json:"usage,omitempty"`
+	// All the tokens of the model: the sum of the five kinds in usage, a kind no turn reported
+	// counting as none.
+	TotalTokens   uint64 `protobuf:"varint,5,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -371,6 +397,13 @@ func (x *ModelCost) GetUsage() *Usage {
 		return x.Usage
 	}
 	return nil
+}
+
+func (x *ModelCost) GetTotalTokens() uint64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
 }
 
 // SpendSeries is the cost of the run over time: consecutive buckets of one width from the run's
@@ -445,7 +478,9 @@ type SpendBucket struct {
 	Start *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=start,proto3" json:"start,omitempty"`
 	// The cost of the priced turns in the bucket.
 	CostUsd float64 `protobuf:"fixed64,2,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
-	// That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket.
+	// That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket
+	// and a model RunCost.models left out. cost_usd is the cost of every model, so it can exceed the
+	// sum of by_model when RunCost.models_truncated is set.
 	ByModel       []*ModelSpend `protobuf:"bytes,3,rep,name=by_model,json=byModel,proto3" json:"by_model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -559,7 +594,7 @@ var File_vibesys_orchestrator_v1_cost_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_cost_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/orchestrator/v1/cost.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xbc\x05\n" +
+	"\"vibesys/orchestrator/v1/cost.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xf1\x05\n" +
 	"\aRunCost\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x127\n" +
@@ -569,41 +604,44 @@ const file_vibesys_orchestrator_v1_cost_proto_rawDesc = "" +
 	"maxCostUsd\x88\x01\x01\x12\x14\n" +
 	"\x05turns\x18\x06 \x01(\rR\x05turns\x12%\n" +
 	"\x0eunpriced_turns\x18\a \x01(\rR\runpricedTurns\x12A\n" +
-	"\x05roles\x18\b \x03(\v2!.vibesys.orchestrator.v1.RoleCostB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12:\n" +
-	"\x06models\x18\t \x03(\v2\".vibesys.orchestrator.v1.ModelCostR\x06models\x12D\n" +
+	"\x05roles\x18\b \x03(\v2!.vibesys.orchestrator.v1.RoleCostB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12D\n" +
+	"\x06models\x18\t \x03(\v2\".vibesys.orchestrator.v1.ModelCostB\b\xbaH\x05\x92\x01\x02\x10@R\x06models\x12D\n" +
 	"\x06series\x18\n" +
 	" \x01(\v2$.vibesys.orchestrator.v1.SpendSeriesB\x06\xbaH\x03\xc8\x01\x01R\x06series\x129\n" +
-	"\rlast_hour_usd\x18\v \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\vlastHourUsd\x88\x01\x01:e\xbaHb\x1a`\n" +
+	"\rlast_hour_usd\x18\v \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\vlastHourUsd\x88\x01\x01\x12)\n" +
+	"\x10models_truncated\x18\f \x01(\bR\x0fmodelsTruncated:e\xbaHb\x1a`\n" +
 	"\x17run_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turnsB\x0f\n" +
 	"\r_max_cost_usdB\x10\n" +
-	"\x0e_last_hour_usd\"\xc9\x02\n" +
+	"\x0e_last_hour_usd\"\xec\x02\n" +
 	"\bRoleCost\x12B\n" +
 	"\x04role\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04role\x12\x16\n" +
 	"\x06agents\x18\x02 \x01(\rR\x06agents\x12\x14\n" +
 	"\x05turns\x18\x03 \x01(\rR\x05turns\x12%\n" +
 	"\x0eunpriced_turns\x18\x04 \x01(\rR\runpricedTurns\x12<\n" +
-	"\x05usage\x18\x05 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage:f\xbaHc\x1aa\n" +
-	"\x18role_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\"h\n" +
+	"\x05usage\x18\x05 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\x12!\n" +
+	"\ftotal_tokens\x18\x06 \x01(\x04R\vtotalTokens:f\xbaHc\x1aa\n" +
+	"\x18role_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\"r\n" +
 	"\bModelRef\x12F\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"\xb0\x02\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12\x1e\n" +
+	"\x05model\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x05model\"\xd3\x02\n" +
 	"\tModelCost\x12?\n" +
 	"\x05model\x18\x01 \x01(\v2!.vibesys.orchestrator.v1.ModelRefB\x06\xbaH\x03\xc8\x01\x01R\x05model\x12\x14\n" +
 	"\x05turns\x18\x02 \x01(\rR\x05turns\x12%\n" +
 	"\x0eunpriced_turns\x18\x03 \x01(\rR\runpricedTurns\x12<\n" +
-	"\x05usage\x18\x04 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage:g\xbaHd\x1ab\n" +
+	"\x05usage\x18\x04 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\x12!\n" +
+	"\ftotal_tokens\x18\x05 \x01(\x04R\vtotalTokens:g\xbaHd\x1ab\n" +
 	"\x19model_cost.unpriced_turns\x12\"unpriced_turns cannot exceed turns\x1a!this.unpriced_turns <= this.turns\"\xd1\x01\n" +
 	"\vSpendSeries\x128\n" +
 	"\x05start\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05start\x12<\n" +
 	"\x05width\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xc8\x01\x01\xaa\x01\x02*\x00R\x05width\x12J\n" +
 	"\abuckets\x18\x03 \x03(\v2$.vibesys.orchestrator.v1.SpendBucketB\n" +
-	"\xbaH\a\x92\x01\x04\b\x01\x10@R\abuckets\"\xb4\x01\n" +
+	"\xbaH\a\x92\x01\x04\b\x01\x10@R\abuckets\"\xbe\x01\n" +
 	"\vSpendBucket\x128\n" +
 	"\x05start\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05start\x12+\n" +
-	"\bcost_usd\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsd\x12>\n" +
-	"\bby_model\x18\x03 \x03(\v2#.vibesys.orchestrator.v1.ModelSpendR\abyModel\"z\n" +
+	"\bcost_usd\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsd\x12H\n" +
+	"\bby_model\x18\x03 \x03(\v2#.vibesys.orchestrator.v1.ModelSpendB\b\xbaH\x05\x92\x01\x02\x10@R\abyModel\"z\n" +
 	"\n" +
 	"ModelSpend\x12?\n" +
 	"\x05model\x18\x01 \x01(\v2!.vibesys.orchestrator.v1.ModelRefB\x06\xbaH\x03\xc8\x01\x01R\x05model\x12+\n" +

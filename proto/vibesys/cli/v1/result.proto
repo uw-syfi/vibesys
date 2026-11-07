@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
@@ -17,6 +18,14 @@ enum Direction {
 message Metric {
   string name = 1;
   Direction direction = 2;
+  // What the metric's values are counted in, such as "tok/s" or "ms", when the measurement says. A
+  // reader that compares a measurement with a declared bound (ObjectiveBound.unit) uses it to tell
+  // that the two are in different units. Absent when the measurement does not say, which a reader
+  // takes as "not known", not as any unit.
+  optional string unit = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 64
+  }];
 }
 
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
