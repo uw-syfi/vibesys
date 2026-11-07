@@ -117,3 +117,9 @@
 .vs-collapsible-body {
   animation: vs-enter var(--duration-fast) var(--easing);
 }
+
+/* Code and output are never reflowed: a long line scrolls inside its block and never widens the page. */
+.vs-transcript .vs-code-block-body {
+  white-space: pre;
+  overflow-wrap: normal;
+}
