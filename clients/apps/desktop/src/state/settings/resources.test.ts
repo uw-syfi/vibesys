@@ -72,3 +72,29 @@ describe('a resource row', () => {
     expect(stood).toEqual(expected);
   });
 });
+
+describe('a host that refuses for good', () => {
+  const refused = {
+    kind: 'Refused',
+    detail: 'the state directory is on nfs',
+    retryable: false,
+    cause: 'state-network-filesystem',
+  } as const;
+  const row = (connection: HostConnectionState) =>
+    resourceRow({
+      key: 'ssh:host-a',
+      label: 'host-a',
+      connection,
+      runsFeed: {_tag: 'Opening'},
+      hasData: false,
+    });
+
+  it('is refused, and says why, where a host that cannot be reached is unreachable and says nothing', () => {
+    expect(row({_tag: 'Unusable', fault: refused})).toMatchObject({
+      connection: 'refused',
+      cause: 'state-network-filesystem',
+    });
+    expect(row({_tag: 'Unusable', fault})).toMatchObject({connection: 'unreachable', cause: null});
+    expect(row({_tag: 'Connecting', attempt: 1}).cause).toBeNull();
+  });
+});

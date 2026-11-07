@@ -22,11 +22,17 @@ import {decodeFrames, encodeFrame, isFault} from '../../state/grpc-frames.js';
 export const HELLO = `/${HostService.typeName}/${HostService.method.hello.name}`;
 
 /** One call the peer received on a scripted method. */
-interface FakeCall {
+export interface FakeCall {
   readonly method: string;
   readonly request: Uint8Array;
   /** Send one reply message. */
   send(message: Uint8Array): void;
+  /**
+   * Start sending one reply message in at most `pieces` parts, none of them yet. `parts` is how
+   * many there are; each call of `next` writes the next part (one chunk on the wire) and says
+   * whether more remain, so a test decides how long the message takes to arrive and when.
+   */
+  trickle(message: Uint8Array, pieces: number): {readonly parts: number; next(): boolean};
   /** End the call with `code` (OK by default). */
   end(code?: number, detail?: string): void;
   /** End the call's stream with trailers that carry no gRPC status, as a cut link can. */
@@ -135,6 +141,21 @@ function serve(stream: ServerHttp2Stream, headers: IncomingHttpHeaders, serving:
       send: message => {
         const frame = encodeFrame(message, HOST_API_MAX_MESSAGE_BYTES);
         if (!isFault(frame) && !stream.destroyed) stream.write(frame);
+      },
+      trickle: (message, pieces) => {
+        const frame = encodeFrame(message, HOST_API_MAX_MESSAGE_BYTES);
+        const bytes = isFault(frame) ? new Uint8Array(0) : frame;
+        const size = Math.max(1, Math.ceil(bytes.byteLength / pieces));
+        let offset = 0;
+        return {
+          parts: Math.ceil(bytes.byteLength / size),
+          next: () => {
+            if (offset < bytes.byteLength && !stream.destroyed)
+              stream.write(bytes.subarray(offset, offset + size));
+            offset += size;
+            return offset < bytes.byteLength;
+          },
+        };
       },
       end: (code = 0, detail = '') => finish(code, detail),
       endWithoutStatus: () => {

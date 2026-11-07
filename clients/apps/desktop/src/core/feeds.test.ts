@@ -259,7 +259,8 @@ describe('a Hello that is not COMPATIBLE (P7)', () => {
     ({outcome}) =>
       Effect.gen(function* () {
         const {h, freshness} = yield* play(outcome);
-        const calls = h.fake.calls();
+        // What the host says about why it does not serve is asked beside the handshake, not by it.
+        const calls = h.fake.calls().filter(call => !call.target.method.includes('HostControl'));
         const firstStream = calls.findIndex(call => call.kind === 'stream');
         const helloAnswered = outcome.failures === 0 || outcome.status === RpcStatus.UNAVAILABLE;
         const canStream = outcome.compatibility === Compatibility.COMPATIBLE && helloAnswered;

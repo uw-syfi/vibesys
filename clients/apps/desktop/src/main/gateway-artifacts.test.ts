@@ -1,5 +1,5 @@
 import {describe, expect, it} from '@effect/vitest';
-import {API_SCHEMA_HASH} from '@vibesys/proto';
+import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import hostProgram from '../../../../../proto/testdata/host_program.golden.json' with {
   type: 'json',
@@ -35,9 +35,15 @@ describe('gateway artifacts', () => {
         const missing = yield* read({}).pipe(
           Effect.provide(gatewayArtifactsFrom('/app/gateway', () => Effect.succeed(null))),
         );
-        expect((yield* Effect.flip(missing.read('darwin-arm64'))).message).toContain(
-          'install Go and rebuild (darwin-arm64)',
-        );
+        const refused = yield* Effect.flip(missing.read('darwin-arm64'));
+        // A refusal no retry changes, naming the platform, the version and what the build holds.
+        expect(refused).toMatchObject({
+          _tag: 'GatewayRefused',
+          refusal: DesktopRefusal.HOST_PROGRAM_MISSING,
+        });
+        expect(refused.message).toContain('darwin-arm64');
+        expect(refused.message).toContain(API_SCHEMA_HASH.slice(0, 16));
+        expect(refused.message).toContain('holds none');
         const broken = yield* read({}).pipe(
           Effect.provide(
             gatewayArtifactsFrom('/app/gateway', () => Effect.fail(new Error('EACCES'))),
@@ -45,5 +51,23 @@ describe('gateway artifacts', () => {
         );
         expect((yield* Effect.flip(broken.read('linux-arm64'))).message).toContain('EACCES');
       }),
+  );
+});
+
+describe('a dev build that built fewer targets', () => {
+  it.effect('names the platforms it does hold, so the missing one is plain', () =>
+    Effect.gen(function* () {
+      const artifacts = yield* read({}).pipe(
+        Effect.provide(
+          gatewayArtifactsFrom('/app/gateway', path =>
+            Effect.succeed(path.endsWith('-darwin-arm64') ? Uint8Array.of(7) : null),
+          ),
+        ),
+      );
+      const refused = yield* Effect.flip(artifacts.read('linux-amd64'));
+      expect(refused.message).toContain('no host program for linux-amd64');
+      expect(refused.message).toContain('it holds darwin-arm64');
+      expect(yield* artifacts.read('darwin-arm64')).toEqual(Uint8Array.of(7));
+    }),
   );
 });

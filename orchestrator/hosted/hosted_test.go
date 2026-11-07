@@ -300,6 +300,10 @@ func TestARefusedStateDirectoryIsReportedAsData(t *testing.T) {
 	if id.GetUnserved().GetReason() != pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED || id.GetRelation() != pb.ReleaseRelation_RELEASE_RELATION_UNKNOWN {
 		t.Fatalf("identity %v", id)
 	}
+	// A relative path is refused for its form, not its place: no setting about a disk fixes it.
+	if got := id.GetUnserved().GetStateRefusal(); got != pb.StateRefusal_STATE_REFUSAL_UNSPECIFIED {
+		t.Fatalf("state refusal %v", got)
+	}
 }
 
 func TestHostProgramGolden(t *testing.T) {

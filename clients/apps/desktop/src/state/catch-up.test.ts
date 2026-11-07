@@ -2,7 +2,7 @@ import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {type Command, CommandSchema, ReceiptSchema, Refusal} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {pressOf, refusalOf} from './catch-up.js';
+import {catchUpRefusalOf, pressOf} from './catch-up.js';
 import type {CommandProgress} from './commands.js';
 import type {Fault, FaultKind} from './fault.js';
 import {FAULT_KINDS} from './fault.js';
@@ -46,13 +46,13 @@ describe('a press of Catch me up, as the screen reads it', () => {
       fc.property(fc.constantFrom(...REFUSALS), refusal => {
         const receipt = create(ReceiptSchema, {commandId: 'c1', refusal});
         const press = pressOf({_tag: 'Refused', receipt});
-        expect(press).toEqual({_tag: 'Refused', reason: refusalOf(refusal)});
+        expect(press).toEqual({_tag: 'Refused', reason: catchUpRefusalOf(refusal)});
       }),
     );
-    expect(refusalOf(Refusal.RUN_NOT_FOUND)).toBe('run-not-found');
-    expect(refusalOf(Refusal.NO_VIEWER)).toBe('no-viewer');
-    expect(refusalOf(Refusal.NOT_PERMITTED)).toBe('not-permitted');
-    expect(refusalOf(Refusal.COST_LIMIT_REACHED)).toBe('unexpected');
+    expect(catchUpRefusalOf(Refusal.RUN_NOT_FOUND)).toBe('run-not-found');
+    expect(catchUpRefusalOf(Refusal.NO_VIEWER)).toBe('no-viewer');
+    expect(catchUpRefusalOf(Refusal.NOT_PERMITTED)).toBe('not-permitted');
+    expect(catchUpRefusalOf(Refusal.COST_LIMIT_REACHED)).toBe('unexpected');
   });
 
   it('keeps an outcome it cannot tell as unconfirmed, with the fault, to press again', () => {

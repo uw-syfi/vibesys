@@ -10,6 +10,7 @@ import {
   DesktopGatewayReplySchema,
   DesktopGatewayRequestSchema,
   type DesktopLinkProblem,
+  type DesktopRefusal,
   validatedExactFromBinary,
 } from '@vibesys/proto';
 import type {HostKey} from '../state/host.js';
@@ -68,11 +69,15 @@ export function gatewayReply(bytes: Uint8Array): Uint8Array {
   return reply;
 }
 
-/** The last reply of a call: clean without `error` and `status`, else the failure and its gRPC status. */
+/**
+ * The last reply of a call: clean without `error` and `status`, else the failure and its gRPC
+ * status, the link problem that ended it, or the refusal that no retry changes.
+ */
 export function gatewayEnd(
   error?: string,
   status?: number,
   linkProblem?: DesktopLinkProblem,
+  refusal?: DesktopRefusal,
 ): Uint8Array {
   const reply = toBinary(
     DesktopGatewayReplySchema,
@@ -83,6 +88,7 @@ export function gatewayEnd(
           ...(error === undefined ? {} : {error}),
           ...(status === undefined ? {} : {status}),
           ...(linkProblem === undefined ? {} : {linkProblem}),
+          ...(refusal === undefined ? {} : {refusal}),
         },
       },
     }),

@@ -9,24 +9,31 @@ import {HOST_API_MAX_MESSAGE_BYTES} from '@vibesys/proto';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
-import * as Option from 'effect/Option';
 import type * as Scope from 'effect/Scope';
-import {UNARY_BOUND_MS} from '../state/gateway-policy.js';
+import {REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {decodeFrames, encodeFrame, isFault} from '../state/grpc-frames.js';
 import {callStatus} from '../state/grpc-status.js';
 import {GrpcCode, GrpcFailed} from './errors.js';
 
+/** How long a call is watched for progress: to its end, or until its first reply message. */
+type Watch = 'to-end' | 'to-first-reply';
+
 export interface GatewaySession {
   /**
    * One call: send `bytes`, hand each reply message to `receive` in order, end with the status.
-   * `receive` throwing ends the call with INTERNAL. Interrupting the call resets its stream.
+   * `receive` throwing ends the call with INTERNAL. Interrupting the call resets its stream. With
+   * `watch`, the call fails with DEADLINE_EXCEEDED once a whole `REPLY_STALL_MS` window passes with
+   * nothing heard on it (headers, a chunk of a message, the end): bytes that keep arriving, however
+   * slowly, are progress and never cut it. Without `watch` it is bounded by the session's liveness
+   * alone, as a quiet feed must be.
    */
   readonly call: (
     method: string,
     bytes: Uint8Array,
     receive: (message: Uint8Array) => void,
+    watch?: Watch,
   ) => Effect.Effect<void, GrpcFailed>;
-  /** A call with exactly one reply, bounded by `UNARY_BOUND_MS`. */
+  /** A call with exactly one reply, watched to its end. */
   readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, GrpcFailed>;
   /** Completes when the session ended: the peer closed it, said goaway, or the scope closed. */
   readonly lost: Effect.Effect<void>;
@@ -138,63 +145,114 @@ const watchStream = (
   stream.on('close', () => finish(unavailable('gRPC connection closed')));
 };
 
-/** One call over `http2`: send `bytes`, then `watchStream`. Interrupting resets the stream. */
-const callOver =
-  (http2: ClientHttp2Session, heard: () => void, metadata: CallMetadata): GatewaySession['call'] =>
-  (method, bytes, receive) =>
-    Effect.callback<void, GrpcFailed>(resume => {
-      const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
-      if (isFault(frame)) return resume(Effect.fail(new GrpcFailed(frame)));
-      const stream = startStream(http2, method, frame, metadata);
-      if (stream instanceof GrpcFailed) return resume(Effect.fail(stream));
-      let settled = false;
-      watchStream(
-        stream,
-        receive,
-        error => {
-          if (settled) return;
-          settled = true;
-          if (error === undefined) resume(Effect.void);
-          else {
-            stream.close(constants.NGHTTP2_CANCEL);
-            resume(Effect.fail(error));
-          }
-        },
-        () => settled,
-        method.startsWith(`/${OrchestratorService.typeName}/`)
-          ? ORCHESTRATOR_MAX_MESSAGE_BYTES
-          : HOST_API_MAX_MESSAGE_BYTES,
-        heard,
-      );
-      return Effect.sync(() => {
+/** What one call has heard and delivered, which its watch reads. */
+interface Tally {
+  heard: number;
+  replied: boolean;
+}
+
+/** What a call needs of its session: the connection, what the peer was heard to send, and the metadata of every call. */
+interface Line {
+  readonly http2: ClientHttp2Session;
+  readonly heard: () => void;
+  readonly metadata: CallMetadata;
+}
+
+/** The send of one call over `line`; its progress is counted in `tally`. */
+const startCall = (
+  {http2, heard, metadata}: Line,
+  tally: Tally,
+  method: string,
+  bytes: Uint8Array,
+  receive: Receive,
+): Effect.Effect<void, GrpcFailed> =>
+  Effect.callback<void, GrpcFailed>(resume => {
+    const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
+    if (isFault(frame)) return resume(Effect.fail(new GrpcFailed(frame)));
+    const stream = startStream(http2, method, frame, metadata);
+    if (stream instanceof GrpcFailed) return resume(Effect.fail(stream));
+    let settled = false;
+    watchStream(
+      stream,
+      message => {
+        tally.replied = true;
+        receive(message);
+      },
+      error => {
         if (settled) return;
         settled = true;
-        stream.close(constants.NGHTTP2_CANCEL);
-      });
+        if (error === undefined) resume(Effect.void);
+        else {
+          stream.close(constants.NGHTTP2_CANCEL);
+          resume(Effect.fail(error));
+        }
+      },
+      () => settled,
+      method.startsWith(`/${OrchestratorService.typeName}/`)
+        ? ORCHESTRATOR_MAX_MESSAGE_BYTES
+        : HOST_API_MAX_MESSAGE_BYTES,
+      () => {
+        tally.heard += 1;
+        heard();
+      },
+    );
+    return Effect.sync(() => {
+      if (settled) return;
+      settled = true;
+      stream.close(constants.NGHTTP2_CANCEL);
+    });
+  });
+
+/**
+ * Fails when a whole window passes with nothing heard on the call. Never ends otherwise: it is
+ * raced against the call, and a watch `to-first-reply` stops watching once the first reply came.
+ */
+const stalled = (tally: Tally, watch: Watch): Effect.Effect<never, GrpcFailed> =>
+  Effect.gen(function* () {
+    while (true) {
+      const before = tally.heard;
+      yield* Effect.sleep(`${REPLY_STALL_MS} millis`);
+      if (watch === 'to-first-reply' && tally.replied) return yield* Effect.never;
+      if (tally.heard === before)
+        return yield* new GrpcFailed({
+          code: GrpcCode.DEADLINE_EXCEEDED,
+          message: `gRPC deadline exceeded: nothing heard for ${REPLY_STALL_MS / 1000} seconds`,
+        });
+    }
+  });
+
+/** One call over `line`: send `bytes`, then `watchStream`. Interrupting resets the stream. */
+const callOver =
+  (line: Line): GatewaySession['call'] =>
+  (method, bytes, receive, watch) =>
+    Effect.suspend(() => {
+      const tally: Tally = {heard: 0, replied: false};
+      const run = startCall(line, tally, method, bytes, receive);
+      return watch === undefined ? run : Effect.raceFirst(run, stalled(tally, watch));
     });
 
-/** A call with exactly one reply, within `UNARY_BOUND_MS`. */
+/** A call with exactly one reply, watched to its end. */
 const unaryOver =
   (call: GatewaySession['call']): GatewaySession['unary'] =>
   (method, bytes) =>
     Effect.suspend(() => {
       let reply: Uint8Array | undefined;
-      return call(method, bytes, message => {
-        if (reply !== undefined) throw new Error('unary returned multiple messages');
-        reply = message;
-      }).pipe(
-        Effect.timeoutOption(`${UNARY_BOUND_MS} millis`),
-        Effect.flatMap(done => {
-          if (Option.isNone(done))
-            return Effect.fail(
-              new GrpcFailed({code: GrpcCode.DEADLINE_EXCEEDED, message: 'gRPC deadline exceeded'}),
-            );
-          return reply === undefined
+      return call(
+        method,
+        bytes,
+        message => {
+          if (reply !== undefined) throw new Error('unary returned multiple messages');
+          reply = message;
+        },
+        'to-end',
+      ).pipe(
+        Effect.flatMap(() =>
+          reply === undefined
             ? Effect.fail(
                 new GrpcFailed({code: GrpcCode.INTERNAL, message: 'unary returned no message'}),
               )
-            : Effect.succeed(reply);
-        }),
+            : Effect.succeed(reply),
+        ),
       );
     });
 
@@ -227,13 +285,13 @@ export const openSession = (
         }),
     );
     let heard = 0;
-    const call = callOver(
+    const call = callOver({
       http2,
-      () => {
+      heard: () => {
         heard += 1;
       },
       metadata,
-    );
+    });
     return {
       call,
       unary: unaryOver(call),

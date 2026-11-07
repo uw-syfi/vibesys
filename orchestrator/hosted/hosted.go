@@ -77,7 +77,9 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash, BuildID: o.BuildID, Connected: o.Connected})
 	layout, err := production.LayoutFor(o.Config.GetStateDirectory(), gatewayroot.StateDirectory(o.Root, o.Home, o.Getenv))
 	if err != nil {
-		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
+		x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
+		x.why.StateRefusal = production.StateRefusalOf(err)
+		return x
 	}
 	sidecars, err := production.SidecarsFor(parts, layout.State.Sessions(), o.Executable, o.Log)
 	if err != nil {

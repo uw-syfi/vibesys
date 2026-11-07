@@ -10,6 +10,7 @@ import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as Schema from 'effect/Schema';
 import * as TestClock from 'effect/testing/TestClock';
+import {REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {fakeGateway, HELLO} from '../testing/main/fake-gateway.js';
 import {GrpcFailed} from './errors.js';
 import {openSession} from './grpc-session.js';
@@ -252,14 +253,15 @@ describe('gateway session', () => {
     ),
   );
 
-  it.effect('gives a unary call 15 seconds in total, then fails it as a deadline', () =>
+  it.effect('fails a unary call that heard nothing for a window as a deadline, within two', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const peer = fakeGateway();
         const session = yield* openSession(peer.connect());
         const running = yield* Effect.forkChild(Effect.flip(session.unary(SERVE, bytes())));
         yield* received(peer, 1);
-        yield* TestClock.adjust('15 seconds');
+        // The bound is on silence, between one and two windows after the last bytes.
+        yield* TestClock.adjust(`${2 * REPLY_STALL_MS} millis`);
         expect((yield* Fiber.join(running)).code).toBe(4);
       }),
     ),

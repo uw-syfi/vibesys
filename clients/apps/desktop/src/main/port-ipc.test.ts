@@ -1,8 +1,9 @@
 import {expect, it} from '@effect/vitest';
 import {oneofIs} from '@vibesys/orchestrator-proto';
+import {DesktopRefusal} from '@vibesys/proto';
 import * as Schema from 'effect/Schema';
 import {decodeGatewayReply, gatewayReply} from '../core/gateway-codec.js';
-import {GatewayFailed, GrpcFailed, LinkFailed} from './errors.js';
+import {GatewayFailed, GatewayRefused, GrpcFailed, LinkFailed} from './errors.js';
 import {
   endOf,
   isOwnWindow,
@@ -278,4 +279,21 @@ it('terminal replies keep every gRPC status and a single error prefix', () => {
     status: undefined,
   });
   expect(ended()).toEqual({error: undefined, status: undefined});
+});
+
+it('a refusal of the app travels as its type, with its words and no status', () => {
+  const reply = decodeGatewayReply(
+    endOf(
+      new GatewayRefused({
+        refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+        message: 'unsupported gateway platform: Linux riscv64',
+      }),
+    ),
+  );
+  if (!oneofIs(reply, 'end', {bytes: true, end: true})) throw new Error('not an end');
+  expect(reply.value).toMatchObject({
+    error: 'unsupported gateway platform: Linux riscv64',
+    refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+  });
+  expect(reply.value.status).toBeUndefined();
 });

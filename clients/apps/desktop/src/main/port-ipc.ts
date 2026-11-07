@@ -6,7 +6,7 @@ import {DesktopLinkProblem} from '@vibesys/proto';
  * answered with exactly one terminal reply, after which the port is closed.
  */
 import {gatewayEnd} from '../core/gateway-codec.js';
-import {GatewayFailed, GrpcFailed, grpcCodeOf, LinkFailed} from './errors.js';
+import {GatewayFailed, GatewayRefused, GrpcFailed, grpcCodeOf, LinkFailed} from './errors.js';
 
 /*
  * What the lifecycle uses of Electron, and no more: Electron's `IpcMain`, `IpcMainEvent` and
@@ -130,13 +130,19 @@ export function servePort(
   });
 }
 
-/** One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status. */
+/**
+ * One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status,
+ * when the link failed, why, and when the app refused the call for good, the refusal.
+ */
 export function endOf(error?: unknown): Uint8Array {
   const status = grpcCodeOf(error);
   const message =
     error === undefined
       ? undefined
-      : error instanceof GrpcFailed || error instanceof GatewayFailed || error instanceof LinkFailed
+      : error instanceof GrpcFailed ||
+          error instanceof GatewayFailed ||
+          error instanceof GatewayRefused ||
+          error instanceof LinkFailed
         ? error.message
         : String(error);
   const problem =
@@ -147,5 +153,10 @@ export function endOf(error?: unknown): Uint8Array {
           capacity: DesktopLinkProblem.CAPACITY,
         }[error.problem]
       : undefined;
-  return gatewayEnd(message, status, problem);
+  return gatewayEnd(
+    message,
+    status,
+    problem,
+    error instanceof GatewayRefused ? error.refusal : undefined,
+  );
 }

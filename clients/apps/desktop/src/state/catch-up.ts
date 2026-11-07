@@ -36,7 +36,7 @@ export type CatchUpPress =
 /** The metadata fields of a viewer, which the host names when a call lacks them. */
 const VIEWER_FIELDS = ['vibesys-viewer-id', 'vibesys-viewer-label'] as const;
 
-export function refusalOf(refusal: Refusal): CatchUpRefusal {
+export function catchUpRefusalOf(refusal: Refusal): CatchUpRefusal {
   switch (refusal) {
     case Refusal.RUN_NOT_FOUND:
       return 'run-not-found';
@@ -71,7 +71,7 @@ export function pressOf(progress: CommandProgress | undefined): CatchUpPress | u
           }
         : {_tag: 'Made', checkInId: progress.receipt.checkInId};
     case 'Refused':
-      return {_tag: 'Refused', reason: refusalOf(progress.receipt.refusal)};
+      return {_tag: 'Refused', reason: catchUpRefusalOf(progress.receipt.refusal)};
     case 'Unconfirmed':
       return {_tag: 'Unconfirmed', fault: progress.fault};
     case 'Failed':

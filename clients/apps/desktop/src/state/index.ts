@@ -10,8 +10,8 @@ export {
   CATCH_UP_REFUSALS,
   type CatchUpPress,
   type CatchUpRefusal,
+  catchUpRefusalOf,
   pressOf,
-  refusalOf,
 } from './catch-up.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
@@ -19,7 +19,13 @@ export {
   idleConnection,
   isTerminal,
 } from './connection.js';
-export {FAULT_KINDS, type Fault, type FaultKind} from './fault.js';
+export {
+  FAULT_KINDS,
+  type Fault,
+  type FaultKind,
+  REFUSAL_CAUSES,
+  type RefusalCause,
+} from './fault.js';
 export type {FeedStatus} from './feed.js';
 export {
   type Freshness,
@@ -46,6 +52,7 @@ export {
   type HostModel,
   runsCursor,
 } from './host-model.js';
+export {type HostRefusal, refusalOf} from './host-refusal.js';
 export {
   type CheckInRead,
   type Facts,

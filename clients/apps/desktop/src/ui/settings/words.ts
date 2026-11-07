@@ -29,6 +29,7 @@ export const CONNECTION_WORD: Readonly<Record<ResourceConnection, Word>> = {
   connected: {label: 'Connected', tone: 'ok'},
   reconnecting: {label: 'Reconnecting', tone: 'warn'},
   incompatible: {label: 'Incompatible', tone: 'err'},
+  refused: {label: 'Refused', tone: 'err'},
   unreachable: {label: 'Unreachable', tone: 'err'},
 };
 

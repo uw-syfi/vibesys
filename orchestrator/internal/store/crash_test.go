@@ -1,8 +1,10 @@
 package store_test
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,8 +44,19 @@ const (
 
 const returnedPrefix = "returned "
 
+// atStep is the line the child prints when it has reached the write step its parent chose. It then
+// stops, with the step not yet taken, and waits to be killed.
+const atStep = "at the step"
+
 // TestCrashChild is the process that dies. It does nothing unless a parent started it. It commits a
-// workload and tells its parent, as it goes, how many commits have returned.
+// workload and tells its parent, as it goes, how many commits have returned. At the chosen write
+// step it says so and blocks, and the parent kills it from outside.
+//
+// The child does not kill itself. A process that sends itself SIGKILL is not stopped by the call:
+// the kernel delivers the signal later, and on macOS that was sometimes after the child had gone on
+// through the rest of its workload, so the "crash" landed at no step at all (about one run in ten
+// of the test below). A process that blocks at the step and is killed by another cannot go on, and
+// the test no longer depends on how soon a signal arrives.
 func TestCrashChild(t *testing.T) {
 	dirPath := os.Getenv(crashDir)
 	if dirPath == "" {
@@ -62,8 +75,11 @@ func TestCrashChild(t *testing.T) {
 			return nil
 		}
 		if step++; step == target {
-			// SIGKILL: no deferred function, no flush, no rollback. The file is as the kernel has it.
-			return syscall.Kill(os.Getpid(), syscall.SIGKILL)
+			fmt.Println(atStep)
+			// Wait for the parent's SIGKILL: no deferred function, no flush, no rollback. The read
+			// returns only if the parent has gone without killing the child, and then it ends.
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			panic("the parent went away before it killed the child")
 		}
 		return nil
 	}})
@@ -78,7 +94,54 @@ func TestCrashChild(t *testing.T) {
 		}
 		fmt.Printf("%s%d\n", returnedPrefix, i)
 	}
-	t.Fatalf("the process was meant to die at write step %d of %d commits", target, commits)
+	t.Fatalf("the process was meant to stop at write step %d of %d commits", target, commits)
+}
+
+// killChildAtStep starts the child, waits until it has stopped at the given write step, kills it
+// with SIGKILL, and returns how many commits had returned by then. The wait ends when the child
+// says it is at the step or when it exits without having been there, which fails the test.
+func killChildAtStep(t *testing.T, dirPath string, seed uint64, step, commits int) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashChild$")
+	cmd.Env = append(os.Environ(), crashDir+"="+dirPath, crashSeed+"="+strconv.FormatUint(seed, 10),
+		crashStep+"="+strconv.Itoa(step), crashRuns+"="+strconv.Itoa(commits))
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdin, err := cmd.StdinPipe() // held open: the child waits on it, and wakes if this process dies.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close() //nolint:errcheck // after the child is gone there is nothing to report.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill() }() // a no-op once the process has been waited for.
+	var lines []string
+	returned, reached := 0, false
+	for sc := bufio.NewScanner(stdout); !reached && sc.Scan(); {
+		line := sc.Text()
+		lines = append(lines, line)
+		if v, ok := strings.CutPrefix(line, returnedPrefix); ok {
+			returned, _ = strconv.Atoi(v)
+		}
+		reached = line == atStep
+	}
+	if !reached {
+		err := cmd.Wait()
+		t.Fatalf("the child ended before write step %d: %v\n%s%s", step, err, strings.Join(lines, "\n"), stderr.String())
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	var exit *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &exit) || !exit.Sys().(syscall.WaitStatus).Signaled() || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+		t.Fatalf("the child did not die by SIGKILL: %v\n%s", err, stderr.String())
+	}
+	return returned
 }
 
 // stepsPerCommit runs a seeded workload without faults and counts the write steps of each commit.
@@ -111,20 +174,7 @@ func TestEveryWriteStepOfTheFirstCommitsIsKilledByASignal(t *testing.T) {
 			for step := first; step < first+n; step++ {
 				t.Run(fmt.Sprintf("commit-%d/step-%d", commit+1, step), func(t *testing.T) {
 					dirPath := t.TempDir()
-					cmd := exec.Command(os.Args[0], "-test.run=^TestCrashChild$")
-					cmd.Env = append(os.Environ(), crashDir+"="+dirPath, crashSeed+"="+strconv.Itoa(seed),
-						crashStep+"="+strconv.Itoa(step), crashRuns+"="+strconv.Itoa(commits))
-					out, err := cmd.CombinedOutput()
-					var exit *exec.ExitError
-					if !errors.As(err, &exit) || !exit.Sys().(syscall.WaitStatus).Signaled() || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
-						t.Fatalf("the child did not die by SIGKILL: %v\n%s", err, out)
-					}
-					returned := 0
-					for _, line := range strings.Split(string(out), "\n") {
-						if v, ok := strings.CutPrefix(line, returnedPrefix); ok {
-							returned, _ = strconv.Atoi(v)
-						}
-					}
+					returned := killChildAtStep(t, dirPath, seed, step, commits)
 					dir, err := localfs.Resolve(dirPath, localfstest.Fake{})
 					if err != nil {
 						t.Fatal(err)

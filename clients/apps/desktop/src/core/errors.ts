@@ -3,9 +3,10 @@
  * retry, resubscribe, stop and say so, or show the daemon's reason. The transport fails with the
  * three `TransportError`s, and `fromTransportError` turns them into an `AppError`.
  */
-import {DesktopLinkProblem} from '@vibesys/proto';
+import {DesktopLinkProblem, DesktopRefusal} from '@vibesys/proto';
 import * as Data from 'effect/Data';
 import type * as Duration from 'effect/Duration';
+import type {RefusalCause} from '../state/index.js';
 
 /** The gRPC status codes, by name (https://grpc.github.io/grpc/core/md_doc_statuscodes.html). */
 export const RpcStatus = {
@@ -45,6 +46,8 @@ export class CallEnded extends Data.TaggedError('CallEnded')<{
   readonly message: string;
   readonly status?: number;
   readonly linkProblem?: DesktopLinkProblem;
+  /** The app refused the call for good (no host program for the platform, a method it forbids). */
+  readonly refusal?: DesktopRefusal;
 }> {}
 
 /** A stream held more unread frames than its capacity. */
@@ -114,6 +117,16 @@ export class Rejected extends Data.TaggedError('Rejected')<{
   readonly detail: string;
 }> {}
 
+/**
+ * The app or the host refused for a reason that no retry and no redial changes: a platform with no
+ * host program, a state directory on a network disk. `cause` is the type the screens name the fix
+ * by; `detail` is the refusing side's own words (platform, version, path).
+ */
+export class Refused extends Data.TaggedError('Refused')<{
+  readonly cause: RefusalCause;
+  readonly detail: string;
+}> {}
+
 export type AppError =
   | AuthenticationFailed
   | NoBridge
@@ -124,7 +137,8 @@ export type AppError =
   | InvalidMessage
   | NotFound
   | Unimplemented
-  | Rejected;
+  | Rejected
+  | Refused;
 
 /** Whether trying the same call again can succeed. A new `AppError` tag fails to compile here. */
 export const isRetryable = (error: AppError): boolean => {
@@ -140,8 +154,19 @@ export const isRetryable = (error: AppError): boolean => {
     case 'NotFound':
     case 'Unimplemented':
     case 'Rejected':
+    case 'Refused':
       return false;
   }
+};
+
+/** What each refusal of the app is, as the cause the screens name. */
+const APP_REFUSAL: Readonly<
+  Record<Exclude<DesktopRefusal, DesktopRefusal.UNSPECIFIED>, RefusalCause>
+> = {
+  [DesktopRefusal.METHOD_NOT_AVAILABLE]: 'method-not-available',
+  [DesktopRefusal.INVALID_REQUEST]: 'invalid-request',
+  [DesktopRefusal.UNSUPPORTED_PLATFORM]: 'unsupported-platform',
+  [DesktopRefusal.HOST_PROGRAM_MISSING]: 'host-program-missing',
 };
 
 const detailOf = (end: CallEnded): string =>
@@ -154,6 +179,8 @@ const detailOf = (end: CallEnded): string =>
 export const fromEnd = (end: CallEnded, type = '(unknown)'): AppError => {
   if (end.linkProblem === DesktopLinkProblem.AUTH)
     return new AuthenticationFailed({detail: detailOf(end)});
+  if (end.refusal !== undefined && end.refusal !== DesktopRefusal.UNSPECIFIED)
+    return new Refused({cause: APP_REFUSAL[end.refusal], detail: detailOf(end)});
   if (end.status === undefined) return new TransportFailed({message: detailOf(end)});
   const detail = detailOf(end);
   switch (end.status) {

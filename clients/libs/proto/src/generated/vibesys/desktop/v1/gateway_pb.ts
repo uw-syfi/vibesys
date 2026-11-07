@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/desktop/v1/gateway.proto.
  */
 export const file_vibesys_desktop_v1_gateway: GenFile = /*@__PURE__*/
-  fileDesc("CiB2aWJlc3lzL2Rlc2t0b3AvdjEvZ2F0ZXdheS5wcm90bxISdmliZXN5cy5kZXNrdG9wLnYxIooCChVEZXNrdG9wR2F0ZXdheVJlcXVlc3QSQAoEa2luZBgBIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wR2F0ZXdheUtpbmRCCrpIB4IBBBABIAASSQoEaG9zdBgCIAEoCUI7ukg4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQSSQoGbWV0aG9kGAMgASgJQjm6SDZyNCiACDIvXi9bQS1aYS16XVtBLVphLXowLTlfLl0qL1tBLVphLXpdW0EtWmEtejAtOV9dKiQSGQoFYnl0ZXMYBCABKAxCCrpIB3oFGICAgAgixwEKEURlc2t0b3BHYXRld2F5RW5kEh0KBWVycm9yGAEgASgJQgm6SAZyBCiAgARIAIgBARIeCgZzdGF0dXMYAiABKAVCCbpIBhoEGBAoAEgBiAEBEk0KDGxpbmtfcHJvYmxlbRgDIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wTGlua1Byb2JsZW1CCrpIB4IBBBABIABIAogBAUIICgZfZXJyb3JCCQoHX3N0YXR1c0IPCg1fbGlua19wcm9ibGVtIncKE0Rlc2t0b3BHYXRld2F5UmVwbHkSGwoFYnl0ZXMYASABKAxCCrpIB3oFGICAgAhIABI0CgNlbmQYAiABKAsyJS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcEdhdGV3YXlFbmRIAEINCgRib2R5EgW6SAIIASp7ChJEZXNrdG9wR2F0ZXdheUtpbmQSJAogREVTS1RPUF9HQVRFV0FZX0tJTkRfVU5TUEVDSUZJRUQQABIeChpERVNLVE9QX0dBVEVXQVlfS0lORF9VTkFSWRABEh8KG0RFU0tUT1BfR0FURVdBWV9LSU5EX1NUUkVBTRACKpsBChJEZXNrdG9wTGlua1Byb2JsZW0SJAogREVTS1RPUF9MSU5LX1BST0JMRU1fVU5TUEVDSUZJRUQQABIdChlERVNLVE9QX0xJTktfUFJPQkxFTV9BVVRIEAESHQoZREVTS1RPUF9MSU5LX1BST0JMRU1fTElOSxACEiEKHURFU0tUT1BfTElOS19QUk9CTEVNX0NBUEFDSVRZEANCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9kZXNrdG9wL3YxO2Rlc2t0b3B2MWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("CiB2aWJlc3lzL2Rlc2t0b3AvdjEvZ2F0ZXdheS5wcm90bxISdmliZXN5cy5kZXNrdG9wLnYxIooCChVEZXNrdG9wR2F0ZXdheVJlcXVlc3QSQAoEa2luZBgBIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wR2F0ZXdheUtpbmRCCrpIB4IBBBABIAASSQoEaG9zdBgCIAEoCUI7ukg4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQSSQoGbWV0aG9kGAMgASgJQjm6SDZyNCiACDIvXi9bQS1aYS16XVtBLVphLXowLTlfLl0qL1tBLVphLXpdW0EtWmEtejAtOV9dKiQSGQoFYnl0ZXMYBCABKAxCCrpIB3oFGICAgAgimQIKEURlc2t0b3BHYXRld2F5RW5kEh0KBWVycm9yGAEgASgJQgm6SAZyBCiAgARIAIgBARIeCgZzdGF0dXMYAiABKAVCCbpIBhoEGBAoAEgBiAEBEk0KDGxpbmtfcHJvYmxlbRgDIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wTGlua1Byb2JsZW1CCrpIB4IBBBABIABIAogBARJECgdyZWZ1c2FsGAQgASgOMiIudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BSZWZ1c2FsQgq6SAeCAQQQASAASAOIAQFCCAoGX2Vycm9yQgkKB19zdGF0dXNCDwoNX2xpbmtfcHJvYmxlbUIKCghfcmVmdXNhbCJ3ChNEZXNrdG9wR2F0ZXdheVJlcGx5EhsKBWJ5dGVzGAEgASgMQgq6SAd6BRiAgIAISAASNAoDZW5kGAIgASgLMiUudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BHYXRld2F5RW5kSABCDQoEYm9keRIFukgCCAEqewoSRGVza3RvcEdhdGV3YXlLaW5kEiQKIERFU0tUT1BfR0FURVdBWV9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaREVTS1RPUF9HQVRFV0FZX0tJTkRfVU5BUlkQARIfChtERVNLVE9QX0dBVEVXQVlfS0lORF9TVFJFQU0QAiqbAQoSRGVza3RvcExpbmtQcm9ibGVtEiQKIERFU0tUT1BfTElOS19QUk9CTEVNX1VOU1BFQ0lGSUVEEAASHQoZREVTS1RPUF9MSU5LX1BST0JMRU1fQVVUSBABEh0KGURFU0tUT1BfTElOS19QUk9CTEVNX0xJTksQAhIhCh1ERVNLVE9QX0xJTktfUFJPQkxFTV9DQVBBQ0lUWRADKtQBCg5EZXNrdG9wUmVmdXNhbBIfChtERVNLVE9QX1JFRlVTQUxfVU5TUEVDSUZJRUQQABIoCiRERVNLVE9QX1JFRlVTQUxfTUVUSE9EX05PVF9BVkFJTEFCTEUQARIoCiRERVNLVE9QX1JFRlVTQUxfVU5TVVBQT1JURURfUExBVEZPUk0QAhIoCiRERVNLVE9QX1JFRlVTQUxfSE9TVF9QUk9HUkFNX01JU1NJTkcQAxIjCh9ERVNLVE9QX1JFRlVTQUxfSU5WQUxJRF9SRVFVRVNUEARCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9kZXNrdG9wL3YxO2Rlc2t0b3B2MWIGcHJvdG8z", [file_buf_validate_validate]);
 
 /**
  * Electron routes this message as protobuf bytes. The preload owns the port,
@@ -69,6 +69,13 @@ export type DesktopGatewayEnd = Message<"vibesys.desktop.v1.DesktopGatewayEnd"> 
    * @generated from field: optional vibesys.desktop.v1.DesktopLinkProblem link_problem = 3;
    */
   linkProblem?: DesktopLinkProblem | undefined;
+
+  /**
+   * Set when the app itself refused the call for good (never with a status or a link problem).
+   *
+   * @generated from field: optional vibesys.desktop.v1.DesktopRefusal refusal = 4;
+   */
+  refusal?: DesktopRefusal | undefined;
 };
 
 /**
@@ -163,3 +170,50 @@ export enum DesktopLinkProblem {
  */
 export const DesktopLinkProblemSchema: GenEnum<DesktopLinkProblem> = /*@__PURE__*/
   enumDesc(file_vibesys_desktop_v1_gateway, 1);
+
+/**
+ * Why the main process refused a call for good: no retry and no redial changes it, so the window
+ * shows it and does not try again. The end's `error` says which platform, method or version.
+ *
+ * @generated from enum vibesys.desktop.v1.DesktopRefusal
+ */
+export enum DesktopRefusal {
+  /**
+   * @generated from enum value: DESKTOP_REFUSAL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The window asked for a method the app does not allow.
+   *
+   * @generated from enum value: DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE = 1;
+   */
+  METHOD_NOT_AVAILABLE = 1,
+
+  /**
+   * The host's operating system or CPU is one no host program is built for.
+   *
+   * @generated from enum value: DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM = 2;
+   */
+  UNSUPPORTED_PLATFORM = 2,
+
+  /**
+   * This build of the app holds no host program for the host's platform, so it cannot provision one.
+   *
+   * @generated from enum value: DESKTOP_REFUSAL_HOST_PROGRAM_MISSING = 3;
+   */
+  HOST_PROGRAM_MISSING = 3,
+
+  /**
+   * The request breaks its schema, so it can never be answered as sent.
+   *
+   * @generated from enum value: DESKTOP_REFUSAL_INVALID_REQUEST = 4;
+   */
+  INVALID_REQUEST = 4,
+}
+
+/**
+ * Describes the enum vibesys.desktop.v1.DesktopRefusal.
+ */
+export const DesktopRefusalSchema: GenEnum<DesktopRefusal> = /*@__PURE__*/
+  enumDesc(file_vibesys_desktop_v1_gateway, 2);

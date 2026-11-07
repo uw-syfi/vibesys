@@ -49,11 +49,12 @@ const quiet: HostSnapshot = {
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [
-  {key: 'local', label: 'This machine', connection: 'connected', freshness: 'live'},
+  {key: 'local', label: 'This machine', connection: 'connected', cause: null, freshness: 'live'},
   {
     key: 'ssh:long',
     label: `ssh:${'a-very-long-host-name-'.repeat(8)}`,
     connection: 'reconnecting',
+    cause: null,
     freshness: 'stale',
   },
 ];

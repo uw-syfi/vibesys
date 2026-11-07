@@ -8,14 +8,14 @@ import {createHash, randomUUID} from 'node:crypto';
 import type {Writable} from 'node:stream';
 import {promisify} from 'node:util';
 import {gzip} from 'node:zlib';
-import {API_SCHEMA_HASH} from '@vibesys/proto';
+import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
 import {COMMAND_BOUND_MS, COPY_STALL_MS} from '../state/gateway-policy.js';
 import {type GatewayTarget, gatewayTarget} from '../state/gateway-target.js';
 import {uploadSchedule} from '../state/upload-pacing.js';
-import {GatewayFailed, type LinkFailed, type SpawnFailed} from './errors.js';
+import {GatewayFailed, GatewayRefused, type LinkFailed, type SpawnFailed} from './errors.js';
 import type {SpawnedProcess} from './process.js';
 import type {SshLink} from './ssh-link.js';
 
@@ -27,10 +27,18 @@ const compress = promisify(gzip);
 /** Where a host keeps the gateway for this build, relative to its home directory. */
 export const GATEWAY_DIRECTORY = `.vibesys/gateway/${API_SCHEMA_HASH.slice(0, 16)}`;
 
-/** The gateway executables this build ships, one per platform. */
+/**
+ * The gateway executables this build ships, one per platform. A platform the build holds none for
+ * is a `GatewayRefused` naming the platform and the version, which no retry changes; one it holds
+ * and cannot read is a `GatewayFailed`.
+ */
 export class GatewayArtifacts extends Context.Service<
   GatewayArtifacts,
-  {readonly read: (target: GatewayTarget) => Effect.Effect<Uint8Array, GatewayFailed>}
+  {
+    readonly read: (
+      target: GatewayTarget,
+    ) => Effect.Effect<Uint8Array, GatewayFailed | GatewayRefused>;
+  }
 >()('app/GatewayArtifacts') {}
 
 const OUTPUT_LIMIT = 8192;
@@ -120,14 +128,17 @@ export const runCommand = (
 export const provisionGateway = (
   link: Pick<SshLink, 'channel' | 'explain'>,
   force: boolean,
-): Effect.Effect<void, GatewayFailed | LinkFailed, GatewayArtifacts> =>
+): Effect.Effect<void, GatewayFailed | GatewayRefused | LinkFailed, GatewayArtifacts> =>
   Effect.gen(function* () {
     const run = (script: string, input?: Uint8Array) => runCommand(link, script, input);
     const platform = yield* run('uname -s; uname -m');
     const target = yield* Effect.try({
       try: () => gatewayTarget(platform),
       catch: cause =>
-        new GatewayFailed({message: String(cause instanceof Error ? cause.message : cause)}),
+        new GatewayRefused({
+          refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+          message: String(cause instanceof Error ? cause.message : cause),
+        }),
     });
     const artifacts = yield* GatewayArtifacts;
     const bytes = yield* artifacts.read(target);

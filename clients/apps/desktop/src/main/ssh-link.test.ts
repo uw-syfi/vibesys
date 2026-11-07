@@ -4,7 +4,10 @@ import * as Fiber from 'effect/Fiber';
 import * as Schema from 'effect/Schema';
 import * as TestClock from 'effect/testing/TestClock';
 import {commandOf} from '../state/remote-command.js';
+import {joinDriving} from '../testing/main/drive.js';
+import {fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeSpawner, type Started} from '../testing/main/fake-process.js';
+import {fakeSshHost} from '../testing/main/fake-ssh-host.js';
 import {LinkFailed} from './errors.js';
 import {makeSshLink} from './ssh-link.js';
 
@@ -185,7 +188,8 @@ describe('ssh link release', () => {
       const link = yield* makeSshLink(OPTIONS).pipe(Effect.provide(spawner.layer));
       const first = yield* Effect.flip(link.release);
       expect(first.message).toContain('remained reachable');
-      expect(yield* Effect.flip(link.release)).toBe(first);
+      // A release that failed leaves the master possibly alive, so asking again tries again.
+      expect((yield* Effect.flip(link.release)).message).toBe(first.message);
     }),
   );
 
@@ -238,6 +242,77 @@ describe('ssh link channels', () => {
       expect(link.explain(3, 'boom\n', 'the gateway').message).toBe(
         'the gateway exited with 3: boom',
       );
+    }),
+  );
+});
+
+describe('ssh link, a master that froze', () => {
+  const frozenHost = () => fakeSshHost(fakeGateway(), 'Linux\nx86_64\n');
+
+  it.effect('kills the master by the pid it reported when it ignores its control socket', () =>
+    Effect.gen(function* () {
+      const ssh = frozenHost();
+      const link = yield* makeSshLink(OPTIONS).pipe(Effect.provide(ssh.spawner.layer));
+      yield* link.establish;
+      const pid = ssh.state.pid;
+      ssh.freeze();
+      yield* joinDriving(yield* Effect.forkChild(link.release), '100 millis');
+      expect(ssh.state.kills).toEqual([pid]);
+      expect(ssh.state.masterUp).toBe(false);
+    }),
+  );
+
+  it.effect(
+    'does not kill a pid that is no longer an ssh master, which someone else now holds',
+    () =>
+      Effect.gen(function* () {
+        const cell = {pid: 4242};
+        const killed: string[] = [];
+        const spawner = fakeSpawner(started => {
+          if (started.command === 'ps') return started.process.end(0, 'vim notes.txt\n');
+          if (started.command === 'kill') return killed.push(started.args.join(' '));
+          // The master does not answer: `-O exit` and `-O check` hang.
+        });
+        const link = yield* makeSshLink({...OPTIONS, master: cell}).pipe(
+          Effect.provide(spawner.layer),
+        );
+        yield* joinDriving(yield* Effect.forkChild(link.release), '100 millis');
+        expect(killed).toEqual([]);
+        expect(cell.pid).toBeUndefined();
+      }),
+  );
+
+  it.effect('kills a frozen master in the way of a new link, which then starts its own', () =>
+    Effect.gen(function* () {
+      const ssh = frozenHost();
+      const cell = {pid: undefined as number | undefined};
+      const first = yield* makeSshLink({...OPTIONS, master: cell}).pipe(
+        Effect.provide(ssh.spawner.layer),
+      );
+      yield* first.establish;
+      const frozenPid = ssh.state.pid;
+      ssh.freeze();
+      // A link made later for the same host knows the pid from the cell, though it never saw the
+      // master come up.
+      const next = yield* makeSshLink({...OPTIONS, master: cell}).pipe(
+        Effect.provide(ssh.spawner.layer),
+      );
+      yield* joinDriving(yield* Effect.forkChild(next.establish), '100 millis');
+      expect(ssh.state.kills).toEqual([frozenPid]);
+      expect(ssh.state.masters).toBe(2);
+      expect(ssh.state.pid).not.toBe(frozenPid);
+    }),
+  );
+
+  it.effect('refuses, with the reason, a frozen master whose pid it never learned', () =>
+    Effect.gen(function* () {
+      const spawner = fakeSpawner(() => {});
+      const link = yield* makeSshLink(OPTIONS).pipe(Effect.provide(spawner.layer));
+      const refused = yield* joinDriving(
+        yield* Effect.forkChild(Effect.flip(link.establish)),
+        '1 second',
+      );
+      expect(refused.message).toContain('does not answer');
     }),
   );
 });

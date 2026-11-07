@@ -16,6 +16,16 @@ export {VerdictKind} from './generated/vibesys/cli/v1/verdict_pb.js';
 export * from './generated/vibesys/orchestrator/v1/checkin_pb.js';
 export * from './generated/vibesys/orchestrator/v1/cost_pb.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
+export {
+  HostControlService,
+  type IdentifyResponse,
+  IdentifyResponseSchema,
+  ReleaseRelation,
+  StateRefusal,
+  type Unserved,
+  UnservedReason,
+  UnservedSchema,
+} from './generated/vibesys/orchestrator/v1/host_control_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
 export * from './generated/vibesys/orchestrator/v1/search_pb.js';
 export * from './generated/vibesys/orchestrator/v1/service_pb.js';
