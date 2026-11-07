@@ -13,6 +13,10 @@ starting point:
 | `from-scratch` | The agent writes the serving system itself. |
 | `vllm` | The workspace holds a pinned vLLM checkout (`vllm/`) to start from. |
 
+Both tasks gate on the same [accuracy checker](.vibesys/shared/accuracy_checker/README.md):
+the running server's greedy completions of ten prompts must equal a stored Hugging Face
+reference generated on an L4.
+
 Copy the project with `vibesys example new model-serving/olmo-hybrid-prefix-caching DEST`, then run one
 task from `DEST` (each task has its own README):
 

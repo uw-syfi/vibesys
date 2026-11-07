@@ -12,8 +12,9 @@ Workload: 20 concurrent requests, 32 768-token shared prefix + 128-token unique 
 Expected task files:
 - reference/reference.py (verbatim transformers `modeling_olmo_hybrid.py`)
 - reference/config.json
-- reference/meta.json (HF model id: `allenai/Olmo-Hybrid-7B`)
-- accuracy_checker/checker.py
+- reference/meta.json (HF model id `allenai/Olmo-Hybrid-7B` and its pinned revision)
 - benchmark/benchmark.py
+
+Both tasks run the same accuracy checker, [`.vibesys/shared/accuracy_checker/checker.py`](../../shared/accuracy_checker/README.md).
 
 The project root holds `requirements.txt` and `pyproject.toml` (the uv environment of the checker and benchmark).

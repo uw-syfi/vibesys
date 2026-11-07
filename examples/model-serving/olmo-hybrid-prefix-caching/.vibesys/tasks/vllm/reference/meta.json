@@ -1,3 +1,4 @@
 {
-  "model_id": "allenai/Olmo-Hybrid-7B"
+  "model_id": "allenai/Olmo-Hybrid-7B",
+  "revision": "4f1cc566f9fdf3ce68da2ab6a788a83d89896dcf"
 }
