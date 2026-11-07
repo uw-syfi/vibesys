@@ -77,7 +77,7 @@ const FAKE_DAEMON = {binaryVersion: 'fake', protocolVersion: 1, minProtocolVersi
 export const methodPathOf = (method: string): string => `${PREFIX}${method}`;
 
 /** The one call of the host's control service that a session makes. */
-const IDENTIFY = `/${HostControlService.typeName}/Identify`;
+const IDENTIFY = `/${HostControlService.typeName}/${HostControlService.method.identify.name}`;
 
 const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVAILABLE}});
 

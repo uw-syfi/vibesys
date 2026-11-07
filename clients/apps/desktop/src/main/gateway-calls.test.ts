@@ -1,7 +1,11 @@
 import type {Duplex} from 'node:stream';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {ListItemsRequestSchema, ListItemsResponseSchema} from '@vibesys/orchestrator-proto';
+import {
+  ListItemsRequestSchema,
+  ListItemsResponseSchema,
+  OrchestratorService,
+} from '@vibesys/orchestrator-proto';
 import {
   DesktopRefusal,
   HostService,
@@ -23,7 +27,7 @@ import type {GatewayDialer} from './gateway-connection.js';
 
 const HOST_A = hostKey({kind: 'ssh', alias: 'host-a'});
 const HOST_B = hostKey({kind: 'ssh', alias: 'host-b'});
-const LIST_ITEMS = '/vibesys.orchestrator.v1.OrchestratorService/ListItems';
+const LIST_ITEMS = `/${OrchestratorService.typeName}/${OrchestratorService.method.listItems.name}`;
 const request = toBinary(
   ListItemsRequestSchema,
   create(ListItemsRequestSchema, {agentId: 'agent-1', beforeOrdinal: 1, pageSize: 10}),
