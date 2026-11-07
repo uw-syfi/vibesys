@@ -433,7 +433,7 @@ func (w *world) actions() []option {
 		add("crash", w.crash)
 		add("restart", func() {
 			w.start("restart", func(ctx context.Context) string {
-				c, err := client.Restart(ctx, w.options())
+				c, err := client.Restart(ctx, w.options(), true)
 				if err == nil {
 					c.Close()
 				}

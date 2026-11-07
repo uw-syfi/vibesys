@@ -147,6 +147,13 @@ message StatusResponse {
   repeated LeaseConflict lease_conflicts = 11;
   // The other vibesysd processes of this machine, of any user.
   repeated DaemonProcess other_daemons = 12;
+  // The submissions the daemon is working on and has not answered yet. A check or a measure is
+  // keyed before it is queued: its task is read and its environment fingerprinted, and for a
+  // docker job that can build the image and convert it for a cluster, for hours, before any job
+  // exists. A restart ends that work: the client sends the submission again to the next daemon,
+  // which starts it over. A submission counts here until its answer is sent, so for a moment one
+  // can count here and in queued_jobs too, and never in neither.
+  uint32 submitting_jobs = 13;
 }
 
 // HeldLease is a lease a job of the daemon holds.

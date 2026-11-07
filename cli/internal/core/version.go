@@ -95,11 +95,12 @@ type DaemonDecision string
 const (
 	// UseDaemon: the daemon is the same build as the command line.
 	UseDaemon DaemonDecision = "use"
-	// ReplaceDaemon: the daemon is another build and has no job, so the command line stops it and
-	// starts its own build. The user ran one install command and manages no daemon.
+	// ReplaceDaemon: the daemon is another build and has no job and no submission, so the command
+	// line stops it and starts its own build. The user ran one install command and manages no
+	// daemon.
 	ReplaceDaemon DaemonDecision = "replace"
-	// RefuseDaemon: the daemon is another build and has a job queued or running. It is left as it
-	// is, and the command says so, naming both builds.
+	// RefuseDaemon: the daemon is another build and has a submission in progress or a job queued or
+	// running. It is left as it is, and the command says so, naming both builds.
 	RefuseDaemon DaemonDecision = "refuse"
 )
 
@@ -107,12 +108,12 @@ const (
 // strings builds report as BuildVersions.binary_version: equal means the same build, and they are
 // never parsed or ordered, so a release build and a local build compare the same way. A daemon that
 // reports no identity (an empty string) is another build than any command line, which always has
-// one. liveJobs is the daemon's queued and running jobs.
-func DecideDaemon(client, daemon string, liveJobs uint32) DaemonDecision {
+// one. live is the daemon's work: its unanswered submissions and its queued and running jobs.
+func DecideDaemon(client, daemon string, live uint32) DaemonDecision {
 	switch {
 	case client != "" && client == daemon:
 		return UseDaemon
-	case liveJobs == 0:
+	case live == 0:
 		return ReplaceDaemon
 	default:
 		return RefuseDaemon

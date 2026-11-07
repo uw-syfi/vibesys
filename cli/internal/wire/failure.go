@@ -164,6 +164,12 @@ func Unavailable(message string) error {
 	return &core.Failure{Kind: core.FailureUnavailable, Message: message}
 }
 
+// Conflict is the failure of a request the state it meets refuses, for a package that does not
+// reach the domain (exit 1).
+func Conflict(message string) error {
+	return &core.Failure{Kind: core.FailureConflict, Message: message}
+}
+
 // Broken says the call ended because its connection failed or its daemon went away, so the error
 // says nothing about what the call asked: no failure came back, only the end of the transport. A
 // daemon that stops ends its streams with a cancel of its own, which is the same thing to a caller

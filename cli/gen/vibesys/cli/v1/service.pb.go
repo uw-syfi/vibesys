@@ -512,9 +512,16 @@ type StatusResponse struct {
 	// found another daemon holding one.
 	LeaseConflicts []*LeaseConflict `protobuf:"bytes,11,rep,name=lease_conflicts,json=leaseConflicts,proto3" json:"lease_conflicts,omitempty"`
 	// The other vibesysd processes of this machine, of any user.
-	OtherDaemons  []*DaemonProcess `protobuf:"bytes,12,rep,name=other_daemons,json=otherDaemons,proto3" json:"other_daemons,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	OtherDaemons []*DaemonProcess `protobuf:"bytes,12,rep,name=other_daemons,json=otherDaemons,proto3" json:"other_daemons,omitempty"`
+	// The submissions the daemon is working on and has not answered yet. A check or a measure is
+	// keyed before it is queued: its task is read and its environment fingerprinted, and for a
+	// docker job that can build the image and convert it for a cluster, for hours, before any job
+	// exists. A restart ends that work: the client sends the submission again to the next daemon,
+	// which starts it over. A submission counts here until its answer is sent, so for a moment one
+	// can count here and in queued_jobs too, and never in neither.
+	SubmittingJobs uint32 `protobuf:"varint,13,opt,name=submitting_jobs,json=submittingJobs,proto3" json:"submitting_jobs,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -629,6 +636,13 @@ func (x *StatusResponse) GetOtherDaemons() []*DaemonProcess {
 		return x.OtherDaemons
 	}
 	return nil
+}
+
+func (x *StatusResponse) GetSubmittingJobs() uint32 {
+	if x != nil {
+		return x.SubmittingJobs
+	}
+	return 0
 }
 
 // HeldLease is a lease a job of the daemon holds.
@@ -4277,7 +4291,7 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x14DaemonEnsureResponse\x12!\n" +
 	"\x06socket\x18\x01 \x01(\tB\t\xbaH\x06r\x042\x02^/R\x06socket\x129\n" +
 	"\bversions\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\x126\n" +
-	"\x11runtime_directory\x18\x03 \x01(\tB\t\xbaH\x06r\x042\x02^/R\x10runtimeDirectory\"\xe6\x04\n" +
+	"\x11runtime_directory\x18\x03 \x01(\tB\t\xbaH\x06r\x042\x02^/R\x10runtimeDirectory\"\x8f\x05\n" +
 	"\x0eStatusResponse\x129\n" +
 	"\bversions\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\rR\x03pid\x129\n" +
@@ -4293,7 +4307,8 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x06leases\x18\n" +
 	" \x03(\v2\x19.vibesys.cli.v1.HeldLeaseR\x06leases\x12F\n" +
 	"\x0flease_conflicts\x18\v \x03(\v2\x1d.vibesys.cli.v1.LeaseConflictR\x0eleaseConflicts\x12B\n" +
-	"\rother_daemons\x18\f \x03(\v2\x1d.vibesys.cli.v1.DaemonProcessR\fotherDaemons\"\xc7\x01\n" +
+	"\rother_daemons\x18\f \x03(\v2\x1d.vibesys.cli.v1.DaemonProcessR\fotherDaemons\x12'\n" +
+	"\x0fsubmitting_jobs\x18\r \x01(\rR\x0esubmittingJobs\"\xc7\x01\n" +
 	"\tHeldLease\x12\x1e\n" +
 	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x12\n" +
 	"\x04task\x18\x02 \x01(\tR\x04task\x12#\n" +

@@ -143,6 +143,7 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		Versions:          wire.BuildVersions(s.binary, core.CurrentVersions()),
 		Pid:               uint32(os.Getpid()),
 		StartedAt:         timestamppb.New(st.StartedAt),
+		SubmittingJobs:    uint32(st.Submitting),
 		QueuedJobs:        uint32(st.Queued),
 		RunningJobs:       uint32(st.Running),
 		Environment:       inheritedVariables(s.inherited.Environ),

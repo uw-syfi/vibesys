@@ -459,7 +459,7 @@ func TestRestartReplacesTheDaemonAndKeepsTheJob(t *testing.T) {
 		t.Fatalf("running jobs = %d, want 1", before.GetRunningJobs())
 	}
 
-	c2, err := client.Restart(ctxFor(t), s.options(true))
+	c2, err := client.Restart(ctxFor(t), s.options(true), false)
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
@@ -523,7 +523,7 @@ func submitHeld(t *testing.T, s *setup, c *client.Client, req *cliv1.SubmitReque
 	if !s.world.Gates.Reached(ctxFor(t), fakeenv.FingerprintMark) {
 		t.Fatal("the submission never reached the fingerprint")
 	}
-	c2, err := client.Restart(ctxFor(t), s.options(true))
+	c2, err := client.Restart(ctxFor(t), s.options(true), true)
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
@@ -594,9 +594,47 @@ const (
 	broken meeting = "broken"
 )
 
-// meet starts a daemon of the build daemonBuild, gives it a job when live, and connects a client of
-// the build clientBuild to it. The starter then starts clientBuild, as a client's own does.
-func meet(t *testing.T, daemonBuild, clientBuild string, live bool) meeting {
+// work is what a daemon is doing when a client meets it.
+type work string
+
+const (
+	// idle: no job and no submission.
+	idle work = "idle"
+	// runningJob: a job runs.
+	runningJob work = "a running job"
+	// submission: a submission waits for its environment's fingerprint, as a docker job's image
+	// build and conversion makes it wait, for hours, before any job exists.
+	submission work = "a submission in progress"
+)
+
+var works = []work{idle, runningJob, submission}
+
+// holdSubmission submits a check job of the commit in the task and holds it at its environment's
+// fingerprint until the test ends. It returns once the daemon has the submission.
+func holdSubmission(t *testing.T, s *setup, c *client.Client, task string) {
+	t.Helper()
+	s.world.Tasks.Put("/repo", commit, tasktest.Files(task))
+	s.world.Env.HoldFingerprint("image")
+	at := &cliv1.CallContext{Repository: "/repo", Task: task, RunId: "run-1", Harness: "h", Agent: "agent-1"}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The answer is not the test's: the submission only has to be in progress.
+		_, _ = c.Submit(ctxFor(t), &cliv1.SubmitRequest{Context: at, Spec: wire.JobSpec(core.JobSpec{
+			Commit: commit, Environment: core.EnvironmentHost, Settings: core.CheckSettings{}})})
+	}()
+	t.Cleanup(func() {
+		s.world.Gates.Release("image")
+		<-done
+	})
+	if !s.world.Gates.Reached(ctxFor(t), fakeenv.FingerprintMark) {
+		t.Fatal("the submission never reached the fingerprint")
+	}
+}
+
+// meet starts a daemon of the build daemonBuild, gives it the work, and connects a client of the
+// build clientBuild to it. The starter then starts clientBuild, as a client's own does.
+func meet(t *testing.T, daemonBuild, clientBuild string, w work) meeting {
 	t.Helper()
 	s := newSetup(t)
 	s.starter.Version = daemonBuild
@@ -606,15 +644,23 @@ func meet(t *testing.T, daemonBuild, clientBuild string, live bool) meeting {
 	if err != nil {
 		t.Fatalf("the daemon of build %q did not start: %v", daemonBuild, err)
 	}
-	if live {
+	switch w {
+	case idle:
+	case runningJob:
 		job := submit(t, first, "print", "kept", ";", "hold", "g", ";", "exit", "0")
 		if err := first.Logs(ctxFor(t), &cliv1.ReadLogsRequest{Context: call, JobId: job.GetId(), Follow: true},
 			func(*cliv1.ReadLogsResponse) error { return errStop }); !errors.Is(err, errStop) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { s.world.Gates.Release("g") })
+	case submission:
+		holdSubmission(t, s, first, "task")
 	}
-	first.Close()
+	if w != submission {
+		first.Close()
+	} else {
+		t.Cleanup(func() { first.Close() })
+	}
 
 	s.starter.Version = clientBuild
 	opts.Version = clientBuild
@@ -654,24 +700,26 @@ func meet(t *testing.T, daemonBuild, clientBuild string, live bool) meeting {
 
 // A client never uses a daemon of another build without saying so. Over pairs of build identities,
 // release and local builds alike (the pair of the live finding is the first), and daemons that are
-// idle or have a job, exactly one thing happens: the same build is used, an idle daemon of another
-// build is replaced by the client's, or a daemon of another build with a job is refused with both
-// versions and left running.
+// idle, run a job, or work on a submission that has no job yet, exactly one thing happens: the same
+// build is used, an idle daemon of another build is replaced by the client's, or a daemon of
+// another build with work is refused with both versions and left running. A daemon that was
+// building a submission's image for hours with no job yet used to count as idle and be replaced,
+// which ended the build.
 func TestAClientAndADaemonOfAnotherBuild(t *testing.T) {
 	builds := []string{"0.0.1-live", "0.1.0-local.9342cd403", "dev", "0.1.0-local.9342cd404"}
 	for _, clientBuild := range builds {
 		for _, daemonBuild := range append([]string{""}, builds...) {
-			for _, live := range []bool{false, true} {
-				name := fmt.Sprintf("client %s daemon %q live %v", clientBuild, daemonBuild, live)
+			for _, w := range works {
+				name := fmt.Sprintf("client %s daemon %q with %s", clientBuild, daemonBuild, w)
 				want := sameBuild
 				switch {
 				case clientBuild == daemonBuild:
-				case live:
+				case w != idle:
 					want = refused
 				default:
 					want = replaced
 				}
-				if got := meet(t, daemonBuild, clientBuild, live); got != want {
+				if got := meet(t, daemonBuild, clientBuild, w); got != want {
 					t.Errorf("%s: %s, want %s", name, got, want)
 				}
 			}
@@ -698,5 +746,63 @@ func TestDialReachesADaemonOfAnotherBuild(t *testing.T) {
 	defer c.Close()
 	if st, err := c.Status(ctxFor(t)); err != nil || st.GetVersions().GetBinaryVersion() != "0.1.0-local.9342cd403" {
 		t.Fatalf("status = %v, %v", st, err)
+	}
+}
+
+// A submission the daemon works on before its job exists, such as one whose image is built and
+// converted for hours, is live work wherever the daemon's work is counted, beside the jobs of
+// other tasks: the status counts it, and a restart, which would start it over, is refused unless
+// forced. A restart once ended such a build when the status said "queued 0 running 0". Running
+// jobs alone do not refuse a restart: they keep running under their supervisors.
+func TestASubmissionInProgressIsLiveWorkThatARestartWaitsFor(t *testing.T) {
+	for _, w := range works {
+		t.Run(string(w), func(t *testing.T) {
+			s := newSetup(t)
+			c := s.connect(t)
+			if w == runningJob || w == submission {
+				// A job of another task runs beside the submission.
+				job := submit(t, c, "print", "kept", ";", "hold", "g", ";", "exit", "0")
+				if err := c.Logs(ctxFor(t), &cliv1.ReadLogsRequest{Context: call, JobId: job.GetId(), Follow: true},
+					func(*cliv1.ReadLogsResponse) error { return errStop }); !errors.Is(err, errStop) {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { s.world.Gates.Release("g") })
+			}
+			if w == submission {
+				holdSubmission(t, s, c, "other-task")
+			}
+			st, err := c.Status(ctxFor(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantSubmitting, wantRunning := uint32(0), uint32(0)
+			if w != idle {
+				wantRunning = 1
+			}
+			if w == submission {
+				wantSubmitting = 1
+			}
+			if st.GetSubmittingJobs() != wantSubmitting || st.GetRunningJobs() != wantRunning ||
+				wire.LiveWork(st) != wantSubmitting+wantRunning+st.GetQueuedJobs() {
+				t.Fatalf("status with %s = submitting %d queued %d running %d (live %d), want submitting %d running %d",
+					w, st.GetSubmittingJobs(), st.GetQueuedJobs(), st.GetRunningJobs(), wire.LiveWork(st), wantSubmitting, wantRunning)
+			}
+
+			restarted, err := client.Restart(ctxFor(t), s.options(true), false)
+			if w == submission {
+				var f *core.Failure
+				if !errors.As(err, &f) || f.Kind != core.FailureConflict || !strings.Contains(f.Message, "--force") {
+					t.Fatalf("Restart with a submission in progress = %v, want a conflict that names --force", err)
+				}
+				if s.starter.Calls() != 1 {
+					t.Fatalf("starts = %d, want the daemon left as it was", s.starter.Calls())
+				}
+				restarted, err = client.Restart(ctxFor(t), s.options(true), true)
+			}
+			if err != nil {
+				t.Fatalf("Restart with %s: %v", w, err)
+			}
+			restarted.Close()
+		})
 	}
 }

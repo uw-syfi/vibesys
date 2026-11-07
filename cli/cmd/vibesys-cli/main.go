@@ -115,7 +115,7 @@ commands:
   frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   plan check-gain --under <share>                say whether every open or parked plan's gain bound is below it
-  daemon status|stop|restart                     manage the daemon
+  daemon status|stop|restart [--force]           manage the daemon
   upgrade                                        replace this binary with the newest release
 
 Every job and daemon command takes --json, and --repo, --task, --run, --harness, --agent and
