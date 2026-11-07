@@ -157,7 +157,8 @@ export {
   type RowTrail,
 } from './components/pick-list.js';
 export {RailFrame, RailItem} from './components/rail.js';
-export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
+export {Breadcrumb, type Crumb} from './components/breadcrumb.js';
+export {type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
 export {

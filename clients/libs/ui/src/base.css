@@ -104,7 +104,56 @@ body > div:first-child {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* The room of the breadcrumb, kept when there is none: a title is at the same place on every page. */
+.vs-page-trail {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--row-dense);
+}
+.vs-page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+  min-width: 0;
+  /* A control's height, so the title is as far from the row's top whether or not a button shares it. */
+  min-height: var(--control);
+}
+.vs-page-title {
+  flex: 1 1 var(--column-tile);
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--text-title-family);
+  font-size: var(--text-title-size);
+  line-height: var(--text-title-line);
+  font-weight: var(--text-title-weight);
+  letter-spacing: var(--text-title-tracking);
+  text-transform: var(--text-title-transform);
+}
+/* The heading takes the focus when its page opens, so readers hear what changed; no ring. */
+.vs-page-title:focus {
+  outline: none;
+}
+.vs-page-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
   min-width: 0;
 }
 .vs-page-scroll {

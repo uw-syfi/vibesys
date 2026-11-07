@@ -1,5 +1,6 @@
 import {type CSSProperties, type JSX, type ReactNode, useId, useState} from 'react';
 import type {SpaceToken} from '../tokens/index.js';
+import {Breadcrumb, type Crumb} from './breadcrumb.js';
 import {Icon} from './icon.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
@@ -95,6 +96,13 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
  * its bottom edge while more lies below. A header or footer is for a page whose body can outgrow
  * the window. The header is also the page's header row for the window's toasts, which sit just
  * below it: put the title row and its actions there, not in the body.
+ *
+ * A page with a header opens on a trail band, the room of the breadcrumb that says where the reader
+ * is, kept empty when the page has no `trail`, so that the title sits at the same place on every page
+ * of the window and no page's title moves when the reader goes into one and back out. The header is
+ * either the caller's own node or, with `title`, the page's own title row: the `<h1>` (which takes
+ * the focus when a screen is opened, so a reader hears what changed) with the page's `actions`
+ * beside it, and `meta` (its state and what it is about) under it.
  */
 export function Page(props: {
   readonly width?: PageWidth;
@@ -102,6 +110,14 @@ export function Page(props: {
   readonly sideAction?: boolean;
   /** What stays in view above a body that scrolls. */
   readonly header?: ReactNode;
+  /** The page's title as its `<h1>`, with `actions` and `meta`: the header, when it is not given whole. */
+  readonly title?: string;
+  /** The page's actions, in one group beside its title. */
+  readonly actions?: ReactNode;
+  /** What the page is about, in one row under its title: its state, where it runs. */
+  readonly meta?: ReactNode;
+  /** Where the reader is, over the title: each level but the last a way back to it. */
+  readonly trail?: readonly Crumb[];
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
   /**
@@ -112,7 +128,24 @@ export function Page(props: {
   readonly children: ReactNode;
 }): JSX.Element {
   const width = props.width ?? 'content';
-  if (props.header === undefined && props.footer === undefined) {
+  const {title} = props;
+  const header =
+    title === undefined ? (
+      props.header
+    ) : (
+      <>
+        <div className="vs-page-title-row">
+          <h1 className="vs-page-title" tabIndex={-1} title={title}>
+            {title}
+          </h1>
+          {props.actions === undefined ? null : (
+            <div className="vs-page-actions">{props.actions}</div>
+          )}
+        </div>
+        {props.meta === undefined ? null : <div className="vs-page-meta">{props.meta}</div>}
+      </>
+    );
+  if (header === undefined && props.footer === undefined) {
     return (
       <main className="vs-page" data-state={props.state}>
         <div className="vs-page-content" data-width={width}>
@@ -129,7 +162,16 @@ export function Page(props: {
       data-state={props.state}
     >
       <div className="vs-page-content" data-width={width}>
-        {props.header === undefined ? null : <div className="vs-page-header">{props.header}</div>}
+        {header === undefined ? null : (
+          <div className="vs-page-header">
+            <div className="vs-page-trail">
+              {props.trail === undefined ? null : (
+                <Breadcrumb label="Where you are" items={props.trail} />
+              )}
+            </div>
+            {header}
+          </div>
+        )}
         <div className="vs-page-scroll">
           <div className="vs-page-body">{props.children}</div>
         </div>
