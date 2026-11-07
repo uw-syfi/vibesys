@@ -26,6 +26,25 @@ var (
 	MinVersion = option(pb.E_MinProtocolVersion)
 )
 
+// Judge says whether a client and a host can talk, from the host's side: each must be within the other's
+// range. A client's min_protocol_version is the oldest host it still speaks, so a client that needs what
+// a revision added states it by raising its min to that revision, and a host older than that answers it
+// DAEMON_TOO_OLD, however old the host is and whether or not it knows the revision.
+func Judge(host, client *pb.BuildVersions) pb.Compatibility {
+	switch {
+	case client.GetProtocolVersion() < host.GetMinProtocolVersion():
+		return pb.Compatibility_COMPATIBILITY_CLIENT_TOO_OLD
+	case client.GetMinProtocolVersion() > host.GetProtocolVersion():
+		return pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD
+	}
+	return pb.Compatibility_COMPATIBILITY_COMPATIBLE
+}
+
+// Build is this build's own versions, as the message the handshake carries.
+func Build(binary string) *pb.BuildVersions {
+	return &pb.BuildVersions{BinaryVersion: binary, ProtocolVersion: Version, MinProtocolVersion: MinVersion}
+}
+
 func option(ext protoreflect.ExtensionType) uint32 {
 	return proto.GetExtension(pb.File_vibesys_orchestrator_v1_service_proto.Options(), ext).(uint32)
 }

@@ -65,6 +65,8 @@ type FaultStore struct {
 	// FailMessages fails that many reads of a run's messages before any succeeds, and every one when it
 	// is negative.
 	FailMessages int
+	// FailMessage is the same for reads of one message by its id.
+	FailMessage int
 	// CrashAt, when set to a crash point, ends the process the next time the daemon reaches it.
 	CrashAt string
 	// Committed lists every effect committed through this store, with the sequence of its result.
@@ -130,6 +132,20 @@ func (f *FaultStore) Messages(run core.RunID, after uint64, limit int) ([]store.
 		return nil, ErrInjected
 	}
 	return f.Store.Messages(run, after, limit)
+}
+
+// Message implements store.Store.
+func (f *FaultStore) Message(id core.MessageID) (core.Message, bool, error) {
+	f.mu.Lock()
+	fail := f.FailMessage != 0
+	if f.FailMessage > 0 {
+		f.FailMessage--
+	}
+	f.mu.Unlock()
+	if fail {
+		return core.Message{}, false, ErrInjected
+	}
+	return f.Store.Message(id)
 }
 
 // Release implements store.Store.

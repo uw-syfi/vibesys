@@ -509,7 +509,7 @@ func checkTurns(t *testing.T, seed uint64, s store.Store, m *model, run core.Run
 		for _, limit := range []int{0, 3} {
 			got, err := s.Turns(run, from, to, limit)
 			want := m.turns(run, from, to, limit)
-			if err != nil || got.Truncated != want.Truncated || !(reflect.DeepEqual(got.Turns, want.Turns) || (len(got.Turns) == 0 && len(want.Turns) == 0)) {
+			if err != nil || got.Truncated != want.Truncated || got.LeftOut != want.LeftOut || !(reflect.DeepEqual(got.Turns, want.Turns) || (len(got.Turns) == 0 && len(want.Turns) == 0)) {
 				failf(t, seed, "turns of %q in [%v, %v] limit %d: %v\n got  %+v\n want %+v", run, from, to, limit, err, got, want)
 			}
 		}
@@ -519,7 +519,7 @@ func checkTurns(t *testing.T, seed uint64, s store.Store, m *model, run core.Run
 	whole := [2]time.Time{{}, time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC)}
 	got, err := s.Turns(run, whole[0], whole[1], 0)
 	want := m.turns(run, whole[0], whole[1], 0)
-	if err != nil || got.Truncated != want.Truncated || !(reflect.DeepEqual(got.Turns, want.Turns) || (len(got.Turns) == 0 && len(want.Turns) == 0)) {
+	if err != nil || got.Truncated != want.Truncated || got.LeftOut != want.LeftOut || !(reflect.DeepEqual(got.Turns, want.Turns) || (len(got.Turns) == 0 && len(want.Turns) == 0)) {
 		failf(t, seed, "the whole history of turns of %q: %v\n got  %+v\n want %+v", run, err, got, want)
 	}
 }

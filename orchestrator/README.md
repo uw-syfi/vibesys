@@ -433,8 +433,11 @@ host (`internal/daemon/summary.go`, `search.Standings`):
   scheduled report (the hour is counted from the last report about the run), and does not say the lead has
   finished; it still takes its number among the run's reports. The core names the summary report
   (`RunRecord.summary_report_id`, stored, set in the event that records the report), and the host reads the
-  message by id. A run recorded before the field existed has none named, and the host finds its newest
-  non-window report once in its messages.
+  message by id. A run recorded before the field existed has none named, and the host names it once when it
+  opens its store (`nameSummaryReports`), from its newest non-window report, so no request scans a mailbox.
+  A summary is always served: when the report cannot be (the store lacks the message or fails the read, or the
+  summary would pass `MaxSummaryBytes`), the summary goes without it and sets `report_unavailable`, which
+  degrades that run and no other.
 - **The agents.** `agents_working` counts the agents launching, in a turn, or waiting on subagents
   (`AgentStatus.Working`, the one definition), with the same split by type of agent.
 - **The standing.** One entry per objective: the head's value and the best the run measured (they are two things: the head is the candidate last promoted), the unit of the standing bound and the share of it each is at. Both are read from the search state, which the one measurement projection fills; nothing is calculated again.
@@ -448,11 +451,18 @@ summaries is never sent the frame.
 A snapshot of detail `SUMMARY` holds runs and summaries only, so its size follows the number of runs and not the
 length of their mailboxes. Runs are listed live first, then the newest started; if the next run and its summary do
 not fit `MaxSnapshotBytes`, it and every run after it are left out, counted in `runs_left_out`, and `truncated` is
-set: the oldest finished runs go first and none disappears unsaid. A client then reads a run's history with
+set: the oldest finished runs go first and none disappears unsaid. A run the snapshot left out stays out for
+the life of the stream: no change, search view or summary of it is sent (a new snapshot lists again), so a client
+never holds a run it cannot show. The frames that follow the snapshot or a replay (the search views and summaries
+of the listed runs) are sent in that listing order and stop at `MaxFollowUpBytes`; a resumed stream that cannot be
+refreshed within it is answered with a snapshot instead. A client then reads a run's history with
 `GetRunHistory` when it opens the run: the first page holds its agents, turns and check-ins and the first messages,
 and each page names the cursor of the next (zero at the last), a page holding at most `MaxHistoryPageBytes` of
 messages and at least one. The history is current to the page's `sequence`; a client keeps a record it already
-holds and adds the others, and the stream's changes keep it current. A snapshot of detail unspecified is whole
+holds and adds the others, and the stream's changes keep it current. The whole page is bounded by
+`MaxHistoryPageBytes`: the agents, turns and check-ins take at most half of the first page and say in
+`agents_left_out_count`, `turns_left_out_count` and `check_ins_left_out_count` how many they left out.
+A snapshot of detail unspecified is whole
 histories as before, so the headless client is unchanged; it sheds search views, then check-ins, then turns and
 messages before it leaves a run out, and says `truncated`.
 

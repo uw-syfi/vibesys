@@ -113,9 +113,7 @@ func Dial(ctx context.Context, dial Dialer, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("connect to the orchestrator: %w", err)
 	}
 	c := &Client{conn: conn, svc: pb.NewOrchestratorServiceClient(conn)}
-	resp, err := c.svc.Hello(ctx, &pb.HelloRequest{Client: &pb.BuildVersions{
-		BinaryVersion: opts.BinaryVersion, ProtocolVersion: protocol.Version, MinProtocolVersion: protocol.MinVersion,
-	}})
+	resp, err := c.svc.Hello(ctx, &pb.HelloRequest{Client: protocol.Build(opts.BinaryVersion)})
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("handshake with the orchestrator: %w", err)
