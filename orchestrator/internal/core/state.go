@@ -31,6 +31,8 @@ type State struct {
 	// messages holds the messages still in transit.
 	messages map[MessageID]Message
 	receipts map[CommandID]Receipt
+	// checkIns holds every check-in of every run. They are few: one for each press of Catch me up.
+	checkIns map[CheckInID]CheckIn
 	// jobs holds the jobs whose end was already told, by run: a job id is only unique within the
 	// store of one task, so two runs can both finish a job called j1.
 	jobs map[toldJob]struct{}
@@ -45,7 +47,7 @@ type toldJob struct {
 // written says which of a State's maps one transaction has its own copy of. A map is copied when
 // the fold first writes to it, so an input costs what it changes and not what the State has
 // remembered. What the maps hold is replaced and never changed in place, so it is shared.
-type written struct{ runs, agents, messages, receipts, jobs bool }
+type written struct{ runs, agents, messages, receipts, checkIns, jobs bool }
 
 // own gives the transaction its own copy of a map, once.
 func own[K comparable, V any](m *map[K]V, done *bool) {
@@ -119,6 +121,9 @@ func (s *State) apply(e Event, w *written) {
 	case Receipt:
 		own(&s.receipts, &w.receipts)
 		s.receipts[b.Command] = b
+	case CheckIn:
+		own(&s.checkIns, &w.checkIns)
+		s.checkIns[b.ID] = b
 	default:
 		panic(fmt.Sprintf("core: unknown event body %T", e.Body))
 	}

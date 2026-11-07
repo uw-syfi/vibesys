@@ -53,6 +53,9 @@ func (s State) Violations() []string {
 		for _, breach := range run.summaryBreaches() {
 			bad("run %s %s", run.ID, breach)
 		}
+		for _, breach := range s.checkInBreaches(run) {
+			bad("run %s %s", run.ID, breach)
+		}
 		if run.LeadReminders > MaxLeadReminders {
 			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)
 		}

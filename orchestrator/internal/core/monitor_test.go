@@ -17,6 +17,7 @@ type coverage struct {
 	startsFailed, startsTimedOut                                                        int
 	stalls, leadReminders, handoffReminders, reports                                    int
 	schedule                                                                            scheduleCoverage
+	checkIns                                                                            checkInCoverage
 }
 
 func (c *coverage) add(o coverage) {
@@ -45,6 +46,7 @@ func (c *coverage) add(o coverage) {
 	c.handoffReminders += o.handoffReminders
 	c.reports += o.reports
 	c.schedule.add(o.schedule)
+	c.checkIns.add(o.checkIns)
 }
 
 func (c coverage) require(t *testing.T) {
@@ -61,6 +63,12 @@ func (c coverage) require(t *testing.T) {
 		"reports": c.reports, "requests for a report": c.schedule.asks, "requests for a report that were still unread": c.schedule.swallowed,
 		"summary timers that were stale": c.schedule.stale, "reports that restarted the interval": c.schedule.restarted,
 		"requests for a report that a limit, a stop or a final report took away": c.schedule.cancelled,
+		"check-ins pressed": c.checkIns.made, "presses answered with a pending check-in": c.checkIns.repeated,
+		"presses with no viewer": c.checkIns.unviewed, "requests for a catch-up report": c.checkIns.asked,
+		"presses with a request in flight": c.checkIns.inFlight, "presses on a run that could not be asked": c.checkIns.cannot,
+		"check-ins made ready": c.checkIns.ready, "check-ins failed": c.checkIns.failed,
+		"reports that answered a catch-up": c.checkIns.linked, "presses on a run that was over": c.checkIns.overRuns,
+		"empty windows": c.checkIns.empty,
 	} {
 		if n == 0 {
 			t.Errorf("the simulation never reached: %s", name)
@@ -121,6 +129,8 @@ type monitor struct {
 	// the start being checked asked for, zero for none.
 	books      map[core.RunID]*schedule
 	startEvery time.Duration
+	// checkInBooks holds the check-ins as the monitor works them out.
+	checkInBooks *checkInBooks
 	// arms holds, for the commit being checked, each time a request became due in a run.
 	arms map[core.RunID][]time.Time
 
@@ -140,7 +150,7 @@ func newMonitor() *monitor {
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
 		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
-		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{},
+		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{}, checkInBooks: newCheckInBooks(),
 	}
 }
 
@@ -180,6 +190,9 @@ func (m *monitor) commit(body core.InputBody, events []core.Event, effects []cor
 	}
 	m.arms = map[core.RunID][]time.Time{}
 	if err := m.summaryTimer(body, events); err != nil {
+		return err
+	}
+	if err := m.checkIns(body, events, effects); err != nil {
 		return err
 	}
 	for _, e := range events {
@@ -325,6 +338,8 @@ func (m *monitor) observe(e core.Event) error {
 		return m.message(b)
 	case core.Receipt:
 		return m.receipt(b)
+	case core.CheckIn:
+		return nil // held to its rules by checkIns, before the events are folded in
 	}
 	return fmt.Errorf("unknown event %T", e.Body)
 }
@@ -681,6 +696,9 @@ func (m *monitor) final() error {
 	}
 	for agent, turn := range m.running {
 		return fmt.Errorf("agent %s still runs turn %s", agent, turn)
+	}
+	if err := m.checkInsFinal(); err != nil {
+		return err
 	}
 	for id, a := range m.agents {
 		if a.Status == core.AgentLaunching {

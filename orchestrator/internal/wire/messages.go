@@ -32,6 +32,16 @@ func TurnFromMessage(t *pb.Turn) (core.Turn, error) {
 // states it.
 func MailboxMessage(m core.Message) *pb.Message { return messageOut(m) }
 
+// CheckInMessage returns a check-in as the contract states it.
+func CheckInMessage(c core.CheckIn) *pb.CheckIn { return checkInOut(c) }
+
+// CheckInFromMessage reads a check-in given as the contract states it: the inverse of CheckInMessage.
+func CheckInFromMessage(c *pb.CheckIn) (core.CheckIn, error) {
+	var errs errorList
+	out := checkInIn(c, &errs)
+	return out, errs.err()
+}
+
 // ItemMessage returns an item as the contract states it.
 func ItemMessage(i core.Item) *pb.Item { return itemOut(i) }
 
@@ -55,6 +65,8 @@ func ChangeMessage(sequence uint64, e core.Event) (*pb.RunChange, error) {
 		out.Body = &pb.RunChange_Message{Message: messageOut(b)}
 	case core.Receipt:
 		out.Body = &pb.RunChange_Receipt{Receipt: receiptOut(b, sequence)}
+	case core.CheckIn:
+		out.Body = &pb.RunChange_CheckIn{CheckIn: checkInOut(b)}
 	default:
 		return nil, describe("event", e.Body)
 	}

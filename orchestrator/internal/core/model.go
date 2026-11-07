@@ -387,6 +387,13 @@ type (
 		Every   time.Duration
 		Reports uint32
 	}
+	// CatchUpRequest asks the lead for a progress report covering [Since, Until): the operator pressed
+	// Catch me up, and that is what happened since the viewer last looked. CheckIn is the check-in the
+	// report is linked to. The lead answers with a report of kind progress, in the turn this starts.
+	CatchUpRequest struct {
+		CheckIn      CheckInID
+		Since, Until time.Time
+	}
 	// SubagentSettled tells the lead a subagent stopped working without a handoff.
 	SubagentSettled struct {
 		Agent  AgentID
@@ -422,6 +429,7 @@ func (HandoffReminder) messageBody()  {}
 func (RunLimitReached) messageBody()  {}
 func (LeadIdleReminder) messageBody() {}
 func (ReportDue) messageBody()        {}
+func (CatchUpRequest) messageBody()   {}
 
 // Message is typed mail between agents and the operator.
 type Message struct {
@@ -453,6 +461,8 @@ func (m Message) trigger() TurnTrigger {
 		return TriggerSubagentSettled
 	case HandoffReminder, LeadIdleReminder, RunLimitReached:
 		return TriggerReminder
+	case CatchUpRequest:
+		return TriggerOperator
 	case ReportDue:
 		return TriggerSchedule
 	}
@@ -474,4 +484,6 @@ type Receipt struct {
 	Delivery Delivery
 	// Allowed is what the run may use, set with RefuseAgentNotAllowed.
 	Allowed []AgentChoice
+	// CheckIn is the check-in a RequestCatchUp made, or the one it found pending for the viewer.
+	CheckIn CheckInID
 }

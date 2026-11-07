@@ -369,6 +369,8 @@ func messageOut(m core.Message) *pb.Message {
 		}}
 	case core.ReportDue:
 		out.Body = &pb.Message_ReportDue{ReportDue: &pb.ReportDue{EverySeconds: uint32(b.Every / time.Second), ReportsPosted: b.Reports}}
+	case core.CatchUpRequest:
+		out.Body = &pb.Message_CatchUpRequest{CatchUpRequest: &pb.CatchUpRequest{CheckInId: string(b.CheckIn), Since: when(b.Since), Until: when(b.Until)}}
 	case core.RunLimitReached:
 		out.Body = &pb.Message_RunLimitReached{RunLimitReached: &pb.RunLimitReached{
 			Limit: runLimits.out(b.Limit), ElapsedSeconds: uint32(b.Elapsed / time.Second), SpentUsd: b.Spent,
@@ -416,6 +418,10 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 		out.Body = core.ReportDue{
 			Every: time.Duration(b.ReportDue.GetEverySeconds()) * time.Second, Reports: b.ReportDue.GetReportsPosted(),
 		}
+	case *pb.Message_CatchUpRequest:
+		out.Body = core.CatchUpRequest{
+			CheckIn: core.CheckInID(b.CatchUpRequest.GetCheckInId()), Since: moment(b.CatchUpRequest.GetSince(), errs), Until: moment(b.CatchUpRequest.GetUntil(), errs),
+		}
 	case *pb.Message_RunLimitReached:
 		l := b.RunLimitReached
 		out.Body = core.RunLimitReached{
@@ -436,6 +442,7 @@ func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 		CommandId: string(r.Command), Refusal: refusals.out(r.Refusal),
 		RunId: string(r.Run), AgentId: string(r.Agent), MessageId: string(r.Message),
 		Delivery: deliveries.out(r.Delivery), Sequence: sequence, AllowedAgents: choicesOut(r.Allowed),
+		CheckInId: string(r.CheckIn),
 	}
 }
 
@@ -444,7 +451,7 @@ func receiptIn(r *pb.Receipt, errs *errorList) core.Receipt {
 		Command: core.CommandID(r.GetCommandId()),
 		Refusal: refusals.in(r.GetRefusal(), errs), Run: core.RunID(r.GetRunId()), Agent: core.AgentID(r.GetAgentId()),
 		Message: core.MessageID(r.GetMessageId()), Delivery: deliveries.in(r.GetDelivery(), errs),
-		Allowed: choicesIn(r.GetAllowedAgents(), errs),
+		Allowed: choicesIn(r.GetAllowedAgents(), errs), CheckIn: core.CheckInID(r.GetCheckInId()),
 	}
 }
 
@@ -480,6 +487,8 @@ func EncodeEvent(sequence uint64, e core.Event) ([]byte, error) {
 		out.Body = &pb.Event_MessageUpdated{MessageUpdated: messageOut(b)}
 	case core.Receipt:
 		out.Body = &pb.Event_ReceiptRecorded{ReceiptRecorded: receiptRecordOut(b, sequence)}
+	case core.CheckIn:
+		out.Body = &pb.Event_CheckInUpdated{CheckInUpdated: checkInOut(b)}
 	default:
 		return nil, describe("event", e.Body)
 	}
@@ -514,6 +523,8 @@ func DecodeEvent(data []byte) (uint64, core.Event, error) {
 		e.Body = messageIn(b.MessageUpdated, &errs)
 	case *pb.Event_ReceiptRecorded:
 		e.Body = receiptRecordIn(b.ReceiptRecorded, &errs)
+	case *pb.Event_CheckInUpdated:
+		e.Body = checkInIn(b.CheckInUpdated, &errs)
 	default:
 		errs.errs = append(errs.errs, describe("event", m.GetBody()))
 	}

@@ -10,6 +10,15 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
+// The metadata an operator's client puts on its calls to say which install of the client is calling:
+// an id that stays the same for the install, and a name to show. Together they are the core's Viewer, a
+// label and nothing more: the daemon authenticates neither and grants nothing for them. Both or neither
+// are sent, and a call that asks for a catch-up needs both.
+const (
+	MetaViewerID    = "vibesys-viewer-id"
+	MetaViewerLabel = "vibesys-viewer-label"
+)
+
 var (
 	// Version rises only when a change breaks a peer.
 	Version = option(pb.E_ProtocolVersion)

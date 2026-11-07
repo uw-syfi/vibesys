@@ -16,7 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
-const rounds = 3000
+const rounds = 6000
 
 var session = core.Session{Agent: "agent", N: 1}
 
@@ -168,6 +168,8 @@ func generatedEffect(r *rand.Rand) *pb.Effect {
 		e = armed(b.ArmTimer, ref(b.ArmTimer.GetSession()))
 	case *pb.Effect_ReleaseCheckouts:
 		e = core.ReleaseCheckouts{Run: core.RunID(b.ReleaseCheckouts.GetRunId())}
+	case *pb.Effect_ComputeWindowFacts:
+		e = core.ComputeWindowFacts{CheckIn: core.CheckInID(b.ComputeWindowFacts.GetCheckInId())}
 	}
 	in.Id = string(e.ID())
 	return in

@@ -29,6 +29,8 @@ const (
 	ActionStopAgent   Action = "stop_agent"
 	ActionPostHandoff Action = "post_handoff"
 	ActionPostReport  Action = "post_report"
+	// ActionRequestCatchUp is the press of Catch me up, which is for the operator and no tool.
+	ActionRequestCatchUp Action = "request_catch_up"
 )
 
 var subagents = []Principal{PrincipalPlanner, PrincipalWorker, PrincipalJudge, PrincipalCombiner, PrincipalProfiler}
@@ -43,6 +45,8 @@ var permissions = map[Action][]Principal{
 	ActionStopAgent:   {PrincipalOperator, PrincipalLead},
 	ActionPostHandoff: subagents,
 	ActionPostReport:  {PrincipalLead},
+
+	ActionRequestCatchUp: {PrincipalOperator},
 }
 
 // Allowed says whether a principal may do an action.

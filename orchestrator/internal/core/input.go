@@ -22,8 +22,11 @@ type Caller interface{ caller() }
 
 // The callers.
 type (
-	// Operator is the person at a client.
-	Operator struct{}
+	// Operator is the person at a client. There is one operator principal, whoever is at the client:
+	// what the operator may do never depends on Viewer, which is only the label the client chose for
+	// its install, so that a check-in can say whose it is. Nothing authenticates it, and it is no
+	// part of a command's digest.
+	Operator struct{ Viewer Viewer }
 	// AgentCaller is an agent, through its session.
 	AgentCaller struct{ Agent AgentID }
 )
@@ -92,15 +95,19 @@ type (
 	PostHandoff struct{ Handoff Handoff }
 	// PostReport sends the operator a report.
 	PostReport struct{ Report Report }
+	// RequestCatchUp records a check-in for the operator's viewer: everything in the run since that
+	// viewer's last one. See checkin.go.
+	RequestCatchUp struct{ Run RunID }
 )
 
-func (StartRun) action() Action    { return ActionStartRun }
-func (StopRun) action() Action     { return ActionStopRun }
-func (SpawnAgent) action() Action  { return ActionSpawnAgent }
-func (StopAgent) action() Action   { return ActionStopAgent }
-func (SendMessage) action() Action { return ActionSendMessage }
-func (PostHandoff) action() Action { return ActionPostHandoff }
-func (PostReport) action() Action  { return ActionPostReport }
+func (StartRun) action() Action       { return ActionStartRun }
+func (StopRun) action() Action        { return ActionStopRun }
+func (SpawnAgent) action() Action     { return ActionSpawnAgent }
+func (StopAgent) action() Action      { return ActionStopAgent }
+func (SendMessage) action() Action    { return ActionSendMessage }
+func (PostHandoff) action() Action    { return ActionPostHandoff }
+func (PostReport) action() Action     { return ActionPostReport }
+func (RequestCatchUp) action() Action { return ActionRequestCatchUp }
 
 // Session names one session of one agent.
 type Session struct {
@@ -215,6 +222,26 @@ type CheckoutsReleased struct {
 }
 
 func (CheckoutsReleased) inputBody() {}
+
+// WindowFactsReady answers a ComputeWindowFacts with the facts of the check-in's window. They are
+// frozen in the check-in: an answer for a check-in that is no longer pending, such as a repeat, changes
+// nothing.
+type WindowFactsReady struct {
+	CheckIn CheckInID
+	Facts   WindowFacts
+}
+
+func (WindowFactsReady) inputBody() {}
+
+// WindowFactsFailed answers a ComputeWindowFacts when the facts cannot be worked out because a record
+// they are made of cannot be read now. Detail says what, in words for the viewer. The check-in fails,
+// and the viewer's next one starts where this one would have.
+type WindowFactsFailed struct {
+	CheckIn CheckInID
+	Detail  string
+}
+
+func (WindowFactsFailed) inputBody() {}
 
 // TimerFired says a timer an ArmTimer asked for is due. A timer can outlive what it was armed for,
 // and then it does nothing.

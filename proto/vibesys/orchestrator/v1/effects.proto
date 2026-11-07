@@ -21,6 +21,7 @@ message Effect {
     CloseSession close_session = 14;
     ArmTimer arm_timer = 15;
     ReleaseCheckouts release_checkouts = 16;
+    ComputeWindowFacts compute_window_facts = 17;
   }
 }
 
@@ -79,6 +80,17 @@ message CloseSession {
 // those that hold work git does not have. The answer comes back as the run's kept_checkouts.
 message ReleaseCheckouts {
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// ComputeWindowFacts asks for the facts of a check-in's window to be worked out from the host's records
+// (the job log, the finished turns, the agents and the messages of the run). It is answered by
+// WindowFactsReady, or by WindowFactsFailed when a record the facts need cannot be read now, and the
+// check-in is pending until then.
+message ComputeWindowFacts {
+  string check_in_id = 1 [(buf.validate.field).string.min_len = 1];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp since = 3 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp until = 4 [(buf.validate.field).required = true];
 }
 
 // TimerKind says what a timer is for.

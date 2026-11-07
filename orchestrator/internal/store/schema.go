@@ -108,6 +108,13 @@ CREATE TABLE IF NOT EXISTS messages (
   body             BLOB NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS messages_run ON messages(run_id, seq);
 
+CREATE TABLE IF NOT EXISTS check_ins (
+  id               TEXT PRIMARY KEY,
+  run_id           TEXT NOT NULL,
+  viewer_id        TEXT NOT NULL,
+  updated_sequence INTEGER NOT NULL,
+  body             BLOB NOT NULL) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS checkpoint (gen INTEGER NOT NULL, idx INTEGER NOT NULL, body BLOB NOT NULL, PRIMARY KEY (gen, idx)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pruned (run_id TEXT PRIMARY KEY, through INTEGER NOT NULL) WITHOUT ROWID;
 `

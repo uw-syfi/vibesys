@@ -786,6 +786,13 @@ func verifySummary(tx *sql.Tx, state core.State) error {
 	}); err != nil {
 		return err
 	}
+	if err := load(`SELECT body FROM check_ins`, func(e core.Event) error {
+		c, err := entity[core.CheckIn](e)
+		sm.checkIns[c.ID] = c
+		return err
+	}); err != nil {
+		return err
+	}
 	if err := load(`SELECT body FROM messages WHERE delivery NOT IN (?, ?)`, func(e core.Event) error {
 		m, err := entity[core.Message](e)
 		sm.transit[m.ID] = m

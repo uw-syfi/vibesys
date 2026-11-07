@@ -162,6 +162,7 @@ func bodies(r *rand.Rand) []core.Message {
 		core.AgentLaunching, core.AgentActive, core.AgentWaiting, core.AgentIdle, core.AgentEnded, core.AgentFailed, core.AgentLost,
 	}
 	verdicts := []core.Verdict{core.VerdictPass, core.VerdictFail, core.VerdictUnmeasured}
+	since := time.Date(2026, time.January, 1, 9, 0, 0, 0, time.UTC).Add(time.Duration(r.Uint32()) * time.Second)
 	envelope := func(body core.MessageBody) core.Message {
 		return core.Message{
 			ID: "m1", Run: "r1", From: core.AgentID(optional(r, "from:")), To: "agent-a",
@@ -213,6 +214,7 @@ func bodies(r *rand.Rand) []core.Message {
 			Idle: time.Duration(r.Uint32()) * time.Second, Subagents: r.Uint32(), Workers: r.Uint32(), Judges: r.Uint32(),
 		}),
 		envelope(core.ReportDue{Every: time.Duration(r.Uint32()) * time.Second, Reports: r.Uint32()}),
+		envelope(core.CatchUpRequest{CheckIn: "c1", Since: since, Until: since.Add(time.Duration(r.Uint32()) * time.Second)}),
 	}
 }
 

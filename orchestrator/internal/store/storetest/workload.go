@@ -133,8 +133,29 @@ func (w *Workload) answer(e core.Effect) core.InputBody {
 		return w.fact(e.Session, core.SessionClosed{})
 	case core.ArmTimer:
 		w.timers = append(w.timers, e)
+	case core.ComputeWindowFacts:
+		if w.r.IntN(4) == 0 {
+			return core.WindowFactsFailed{CheckIn: e.CheckIn, Detail: "the job log cannot be read"}
+		}
+		return core.WindowFactsReady{CheckIn: e.CheckIn, Facts: w.facts()}
 	}
 	return nil
+}
+
+// facts are the facts of a window as a host could work them out: every part of them set, so that a
+// store that kept less of a check-in than it was given is seen.
+func (w *Workload) facts() core.WindowFacts {
+	cost, tokens := float64(w.r.IntN(400))/8, uint64(1+w.r.IntN(5000))
+	best := &core.Best{Value: float64(w.r.IntN(64)) / 4, Job: core.JobID(w.id("job")), Commit: core.Commit("abc"), At: w.now}
+	return core.WindowFacts{
+		Spend: core.Spend{
+			Turns: 3, Unpriced: 1, Usage: core.Usage{InputTokens: &tokens, CostUSD: &cost},
+			Roles: []core.RoleSpend{{Role: core.RoleLead, Turns: 2, Usage: core.Usage{CostUSD: &cost}}, {Role: core.RoleWorker, Turns: 1, Unpriced: 1, Usage: core.Usage{InputTokens: &tokens}}},
+		},
+		AgentsStarted: uint32(w.r.IntN(4)), AgentsEnded: uint32(w.r.IntN(4)), JobsMeasured: uint32(w.r.IntN(9)),
+		Objectives:   []core.ObjectiveMove{{Metric: "throughput", Direction: core.Maximize, Start: best, End: best}, {Metric: "latency", Direction: core.Minimize, End: best}},
+		PlansCreated: []uint32{1, 2}, PlansChanged: []uint32{7}, Reports: []core.MessageID{"m-1"},
+	}
 }
 
 // advance streams one more item of a running turn, or ends it.
@@ -206,6 +227,12 @@ func (w *Workload) newCommand() core.InputBody {
 			SummaryEvery: []time.Duration{0, 5 * time.Minute, 90 * time.Minute}[w.r.IntN(3)],
 			Lead:         core.AgentSpec{Harness: core.ClaudeCode, Model: "model-a", Effort: "high"}, Brief: "do the task",
 		})
+	}
+	if w.r.IntN(12) == 0 {
+		// A viewer catches up on a run that may be over: a check-in, and later its facts.
+		viewer := w.r.IntN(3)
+		return w.command(core.Operator{Viewer: core.Viewer{ID: core.ViewerID(fmt.Sprintf("install-%d", viewer)), Label: fmt.Sprintf("viewer %d", viewer)}},
+			core.RequestCatchUp{Run: runs[w.r.IntN(len(runs))].ID})
 	}
 	run := live[w.r.IntN(len(live))]
 	agents := w.state.Agents(run.ID)
