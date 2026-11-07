@@ -1,4 +1,4 @@
-import {describe, expect, it} from '@effect/vitest';
+import {describe, expect, expectTypeOf, it} from '@effect/vitest';
 import fc from 'fast-check';
 import {costViewArb} from '../../testing/orchestrator/cost-arbitrary.js';
 import {
@@ -9,7 +9,13 @@ import {
   PRICED_AND_UNPRICED,
 } from '../../testing/orchestrator/cost-views.js';
 import {COST_WORDS} from '../orchestrator/cost-words.js';
-import {costScreenModel} from './cost-model.js';
+import {
+  type CostScreenModel,
+  costScreenModel,
+  KIND_COLUMNS,
+  MODEL_COLUMNS,
+  TYPE_COLUMNS,
+} from './cost-model.js';
 import {formatTokens} from './words.js';
 
 const NUMBER_WORDS = /NaN|undefined|Infinity|\[object/;
@@ -34,6 +40,27 @@ function sayings(view: Parameters<typeof costScreenModel>[0]): string[] {
 }
 
 describe('the cost screen model', () => {
+  it('builds every row with one figure for each header of its table', () => {
+    // The types are the proof: a row of another width is not a `BarRow` of this table's width.
+    expectTypeOf<CostScreenModel['types'][number]['figures']['length']>().toEqualTypeOf<
+      (typeof TYPE_COLUMNS)['length']
+    >();
+    expectTypeOf<CostScreenModel['models'][number]['figures']['length']>().toEqualTypeOf<
+      (typeof MODEL_COLUMNS)['length']
+    >();
+    expectTypeOf<CostScreenModel['kinds'][number]['figures']['length']>().toEqualTypeOf<
+      (typeof KIND_COLUMNS)['length']
+    >();
+    fc.assert(
+      fc.property(costViewArb, view => {
+        const model = costScreenModel(view, COST_WORDS);
+        for (const row of model.types) expect(row.figures).toHaveLength(TYPE_COLUMNS.length);
+        for (const row of model.models) expect(row.figures).toHaveLength(MODEL_COLUMNS.length);
+        for (const row of model.kinds) expect(row.figures).toHaveLength(KIND_COLUMNS.length);
+      }),
+    );
+  });
+
   it('says only what was served: a price that was never reported stays absent and is never a zero', () => {
     fc.assert(
       fc.property(costViewArb, view => {

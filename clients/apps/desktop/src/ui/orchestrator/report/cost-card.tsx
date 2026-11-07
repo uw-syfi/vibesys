@@ -1,7 +1,7 @@
 import {BarRows, Button, Card, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CostFeedSnapshot, CostView} from '../../../state/index.js';
-import {costScreenModel, SpendCard} from '../../cost/index.js';
+import {costScreenModel, SpendCard, TYPE_COLUMNS} from '../../cost/index.js';
 import {COST_WORDS} from '../cost-words.js';
 
 /** What went wrong with the cost stream, beside the figures it last delivered, and the way to retry. */
@@ -56,7 +56,7 @@ export function CostCard(props: {
                 label="Cost by agent type"
                 nameHeader="Type"
                 barLabel="Share of the largest cost"
-                columns={[{header: 'Agents'}, {header: 'Turns'}, {header: 'Cost', strong: true}]}
+                columns={TYPE_COLUMNS}
                 rows={model.types}
               />
             </Card>

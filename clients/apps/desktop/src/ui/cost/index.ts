@@ -3,7 +3,7 @@
  * `CostWords`; nothing here imports another feature. Another screen that shows a run's cost in
  * brief (the run report) takes `SpendCard` from `spend-card.ts` with `costScreenModel(...).spend`.
  */
-export {costScreenModel} from './cost-model.js';
+export {costScreenModel, TYPE_COLUMNS} from './cost-model.js';
 export {CostScreen} from './cost-screen.js';
 export {SpendCard} from './spend-card.js';
 export type {CostWords} from './words.js';
