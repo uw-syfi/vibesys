@@ -23,6 +23,7 @@ import {
   type RunView,
   runReport,
 } from '../../state/index.js';
+import {AgentsScreen} from '../agents/agents-screen.js';
 import {CommandLine} from './command-line.js';
 import {CostView} from './cost-view.js';
 import {HandoffCards} from './handoff-cards.js';
@@ -34,6 +35,7 @@ import {agentWord, harnessWord, runWord} from './words.js';
 
 const VIEWS = [
   {value: 'timeline', label: 'Timeline'},
+  {value: 'agents', label: 'Agents'},
   {value: 'cost', label: 'Cost'},
   {value: 'handoffs', label: 'Handoffs and reports'},
 ] as const;
@@ -41,7 +43,7 @@ const VIEWS = [
 /** The last step of the trail on a screen of the run that is not its report. */
 const VIEW_CRUMBS = {
   report: 'Agents',
-  timeline: 'Agents',
+  timeline: 'Timeline',
   agents: 'Agents',
   cost: 'Cost',
   handoffs: 'Handoffs',
@@ -80,8 +82,7 @@ function AgentTree(props: {
   );
 }
 
-/** One run: its agents beside either the chosen agent's turns or the run-wide views. */
-export function RunScreen(props: {
+interface RunScreenProps {
   readonly state: OrchestratorState;
   /** What the host is called on screen. */
   readonly host: string;
@@ -89,6 +90,8 @@ export function RunScreen(props: {
   readonly nowMs: number;
   /** How current the run stream is. */
   readonly freshness: Freshness;
+  /** How long what is shown has been out of date, from the host's freshness; null while it is current. */
+  readonly staleForMs: number | null;
   /** The state of the cost stream, which is followed while the report shows. */
   readonly costFeed: FeedStatus;
   readonly view: RunView;
@@ -101,40 +104,60 @@ export function RunScreen(props: {
   readonly goRuns: () => void;
   readonly show: (view: RunView) => void;
   readonly pick: (agentId: string) => void;
-}): JSX.Element {
-  const run = props.state.runs[props.runId];
-  if (run === undefined) {
+}
+
+/**
+ * One run: it opens on its report. The agents, the cost and the other screens of the run open from
+ * the report, each with its agents beside either the chosen agent's turns or the run-wide views.
+ */
+export function RunScreen(props: RunScreenProps): JSX.Element {
+  const report = runReport(props.state, props.runId, props.nowMs);
+  if (report === undefined) {
     return <Text tone="muted">This run is not on this host any more.</Text>;
   }
-  const report = runReport(props.state, props.runId, props.nowMs);
-  if (props.view === 'report' && props.agentId === null && report !== undefined) {
-    return (
-      <ReportScreen
-        report={report}
-        host={props.host}
-        nowMs={props.nowMs}
-        freshness={props.freshness}
-        costFeed={props.costFeed}
-        stopProgress={props.stopProgress}
-        stop={props.stop}
-        retryStop={props.retryStop}
-        goRuns={props.goRuns}
-        openAgents={() => props.show('agents')}
-        openCost={() => props.show('cost')}
-      />
-    );
-  }
+  if (props.view !== 'report' || props.agentId !== null) return <DrillDown {...props} />;
+  return (
+    <ReportScreen
+      report={report}
+      host={props.host}
+      nowMs={props.nowMs}
+      freshness={props.freshness}
+      staleForMs={props.staleForMs}
+      costFeed={props.costFeed}
+      stopProgress={props.stopProgress}
+      stop={props.stop}
+      retryStop={props.retryStop}
+      goRuns={props.goRuns}
+      openAgents={() => props.show('agents')}
+      openCost={() => props.show('cost')}
+    />
+  );
+}
+
+/** A screen of the run that is not its report: its agents, its cost, its handoffs. */
+function DrillDown(props: RunScreenProps): JSX.Element {
+  const run = props.state.runs[props.runId];
+  if (run === undefined) return <Text tone="muted">This run is not on this host any more.</Text>;
   const search = props.state.searches[props.runId];
   const status = runWord(run.status);
   const stoppable = run.status === RunStatus.STARTING || run.status === RunStatus.RUNNING;
   const body =
-    props.view === 'timeline' || props.view === 'agents' || props.view === 'report' ? (
+    props.view === 'timeline' || props.view === 'report' ? (
       <TimelineView
         state={props.state}
         runId={props.runId}
         nowMs={props.nowMs}
         agentId={props.agentId}
         pick={props.pick}
+      />
+    ) : props.view === 'agents' ? (
+      <AgentsScreen
+        state={props.state}
+        runId={props.runId}
+        host={props.host}
+        nowMs={props.nowMs}
+        selected={props.agentId}
+        open={props.pick}
       />
     ) : props.view === 'cost' ? (
       <CostView state={props.state} runId={props.runId} />
@@ -171,7 +194,6 @@ export function RunScreen(props: {
       {search === undefined ? null : <SearchPanels search={search} nowMs={props.nowMs} />}
       <Split
         asideFirst
-        asideSticky
         aside={
           <AgentTree
             state={props.state}
@@ -185,7 +207,7 @@ export function RunScreen(props: {
             <Tabs
               label="Views of this run"
               tabs={VIEWS}
-              value={props.view === 'agents' || props.view === 'report' ? 'timeline' : props.view}
+              value={props.view === 'report' ? 'timeline' : props.view}
               change={props.show}
             >
               {body}

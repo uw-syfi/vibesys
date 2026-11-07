@@ -1,14 +1,18 @@
+import type {Agent} from '@vibesys/orchestrator-proto';
 import {Page, pageState, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
+import type {HistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type FeedStatus,
   freshnessOf,
   type HostConnectionState,
+  type HostFreshness,
   type HostModel,
   type Route,
   type RouteAction,
   type RunView,
+  staleForMs,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -36,12 +40,19 @@ export interface HostSnapshot {
   readonly label: string;
   readonly model: HostModel;
   readonly connection: HostConnectionState;
+  /** Whether what is shown of this host is current, and when it last was. */
+  readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** The status of each run's cost stream a screen has open, by run id. */
   readonly costFeeds: Readonly<Record<string, FeedStatus>>;
+  /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
+  readonly history: {
+    readonly earlier: HistoryStatus;
+    readonly wholes: Readonly<Record<number, HistoryStatus>>;
+  };
 }
 
 /** What the person has asked for, how it is going, and the ways to ask for more. */
@@ -58,18 +69,75 @@ export interface AppCommands {
   readonly retryStop: (runId: string) => void;
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
+  /** Read the page of items of an agent before ordinal `before`. */
+  readonly loadEarlier: (host: string, agentId: string, before: number) => void;
+  /** Read the item at `ordinal` of an agent whole. */
+  readonly expand: (host: string, agentId: string, ordinal: number) => void;
 }
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
-function runsNote(host: HostSnapshot, retry: (host: string) => void): ConnectionNote {
+function runsNote(
+  host: HostSnapshot,
+  retry: (host: string) => void,
+  nowMs: number,
+): ConnectionNote {
   return {
     key: `runs/${host.key}`,
     what: `the runs on ${host.label}`,
     connection: host.connection,
     feed: host.runsFeed,
     hasData: hasData(host),
+    staleForMs: staleForMs(host.freshness, nowMs),
     tryAgain: () => retry(host.key),
+  };
+}
+
+/** The panel of the agent that is open, bound to the commands of its host. */
+function OpenAgent(props: {
+  readonly state: HostSnapshot['model']['data'];
+  readonly agent: Agent;
+  readonly host: HostSnapshot;
+  readonly nowMs: number;
+  readonly commands: AppCommands;
+  readonly go: (action: RouteAction) => void;
+}): JSX.Element {
+  const {agent, host, commands, go} = props;
+  return (
+    <AgentPanel
+      nowMs={props.nowMs}
+      state={props.state}
+      agent={agent}
+      host={host.label}
+      history={{
+        ...host.history,
+        loadEarlier: before => commands.loadEarlier(host.key, agent.id, before),
+        expand: ordinal => commands.expand(host.key, agent.id, ordinal),
+      }}
+      open={agentId => go({type: 'pick-agent', agentId})}
+      sendProgress={commands.send[agent.id]}
+      send={text => commands.sendMessage(host.key, agent.id, text)}
+      retrySend={() => commands.retrySend(agent.id)}
+      close={() => go({type: 'close-agent'})}
+    />
+  );
+}
+
+/** The note about one agent's steps on `host`, which share the host's connection. */
+function agentNote(
+  host: HostSnapshot,
+  agent: Agent,
+  names: ReturnType<typeof agentNames>,
+  props: {readonly nowMs: number; readonly retryHost: (host: string) => void},
+): ConnectionNote {
+  return {
+    key: `agent/${agent.id}`,
+    what: `the steps of ${nameOf(names, agent)}`,
+    connection: host.connection,
+    feed: host.agentFeeds[agent.id] ?? {_tag: 'Opening'},
+    hasData: Object.values(host.model.data.items).some(item => item.agentId === agent.id),
+    staleForMs: staleForMs(host.freshness, props.nowMs),
+    tryAgain: () => props.retryHost(host.key),
   };
 }
 
@@ -83,48 +151,6 @@ function runTitle(
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   if (agent !== undefined) return `${task}: ${nameOf(names, agent)}`;
   return route.view === 'report' ? task : `${task}: ${RUN_TITLES[route.view]}`;
-}
-
-/** The list of every connected host's runs, and the form that starts one. */
-function RunsPage(props: {
-  readonly hosts: readonly HostSnapshot[];
-  readonly commands: AppCommands;
-  readonly retryHost: (host: string) => void;
-  readonly go: (action: RouteAction) => void;
-}): JSX.Element {
-  const {hosts, commands, go} = props;
-  return (
-    <Page
-      key="runs"
-      width="wide"
-      state={pageState(hosts.length === 0)}
-      header={
-        <Text variant="title">
-          {hosts.some(host => host.connection._tag === 'Unusable')
-            ? 'Runs unavailable'
-            : commands.start?._tag === 'Refused'
-              ? 'Start run refused'
-              : TITLE}
-        </Text>
-      }
-    >
-      <Stack gap="space-4">
-        <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
-        <StartRunForm
-          hosts={hosts.map(({key, label}) => ({key, label}))}
-          progress={commands.start}
-          start={commands.startRun}
-          retry={commands.retryStart}
-          openRun={(host, runId) => go({type: 'open-run', host, runId})}
-        />
-        <RunList
-          unreadHosts={hosts.filter(host => host.runsFeed._tag !== 'Live').map(host => host.label)}
-          hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
-          open={(host, runId) => go({type: 'open-run', host, runId})}
-        />
-      </Stack>
-    </Page>
-  );
 }
 
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
@@ -141,7 +167,42 @@ export function OrchestratorApp(props: {
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
-    return <RunsPage hosts={hosts} commands={commands} retryHost={props.retryHost} go={go} />;
+    return (
+      <Page
+        key="runs"
+        width="wide"
+        state={pageState(hosts.length === 0)}
+        header={
+          <Text variant="title">
+            {hosts.some(host => host.connection._tag === 'Unusable')
+              ? 'Runs unavailable'
+              : commands.start?._tag === 'Refused'
+                ? 'Start run refused'
+                : TITLE}
+          </Text>
+        }
+      >
+        <Stack gap="space-4">
+          <ConnectionBanner
+            notes={hosts.map(host => runsNote(host, props.retryHost, props.nowMs))}
+          />
+          <StartRunForm
+            hosts={hosts.map(({key, label}) => ({key, label}))}
+            progress={commands.start}
+            start={commands.startRun}
+            retry={commands.retryStart}
+            openRun={(host, runId) => go({type: 'open-run', host, runId})}
+          />
+          <RunList
+            unreadHosts={hosts
+              .filter(host => host.runsFeed._tag !== 'Live')
+              .map(host => host.label)}
+            hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
+            open={(host, runId) => go({type: 'open-run', host, runId})}
+          />
+        </Stack>
+      </Page>
+    );
   }
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
@@ -156,19 +217,8 @@ export function OrchestratorApp(props: {
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const names = agentNames(state, runId);
   const notes = [
-    runsNote(host, props.retryHost),
-    ...(agent === undefined
-      ? []
-      : [
-          {
-            key: `agent/${agent.id}`,
-            what: `the steps of ${nameOf(names, agent)}`,
-            connection: host.connection,
-            feed: host.agentFeeds[agent.id] ?? ({_tag: 'Opening'} as const),
-            hasData: Object.values(state.items).some(item => item.agentId === agent.id),
-            tryAgain: () => props.retryHost(host.key),
-          } satisfies ConnectionNote,
-        ]),
+    runsNote(host, props.retryHost, props.nowMs),
+    ...(agent === undefined ? [] : [agentNote(host, agent, names, props)]),
   ];
   return (
     <Page
@@ -185,7 +235,8 @@ export function OrchestratorApp(props: {
           runId={runId}
           nowMs={props.nowMs}
           freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
-          costFeed={host.costFeeds[runId] ?? ({_tag: 'Opening'} as const)}
+          staleForMs={staleForMs(host.freshness, props.nowMs)}
+          costFeed={host.costFeeds[runId] ?? {_tag: 'Opening'}}
           view={route.view}
           agentId={route.agentId}
           stopProgress={commands.stop[runId]}
@@ -196,15 +247,13 @@ export function OrchestratorApp(props: {
           pick={agentId => go({type: 'pick-agent', agentId})}
           agentPanel={
             agent === undefined ? null : (
-              <AgentPanel
-                nowMs={props.nowMs}
+              <OpenAgent
                 state={state}
                 agent={agent}
-                name={nameOf(names, agent)}
-                sendProgress={commands.send[agent.id]}
-                send={text => commands.sendMessage(host.key, agent.id, text)}
-                retrySend={() => commands.retrySend(agent.id)}
-                close={() => go({type: 'close-agent'})}
+                host={host}
+                nowMs={props.nowMs}
+                commands={commands}
+                go={go}
               />
             )
           }

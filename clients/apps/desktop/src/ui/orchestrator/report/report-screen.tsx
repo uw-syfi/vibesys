@@ -1,4 +1,4 @@
-import {Row, Stack, Text} from '@vibesys/ui';
+import {Row, Stack} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {CommandProgress, FeedStatus, Freshness, RunReport} from '../../../state/index.js';
 import {AgentsCard} from './agents-card.js';
@@ -20,6 +20,8 @@ export function ReportScreen(props: {
   readonly nowMs: number;
   /** How current the run stream is; the header says so when it is not. */
   readonly freshness: Freshness;
+  /** How long what is shown has been out of date; null while it is current. */
+  readonly staleForMs: number | null;
   /** The state of the cost stream the report follows while it is shown. */
   readonly costFeed: FeedStatus;
   readonly stopProgress: CommandProgress | undefined;
@@ -37,17 +39,14 @@ export function ReportScreen(props: {
         report={report}
         host={props.host}
         freshness={props.freshness}
+        nowMs={props.nowMs}
+        staleForMs={props.staleForMs}
         stoppable={isStoppable(report.header.status)}
         stopProgress={props.stopProgress}
         stop={props.stop}
         retryStop={props.retryStop}
         goRuns={props.goRuns}
       />
-      {report.search.state === 'unreadable' ? (
-        <Row gap="space-3" wrap>
-          <Text tone="warn">Search state is stale</Text>
-        </Row>
-      ) : null}
       <LeadSummary summary={report.summary} nowMs={props.nowMs} />
       <ObjectiveTiles objectives={report.objectives} />
       <Row gap="space-5" wrap align="start">

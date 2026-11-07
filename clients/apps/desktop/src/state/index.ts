@@ -5,6 +5,7 @@
  * (`desktop-state-*` rules in `.dependency-cruiser.mjs`), so a fold is a function from data to
  * data that any test calls directly.
  */
+export * from './agents/index.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
   type HostConnectionState,
@@ -13,7 +14,14 @@ export {
 } from './connection.js';
 export {FAULT_KINDS, type Fault, type FaultKind} from './fault.js';
 export type {FeedStatus} from './feed.js';
-export {type Freshness, freshnessOf} from './freshness.js';
+export {
+  type Freshness,
+  freshnessOf,
+  type HostFreshness,
+  hostFreshness,
+  type LinkStatus,
+  staleForMs,
+} from './freshness.js';
 export {
   type HostId,
   type HostKey,
@@ -50,6 +58,8 @@ export {
   isFinalItem,
   type OlderFrame,
 } from './orchestrator/fold.js';
+export {type ItemOf, itemIs} from './orchestrator/items.js';
+export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
 export {
   type AgentsStrip,
   type AgentTypeCount,

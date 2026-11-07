@@ -31,8 +31,10 @@ service OrchestratorService {
   rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
   // One agent: a page of items, then items and deltas after the sequence.
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
-  // Older history, paged.
+  // Older history, paged. A page leaves out what is large: see ItemsPage.elisions.
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // One item of an agent, whole: what a page left out.
+  rpc GetItem(GetItemRequest) returns (GetItemResponse);
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
@@ -100,11 +102,27 @@ message WatchAgentRequest {
 }
 
 message ItemsPage {
+  // Large reasoning and tool output is left out of the items of a page: see `elisions`.
   repeated Item items = 1;
   // The sequence the page is current to.
   uint64 sequence = 2;
   // Pass as before_ordinal to read older items. Zero when there are none.
   uint32 next_before_ordinal = 3;
+  // The items of this page whose text the host left out so that a page of history stays small. An
+  // item arrives whole in a stream or a change, and from GetItem; only a page elides. Absent when
+  // nothing was left out.
+  repeated Elision elisions = 4;
+}
+
+// Elision says a page left out the text of one of its items: the text of a reasoning item or the
+// output of a tool call, when it was larger than the host's page limit. The item is in the page
+// with that text empty; GetItem reads it whole. Assistant text, prompts and what a tool was asked
+// are never left out.
+message Elision {
+  // The ordinal of the item, which is in the same page.
+  uint32 ordinal = 1 [(buf.validate.field).uint32.gt = 0];
+  // How large the text left out was, in bytes.
+  uint64 body_bytes = 2 [(buf.validate.field).uint64.gt = 0];
 }
 
 message WatchAgentResponse {
@@ -134,6 +152,19 @@ message ListItemsRequest {
 
 message ListItemsResponse {
   ItemsPage page = 1 [(buf.validate.field).required = true];
+}
+
+message GetItemRequest {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The item's place in the agent's history, as an Item carries it.
+  uint32 ordinal = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message GetItemResponse {
+  // Whole: nothing is left out.
+  Item item = 1 [(buf.validate.field).required = true];
+  // The sequence the item is current to.
+  uint64 sequence = 2;
 }
 
 message WatchRunCostRequest {

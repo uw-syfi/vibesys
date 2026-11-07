@@ -68,7 +68,9 @@ describe('ages and spans', () => {
       fc.property(fc.integer({min: 0, max: 1e9}), fc.integer({min: 0, max: 1e9}), (a, b) => {
         const [low, high] = a <= b ? [a, b] : [b, a];
         const seconds = (text: string): number => {
-          const parts = [...text.matchAll(/(\d+)([dhms])/g)].map(m => [Number(m[1]), m[2]] as const);
+          const parts = [...text.matchAll(/(\d+)([dhms])/g)].map(
+            m => [Number(m[1]), m[2]] as const,
+          );
           const unit = {d: 86_400, h: 3600, m: 60, s: 1} as const;
           return parts.reduce((sum, [n, u]) => sum + n * unit[u as keyof typeof unit], 0);
         };

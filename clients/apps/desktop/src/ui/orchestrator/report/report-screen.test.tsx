@@ -104,6 +104,7 @@ function render(
       runId={RUN}
       nowMs={world.live === false ? END + 60_000 : NOW}
       freshness={options.freshness ?? 'live'}
+      staleForMs={options.freshness === undefined || options.freshness === 'live' ? null : 90_000}
       costFeed={options.costFeed ?? {_tag: 'Live'}}
       view={options.view ?? 'report'}
       agentId={null}
@@ -363,9 +364,18 @@ describe('what the header says about freshness', () => {
     );
   });
 
-  it('says the search state is stale inline, not as a banner', () => {
+  it('says how long the data has been stale, in the chip\u2019s hint', () => {
+    const {screen} = render({}, {freshness: 'stale'});
+    const chip = [...screen.container.querySelectorAll('.vs-chip')].find(
+      each => each.textContent === 'Stale',
+    );
+    expect(chip?.getAttribute('aria-description')).toContain('Last current 1 min ago');
+    screen.unmount();
+  });
+
+  it('says the search state is stale in the header, not as a banner', () => {
     const {screen} = render({stale: true});
-    expect(screen.text()).toContain('Search state is stale');
+    expect(screen.text()).toContain('Search stale');
     expect(screen.container.querySelector('[role="alert"], .vs-banner')).toBeNull();
     screen.unmount();
   });

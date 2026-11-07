@@ -4,7 +4,7 @@ import type {JSX} from 'react';
 import type {CommandProgress, Freshness, ObjectiveReport, RunReport} from '../../../state/index.js';
 import {CommandLine} from '../command-line.js';
 import {runWord} from '../words.js';
-import {formatElapsed, formatFigure, seattleMoment, withUnit} from './format.js';
+import {formatAge, formatElapsed, formatFigure, seattleMoment, withUnit} from './format.js';
 
 /** What a data state is called when the data is not current; a current one needs no word. */
 const FRESHNESS: Readonly<
@@ -51,6 +51,8 @@ export function ReportHeader(props: {
   readonly report: RunReport;
   readonly host: string;
   readonly freshness: Freshness;
+  readonly nowMs: number;
+  readonly staleForMs: number | null;
   readonly stoppable: boolean;
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
@@ -60,6 +62,12 @@ export function ReportHeader(props: {
   const {header, objectives} = props.report;
   const status = runWord(header.status);
   const stale = props.freshness === 'live' ? undefined : FRESHNESS[props.freshness];
+  const staleHint =
+    stale === undefined
+      ? undefined
+      : props.staleForMs === null
+        ? stale.hint
+        : `${stale.hint} Last current ${formatAge(props.staleForMs)}.`;
   return (
     <Stack gap="space-3">
       <Breadcrumb
@@ -75,8 +83,19 @@ export function ReportHeader(props: {
           <Row gap="space-3" rowGap="space-2" wrap>
             <Chip label={status.label} tone={status.tone} dot />
             {stale === undefined ? null : (
-              <Chip label={stale.label} tone={stale.tone} hint={stale.hint} />
+              <Chip
+                label={stale.label}
+                tone={stale.tone}
+                {...(staleHint === undefined ? {} : {hint: staleHint})}
+              />
             )}
+            {props.report.search.state === 'unreadable' ? (
+              <Chip
+                label="Search stale"
+                tone="warn"
+                hint={`The search service was lost ${formatAge(props.report.search.sinceMs === 0 ? 0 : props.nowMs - props.report.search.sinceMs)}. The measurements shown were the last read.`}
+              />
+            ) : null}
             <Chip label={props.host} mono />
             <Text variant="small" title={header.endedMs === null ? 'Running for' : 'Ran for'}>
               {formatElapsed(header.elapsedMs)}

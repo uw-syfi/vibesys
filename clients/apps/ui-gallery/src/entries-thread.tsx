@@ -2,6 +2,8 @@ import {
   Card,
   ChatMessage,
   Collapsible,
+  Conversation,
+  type ConversationItem,
   Message,
   type MessageVariant,
   type ReplyField,
@@ -292,6 +294,68 @@ function TurnResultDemo(): JSX.Element {
   );
 }
 
+const CONVERSATION: readonly ConversationItem[] = [
+  {kind: 'rule', id: 'r1', label: 'Turn 207 · Wed 2:02 AM · $1.12'},
+  {
+    kind: 'bubble',
+    id: 'b1',
+    author: {label: `${PLANNER.toLowerCase()}-2`, press: noop},
+    at: '2:02 AM',
+    text: 'Try fusing the gate into the expert dispatch loop, and a 64 tile variant if it helps.',
+  },
+  {
+    kind: 'said',
+    id: 's1',
+    text: 'I will read the dispatch path first, then try a tile variant.',
+  },
+  {
+    kind: 'thought',
+    id: 'th1',
+    label: 'Thought for 14s',
+    text: 'The gate and the dispatch round-trip the expert ids through memory; fusing them removes that.',
+  },
+  {
+    kind: 'tool',
+    id: 'tc1',
+    name: 'Read',
+    state: 'ok',
+    summary: 'src/moe/dispatch.cc',
+    duration: '0.1s',
+    input: 'src/moe/dispatch.cc',
+    output: 'src/moe/dispatch.cc · 412 lines',
+  },
+  {
+    kind: 'tool',
+    id: 'tc2',
+    name: 'Command',
+    state: 'failed',
+    summary:
+      'pytest -x tests/test_decode.py --tile 128 --trace long --a-very-long-argument-that-is-cut',
+    duration: '2m 05s',
+    input: null,
+    output: 'FAILED tests/test_decode.py::test_case_3',
+  },
+  {
+    kind: 'link',
+    id: 'l1',
+    icon: 'bot',
+    title: `Spawned ${REVIEWER.toLowerCase()}-3`,
+    trail: 'host-a · 2:10 AM',
+    press: noop,
+  },
+  {kind: 'rule', id: 'r2', label: 'Turn 208 · Wed 6:28 AM · $0.86'},
+  {
+    kind: 'link',
+    id: 'l2',
+    icon: 'arrow-up',
+    title: `${REVIEWER.toLowerCase()}-3 joined`,
+    chip: {label: 'Done', tone: 'ok'},
+    trail: '6:28 AM',
+    press: noop,
+  },
+  {kind: 'said', id: 's2', text: 'The clean run matches: **2.31×** the baseline.'},
+];
+
 export const THREAD_ENTRIES: Readonly<
   Record<
     Extract<
@@ -302,6 +366,7 @@ export const THREAD_ENTRIES: Readonly<
       | 'ToolCall'
       | 'StructuredReply'
       | 'Thread'
+      | 'Conversation'
       | 'TurnResult'
     >,
     GalleryEntry
@@ -324,6 +389,17 @@ export const THREAD_ENTRIES: Readonly<
     render: () => (
       <Card>
         <Thread label="Turn by turn" items={THREAD} />
+      </Card>
+    ),
+  },
+  Conversation: {
+    render: () => (
+      <Card>
+        <Conversation
+          label="A conversation"
+          items={CONVERSATION}
+          earlier={{text: 'Earlier turns', loading: false, load: noop}}
+        />
       </Card>
     ),
   },

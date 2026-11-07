@@ -30,6 +30,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | --- | --- | --- |
 | `internal/core` | State, `Decide`, the role table. No I/O, clock or randomness | Nothing of this module |
 | `internal/cost` | What a run has cost, worked out from its finished turns: the `Ledger` and its `View`. No I/O, clock or randomness | `core` |
+| `internal/window` | What happened in a run between two times (`Facts`): spend by type of agent, agents started and ended, measurements, the best of each objective at both ends, plans touched, reports posted. A check-in freezes it. No I/O, clock or randomness | `core`, `cost`, `search` |
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
 | `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `cost`, `gen` |
@@ -414,6 +415,13 @@ A snapshot holds runs and agents, and every turn and message of those runs, not 
 shows an agent's turns and the handoffs and reports a late watcher missed, and not what the agent said
 in them (`WatchAgent` and `ListItems` page items). A run with more turns than a timeline window holds
 shows its earliest in the snapshot.
+
+A page of items leaves out the text of a reasoning item or the output of a tool call larger than
+`daemon.ElideOver` (4096 bytes), so that a page of an agent that thought and ran a lot stays small: the
+item is in the page with that text empty, and the page's `elisions` say which items and how large the
+text was. `GetItem` reads one item whole by its agent and ordinal. An item that arrives in a stream is
+always whole. An item carries `started_at`, when the host first saw it, beside `at`, when it was last
+updated, so a finished item took the difference; an item recorded before the host kept it has none.
 
 ### What a run has cost
 

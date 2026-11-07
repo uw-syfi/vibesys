@@ -147,6 +147,8 @@ export function ToolCall(props: {
   readonly meta?: string;
   readonly input: string | null;
   readonly output: string | null;
+  /** What is said in place of a result that is not here, when the caller knows why (it is being read). */
+  readonly notice?: string;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
@@ -165,7 +167,9 @@ export function ToolCall(props: {
         {props.input === null ? null : <Code label="Input" text={props.input} />}
         {props.output === null ? (
           <Text tone="muted">
-            {props.state === 'pending' ? 'Waiting for the result…' : 'No result was recorded.'}
+            {props.state === 'pending'
+              ? 'Waiting for the result…'
+              : (props.notice ?? 'No result was recorded.')}
           </Text>
         ) : props.output === '' ? (
           <Text tone="muted">The call returned nothing.</Text>

@@ -1,0 +1,91 @@
+/* A Gantt that is a tree over time: tags, folds, counts, marks and motion. Imported by components.css. */
+
+/* Tags have a column of their own, so they line up whatever the depth of the row. */
+.vs-gantt[data-tags] .vs-gantt-row {
+  grid-template-columns:
+    clamp(var(--gantt-label), 36%, var(--gantt-label-max))
+    var(--gantt-figure)
+    1fr
+    var(--gantt-figure);
+}
+.vs-gantt-seg[data-kind="err"] {
+  background: var(--err);
+}
+
+/* A row that holds others: the chevron is the first cell of the indent, and the count follows the name. */
+.vs-gantt-fold {
+  flex: none;
+  width: var(--icon);
+  cursor: pointer;
+}
+.vs-gantt-fold[data-empty] {
+  cursor: inherit;
+}
+.vs-gantt-count {
+  flex: none;
+  margin-left: var(--space-3);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--chip-accent-bg);
+  color: var(--accent);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  font-weight: var(--text-caption-weight);
+  font-variant-numeric: tabular-nums;
+}
+/* The tag is a short identifier in its own column: it is cut, never wrapped, and the title has it whole. */
+.vs-gantt-tag {
+  min-width: 0;
+  overflow: hidden;
+  justify-self: start;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-gantt-tag.vs-listheader {
+  padding: 0;
+  border-color: transparent;
+}
+/* Where something came back: a thin line across the bar. */
+.vs-gantt-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--mark-at);
+  width: var(--focus-ring);
+  margin-left: calc(var(--focus-ring) / -2);
+  background: var(--text);
+  box-shadow: 0 0 0 var(--hairline) var(--panel);
+}
+.vs-gantt-mark[data-tone="err"] {
+  background: var(--err);
+}
+/* A bar that stands for several rows is drawn as a stack. */
+.vs-gantt-bar[data-stacked] {
+  box-shadow:
+    0 var(--space-2) 0 calc(var(--hairline) * -1) var(--line),
+    0 var(--space-3) 0 calc(var(--space-1) * -1) var(--panel-2);
+}
+/* Motion: a row that arrives draws in, and bars follow the axis as it grows. */
+.vs-gantt-row[data-entering] {
+  animation: vs-enter var(--duration-base) var(--easing-enter);
+}
+.vs-gantt-bar {
+  transition:
+    left var(--duration-base) var(--easing),
+    width var(--duration-base) var(--easing);
+}
+@keyframes vs-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--space-2) * -1));
+  }
+}
