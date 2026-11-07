@@ -87,6 +87,8 @@ export function PathInput(props: {
     const own = ownerOf(event.key, props);
     if (own === undefined) return;
     event.preventDefault();
+    // The owner may remove this input; the key must not then reach the page's own Escape (back).
+    event.stopPropagation();
     own();
   };
   return (

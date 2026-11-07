@@ -18,31 +18,31 @@ export function AddMachine(props: {
   const {state} = props;
   return (
     <Card>
-      <Row gap="space-3" align="end" wrap>
-        <Stack gap="space-2">
-          <Field label="Machine" {...(state.error === null ? {} : {error: state.error})}>
-            <PathInput
-              takeFocus
-              value={state.input}
-              change={props.type}
-              completions={state.matches.map(value => ({value}))}
-              placeholder="host or ssh command"
-              pick={completion => props.pick(completion.value)}
-              submit={props.submit}
-              escape={props.close}
-            />
-          </Field>
-        </Stack>
-        <Button
-          variant="primary"
-          text="Add"
-          press={props.submit}
-          {...(state.busy || state.input.trim() === ''
-            ? {disabledReason: 'Type a host or paste an ssh command', quietReason: true}
-            : {})}
-        />
-        <Button variant="quiet" text="Close" press={props.close} />
-      </Row>
+      <Stack gap="space-4">
+        <Field label="Machine" {...(state.error === null ? {} : {error: state.error})}>
+          <PathInput
+            takeFocus
+            value={state.input}
+            change={props.type}
+            completions={state.matches.map(value => ({value}))}
+            placeholder="host or ssh command"
+            pick={completion => props.pick(completion.value)}
+            submit={props.submit}
+            escape={props.close}
+          />
+        </Field>
+        <Row gap="space-3">
+          <Button
+            variant="primary"
+            text="Add"
+            press={props.submit}
+            {...(state.busy || state.input.trim() === ''
+              ? {disabledReason: 'Type a host or paste an ssh command', quietReason: true}
+              : {})}
+          />
+          <Button variant="quiet" text="Close" press={props.close} />
+        </Row>
+      </Stack>
     </Card>
   );
 }

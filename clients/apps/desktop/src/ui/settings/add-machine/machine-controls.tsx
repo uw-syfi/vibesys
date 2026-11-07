@@ -90,7 +90,7 @@ export function useMachineControls(
       close={close}
     />
   ) : (
-    <Row justify="end">
+    <Row justify="start">
       <Button variant="secondary" icon="plus" text="Add machine" press={opened} />
     </Row>
   );
