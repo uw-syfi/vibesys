@@ -1,4 +1,14 @@
-import {Card, Chip, type Crumb, Gantt, type GanttRow, type Guide, Page, Text} from '@vibesys/ui';
+import {
+  Card,
+  Chip,
+  type Crumb,
+  Gantt,
+  type GanttLegend,
+  type GanttRow,
+  type Guide,
+  Page,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, type ReactNode, useState} from 'react';
 import {
   type AgentRow,
@@ -18,6 +28,16 @@ import {agentLabel, groupLabel} from './labels.js';
 import {axisLabel, formatSpan, formatUsd} from './time.js';
 
 const TICKS = 5;
+
+/** What the bars of the tree say, in the words the page's own chips and column use. */
+const LEGEND: GanttLegend = {
+  live: 'Running',
+  done: 'Done',
+  failed: 'Failed',
+  returned: 'Result returned',
+  tag: 'Machine',
+  folded: 'Folded',
+};
 
 /** The lineage cells before a row's name: a line through each ancestor that has later siblings, a branch for the row. */
 export function guidesOf(lineage: readonly Branch[]): Guide[] {
@@ -159,7 +179,7 @@ export function AgentsScreen(props: {
           tagLabel="Machine"
           figureLabel="Cost"
           detail="full"
-          legend
+          legend={LEGEND}
         />
       </Card>
     </Page>

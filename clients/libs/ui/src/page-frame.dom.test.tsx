@@ -218,15 +218,23 @@ describe('Gantt with a legend', () => {
         press: () => undefined,
       },
     ];
-    const keyed = await mount(<Gantt label="Agents" from={0} to={10} rows={rows} legend />);
+    const words = {
+      live: 'Growing',
+      done: 'Over',
+      failed: 'Broke',
+      returned: 'Came back',
+      tag: 'Where',
+      folded: 'Stacked',
+    };
+    const keyed = await mount(<Gantt label="Agents" from={0} to={10} rows={rows} legend={words} />);
     const items = [...keyed.querySelectorAll('ul[aria-label="Key to the bars"] li')];
     expect(items.map(item => item.textContent)).toEqual([
-      'Running',
-      'Done',
-      'Failed',
-      'Result returned',
-      'host-aMachine',
-      'Folded',
+      'Growing',
+      'Over',
+      'Broke',
+      'Came back',
+      ' Where',
+      'Stacked',
     ]);
     const bare = await mount(<Gantt label="Agents" from={0} to={10} rows={rows} />);
     expect(bare.querySelector('ul[aria-label="Key to the bars"]')).toBeNull();

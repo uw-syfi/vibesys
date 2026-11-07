@@ -75,6 +75,7 @@ export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
   type GanttFold,
+  type GanttLegend,
   type GanttMark,
   type GanttRow,
   type GanttSegment,

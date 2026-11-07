@@ -45,7 +45,7 @@ describe('the agents screen', () => {
       'Done',
       'Failed',
       'Result returned',
-      'host-aMachine',
+      ' Machine',
       'Folded',
     ]);
     expect(screen.container.querySelector('h1')?.textContent).toBe('Agents');

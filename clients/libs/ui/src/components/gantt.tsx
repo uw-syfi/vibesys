@@ -402,11 +402,23 @@ function RowView(props: {
   );
 }
 
-/**
- * The key to what a Gantt's bars say, drawn with the bars' own shades: running, done and failed
- * bars, the line where a result came back, the machine tag, and the stack of folded rows.
- */
-function GanttLegend(): JSX.Element {
+/** The words of a Gantt's key, one for each thing its bars can show; the caller's, in its own vocabulary. */
+export interface GanttLegend {
+  /** A bar that is still growing. */
+  readonly live: string;
+  readonly done: string;
+  readonly failed: string;
+  /** The line across a bar where a result came back. */
+  readonly returned: string;
+  /** The tag column's own word. */
+  readonly tag: string;
+  /** The stack drawn under a bar that holds several rows. */
+  readonly folded: string;
+}
+
+/** The key to what a Gantt's bars say, drawn with the bars' own shades. */
+function LegendKey(props: {readonly words: GanttLegend}): JSX.Element {
+  const {words} = props;
   const item = (key: string, sample: JSX.Element, label: string): JSX.Element => (
     <li key={key} className="vs-gantt-legend-item">
       {sample}
@@ -415,35 +427,34 @@ function GanttLegend(): JSX.Element {
       </Text>
     </li>
   );
-  const bar = (kind: string, outcome: string): JSX.Element => (
-    <span className="vs-gantt-legend-bar" data-outcome={outcome} aria-hidden="true">
+  const bar = (kind: string, outcome: string, stacked?: boolean): JSX.Element => (
+    <span
+      className="vs-gantt-legend-bar"
+      data-outcome={outcome}
+      data-stacked={stacked === true || undefined}
+      aria-hidden="true"
+    >
       <span className="vs-gantt-legend-fill" data-kind={kind} />
     </span>
   );
   return (
     <ul className="vs-gantt-legend" aria-label="Key to the bars">
-      {item('running', bar('solid', 'live'), 'Running')}
-      {item('done', bar('grey', 'muted'), 'Done')}
-      {item('failed', bar('err', 'err'), 'Failed')}
+      {item('live', bar('solid', 'live'), words.live)}
+      {item('done', bar('grey', 'muted'), words.done)}
+      {item('failed', bar('err', 'err'), words.failed)}
       {item(
         'returned',
         <span className="vs-gantt-legend-mark" aria-hidden="true" />,
-        'Result returned',
+        words.returned,
       )}
       {item(
-        'machine',
+        'tag',
         <span className="vs-gantt-tag vs-gantt-legend-tag" aria-hidden="true">
-          host-a
+          {'\u00a0'}
         </span>,
-        'Machine',
+        words.tag,
       )}
-      {item(
-        'folded',
-        <span className="vs-gantt-legend-bar" data-stacked="" aria-hidden="true">
-          <span className="vs-gantt-legend-fill" data-kind="grey" />
-        </span>,
-        'Folded',
-      )}
+      {item('folded', bar('grey', 'muted', true), words.folded)}
     </ul>
   );
 }
@@ -483,8 +494,8 @@ export function Gantt(props: {
   readonly detail?: 'full' | 'aggregate';
   /** `fill` takes the height of its container; the default is at most a thread's. */
   readonly size?: 'default' | 'fill';
-  /** A key above the rows to what the bars, the lines on them, the tags and the stacks mean. */
-  readonly legend?: boolean;
+  /** A key above the rows to what the bars, the lines on them, the tags and the stacks mean, in these words. */
+  readonly legend?: GanttLegend;
 }): JSX.Element {
   const whole: GanttView = {from: props.from, to: props.to};
   const view = props.view ?? whole;
@@ -527,7 +538,7 @@ export function Gantt(props: {
       data-tags={tagged || undefined}
       data-size={props.size ?? 'default'}
     >
-      {props.legend === true ? <GanttLegend /> : null}
+      {props.legend === undefined ? null : <LegendKey words={props.legend} />}
       {strip || changeView === undefined ? null : (
         <ZoomBar view={view} whole={whole} change={changeView} />
       )}

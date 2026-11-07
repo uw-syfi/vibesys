@@ -132,7 +132,7 @@ export function Page(props: {
   readonly title?: string;
   /** The page's actions, in one group beside its title. */
   readonly actions?: ReactNode;
-  /** What the page is about, in one row under its title: its state, where it runs. */
+  /** What the page is about, in one row under its title: its state, what it is on. */
   readonly meta?: ReactNode;
   /** Where the reader is, over the title: each level but the last a way back to it. */
   readonly trail?: readonly Crumb[];
