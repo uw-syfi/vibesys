@@ -145,7 +145,6 @@ export function RunScreen(props: {
       {search === undefined ? null : <SearchPanels search={search} nowMs={props.nowMs} />}
       <Split
         asideFirst
-        asideSticky
         aside={
           <AgentTree
             state={props.state}

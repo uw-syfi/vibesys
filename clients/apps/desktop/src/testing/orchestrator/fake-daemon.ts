@@ -117,8 +117,18 @@ export class FakeDaemon {
     return () => void this.#watchers.delete(listener);
   }
 
+  /** The state the first `upTo` changes make, kept for the next read of the same prefix. */
+  #folded: {readonly upTo: number; readonly state: OrchestratorState} | null = null;
+
   #state(upTo: number): OrchestratorState {
-    return this.#log.slice(0, upTo).reduce(applyChange, emptyState);
+    if (this.#folded?.upTo === upTo) return this.#folded.state;
+    // The log only grows at its end, so a shorter prefix already folded is where the next one starts.
+    const from = this.#folded !== null && this.#folded.upTo < upTo ? this.#folded : null;
+    const state = this.#log
+      .slice(from?.upTo ?? 0, upTo)
+      .reduce(applyChange, from?.state ?? emptyState);
+    this.#folded = {upTo, state};
+    return state;
   }
 
   snapshot(): RunsSnapshot {

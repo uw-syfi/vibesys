@@ -197,6 +197,14 @@ export function AgentPanel(props: {
           <Text variant="small" tone="muted">{`${cost} · ${turns} turns`}</Text>
         )}
       </Row>
+      <AgentTranscript
+        state={state}
+        agentId={agent.id}
+        host={props.host}
+        nowMs={props.nowMs}
+        history={props.history}
+        open={props.open}
+      />
       <MessageBox
         nowMs={props.nowMs}
         agent={agent}
@@ -206,14 +214,6 @@ export function AgentPanel(props: {
         )}
         send={props.send}
         retry={props.retrySend}
-      />
-      <AgentTranscript
-        state={state}
-        agentId={agent.id}
-        host={props.host}
-        nowMs={props.nowMs}
-        history={props.history}
-        open={props.open}
       />
     </Stack>
   );
