@@ -52,7 +52,7 @@ func TestSearchCapsAreValidatedAtTheBoundary(t *testing.T) {
 	if err := protojson.Unmarshal(data, frame); err != nil {
 		t.Fatal(err)
 	}
-	for field, cap := range map[string]int{"jobs": 500, "results": 500, "judgments": 100, "promotions": 200, "plans": 200, "troubles": 500} {
+	for field, cap := range map[string]int{"jobs": 500, "results": 500, "judgments": 100, "promotions": 200, "plans": 200, "troubles": 500, "bounds": 64} {
 		t.Run(field, func(t *testing.T) {
 			s := proto.Clone(client.WatchRunsSearch(frame)).(*pb.SearchState)
 			m := s.ProtoReflect()

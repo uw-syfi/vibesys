@@ -1,0 +1,128 @@
+package search
+
+import (
+	"cmp"
+	"math"
+	"slices"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+)
+
+// The limits of what the view carries of the declared bounds, which are the limits the contract
+// states for it.
+const (
+	maxBoundObjectives = 64
+	maxBoundVersions   = 64
+)
+
+// Bounds is the view of the performance bounds the agents of one run declared: one entry per
+// objective, by name, with every version of the bound oldest first, so a chart can draw the bound as
+// it stood at each moment, and with how close the head is to the bound that stands.
+//
+// Only the bounds this run declared are shown: the store holds those of every run of the task, as it
+// holds their jobs, and a bound declared in an earlier run says nothing of this one. A declaration
+// made outside a run has no run and belongs to none. It never aliases the facts.
+//
+// The result says whether anything was left out: an objective past the limit (the ones whose newest
+// bound is oldest go), versions past the limit (the oldest go), and versions of another direction than
+// the newest one's, which no longer say anything about the objective as the task has it now.
+func Bounds(facts []*cli.TaskFact, run string, head *cli.Head) (out []*pb.ObjectiveBounds, truncated bool) {
+	byObjective := map[string][]*cli.ObjectiveBound{}
+	for _, f := range facts {
+		if b := f.GetBound(); b != nil && b.GetOrigin().GetRunId() == run {
+			byObjective[b.GetObjective()] = append(byObjective[b.GetObjective()], b)
+		}
+	}
+	for objective, versions := range byObjective {
+		slices.SortFunc(versions, func(a, b *cli.ObjectiveBound) int { return cmp.Compare(a.GetSeq(), b.GetSeq()) })
+		standing := versions[len(versions)-1]
+		kept := slices.DeleteFunc(slices.Clone(versions), func(b *cli.ObjectiveBound) bool { return b.GetDirection() != standing.GetDirection() })
+		truncated = truncated || len(kept) != len(versions) || len(kept) > maxBoundVersions
+		if len(kept) > maxBoundVersions {
+			kept = kept[len(kept)-maxBoundVersions:]
+		}
+		entry := &pb.ObjectiveBounds{Objective: objective, Direction: standing.GetDirection()}
+		for _, b := range kept {
+			entry.Versions = append(entry.Versions, cloneBound(b))
+		}
+		if value, ok := headValue(head, objective, standing.GetDirection()); ok {
+			entry.HeadValue = &value
+			if percent, ok := PercentOfBound(standing.GetDirection(), standing.GetValue(), value); ok {
+				entry.PercentOfBound = &percent
+			}
+		}
+		out = append(out, entry)
+	}
+	if len(out) > maxBoundObjectives {
+		// Keep the objectives with the newest standing bound.
+		slices.SortStableFunc(out, func(a, b *pb.ObjectiveBounds) int {
+			return -cmp.Compare(standingSeq(a), standingSeq(b))
+		})
+		out, truncated = out[:maxBoundObjectives], true
+	}
+	slices.SortFunc(out, func(a, b *pb.ObjectiveBounds) int { return cmp.Compare(a.Objective, b.Objective) })
+	return out, truncated
+}
+
+func standingSeq(b *pb.ObjectiveBounds) uint64 { return b.Versions[len(b.Versions)-1].GetSeq() }
+
+func cloneBound(b *cli.ObjectiveBound) *cli.ObjectiveBound {
+	return &cli.ObjectiveBound{
+		Seq: b.GetSeq(), Origin: &cli.RecordOrigin{RunId: b.GetOrigin().GetRunId(), Agent: b.GetOrigin().GetAgent(), At: b.GetOrigin().GetAt()},
+		Objective: b.GetObjective(), Direction: b.GetDirection(), Value: b.GetValue(), Unit: b.GetUnit(), Note: b.GetNote(),
+	}
+}
+
+// headValue is the head's value on an objective, the number its percent of the bound is a share of:
+// the measurement's value for the metric it scores, and the mean of the samples of another objective,
+// which the daemon computes. It is not there when the run has no head or the head has no value for the
+// objective, and when the head says it measured the objective in another direction than the bound's,
+// since a share of a bound in the other direction would mean nothing. A measurement that does not say
+// which way an objective it reports besides the scored metric improves takes the bound's direction.
+func headValue(head *cli.Head, objective string, direction cli.Direction) (float64, bool) {
+	m := head.GetCurrent().GetResult().GetMeasure()
+	if m == nil {
+		return 0, false
+	}
+	finite := func(v float64, ok bool) (float64, bool) { return v, ok && !math.IsNaN(v) && !math.IsInf(v, 0) }
+	if scored := m.GetMetric(); scored.GetName() == objective {
+		return finite(m.GetValue(), scored.GetDirection() == direction)
+	}
+	for _, o := range m.GetObservations() {
+		if o.GetName() != objective || o.Value == nil {
+			continue
+		}
+		for _, metric := range m.GetObjectives().GetMetrics() {
+			if metric.GetName() == objective && metric.GetDirection() != direction {
+				return 0, false
+			}
+		}
+		return finite(o.GetValue(), true)
+	}
+	return 0, false
+}
+
+// PercentOfBound is how close a value is to the bound of its objective, in percent: 100 at the
+// bound, and more past it. For an objective that is maximized it is the value over the bound, and for
+// one that is minimized the bound over the value, so more is better for both. It is not defined, and
+// says so, when the direction is not one, when either number is not finite and above zero, and when
+// the share does not fit a float.
+func PercentOfBound(direction cli.Direction, bound, value float64) (float64, bool) {
+	if !(bound > 0) || !(value > 0) || math.IsInf(bound, 0) || math.IsInf(value, 0) {
+		return 0, false
+	}
+	var percent float64
+	switch direction {
+	case cli.Direction_DIRECTION_MAXIMIZE:
+		percent = value / bound * 100
+	case cli.Direction_DIRECTION_MINIMIZE:
+		percent = bound / value * 100
+	default:
+		return 0, false
+	}
+	if math.IsInf(percent, 0) || math.IsNaN(percent) || percent <= 0 {
+		return 0, false
+	}
+	return percent, true
+}
