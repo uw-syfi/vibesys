@@ -61,6 +61,11 @@ class OrchestratorServiceStub(object):
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsResponse.FromString,
                 _registered_method=True)
+        self.WatchRunCost = channel.unary_stream(
+                '/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.FromString,
+                _registered_method=True)
 
 
 class OrchestratorServiceServicer(object):
@@ -103,6 +108,14 @@ class OrchestratorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WatchRunCost(self, request, context):
+        """What one run has cost: its whole cost view, then the whole view again each time it changes. The
+        host works it out, so the client sums nothing.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OrchestratorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -130,6 +143,11 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.ListItems,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsResponse.SerializeToString,
+            ),
+            'WatchRunCost': grpc.unary_stream_rpc_method_handler(
+                    servicer.WatchRunCost,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -269,6 +287,33 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/ListItems',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListItemsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WatchRunCost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost',
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.FromString,
             options,
             channel_credentials,
             insecure,
