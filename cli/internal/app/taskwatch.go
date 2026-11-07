@@ -94,7 +94,7 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 		return awayView(err), true
 	}
 	jobs, results, promotions, plans := snapshot.Jobs, snapshot.Results, snapshot.Promotions, snapshot.Plans
-	c := &core.TaskContent{Plans: plans, Bounds: snapshot.Bounds, Jobs: jobs, Results: results}
+	c := &core.TaskContent{Plans: plans, Workstreams: snapshot.Workstreams, Bounds: snapshot.Bounds, Jobs: jobs, Results: results}
 	for i, p := range promotions {
 		c.Promotions = append(c.Promotions, core.PromotionRecord{Seq: uint64(i + 1), Promotion: p})
 	}

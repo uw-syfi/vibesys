@@ -9,6 +9,7 @@ import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
 import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/workstream.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -50,6 +51,12 @@ message ResultFile {
 message PlanFile {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
   Plan plan = 2 [(buf.validate.field).required = true];
+}
+
+// WorkstreamFile is workstreams/<number>.json: one workstream, replaced whole on each change.
+message WorkstreamFile {
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  Workstream workstream = 2 [(buf.validate.field).required = true];
 }
 
 // PromotionFile is promotions/<n>.json: the nth promotion.

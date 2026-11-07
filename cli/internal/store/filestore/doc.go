@@ -23,7 +23,7 @@
 //	plans/<number>.json        one plan, replaced whole on each change
 //	promotions/<n>.json        the nth promotion
 //	bounds/<n>.json            the nth declared performance bound, written once
-//	workstreams/               where the records of workstreams go; made with the store
+//	workstreams/<number>.json  one workstream, replaced whole on each change
 //	frontier/<n>.json          the frontier after its nth change, whole; the last one is the frontier
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written

@@ -202,6 +202,50 @@ func testConcurrency(t *testing.T, newStore New) {
 		}
 	})
 
+	// Planners that name one line of work at the same moment, in whatever case and spacing, get one
+	// workstream, and planners that name different ones get one each, numbered without a gap.
+	t.Run("parallel starts of one title make one workstream, and of different titles one each", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		same := make([]core.Workstream, n)
+		created := make([]bool, n)
+		parallel(t, n, func(i int) {
+			started, err := e.s.StartWorkstream(e.ctx, core.NewWorkstream{
+				Title:  core.NormalizeWorkstreamTitle(spellings[i%len(spellings)]),
+				Origin: core.RecordOrigin{Run: core.RunID(fmt.Sprint("run-", i)), At: epoch},
+			})
+			if err != nil {
+				t.Errorf("StartWorkstream: %v", err)
+			}
+			same[i], created[i] = started.Workstream, started.Created
+		})
+		made := 0
+		for i, w := range same {
+			if created[i] {
+				made++
+			}
+			if w.Number != 1 || w.Title != same[0].Title {
+				t.Fatalf("start %d answered %+v, want workstream 1 for every one of them", i, w)
+			}
+		}
+		if got := e.workstreams(core.WorkstreamFilter{}); made != 1 || len(got) != 1 {
+			t.Fatalf("%d starts created a workstream, and the task has %d, want exactly 1", made, len(got))
+		}
+		numbers := make([]core.WorkstreamNumber, n)
+		parallel(t, n, func(i int) {
+			started, err := e.s.StartWorkstream(e.ctx, core.NewWorkstream{Title: fmt.Sprint("line ", i), Origin: core.RecordOrigin{At: epoch}})
+			if err != nil {
+				t.Errorf("StartWorkstream: %v", err)
+			}
+			numbers[i] = started.Workstream.Number
+		})
+		slices.Sort(numbers)
+		for i, number := range numbers {
+			if number != core.WorkstreamNumber(i+2) {
+				t.Fatalf("workstream numbers = %v, want 2 to %d", numbers, n+1)
+			}
+		}
+	})
+
 	t.Run("parallel log appends each land whole", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		job := e.submit(e.command(1, "ls")).Job
