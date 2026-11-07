@@ -1883,13 +1883,6 @@ button.vs-dotlegend-item:focus-visible {
   border-radius: var(--radius-lg);
   background: var(--panel);
 }
-/* The name of what a tile measures is one line, cut with an ellipsis (its whole text on hover), so
-   tiles of a row keep one height. */
-.vs-tile-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .vs-tile-figure {
   display: flex;
   align-items: baseline;
