@@ -1,73 +1,7 @@
 /**
- * How the run report writes numbers and times. Times are told in Seattle time, the zone of the
- * people who use the app; the one constant below is the only place that says so.
+ * How the run report writes numbers and spans. Its times come from the display clock
+ * (`../../display-time.ts`).
  */
-
-const DISPLAY_TIME_ZONE = 'America/Los_Angeles';
-
-const SECOND = 1000;
-const MINUTE = 60 * SECOND;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-const moment = new Intl.DateTimeFormat('en-US', {
-  timeZone: DISPLAY_TIME_ZONE,
-  weekday: 'short',
-  hour: 'numeric',
-  minute: '2-digit',
-});
-const clock = new Intl.DateTimeFormat('en-US', {
-  timeZone: DISPLAY_TIME_ZONE,
-  hour: 'numeric',
-  minute: '2-digit',
-});
-const fields = new Intl.DateTimeFormat('en-US', {
-  timeZone: DISPLAY_TIME_ZONE,
-  hourCycle: 'h23',
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-});
-
-/**
- * The runtimes' date formatters put a narrow no-break space (U+202F) or a plain space before AM or
- * PM, depending on the version of their ICU data. One no-break space (U+00A0) in its place gives the
- * same text in every runtime, and a label that never breaks between the time and AM.
- */
-const settled = (text: string): string => text.replace(/[\u202f ]/g, '\u00a0');
-
-/** A day and time of day: `Mon 2:40 AM`. */
-export const seattleMoment = (atMs: number): string => {
-  const [day = '', ...rest] = moment.format(atMs).split(' ');
-  return `${day} ${settled(rest.join(' '))}`;
-};
-
-/** A time of day: `2:40 AM`. */
-export const seattleClock = (atMs: number): string => settled(clock.format(atMs));
-
-/** How far Seattle's clock is ahead of UTC at an instant (negative: behind), by the zone's rules. */
-export function seattleOffsetMs(atMs: number): number {
-  const part = new Map(
-    fields.formatToParts(Math.floor(atMs / SECOND) * SECOND).map(each => [each.type, each.value]),
-  );
-  const at = (type: Intl.DateTimeFormatPartTypes): number => Number(part.get(type));
-  const shown = Date.UTC(
-    at('year'),
-    at('month') - 1,
-    at('day'),
-    at('hour'),
-    at('minute'),
-    at('second'),
-  );
-  return shown - Math.floor(atMs / SECOND) * SECOND;
-}
-
-/** An axis label for an instant: the time of day for a span under a day and a half, else with its day. */
-export const axisMoment = (atMs: number, spanMs: number): string =>
-  spanMs < 1.5 * DAY ? seattleClock(atMs) : seattleMoment(atMs);
 
 /**
  * How long ago (`3s ago`, `52m ago`, `5d 19h ago`) and how long (`2d 6h`, `5h 20m`, `18m`, `42s`):

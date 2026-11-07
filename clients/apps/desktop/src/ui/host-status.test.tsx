@@ -11,8 +11,8 @@ import {installDom, mount} from '../testing/dom/harness.js';
 import {CostScreen} from './cost/index.js';
 import {hostStatusWord} from './host-status-words.js';
 import {MachinesScreen} from './machines/index.js';
-import {COST_WORDS} from './orchestrator/cost-words.js';
 import {FleetScreen} from './orchestrator/fleet-screen.js';
+import {COST_WORDS} from './test-display-clock.js';
 
 installDom();
 

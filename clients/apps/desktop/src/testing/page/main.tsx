@@ -42,6 +42,7 @@ import {
 } from '../../core/index.js';
 import type {CostView} from '../../state/index.js';
 import {hostsOfAddress} from '../../ui/address.js';
+import {DisplayClockProvider} from '../../ui/display-clock.js';
 import type {ConnectedHost} from '../../ui/orchestrator/connected.js';
 import {
   KeyPressesFromWindow,
@@ -250,15 +251,17 @@ Effect.runFork(
     }
     page.render(
       <StrictMode>
-        <ConnectedShell
-          hosts={hosts}
-          navigation={navigation}
-          appearance={appearance}
-          viewerId={viewer}
-          dispatch={(effect, then) => {
-            Effect.runFork(Effect.map(effect, then));
-          }}
-        />
+        <DisplayClockProvider zone="America/Los_Angeles">
+          <ConnectedShell
+            hosts={hosts}
+            navigation={navigation}
+            appearance={appearance}
+            viewerId={viewer}
+            dispatch={(effect, then) => {
+              Effect.runFork(Effect.map(effect, then));
+            }}
+          />
+        </DisplayClockProvider>
       </StrictMode>,
     );
     yield* Effect.never;
