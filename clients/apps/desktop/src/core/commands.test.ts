@@ -1,10 +1,17 @@
 import {create, fromBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {
+  type Agent,
+  AgentRole,
   AgentStatus,
+  AgentStopStage,
   Compatibility,
+  Delivery,
   DispatchRequestSchema,
+  Refusal,
   SendMessageSchema,
+  StopAgentSchema,
+  TurnStatus,
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
@@ -230,5 +237,213 @@ describe('commands (P6: no mutation is sent twice by the app)', () => {
       });
       expect(dispatched(h)).toHaveLength(0);
     }),
+  );
+});
+
+const stopOne = (agentId: string): Intent => ({
+  case: 'stopAgent',
+  value: create(StopAgentSchema, {agentId}),
+});
+
+const IN_TRANSIT = new Set([Delivery.QUEUED, Delivery.STEERED, Delivery.NEW_TURN]);
+
+/** What the fake host holds of one agent: the agent, whether it is in a turn, its mail on the way. */
+const heldOf = (daemon: FakeDaemon, agentId: string) => {
+  const whole = daemon.snapshot();
+  return {
+    agent: whole.agents.find(agent => agent.id === agentId),
+    turning: whole.turns.some(
+      turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
+    ),
+    inTransit: whole.messages.filter(
+      message => message.toAgentId === agentId && IN_TRANSIT.has(message.delivery),
+    ).length,
+  };
+};
+
+const beingStopped = (agent: Agent): boolean =>
+  agent.stopStage === AgentStopStage.INTERRUPTING || agent.stopStage === AgentStopStage.CLOSING;
+
+/**
+ * The host's answer to a stop of `agent` (`stopSubagent` in the orchestrator's core): no such
+ * agent, the lead, an agent that is over or already closing, else none.
+ */
+const hostRefusal = (agent: Agent | undefined): Refusal =>
+  agent === undefined
+    ? Refusal.AGENT_NOT_FOUND
+    : agent.role === AgentRole.LEAD
+      ? Refusal.AGENT_IS_LEAD
+      : FINAL.has(agent.status) || agent.stopStage === AgentStopStage.CLOSING
+        ? Refusal.AGENT_NOT_LIVE
+        : Refusal.UNSPECIFIED;
+
+describe('stopping one agent (StopAgent, as the host decides it)', () => {
+  // Two subagents still in a turn and two that handed off and wait between turns.
+  const run = generateScenario({seed: 11, subagents: 4, live: true});
+  const host = () => new FakeDaemon(run);
+
+  const press = (h: HostHarness, agentId: string) =>
+    Effect.gen(function* () {
+      const id = yield* h.session.commands.submit(stopOne(agentId));
+      yield* h.elapse(1);
+      return yield* h.read(h.session.commands.progress(id));
+    });
+
+  const plans = Schema.Struct({
+    seed: between(1, 500),
+    subagents: between(1, 6),
+    live: Schema.Boolean,
+    tree: Schema.Boolean,
+    // Each step stops the picked agent, or has the host hear that the picked agent's stop closed
+    // its session; the last pick past the agents is an id the host never had.
+    steps: Schema.Array(Schema.Struct({finish: Schema.Boolean, pick: between(0, 63)})).check(
+      Schema.isMaxLength(10),
+    ),
+  });
+
+  /** The host hears that an agent's stop closed its session: it is over, with nothing running or owed. */
+  const finishChecked = (daemon: FakeDaemon, agentId: string): void => {
+    const {agent} = heldOf(daemon, agentId);
+    if (agent === undefined || FINAL.has(agent.status) || !beingStopped(agent)) return;
+    daemon.finishStop(agentId);
+    expect(heldOf(daemon, agentId)).toMatchObject({
+      agent: {status: AgentStatus.ENDED, stopStage: AgentStopStage.NONE},
+      turning: false,
+      inTransit: 0,
+    });
+  };
+
+  /**
+   * A press of Stop is answered as the host answers it. A refused one changes nothing; an accepted
+   * one already interrupting a turn changes nothing either, and otherwise interrupts the agent's
+   * turn or, between turns, closes its session.
+   */
+  const pressChecked = (h: HostHarness, daemon: FakeDaemon, agentId: string) =>
+    Effect.gen(function* () {
+      const before = heldOf(daemon, agentId);
+      const progress = yield* press(h, agentId);
+      const after = heldOf(daemon, agentId);
+      const refusal = hostRefusal(before.agent);
+      if (refusal !== Refusal.UNSPECIFIED) {
+        expect(progress).toMatchObject({_tag: 'Refused', receipt: {refusal}});
+        expect(after.agent).toEqual(before.agent);
+        return;
+      }
+      expect(progress).toMatchObject({_tag: 'Accepted', receipt: {agentId}});
+      expect(after.agent?.status).toBe(before.agent?.status);
+      expect(after.agent?.stopStage).toBe(
+        before.agent?.stopStage === AgentStopStage.INTERRUPTING || before.turning
+          ? AgentStopStage.INTERRUPTING
+          : AgentStopStage.CLOSING,
+      );
+    });
+
+  it.effect.prop(
+    'every stop is answered as the host answers it, and an accepted one starts stopping the agent',
+    {plan: plans},
+    ({plan}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = new FakeDaemon(
+            generateScenario({
+              seed: plan.seed,
+              subagents: plan.subagents,
+              live: plan.live,
+              tree: plan.tree,
+            }),
+          );
+          const h = yield* hostHarness(daemon);
+          const ids = [...daemon.snapshot().agents.map(agent => agent.id), 'agent-never-held'];
+          for (const step of plan.steps) {
+            const agentId = ids[step.pick % ids.length] ?? '';
+            if (step.finish) finishChecked(daemon, agentId);
+            else yield* pressChecked(h, daemon, agentId);
+          }
+        }).pipe(Random.withSeed(SEED)),
+      ),
+    {arbitrary: {runs: 25}},
+  );
+
+  it.effect(
+    'a stop interrupts a working agent, and once its session closes it is over and its mail is rejected',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = host();
+          const h = yield* hostHarness(daemon);
+          const working = daemon
+            .snapshot()
+            .agents.find(
+              agent => agent.role !== AgentRole.LEAD && heldOf(daemon, agent.id).turning,
+            );
+          if (working === undefined) throw new Error('the scenario has no subagent in a turn');
+          expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
+          expect(heldOf(daemon, working.id).agent?.stopStage).toBe(AgentStopStage.INTERRUPTING);
+          // A second press while the turn is being interrupted is taken and changes nothing.
+          const sequence = daemon.sequence;
+          expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
+          expect(heldOf(daemon, working.id).agent?.stopStage).toBe(AgentStopStage.INTERRUPTING);
+          expect(daemon.sequence).toBe(sequence + 1n);
+          daemon.finishStop(working.id);
+          expect(heldOf(daemon, working.id)).toMatchObject({
+            agent: {status: AgentStatus.ENDED, stopStage: AgentStopStage.NONE},
+            turning: false,
+            inTransit: 0,
+          });
+          expect(yield* press(h, working.id)).toMatchObject({
+            _tag: 'Refused',
+            receipt: {refusal: Refusal.AGENT_NOT_LIVE},
+          });
+        }),
+      ),
+  );
+
+  it.effect(
+    'a stop closes the session of an agent between turns; a stop while it closes is refused',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = host();
+          const h = yield* hostHarness(daemon);
+          const resting = daemon
+            .snapshot()
+            .agents.find(
+              agent =>
+                agent.role !== AgentRole.LEAD &&
+                !FINAL.has(agent.status) &&
+                !heldOf(daemon, agent.id).turning,
+            );
+          if (resting === undefined) throw new Error('the scenario has no subagent between turns');
+          expect(yield* press(h, resting.id)).toMatchObject({_tag: 'Accepted'});
+          expect(heldOf(daemon, resting.id).agent).toMatchObject({
+            status: resting.status,
+            stopStage: AgentStopStage.CLOSING,
+          });
+          expect(yield* press(h, resting.id)).toMatchObject({
+            _tag: 'Refused',
+            receipt: {refusal: Refusal.AGENT_NOT_LIVE},
+          });
+        }),
+      ),
+  );
+
+  it.effect('the lead stops only with its run, and an agent the host never had is not found', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const daemon = host();
+        const h = yield* hostHarness(daemon);
+        const lead = daemon.snapshot().agents.find(agent => agent.role === AgentRole.LEAD);
+        if (lead === undefined) throw new Error('the scenario has no lead');
+        expect(yield* press(h, lead.id)).toMatchObject({
+          _tag: 'Refused',
+          receipt: {refusal: Refusal.AGENT_IS_LEAD},
+        });
+        expect(heldOf(daemon, lead.id).agent).toEqual(lead);
+        expect(yield* press(h, 'agent-never-held')).toMatchObject({
+          _tag: 'Refused',
+          receipt: {refusal: Refusal.AGENT_NOT_FOUND},
+        });
+      }),
+    ),
   );
 });

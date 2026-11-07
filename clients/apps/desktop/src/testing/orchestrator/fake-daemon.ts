@@ -6,7 +6,10 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
+  AgentRole,
+  AgentSchema,
   AgentStatus,
+  AgentStopStage,
   CatchUpRequestSchema,
   type CheckIn,
   CheckInSchema,
@@ -39,6 +42,8 @@ import {
   RunsSnapshotSchema,
   type SearchState,
   SnapshotDetail,
+  TurnSchema,
+  TurnStatus,
   ViewerSchema,
   type WindowFacts,
 } from '@vibesys/orchestrator-proto';
@@ -84,6 +89,9 @@ function elided(item: Item): {readonly item: Item; readonly bytes: number | null
 }
 
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
+
+/** Where a message stands while it is still on its way: neither read nor rejected. */
+const IN_TRANSIT = new Set([Delivery.QUEUED, Delivery.STEERED, Delivery.NEW_TURN]);
 
 /** Every kind of command, so a command is read through `oneofIs` for the one kind it is. */
 const COMMAND_KINDS = {
@@ -314,9 +322,11 @@ export class FakeDaemon {
     const {body} = command;
     const receipt = oneofIs(body, 'sendMessage', COMMAND_KINDS)
       ? this.#sendMessage(command.id, body.value.agentId, body.value.text, at)
-      : oneofIs(body, 'requestCatchUp', COMMAND_KINDS)
-        ? this.#catchUp(command.id, body.value.runId, at)
-        : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
+      : oneofIs(body, 'stopAgent', COMMAND_KINDS)
+        ? this.#stopAgent(command.id, body.value.agentId, at)
+        : oneofIs(body, 'requestCatchUp', COMMAND_KINDS)
+          ? this.#catchUp(command.id, body.value.runId, at)
+          : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
     this.#receipts.set(command.id, receipt);
     return receipt;
   }
@@ -482,6 +492,91 @@ export class FakeDaemon {
       case: 'message',
       value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
     });
+  }
+
+  /**
+   * The session of an agent being stopped closes, as the host hears once the stop reached it: a
+   * turn still running ends interrupted, the agent ends and its stop stage is cleared, and what
+   * was still on its way to it is rejected. Only a stop ends a session here, so an agent that is
+   * not being stopped is a mistake in the test.
+   */
+  finishStop(agentId: string): void {
+    const state = this.#state(this.#visible);
+    const agent = state.agents[agentId];
+    if (
+      agent === undefined ||
+      FINAL.has(agent.status) ||
+      (agent.stopStage !== AgentStopStage.INTERRUPTING &&
+        agent.stopStage !== AgentStopStage.CLOSING)
+    )
+      throw new Error(`the fake host is not stopping an agent ${agentId}`);
+    const at = this.#now();
+    const endedAt = timestampFromMs(at);
+    for (const turn of Object.values(state.turns)) {
+      if (turn.agentId !== agentId || turn.status !== TurnStatus.RUNNING) continue;
+      this.#append(at, {
+        case: 'turn',
+        value: create(TurnSchema, {...turn, status: TurnStatus.INTERRUPTED, endedAt}),
+      });
+    }
+    this.#append(at, {
+      case: 'agent',
+      value: create(AgentSchema, {
+        ...agent,
+        status: AgentStatus.ENDED,
+        stopStage: AgentStopStage.NONE,
+        endedAt,
+      }),
+    });
+    const run = state.runs[agent.runId];
+    const rejection =
+      run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
+        ? Rejection.AGENT_GONE
+        : Rejection.RUN_STOPPING;
+    for (const message of Object.values(state.messages)) {
+      if (message.toAgentId !== agentId || !IN_TRANSIT.has(message.delivery)) continue;
+      this.#append(at, {
+        case: 'message',
+        value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
+      });
+    }
+  }
+
+  /**
+   * A stop of one agent as the host decides it (`stopSubagent`, then `stopAgent`): the lead stops
+   * only with its run, an agent that is over or whose session is already closing is not live, and
+   * a stop already interrupting a turn is accepted and changes nothing. Otherwise an agent in a
+   * turn is interrupted and an agent between turns has its session closed. The run's status is
+   * not asked, as the host does not ask it.
+   */
+  #stopAgent(commandId: string, agentId: string, atMs: number): Receipt {
+    const state = this.#state(this.#visible);
+    const agent = state.agents[agentId];
+    if (agent === undefined) return this.#refuse(commandId, Refusal.AGENT_NOT_FOUND, agentId, atMs);
+    if (agent.role === AgentRole.LEAD)
+      return this.#refuse(commandId, Refusal.AGENT_IS_LEAD, agentId, atMs);
+    if (FINAL.has(agent.status) || agent.stopStage === AgentStopStage.CLOSING)
+      return this.#refuse(commandId, Refusal.AGENT_NOT_LIVE, agentId, atMs);
+    if (agent.stopStage !== AgentStopStage.INTERRUPTING) {
+      const turning = Object.values(state.turns).some(
+        turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
+      );
+      this.#append(atMs, {
+        case: 'agent',
+        value: create(AgentSchema, {
+          ...agent,
+          stopStage: turning ? AgentStopStage.INTERRUPTING : AgentStopStage.CLOSING,
+        }),
+      });
+    }
+    const receipt = create(ReceiptSchema, {
+      commandId,
+      runId: agent.runId,
+      agentId: agent.id,
+      sequence: BigInt(this.#log.length + 1),
+    });
+    this.#append(atMs, {case: 'receipt', value: receipt});
+    return receipt;
   }
 
   #refuse(commandId: string, refusal: Refusal, agentId: string, atMs: number): Receipt {
