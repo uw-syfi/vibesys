@@ -70,7 +70,7 @@ func file(t *testing.T, mem *fsys.MemFS, name string) []byte {
 // The files of a store, by the part of the script that makes each.
 var recordFiles = []string{
 	"state/jobs/j1.json", "state/jobs/j3.json", "state/results/j1.json", "state/plans/1.json", "state/promotions/1.json", "state/promotions/2.json",
-	"state/frontier/1.json", "state/frontier/2.json",
+	"state/frontier/1.json", "state/frontier/2.json", "state/bounds/1.json", "state/bounds/2.json",
 }
 
 const eventFileName = "state/runs/run-a/1.json"
@@ -170,6 +170,11 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 		}, []string{"plan 2 is missing"}},
 		{"a plan under another plan's number", func(m *fsys.MemFS) { m.Put("state/plans/2.json", file(t, m, "state/plans/1.json")) }, []string{"state/plans/2.json"}},
 		{"a missing promotion", func(m *fsys.MemFS) { mustRemove(t, m, "state/promotions/1.json") }, []string{"state/promotions/1.json"}},
+		{"a missing bound", func(m *fsys.MemFS) { mustRemove(t, m, "state/bounds/1.json") }, []string{"state/bounds/1.json"}},
+		{"a bound under another bound's place", func(m *fsys.MemFS) { m.Put("state/bounds/2.json", file(t, m, "state/bounds/1.json")) }, []string{"state/bounds/2.json"}},
+		{"a bound that is not well formed", func(m *fsys.MemFS) {
+			m.Put("state/bounds/2.json", regexp.MustCompile(`"value":\s*[0-9.]+`).ReplaceAll(file(t, m, "state/bounds/2.json"), []byte(`"value": 0`)))
+		}, []string{"state/bounds/2.json", "bound.value"}},
 		{"a missing event", func(m *fsys.MemFS) { mustRemove(t, m, "state/runs/run-a/1.json") }, []string{"state/runs/run-a/1.json"}},
 		{"a missing first log chunk", func(m *fsys.MemFS) { mustRemove(t, m, "state/logs/j1/00000000000000000000") }, []string{"state/logs/j1/00000000000000000006"}},
 		{"a job that names a result that is not there", func(m *fsys.MemFS) { mustRemove(t, m, "state/results/j1.json") }, []string{"j1"}},
@@ -389,6 +394,36 @@ func TestEncodingIsPinned(t *testing.T) {
 	}
 }
 
+// The bound file is protojson of BoundFile with the proto field names, and says who declared the
+// bound and when.
+func TestTheBoundFileIsPinned(t *testing.T) {
+	mem := fsys.NewMemFS()
+	s := openOn(t, mem)
+	if err := bound("a bound", "ops", 15000, 12).run(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	const want = `{
+  "format": 5,
+  "bound": {
+    "seq": "1",
+    "origin": {
+      "run_id": "run-a",
+      "agent": "lead",
+      "at": "2026-11-01T00:00:12Z"
+    },
+    "objective": "ops",
+    "direction": "DIRECTION_MAXIMIZE",
+    "value": 15000,
+    "unit": "ops/s",
+    "note": "derived from the memory bandwidth"
+  }
+}
+`
+	if got := unspaced(file(t, mem, "state/bounds/1.json")); got != unspaced([]byte(want)) {
+		t.Errorf("bound file =\n%s\nwant\n%s", got, unspaced([]byte(want)))
+	}
+}
+
 // A store of the hand-written encoding that came before protojson is refused, naming the file and
 // saying what to do, and nothing in it is read: there is no migration, because no release wrote one.
 func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
@@ -412,7 +447,9 @@ func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
 // A store that ran to the end holds exactly these files, and no temporary one.
 func TestLayoutOfAFinishedScript(t *testing.T) {
 	want := []string{
-		"state/.owner", "state/.owner.lock", "state/format",
+		"state/.owner", "state/.owner.lock",
+		"state/bounds/1.json", "state/bounds/2.json",
+		"state/format",
 		"state/frontier/1.json", "state/frontier/2.json",
 		"state/jobs/j1.json", "state/jobs/j2.json", "state/jobs/j3.json",
 		"state/logs/j1/00000000000000000000", "state/logs/j1/00000000000000000006", "state/logs/j2/00000000000000000000",

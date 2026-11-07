@@ -40,6 +40,7 @@ func Run(t *testing.T, newStore New) {
 		{"results", testResults},
 		{"frontier", testFrontier},
 		{"plans", testPlans},
+		{"bounds", testBounds},
 		{"events", testEvents},
 		{"logs", testLogs},
 		{"values", testValues},
@@ -271,6 +272,7 @@ type state struct {
 	Promotions []core.Promotion
 	Frontier   core.Frontier
 	Plans      []core.Plan
+	Bounds     []core.Bound
 	Events     map[core.RunID][]core.Event
 	Logs       map[core.JobID][]byte
 }
@@ -296,6 +298,9 @@ func snapshot(t *testing.T, s store.Store, runs ...core.RunID) state {
 	}
 	if st.Plans, err = s.Plans(ctx, core.PlanFilter{}); err != nil {
 		t.Fatalf("Plans: %v", err)
+	}
+	if st.Bounds, err = s.Bounds(ctx); err != nil {
+		t.Fatalf("Bounds: %v", err)
 	}
 	st.Events = map[core.RunID][]core.Event{}
 	for _, run := range runs {

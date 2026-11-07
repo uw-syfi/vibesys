@@ -1,7 +1,9 @@
 package filestore
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"slices"
 	"sort"
@@ -14,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // Recover reads the durable state. It is what Open runs and what the Engine runs after a Commit
@@ -53,6 +56,9 @@ func (b *backend) Recover() (ledger.Snapshot, error) {
 		return snap, err
 	}
 	if snap.Promotions, err = b.loadPromotions(); err != nil {
+		return snap, err
+	}
+	if snap.Bounds, err = b.loadBounds(); err != nil {
 		return snap, err
 	}
 	if snap.Frontier, err = b.loadFrontier(); err != nil {
@@ -234,6 +240,38 @@ func (b *backend) loadPromotions() ([]core.Promotion, error) {
 		promotions = append(promotions, promotion)
 	}
 	return promotions, nil
+}
+
+// loadBounds reads the log of declared bounds, numbered from 1 with no gap. A store with no bounds
+// directory is one that never had a bound declared.
+func (b *backend) loadBounds() ([]core.Bound, error) {
+	files, err := b.recordFiles(path.Join(b.root, boundsDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	bounds := make([]core.Bound, 0, len(files))
+	for n := uint64(1); n <= uint64(len(files)); n++ {
+		name, ok := files[n]
+		if !ok {
+			return nil, corrupt(boundPath(b.root, n), "it is missing, and later bounds are there")
+		}
+		var file cliv1.BoundFile
+		if err := b.readRecord(name, &file); err != nil {
+			return nil, err
+		}
+		bound, err := wire.ToBound("bound", file.GetBound())
+		if err != nil {
+			return nil, corrupt(name, "%v", err)
+		}
+		if bound.Seq != n {
+			return nil, corrupt(name, "it holds bound %d", bound.Seq)
+		}
+		bounds = append(bounds, bound)
+	}
+	return bounds, nil
 }
 
 // loadFrontier reads every revision of the frontier, numbered from 1 with no gap, and returns the
