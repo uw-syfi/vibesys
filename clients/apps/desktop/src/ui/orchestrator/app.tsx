@@ -1,5 +1,5 @@
-import type {Agent} from '@vibesys/orchestrator-proto';
-import {Page, Stack, Text} from '@vibesys/ui';
+import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
+import {type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus} from '../../core/index.js';
 import {
@@ -13,28 +13,23 @@ import {
   type HostFreshness,
   type HostModel,
   type NavigationAction,
+  type OrchestratorState,
   type Route,
-  type RunView,
+  runReport,
   staleForMs,
 } from '../../state/index.js';
-import {AgentPanel} from './agent-panel.js';
+import {AgentPage} from '../agents/agent-page.js';
+import {AgentsScreen} from '../agents/agents-screen.js';
+import {CostScreen} from '../cost/index.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
+import {COST_WORDS} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
-import {RunScreen} from './run-screen.js';
+import {ReportScreen} from './report/report-screen.js';
 import type {StartRunRequest} from './start-draft.js';
 
 const TITLE = 'Runs';
-const RUN_TITLES = {
-  report: 'Report',
-  timeline: 'Search and activity',
-  agents: 'Agents',
-  cost: 'Cost',
-  handoffs: 'Handoffs and reports',
-  ideas: 'Ideas',
-  'catch-up': 'Catch me up',
-} satisfies Record<RunView, string>;
 
 /** Everything the screens know about one host at this moment. */
 export interface HostSnapshot {
@@ -111,22 +106,26 @@ function runsNote(
   };
 }
 
-/** The panel of the agent that is open, bound to the commands of its host. */
+/** The page of the agent that is open, bound to the commands of its host. */
 function OpenAgent(props: {
-  readonly state: HostSnapshot['model']['data'];
+  readonly state: OrchestratorState;
   readonly agent: Agent;
   readonly host: HostSnapshot;
   readonly nowMs: number;
   readonly commands: AppCommands;
+  readonly trail: readonly Crumb[];
+  readonly notice: JSX.Element | null;
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {agent, host, commands, go} = props;
   return (
-    <AgentPanel
+    <AgentPage
       nowMs={props.nowMs}
       state={props.state}
       agent={agent}
       host={host.label}
+      trail={props.trail}
+      notice={props.notice}
       history={{
         ...host.history,
         loadEarlier: before => commands.loadEarlier(host.key, agent.id, before),
@@ -136,7 +135,6 @@ function OpenAgent(props: {
       sendProgress={commands.send[agent.id]}
       send={text => commands.sendMessage(host.key, agent.id, text)}
       retrySend={() => commands.retrySend(agent.id)}
-      close={() => go({type: 'close-agent'})}
     />
   );
 }
@@ -157,18 +155,6 @@ function agentNote(
     staleForMs: staleForMs(host.freshness, props.nowMs),
     tryAgain: () => props.retryHost(host.key),
   };
-}
-
-/** The title of a run's page: its name alone on the report, else the name and what is open. */
-function runTitle(
-  state: HostSnapshot['model']['data'],
-  route: Extract<Route, {screen: 'run'}>,
-  names: ReturnType<typeof agentNames>,
-): string {
-  const task = state.runs[route.runId]?.task ?? 'Run';
-  const agent = route.agentId === null ? undefined : state.agents[route.agentId];
-  if (agent !== undefined) return `${task}: ${nameOf(names, agent)}`;
-  return route.view === 'report' ? task : `${task}: ${RUN_TITLES[route.view]}`;
 }
 
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
@@ -211,63 +197,201 @@ export function OrchestratorApp(props: {
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
     return (
-      <Page key="run" state="loading" header={<Text variant="title">{TITLE}</Text>}>
+      <Page key="run" width="wide" state="loading" title={TITLE}>
         <Text tone="muted">Connecting.</Text>
       </Page>
     );
   }
+  return (
+    <RunDestination
+      route={route}
+      host={host}
+      nowMs={props.nowMs}
+      commands={commands}
+      retryHost={props.retryHost}
+      retryCost={props.retryCost}
+      go={go}
+    />
+  );
+}
+
+/** The agents of a run, or, with one open, that agent's page one step under them. */
+function AgentsDestination(props: {
+  readonly state: OrchestratorState;
+  readonly runId: string;
+  readonly host: HostSnapshot;
+  readonly nowMs: number;
+  readonly agent: Agent | undefined;
+  /** The trail down to the run. */
+  readonly trail: readonly Crumb[];
+  readonly notice: JSX.Element | null;
+  readonly commands: AppCommands;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {state, runId, host, agent, go} = props;
+  const trail: readonly Crumb[] = [
+    ...props.trail,
+    {
+      id: 'agents',
+      label: 'Agents',
+      ...(agent === undefined ? {} : {press: () => go({type: 'close-agent'})}),
+    },
+  ];
+  return agent === undefined ? (
+    <AgentsScreen
+      state={state}
+      runId={runId}
+      host={host.label}
+      nowMs={props.nowMs}
+      trail={trail}
+      notice={props.notice}
+      open={agentId => go({type: 'pick-agent', agentId})}
+    />
+  ) : (
+    <OpenAgent
+      state={state}
+      agent={agent}
+      host={host}
+      nowMs={props.nowMs}
+      commands={props.commands}
+      trail={trail}
+      notice={props.notice}
+      go={go}
+    />
+  );
+}
+
+/**
+ * The page of a run that the route names, whichever it is: the report, the agents, one agent, the
+ * cost. Every one is a `Page` of the same frame, with the trail from the Runs list down to it, and
+ * none carries another screen's pieces beside it.
+ */
+function RunDestination(props: {
+  readonly route: Extract<Route, {screen: 'run'}>;
+  readonly host: HostSnapshot;
+  readonly nowMs: number;
+  readonly commands: AppCommands;
+  readonly retryHost: (host: string) => void;
+  readonly retryCost: (host: string, runId: string) => void;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {route, host, commands, go, nowMs} = props;
   const state = host.model.data;
   const {runId} = route;
+  const run = state.runs[runId];
+  const goRuns = (): void => go({type: 'close-run'});
+  if (run === undefined) return <MissingRun goRuns={goRuns} />;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
-  const names = agentNames(state, runId);
-  const notes = [
-    runsNote(host, props.retryHost, props.nowMs),
-    ...(agent === undefined ? [] : [agentNote(host, agent, names, props)]),
+  const notice = (
+    <ConnectionBanner
+      notes={[
+        runsNote(host, props.retryHost, nowMs),
+        ...(agent === undefined
+          ? []
+          : [
+              agentNote(host, agent, agentNames(state, runId), {nowMs, retryHost: props.retryHost}),
+            ]),
+      ]}
+    />
+  );
+  const toRun: readonly Crumb[] = [
+    {id: 'runs', label: TITLE, press: goRuns},
+    {id: runId, label: run.task, press: () => go({type: 'show', view: 'report'})},
   ];
+  if (route.view === 'cost') {
+    const feed = host.costFeeds[runId] ?? OPENING_COST;
+    return (
+      <CostScreen
+        view={state.costs[runId]}
+        freshness={feed.freshness}
+        status={feed.status}
+        runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
+        words={COST_WORDS}
+        trail={[...toRun, {id: 'cost', label: 'Cost'}]}
+        notice={notice}
+        retry={() => props.retryCost(host.key, runId)}
+      />
+    );
+  }
+  if (route.view === 'agents') {
+    return (
+      <AgentsDestination
+        state={state}
+        runId={runId}
+        host={host}
+        nowMs={nowMs}
+        agent={agent}
+        trail={toRun}
+        notice={notice}
+        commands={commands}
+        go={go}
+      />
+    );
+  }
+  return (
+    <ReportDestination
+      host={host}
+      runId={runId}
+      nowMs={nowMs}
+      notice={notice}
+      commands={commands}
+      retryCost={props.retryCost}
+      go={go}
+    />
+  );
+}
+
+/** What a run's page says when the host no longer has the run. */
+function MissingRun(props: {readonly goRuns: () => void}): JSX.Element {
   return (
     <Page
       key="run"
-      width="fill"
+      width="wide"
       state="ready"
-      header={<Text variant="title">{runTitle(state, route, names)}</Text>}
+      trail={[{id: 'runs', label: TITLE, press: props.goRuns}]}
+      title="Run"
     >
-      <Stack gap="space-4">
-        <ConnectionBanner notes={notes} />
-        <RunScreen
-          state={state}
-          host={host.label}
-          runId={runId}
-          nowMs={props.nowMs}
-          freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
-          staleForMs={staleForMs(host.freshness, props.nowMs)}
-          view={route.view}
-          costFeed={host.costFeeds[runId] ?? OPENING_COST}
-          retryCost={() => props.retryCost(host.key, runId)}
-          agentId={route.agentId}
-          stopProgress={commands.stop[runId]}
-          stop={() => commands.stopRun(host.key, runId)}
-          retryStop={() => commands.retryStop(runId)}
-          catchUp={() => {
-            commands.catchUp(host.key, runId);
-            go({type: 'show', view: 'catch-up'});
-          }}
-          goRuns={() => go({type: 'close-run'})}
-          show={view => go({type: 'show', view})}
-          pick={agentId => go({type: 'pick-agent', agentId})}
-          agentPanel={
-            agent === undefined ? null : (
-              <OpenAgent
-                state={state}
-                agent={agent}
-                host={host}
-                nowMs={props.nowMs}
-                commands={commands}
-                go={go}
-              />
-            )
-          }
-        />
-      </Stack>
+      <Text tone="muted">This run is not on this host any more.</Text>
     </Page>
+  );
+}
+
+/** The report of a run, bound to the commands of its host. */
+function ReportDestination(props: {
+  readonly host: HostSnapshot;
+  readonly runId: string;
+  readonly nowMs: number;
+  readonly notice: JSX.Element | null;
+  readonly commands: AppCommands;
+  readonly retryCost: (host: string, runId: string) => void;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {host, runId, nowMs, commands, go} = props;
+  const state = host.model.data;
+  const report = runReport(state, runId, nowMs);
+  if (report === undefined) return <MissingRun goRuns={() => go({type: 'close-run'})} />;
+  return (
+    <ReportScreen
+      report={report}
+      host={host.label}
+      nowMs={nowMs}
+      freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
+      staleForMs={staleForMs(host.freshness, nowMs)}
+      cost={state.costs[runId]}
+      costFeed={host.costFeeds[runId] ?? OPENING_COST}
+      retryCost={() => props.retryCost(host.key, runId)}
+      stopProgress={commands.stop[runId]}
+      stop={() => commands.stopRun(host.key, runId)}
+      retryStop={() => commands.retryStop(runId)}
+      catchUp={() => {
+        commands.catchUp(host.key, runId);
+        go({type: 'show', view: 'catch-up'});
+      }}
+      goRuns={() => go({type: 'close-run'})}
+      openAgents={() => go({type: 'show', view: 'agents'})}
+      openCost={() => go({type: 'show', view: 'cost'})}
+      names={agentNames(state, runId)}
+      notice={props.notice}
+    />
   );
 }

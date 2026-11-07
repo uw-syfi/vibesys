@@ -2,7 +2,7 @@ import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
 import {APPEARANCE_MODES, themesOf} from '@vibesys/ui/tokens';
-import {act, type JSX, useReducer} from 'react';
+import {act, type JSX, useEffect, useReducer} from 'react';
 import {
   applyChange,
   type CommandProgress,
@@ -20,6 +20,7 @@ import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
+import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
 
 installDom();
@@ -62,49 +63,68 @@ const idle: CommandProgress | undefined = undefined;
 /** Every press of Catch me up the window sent, as `host/run`. */
 const caughtUp: string[] = [];
 
+/** What the run is called on the list and in every trail. */
+const TASK = host.model.data.runs[scenario.runId]?.task ?? '';
+
 /** The window as the entry composes it, over the navigation fold, recording every intent sent. */
 function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
   const [navigation, move] = useReducer(navigationReducer, initialNavigation);
-  const go = (action: NavigationAction): void => {
-    props.log.push(action);
-    move(action);
-  };
+  // The window's keyboard: Escape is one step back, as the entry's key press stream makes it.
+  useEffect(() => {
+    const listen = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') move({type: 'back'});
+    };
+    document.addEventListener('keydown', listen);
+    return () => document.removeEventListener('keydown', listen);
+  }, []);
   return (
-    <AppShell destination={navigation.destination} go={go}>
-      {navigation.destination === 'runs' ? (
-        <OrchestratorApp
-          hosts={[host, quiet]}
-          nowMs={scenario.endMs}
-          commands={{
-            start: idle,
-            stop: {},
-            send: {},
-            startRun: () => undefined,
-            retryStart: () => undefined,
-            stopRun: () => undefined,
-            retryStop: () => undefined,
-            sendMessage: () => undefined,
-            retrySend: () => undefined,
-            catchUp: (host, runId) => caughtUp.push(`${host}/${runId}`),
-            loadEarlier: () => undefined,
-            expand: () => undefined,
-          }}
-          retryHost={() => undefined}
-          retryCost={() => undefined}
-          route={navigation.runs}
-          fleet={navigation.fleet}
-          go={go}
-        />
-      ) : (
-        <SettingsScreen
-          tab={navigation.settingsTab}
-          pick={tab => go({type: 'pick-settings-tab', tab})}
-          appearance={initialAppearance('light')}
-          choose={() => undefined}
-          resources={resources}
-        />
-      )}
-    </AppShell>
+    <FocusMemory place={placeOf(navigation)}>
+      {note => {
+        const go = (action: NavigationAction): void => {
+          props.log.push(action);
+          // As the shell does: what opens a page keeps its opener, so going back finds it again.
+          note(action);
+          move(action);
+        };
+        return (
+          <AppShell destination={navigation.destination} go={go}>
+            {navigation.destination === 'runs' ? (
+              <OrchestratorApp
+                hosts={[host, quiet]}
+                nowMs={scenario.endMs}
+                commands={{
+                  start: idle,
+                  stop: {},
+                  send: {},
+                  startRun: () => undefined,
+                  retryStart: () => undefined,
+                  stopRun: () => undefined,
+                  retryStop: () => undefined,
+                  sendMessage: () => undefined,
+                  retrySend: () => undefined,
+                  catchUp: (host, runId) => caughtUp.push(`${host}/${runId}`),
+                  loadEarlier: () => undefined,
+                  expand: () => undefined,
+                }}
+                retryHost={() => undefined}
+                retryCost={() => undefined}
+                route={navigation.runs}
+                fleet={navigation.fleet}
+                go={go}
+              />
+            ) : (
+              <SettingsScreen
+                tab={navigation.settingsTab}
+                pick={tab => go({type: 'pick-settings-tab', tab})}
+                appearance={initialAppearance('light')}
+                choose={() => undefined}
+                resources={resources}
+              />
+            )}
+          </AppShell>
+        );
+      }}
+    </FocusMemory>
   );
 }
 
@@ -178,17 +198,68 @@ describe('the window shell', () => {
     screen.unmount();
   });
 
+  it('lands the focus on the heading of a screen that opens, and on its opener when Escape goes back', () => {
+    const {screen} = open();
+    const pressEscape = (): void => {
+      const View = document.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent};
+      act(() => {
+        document.dispatchEvent(new View.KeyboardEvent('keydown', {key: 'Escape'}));
+      });
+    };
+    const focused = (): string =>
+      `${document.activeElement?.tagName}:${document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent}`;
+    // The list: a run opens on its report, with the focus on its heading.
+    const row = firstRun(screen);
+    act(() => row.focus());
+    const rowName = row.textContent;
+    screen.press(row);
+    expect(focused()).toBe(`H1:${TASK}`);
+    // The report's links open the cost and the agents, and Escape returns to each link.
+    for (const link of ['Open cost', 'Open agents']) {
+      act(() => screen.control(link).focus());
+      screen.press(screen.control(link));
+      expect(document.activeElement?.tagName).toBe('H1');
+      expect(document.activeElement?.textContent).toBe(link === 'Open cost' ? 'Cost' : 'Agents');
+      pressEscape();
+      expect(focused()).toBe(`BUTTON:${link}`);
+    }
+    // An agent opens from its row on the agents page; Escape returns to that row, then to the link.
+    act(() => screen.control('Open agents').focus());
+    screen.press(screen.control('Open agents'));
+    const [agent] = screen.container.querySelectorAll<HTMLElement>(
+      '[role="listbox"] [role="option"]',
+    );
+    if (agent === undefined) throw new Error('the run lists no agent');
+    const agentName = agent.getAttribute('aria-label');
+    act(() => agent.focus());
+    screen.press(agent);
+    expect(document.activeElement?.tagName).toBe('H1');
+    pressEscape();
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(agentName);
+    pressEscape();
+    expect(focused()).toBe('BUTTON:Open agents');
+    // Back to the list: the focus is on the row the run was opened from.
+    pressEscape();
+    expect(document.activeElement?.getAttribute('role')).toBe('option');
+    expect(document.activeElement?.textContent).toBe(rowName);
+    screen.unmount();
+  });
+
   it('every navigation intent but the keyboard back is sent by a control the screens show', () => {
     const {screen, log} = open();
     const sent = (): Set<NavigationKind> => new Set(log.map(action => action.type));
     const row = (): HTMLElement => firstRun(screen);
     screen.press(row());
     screen.press(screen.control('Open agents'));
-    const [agent] = screen.container.querySelectorAll<HTMLElement>('[role="treeitem"]');
+    const [agent] = screen.container.querySelectorAll<HTMLElement>(
+      '[role="listbox"] [role="option"]',
+    );
     if (agent === undefined) throw new Error('the run lists no agent');
     screen.press(agent);
-    screen.press(screen.control('Close agent view'));
-    screen.press(screen.control('Cost'));
+    // The agent's own page: its trail's Agents step closes it, the run's step goes to the report.
+    screen.press(screen.control('Agents'));
+    screen.press(screen.control(TASK));
+    screen.press(screen.control('Open cost'));
     screen.press(
       screen.controls('Runs').find(control => control.classList.contains('vs-crumb')) ?? row(),
     );

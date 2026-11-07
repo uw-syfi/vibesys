@@ -25,10 +25,8 @@ const generators: {
     type: fc.constant('show' as const),
     view: fc.constantFrom(
       'report' as const,
-      'timeline' as const,
       'agents' as const,
       'cost' as const,
-      'handoffs' as const,
       'catch-up' as const,
     ),
   }),
@@ -113,21 +111,28 @@ describe('navigation', () => {
     );
   });
 
-  it('back from an agent keeps the run, and back from the run lists the runs', () => {
+  it('back from an agent lands on the agents, then the report, then the runs', () => {
     const agent = walk([
       {type: 'open-run', host: 'host-a', runId: 'run-1'},
       {type: 'pick-agent', agentId: 'a'},
     ]);
-    const run = navigationReducer(agent, {type: 'back'});
-    expect(run.runs).toMatchObject({screen: 'run', runId: 'run-1', agentId: null});
+    const agents = navigationReducer(agent, {type: 'back'});
+    expect(agents.runs).toMatchObject({
+      screen: 'run',
+      runId: 'run-1',
+      view: 'agents',
+      agentId: null,
+    });
+    const run = navigationReducer(agents, {type: 'back'});
+    expect(run.runs).toMatchObject({screen: 'run', runId: 'run-1', view: 'report', agentId: null});
     expect(navigationReducer(run, {type: 'back'}).runs).toEqual({screen: 'runs'});
   });
 
   it('back from a screen of the run goes to its report, and from the report to the runs', () => {
     fc.assert(
       fc.property(
-        fc.constantFrom('timeline', 'agents', 'cost', 'handoffs') as fc.Arbitrary<
-          'timeline' | 'agents' | 'cost' | 'handoffs'
+        fc.constantFrom('agents', 'cost', 'catch-up') as fc.Arbitrary<
+          'agents' | 'cost' | 'catch-up'
         >,
         view => {
           const screen = walk([

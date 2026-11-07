@@ -1,5 +1,5 @@
-import {Card, Chip, Gantt, type GanttRow, type Guide, Row, Stack, Text} from '@vibesys/ui';
-import {type JSX, useState} from 'react';
+import {Card, Chip, type Crumb, Gantt, type GanttRow, type Guide, Page, Text} from '@vibesys/ui';
+import {type JSX, type ReactNode, useState} from 'react';
 import {
   type AgentRow,
   agentNames,
@@ -64,12 +64,7 @@ function shared(row: SpawnRow, label: string): GanttRow {
   };
 }
 
-function agentRow(
-  row: AgentRow,
-  labels: ReadonlyMap<string, string>,
-  selected: string | null,
-  actions: Actions,
-): GanttRow {
+function agentRow(row: AgentRow, labels: ReadonlyMap<string, string>, actions: Actions): GanttRow {
   const fold = () => actions.fold(row);
   const count = foldedCount(row);
   return {
@@ -82,7 +77,6 @@ function agentRow(
       tone: tick.tone === 'failed' ? 'err' : 'ok',
       label: labels.get(tick.childId) ?? '',
     })),
-    selected: row.agentId === selected,
     press: () => actions.open(row.agentId),
   };
 }
@@ -101,19 +95,20 @@ function groupRow(row: GroupRow, actions: Actions): GanttRow {
 function Stats(props: {readonly tree: SpawnTree}): JSX.Element {
   const {stats} = props.tree;
   return (
-    <Row gap="space-5" wrap align="center">
+    <>
       <Chip label={`${stats.running} running`} tone="live" dot />
       <Text variant="small" tone="muted">{`${stats.total} total`}</Text>
       <Text variant="small" tone="muted">{`${stats.failed} failed`}</Text>
       <Text variant="small" tone="muted">{`peak ${stats.peak}`}</Text>
-    </Row>
+    </>
   );
 }
 
 /**
- * The agents of a run as a spawn tree over time. A row is one agent from its start to its end,
- * under the agent that spawned it; a tick on a parent is a result that came back to it; a count
- * bar is agents folded into one row, and a click on it unfolds them. A click on an agent opens it.
+ * The agents of a run as a page of the run: a spawn tree over time. A row is one agent from its
+ * start to its end, under the agent that spawned it; a tick on a parent is a result that came back
+ * to it; a count bar is agents folded into one row, and a click on it unfolds them. A click on an
+ * agent opens its page. A key above the tree says what its bars, ticks and stacks mean.
  */
 export function AgentsScreen(props: {
   readonly state: OrchestratorState;
@@ -121,8 +116,10 @@ export function AgentsScreen(props: {
   /** What the machine the run is on is called. */
   readonly host: string;
   readonly nowMs: number;
-  /** The agent open beside the tree, if any. */
-  readonly selected: string | null;
+  /** Where the reader is: the levels above this screen. */
+  readonly trail: readonly Crumb[];
+  /** The state of every connection that is not working, above the tree. */
+  readonly notice: ReactNode;
   readonly open: (agentId: string) => void;
 }): JSX.Element {
   const [folds, setFolds] = useState<FoldChoices>({});
@@ -138,12 +135,19 @@ export function AgentsScreen(props: {
     fold: target => setFolds(choices => toggled(choices, target)),
   };
   const rows = tree.rows.map(row =>
-    row.kind === 'agent' ? agentRow(row, labels, props.selected, actions) : groupRow(row, actions),
+    row.kind === 'agent' ? agentRow(row, labels, actions) : groupRow(row, actions),
   );
   const to = Math.max(tree.endMs, tree.startMs + 1000);
   return (
-    <Stack gap="space-4">
-      <Stats tree={tree} />
+    <Page
+      key="agents"
+      width="wide"
+      state="ready"
+      trail={props.trail}
+      title="Agents"
+      meta={<Stats tree={tree} />}
+    >
+      {props.notice}
       <Card flush>
         <Gantt
           label="Agents over time"
@@ -155,8 +159,9 @@ export function AgentsScreen(props: {
           tagLabel="Machine"
           figureLabel="Cost"
           detail="full"
+          legend
         />
       </Card>
-    </Stack>
+    </Page>
   );
 }

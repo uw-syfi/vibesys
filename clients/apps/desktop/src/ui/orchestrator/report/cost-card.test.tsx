@@ -17,7 +17,13 @@ const live: CostFeedSnapshot = {status: {_tag: 'Live'}, freshness: 'live'};
 /** Each table of the card as its headers and, for each row, its cells. */
 function tablesOf(view: CostView): {headers: string[]; rows: string[][]}[] {
   const screen = mount(
-    <CostCard cost={view} feed={live} retry={() => undefined} open={() => undefined} />,
+    <CostCard
+      cost={view}
+      feed={live}
+      runOver={false}
+      retry={() => undefined}
+      open={() => undefined}
+    />,
   );
   const tables = [...screen.container.querySelectorAll('table')].map(table => ({
     headers: [...table.querySelectorAll('thead th')].map(cell => cell.textContent ?? ''),

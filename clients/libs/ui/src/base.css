@@ -267,6 +267,12 @@ body > div:first-child {
   flex: 1 1 var(--column-chart);
   min-width: min(100%, var(--column-chart));
 }
+/* A column of text to be read: as wide as a page of text reads well, centred in what holds it. */
+.vs-flex[data-width="reading"] {
+  align-self: center;
+  width: 100%;
+  max-width: var(--content-narrow);
+}
 .vs-flex[data-align="start"] {
   align-items: flex-start;
 }
@@ -299,6 +305,10 @@ body > div:first-child {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
+}
+/* Reversed in the row only: when the columns wrap the first in the document is still the first line. */
+.vs-split[data-aside-at-start] {
+  flex-direction: row-reverse;
 }
 .vs-split-main {
   flex: 999 1 var(--column-main);

@@ -403,6 +403,52 @@ function RowView(props: {
 }
 
 /**
+ * The key to what a Gantt's bars say, drawn with the bars' own shades: running, done and failed
+ * bars, the line where a result came back, the machine tag, and the stack of folded rows.
+ */
+function GanttLegend(): JSX.Element {
+  const item = (key: string, sample: JSX.Element, label: string): JSX.Element => (
+    <li key={key} className="vs-gantt-legend-item">
+      {sample}
+      <Text variant="small" tone="muted">
+        {label}
+      </Text>
+    </li>
+  );
+  const bar = (kind: string, outcome: string): JSX.Element => (
+    <span className="vs-gantt-legend-bar" data-outcome={outcome} aria-hidden="true">
+      <span className="vs-gantt-legend-fill" data-kind={kind} />
+    </span>
+  );
+  return (
+    <ul className="vs-gantt-legend" aria-label="Key to the bars">
+      {item('running', bar('solid', 'live'), 'Running')}
+      {item('done', bar('grey', 'muted'), 'Done')}
+      {item('failed', bar('err', 'err'), 'Failed')}
+      {item(
+        'returned',
+        <span className="vs-gantt-legend-mark" aria-hidden="true" />,
+        'Result returned',
+      )}
+      {item(
+        'machine',
+        <span className="vs-gantt-tag vs-gantt-legend-tag" aria-hidden="true">
+          host-a
+        </span>,
+        'Machine',
+      )}
+      {item(
+        'folded',
+        <span className="vs-gantt-legend-bar" data-stacked="" aria-hidden="true">
+          <span className="vs-gantt-legend-fill" data-kind="grey" />
+        </span>,
+        'Folded',
+      )}
+    </ul>
+  );
+}
+
+/**
  * Rows of bars on one time axis from `from` to `to`, a tick row above them, and a `playhead` line
  * through every row. Rows are the options of a windowed listbox (only the rows near the visible
  * part are drawn; Up and Down, Page Up and Down, Home and End move across all of them, Enter and
@@ -437,6 +483,8 @@ export function Gantt(props: {
   readonly detail?: 'full' | 'aggregate';
   /** `fill` takes the height of its container; the default is at most a thread's. */
   readonly size?: 'default' | 'fill';
+  /** A key above the rows to what the bars, the lines on them, the tags and the stacks mean. */
+  readonly legend?: boolean;
 }): JSX.Element {
   const whole: GanttView = {from: props.from, to: props.to};
   const view = props.view ?? whole;
@@ -479,6 +527,7 @@ export function Gantt(props: {
       data-tags={tagged || undefined}
       data-size={props.size ?? 'default'}
     >
+      {props.legend === true ? <GanttLegend /> : null}
       {strip || changeView === undefined ? null : (
         <ZoomBar view={view} whole={whole} change={changeView} />
       )}

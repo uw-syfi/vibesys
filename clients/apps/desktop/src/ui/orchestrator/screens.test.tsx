@@ -6,8 +6,6 @@ import {
   Delivery,
   EditCallSchema,
   Harness,
-  JobOutcome,
-  JudgeVerdict,
   MessageSchema,
   OtherCallSchema,
   ReadCallSchema,
@@ -27,18 +25,15 @@ import {
   type CommandProgress,
   emptyState,
   type OrchestratorState,
-  type RunView,
+  runReport,
 } from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
-import {searchFixture} from '../../testing/orchestrator/search.js';
-import {AgentPanel} from './agent-panel.js';
+import {AgentPage} from '../agents/agent-page.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
-import {HandoffCards, verdictOf} from './handoff-cards.js';
-import {RunScreen} from './run-screen.js';
-import {SearchPanels} from './search-panels.js';
+import {agentNames} from './names.js';
+import {ReportScreen} from './report/report-screen.js';
 import {describeCall, harnessWord} from './words.js';
 
-const VIEWS: readonly RunView[] = ['report', 'timeline', 'cost', 'handoffs'];
 /** Names of the protocol that must never reach a person. */
 const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object/;
 
@@ -48,44 +43,46 @@ function stateOf(seed: number, subagents: number, live: boolean) {
   return {scenario, state, runId: scenario.runId};
 }
 
-function screen(
+function report(
   state: OrchestratorState,
   runId: string,
-  view: RunView,
   nowMs: number,
   stopProgress?: CommandProgress,
 ): string {
+  const summary = runReport(state, runId, nowMs);
+  if (summary === undefined) throw new Error('the fixture has its run');
   return renderToStaticMarkup(
-    <RunScreen
-      state={state}
+    <ReportScreen
+      report={summary}
       host="host-a"
-      runId={runId}
       nowMs={nowMs}
       freshness="live"
       staleForMs={null}
-      view={view}
+      cost={state.costs[runId]}
       costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}
-      agentId={null}
-      agentPanel={null}
       stopProgress={stopProgress}
       stop={() => undefined}
       retryStop={() => undefined}
       catchUp={() => undefined}
       goRuns={() => undefined}
-      show={() => undefined}
-      pick={() => undefined}
+      openAgents={() => undefined}
+      openCost={() => undefined}
+      names={agentNames(state, runId)}
+      notice={null}
     />,
   );
 }
 
-function panel(state: OrchestratorState, agent: Agent, sendProgress?: CommandProgress): string {
+function page(state: OrchestratorState, agent: Agent, sendProgress?: CommandProgress): string {
   return renderToStaticMarkup(
-    <AgentPanel
+    <AgentPage
       nowMs={0}
       state={state}
       agent={agent}
       host="host-a"
+      trail={[]}
+      notice={null}
       history={{
         earlier: {_tag: 'Idle'},
         wholes: {},
@@ -96,13 +93,12 @@ function panel(state: OrchestratorState, agent: Agent, sendProgress?: CommandPro
       sendProgress={sendProgress}
       send={() => undefined}
       retrySend={() => undefined}
-      close={() => undefined}
     />,
   );
 }
 
 describe('the screens', () => {
-  it('every view of any run, live or finished, renders and names nothing from the protocol', () => {
+  it('the report and every agent of any run, live or finished, render and name nothing from the protocol', () => {
     fc.assert(
       fc.property(
         fc.integer({min: 1, max: 40}),
@@ -110,12 +106,9 @@ describe('the screens', () => {
         fc.boolean(),
         (seed, subagents, live) => {
           const {scenario, state, runId} = stateOf(seed, subagents, live);
-          for (const view of VIEWS) {
-            const html = screen(state, runId, view, scenario.endMs + 60_000);
-            expect(html).not.toMatch(PROTOCOL);
-          }
+          expect(report(state, runId, scenario.endMs + 60_000)).not.toMatch(PROTOCOL);
           for (const agent of Object.values(state.agents)) {
-            expect(panel(state, agent)).not.toMatch(PROTOCOL);
+            expect(page(state, agent)).not.toMatch(PROTOCOL);
           }
         },
       ),
@@ -152,7 +145,7 @@ describe('the screens', () => {
     }
     // How long what is shown has been out of date, as the host's freshness reports it.
     const waiting = note({_tag: 'Waiting', attempt: 1, fault, retryAtMs: 5}, {_tag: 'Live'});
-    expect(html(waiting)).toContain('Stale \u00b7 40 s');
+    expect(html(waiting)).toContain('Stale · 40 s');
     expect(html({...waiting, staleForMs: null})).not.toContain('Stale');
     expect(html(note({_tag: 'Incompatible', side: 'daemon-too-old'}, {_tag: 'Opening'}))).toContain(
       'Update VibeSys on that host',
@@ -185,9 +178,9 @@ describe('the screens', () => {
         }),
       },
     });
-    expect(panel(state, agent, progress)).toContain('Sent; delivery to agent unconfirmed');
-    expect(panel(stored(Delivery.CONSUMED), agent, progress)).toContain('Read by the agent');
-    const rejected = panel(stored(Delivery.REJECTED, Rejection.AGENT_GONE), agent, progress);
+    expect(page(state, agent, progress)).toContain('Sent; delivery to agent unconfirmed');
+    expect(page(stored(Delivery.CONSUMED), agent, progress)).toContain('Read by the agent');
+    const rejected = page(stored(Delivery.REJECTED, Rejection.AGENT_GONE), agent, progress);
     expect(rejected).toContain('Not delivered');
     expect(rejected).toContain('session is over');
   });
@@ -226,85 +219,8 @@ describe('the screens', () => {
     const codex = agents.find(a => a.capabilities?.steers === false && a.role === AgentRole.WORKER);
     if (claude === undefined || codex === undefined)
       throw new Error('the fixture mixes both tools');
-    expect(panel(state, claude)).toContain('in the middle of what it is doing');
-    expect(panel(state, codex)).toContain('waits until it finishes its current step');
-  });
-
-  it('a handoff shows its benchmark job outcome as the verdict, and none when unknown', () => {
-    const {state} = stateOf(5, 4, false);
-    expect(verdictOf(state, 'nobody')).toBeNull();
-    const finished = create(MessageSchema, {
-      id: 'job-1',
-      body: {
-        case: 'jobFinished',
-        value: {submittedByAgentId: 'worker-1', outcome: JobOutcome.SUCCEEDED},
-      },
-    });
-    const withJob = {...state, messages: {...state.messages, 'job-1': finished}};
-    expect(verdictOf(withJob, 'worker-1')?.label).toBe('Its benchmark job: Succeeded');
-  });
-
-  it('a handoff card shows what the body of each role says, and a worker without a change says so', () => {
-    const bodies = {
-      planner: {case: 'planner', value: {plan: 'plans/plan-3.md', confidence: 'medium'}},
-      judge: {case: 'judge', value: {commit: 'abc', verdict: JudgeVerdict.FAIL, reasons: 'noise'}},
-      combiner: {
-        case: 'combiner',
-        value: {commit: 'def', branch: 'merged', applied: 'plans 1 and 2'},
-      },
-      profiler: {case: 'profiler', value: {question: 'where?', answer: 'the copy'}},
-      kept: {
-        case: 'worker',
-        value: {
-          outcome: {case: 'candidate', value: {commit: 'c0ffee', branch: 'idea-1', checks: 'ok'}},
-        },
-      },
-      none: {
-        case: 'worker',
-        value: {outcome: {case: 'noCandidate', value: {blocker: 'did not compile'}}},
-      },
-    } as const;
-    const wanted: Record<keyof typeof bodies, readonly string[]> = {
-      planner: ['plans/plan-3.md', 'medium'],
-      judge: ['The claim does not hold', 'noise'],
-      combiner: ['plans 1 and 2', 'def on merged'],
-      profiler: ['where?', 'the copy'],
-      kept: ['c0ffee on idea-1'],
-      none: ['No change was kept from this attempt.', 'did not compile'],
-    };
-    for (const [kind, body] of Object.entries(bodies)) {
-      const message = create(MessageSchema, {
-        id: `handoff-${kind}`,
-        runId: 'r',
-        body: {case: 'handoff', value: {claim: 'it says so', body}},
-      });
-      const html = renderToStaticMarkup(
-        <HandoffCards state={{...emptyState, messages: {[message.id]: message}}} runId="r" />,
-      );
-      for (const text of wanted[kind as keyof typeof bodies]) expect(html).toContain(text);
-    }
-  });
-
-  it('every agent row carries its harness chip and its id, so a reader needs no detail view', () => {
-    fc.assert(
-      fc.property(
-        fc.integer({min: 1, max: 30}),
-        fc.integer({min: 1, max: 8}),
-        (seed, subagents) => {
-          const {scenario, state, runId} = stateOf(seed, subagents, true);
-          const html = screen(state, runId, 'timeline', scenario.endMs + 60_000);
-          const rows = html.split('role="treeitem"').slice(1);
-          const agents = Object.values(state.agents).filter(agent => agent.runId === runId);
-          expect(rows).toHaveLength(agents.length);
-          for (const agent of agents) {
-            const row = rows.find(candidate => candidate.includes(`data-row-id="${agent.id}"`));
-            expect(row).toBeDefined();
-            expect(row).toContain(harnessWord(agent.harness));
-          }
-        },
-      ),
-      {numRuns: 20},
-    );
+    expect(page(state, claude)).toContain('in the middle of what it is doing');
+    expect(page(state, codex)).toContain('waits until it finishes its current step');
   });
 
   it('shows Stop only while the run can be stopped, and what became of the press', () => {
@@ -323,20 +239,17 @@ describe('the screens', () => {
       [RunStatus.ENDED, false],
       [RunStatus.FAILED, false],
     ] as const) {
-      expect(screen(as(status), runId, 'timeline', now).includes('Stop run')).toBe(shown);
+      expect(report(as(status), runId, now).includes('Stop run')).toBe(shown);
     }
     const command = create(CommandSchema, {id: 'c'});
-    const sending = screen(as(RunStatus.RUNNING), runId, 'timeline', now, {
-      _tag: 'Sending',
-      command,
-    });
+    const sending = report(as(RunStatus.RUNNING), runId, now, {_tag: 'Sending', command});
     expect(sending).toContain('Stop: sending.');
-    const refused = screen(as(RunStatus.RUNNING), runId, 'timeline', now, {
+    const refused = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Refused',
       receipt: create(ReceiptSchema, {commandId: 'c', refusal: Refusal.RUN_NOT_RUNNING}),
     });
     expect(refused).toContain('The run is not running.');
-    const unsure = screen(as(RunStatus.RUNNING), runId, 'timeline', now, {
+    const unsure = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Unconfirmed',
       command,
       fault: {kind: 'DeadlineExceeded', detail: 'waited 15s', retryable: true},
@@ -346,46 +259,8 @@ describe('the screens', () => {
     expect(unsure).toContain('waited 15s');
   });
 
-  it('the final report is a named region whose first line is the lead\u2019s headline', () => {
-    const report = create(MessageSchema, {
-      id: 'report-1',
-      runId: 'r',
-      body: {
-        case: 'report',
-        value: {
-          headline: 'best score 17 at abc1234',
-          changed: 'a',
-          decisions: 'b',
-          openForUser: '',
-        },
-      },
-    });
-    const state = {...emptyState, messages: {'report-1': report}};
-    const html = renderToStaticMarkup(<HandoffCards state={state} runId="r" />);
-    expect(html).toContain('aria-labelledby');
-    expect(html).toContain('Final report');
-    expect(html).toContain('best score 17 at abc1234');
-  });
-
   it('the lead and a subagent on another tool are told apart by their chips', () => {
     expect(harnessWord(Harness.CLAUDE_CODE)).toBe('Claude Code');
     expect(harnessWord(Harness.CODEX)).toBe('Codex');
   });
-});
-
-it('shows the truncation note exactly when facts are truncated, and the unreadable banner only when stale', () => {
-  for (const truncated of [false, true])
-    for (const stale of [false, true]) {
-      const search = searchFixture('r', 100, stale, truncated);
-      const html = renderToStaticMarkup(<SearchPanels search={search} nowMs={100} />);
-      expect(html.includes('Some search facts were omitted')).toBe(truncated);
-      expect(html.includes('Search state is stale')).toBe(stale);
-      expect(html).toContain('Throughput: 42');
-    }
-});
-
-it('the timeline says when no finished jobs have been read', () => {
-  const {state, runId, scenario} = stateOf(9, 0, false);
-  const html = screen({...state, searches: {}}, runId, 'timeline', scenario.endMs);
-  expect(html).toContain('0 finished jobs read.');
 });

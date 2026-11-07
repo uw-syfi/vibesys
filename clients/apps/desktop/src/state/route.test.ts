@@ -13,11 +13,8 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
     type: fc.constant('show' as const),
     view: fc.constantFrom(
       'report' as const,
-      'timeline' as const,
       'agents' as const,
       'cost' as const,
-      'handoffs' as const,
-      'ideas' as const,
       'catch-up' as const,
     ),
   }),
@@ -39,7 +36,7 @@ describe('the route', () => {
 
   it('moves that need a run change nothing on the list', () => {
     fc.assert(
-      fc.property(fc.constantFrom('timeline' as const, 'cost' as const), view => {
+      fc.property(fc.constantFrom('agents' as const, 'cost' as const), view => {
         expect(routeReducer(initialRoute, {type: 'show', view})).toBe(initialRoute);
         expect(routeReducer(initialRoute, {type: 'pick-agent', agentId: 'a'})).toBe(initialRoute);
       }),
@@ -83,6 +80,25 @@ describe('which cost stream is followed', () => {
     expect(costTarget(cost)).toEqual({host: 'host-a', runId: 'run-1'});
     expect(costTarget(routeReducer(cost, {type: 'pick-agent', agentId: 'a'}))).toBeNull();
     expect(costTarget(routeReducer(cost, {type: 'close-run'}))).toBeNull();
-    expect(costTarget(routeReducer(cost, {type: 'show', view: 'timeline'}))).toBeNull();
+    expect(costTarget(routeReducer(cost, {type: 'show', view: 'agents'}))).toBeNull();
+  });
+
+  it('opens an agent under the agents view, and any page of the run closes it', () => {
+    fc.assert(
+      fc.property(fc.array(action, {maxLength: 30}), moves => {
+        const route = moves.reduce(routeReducer, initialRoute);
+        if (route.screen !== 'run') return;
+        const picked = routeReducer(route, {type: 'pick-agent', agentId: 'a'});
+        expect(picked).toMatchObject({view: 'agents', agentId: 'a'});
+        // The agent's page is never under another view, and a page of the run is never an agent's.
+        for (const view of ['report', 'agents', 'cost', 'catch-up'] as const) {
+          expect(routeReducer(picked, {type: 'show', view})).toMatchObject({view, agentId: null});
+        }
+        expect(routeReducer(picked, {type: 'close-agent'})).toMatchObject({
+          view: 'agents',
+          agentId: null,
+        });
+      }),
+    );
   });
 });

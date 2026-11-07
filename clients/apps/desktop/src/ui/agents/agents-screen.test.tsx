@@ -38,7 +38,8 @@ function screenOf(seed: number, subagents: number, live: boolean, tree: boolean)
       runId={scenario.runId}
       host="host-a"
       nowMs={scenario.endMs + 60_000}
-      selected={null}
+      trail={[]}
+      notice={null}
       open={() => undefined}
     />,
   );

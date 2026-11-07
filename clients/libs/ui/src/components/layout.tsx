@@ -1,4 +1,13 @@
-import {type CSSProperties, type JSX, type ReactNode, useId, useState} from 'react';
+import {
+  type CSSProperties,
+  createContext,
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useId,
+  useState,
+} from 'react';
 import type {SpaceToken} from '../tokens/index.js';
 import {Breadcrumb, type Crumb} from './breadcrumb.js';
 import {Icon} from './icon.js';
@@ -12,6 +21,14 @@ export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
  * page, so a test or a script waits for a state, not for a duration.
  */
 export type PageState = 'loading' | 'ready';
+
+/**
+ * What the window does when a page is drawn: called with the page's `<main>` once, as it arrives.
+ * The window that holds the pages provides it (where the focus goes when a screen opens or is left),
+ * so a page is a plain component that knows nothing of how the window moves the focus. With none
+ * provided, nothing happens.
+ */
+export const PageArrival = createContext<(page: HTMLElement) => void>(() => undefined);
 
 /** `loading` while `awaiting`, else `ready`: the one place the two words are chosen. */
 export function pageState(awaiting: boolean): PageState {
@@ -43,9 +60,10 @@ interface FlexProps {
   /**
    * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
    * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
-   * row leaves it less than a readable width.
+   * row leaves it less than a readable width; or a column of text to be read (`reading`), as wide as
+   * a page of text reads well and centred in what holds it.
    */
-  readonly width?: 'figure' | 'chart';
+  readonly width?: 'figure' | 'chart' | 'reading';
   readonly children: ReactNode;
 }
 
@@ -129,6 +147,14 @@ export function Page(props: {
 }): JSX.Element {
   const width = props.width ?? 'content';
   const {title} = props;
+  const arrival = useContext(PageArrival);
+  // This callback changes only with the window's arrival, so it fires once as the page is drawn.
+  const arrived = useCallback(
+    (page: HTMLElement | null) => {
+      if (page !== null) arrival(page);
+    },
+    [arrival],
+  );
   const header =
     title === undefined ? (
       props.header
@@ -147,7 +173,7 @@ export function Page(props: {
     );
   if (header === undefined && props.footer === undefined) {
     return (
-      <main className="vs-page" data-state={props.state}>
+      <main className="vs-page" data-state={props.state} ref={arrived}>
         <div className="vs-page-content" data-width={width}>
           {props.children}
         </div>
@@ -157,6 +183,7 @@ export function Page(props: {
   return (
     <main
       className="vs-page"
+      ref={arrived}
       data-fixed-header=""
       data-side-action={props.sideAction || undefined}
       data-state={props.state}
@@ -222,6 +249,12 @@ export function Split(props: {
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
   readonly asideFirst?: boolean;
+  /**
+   * The aside is at the start (the left) when the two sit side by side, yet the main column still
+   * comes first in reading order and, when narrow, on screen: what the page is about before the list
+   * it was picked from.
+   */
+  readonly asideAtStart?: boolean;
   /** The aside stays in view beside a long main column, and scrolls on its own when it is taller than a thread. */
   readonly asideSticky?: boolean;
 }): JSX.Element {
@@ -232,7 +265,11 @@ export function Split(props: {
     </div>
   );
   return (
-    <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
+    <div
+      className="vs-split"
+      data-aside-at-start={props.asideAtStart === true || undefined}
+      style={gapStyle(props.gap ?? 'space-5')}
+    >
       {props.asideFirst === true ? aside : main}
       {props.asideFirst === true ? main : aside}
     </div>

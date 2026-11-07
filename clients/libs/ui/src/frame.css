@@ -1347,6 +1347,15 @@ button.vs-crumb:focus-visible {
   height: calc(var(--space-8) * 2);
   border-bottom: var(--hairline) solid var(--line);
 }
+/* A bar never grows wider than a bar: few bars make a short plot (and the labels under it as short),
+   not a few slabs the width of the card. */
+.vs-bars {
+  --bar-max: calc(var(--space-8) + var(--space-5));
+}
+.vs-bars-plot,
+.vs-bars-marks {
+  max-width: calc(var(--bars-count, 1) * (var(--bar-max) + var(--space-1)));
+}
 .vs-bars-bar {
   display: flex;
   flex: 1 1 0;
@@ -1633,6 +1642,9 @@ button.vs-crumb:focus-visible {
   gap: var(--space-6);
   grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
 }
+.vs-chart-columns[data-align="start"] {
+  align-items: start;
+}
 .vs-chart-columns[data-across] {
   /* Side by side while each chart keeps the width it is read at; a narrower window wraps the last. */
   grid-template-columns: repeat(
@@ -1877,6 +1889,12 @@ button.vs-dotlegend-item:focus-visible {
 .vs-tiles[data-stacked] {
   grid-template-columns: 1fr;
   width: var(--tile-width);
+}
+/* The tracks of `ChartColumns`: a tile is a chart's width, a lone tile does not stretch past its track. */
+.vs-tiles[data-track="chart"] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--chart-min)), 1fr));
+  gap: var(--space-6);
+  width: 100%;
 }
 .vs-tiles[data-stacked] .vs-tile-trend {
   display: none;

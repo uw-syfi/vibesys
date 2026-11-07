@@ -47,15 +47,17 @@ export const SystemAppearanceFromWindow: Layer.Layer<SystemAppearance> = Layer.s
 );
 
 /**
- * Where Escape and the arrows already mean something else: a text field, a list of choices, an open
- * menu or a dialog. A radio or a checkbox is not one: Escape and Alt+Left mean back on them.
+ * Where Escape and the arrows already mean something else: a text field, a choice being made, an
+ * open menu or a dialog. A radio or a checkbox is not one: Escape and Alt+Left mean back on them,
+ * and neither does a row of a list on the page (the runs, the agents' bars): the focus returns to
+ * one when a screen is left, and Escape goes back from there.
  */
 const CAPTURING = [
   'textarea',
   'select',
   'input:not([type="radio"], [type="checkbox"], [type="button"], [type="submit"])',
   '[contenteditable]:not([contenteditable="false"])',
-  '[role="textbox"], [role="combobox"], [role="listbox"], [role="menu"], [role="dialog"]',
+  '[role="textbox"], [role="combobox"], [role="menu"], [role="dialog"]',
   'dialog[open]',
 ].join(', ');
 
