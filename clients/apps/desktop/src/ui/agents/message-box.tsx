@@ -13,28 +13,24 @@ import {
   type Word,
 } from '../orchestrator/words.js';
 
-/** What this agent's tool lets a message do, in one sentence. */
+/** What this agent's tool lets a message do, as a label. */
 function capabilityLine(agent: Agent): string {
-  const caps = agent.capabilities;
-  const takes =
-    caps?.steers === true
-      ? 'A message reaches it in the middle of what it is doing.'
-      : 'A message waits until it finishes its current step.';
+  const takes = agent.capabilities?.steers === true ? 'reaches it mid-turn' : 'waits for its step';
   return `${harnessWord(agent.harness)}: ${takes}`;
 }
 
 /** What a stored message's delivery says now, with the reason when it was rejected. */
 function storedLine(message: Message): {label: string; tone: Word['tone']} {
   const word = deliveryWord(message.delivery);
-  const why = message.delivery === Delivery.REJECTED ? ` ${rejectionWord(message.rejection)}` : '';
-  return {label: `${word.label}.${why}`, tone: word.tone};
+  const why = message.delivery === Delivery.REJECTED ? ` \u00b7 ${rejectionWord(message.rejection)}` : '';
+  return {label: `${word.label}${why}`, tone: word.tone};
 }
 
 /** The line for an answer whose message the host has not reported yet: the receipt's own words. */
 function receiptLine(receipt: Receipt): {label: string; tone: Word['tone']} {
   if (receipt.refusal !== 0) return {label: refusalWord(receipt.refusal), tone: 'err'};
   const word = deliveryWord(receipt.delivery);
-  return {label: `${word.label}.`, tone: word.tone};
+  return {label: word.label, tone: word.tone};
 }
 
 function SentMessage(props: {
@@ -44,10 +40,10 @@ function SentMessage(props: {
 }): JSX.Element {
   return (
     <Row gap="space-3" wrap>
-      <Text tone="muted">{`You wrote: ${props.text}`}</Text>
+      <Text tone="muted">{props.text}</Text>
       <Chip label={props.line.label} tone={props.line.tone} dot />
       {props.atMs === null ? null : (
-        <Text variant="small">{`Sent at ${formatClock(props.atMs)}`}</Text>
+        <Text variant="small">{formatClock(props.atMs)}</Text>
       )}
     </Row>
   );
@@ -78,7 +74,7 @@ function SentMessages(props: {
       {pending === null ? null : (
         <SentMessage
           atMs={props.pendingAtMs}
-          text="your last message"
+          text="Last message"
           line={receiptLine(pending)}
         />
       )}
@@ -128,7 +124,7 @@ export function MessageBox(props: {
               props.send(shown);
             }}
             {...(shown.trim() === '' || sending
-              ? {disabledReason: sending ? 'Sending.' : 'Write a message first.', quietReason: true}
+              ? {disabledReason: sending ? 'Sending' : 'Write a message first', quietReason: true}
               : {})}
           />
         </Row>

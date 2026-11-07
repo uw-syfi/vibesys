@@ -32,7 +32,6 @@ describe('the agents screen', () => {
         host="host-a"
         nowMs={scenario.endMs}
         trail={[]}
-        notice={null}
         reading={null}
         open={id => opened.push(id)}
       />,
@@ -100,7 +99,6 @@ describe('an agent page', () => {
         agent={agent}
         host="host-a"
         trail={[{id: 'runs', label: 'Runs'}]}
-        notice={null}
         reading={null}
         sendProgress={undefined}
         history={{
@@ -115,19 +113,23 @@ describe('an agent page', () => {
       />,
     );
 
-  it('reads as a centred column: where the agent sits and ran, its conversation, then the box to write in', () => {
+  it('reads in one scroll: where the agent sits and ran, its conversation filling the page, then the box to write in', () => {
     for (const agent of Object.values(state.agents).slice(0, 6)) {
       const screen = page(agent);
-      const column = screen.container.querySelector('[data-width="reading"]');
-      expect(column).not.toBeNull();
-      // Placement, then the conversation, then the message box, all inside the one column.
-      const sections = [...(column?.children ?? [])].map(each => each.textContent ?? '');
-      const placement = sections.findIndex(text => text.startsWith('Placement'));
-      const box = sections.findIndex(text => text.startsWith('Message'));
+      // The page's body does not scroll; the conversation takes what the cards leave and scrolls itself.
+      const body = screen.container.querySelector('.vs-page-scroll[data-fill] > .vs-page-body');
+      expect(body).not.toBeNull();
+      const sections = [...(body?.children ?? [])];
+      const text = sections.map(each => each.textContent ?? '');
+      const placement = text.findIndex(each => each.startsWith('Placement'));
+      const box = text.findIndex(each => each.startsWith('Message'));
+      const conversation = sections.findIndex(each => each.matches('.vs-conversation[data-size="fill"]'));
       expect(placement).toBeGreaterThanOrEqual(0);
-      expect(box).toBeGreaterThan(placement);
-      expect(column?.querySelector('.vs-conversation')).not.toBeNull();
-      expect(column?.textContent).toContain('host-a');
+      expect(conversation).toBeGreaterThan(placement);
+      expect(box).toBeGreaterThan(conversation);
+      // One conversation, drawn as a direct child of the body: no column of its own around it.
+      expect(screen.container.querySelectorAll('.vs-conversation')).toHaveLength(1);
+      expect(body?.textContent).toContain('host-a');
       screen.unmount();
     }
   });

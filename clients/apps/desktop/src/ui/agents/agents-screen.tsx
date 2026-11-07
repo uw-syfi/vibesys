@@ -116,7 +116,11 @@ function Stats(props: {readonly tree: SpawnTree}): JSX.Element {
   const {stats} = props.tree;
   return (
     <>
-      <Chip label={`${stats.running} running`} tone="live" dot />
+      <Chip
+        label={`${stats.running} running`}
+        tone={stats.running > 0 ? 'live' : 'neutral'}
+        dot
+      />
       <Text variant="small" tone="muted">{`${stats.total} total`}</Text>
       <Text variant="small" tone="muted">{`${stats.failed} failed`}</Text>
       <Text variant="small" tone="muted">{`peak ${stats.peak}`}</Text>
@@ -138,8 +142,6 @@ export function AgentsScreen(props: {
   readonly nowMs: number;
   /** Where the reader is: the levels above this screen. */
   readonly trail: readonly Crumb[];
-  /** The state of every connection that is not working, above the tree. */
-  readonly notice: ReactNode;
   /** Where the read of the run's history stands, beside the counts. */
   readonly reading: ReactNode;
   readonly open: (agentId: string) => void;
@@ -174,7 +176,6 @@ export function AgentsScreen(props: {
         </>
       }
     >
-      {props.notice}
       <Card flush>
         <Gantt
           label="Agents over time"

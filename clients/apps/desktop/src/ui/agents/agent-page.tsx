@@ -1,5 +1,5 @@
 import type {Agent} from '@vibesys/orchestrator-proto';
-import {Breadcrumb, Card, Chip, type Crumb, Page, Row, Stack, Text} from '@vibesys/ui';
+import {Breadcrumb, Card, Chip, type Crumb, Page, Row, Text} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   agentNames,
@@ -50,8 +50,9 @@ function Placement(props: {
 
 /**
  * One agent as a page of the run: where it is in the spawn tree and where it ran, then its session
- * read as a conversation in a column of text centred under the page's title, with the box to write
- * to it below. The conversation scrolls inside its own pane, newest at the bottom.
+ * read as a conversation as wide as the cards, on the page's own edges, with the box to write to it below. The page
+ * does not scroll: the conversation takes the room between the cards and the box and scrolls by
+ * itself, newest at the bottom, so there is one scrollbar.
  */
 export function AgentPage(props: {
   readonly state: OrchestratorState;
@@ -61,8 +62,6 @@ export function AgentPage(props: {
   readonly host: string;
   /** Where the reader is: the levels above this screen. */
   readonly trail: readonly Crumb[];
-  /** The state of every connection that is not working, above the transcript. */
-  readonly notice: ReactNode;
   /** Where the read of the run's history stands, among the chips under the title. */
   readonly reading: ReactNode;
   /** What the last press of Send to this agent came to, or undefined before any. */
@@ -80,10 +79,12 @@ export function AgentPage(props: {
   const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
   // The lead is at the top of the tree: a place of one level says what the title says.
   const place = agentPlace(state, agent.id);
+  const turnsLeftOut = state.histories[agent.runId]?.turnsLeftOut === true;
   return (
     <Page
       key={`agent-${agent.id}`}
       width="wide"
+      fill
       state="ready"
       trail={props.trail}
       title={label}
@@ -93,13 +94,12 @@ export function AgentPage(props: {
           <Chip label={props.host} mono clip />
           <Chip label={harnessWord(agent.harness)} />
           {agent.model === '' ? null : <Chip label={agent.model} mono clip />}
+          {turnsLeftOut ? <Chip label="Older turns not shown" tone="warn" dot /> : null}
           {props.reading}
         </>
       }
     >
-      {props.notice}
-      <Stack gap="space-5" width="reading">
-        {place.length < 2 ? null : (
+      {place.length < 2 ? null : (
           <Breadcrumb
             label="Place in the spawn tree"
             items={place.map(crumb => ({
@@ -128,7 +128,6 @@ export function AgentPage(props: {
           send={props.send}
           retry={props.retrySend}
         />
-      </Stack>
     </Page>
   );
 }

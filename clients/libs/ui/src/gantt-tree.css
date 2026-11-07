@@ -3,8 +3,8 @@
 /* Tags have a column of their own, so they line up whatever the depth of the row. */
 .vs-gantt[data-tags] .vs-gantt-row {
   grid-template-columns:
-    clamp(var(--gantt-label), 36%, var(--gantt-label-max))
-    var(--gantt-figure)
+    clamp(var(--gantt-label), 20%, var(--gantt-label-max))
+    var(--gantt-tag)
     1fr
     var(--gantt-figure);
 }

@@ -476,7 +476,7 @@ describe('the report with a different amount of data', () => {
         },
       },
     );
-    expect(cardText(failed.screen.container, 'Cost')).toContain('cannot be reached');
+    expect(cardText(failed.screen.container, 'Cost')).toContain('Unreachable');
     expect(failed.screen.controls('Retry cost')).toHaveLength(1);
     failed.screen.unmount();
   });

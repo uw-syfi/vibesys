@@ -731,6 +731,8 @@ button.vs-crumb:focus-visible {
 .vs-gantt-rows {
   max-height: var(--thread);
   overflow-y: auto;
+  /* The room of the scrollbar is kept whether or not there is one, and the axis row keeps it too. */
+  scrollbar-gutter: stable;
 }
 .vs-gantt[data-size="fill"] {
   flex: 1 1 auto;
@@ -750,6 +752,8 @@ button.vs-crumb:focus-visible {
 .vs-gantt-rows {
   max-height: var(--thread);
   overflow-y: auto;
+  /* The room of the scrollbar is kept whether or not there is one, and the axis row keeps it too. */
+  scrollbar-gutter: stable;
 }
 .vs-gantt[data-size="fill"] {
   flex: 1 1 auto;
@@ -779,6 +783,9 @@ button.vs-crumb:focus-visible {
 .vs-gantt-row[data-axis] {
   min-height: var(--text-section-line);
   cursor: default;
+  /* Never scrolls; keeps the gutter the rows keep, so the axis and the bars share their columns. */
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
 }
 .vs-gantt-row:not([data-axis]):hover {
   background: var(--panel-2);
@@ -857,12 +864,6 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-bar[data-outcome="live"] {
   border-right-color: var(--accent);
-  animation: vs-gantt-live calc(var(--duration-base) * 8) var(--easing) infinite alternate;
-}
-@keyframes vs-gantt-live {
-  to {
-    border-right-color: transparent;
-  }
 }
 .vs-gantt-seg {
   position: absolute;
@@ -1008,11 +1009,6 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-section-size);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .vs-gantt-bar[data-outcome="live"] {
-    animation: none;
-  }
-}
 
 /* --- a list in columns: header that sorts, rows on one grid, a bar for the path to the selection --- */
 
@@ -1470,11 +1466,6 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   flex: none;
 }
-@keyframes vs-live-pulse {
-  to {
-    opacity: 0.35;
-  }
-}
 .vs-toolgroup {
   display: flex;
   flex-direction: column;
@@ -1531,16 +1522,10 @@ button.vs-crumb:focus-visible {
 .vs-toolgroup-row[data-state="ok"] .vs-toolgroup-status {
   color: var(--ok);
 }
-/* What is still going on pulses: the thought being written and the call waiting for its result. */
+/* What is still going on is the accent, still: it stops being the accent when it stops going on. */
 .vs-thought[data-live] .vs-thought-icon,
 .vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
-  animation: vs-live-pulse calc(var(--duration-base) * 5) var(--easing) infinite alternate;
-}
-@media (prefers-reduced-motion: reduce) {
-  .vs-thought[data-live] .vs-thought-icon,
-  .vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
-    animation: none;
-  }
+  color: var(--accent);
 }
 .vs-toolgroup-name {
   flex: none;

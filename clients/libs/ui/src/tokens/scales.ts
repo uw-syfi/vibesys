@@ -59,6 +59,7 @@ export type SizeToken =
   | 'gantt-label'
   | 'gantt-label-max'
   | 'gantt-figure'
+  | 'gantt-tag'
   | 'gantt-bar'
   | 'hairline'
   | 'focus-ring'
@@ -100,6 +101,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'gantt-label': 220,
   'gantt-label-max': 420,
   'gantt-figure': 96,
+  'gantt-tag': 112,
   'gantt-bar': 12,
   hairline: 1,
   'focus-ring': 2,
