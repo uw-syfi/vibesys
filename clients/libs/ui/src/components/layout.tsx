@@ -28,7 +28,10 @@ export type PageState = 'loading' | 'ready';
  * so a page is a plain component that knows nothing of how the window moves the focus. With none
  * provided, nothing happens.
  */
-export const PageArrival = createContext<(page: HTMLElement) => void>(() => undefined);
+const PageArrival = createContext<(page: HTMLElement) => void>(() => undefined);
+
+/** The context a window provides its arrival through: `pageArrival.Provider` around its pages. */
+export const pageArrival = PageArrival;
 
 /** `loading` while `awaiting`, else `ready`: the one place the two words are chosen. */
 export function pageState(awaiting: boolean): PageState {

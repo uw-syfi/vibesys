@@ -3,11 +3,13 @@
  * person opens another, so the focus the old one held is lost and falls to the document. Opening a
  * screen lands the focus on its heading, so a reader hears what changed; going back lands it on the
  * control that opened the screen they left, found again by what it is called, so a keyboard user
- * is where they were. Pages call back as they are drawn (`PageArrival`), so no effect runs here.
+ * is where they were. Pages call back as they are drawn (`pageArrival`), so no effect runs here.
  */
-import {PageArrival} from '@vibesys/ui';
+import {pageArrival} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo, useRef} from 'react';
 import type {Navigation, NavigationAction} from '../../state/index.js';
+
+const Arrival = pageArrival.Provider;
 
 /** Where the window is, as one word: the same word for the same screen, however often it is drawn. */
 export function placeOf(navigation: Navigation): string {
@@ -81,5 +83,5 @@ export function FocusMemory(props: {
       openers.current.set(place, signatureOf(held));
     }
   };
-  return <PageArrival.Provider value={arrival}>{props.children(note)}</PageArrival.Provider>;
+  return <Arrival value={arrival}>{props.children(note)}</Arrival>;
 }
