@@ -14,6 +14,7 @@ import "vibesys/cli/v1/promote.proto";
 import "vibesys/cli/v1/result.proto";
 import "vibesys/cli/v1/verdict.proto";
 import "vibesys/cli/v1/version.proto";
+import "vibesys/cli/v1/workstream.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -75,6 +76,15 @@ service DaemonService {
   rpc EditPlan(EditPlanRequest) returns (EditPlanResponse);
   rpc CommentPlan(CommentPlanRequest) returns (CommentPlanResponse);
   rpc ClosePlan(ClosePlanRequest) returns (ClosePlanResponse);
+
+  // StartWorkstream starts a workstream with the title, or returns the one that is not closed and has
+  // the same title once case and runs of white space are ignored, so planners that start the same
+  // line of work at once get one number.
+  rpc StartWorkstream(StartWorkstreamRequest) returns (StartWorkstreamResponse);
+  // ListWorkstreams lists the task's workstreams by number.
+  rpc ListWorkstreams(ListWorkstreamsRequest) returns (ListWorkstreamsResponse);
+  // EditWorkstream changes a workstream's title, status or note.
+  rpc EditWorkstream(EditWorkstreamRequest) returns (EditWorkstreamResponse);
 
   // DeclareBound records the performance bound an agent states for an objective of the task, as a
   // new version that supersedes the bound standing for it. Nothing is overwritten.
@@ -426,6 +436,9 @@ message CreatePlanRequest {
   string body = 3;
   // The bound on the plan's possible gain, when the planner states one.
   PlanGainBound gain_bound = 4;
+  // The workstream the plan joins, or 0 for none. A number the task has no workstream for is
+  // NOT_FOUND.
+  uint32 workstream = 5;
 }
 
 message CreatePlanResponse {
@@ -458,8 +471,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body, status or gain_bound"
-    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound)"
+    message: "set at least one of title, body, status, gain_bound or workstream"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound) || this.workstream != 0u"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
@@ -472,6 +485,9 @@ message EditPlanRequest {
   }];
   // Replaces the plan's bound. A plan's bound is replaced and never cleared.
   PlanGainBound gain_bound = 6;
+  // Moves the plan to this workstream, and 0 leaves it where it is: a plan's workstream is set and
+  // moved, never cleared. A number the task has no workstream for is NOT_FOUND.
+  uint32 workstream = 7;
 }
 
 message EditPlanResponse {
@@ -501,6 +517,69 @@ message ClosePlanRequest {
 
 message ClosePlanResponse {
   Plan plan = 1;
+}
+
+message StartWorkstreamRequest {
+  CallContext context = 1 [(buf.validate.field).required = true];
+  // One line of text. Its white space is collapsed before it is stored, and compared with the titles
+  // of the workstreams that are not closed with case and white space ignored.
+  string title = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+}
+
+message StartWorkstreamResponse {
+  // The workstream started, or the one that was open with the title.
+  Workstream workstream = 1 [(buf.validate.field).required = true];
+  // Whether this call started it: false when a workstream that is not closed had the title already.
+  bool created = 2;
+}
+
+message ListWorkstreamsRequest {
+  CallContext context = 1 [(buf.validate.field).required = true];
+  // Only workstreams in one of these statuses. Empty lists them all.
+  repeated WorkstreamStatus statuses = 2 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message ListWorkstreamsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_workstreams.each_number_once"
+    message: "a workstream is listed once, under its own number"
+    expression: "this.workstreams.map(w, w.number).unique()"
+  };
+
+  // By number.
+  repeated Workstream workstreams = 1;
+}
+
+message EditWorkstreamRequest {
+  option (buf.validate.message).cel = {
+    id: "edit_workstream.sets_something"
+    message: "set at least one of title, status or note"
+    expression: "has(this.title) || has(this.status) || has(this.note)"
+  };
+  CallContext context = 1 [(buf.validate.field).required = true];
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
+  // A field that is absent is left as it is. A title that is another workstream's, with case and
+  // white space ignored, is a CONFLICT unless the workstream is closed.
+  optional string title = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+  optional WorkstreamStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // An empty note clears the note.
+  optional string note = 5 [(buf.validate.field).string.max_len = 280];
+}
+
+message EditWorkstreamResponse {
+  Workstream workstream = 1 [(buf.validate.field).required = true];
 }
 
 message DeclareBoundRequest {
@@ -588,7 +667,7 @@ message TaskFacts {
 }
 
 // A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number,
-// bound.seq or trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
+// bound.seq, workstream.number or trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
 // of the daemon's hands; a key that stops existing is conveyed by a Reset, except a judgment, which
 // leaves the window of judged commits and is then stale by its against.
 message TaskFact {
@@ -603,6 +682,7 @@ message TaskFact {
     StoreHealth health = 7;
     JobTrouble trouble = 8;
     ObjectiveBound bound = 9;
+    Workstream workstream = 10;
   }
 }
 

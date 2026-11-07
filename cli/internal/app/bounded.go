@@ -190,6 +190,26 @@ func (s boundedStore) EditPlan(ctx context.Context, number core.PlanNumber, edit
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Plan, error) { return st.EditPlan(ctx, number, edit) })
 }
 
+func (s boundedStore) StartWorkstream(ctx context.Context, w core.NewWorkstream) (core.StartedWorkstream, error) {
+	defer touched(s.tasks)
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.StartedWorkstream, error) {
+		return st.StartWorkstream(ctx, w)
+	})
+}
+
+func (s boundedStore) Workstreams(ctx context.Context, filter core.WorkstreamFilter) ([]core.Workstream, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) ([]core.Workstream, error) {
+		return st.Workstreams(ctx, filter)
+	})
+}
+
+func (s boundedStore) EditWorkstream(ctx context.Context, number core.WorkstreamNumber, edit core.WorkstreamEdit) (core.Workstream, error) {
+	defer touched(s.tasks)
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Workstream, error) {
+		return st.EditWorkstream(ctx, number, edit)
+	})
+}
+
 func (s boundedStore) DeclareBound(ctx context.Context, bound core.NewBound) (core.Bound, error) {
 	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Bound, error) { return st.DeclareBound(ctx, bound) })

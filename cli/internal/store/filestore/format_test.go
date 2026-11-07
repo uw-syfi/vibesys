@@ -3,6 +3,7 @@ package filestore_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -73,7 +75,7 @@ func file(t *testing.T, mem *fsys.MemFS, name string) []byte {
 // The files of a store, by the part of the script that makes each.
 var recordFiles = []string{
 	"state/jobs/j1.json", "state/jobs/j3.json", "state/results/j1.json", "state/plans/1.json", "state/promotions/1.json", "state/promotions/2.json",
-	"state/frontier/1.json", "state/frontier/2.json", "state/bounds/1.json", "state/bounds/2.json",
+	"state/frontier/1.json", "state/frontier/2.json", "state/bounds/1.json", "state/bounds/2.json", "state/workstreams/1.json",
 }
 
 const eventFileName = "state/runs/run-a/1.json"
@@ -191,6 +193,38 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 			rewritePlan(t, m, func(p *cliv1.Plan) { p.Transitions[1].Origin.At = nil })
 		}, []string{"state/plans/1.json"}},
 		{"a missing promotion", func(m *fsys.MemFS) { mustRemove(t, m, "state/promotions/1.json") }, []string{"state/promotions/1.json"}},
+		{"a missing workstream", func(m *fsys.MemFS) {
+			m.Put("state/workstreams/3.json", regexp.MustCompile(`"number":\s*1`).ReplaceAll(file(t, m, "state/workstreams/1.json"), []byte(`"number": 3`)))
+		}, []string{"state/workstreams/2.json", "is missing"}},
+		{"a workstream under another workstream's number", func(m *fsys.MemFS) {
+			m.Put("state/workstreams/2.json", file(t, m, "state/workstreams/1.json"))
+		}, []string{"state/workstreams/2.json"}},
+		{"a workstream whose title is not as it is stored", func(m *fsys.MemFS) {
+			rewriteWorkstream(t, m, 1, func(w *cliv1.Workstream) { w.Title = "  KV   cache layout " })
+		}, []string{"workstream 1", "white space collapsed"}},
+		{"a workstream with no title", func(m *fsys.MemFS) {
+			rewriteWorkstream(t, m, 1, func(w *cliv1.Workstream) { w.Title = "" })
+		}, []string{"state/workstreams/1.json"}},
+		{"a workstream with an unknown status", func(m *fsys.MemFS) {
+			rewriteWorkstream(t, m, 1, func(w *cliv1.Workstream) { w.Status = cliv1.WorkstreamStatus(42) })
+		}, []string{"state/workstreams/1.json"}},
+		{"a workstream with no origin time", func(m *fsys.MemFS) {
+			rewriteWorkstream(t, m, 1, func(w *cliv1.Workstream) { w.Origin.At = nil })
+		}, []string{"state/workstreams/1.json"}},
+		{"two open workstreams with one title", func(m *fsys.MemFS) {
+			second := &cliv1.WorkstreamFile{Format: 6, Workstream: &cliv1.Workstream{
+				Number: 2, Title: "kv CACHE layout", Status: cliv1.WorkstreamStatus_WORKSTREAM_STATUS_ACTIVE,
+				Origin: &cliv1.RecordOrigin{At: timestamppb.New(at(40))}, UpdatedAt: timestamppb.New(at(40)),
+			}}
+			data, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.Put("state/workstreams/2.json", data)
+		}, []string{"workstreams 1 and 2", "kv CACHE layout"}},
+		{"a plan in a workstream that does not exist", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Workstream = 7 })
+		}, []string{"plan 1", "workstream 7"}},
 		{"a missing bound", func(m *fsys.MemFS) { mustRemove(t, m, "state/bounds/1.json") }, []string{"state/bounds/1.json"}},
 		{"a bound under another bound's place", func(m *fsys.MemFS) { m.Put("state/bounds/2.json", file(t, m, "state/bounds/1.json")) }, []string{"state/bounds/2.json"}},
 		{"a bound that is not well formed", func(m *fsys.MemFS) {
@@ -233,6 +267,22 @@ func rewritePlan(t *testing.T, m *fsys.MemFS, mutate func(*cliv1.Plan)) {
 		t.Fatal(err)
 	}
 	mutate(record.Plan)
+	data, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Put(name, data)
+}
+
+// rewriteWorkstream changes the message of a workstream's file and writes it back as the program does.
+func rewriteWorkstream(t *testing.T, m *fsys.MemFS, n int, mutate func(*cliv1.Workstream)) {
+	t.Helper()
+	name := fmt.Sprintf("state/workstreams/%d.json", n)
+	var record cliv1.WorkstreamFile
+	if err := protojson.Unmarshal(file(t, m, name), &record); err != nil {
+		t.Fatal(err)
+	}
+	mutate(record.Workstream)
 	data, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(&record)
 	if err != nil {
 		t.Fatal(err)
@@ -489,6 +539,38 @@ func TestThePlanFileIsPinned(t *testing.T) {
 	}
 }
 
+// The workstream file says what the agent stated, who started it and when it last changed.
+func TestTheWorkstreamFileIsPinned(t *testing.T) {
+	mem := fsys.NewMemFS()
+	s := openOn(t, mem)
+	for _, o := range script() {
+		if o.name == "start a workstream" || o.name == "pause the workstream" {
+			if err := o.run(t.Context(), s); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	const want = `{
+  "format": 6,
+  "workstream": {
+    "number": 1,
+    "title": "KV cache layout",
+    "status": "WORKSTREAM_STATUS_PAUSED",
+    "note": "paused: accuracy gate",
+    "origin": {
+      "run_id": "run-a",
+      "agent": "lead",
+      "at": "2026-11-01T00:00:32Z"
+    },
+    "updated_at": "2026-11-01T00:00:34Z"
+  }
+}
+`
+	if got := unspaced(file(t, mem, "state/workstreams/1.json")); got != unspaced([]byte(want)) {
+		t.Errorf("workstream file =\n%s\nwant\n%s", got, unspaced([]byte(want)))
+	}
+}
+
 // The bound file is protojson of BoundFile with the proto field names, and says who declared the
 // bound and when.
 func TestTheBoundFileIsPinned(t *testing.T) {
@@ -552,6 +634,7 @@ func TestLayoutOfAFinishedScript(t *testing.T) {
 		"state/promotions/1.json", "state/promotions/2.json",
 		"state/results/j1.json",
 		"state/runs/run-a/1.json", "state/runs/run-a/2.json", "state/runs/run-b/1.json",
+		"state/workstreams/1.json",
 	}
 	if got := slices.Sorted(maps.Keys(populated(t).Files())); !slices.Equal(got, want) {
 		t.Errorf("files =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

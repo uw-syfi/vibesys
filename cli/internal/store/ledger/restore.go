@@ -11,13 +11,18 @@ import (
 )
 
 // Restore rebuilds a Ledger from durable state, and fails with FailureInternal when the state
-// breaks an invariant a store keeps: job ids and plan numbers are consecutive from 1, a result
-// belongs to a job that succeeded and names it and a job that names a result has it, a plan link
-// names a plan that exists, the frontier names each member once, and only a job has a log. A value that no store would hold is refused
-// too, so a record edited by hand cannot get past what Submit would have refused.
+// breaks an invariant a store keeps: job ids, plan numbers and workstream numbers are consecutive
+// from 1, a result belongs to a job that succeeded and names it and a job that names a result has it,
+// a plan link names a plan that exists, a plan's workstream exists, a plan's history is consistent
+// (core.Plan.CheckHistory), no two workstreams that are not closed have one title, the frontier names
+// each member once, and only a job has a log. A value that no store would hold is refused too, so a
+// record edited by hand cannot get past what Submit would have refused.
 func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
 	l := New(rules)
 	if err := l.restoreJobs(snap.Jobs); err != nil {
+		return nil, err
+	}
+	if err := l.restoreWorkstreams(snap.Workstreams); err != nil {
 		return nil, err
 	}
 	if err := l.restorePlans(snap.Plans); err != nil {
@@ -86,6 +91,30 @@ func (l *Ledger) restoreBounds(bounds []core.Bound) error {
 	return nil
 }
 
+// restoreWorkstreams takes the task's workstreams, whose numbers are consecutive from 1 and whose
+// every entry is well formed, and of which no two that are not closed have the same title, so a
+// record edited by hand cannot get past what StartWorkstream and EditWorkstream would have refused.
+func (l *Ledger) restoreWorkstreams(workstreams []core.Workstream) error {
+	ordered := slices.SortedFunc(slices.Values(workstreams), func(a, b core.Workstream) int { return cmp.Compare(a.Number, b.Number) })
+	for i, w := range ordered {
+		if w.Number != core.WorkstreamNumber(i+1) {
+			return internal("workstream numbers are not consecutive: workstream %d is missing", i+1)
+		}
+		held, err := Hold(fmt.Sprintf("workstream %d", w.Number), w)
+		if err != nil {
+			return err
+		}
+		if err := held.Check(); err != nil {
+			return internal("workstream %d: %v", held.Number, err)
+		}
+		l.workstreams = append(l.workstreams, held)
+	}
+	if err := core.CheckWorkstreamTitles(l.workstreams); err != nil {
+		return internal("%v", err)
+	}
+	return nil
+}
+
 func (l *Ledger) restoreJobs(jobs []core.Job) error {
 	numbered := make([]uint64, len(jobs))
 	order := make([]int, len(jobs))
@@ -141,6 +170,9 @@ func (l *Ledger) restorePlans(plans []core.Plan) error {
 		}
 		if err := held.CheckHistory(); err != nil {
 			return internal("plan %d: %v", held.Number, err)
+		}
+		if held.Workstream != 0 && !l.hasWorkstream(held.Workstream) {
+			return internal("plan %d belongs to workstream %d, which does not exist", held.Number, held.Workstream)
 		}
 		l.plans = append(l.plans, held)
 	}

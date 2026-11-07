@@ -1,5 +1,5 @@
 // Package store declares Store, the logical interface to everything vibesys-cli keeps: job
-// state, results, events, job logs, plans, promotions and the frontier.
+// state, results, events, job logs, plans, workstreams, promotions and the frontier.
 //
 // A Store has no paths and no formats. Only internal/store/filestore knows the physical layout,
 // and internal/store/memstore is an in-memory implementation for tests. Both pass the one
@@ -41,12 +41,13 @@ import (
 // Values come back as copies: changing one never changes the store.
 // TaskSnapshot is a single store revision. Its values are independent copies.
 type TaskSnapshot struct {
-	Revision   uint64
-	Jobs       []core.Job
-	Results    []core.Result
-	Promotions []core.Promotion
-	Plans      []core.Plan
-	Bounds     []core.Bound
+	Revision    uint64
+	Jobs        []core.Job
+	Results     []core.Result
+	Promotions  []core.Promotion
+	Plans       []core.Plan
+	Workstreams []core.Workstream
+	Bounds      []core.Bound
 }
 
 type Store interface {
@@ -55,6 +56,7 @@ type Store interface {
 	ResultStore
 	FrontierStore
 	PlanStore
+	WorkstreamStore
 	BoundStore
 	EventStore
 	LogStore
@@ -130,6 +132,26 @@ type PlanStore interface {
 
 	// EditPlan applies an edit, including a status change and a comment, as one change.
 	EditPlan(ctx context.Context, number core.PlanNumber, edit core.PlanEdit) (core.Plan, error)
+}
+
+// WorkstreamStore holds workstreams, the lines of work plans join.
+type WorkstreamStore interface {
+	// StartWorkstream stores a workstream with the next number, active, and returns it, unless a
+	// workstream that is not closed has the same title (core.Workstream.Named), in which case that one
+	// is returned and nothing changes. Which of the two happened is the answer's Created, decided with
+	// the store as it is when the call runs, so calls that start the same title at once make one
+	// workstream. A workstream with no origin time, or a title that is not in its stored form
+	// (core.NormalizeWorkstreamTitle), is refused as invalid input.
+	StartWorkstream(ctx context.Context, workstream core.NewWorkstream) (core.StartedWorkstream, error)
+
+	// Workstreams returns the workstreams matching the filter, by number.
+	Workstreams(ctx context.Context, filter core.WorkstreamFilter) ([]core.Workstream, error)
+
+	// EditWorkstream applies an edit as one change. An edit that changes nothing changes nothing,
+	// the update time included. It fails with FailureNotFound for a workstream that does not exist,
+	// and with FailureConflict when it would leave two workstreams that are not closed with the same
+	// title.
+	EditWorkstream(ctx context.Context, number core.WorkstreamNumber, edit core.WorkstreamEdit) (core.Workstream, error)
 }
 
 // BoundStore holds the log of declared performance bounds. It is append-only: a bound is never

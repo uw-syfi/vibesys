@@ -55,6 +55,9 @@ func (b *backend) Recover() (ledger.Snapshot, error) {
 	if snap.Plans, err = b.loadPlans(); err != nil {
 		return snap, err
 	}
+	if snap.Workstreams, err = b.loadWorkstreams(); err != nil {
+		return snap, err
+	}
 	if snap.Promotions, err = b.loadPromotions(); err != nil {
 		return snap, err
 	}
@@ -213,6 +216,35 @@ func (b *backend) loadPlans() ([]core.Plan, error) {
 		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+// loadWorkstreams reads the task's workstreams, numbered from 1 with no gap. Open makes the
+// directory in a store of format 6, so a store without it is damaged and is refused.
+func (b *backend) loadWorkstreams() ([]core.Workstream, error) {
+	files, err := b.recordFiles(path.Join(b.root, workstreamsDir))
+	if err != nil {
+		return nil, err
+	}
+	workstreams := make([]core.Workstream, 0, len(files))
+	for n := core.WorkstreamNumber(1); int(n) <= len(files); n++ {
+		name, ok := files[uint64(n)]
+		if !ok {
+			return nil, corrupt(workstreamPath(b.root, n), "it is missing, and later workstreams are there")
+		}
+		var file cliv1.WorkstreamFile
+		if err := b.readRecord(name, &file); err != nil {
+			return nil, err
+		}
+		w, err := wire.ToWorkstream("workstream", file.GetWorkstream())
+		if err != nil {
+			return nil, corrupt(name, "%v", err)
+		}
+		if w.Number != n {
+			return nil, corrupt(name, "it holds workstream %d", w.Number)
+		}
+		workstreams = append(workstreams, w)
+	}
+	return workstreams, nil
 }
 
 func (b *backend) loadPromotions() ([]core.Promotion, error) {
