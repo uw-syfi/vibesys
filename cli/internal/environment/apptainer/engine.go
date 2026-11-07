@@ -181,6 +181,7 @@ type box struct {
 	owner  bool   // the allocation is its own, or claimed for it
 	pool   string // the name of the reusable allocation claimed for it, when it is one
 	spec   docker.ContainerSpec
+	env    map[string]string // what its processes get: the image's environment, then the spec's
 	sif    string
 	hold   io.Closer
 	gone   bool // removed or closed: its processes end with it
@@ -430,6 +431,14 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		e.forget(b)
 		return nil, err
 	}
+	imageEnv, err := e.cfg.Export.Env(ctx, spec.Image)
+	if err != nil {
+		e.forget(b)
+		return nil, fmt.Errorf("reading the environment of the image %s: %w", spec.Image, err)
+	}
+	e.mu.Lock()
+	b.env = BoxEnv(imageEnv, spec.Env)
+	e.mu.Unlock()
 	log := spec.Log
 	if log == nil {
 		log = io.Discard
@@ -930,6 +939,22 @@ func Size(n int64) string {
 	return fmt.Sprintf("%d bytes", n)
 }
 
+// BoxEnv is the environment a box's processes get: the image's (KEY=VALUE each, as
+// Exporter.Env gives it), over which own is set. A runtime that starts a process in an image
+// does not promise the image's variables to it: under Pyxis the step inherits the login node's
+// PATH, so a tool the image's PATH names (Go under /usr/local/go/bin) was not found. The box
+// names every variable instead, as a container of the docker environment has them.
+func BoxEnv(image []string, own map[string]string) map[string]string {
+	env := make(map[string]string, len(image)+len(own))
+	for _, kv := range image {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			env[k] = v
+		}
+	}
+	maps.Copy(env, own)
+	return env
+}
+
 // handle is a started container, and a docker.Container.
 type handle struct {
 	e    *Engine
@@ -950,7 +975,7 @@ func (h *handle) boxOf() Box {
 	defer h.e.mu.Unlock()
 	return Box{
 		Name: h.b.name, Image: h.b.sif, Dir: h.b.spec.Dir, Mounts: slices.Clone(h.b.spec.Mounts),
-		Env: maps.Clone(h.b.spec.Env), ROCm: h.b.spec.GPUs.ROCm,
+		Env: maps.Clone(h.b.env), ROCm: h.b.spec.GPUs.ROCm,
 	}
 }
 

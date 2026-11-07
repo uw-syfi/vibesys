@@ -142,3 +142,39 @@ func TestRealDockerTaskIsRefusedClearlyWhenDockerIsNotThere(t *testing.T) {
 		t.Fatalf("submit check without docker = %+v, want a failure that names docker", r)
 	}
 }
+
+// A check runs in the task's image as a command run by hand in it does: with the image's own PATH
+// and ENV, to which the job's variables are added.
+func TestRealDockerTaskCheckSeesTheImagesPathAndEnvironment(t *testing.T) {
+	m := newMachine(t)
+	m.git("init", "-q", "-b", "main")
+	dir := task.TasksDir + "/bench/"
+	m.write(dir+task.ManifestName, `
+version = "0.1"
+backends = ["cpu"]
+
+[accuracy]
+command = ['sh', '-c', 'command -v tool && test "$FROM_IMAGE" = kept && case "$PATH" in /opt/tool/bin:*) ;; *) exit 3;; esac && echo "$VIBESYS_ARTIFACTS_DIR"']
+timeout_seconds = 60
+
+[benchmark]
+command = ['sh', '-c', 'printf "{\"ops\": 1}" > "$2"', 'sh']
+timeout_seconds = 60
+
+[benchmark.result]
+json_argument = "--out"
+metric = "ops"
+`, 0o644)
+	m.write(dir+task.ObjectiveName, "[[objective]]\nname = \"ops\"\ndirection = \"max\"\n", 0o644)
+	m.write(dir+"Dockerfile", "FROM "+pinned+"\n"+
+		"RUN mkdir -p /opt/tool/bin && printf '#!/bin/sh\\necho found\\n' > /opt/tool/bin/tool && chmod 755 /opt/tool/bin/tool\n"+
+		"ENV PATH=/opt/tool/bin:${PATH}\nENV FROM_IMAGE=kept\n", 0o644)
+	m.git("add", "-A")
+	m.git("commit", "-q", "-m", "task")
+
+	r := m.cli("submit", "check", "HEAD", "--wait")
+	logs := m.cli("logs", jobOf(t, r))
+	if r.code != exitOK || !strings.Contains(r.stdout, "succeeded") {
+		t.Fatalf("submit check = %+v; logs %q", r, logs.stdout)
+	}
+}
