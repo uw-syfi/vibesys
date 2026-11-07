@@ -96,7 +96,7 @@ function ReportBlock(props: {readonly report: ReportWords}): JSX.Element {
   const {report} = props;
   return (
     <Stack gap="space-3">
-      <Text variant="heading">{report.headline}</Text>
+      <Text variant="body-strong">{report.headline}</Text>
       {report.parts.map(part => (
         <Stack key={part.label} gap="space-1">
           <Text variant="section">{part.label}</Text>
@@ -186,7 +186,7 @@ function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
       <Card section="Spend">
         <Stack gap="space-4">
           <Row gap="space-4" align="baseline" wrap>
-            <Text variant="hero" tone={tiles.spend.total === null ? 'muted' : 'default'}>
+            <Text variant="metric" tone={tiles.spend.total === null ? 'muted' : 'default'}>
               {tiles.spend.total ?? NOT_REPORTED}
             </Text>
             {tiles.spend.unpriced === null ? null : (
@@ -214,7 +214,7 @@ function Window(props: {readonly model: CatchUpModel}): JSX.Element {
   return (
     <Stack gap="space-4">
       <Stack gap="space-2">
-        <Text as="h2" variant="title">
+        <Text as="h2" variant="heading">
           {model.title}
         </Text>
         <Row gap="space-3" wrap>

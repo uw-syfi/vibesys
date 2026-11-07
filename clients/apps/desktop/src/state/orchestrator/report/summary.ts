@@ -1,9 +1,7 @@
 /**
  * The run's summary: the newest report the lead posted. The lead writes it and the host numbers it,
  * so the newest is the one with the highest number (ties by the time it was recorded, then its id),
- * whatever order the messages arrived in. A report that answered a viewer's Catch me up is for that
- * viewer's window, not the run's summary, so the host's check-ins (`report_message_id`) name the
- * reports to leave out: they are shown on the Catch me up page and nowhere else.
+ * whatever order the messages arrived in.
  */
 import {oneofIs, ReportKind} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from '../state.js';
@@ -41,25 +39,11 @@ const BODY_KINDS = {
 
 const FIELDS: readonly SummaryField[] = ['changed', 'inFlight', 'decisions', 'openForUser'];
 
-/** The reports of the run that answered a catch-up, by message id, whoever pressed it. */
-function catchUpAnswers(state: OrchestratorState, runId: string): ReadonlySet<string> {
-  return new Set(
-    Object.values(state.checkIns)
-      .filter(checkIn => checkIn.runId === runId && checkIn.reportMessageId !== '')
-      .map(checkIn => checkIn.reportMessageId),
-  );
-}
-
-/**
- * The newest report of the run that is not a catch-up's answer, or undefined before the lead has
- * posted one.
- */
+/** The newest report of the run, or undefined before the lead has posted one. */
 export function latestReport(state: OrchestratorState, runId: string): SummaryView | undefined {
   const views: SummaryView[] = [];
-  const answers = catchUpAnswers(state, runId);
   for (const message of Object.values(state.messages)) {
-    if (message.runId !== runId || answers.has(message.id)) continue;
-    if (!oneofIs(message.body, 'report', BODY_KINDS)) continue;
+    if (message.runId !== runId || !oneofIs(message.body, 'report', BODY_KINDS)) continue;
     const report = message.body.value;
     views.push({
       id: message.id,
