@@ -484,7 +484,13 @@ the resources, the stop) hold unchanged; only how a container exists differs.
   cancels the allocation when it ends, which is when the run closes it or the
   daemon dies and its ssh connection with it; the run also cancels by name and
   confirms with `squeue` then `sacct`, and a run sweeps its scope's leftovers
-  by name.
+  by name. The jobs of one placement run at once, so each job's runs are a
+  scope of their own under the placement's, which the allocation's comment
+  and the staged directories name, and a job's supervisor holds a lock of its
+  run scope while it lives (`runtimedir.Runs`): a run sweeps what its own
+  job's earlier attempts and every dead job of the placement left, and never
+  a live job's. The holder alone would not do: an allocation still queued
+  when its job died has no holder, and would hold a node until its limit.
 - A container's processes carry a variable naming it, set inside the container
   only, by which SIGTERM and SIGKILL reach every one of them; the step itself is
   not signalled, so the grace works as under Docker.
@@ -518,8 +524,9 @@ while idle, which other users of the partition pay for.
 - One claim at a time is the arbitration: no container runs in a claimed
   allocation but the claimer's own (and the one that joins it in a task of two
   images), so a measured sample still holds the whole node while it runs.
-  Nothing is leased between daemons for it, as before; `max_jobs` is 1 for
-  every remote placement.
+  Nothing is leased between daemons for it, as before. An `apptainer`
+  placement may run `max_jobs` jobs at once: the reused allocations are the
+  placement's, and a job that finds none free asks for a new one.
 - A claim kills every process of a container left in the allocation (one
   that carries `VIBESYS_BOX` and is in the job's cgroup, or carries the job's
   id) and waits for none to be left before it is held; a release does the same

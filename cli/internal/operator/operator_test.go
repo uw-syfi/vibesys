@@ -176,7 +176,7 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"an apptainer placement with srun options":  {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nsrun_arguments = [\"--qos=x\"]", 1), "submit_arguments"},
 		"an apptainer placement with NVIDIA GPUs":   {apptainerPlacement + "[placements.mi210.resources.gpu]\ndevices = \"all\"\n", "rocm"},
 		"an apptainer placement with a cluster":     {apptainerPlacement + "[placements.mi210.resources.kubernetes]\nkubeconfig = \"/k\"\n", "kubernetes"},
-		"an apptainer placement running two jobs":   {strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"apptainer\"\nmax_jobs = 2", 1), "placements.mi210.max_jobs"},
+		"a slurm placement running two jobs":        {strings.Replace(placementsConfig, "kind = \"slurm\"", "kind = \"slurm\"\nmax_jobs = 2", 1), "placements.a100.max_jobs"},
 		"an apptainer section on a slurm placement": {strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"slurm\"", 1), "[placements.mi210.apptainer]"},
 		"an unknown apptainer key":                  {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nbind = \"/x\"", 1), "placements.mi210.apptainer.bind"},
 		"an empty submit command":                   {strings.Replace(apptainerPlacement, `submit_command = ["/opt/site/bin/sbatch-wrapper"]`, `submit_command = [""]`, 1), "submit_command"},
@@ -252,6 +252,13 @@ func TestAnApptainerPlacementIsRead(t *testing.T) {
 	c, err = operator.Parse([]byte(text))
 	if a := c.GetPlacements()["mi210"].GetApptainer(); err != nil || a.GetIdleReleaseSeconds() != 1800 || a.GetAllocationLimitSeconds() != 86400 {
 		t.Errorf("the reuse of allocations: %v, %v", a, err)
+	}
+	// Each job of an apptainer placement has allocations and staged directories of its own, so it
+	// may run several at once.
+	text = strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"apptainer\"\nmax_jobs = 3", 1)
+	c, err = operator.Parse([]byte(text))
+	if err != nil || c.GetPlacements()["mi210"].GetMaxJobs() != 3 {
+		t.Errorf("three jobs at once: %v, %v", c, err)
 	}
 	text = strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"", 1)
 	c, err = operator.Parse([]byte(text))

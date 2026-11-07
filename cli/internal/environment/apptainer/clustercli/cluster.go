@@ -458,16 +458,20 @@ func (c *Cluster) Jobs(ctx context.Context, scope string) ([]apptainer.Job, erro
 }
 
 // ParseJobs reads squeue's "name|comment|id|state|time left" lines and returns this package's jobs
-// whose comment is the scope.
+// of the scope (apptainer.InScope).
 func ParseJobs(out, scope string) []apptainer.Job {
 	var jobs []apptainer.Job
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(strings.TrimSpace(line), "|")
-		if len(f) < 2 || !strings.HasPrefix(f[0], apptainer.JobPrefix) || strings.TrimSpace(f[1]) != scope {
+		if len(f) < 2 || !strings.HasPrefix(f[0], apptainer.JobPrefix) {
+			continue
+		}
+		comment := strings.TrimSpace(f[1])
+		if _, ok := apptainer.InScope(comment, scope); !ok {
 			continue
 		}
 		f = append(f, "", "", "")
-		j := apptainer.Job{Name: f[0], ID: strings.TrimSpace(f[2]), Phase: phaseOf(f[3])}
+		j := apptainer.Job{Name: f[0], Comment: comment, ID: strings.TrimSpace(f[2]), Phase: phaseOf(f[3])}
 		if j.Phase == apptainer.Running {
 			j.Left = ParseTimeLeft(f[4])
 		}

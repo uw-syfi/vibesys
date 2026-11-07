@@ -234,7 +234,7 @@ var testRules = map[string][]string{
 		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
 		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
 	},
-	"internal/environment/docker/machine": {"internal/environment/envtest"},
+	"internal/environment/docker/machine": {"internal/environment/docker/dockerfake", "internal/environment/envtest"},
 	"internal/remote":                     {"internal/environment/envtest"},
 	"internal/resource/gpu":               {"internal/resource/resourcetest"},
 	"internal/resource/rocm":              {"internal/resource/resourcetest"},

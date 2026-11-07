@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -185,4 +186,70 @@ func sameClaims(a, b map[string][]core.Claim) bool {
 		}
 	}
 	return true
+}
+
+// threeAtOnce is an operator config of one apptainer placement that runs three jobs at once, each
+// in an allocation of its own that holds a whole node.
+const threeAtOnce = `
+[placements.mi250]
+kind = "apptainer"
+max_jobs = 3
+[placements.mi250.remote]
+host = "host-a"
+remote_workspace_root = "/w"
+[placements.mi250.slurm]
+partition = "gpu"
+[placements.mi250.resources.rocm]
+`
+
+// An apptainer placement of max_jobs jobs runs that many at once, since each has an allocation of
+// its own: the scheduler starts a job beside up to max_jobs - 1 others. A measure still runs alone
+// on its placement: it waits for every other job there, and every other job waits for it.
+func TestAnApptainerPlacementRunsMaxJobsAtOnceAndAMeasureAlone(t *testing.T) {
+	op := parse(t, threeAtOnce)
+	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := schedulerOf(op, m.offers, m.claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(kind core.JobKind) []schedule.Claim {
+		spec := core.JobSpec{Environment: core.EnvironmentDocker, Placement: "mi250"}
+		if kind == core.JobMeasure {
+			spec.Settings = core.MeasureSettings{}
+		}
+		options := s.Demand.Options(core.Job{Spec: spec})
+		if len(options) != 1 {
+			t.Fatalf("a %s job may run on %+v", kind, options)
+		}
+		return options[0].Claims
+	}
+	cases := []struct {
+		running []core.JobKind
+		waits   core.JobKind
+		starts  bool
+	}{
+		{[]core.JobKind{core.JobCommand}, core.JobCommand, true},
+		{[]core.JobKind{core.JobCommand, core.JobCommand}, core.JobCommand, true},
+		{[]core.JobKind{core.JobCommand, core.JobCommand, core.JobCommand}, core.JobCommand, false},
+		{[]core.JobKind{core.JobCommand}, core.JobMeasure, false},
+		{[]core.JobKind{core.JobMeasure}, core.JobCommand, false},
+		{nil, core.JobMeasure, true},
+	}
+	for _, c := range cases {
+		state := schedule.State{
+			Resources: s.Resources,
+			Waiting:   []schedule.Candidate{{ID: "waiting", Options: []schedule.Option{{Placement: "mi250", Claims: claims(c.waits)}}}},
+		}
+		for i, kind := range c.running {
+			state.Holdings = append(state.Holdings, schedule.Holding{ID: schedule.ID("running-" + strconv.Itoa(i)), Claims: claims(kind)})
+		}
+		decisions := schedule.Step(state, schedule.Rules{Policy: s.Policy})
+		_, started := decisions[0].(schedule.Start)
+		if started != c.starts {
+			t.Errorf("a %s job waits beside %v: %+v, want started %v", c.waits, c.running, decisions[0], c.starts)
+		}
+	}
 }

@@ -62,11 +62,21 @@ const CallTimeout = 2 * time.Minute
 // the scope (staged/<scope>/<key>, holding checkout/, scratch/ and artifacts/), and one per cache
 // key (cache/<key>). Copies can take as long as the data needs; every other call is bounded by
 // CallTimeout.
+//
+// A run's staging removes the staged directories that ended jobs left. Without Runs the scope runs
+// one job at a time, so every staged checkout but the run's own is one. With Runs the scope is a
+// placement's whose jobs run at once, each in a run of its own (Run), and the checkouts are kept by
+// run (staged/<scope>/<run>/<key>): a run removes its own run's other checkouts and the directories
+// of the scope's dead runs, each while it holds it, and never a live run's.
 type Remote struct {
-	Shell  remote.SSH
-	Rsync  remote.Rsync
-	Root   string
-	Scope  string
+	Shell remote.SSH
+	Rsync remote.Rsync
+	Root  string
+	Scope string
+	// Run is the scope of this process's run, under Scope; it is used with Runs.
+	Run string
+	// Runs, when set, says which runs of the scope live.
+	Runs   docker.Runs
 	Timers clock.Timers
 	// Arch is the Go architecture of the programs Program places; empty is this build's.
 	Arch string
@@ -88,19 +98,39 @@ func (r *Remote) run(ctx context.Context, script string, args ...string) (string
 // another job's do not.
 func (r *Remote) base(checkout string) string {
 	sum := sha256.Sum256([]byte(checkout))
-	return path.Join(r.Root, "staged", r.Scope, hex.EncodeToString(sum[:8]))
+	return path.Join(r.parent(), hex.EncodeToString(sum[:8]))
 }
 
-// stageScript makes a run's directories, removes the staged directories of the scope's earlier
-// jobs (the daemon runs one job of a scope at a time, so those jobs have ended), and empties the
-// run's artifacts directory.
+// parent is the directory the run's staged checkouts are in.
+func (r *Remote) parent() string {
+	if r.Runs == nil {
+		return r.scopeDir()
+	}
+	return path.Join(r.scopeDir(), r.Run)
+}
+
+// scopeDir is the directory of the scope's staged checkouts, or of its runs' with Runs.
+func (r *Remote) scopeDir() string { return path.Join(r.Root, "staged", r.Scope) }
+
+// stageScript makes a run's directories, removes the other staged directories of its parent $2
+// (its earlier checkouts: the parent's checkouts are one job's at a time), and empties the run's
+// artifacts directory. With $4 it then prints the names of the directories of $4 other than $2's,
+// one per line: the scope's other runs.
 const stageScript = `set -eu
-base="$1"; scope="$2"; artifacts="$3"
+base="$1"; parent="$2"; artifacts="$3"; scope="${4-}"
 mkdir -p "$base/checkout" "$base/scratch" "$base/artifacts"
-for d in "$scope"/*; do
+for d in "$parent"/*; do
   if [ -d "$d" ] && [ "$d" != "$base" ]; then rm -rf "$d"; fi
 done
-if [ -n "$artifacts" ]; then rm -rf "$base/artifacts/$artifacts"; mkdir -p "$base/artifacts/$artifacts"; fi`
+if [ -n "$artifacts" ]; then rm -rf "$base/artifacts/$artifacts"; mkdir -p "$base/artifacts/$artifacts"; fi
+if [ -n "$scope" ]; then
+  for d in "$scope"/*; do
+    if [ -d "$d" ] && [ "$d" != "$parent" ]; then printf '%s\n' "${d##*/}"; fi
+  done
+fi`
+
+// removeScript removes a directory and everything in it.
+const removeScript = `rm -rf "$1"`
 
 // Stage implements docker.Machine. The checkout is copied without deleting what the commands left
 // in the staged copy, such as a build, so a job's later commands find it; the scratch directory is
@@ -111,8 +141,21 @@ func (r *Remote) Stage(ctx context.Context, d docker.Dirs) (docker.Dirs, error) 
 	if d.Artifacts != "" {
 		name = path.Base(d.Artifacts)
 	}
-	if _, err := r.run(ctx, stageScript, base, path.Join(r.Root, "staged", r.Scope), name); err != nil {
+	args := []string{base, r.parent(), name}
+	if r.Runs != nil {
+		if err := r.Runs.Hold(ctx, r.Run); err != nil {
+			return docker.Dirs{}, fmt.Errorf("marking the run %s live: %w", r.Run, err)
+		}
+		args = append(args, r.scopeDir())
+	}
+	others, err := r.run(ctx, stageScript, args...)
+	if err != nil {
 		return docker.Dirs{}, fmt.Errorf("staging the run on %s: %w", r.Shell.Where(), err)
+	}
+	if r.Runs != nil {
+		if err := r.clearDead(ctx, strings.Fields(others)); err != nil {
+			return docker.Dirs{}, err
+		}
 	}
 	out := docker.Dirs{Checkout: path.Join(base, "checkout")}
 	if err := r.Rsync.Push(ctx, d.Checkout, out.Checkout, false); err != nil {
@@ -128,6 +171,24 @@ func (r *Remote) Stage(ctx context.Context, d docker.Dirs) (docker.Dirs, error) 
 		out.Artifacts = path.Join(base, "artifacts", name)
 	}
 	return out, nil
+}
+
+// clearDead removes the staged directories of the scope's runs that are dead, each while it holds
+// the run, so that no run of it starts meanwhile. A live run's are left, and so is a directory
+// whose name is no run's.
+func (r *Remote) clearDead(ctx context.Context, runs []string) error {
+	for _, run := range runs {
+		release, dead, err := r.Runs.Claim(run)
+		if err != nil || !dead {
+			continue
+		}
+		_, err = r.run(ctx, removeScript, path.Join(r.scopeDir(), run))
+		release()
+		if err != nil {
+			return fmt.Errorf("removing what the dead run %s left on %s: %w", run, r.Shell.Where(), err)
+		}
+	}
+	return nil
 }
 
 // Collect implements docker.Machine.
