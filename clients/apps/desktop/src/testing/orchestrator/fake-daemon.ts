@@ -20,6 +20,8 @@ import {
   type GetRunHistoryResponse,
   GetRunHistoryResponseSchema,
   type Item,
+  ItemSchema,
+  ItemStatus,
   type ItemsPage,
   ItemsPageSchema,
   type Message,
@@ -44,6 +46,7 @@ import {
   type SearchState,
   SnapshotDetail,
   type StartRun,
+  type Turn,
   TurnSchema,
   TurnStatus,
   ViewerSchema,
@@ -92,8 +95,17 @@ function elided(item: Item): {readonly item: Item; readonly bytes: number | null
 
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
 
+/** The stop stages of an agent whose stop the host has started and not yet seen through. */
+const STOPPING = new Set([AgentStopStage.INTERRUPTING, AgentStopStage.CLOSING]);
+
 /** Where a message stands while it is still on its way: neither read nor rejected. */
 const IN_TRANSIT = new Set([Delivery.QUEUED, Delivery.STEERED, Delivery.NEW_TURN]);
+
+/**
+ * How many turns the host starts for one message (`MaxDeliveryAttempts` in the orchestrator's
+ * core). The host does not serve it, so the fake holds its own copy.
+ */
+const MAX_DELIVERY_ATTEMPTS = 3;
 
 /** Every kind of command, so a command is read through `oneofIs` for the one kind it is. */
 const COMMAND_KINDS = {
@@ -540,51 +552,74 @@ export class FakeDaemon {
   }
 
   /**
-   * The session of an agent being stopped closes, as the host hears once the stop reached it: a
-   * turn still running ends interrupted, the agent ends and its stop stage is cleared, and what
-   * was still on its way to it is rejected. Only a stop ends a session here, so an agent that is
-   * not being stopped is a mistake in the test.
+   * The session of an agent being stopped closes, as the host hears once the stop reached it
+   * (`sessionOver`, which ends a running turn with `endTurn`, then `rejectMail`):
+   * - a turn still running ends interrupted, and first every item still running in it fails;
+   * - the message that started that turn was not delivered, so it is rejected: as out of attempts
+   *   when the host has started as many turns for it as it ever will, else as the rest of its mail;
+   * - the agent ends and its stop stage is cleared;
+   * - what was still on its way to it is rejected, as gone while its run is live, else as the run
+   *   stopping.
+   *
+   * Only a stop ends a session here, so an agent that is not being stopped is a mistake in the test.
    */
   finishStop(agentId: string): void {
     const state = this.#state(this.#visible);
     const agent = state.agents[agentId];
-    if (
-      agent === undefined ||
-      FINAL.has(agent.status) ||
-      (agent.stopStage !== AgentStopStage.INTERRUPTING &&
-        agent.stopStage !== AgentStopStage.CLOSING)
-    )
+    if (agent === undefined || FINAL.has(agent.status) || !STOPPING.has(agent.stopStage))
       throw new Error(`the fake host is not stopping an agent ${agentId}`);
     const at = this.#now();
-    const endedAt = timestampFromMs(at);
-    for (const turn of Object.values(state.turns)) {
-      if (turn.agentId !== agentId || turn.status !== TurnStatus.RUNNING) continue;
-      this.#append(at, {
-        case: 'turn',
-        value: create(TurnSchema, {...turn, status: TurnStatus.INTERRUPTED, endedAt}),
-      });
-    }
+    const run = state.runs[agent.runId];
+    const gone =
+      run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
+        ? Rejection.AGENT_GONE
+        : Rejection.RUN_STOPPING;
+    const running = Object.values(state.turns).filter(
+      turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
+    );
+    for (const turn of running) this.#interrupt(state, turn, at, gone);
     this.#append(at, {
       case: 'agent',
       value: create(AgentSchema, {
         ...agent,
         status: AgentStatus.ENDED,
         stopStage: AgentStopStage.NONE,
-        endedAt,
+        endedAt: timestampFromMs(at),
       }),
     });
-    const run = state.runs[agent.runId];
-    const rejection =
-      run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
-        ? Rejection.AGENT_GONE
-        : Rejection.RUN_STOPPING;
-    for (const message of Object.values(state.messages)) {
-      if (message.toAgentId !== agentId || !IN_TRANSIT.has(message.delivery)) continue;
-      this.#append(at, {
-        case: 'message',
-        value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
-      });
-    }
+    const triggers = new Set(running.map(turn => turn.triggerMessageId));
+    for (const message of Object.values(state.messages))
+      if (
+        message.toAgentId === agentId &&
+        IN_TRANSIT.has(message.delivery) &&
+        !triggers.has(message.id)
+      )
+        this.reject(message.id, gone);
+  }
+
+  /**
+   * A running turn ends interrupted (`endTurn`): first every item still running in it fails, and
+   * the message that started it was not delivered, so it is rejected, as out of attempts once the
+   * host has started as many turns for it as it ever will.
+   */
+  #interrupt(state: OrchestratorState, turn: Turn, at: number, gone: Rejection): void {
+    const endedAt = timestampFromMs(at);
+    for (const item of Object.values(state.items))
+      if (item.turnId === turn.id && item.status === ItemStatus.RUNNING)
+        this.#append(at, {
+          case: 'item',
+          value: create(ItemSchema, {...item, status: ItemStatus.FAILED, at: endedAt}),
+        });
+    this.#append(at, {
+      case: 'turn',
+      value: create(TurnSchema, {...turn, status: TurnStatus.INTERRUPTED, endedAt}),
+    });
+    const trigger = state.messages[turn.triggerMessageId];
+    if (trigger !== undefined)
+      this.reject(
+        trigger.id,
+        trigger.attempts >= MAX_DELIVERY_ATTEMPTS ? Rejection.ATTEMPTS_EXHAUSTED : gone,
+      );
   }
 
   /**

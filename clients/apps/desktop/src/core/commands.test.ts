@@ -8,7 +8,12 @@ import {
   Compatibility,
   Delivery,
   DispatchRequestSchema,
+  ItemStatus,
+  MessageSchema,
   Refusal,
+  Rejection,
+  RunChangeSchema,
+  RunStatus,
   SendMessageSchema,
   StopAgentSchema,
   TurnStatus,
@@ -247,17 +252,61 @@ const stopOne = (agentId: string): Intent => ({
 
 const IN_TRANSIT = new Set([Delivery.QUEUED, Delivery.STEERED, Delivery.NEW_TURN]);
 
-/** What the fake host holds of one agent: the agent, whether it is in a turn, its mail on the way. */
+/** How many turns the host starts for one message (`MaxDeliveryAttempts` in its core). */
+const MAX_DELIVERY_ATTEMPTS = 3;
+
+/**
+ * What the fake host holds of one agent: the agent, its running turns, how many of its items are
+ * still running, and its mail on the way.
+ */
 const heldOf = (daemon: FakeDaemon, agentId: string) => {
   const whole = daemon.snapshot();
+  const running = whole.turns.filter(
+    turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
+  );
   return {
     agent: whole.agents.find(agent => agent.id === agentId),
-    turning: whole.turns.some(
-      turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
-    ),
+    turning: running.length > 0,
+    running,
+    runningItems: daemon
+      .page(agentId, Number.MAX_SAFE_INTEGER, 0)
+      .items.filter(item => item.status === ItemStatus.RUNNING).length,
     inTransit: whole.messages.filter(
       message => message.toAgentId === agentId && IN_TRANSIT.has(message.delivery),
     ).length,
+  };
+};
+
+type Scenario = ReturnType<typeof generateScenario>;
+
+/**
+ * `scenario` with the message that started each turn still running held as the host holds it: on
+ * its way (`NEW_TURN`), with `attempts` turns started for it.
+ */
+const withTriggersInTurn = (scenario: Scenario, attempts: number): Scenario => {
+  const whole = new FakeDaemon(scenario).snapshot();
+  const triggers = new Set(
+    whole.turns
+      .filter(turn => turn.status === TurnStatus.RUNNING)
+      .map(turn => turn.triggerMessageId),
+  );
+  const held = whole.messages.filter(message => triggers.has(message.id));
+  return {
+    ...scenario,
+    changes: [
+      ...scenario.changes,
+      ...held.map((message, at) =>
+        create(RunChangeSchema, {
+          sequence: BigInt(scenario.changes.length + at + 1),
+          runId: message.runId,
+          at: message.at,
+          body: {
+            case: 'message',
+            value: create(MessageSchema, {...message, delivery: Delivery.NEW_TURN, attempts}),
+          },
+        }),
+      ),
+    ],
   };
 };
 
@@ -294,6 +343,8 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
     subagents: between(1, 6),
     live: Schema.Boolean,
     tree: Schema.Boolean,
+    // Turns the host has started for the message behind each running turn.
+    attempts: between(1, MAX_DELIVERY_ATTEMPTS),
     // Each step stops the picked agent, or has the host hear that the picked agent's stop closed
     // its session; the last pick past the agents is an id the host never had.
     steps: Schema.Array(Schema.Struct({finish: Schema.Boolean, pick: between(0, 63)})).check(
@@ -301,16 +352,42 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
     ),
   });
 
-  /** The host hears that an agent's stop closed its session: it is over, with nothing running or owed. */
+  /**
+   * How the host rejects the message behind a turn its stop interrupted: as out of attempts once it
+   * has started as many turns for it as it ever will, else as gone while the run is live.
+   */
+  const triggerRejection = (daemon: FakeDaemon, agent: Agent, attempts: number): Rejection => {
+    if (attempts >= MAX_DELIVERY_ATTEMPTS) return Rejection.ATTEMPTS_EXHAUSTED;
+    const run = daemon.snapshot().runs.find(each => each.id === agent.runId);
+    return run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
+      ? Rejection.AGENT_GONE
+      : Rejection.RUN_STOPPING;
+  };
+
+  /**
+   * The host hears that an agent's stop closed its session: it is over, with nothing running or
+   * owed, and the message behind each interrupted turn is rejected as the host rejects it.
+   */
   const finishChecked = (daemon: FakeDaemon, agentId: string): void => {
-    const {agent} = heldOf(daemon, agentId);
+    const {agent, running} = heldOf(daemon, agentId);
     if (agent === undefined || FINAL.has(agent.status) || !beingStopped(agent)) return;
+    const before = daemon.snapshot().messages;
     daemon.finishStop(agentId);
     expect(heldOf(daemon, agentId)).toMatchObject({
       agent: {status: AgentStatus.ENDED, stopStage: AgentStopStage.NONE},
       turning: false,
+      runningItems: 0,
       inTransit: 0,
     });
+    const after = daemon.snapshot().messages;
+    const triggers = before.filter(message =>
+      running.some(turn => turn.triggerMessageId === message.id),
+    );
+    for (const trigger of triggers)
+      expect(after.find(message => message.id === trigger.id)).toMatchObject({
+        delivery: Delivery.REJECTED,
+        rejection: triggerRejection(daemon, agent, trigger.attempts),
+      });
   };
 
   /**
@@ -345,12 +422,15 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const daemon = new FakeDaemon(
-            generateScenario({
-              seed: plan.seed,
-              subagents: plan.subagents,
-              live: plan.live,
-              tree: plan.tree,
-            }),
+            withTriggersInTurn(
+              generateScenario({
+                seed: plan.seed,
+                subagents: plan.subagents,
+                live: plan.live,
+                tree: plan.tree,
+              }),
+              plan.attempts,
+            ),
           );
           const h = yield* hostHarness(daemon);
           const ids = [...daemon.snapshot().agents.map(agent => agent.id), 'agent-never-held'];
@@ -364,19 +444,32 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
     {arbitrary: {runs: 25}},
   );
 
+  /** A subagent of the run in a turn with an item still running. */
+  const workingIn = (daemon: FakeDaemon): Agent => {
+    const working = daemon
+      .snapshot()
+      .agents.find(
+        agent => agent.role !== AgentRole.LEAD && heldOf(daemon, agent.id).runningItems > 0,
+      );
+    if (working === undefined) throw new Error('the scenario has no subagent with a running item');
+    return working;
+  };
+
+  /** Where the message that started `agentId`'s running turn stands. */
+  const triggerOf = (daemon: FakeDaemon, agentId: string) => {
+    const [turn] = heldOf(daemon, agentId).running;
+    return daemon.snapshot().messages.find(message => message.id === turn?.triggerMessageId);
+  };
+
   it.effect(
     'a stop interrupts a working agent, and once its session closes it is over and its mail is rejected',
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const daemon = host();
+          const daemon = new FakeDaemon(withTriggersInTurn(run, 1));
           const h = yield* hostHarness(daemon);
-          const working = daemon
-            .snapshot()
-            .agents.find(
-              agent => agent.role !== AgentRole.LEAD && heldOf(daemon, agent.id).turning,
-            );
-          if (working === undefined) throw new Error('the scenario has no subagent in a turn');
+          const working = workingIn(daemon);
+          const trigger = triggerOf(daemon, working.id);
           expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
           expect(heldOf(daemon, working.id).agent?.stopStage).toBe(AgentStopStage.INTERRUPTING);
           // A second press while the turn is being interrupted is taken and changes nothing.
@@ -385,15 +478,44 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
           expect(heldOf(daemon, working.id).agent?.stopStage).toBe(AgentStopStage.INTERRUPTING);
           expect(daemon.sequence).toBe(sequence + 1n);
           daemon.finishStop(working.id);
+          // The turn's running item fails with it, and the message that started it was not delivered.
           expect(heldOf(daemon, working.id)).toMatchObject({
             agent: {status: AgentStatus.ENDED, stopStage: AgentStopStage.NONE},
             turning: false,
+            runningItems: 0,
             inTransit: 0,
           });
+          expect(
+            daemon
+              .page(working.id, Number.MAX_SAFE_INTEGER, 0)
+              .items.filter(item => item.status === ItemStatus.FAILED),
+          ).not.toHaveLength(0);
+          expect(
+            daemon.snapshot().messages.find(message => message.id === trigger?.id),
+          ).toMatchObject({delivery: Delivery.REJECTED, rejection: Rejection.AGENT_GONE});
           expect(yield* press(h, working.id)).toMatchObject({
             _tag: 'Refused',
             receipt: {refusal: Refusal.AGENT_NOT_LIVE},
           });
+        }),
+      ),
+  );
+
+  it.effect(
+    'a message that has started as many turns as the host allows is rejected as out of attempts when its turn is stopped',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = new FakeDaemon(withTriggersInTurn(run, MAX_DELIVERY_ATTEMPTS));
+          const h = yield* hostHarness(daemon);
+          const working = workingIn(daemon);
+          const trigger = triggerOf(daemon, working.id);
+          expect(trigger).toMatchObject({attempts: MAX_DELIVERY_ATTEMPTS});
+          expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
+          daemon.finishStop(working.id);
+          expect(
+            daemon.snapshot().messages.find(message => message.id === trigger?.id),
+          ).toMatchObject({delivery: Delivery.REJECTED, rejection: Rejection.ATTEMPTS_EXHAUSTED});
         }),
       ),
   );
