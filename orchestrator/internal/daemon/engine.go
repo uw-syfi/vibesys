@@ -48,14 +48,17 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("recover the state: %w", err)
 	}
+	if d.Log == nil {
+		d.Log = slog.New(slog.DiscardHandler)
+	}
+	if state, err = nameSummaryReports(d, state); err != nil {
+		return nil, err
+	}
 	snap, err := d.Store.Snapshot()
 	if err != nil {
 		return nil, fmt.Errorf("read the last sequence: %w", err)
 	}
-	if d.Log == nil {
-		d.Log = slog.New(slog.DiscardHandler)
-	}
-	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: newReportCache()}
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: reportCache{}}
 	return e, nil
 }
 

@@ -468,9 +468,14 @@ type RunSummary struct {
 	Roles []*RoleAgents `protobuf:"bytes,5,rep,name=roles,proto3" json:"roles,omitempty"`
 	// Where the run stands on each objective, in the order of the task's metrics, then the objectives that
 	// have a declared bound and no measurement.
-	Objectives    []*ObjectiveStanding `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Objectives []*ObjectiveStanding `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
+	// The host could not serve the run's summary report: its record is missing or unreadable, or it is too
+	// large to send. `report` is absent for that reason and not because the lead posted none, and every
+	// other field of the summary is whole. The next summary of the run after the host can read it again
+	// has the report.
+	ReportUnavailable bool `protobuf:"varint,7,opt,name=report_unavailable,json=reportUnavailable,proto3" json:"report_unavailable,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RunSummary) Reset() {
@@ -543,6 +548,13 @@ func (x *RunSummary) GetObjectives() []*ObjectiveStanding {
 		return x.Objectives
 	}
 	return nil
+}
+
+func (x *RunSummary) GetReportUnavailable() bool {
+	if x != nil {
+		return x.ReportUnavailable
+	}
+	return false
 }
 
 // RoleAgents counts the agents of one type in a run.
@@ -1441,13 +1453,21 @@ type GetRunHistoryResponse struct {
 	Messages []*Message `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
 	// Pass as cursor to read the next page. Zero when this was the last.
 	NextCursor uint64 `protobuf:"varint,6,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
-	// First page only: the run has more turns than the timeline window holds, and the later ones are
-	// not here.
+	// First page only: the page does not hold all the run's turns, whether the timeline window or the
+	// page's byte budget cut them. True exactly when turns_left_out_count is not zero.
 	TurnsLeftOut bool `protobuf:"varint,7,opt,name=turns_left_out,json=turnsLeftOut,proto3" json:"turns_left_out,omitempty"`
-	// First page only: a viewer made more check-ins than the 64 held, and the older ones are not here.
+	// First page only: the page does not hold all the run's check-ins, whether a viewer made more than
+	// the 64 held or the page's byte budget cut them. True exactly when check_ins_left_out_count is not
+	// zero.
 	CheckInsLeftOut bool `protobuf:"varint,8,opt,name=check_ins_left_out,json=checkInsLeftOut,proto3" json:"check_ins_left_out,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// First page only, and each is how many the run has that this page leaves out, to fit its byte
+	// budget (and, for turns and check-ins, the host's window and the 64 per viewer): the agents, the
+	// later turns, and the older check-ins. Messages are never left out, only paged.
+	AgentsLeftOutCount   uint32 `protobuf:"varint,9,opt,name=agents_left_out_count,json=agentsLeftOutCount,proto3" json:"agents_left_out_count,omitempty"`
+	TurnsLeftOutCount    uint32 `protobuf:"varint,10,opt,name=turns_left_out_count,json=turnsLeftOutCount,proto3" json:"turns_left_out_count,omitempty"`
+	CheckInsLeftOutCount uint32 `protobuf:"varint,11,opt,name=check_ins_left_out_count,json=checkInsLeftOutCount,proto3" json:"check_ins_left_out_count,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *GetRunHistoryResponse) Reset() {
@@ -1534,6 +1554,27 @@ func (x *GetRunHistoryResponse) GetCheckInsLeftOut() bool {
 		return x.CheckInsLeftOut
 	}
 	return false
+}
+
+func (x *GetRunHistoryResponse) GetAgentsLeftOutCount() uint32 {
+	if x != nil {
+		return x.AgentsLeftOutCount
+	}
+	return 0
+}
+
+func (x *GetRunHistoryResponse) GetTurnsLeftOutCount() uint32 {
+	if x != nil {
+		return x.TurnsLeftOutCount
+	}
+	return 0
+}
+
+func (x *GetRunHistoryResponse) GetCheckInsLeftOutCount() uint32 {
+	if x != nil {
+		return x.CheckInsLeftOutCount
+	}
+	return 0
 }
 
 type WatchRunCostRequest struct {
@@ -1687,7 +1728,7 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\tcheck_ins\x18\b \x03(\v2 .vibesys.orchestrator.v1.CheckInR\bcheckIns\x12A\n" +
 	"\tsummaries\x18\t \x03(\v2#.vibesys.orchestrator.v1.RunSummaryR\tsummaries\x12\"\n" +
 	"\rruns_left_out\x18\n" +
-	" \x01(\rR\vrunsLeftOut\"\xba\x05\n" +
+	" \x01(\rR\vrunsLeftOut\"\xe9\x05\n" +
 	"\n" +
 	"RunSummary\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x128\n" +
@@ -1697,7 +1738,8 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\x05roles\x18\x05 \x03(\v2#.vibesys.orchestrator.v1.RoleAgentsB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12T\n" +
 	"\n" +
 	"objectives\x18\x06 \x03(\v2*.vibesys.orchestrator.v1.ObjectiveStandingB\b\xbaH\x05\x92\x01\x02\x10@R\n" +
-	"objectives:\xec\x02\xbaH\xe8\x02\x1a\xec\x01\n" +
+	"objectives\x12-\n" +
+	"\x12report_unavailable\x18\a \x01(\bR\x11reportUnavailable:\xec\x02\xbaH\xe8\x02\x1a\xec\x01\n" +
 	" run_summary.report_is_of_the_run\x12Rthe report is the whole-run report of this run, never one that answered a check-in\x1at!has(this.report) || (this.report.run_id == this.run_id && has(this.report.report) && this.report.report.scope != 2)\x1aw\n" +
 	" run_summary.working_within_total\x12)agents_working cannot exceed agents_total\x1a(this.agents_working <= this.agents_total\"\xe0\x01\n" +
 	"\n" +
@@ -1765,7 +1807,7 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\"N\n" +
 	"\x14GetRunHistoryRequest\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\x04R\x06cursor\"\x91\x03\n" +
+	"\x06cursor\x18\x02 \x01(\x04R\x06cursor\"\xa7\x06\n" +
 	"\x15GetRunHistoryResponse\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x126\n" +
 	"\x06agents\x18\x02 \x03(\v2\x1e.vibesys.orchestrator.v1.AgentR\x06agents\x123\n" +
@@ -1775,7 +1817,12 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\vnext_cursor\x18\x06 \x01(\x04R\n" +
 	"nextCursor\x12$\n" +
 	"\x0eturns_left_out\x18\a \x01(\bR\fturnsLeftOut\x12+\n" +
-	"\x12check_ins_left_out\x18\b \x01(\bR\x0fcheckInsLeftOut\"5\n" +
+	"\x12check_ins_left_out\x18\b \x01(\bR\x0fcheckInsLeftOut\x121\n" +
+	"\x15agents_left_out_count\x18\t \x01(\rR\x12agentsLeftOutCount\x12/\n" +
+	"\x14turns_left_out_count\x18\n" +
+	" \x01(\rR\x11turnsLeftOutCount\x126\n" +
+	"\x18check_ins_left_out_count\x18\v \x01(\rR\x14checkInsLeftOutCount:\xf7\x01\xbaH\xf3\x01\x1a\xf0\x01\n" +
+	"\x1frun_history.flags_follow_counts\x12Sturns_left_out and check_ins_left_out say exactly whether their counts are not zero\x1axthis.turns_left_out == (this.turns_left_out_count > 0) && this.check_ins_left_out == (this.check_ins_left_out_count > 0)\"5\n" +
 	"\x13WatchRunCostRequest\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"T\n" +
 	"\x14WatchRunCostResponse\x12<\n" +
@@ -1794,7 +1841,7 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\rGetRunHistory\x12-.vibesys.orchestrator.v1.GetRunHistoryRequest\x1a..vibesys.orchestrator.v1.GetRunHistoryResponse\x12m\n" +
 	"\fWatchRunCost\x12,.vibesys.orchestrator.v1.WatchRunCostRequest\x1a-.vibesys.orchestrator.v1.WatchRunCostResponse0\x01:I\n" +
 	"\x10protocol_version\x12\x1c.google.protobuf.FileOptions\x18\xbe\x87\x03 \x01(\rR\x0fprotocolVersion:P\n" +
-	"\x14min_protocol_version\x12\x1c.google.protobuf.FileOptions\x18\xbf\x87\x03 \x01(\rR\x12minProtocolVersionB\\\xf0\xbb\x18\x01\xf8\xbb\x18\x01ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x14min_protocol_version\x12\x1c.google.protobuf.FileOptions\x18\xbf\x87\x03 \x01(\rR\x12minProtocolVersionB\\\xf0\xbb\x18\x02\xf8\xbb\x18\x02ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_service_proto_rawDescOnce sync.Once

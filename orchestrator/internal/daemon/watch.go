@@ -34,7 +34,9 @@ type watch[R any] struct {
 	change   func(*pb.RunChange) (R, bool)
 	delta    func(*pb.Delta) (R, bool)
 	latest   func(*pb.SearchState) (R, bool)
-	current  func(core.State) []R
+	// current is what a client is owed after a snapshot or a replay, from the state at that instant, and
+	// says whether it was too much for one burst, so that only a prefix of it is returned.
+	current func(core.State) (frames []R, tooMany bool)
 	// settle, when set, is called at the end of every Poll with the sequence the stream is current to,
 	// and returns what the events of the batch and the time since have added up to. A stream whose
 	// frames are whole views uses it to send one view for a batch of events, not one for each.
@@ -93,8 +95,19 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 	// A run-limited read skips the sequences of other runs, so the cursor may stop short of target.
 	w.sent = max(w.sent, target)
 	if w.current != nil {
-		if err := w.e.Cut(func(state core.State, _ uint64) error { first = append(first, w.current(state)...); return nil }); err != nil {
+		tooMany := false
+		if err := w.e.Cut(func(state core.State, _ uint64) error {
+			var frames []R
+			frames, tooMany = w.current(state)
+			first = append(first, frames...)
+			return nil
+		}); err != nil {
 			return nil, err
+		}
+		if tooMany {
+			// A client that resumed holds views that may be stale, and a burst that cannot refresh them all
+			// would leave some of them so: a snapshot says what it left out.
+			return w.resync()
 		}
 	}
 	return w.checked(first)
@@ -108,7 +121,10 @@ func (w *watch[R]) snapshotLocked(state core.State, last uint64, out *[]R) error
 	w.sent = last
 	*out = append(*out, snap)
 	if w.current != nil {
-		*out = append(*out, w.current(state)...)
+		// Of a snapshot's follow-ups, the runs that do not fit the burst are sent what they send when
+		// they next change.
+		frames, _ := w.current(state)
+		*out = append(*out, frames...)
 	}
 	return nil
 }

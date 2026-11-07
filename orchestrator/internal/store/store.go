@@ -179,6 +179,8 @@ type TurnWindow struct {
 	Turns []core.Turn
 	// Truncated says there were more than the limit, and the latest are missing.
 	Truncated bool
+	// LeftOut is how many turns overlap the window beyond those returned: zero unless Truncated.
+	LeftOut int
 }
 
 // OutboxID names one queued effect in the outbox. It is the store's, not the effect's: a repeated
