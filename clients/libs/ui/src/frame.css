@@ -1347,15 +1347,15 @@ button.vs-crumb:focus-visible {
   height: calc(var(--space-8) * 2);
   border-bottom: var(--hairline) solid var(--line);
 }
-/* A bar never grows wider than a bar: few bars make a short plot (and the labels under it as short),
-   not a few slabs the width of the card. */
+/* A bar never grows wider than a bar: few bars make a short plot, not a few slabs the width of the
+   card. No fallback count: the stacked area shares the axis row, counts no bars and is not capped. */
 .vs-bars {
   --bar-max: calc(var(--space-8) + var(--space-5));
 }
 .vs-bars-plot,
 .vs-bars-marks,
 .vs-bars-axis {
-  max-width: calc(var(--bars-count, 1) * (var(--bar-max) + var(--space-1)));
+  max-width: calc(var(--bars-count) * (var(--bar-max) + var(--space-1)));
 }
 .vs-bars-bar {
   display: flex;
