@@ -1,9 +1,12 @@
 /**
  * One run's cost stream: the whole cost view the host works out, then a whole view again each time it
- * changes, while a screen watches it. The client sums nothing: the view is stored as it arrives
- * (`applyCost`) and read from `HostModel.data.costs`. A stream always starts with a view, so a reopen
- * has no cursor to resume from.
+ * changes, while a screen watches it. The client sums nothing: each message is read into a view
+ * (`readCost`), which is stored as it arrives (`applyCost`) and read from `HostModel.data.costs`. A
+ * message that lacks a field the contract requires fails the stream with the field named, and the
+ * screen shows that beside its status. A stream always starts with a view, so a reopen has no cursor
+ * to resume from.
  */
+import {RunCostSchema, type WatchRunCostResponse} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
@@ -15,7 +18,9 @@ import {
   type Freshness,
   freshnessOf,
   type HostFrame,
+  readCost,
 } from '../state/index.js';
+import {InvalidMessage} from './errors.js';
 import {type FeedSpec, runFeed} from './feeds.js';
 import type {HostParts} from './host-store.js';
 import {makeRetryGate, type RetryGate} from './retry-gate.js';
@@ -33,9 +38,19 @@ type Statuses = Readonly<Record<string, FeedStatus>>;
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
 
+/** A frame of the view the message carries, or the failure that names what it lacks. */
+function costFrame(response: WatchRunCostResponse): Effect.Effect<HostFrame, InvalidMessage> {
+  const invalid = (detail: string) =>
+    Effect.fail(new InvalidMessage({direction: 'response', type: RunCostSchema.typeName, detail}));
+  if (response.cost === undefined) return invalid('cost is absent');
+  const read = readCost(response.cost);
+  return read._tag === 'Missing'
+    ? invalid(`${read.field} is absent`)
+    : Effect.succeed({from: 'cost', view: read.view});
+}
+
 const costSpec = ({client}: HostParts, runId: string): FeedSpec<HostFrame> => ({
-  open: () =>
-    client.watchRunCost({runId}).pipe(Stream.map(response => ({from: 'cost', response}) as const)),
+  open: () => client.watchRunCost({runId}).pipe(Stream.mapEffect(costFrame)),
   apply: applyHostFrame,
   gapped: () => false,
 });

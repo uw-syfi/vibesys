@@ -16,13 +16,15 @@ import type {JSX, ReactNode} from 'react';
 import {
   agentTree,
   type CommandProgress,
+  type CostFeedSnapshot,
   flattenTree,
   type OrchestratorState,
   type RunView,
 } from '../../state/index.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
+import {CostScreen} from '../cost/index.js';
 import {CommandLine} from './command-line.js';
-import {CostView} from './cost-view.js';
+import {COST_WORDS} from './cost-words.js';
 import {HandoffCards} from './handoff-cards.js';
 import {agentNames} from './names.js';
 import {SearchPanels} from './search-panels.js';
@@ -76,6 +78,9 @@ export function RunScreen(props: {
   readonly runId: string;
   readonly nowMs: number;
   readonly view: RunView;
+  /** How the run's cost stream is going; it is only open while the Cost view is showing. */
+  readonly costFeed: CostFeedSnapshot;
+  readonly retryCost: () => void;
   readonly agentId: string | null;
   readonly agentPanel: ReactNode;
   /** What the last press of Stop came to, or undefined before any. */
@@ -112,7 +117,14 @@ export function RunScreen(props: {
         open={props.pick}
       />
     ) : props.view === 'cost' ? (
-      <CostView state={props.state} runId={props.runId} />
+      <CostScreen
+        view={props.state.costs[props.runId]}
+        freshness={props.costFeed.freshness}
+        status={props.costFeed.status}
+        runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
+        words={COST_WORDS}
+        retry={props.retryCost}
+      />
     ) : (
       <HandoffCards state={props.state} runId={props.runId} />
     );

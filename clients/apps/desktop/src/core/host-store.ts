@@ -1,4 +1,4 @@
-/** The one store both streams fold into, and what every view needs to build on it. */
+/** The one store the streams fold into, and what every view needs to build on it. */
 import type * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Atom from 'effect/reactivity/Atom';
