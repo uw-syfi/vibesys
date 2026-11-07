@@ -35,6 +35,8 @@ type startArgs struct {
 	// maxTime and maxCost are the run's limits, zero for none.
 	maxTime time.Duration
 	maxCost float64
+	// summaryEvery is how often the lead is asked for a progress report, zero for the host's default.
+	summaryEvery time.Duration
 	// allow is the --allow-agent values, each harness or harness:model.
 	allow []string
 }
@@ -66,6 +68,14 @@ func parseStart(args []string) (startArgs, error) {
 			return fmt.Errorf("%q is not a positive number of dollars such as 5", v)
 		}
 		a.maxCost = c
+		return nil
+	})
+	fs.Func("summary-every", "how often the lead is asked for a progress report while work moves, such as 30m (default: 1h; at least 5m)", func(v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("%q is not a positive duration such as 30m", v)
+		}
+		a.summaryEvery = d
 		return nil
 	})
 	fs.UintVar(&a.fanout, "fanout", 4, "how many subagents may be live at once")
@@ -106,6 +116,9 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 	if a.maxCost > 0 {
 		cost := a.maxCost
 		start.MaxCostUsd = &cost
+	}
+	if a.summaryEvery > 0 {
+		start.SummaryEvery = durationpb.New(a.summaryEvery)
 	}
 	return &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: start}}, nil
 }

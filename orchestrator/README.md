@@ -218,7 +218,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 `vibesys-host serve --root ROOT` when none serves.
 
 ```sh
-vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
+vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--summary-every DURATION] [--detach] [--json]
 vibesys-client run list                       # runs, newest first; starts that never ran are hidden, `--all` shows them
 vibesys-client run attach [RUN] [--agent AGENT] [--full-history]  # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
@@ -277,6 +277,31 @@ stalled: it is not reminded, and `run get` says so. A question put to it, which 
 work, so it stays finished. A wait for a report on a stalled run goes on to its timeout, which names the stall;
 one on a finished lead (`--after N` with N its final report) goes on to its timeout too, and the timeout says
 the lead's report is final, so the answer is in its reply (`run attach`).
+
+The orchestrator also asks the lead for a progress report about once an hour, so that a client can show a
+summary of the run with its age (the time of the latest report). `--summary-every 30m` sets the interval:
+at least five minutes, an hour when none is given, and a start that gives `0` is refused, so a run that wants
+fewer reports names a longer interval. The schedule is three fields of the run, folded from events like the
+rest (`summary_every` and `next_summary_at` are in `Run`, the time it is counted from is kept in the store):
+
+- work moves when a message about work reaches the run: an agent started, a handoff, a job's end, or an
+  agent that stopped without a handoff. A job starting, the operator speaking, the lead's own turns and the
+  orchestrator's reminders do not move it;
+- the first movement since the lead last reported or was last asked sets `next_summary_at` to the interval
+  after that report or request, or to that moment if it has passed, and arms `TimerSummaryDue` for it. A run
+  where nothing moved is never asked, so a client shows how old its latest report is, however old;
+- when that timer fires for the time the run still holds, the lead gets one `ReportDue` message (a template
+  words it; the turn it starts is a `schedule` turn) and answers with `post_report`, kind `progress`. A
+  request the lead has not read yet is not repeated: the movement since counts as asked;
+- a report the lead posts on its own, of either kind, restarts the interval from its time and cancels the
+  request that was waiting, so the timer armed for it fires for nothing. A run that is stopping, has reached
+  a limit, or whose lead has given a final report (until it starts new work) is not asked. A run recorded
+  before the schedule existed has no interval and is never asked.
+
+A request is a message like those the lead gets for a finished job: it steers into a turn that is running,
+or waits for the next one, and no fan-out limit or busy lead turns it away. The simulation holds every one
+of these rules against its own account of the schedule over random interleavings of timers, restarts,
+reports and stops.
 
 `vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the
 orchestrator, and `vibesys-client host` is its client. It never starts a host to ask a question:
