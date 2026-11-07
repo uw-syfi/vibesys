@@ -12,9 +12,29 @@ import (
 // MaxWatchFrameBytes is the receive limit used on the orchestrator link.
 const MaxWatchFrameBytes = 4 << 20
 
+// MaxSnapshotCheckIns is how many of a viewer's check-ins in one run a snapshot holds, the newest. A
+// viewer presses Catch me up now and then, so the cut is for a viewer who pressed it very many times.
+const MaxSnapshotCheckIns = 64
+
 // MaxSnapshotBytes leaves room for the response wrapper below the receive limit.
 // Historical run bundles are optional; omitted search views follow separately.
 const MaxSnapshotBytes = 1 << 20
+
+// newestCheckIns keeps, of a run's check-ins in the order they were made, the newest MaxSnapshotCheckIns
+// of each viewer, and says whether any was left out.
+func newestCheckIns(all []core.CheckIn) (kept []core.CheckIn, cut bool) {
+	seen := map[core.ViewerID]int{}
+	for i := len(all) - 1; i >= 0; i-- {
+		viewer := all[i].Viewer.ID
+		if seen[viewer]++; seen[viewer] > MaxSnapshotCheckIns {
+			cut = true
+			continue
+		}
+		kept = append(kept, all[i])
+	}
+	slices.Reverse(kept)
+	return kept, cut
+}
 
 func (s *Service) runsSnapshot(state core.State, last uint64, run core.RunID, scoped bool, seen map[string]uint64) (*pb.WatchRunsResponse, error) {
 	clear(seen)
@@ -51,6 +71,11 @@ func (s *Service) runsSnapshot(state core.State, last uint64, run core.RunID, sc
 		if err := s.addHistory(bundle, r.ID); err != nil {
 			return nil, err
 		}
+		checkIns, cut := newestCheckIns(state.CheckIns(r.ID))
+		for _, c := range checkIns {
+			bundle.CheckIns = append(bundle.CheckIns, wire.CheckInMessage(c))
+		}
+		snap.Truncated = snap.Truncated || cut
 		if used+proto.Size(bundle) > MaxSnapshotBytes-2 {
 			bundle.Searches = nil
 			snap.Truncated = true
@@ -82,6 +107,7 @@ func (s *Service) runsSnapshot(state core.State, last uint64, run core.RunID, sc
 		snap.Turns = append(snap.Turns, bundle.Turns...)
 		snap.Messages = append(snap.Messages, bundle.Messages...)
 		snap.Searches = append(snap.Searches, bundle.Searches...)
+		snap.CheckIns = append(snap.CheckIns, bundle.CheckIns...)
 		for _, search := range bundle.Searches {
 			seen[search.RunId] = search.Revision
 		}
