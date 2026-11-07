@@ -201,8 +201,9 @@ steering note may state another share, which you give to `--under`.
 
 There are two kinds. A progress report goes to the user after a promotion, and at least every
 hour unless the user names another schedule; not after each job or each agent. It does not say
-the work is done. The final report ends the work, once, as [Finish](#finish) says or when you
-cannot go on, and its headline says which. Where the harness has a scheduler, set the hourly
+the work is done. The final report ends the work, once, as [Finish](#finish) says or only when
+an external factor you cannot fix stops all progress (no disk space, no quota, a host that is
+gone), and its headline says which, naming the cause. Where the harness has a scheduler, set the hourly
 report with it at the start and on every resume (the harness file, "Schedule periodic work");
 with none, report when a task finishes. How to write a report:
 [report-progress](../report-progress/SKILL.md). To attach charts of progress to a report, use

@@ -635,7 +635,7 @@ message ProfilerHandoff {
 message Report {
   option (mcp_tool) = {
     name: "post_report"
-    description: "Send the operator a report. Use kind progress for a note along the way and kind final once, when you have finished what you were asked to do or cannot go on."
+    description: "Send the operator a report. Decide every open question yourself and record each decision under decisions. Use kind progress for a note along the way. Use kind final once, when the work is finished, or only when an external factor you cannot fix stops all progress, such as no disk space, no quota or a host that is gone; then name the cause in the headline."
   };
 
   string headline = 1 [
@@ -644,8 +644,11 @@ message Report {
   ];
   string changed = 2 [(tool_field_doc) = "What changed since the last report."];
   string in_flight = 3 [(tool_field_doc) = "What is running now."];
-  string decisions = 4 [(tool_field_doc) = "What you decided on your own."];
-  string open_for_user = 5 [(tool_field_doc) = "What needs the operator."];
+  string decisions = 4 [(tool_field_doc) = "What you decided on your own, including every question that was open."];
+  // The lead decides what is open and records it under decisions, so no field asks the operator.
+  // Field 5 carried a question for the operator; reserved so a stored report still parses.
+  reserved 5;
+  reserved "open_for_user";
   ReportKind kind = 6 [
     (buf.validate.field).enum = {
       defined_only: true

@@ -81,15 +81,15 @@ describe('a report as the page reads it', () => {
   it('is its headline and the parts the lead filled in, in a fixed order', () => {
     const report = create(ReportSchema, {
       headline: 'Best moved to 2.31x',
-      openForUser: 'Pick a cache size',
       changed: 'Three ideas were rejected',
-      decisions: '   ',
+      decisions: 'Kept the cache size',
+      inFlight: '   ',
     });
     expect(reportWords(report)).toEqual({
       headline: 'Best moved to 2.31x',
       parts: [
         {label: 'Changed', text: 'Three ideas were rejected'},
-        {label: 'Needs you', text: 'Pick a cache size'},
+        {label: 'Decisions', text: 'Kept the cache size'},
       ],
     });
   });

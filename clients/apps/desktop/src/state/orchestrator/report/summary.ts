@@ -9,7 +9,7 @@ import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
 
 /** The parts of a report after its headline, in the order the lead gives them. */
-export type SummaryField = 'changed' | 'inFlight' | 'decisions' | 'openForUser';
+export type SummaryField = 'changed' | 'inFlight' | 'decisions';
 
 export interface SummaryView {
   readonly id: string;
@@ -22,7 +22,7 @@ export interface SummaryView {
   readonly sequence: number;
 }
 
-const FIELDS: readonly SummaryField[] = ['changed', 'inFlight', 'decisions', 'openForUser'];
+const FIELDS: readonly SummaryField[] = ['changed', 'inFlight', 'decisions'];
 
 /** The report the host sums the run up by, or undefined before the host has sent one. */
 export function summaryReport(state: OrchestratorState, runId: string): SummaryView | undefined {
