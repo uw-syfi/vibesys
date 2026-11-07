@@ -728,7 +728,16 @@ describe('the candidates cell of the fleet screen', () => {
     expect(some.screen.text()).toContain('7 older runs not shown');
     some.screen.unmount();
     const none = open([cut(0)]);
-    expect(none.screen.text()).not.toContain('not shown');
+    // Its room is kept, empty and hidden, so the chip never moves what is under it.
+    expect(none.screen.container.querySelector('.vs-reserve [class~="vs-chip"]')).not.toBeNull();
+    expect(none.screen.container.querySelector('.vs-reserve')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    );
+    expect(
+      [...none.screen.container.querySelectorAll('.vs-chip')].filter(
+        chip => chip.closest('.vs-reserve') === null && chip.textContent?.includes('not shown'),
+      ),
+    ).toHaveLength(0);
     none.screen.unmount();
     // Two hosts: the figure is of the hosts shown, and the host filter narrows it.
     const both = open([
@@ -737,5 +746,40 @@ describe('the candidates cell of the fleet screen', () => {
     ]);
     expect(both.screen.text()).toContain('12 older runs not shown');
     both.screen.unmount();
+  });
+
+  it('has the same cells in its filter row whether or not a host has answered late, so the rows below never shift', () => {
+    const bar = (hosts: readonly FleetHostInput[]) => {
+      const opened = open(hosts);
+      const row = opened.screen.container.querySelector('[aria-label="Show"]')?.parentElement;
+      const cells = [...(row?.children ?? [])].map(each => each.tagName);
+      opened.screen.unmount();
+      return cells;
+    };
+    const cut = (runsLeftOut: number): FleetHostInput => ({
+      ...hostA,
+      data: {...hostA.data, cut: {truncated: runsLeftOut > 0, runsLeftOut}},
+    });
+    const quiet = bar([cut(0)]);
+    expect(quiet.length).toBeGreaterThanOrEqual(3);
+    // A count of older runs, and a stale host with its Retry, arrive: no cell is added or removed.
+    expect(bar([cut(7)])).toHaveLength(quiet.length);
+    // The second host answers late, stale or with runs left out: the same cells as when it is live.
+    const both = bar([hostA, {...hostB, freshness: 'live', staleForMs: null}]);
+    expect(bar([hostA, {...hostB, freshness: 'empty', staleForMs: null, data: emptyState}])).toHaveLength(
+      both.length,
+    );
+    expect(bar([hostA, hostB])).toHaveLength(both.length);
+    expect(
+      bar([
+        hostA,
+        {
+          ...hostB,
+          freshness: 'live',
+          staleForMs: null,
+          data: {...hostB.data, cut: {truncated: true, runsLeftOut: 4}},
+        },
+      ]),
+    ).toHaveLength(both.length);
   });
 });
