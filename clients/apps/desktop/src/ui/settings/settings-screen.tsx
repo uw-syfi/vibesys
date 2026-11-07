@@ -1,4 +1,5 @@
 import {
+  Button,
   Card,
   Chip,
   Grid,
@@ -32,6 +33,7 @@ import {
   withTheme,
 } from '../../state/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
+import type {MachineControls} from './add-machine/machine-controls.js';
 import {MODE_WORD, TAB_WORD, themeWord} from './words.js';
 
 const MODES = APPEARANCE_MODES.map(value => ({value, label: MODE_WORD[value]}));
@@ -118,15 +120,46 @@ const COLUMNS: readonly TableColumn<ResourceRow>[] = [
   },
 ];
 
-function ResourcesTab(props: {readonly resources: readonly ResourceRow[]}): JSX.Element {
-  return (
+/** The row action that removes a machine; this machine has none. */
+const removeColumn = (remove: (key: string) => void): TableColumn<ResourceRow> => ({
+  key: 'remove',
+  header: 'Remove',
+  control: true,
+  cell: row =>
+    row.key === 'local' ? null : (
+      <Button
+        variant="quiet"
+        size="sm"
+        icon="cross"
+        label={`Remove ${row.label}`}
+        hint="Remove"
+        press={() => remove(row.key)}
+      />
+    ),
+});
+
+function ResourcesTab(props: {
+  readonly resources: readonly ResourceRow[];
+  readonly machines: MachineControls | undefined;
+}): JSX.Element {
+  const {machines} = props;
+  const table = (
     <Table
       label="Resources"
-      columns={COLUMNS}
+      columns={machines === undefined ? COLUMNS : [...COLUMNS, removeColumn(machines.remove)]}
       rows={props.resources}
       rowKey={row => row.key}
       middle
+      {...(machines?.selected == null ? {} : {selected: machines.selected})}
+      {...(machines === undefined ? {} : {select: machines.select})}
     />
+  );
+  if (machines === undefined) return table;
+  return (
+    <Stack gap="space-4">
+      {machines.bar}
+      {table}
+    </Stack>
   );
 }
 
@@ -137,6 +170,8 @@ export function SettingsScreen(props: {
   readonly appearance: AppearanceState;
   readonly choose: (appearance: Appearance) => void;
   readonly resources: readonly ResourceRow[];
+  /** The Add machine and remove controls; a window without them lists the machines only. */
+  readonly machines?: MachineControls;
 }): JSX.Element {
   return (
     <Page width="wide" state="ready" title="Settings">
@@ -158,9 +193,10 @@ export function SettingsScreen(props: {
         {props.tab === 'appearance' ? (
           <AppearanceTab state={props.appearance} choose={props.choose} />
         ) : (
-          <ResourcesTab resources={props.resources} />
+          <ResourcesTab resources={props.resources} machines={props.machines} />
         )}
       </SectionLayout>
+      {props.machines?.toasts}
     </Page>
   );
 }

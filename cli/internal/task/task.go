@@ -692,7 +692,7 @@ func find(axes []axis, name string) (axis, bool) {
 }
 
 // resultOf reads the benchmark's result contract and the scored metric from it and from the
-// objectives.
+// objectives. metric is the manifest's top-level metric, empty when it names none.
 func resultOf(t *Task, b *benchSection, metric string, axes []axis) error {
 	switch {
 	case b.Result != nil && b.ResultProtocol != 0:
@@ -704,6 +704,11 @@ func resultOf(t *Task, b *benchSection, metric string, axes []axis) error {
 		}
 		if r.Metric == "" || strings.ContainsAny(r.Metric, " \t\n") {
 			return invalid("%s: [benchmark.result] metric must be a field name without whitespace, got %q", ManifestName, r.Metric)
+		}
+		// The product's reader refuses the same disagreement, so a task is never scored on a metric
+		// its manifest says it is not.
+		if metric != "" && metric != r.Metric {
+			return invalid("%s: metric %q disagrees with [benchmark.result] metric %q; declare the scored metric once", ManifestName, metric, r.Metric)
 		}
 		a, ok := find(axes, r.Metric)
 		if !ok {

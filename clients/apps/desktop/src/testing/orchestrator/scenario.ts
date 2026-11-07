@@ -618,7 +618,6 @@ function finishRun(builder: Builder, atMs: number): void {
     headline: 'Batching the decode steps made it 18 percent faster.',
     changed: 'Decode steps now run in batches of eight.',
     decisions: 'We kept the batching idea and dropped the cache idea.',
-    openForUser: 'Do you want the paged cache tried next?',
   });
   builder.message(atMs, {fromAgentId: builder.leadId, body: {case: 'report', value: report}});
   const ended = {

@@ -41,6 +41,34 @@ export {faultOf} from './fault.js';
 export {type HostSession, makeHostSession} from './host-session.js';
 export {Ids} from './ids.js';
 export {
+  type AddOutcome,
+  type MachineActions,
+  makeMachineActions,
+  type RemoveOutcome,
+} from './machines/actions.js';
+export {
+  type AskMachines,
+  type MachineAdded,
+  Machines,
+  type MachinesApi,
+  MachinesError,
+  MachinesFromWindow,
+  machinesApiOver,
+  machinesOver,
+} from './machines/machines.js';
+export {
+  MACHINES_CHANNEL,
+  type MachineReply,
+  type MachineRequest,
+  type MachinesBridge,
+  type MachineUndo,
+  machineReplyFromBytes,
+  machineReplyToBytes,
+  machineRequestFromBytes,
+  machineRequestToBytes,
+} from './machines/machines-codec.js';
+export {makeRoster, type Roster, type RosterEntry} from './machines/roster.js';
+export {
   CLIENT_BUILD,
   CLIENT_TOO_OLD_TEXT,
   daemonTooOldText,

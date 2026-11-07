@@ -9,7 +9,7 @@ import type {Appearance} from '@vibesys/ui/tokens';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo, useState} from 'react';
-import type {AppearanceStore, NavigationStore} from '../../core/index.js';
+import type {AppearanceStore, MachineActions, NavigationStore} from '../../core/index.js';
 import {
   type NavigationAction,
   type ResourceRow,
@@ -25,6 +25,7 @@ import {
   NO_ISSUES,
 } from '../orchestrator/connected.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
+import {useMachineControls} from '../settings/add-machine/machine-controls.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {ConnectedCatchUp} from './connected-catch-up.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
@@ -61,6 +62,8 @@ export function ConnectedShell(props: {
   readonly appearance: AppearanceStore;
   /** The id of this install as the hosts know it (`core/viewer`); null when the main process did not say. */
   readonly viewerId: string | null;
+  /** Adding and removing machines; a window without it lists them only. */
+  readonly machines?: MachineActions;
 }): JSX.Element {
   const {hosts, dispatch, navigation, appearance, viewerId} = props;
   const [issues, setIssues] = useState<Issues>(NO_ISSUES);
@@ -69,6 +72,7 @@ export function ConnectedShell(props: {
   const look = useAtomValue(appearance.state);
   const resources = useAtomValue(useMemo(() => resourcesOf(hosts), [hosts]));
   const choose = (next: Appearance): void => dispatch(appearance.choose(next), () => undefined);
+  const controls = useMachineControls(props.machines, dispatch);
   const {runs} = current;
   /** The run whose catch-up page shows, when it does: it has a screen of its own over the run's views. */
   const catchUp =
@@ -114,6 +118,7 @@ export function ConnectedShell(props: {
                 appearance={look}
                 choose={choose}
                 resources={resources}
+                {...(controls === undefined ? {} : {machines: controls})}
               />
             )}
           </AppShell>

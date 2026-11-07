@@ -329,14 +329,12 @@ func handoffIn(h *pb.Handoff, errs *errorList) core.Handoff {
 func reportOut(r core.Report) *pb.Report {
 	return &pb.Report{
 		Kind: reportKinds.out(r.Kind), Scope: reportScopes.out(r.Scope), Sequence: r.Sequence, Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions,
-		OpenForUser: r.OpenForUser,
 	}
 }
 
 func reportIn(r *pb.Report, errs *errorList) core.Report {
 	return core.Report{
 		Kind: reportKinds.in(r.GetKind(), errs), Scope: reportScopes.in(r.GetScope(), errs), Sequence: r.GetSequence(), Headline: r.GetHeadline(), Changed: r.GetChanged(), InFlight: r.GetInFlight(), Decisions: r.GetDecisions(),
-		OpenForUser: r.GetOpenForUser(),
 	}
 }
 
