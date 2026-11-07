@@ -107,7 +107,7 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
       key: 'status',
       header: 'Status',
       size: 'wide',
-      
+
       hint: row => whenHint(row, nowMs) || undefined,
       cell: row => {
         const word = runWord(row.status);

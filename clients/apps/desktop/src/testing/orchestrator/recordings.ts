@@ -10,6 +10,8 @@ import {
   Compatibility,
   DispatchRequestSchema,
   DispatchResponseSchema,
+  GetItemRequestSchema,
+  GetItemResponseSchema,
   HelloResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
@@ -101,6 +103,18 @@ function listItemsSteps(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<S
   const bytes = toBinary(
     ListItemsResponseSchema,
     create(ListItemsResponseSchema, {page: create(ItemsPageSchema, page)}),
+  );
+  return [{frame: bytes}];
+}
+
+/** The whole item a `GetItem` call asks for, or NotFound. */
+function getItemSteps(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> {
+  const request = fromBinary(GetItemRequestSchema, target.request);
+  const item = daemon.item(request.agentId, request.ordinal);
+  if (item === undefined) return [{end: {message: 'no such item', status: RpcStatus.NOT_FOUND}}];
+  const bytes = toBinary(
+    GetItemResponseSchema,
+    create(GetItemResponseSchema, {item, sequence: daemon.sequence}),
   );
   return [{frame: bytes}];
 }
@@ -205,6 +219,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return dispatch(target, nth);
         case methodPathOf('ListItems'):
           return listItemsSteps(daemon, target);
+        case methodPathOf('GetItem'):
+          return getItemSteps(daemon, target);
         case methodPathOf('WatchRuns'):
           return watchRuns(target);
         case methodPathOf('WatchAgent'):

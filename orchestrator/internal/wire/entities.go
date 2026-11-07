@@ -224,7 +224,7 @@ func toolIn(c *pb.ToolCall) core.ToolCall {
 func itemOut(i core.Item) *pb.Item {
 	out := &pb.Item{
 		Id: string(i.ID), TurnId: string(i.Turn), AgentId: string(i.Agent), Ordinal: i.Ordinal,
-		Status: itemStatuses.out(i.Status), At: when(i.At),
+		Status: itemStatuses.out(i.Status), At: when(i.At), StartedAt: when(i.Started),
 	}
 	switch b := i.Body.(type) {
 	case core.Assistant:
@@ -243,6 +243,7 @@ func itemIn(i *pb.Item, errs *errorList) core.Item {
 	out := core.Item{
 		ID: core.ItemID(i.GetId()), Turn: core.TurnID(i.GetTurnId()), Agent: core.AgentID(i.GetAgentId()),
 		Ordinal: i.GetOrdinal(), Status: itemStatuses.in(i.GetStatus(), errs), At: moment(i.GetAt(), errs),
+		Started: moment(i.GetStartedAt(), errs),
 	}
 	switch b := i.GetBody().(type) {
 	case *pb.Item_Assistant:

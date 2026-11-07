@@ -77,10 +77,14 @@ export function itemOf(fields: {
   output?: string;
   exit?: number;
   status?: ItemStatus;
+  /** What the tool was asked, when it is not a shell command made of `text`. */
+  call?: ToolCall['call'];
+  /** When the host first saw the item; absent for an item the host recorded before it kept that. */
+  startedMs?: number;
 }): Item {
   const status = fields.status ?? ItemStatus.FINISHED;
   const tool: ToolCall = create(ToolCallSchema, {
-    call: {case: 'shell', value: create(ShellCallSchema, {command: fields.text})},
+    call: fields.call ?? {case: 'shell', value: create(ShellCallSchema, {command: fields.text})},
     output: fields.output ?? '',
     ...(fields.exit === undefined ? {} : {exitCode: fields.exit}),
   });
@@ -98,6 +102,7 @@ export function itemOf(fields: {
     ordinal: fields.ordinal,
     status,
     at: timestampFromMs(fields.atMs),
+    ...(fields.startedMs === undefined ? {} : {startedAt: timestampFromMs(fields.startedMs)}),
     body,
   });
 }

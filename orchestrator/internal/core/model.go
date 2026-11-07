@@ -272,7 +272,11 @@ type Item struct {
 	Agent   AgentID
 	Ordinal uint32
 	Status  ItemStatus
-	At      time.Time
+	// At is when the item was last updated, and for a finished item when it finished.
+	At time.Time
+	// Started is when the item was first seen, and no update changes it. Zero for an item recorded
+	// before the host kept it.
+	Started time.Time
 	Body    ItemBody
 }
 

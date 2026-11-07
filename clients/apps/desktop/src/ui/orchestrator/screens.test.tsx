@@ -80,7 +80,14 @@ function panel(state: OrchestratorState, agent: Agent, sendProgress?: CommandPro
       nowMs={0}
       state={state}
       agent={agent}
-      name="Worker 1"
+      host="host-a"
+      history={{
+        earlier: {_tag: 'Idle'},
+        wholes: {},
+        loadEarlier: () => undefined,
+        expand: () => undefined,
+      }}
+      open={() => undefined}
       sendProgress={sendProgress}
       send={() => undefined}
       retrySend={() => undefined}

@@ -50,6 +50,11 @@ export interface OrchestratorState {
   readonly agents: Readonly<Record<string, Agent>>;
   readonly turns: Readonly<Record<string, Turn>>;
   readonly items: Readonly<Record<string, Item>>;
+  /**
+   * Items a page left out the large text of (reasoning, tool output), by item id, with how many bytes
+   * were left out. Reading the item whole (`GetItem`) or a live frame of it clears the entry.
+   */
+  readonly elided: Readonly<Record<string, number>>;
   /** The sequence each stored item was committed at: the revision that decides which copy is newer. */
   readonly itemSequences: Readonly<Record<string, bigint>>;
   readonly messages: Readonly<Record<string, Message>>;
@@ -69,6 +74,7 @@ export const emptyState: OrchestratorState = {
   agents: {},
   turns: {},
   items: {},
+  elided: {},
   itemSequences: {},
   messages: {},
   receipts: {},

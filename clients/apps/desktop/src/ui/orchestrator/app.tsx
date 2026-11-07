@@ -1,6 +1,7 @@
 import type {Agent} from '@vibesys/orchestrator-proto';
 import {Page, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
+import type {HistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type FeedStatus,
@@ -26,6 +27,7 @@ import type {StartRunRequest} from './start-draft.js';
 const TITLE = 'Runs';
 const RUN_TITLES = {
   timeline: 'Search and activity',
+  agents: 'Agents',
   cost: 'Cost',
   handoffs: 'Handoffs and reports',
   ideas: 'Ideas',
@@ -45,6 +47,11 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
+  /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
+  readonly history: {
+    readonly earlier: HistoryStatus;
+    readonly wholes: Readonly<Record<number, HistoryStatus>>;
+  };
 }
 
 /** What the person has asked for, how it is going, and the ways to ask for more. */
@@ -61,6 +68,10 @@ export interface AppCommands {
   readonly retryStop: (runId: string) => void;
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
+  /** Read the page of items of an agent before ordinal `before`. */
+  readonly loadEarlier: (host: string, agentId: string, before: number) => void;
+  /** Read the item at `ordinal` of an agent whole. */
+  readonly expand: (host: string, agentId: string, ordinal: number) => void;
 }
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
@@ -88,6 +99,36 @@ function runsNote(
     staleForMs: staleForMs(host.freshness, nowMs),
     tryAgain: () => retry(host.key),
   };
+}
+
+/** The panel of the agent that is open, bound to the commands of its host. */
+function OpenAgent(props: {
+  readonly state: HostSnapshot['model']['data'];
+  readonly agent: Agent;
+  readonly host: HostSnapshot;
+  readonly nowMs: number;
+  readonly commands: AppCommands;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {agent, host, commands, go} = props;
+  return (
+    <AgentPanel
+      nowMs={props.nowMs}
+      state={props.state}
+      agent={agent}
+      host={host.label}
+      history={{
+        ...host.history,
+        loadEarlier: before => commands.loadEarlier(host.key, agent.id, before),
+        expand: ordinal => commands.expand(host.key, agent.id, ordinal),
+      }}
+      open={agentId => go({type: 'pick-agent', agentId})}
+      sendProgress={commands.send[agent.id]}
+      send={text => commands.sendMessage(host.key, agent.id, text)}
+      retrySend={() => commands.retrySend(agent.id)}
+      close={() => go({type: 'close-agent'})}
+    />
+  );
 }
 
 /** The note about one agent's steps on `host`, which share the host's connection. */
@@ -179,15 +220,13 @@ export function OrchestratorApp(props: {
           pick={agentId => go({type: 'pick-agent', agentId})}
           agentPanel={
             agent === undefined ? null : (
-              <AgentPanel
-                nowMs={props.nowMs}
+              <OpenAgent
                 state={state}
                 agent={agent}
-                name={nameOf(names, agent)}
-                sendProgress={commands.send[agent.id]}
-                send={text => commands.sendMessage(host.key, agent.id, text)}
-                retrySend={() => commands.retrySend(agent.id)}
-                close={() => go({type: 'close-agent'})}
+                host={host}
+                nowMs={props.nowMs}
+                commands={commands}
+                go={go}
               />
             )
           }

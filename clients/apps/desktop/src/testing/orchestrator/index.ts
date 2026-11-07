@@ -1,5 +1,5 @@
 /** Realistic orchestrated runs as event streams, and a fake daemon that serves them. */
-export {FakeDaemon} from './fake-daemon.js';
+export {ELIDE_OVER, FakeDaemon} from './fake-daemon.js';
 export {fleetScenario} from './fleet.js';
 export {faultsOn, type HostHarness, hostHarness} from './harness.js';
 export {

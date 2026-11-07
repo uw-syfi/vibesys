@@ -33,6 +33,7 @@ const host: HostSnapshot = {
   freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 /** A second host that has said nothing yet, so the list offers a host filter. */
 const quiet: HostSnapshot = {
@@ -43,6 +44,7 @@ const quiet: HostSnapshot = {
   freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
+  history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [
   {key: 'local', label: 'This machine', connection: 'connected', freshness: 'live'},
@@ -78,6 +80,8 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
             retryStop: () => undefined,
             sendMessage: () => undefined,
             retrySend: () => undefined,
+            loadEarlier: () => undefined,
+            expand: () => undefined,
           }}
           retryHost={() => undefined}
           route={navigation.runs}

@@ -10,7 +10,7 @@ import type * as Effect from 'effect/Effect';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
-import type {HostSession, Intent} from '../../core/index.js';
+import type {HistoryStatus, HostSession, Intent} from '../../core/index.js';
 import type {
   CommandProgress,
   FeedStatus,
@@ -49,6 +49,7 @@ export interface Issues {
 export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}};
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
+const IDLE: HistoryStatus = {_tag: 'Idle'};
 
 /** One agent's stream on its host, followed while this is mounted. */
 const watchAgent = (
@@ -98,6 +99,13 @@ const snapshots = (
           openHost === key && openAgent !== null && openAgent !== undefined
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
             : {},
+        history:
+          openHost === key && openAgent !== null && openAgent !== undefined
+            ? {
+                earlier: get(session.history.earlier(openAgent)),
+                wholes: get(session.history.wholes(openAgent)),
+              }
+            : {earlier: IDLE, wholes: {}},
       })),
       progress: {
         start: progressOf(issues.start),
@@ -159,6 +167,16 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
+    loadEarlier: (host, agentId, before) => {
+      const session = sessionOf(host);
+      if (session !== undefined)
+        dispatch(session.history.loadEarlier(agentId, before), () => undefined);
+    },
+    expand: (host, agentId, ordinal) => {
+      const session = sessionOf(host);
+      if (session !== undefined)
+        dispatch(session.history.expand(agentId, ordinal), () => undefined);
+    },
   };
   if (!AsyncResult.isSuccess(clock))
     return (
