@@ -212,6 +212,7 @@ func bodies(r *rand.Rand) []core.Message {
 		envelope(core.LeadIdleReminder{
 			Idle: time.Duration(r.Uint32()) * time.Second, Subagents: r.Uint32(), Workers: r.Uint32(), Judges: r.Uint32(),
 		}),
+		envelope(core.ReportDue{Every: time.Duration(r.Uint32()) * time.Second, Reports: r.Uint32()}),
 	}
 }
 
@@ -393,6 +394,10 @@ func TestAMessageRendersTheSameAfterTheRoundTripThroughItsStoredForm(t *testing.
 				idle.Idle += time.Duration(r.IntN(1000)) * time.Millisecond
 				m.Body = idle
 			}
+			if due, ok := m.Body.(core.ReportDue); ok {
+				due.Every += time.Duration(r.IntN(1000)) * time.Millisecond
+				m.Body = due
+			}
 			want, err := prompts.Render(m)
 			if err != nil {
 				t.Fatal(err)
@@ -481,6 +486,32 @@ func TestBlankWordsRenderToNothingAndFailNothing(t *testing.T) {
 	for _, body := range []core.MessageBody{core.Text{Text: " \n\t\u00a0\x1f "}, core.Brief{}} {
 		if got, err := prompts.Render(core.Message{ID: "blank", Body: body}); err != nil || got != "" {
 			t.Errorf("%+v rendered %q (%v), want nothing and no error", body, got, err)
+		}
+	}
+}
+
+// The request for a report names the interval in whole minutes, says to post a progress report and not
+// a final one, and tells a first report from a later one by the count the host holds.
+func TestTheReportRequestNamesTheIntervalAndWhetherItIsTheFirstReport(t *testing.T) {
+	r := rand.New(rand.NewPCG(17, 18))
+	for range 2000 {
+		body := core.ReportDue{
+			Every: time.Duration(r.Int64N(int64(48*time.Hour))) + time.Duration(r.IntN(1000))*time.Microsecond, Reports: r.Uint32N(4),
+		}
+		got, err := prompts.Render(core.Message{Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("about every %d minutes", int(body.Every/time.Minute)); !strings.Contains(got, want) {
+			t.Fatalf("%+v rendered %q, want it to say %q", body, got, want)
+		}
+		for _, phrase := range []string{"`post_report`", "kind `progress`", "the whole run", "do not give a final report"} {
+			if !strings.Contains(got, phrase) {
+				t.Fatalf("%+v rendered %q without %q", body, got, phrase)
+			}
+		}
+		if first := strings.Contains(got, "you have posted none yet"); first != (body.Reports == 0) {
+			t.Fatalf("%+v rendered %q, which says it is a first report: %t", body, got, first)
 		}
 	}
 }

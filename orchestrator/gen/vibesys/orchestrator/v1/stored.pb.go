@@ -84,7 +84,11 @@ type RunRecord struct {
 	Run   *Run                   `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
 	// The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
 	// of any of its sessions meets the same daemon.
-	JobTool       *JobToolEndpoint `protobuf:"bytes,2,opt,name=job_tool,json=jobTool,proto3" json:"job_tool,omitempty"`
+	JobTool *JobToolEndpoint `protobuf:"bytes,2,opt,name=job_tool,json=jobTool,proto3" json:"job_tool,omitempty"`
+	// When the run started, or the lead last posted a report, or the lead was last asked for one,
+	// whichever is latest: the time the next progress report is counted from. Absent on a run recorded
+	// before the schedule existed.
+	LastSummaryAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_summary_at,json=lastSummaryAt,proto3" json:"last_summary_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -129,6 +133,13 @@ func (x *RunRecord) GetRun() *Run {
 func (x *RunRecord) GetJobTool() *JobToolEndpoint {
 	if x != nil {
 		return x.JobTool
+	}
+	return nil
+}
+
+func (x *RunRecord) GetLastSummaryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastSummaryAt
 	}
 	return nil
 }
@@ -508,10 +519,11 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n" +
 	"\vAgentRecord\x12<\n" +
 	"\x05agent\x18\x01 \x01(\v2\x1e.vibesys.orchestrator.v1.AgentB\x06\xbaH\x03\xc8\x01\x01R\x05agent\x12/\n" +
-	"\fresume_token\x18\x02 \x01(\fB\f\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\vresumeToken\"\x8e\x01\n" +
+	"\fresume_token\x18\x02 \x01(\fB\f\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\vresumeToken\"\xd8\x01\n" +
 	"\tRunRecord\x126\n" +
 	"\x03run\x18\x01 \x01(\v2\x1c.vibesys.orchestrator.v1.RunB\x06\xbaH\x03\xc8\x01\x01R\x03run\x12I\n" +
-	"\bjob_tool\x18\x02 \x01(\v2(.vibesys.orchestrator.v1.JobToolEndpointB\x04\x90\xbd\x18\x01R\ajobTool\"\x95\x01\n" +
+	"\bjob_tool\x18\x02 \x01(\v2(.vibesys.orchestrator.v1.JobToolEndpointB\x04\x90\xbd\x18\x01R\ajobTool\x12H\n" +
+	"\x0flast_summary_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x04\x90\xbd\x18\x01R\rlastSummaryAt\"\x95\x01\n" +
 	"\rReceiptRecord\x12B\n" +
 	"\areceipt\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\areceipt\x12@\n" +
 	"\x0ecommand_digest\x18\x02 \x01(\tB\x19\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x90\xbd\x18\x01R\rcommandDigest\"\x86\x01\n" +
@@ -563,8 +575,8 @@ var file_vibesys_orchestrator_v1_stored_proto_goTypes = []any{
 	(*Event)(nil),                 // 5: vibesys.orchestrator.v1.Event
 	(*Agent)(nil),                 // 6: vibesys.orchestrator.v1.Agent
 	(*Run)(nil),                   // 7: vibesys.orchestrator.v1.Run
-	(*Receipt)(nil),               // 8: vibesys.orchestrator.v1.Receipt
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*Receipt)(nil),               // 9: vibesys.orchestrator.v1.Receipt
 	(*Turn)(nil),                  // 10: vibesys.orchestrator.v1.Turn
 	(*Item)(nil),                  // 11: vibesys.orchestrator.v1.Item
 	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
@@ -573,20 +585,21 @@ var file_vibesys_orchestrator_v1_stored_proto_depIdxs = []int32{
 	6,  // 0: vibesys.orchestrator.v1.AgentRecord.agent:type_name -> vibesys.orchestrator.v1.Agent
 	7,  // 1: vibesys.orchestrator.v1.RunRecord.run:type_name -> vibesys.orchestrator.v1.Run
 	3,  // 2: vibesys.orchestrator.v1.RunRecord.job_tool:type_name -> vibesys.orchestrator.v1.JobToolEndpoint
-	8,  // 3: vibesys.orchestrator.v1.ReceiptRecord.receipt:type_name -> vibesys.orchestrator.v1.Receipt
-	9,  // 4: vibesys.orchestrator.v1.Event.at:type_name -> google.protobuf.Timestamp
-	4,  // 5: vibesys.orchestrator.v1.Event.source:type_name -> vibesys.orchestrator.v1.SessionSource
-	1,  // 6: vibesys.orchestrator.v1.Event.run_updated:type_name -> vibesys.orchestrator.v1.RunRecord
-	0,  // 7: vibesys.orchestrator.v1.Event.agent_updated:type_name -> vibesys.orchestrator.v1.AgentRecord
-	10, // 8: vibesys.orchestrator.v1.Event.turn_updated:type_name -> vibesys.orchestrator.v1.Turn
-	11, // 9: vibesys.orchestrator.v1.Event.item_updated:type_name -> vibesys.orchestrator.v1.Item
-	12, // 10: vibesys.orchestrator.v1.Event.message_updated:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 11: vibesys.orchestrator.v1.Event.receipt_recorded:type_name -> vibesys.orchestrator.v1.ReceiptRecord
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	8,  // 3: vibesys.orchestrator.v1.RunRecord.last_summary_at:type_name -> google.protobuf.Timestamp
+	9,  // 4: vibesys.orchestrator.v1.ReceiptRecord.receipt:type_name -> vibesys.orchestrator.v1.Receipt
+	8,  // 5: vibesys.orchestrator.v1.Event.at:type_name -> google.protobuf.Timestamp
+	4,  // 6: vibesys.orchestrator.v1.Event.source:type_name -> vibesys.orchestrator.v1.SessionSource
+	1,  // 7: vibesys.orchestrator.v1.Event.run_updated:type_name -> vibesys.orchestrator.v1.RunRecord
+	0,  // 8: vibesys.orchestrator.v1.Event.agent_updated:type_name -> vibesys.orchestrator.v1.AgentRecord
+	10, // 9: vibesys.orchestrator.v1.Event.turn_updated:type_name -> vibesys.orchestrator.v1.Turn
+	11, // 10: vibesys.orchestrator.v1.Event.item_updated:type_name -> vibesys.orchestrator.v1.Item
+	12, // 11: vibesys.orchestrator.v1.Event.message_updated:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 12: vibesys.orchestrator.v1.Event.receipt_recorded:type_name -> vibesys.orchestrator.v1.ReceiptRecord
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_stored_proto_init() }

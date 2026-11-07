@@ -208,6 +208,7 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
           leadBrief: true,
           handoffReminder: true,
           leadIdleReminder: true,
+          reportDue: true,
           runLimitReached: true,
         }),
     )
@@ -222,6 +223,7 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
         leadBrief: true,
         handoffReminder: true,
         leadIdleReminder: true,
+        reportDue: true,
         runLimitReached: true,
       })
         ? message.body.value
