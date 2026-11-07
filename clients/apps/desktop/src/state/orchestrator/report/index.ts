@@ -8,7 +8,6 @@ export {
   ideasInRun,
   ideasInWindow,
   ideasOfVerdict,
-  ideasReport,
   type Verdict,
   type WorkstreamRow,
 } from './ideas.js';
