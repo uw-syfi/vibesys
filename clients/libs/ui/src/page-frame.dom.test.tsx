@@ -240,7 +240,7 @@ describe('StackedBars with few bars', () => {
     const frame = css('frame.css');
     expect(frame).toMatch(/--bar-max: calc\(var\(--space-8\) \+ var\(--space-5\)\)/);
     expect(frame).toMatch(
-      /\.vs-bars-plot,\s*\.vs-bars-marks,\s*\.vs-bars-axis \{[^}]*max-width: calc\(var\(--bars-count\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)/,
+      /\.vs-bars-plot,\s*\.vs-bars-marks,\s*\.vs-bars-axis \{[^}]*max-width: max\(var\(--chart-min\), calc\(var\(--bars-count\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)\)/,
     );
     // The stacked area shares the axis row and counts no bars: a fallback count would squeeze its labels.
     expect(frame).not.toMatch(/var\(--bars-count,/);
@@ -280,5 +280,62 @@ describe('Gantt with a legend', () => {
     ]);
     const bare = await mount(<Gantt label="Agents" from={0} to={10} rows={rows} />);
     expect(bare.querySelector('ul[aria-label="Key to the bars"]')).toBeNull();
+  });
+});
+
+describe('Page with a body that fills', () => {
+  test('marks its scroll area, so one child takes the room and scrolls and the page does not', async () => {
+    const container = await mount(
+      <Page state="ready" title="Agent" fill>
+        <Card>Above</Card>
+        <div className="vs-conversation" data-size="fill" />
+        <Card>Below</Card>
+      </Page>,
+    );
+    const scroll = one(container, '.vs-page-scroll');
+    expect(scroll.getAttribute('data-fill')).toBe('true');
+    expect(scroll.firstElementChild?.className).toBe('vs-page-body');
+    const plain = await mount(
+      <Page state="ready" title="Cost">
+        Body
+      </Page>,
+    );
+    expect(one(plain, '.vs-page-scroll').hasAttribute('data-fill')).toBe(false);
+  });
+
+  test('has a body that gives its room to the conversation and a conversation as wide as its cards', () => {
+    const base = css('base.css');
+    expect(base).toMatch(/\.vs-page-scroll\[data-fill\]\s*\{[^}]*flex-direction:\s*column/);
+    expect(base).toMatch(/\.vs-page-scroll\[data-fill\] > \.vs-page-body\s*\{[^}]*min-height:\s*0/);
+    const conversation = css('conversation.css');
+    // Its rows start on the page's edge: no gutter of its own, and no narrower measure than the cards.
+    expect(conversation).toMatch(/\.vs-conversation-pane\s*\{[^}]*padding:\s*0 0 var\(--space-6\)/);
+    expect(conversation).toMatch(
+      /\[data-size="fill"\] > \.vs-conversation-pane\s*\{[^}]*max-width:\s*none/,
+    );
+  });
+});
+
+describe('Gantt columns', () => {
+  test('keeps the scrollbar gutter on the axis and on the rows, so the bars never shift under the ticks', () => {
+    const frame = css('frame.css');
+    for (const rows of frame.matchAll(/^\.vs-gantt-rows\s*\{([^}]*)\}/gm)) {
+      expect(rows[1]).toContain('scrollbar-gutter: stable');
+    }
+    expect(frame).toMatch(
+      /\.vs-gantt-row\[data-axis\]\s*\{[^}]*overflow-y:\s*hidden;[^}]*scrollbar-gutter:\s*stable/,
+    );
+  });
+
+  test('drops the machine column in a narrow window, so the bars keep a track', () => {
+    const tree = css('gantt-tree.css');
+    expect(tree).toMatch(/@media \(max-width: 760px\)[^@]*\.vs-gantt-tag\s*\{\s*display:\s*none/);
+  });
+
+  test('gives the track the room a tag and a name do not need', () => {
+    const tree = css('gantt-tree.css');
+    expect(tree).toMatch(
+      /clamp\(var\(--gantt-label\), 20%, var\(--gantt-label-max\)\)\s*var\(--gantt-tag\)/,
+    );
   });
 });

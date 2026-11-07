@@ -28,6 +28,8 @@ export function Chip(props: {
    * on hover) when the chip's room is less than it needs, instead of pushing its row wider.
    */
   readonly clip?: boolean;
+  /** One of a column of chips that are alike: it is as wide as the longest of them, whatever its label. */
+  readonly even?: boolean;
   /** The longer account behind a short label; a filesystem path in it is shown by its last name only (`withoutPaths`). */
   readonly hint?: string;
 }): JSX.Element {
@@ -39,6 +41,7 @@ export function Chip(props: {
       data-tone={tone}
       data-mono-id={props.mono === true || undefined}
       data-clip={props.clip === true || undefined}
+      data-even={props.even === true || undefined}
       title={props.clip === true && hint === undefined ? props.label : undefined}
       aria-description={hint}
       // The hint is information a keyboard and a screen reader must reach (WCAG 1.4.13, 2.1.1), which

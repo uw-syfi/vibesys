@@ -182,6 +182,16 @@ function desktopAppRules() {
       },
     },
     {
+      // `agents` is a feature built on the orchestrator's state and words, so it may read
+      // `orchestrator`; it meets every other feature in the shell.
+      name: 'desktop-agents-feature-reads-only-orchestrator',
+      severity: 'error',
+      from: {path: '^apps/desktop/src/(?:state|core|ui)/agents/', pathNot: TEST_FILE},
+      to: {
+        path: '^apps/desktop/src/(?:state|core|ui|testing)/(?:settings|shell|cost|catch-up)/',
+      },
+    },
+    {
       name: 'desktop-production-code-does-not-import-testing',
       severity: 'error',
       from: {path: DESKTOP_APP, pathNot: [TEST_FILE, DESKTOP_PART('testing')]},

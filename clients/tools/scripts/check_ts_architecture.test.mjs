@@ -160,6 +160,13 @@ const RULE_CASES = [
     },
   },
   {
+    rule: 'desktop-agents-feature-reads-only-orchestrator',
+    files: {
+      'apps/desktop/src/ui/settings/words.ts': 'export {};\n',
+      'apps/desktop/src/ui/agents/labels.ts': "import '../settings/words.js';\n",
+    },
+  },
+  {
     rule: 'desktop-core-does-not-reach-the-shells',
     files: {'apps/desktop/src/core/index.ts': "import '../ui/index.js';\n"},
   },

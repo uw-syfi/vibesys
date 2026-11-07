@@ -31,7 +31,7 @@ import {
   withMode,
   withTheme,
 } from '../../state/index.js';
-import {causeWord} from '../refusal-words.js';
+import {causeHint, causeWord} from '../refusal-words.js';
 import {CONNECTION_WORD, FRESHNESS_WORD, MODE_WORD, TAB_WORD, themeWord} from './words.js';
 
 const MODES = APPEARANCE_MODES.map(value => ({value, label: MODE_WORD[value]}));
@@ -118,18 +118,20 @@ const COLUMNS: readonly TableColumn<ResourceRow>[] = [
       const word = CONNECTION_WORD[row.connection];
       return (
         <Row gap="space-2" align="center">
-          <Chip label={word.label} tone={word.tone} dot />
-          {row.cause === null ? null : <Text variant="small">{causeWord(row.cause)}</Text>}
+          <Chip label={word.label} tone={word.tone} dot even />
+          {row.cause === null ? null : (
+            <Chip label={causeWord(row.cause)} tone="warn" hint={causeHint(row.cause)} />
+          )}
         </Row>
       );
     },
   },
   {
     key: 'data',
-    header: 'Data',
+    header: 'Freshness',
     cell: row => {
       const word = FRESHNESS_WORD[row.freshness];
-      return <Chip label={word.label} tone={word.tone} dot />;
+      return <Chip label={word.label} tone={word.tone} dot even />;
     },
   },
 ];
@@ -159,16 +161,16 @@ export function SettingsScreen(props: {
       <SectionLayout
         label="Settings sections"
         sections={
-          <Stack gap="space-1">
-            {SETTINGS_TABS.map(tab => (
-              <SidebarItem
-                key={tab}
-                label={TAB_WORD[tab]}
-                active={tab === props.tab}
-                press={() => props.pick(tab)}
-              />
-            ))}
-          </Stack>
+          // The items sit straight in the navigation, which stacks them beside the content and lays
+          // them in one row, as wide as each other, above it when the page is narrow.
+          SETTINGS_TABS.map(tab => (
+            <SidebarItem
+              key={tab}
+              label={TAB_WORD[tab]}
+              active={tab === props.tab}
+              press={() => props.pick(tab)}
+            />
+          ))
         }
       >
         {props.tab === 'appearance' ? (

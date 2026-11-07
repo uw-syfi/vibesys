@@ -114,6 +114,8 @@
   --gantt-label: 220px;
   --gantt-label-max: 420px;
   --gantt-figure: 96px;
+  --gantt-tag: 112px;
+  --chip-even: 112px;
   --gantt-bar: 12px;
   --hairline: 1px;
   --focus-ring: 2px;

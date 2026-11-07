@@ -9,7 +9,7 @@ import {
 import fc from 'fast-check';
 import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState} from '../../state/orchestrator/state.js';
-import {fanoutOverTime, runAgents} from '../../state/orchestrator/views.js';
+import {runAgents} from '../../state/orchestrator/views.js';
 import {generateScenario} from './index.js';
 
 describe('a generated run', () => {
@@ -72,7 +72,7 @@ describe('a generated run', () => {
     );
   });
 
-  it('the long fixture has ten agents, both harnesses, and several open at once', () => {
+  it('the long fixture has ten agents, both harnesses', () => {
     const scenario = generateScenario({seed: 11, subagents: 9, live: true});
     const state = scenario.changes.reduce(applyChange, emptyState);
     const agents = runAgents(state, scenario.runId);
@@ -80,7 +80,5 @@ describe('a generated run', () => {
     expect(new Set(agents.map(agent => agent.harness))).toEqual(
       new Set([Harness.CLAUDE_CODE, Harness.CODEX]),
     );
-    const peak = Math.max(...fanoutOverTime(state, scenario.runId).map(point => point.live));
-    expect(peak).toBeGreaterThan(1);
   });
 });

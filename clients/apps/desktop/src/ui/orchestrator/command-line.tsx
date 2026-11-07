@@ -1,7 +1,7 @@
 import {Button, Chip, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CommandProgress} from '../../state/index.js';
-import {faultText, receiptRefusalWord} from './words.js';
+import {faultHint, faultText, receiptRefusalWord} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -10,6 +10,8 @@ interface CommandWords {
   readonly tone: Tone;
   /** What the host or the transport said, shown verbatim to the one who can fix it. */
   readonly details: string | null;
+  /** The longer account behind the label, on hover and focus; never a line of the screen. */
+  readonly hint?: string;
   /** The person may press the same action again: the same command goes out under the same id. */
   readonly canRetry: boolean;
 }
@@ -18,28 +20,30 @@ interface CommandWords {
 function commandWords(progress: CommandProgress, done: string): CommandWords {
   switch (progress._tag) {
     case 'Sending':
-      return {label: `${done}: sending.`, tone: 'live', details: null, canRetry: false};
+      return {label: `${done}: sending`, tone: 'live', details: null, canRetry: false};
     case 'Accepted':
-      return {label: `${done}: accepted by the host.`, tone: 'ok', details: null, canRetry: false};
+      return {label: `${done}: accepted`, tone: 'ok', details: null, canRetry: false};
     case 'Refused':
       return {
-        label: `${done}: ${receiptRefusalWord(progress.receipt)}`,
+        label: `${done} refused \u00b7 ${receiptRefusalWord(progress.receipt)}`,
         tone: 'err',
         details: null,
         canRetry: false,
       };
     case 'Unconfirmed':
       return {
-        label: `${done}: not confirmed. ${faultText(progress.fault)} It may still have gone through.`,
+        label: `${done}: not confirmed \u00b7 ${faultText(progress.fault)}`,
         tone: 'warn',
         details: progress.fault.detail,
+        hint: `${faultHint(progress.fault)} It may still have gone through.`,
         canRetry: true,
       };
     case 'Failed':
       return {
-        label: `${done}: not done. ${faultText(progress.fault)}`,
+        label: `${done}: not done \u00b7 ${faultText(progress.fault)}`,
         tone: 'err',
         details: progress.fault.detail,
+        hint: faultHint(progress.fault),
         canRetry: progress.fault.retryable,
       };
   }
@@ -56,7 +60,12 @@ export function CommandLine(props: {
   return (
     <div role="status" aria-live="polite" aria-label={`${props.done}: outcome`}>
       <Row gap="space-3" wrap>
-        <Chip label={words.label} tone={words.tone} dot />
+        <Chip
+          label={words.label}
+          tone={words.tone}
+          dot
+          {...(words.hint === undefined ? {} : {hint: words.hint})}
+        />
         {words.canRetry ? (
           <Button text="Try again" variant="secondary" size="sm" press={props.retry} />
         ) : null}

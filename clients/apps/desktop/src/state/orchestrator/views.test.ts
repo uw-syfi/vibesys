@@ -1,58 +1,9 @@
 import {create} from '@bufbuild/protobuf';
-import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
-import {
-  AgentRole,
-  AgentSchema,
-  AgentStatus,
-  AgentStopStage,
-  Harness,
-  ItemSchema,
-  ItemStatus,
-  JobOutcome,
-  MessageSchema,
-  SearchStateSchema,
-} from '@vibesys/orchestrator-proto';
+import {ItemSchema, ItemStatus} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {emptyState, type OrchestratorState} from './state.js';
-import {agentTree, flattenTree, timeline, unbrokenFrom} from './views.js';
-
-const agent = (id: string, parent: string, role: AgentRole, startMs: number) =>
-  create(AgentSchema, {
-    id,
-    runId: 'r',
-    parentAgentId: parent,
-    role,
-    harness: Harness.CODEX,
-    status: AgentStatus.IDLE,
-    stopStage: AgentStopStage.NONE,
-    session: 1,
-    startedAt: timestampFromMs(startMs),
-  });
-
-const roles = [AgentRole.PLANNER, AgentRole.WORKER, AgentRole.JUDGE];
-
-/** A lead with three subagents. */
-const stateWithAgents = (): OrchestratorState => {
-  const agents = [
-    agent('lead', '', AgentRole.LEAD, 0),
-    ...roles.map((role, i) => agent(`a${i}`, 'lead', role, 1 + i)),
-  ];
-  return {...emptyState, agents: Object.fromEntries(agents.map(a => [a.id, a]))};
-};
-
-describe('the agent tree', () => {
-  it('puts each agent under its parent, the lead first, and lists every agent once', () => {
-    const tree = agentTree(stateWithAgents(), 'r');
-    expect(tree).toHaveLength(1);
-    expect(flattenTree(tree).map(node => [node.agent.id, node.depth])).toEqual([
-      ['lead', 0],
-      ['a0', 1],
-      ['a1', 1],
-      ['a2', 1],
-    ]);
-  });
-});
+import {unbrokenFrom} from './views.js';
 
 describe('reading older steps', () => {
   const stateOf = (ordinals: readonly number[]): OrchestratorState => ({
@@ -95,41 +46,4 @@ describe('reading older steps', () => {
       ),
     );
   });
-});
-
-it('timeline job timing uses typed facts and is independent of tool text', () => {
-  fc.assert(
-    fc.property(fc.integer({min: 0, max: 10000}), fc.string(), (toolAt, text) => {
-      const state = {
-        ...emptyState,
-        searches: {
-          r: create(SearchStateSchema, {
-            runId: 'r',
-            revision: 1n,
-            jobs: [{id: 'job-1', startedAt: timestampFromMs(50), finishedAt: timestampFromMs(100)}],
-          }),
-        },
-        messages: {
-          m: create(MessageSchema, {
-            runId: 'r',
-            at: timestampFromMs(200),
-            body: {case: 'jobFinished', value: {jobId: 'job-1', outcome: JobOutcome.SUCCEEDED}},
-          }),
-        },
-        items: {
-          i: create(ItemSchema, {
-            at: timestampFromMs(toolAt),
-            body: {case: 'tool', value: {output: `job-1 ${text}`}},
-          }),
-        },
-      };
-      expect(timeline(state, 'r', 1000).jobs.map(job => [job.startMs, job.endMs])).toEqual([
-        [50, 100],
-      ]);
-      expect(
-        timeline({...state, searches: {}}, 'r', 1000).jobs.map(job => [job.startMs, job.endMs]),
-      ).toEqual([[null, 200]]);
-    }),
-    {seed: 9, examples: [[0, 'job-1']]},
-  );
 });

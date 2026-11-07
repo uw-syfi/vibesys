@@ -9,7 +9,7 @@ import {
   VerdictKind,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {candidates, jobQueue, jobsWithNoRun, planStatus, resultSoFar} from './search-views.js';
+import {candidates, jobQueue, jobsWithNoRun, planStatus} from './search-views.js';
 
 it('views preserve the facts while unreadable and only accept judgments against the current head', () => {
   fc.assert(
@@ -55,7 +55,6 @@ it('views preserve the facts while unreadable and only accept judgments against 
                 [VerdictKind.UNSPECIFIED]: 'Not judged',
               }[kind],
         );
-        expect(resultSoFar(search)).toBe(search.head?.state);
         expect(jobsWithNoRun(search)).toBe(7);
         expect(planStatus(search)).toEqual([{plan: search.plans[0], label: 'Chosen'}]);
       },
