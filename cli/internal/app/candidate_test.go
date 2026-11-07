@@ -108,7 +108,8 @@ func newTwoImageRig(t *testing.T) *twoImageRig {
 
 func (r *twoImageRig) submit(t *testing.T, settings core.Settings, noCache bool) (core.Job, core.SubmitDisposition) {
 	t.Helper()
-	out, err := r.a.Submit(ctxFor(t), app.SubmitRequest{Context: call, NoCache: noCache, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: settings}})
+	spec := core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: settings}
+	out, err := r.a.Submit(ctxFor(t), app.SubmitRequest{Context: call, NoCache: noCache, NoPlan: noPlan(spec), Spec: spec})
 	if err != nil {
 		t.Fatal(err)
 	}

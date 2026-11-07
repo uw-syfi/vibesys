@@ -1,8 +1,10 @@
 package storetest
 
 import (
+	"errors"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -229,6 +231,39 @@ func testSubmit(t *testing.T, newStore New) {
 		out := e.submit(sub)
 		if want := []core.Submitter{{Run: "run-1", Agent: "worker", At: sub.At}}; !reflect.DeepEqual(out.Job.Submitters, want) {
 			t.Errorf("submitters = %+v, want %+v", out.Job.Submitters, want)
+		}
+	})
+
+	t.Run("a submission that links no plan leaves the links of the job it lands on", func(t *testing.T) {
+		// A measure of the baseline that says it tests no plan can land on a job another caller
+		// linked to a plan: the chart point stays tied to that plan.
+		e := newEnv(t, newStore)
+		plan := e.createPlan("idea")
+		linked := e.check(1, "key-a")
+		linked.Plan = plan.Number
+		first := e.submit(linked).Job
+		joined := e.submit(e.check(1, "key-a"))
+		if joined.Disposition != core.SubmitJoined || !reflect.DeepEqual(joined.Job.Plans, []core.PlanNumber{plan.Number}) {
+			t.Errorf("an unlinked submission = %s with plans %v, want joined on %s with plan %d kept", joined.Disposition, joined.Job.Plans, first.ID, plan.Number)
+		}
+		if got := e.job(first.ID).Plans; !reflect.DeepEqual(got, []core.PlanNumber{plan.Number}) {
+			t.Errorf("plans after an unlinked landing = %v, want [%d]", got, plan.Number)
+		}
+	})
+
+	t.Run("a plan that does not exist is refused naming --plan, and nothing is queued", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		plan := e.createPlan("idea")
+		missing := e.check(1, "key-a")
+		missing.Plan = plan.Number + 1
+		_, err := e.s.Submit(e.ctx, missing)
+		var failure *core.Failure
+		if !errors.As(err, &failure) || failure.Kind != core.FailureNotFound || !strings.Contains(failure.Message, "--plan") ||
+			!strings.Contains(failure.Message, strconv.Itoa(int(missing.Plan))) {
+			t.Errorf("Submit linking plan %d of 1 = %v, want not found naming --plan and the number", missing.Plan, err)
+		}
+		if jobs := e.jobs(core.JobFilter{}); len(jobs) != 0 {
+			t.Errorf("a refused submission left %d jobs", len(jobs))
 		}
 	})
 

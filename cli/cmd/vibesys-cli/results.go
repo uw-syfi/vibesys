@@ -276,7 +276,7 @@ func noResultText(r cliv1.NoCurrentResultReason, head string) string {
 		return "nothing was promoted, so there is no head"
 	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED:
 		return "the head has no measurement that rests on a passing check in the same task version and environment; " +
-			"run `vibesys-cli submit measure " + head + "`"
+			"run `vibesys-cli submit measure " + head + " --no-plan`"
 	}
 	return lower("NO_CURRENT_RESULT_REASON_", r.String())
 }

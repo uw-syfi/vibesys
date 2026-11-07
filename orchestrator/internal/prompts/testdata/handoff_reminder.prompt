@@ -1,3 +1,3 @@
 Your turn ended without a handoff, and your lead is waiting for one. Call `post_handoff` now with what you did, what you measured and what is left, even if the work is not finished.
 
-Give only numbers that `vibesys-cli submit measure` recorded (the `vibesys:measure` skill). A figure from a benchmark you ran by hand is not comparable with the recorded ones, so leave it out or say plainly that it is unrecorded.
+Give only numbers that `vibesys-cli submit measure` recorded (the `vibesys:measure` skill), each with the plan it was linked to by `--plan`. A figure from a benchmark you ran by hand is not comparable with the recorded ones, so leave it out or say plainly that it is unrecorded.

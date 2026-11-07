@@ -10,7 +10,7 @@ missing resource before anything else; a refusal names it and is the operator's 
 
 ```
 vibesys-cli submit check <base> --wait --json
-vibesys-cli submit measure <base> --samples 5 --wait --json
+vibesys-cli submit measure <base> --samples 5 --no-plan --wait --json
 vibesys-cli show <base> --json
 ```
 
@@ -55,7 +55,8 @@ Delete the mutant branches when done (`git branch -D`). Their jobs stay in the s
 ## Sensitivity
 
 Commit a deliberate slowdown of about twice the spread (an extra pass over the data, a sleep of
-that size in the hot path) on a throwaway branch, measure it with five samples, and run
+that size in the hot path) on a throwaway branch, measure it with five samples
+(`submit measure <slow> --samples 5 --no-plan`, since it tests no idea), and run
 `vibesys-cli compare <slow> --against <base> --json`. The verdict must be `worse`. If it is
 `within_noise` or `inconclusive`, the optimization cannot see a gain of that size either: reduce
 the noise or tell the user how large a gain must be to count.

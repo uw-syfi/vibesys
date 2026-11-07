@@ -56,6 +56,9 @@ func submitProfile(ctx context.Context, d deps, args []string) int {
 	case *timeout < 0:
 		return fail(d, asJSON, usagef("--timeout: %v is negative", *timeout))
 	}
+	if err := checkPlanFlags(fs, *plan, false); err != nil {
+		return fail(d, asJSON, err)
+	}
 	prefix, err := splitWords("--wrap", *wrap)
 	if err != nil {
 		return fail(d, asJSON, err)
@@ -97,6 +100,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		note    = fs.String("note", "", "a note to attach to the job")
 		noCache = fs.Bool("no-cache", false, "run the whole job again, with a fresh check, even when saved results answer it")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
+		noPlan  = fs.Bool("no-plan", false, "measure: the job tests no plan, as for the baseline or a re-measure of the head; not with --plan")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
 		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's)")
 		recheck = fs.Bool("recheck", false, "measure: run the check again even when a saved pass exists")
@@ -118,8 +122,13 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		return fail(d, asJSON, usagef("--samples: a check job takes no samples"))
 	case kind == "check" && *recheck:
 		return fail(d, asJSON, usagef("--recheck: a check job always runs its check"))
+	case kind == "check" && *noPlan:
+		return fail(d, asJSON, usagef("--no-plan: only a measure job says it tests no plan; a check job takes --plan N or neither"))
 	case *samples > math.MaxUint32:
 		return fail(d, asJSON, usagef("--samples: %d is too many", *samples))
+	}
+	if err := checkPlanFlags(fs, *plan, *noPlan); err != nil {
+		return fail(d, asJSON, err)
 	}
 	envKind, err := environmentKind(*env)
 	if err == nil {
@@ -143,7 +152,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		spec.Settings = &cliv1.JobSpec_Measure{Measure: &cliv1.MeasureSettings{Samples: uint32(*samples), Recheck: *recheck}}
 	}
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
-		Context: callCtx, Spec: spec, NoCache: *noCache, Note: *note, Plan: uint32(*plan),
+		Context: callCtx, Spec: spec, NoCache: *noCache, Note: *note, Plan: uint32(*plan), NoPlan: *noPlan,
 	})
 }
 
@@ -175,6 +184,9 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		return fail(d, asJSON, usagef("--probe: needs --service"))
 	case *timeout < 0:
 		return fail(d, asJSON, usagef("--timeout: %v is negative", *timeout))
+	}
+	if err := checkPlanFlags(fs, *plan, false); err != nil {
+		return fail(d, asJSON, err)
 	}
 	kind, err := environmentKind(*env)
 	if err == nil {
@@ -224,6 +236,25 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),
 	})
+}
+
+// checkPlanFlags refuses a --plan that cannot name a plan, and --plan beside --no-plan: a job tests
+// a plan or none. A plan is numbered from 1, so an explicit --plan 0 is a mistake and not "none",
+// and a number a plan could never have is refused rather than cut to fit. The daemon makes the same
+// refusals of a request that does not come from this command, and the plan's existence is its to
+// check.
+func checkPlanFlags(fs *flag.FlagSet, plan uint, noPlan bool) error {
+	var given bool
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "plan" })
+	switch {
+	case plan != 0 && noPlan:
+		return usagef("--plan and --no-plan: give one; --plan N links the job to plan N and --no-plan says it tests no plan")
+	case given && plan == 0:
+		return usagef("--plan: plans are numbered from 1; give the plan's number, or --no-plan for a measure that tests none")
+	case plan > math.MaxUint32:
+		return usagef("--plan: %d is not a plan number", plan)
+	}
+	return nil
 }
 
 // send submits, prints the job, and with wait blocks until it is final.
