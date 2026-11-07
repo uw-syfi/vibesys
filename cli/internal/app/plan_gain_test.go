@@ -14,7 +14,7 @@ func TestAPlansGainBoundIsKeptReplacedAndNeverLostByAnotherChange(t *testing.T) 
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
 	first := &core.GainBound{Share: 0.05, RelativeTo: core.GainHeadline}
-	p, err := a.CreatePlan(ctx, call, "title", "body", first)
+	p, err := a.CreatePlan(ctx, call, "title", "body", first, 0)
 	if err != nil || p.GainBound == nil || *p.GainBound != *first {
 		t.Fatalf("created = %+v, %v", p, err)
 	}
@@ -43,7 +43,7 @@ func TestARefusedGainBoundChangesNothing(t *testing.T) {
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
 	good := &core.GainBound{Share: 0.1, RelativeTo: core.GainHeadline}
-	p, err := a.CreatePlan(ctx, call, "title", "body", good)
+	p, err := a.CreatePlan(ctx, call, "title", "body", good, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestARefusedGainBoundChangesNothing(t *testing.T) {
 		{Share: 0.1},
 		{Share: 0.1, RelativeTo: "base"},
 	} {
-		_, err := a.CreatePlan(ctx, call, "another", "", &bad)
+		_, err := a.CreatePlan(ctx, call, "another", "", &bad, 0)
 		wantInvalid(t, "a create with a bad bound", err)
 		_, err = a.EditPlan(ctx, call, p.Number, app.PlanChange{GainBound: &bad})
 		wantInvalid(t, "an edit to a bad bound", err)

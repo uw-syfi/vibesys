@@ -65,6 +65,10 @@ func FactKey(f *pb.TaskFact) (string, error) {
 		if b.Plan.GetNumber() > 0 {
 			return fmt.Sprint("plan/", b.Plan.GetNumber()), nil
 		}
+	case *pb.TaskFact_Workstream:
+		if b.Workstream.GetNumber() > 0 {
+			return fmt.Sprint("workstream/", b.Workstream.GetNumber()), nil
+		}
 	case *pb.TaskFact_Head:
 		if b.Head != nil && b.Head.GetState() != nil {
 			return "head", nil

@@ -86,6 +86,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"frontier":   frontierCommand,
 	"plan":       planCommand,
 	"bound":      boundCommand,
+	"workstream": workstreamCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
@@ -116,6 +117,10 @@ commands:
   frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   plan check-gain --under <share>                say whether every open or parked plan's gain bound is below it
+  workstream start <title>                       start a line of work plans join, or find the open one with
+                                                 that title
+  workstream list [--status s]                   the task's workstreams
+  workstream edit <n> [--title t] [--status s] [--note text]
   bound declare --objective <name> --value <v> --unit <u> --note <how derived> [--commit rev]
                                                  state the best an objective can reach; a revision is
                                                  a new entry, and nothing is replaced

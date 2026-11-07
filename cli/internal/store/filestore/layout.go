@@ -61,6 +61,10 @@ func planPath(root string, n core.PlanNumber) string {
 	return path.Join(root, plansDir, strconv.FormatUint(uint64(n), 10)+recordSuffix)
 }
 
+func workstreamPath(root string, n core.WorkstreamNumber) string {
+	return path.Join(root, workstreamsDir, strconv.FormatUint(uint64(n), 10)+recordSuffix)
+}
+
 func promotionPath(root string, seq uint64) string {
 	return path.Join(root, promotionsDir, strconv.FormatUint(seq, 10)+recordSuffix)
 }

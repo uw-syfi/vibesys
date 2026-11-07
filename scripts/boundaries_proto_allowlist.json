@@ -41,7 +41,8 @@
     "PlanFile",
     "PromotionFile",
     "ResultFile",
-    "TaskFile"
+    "TaskFile",
+    "WorkstreamFile"
   ],
   "proto/vibesys/cli/v1/supervisor.proto": [
     "ResultFormat.json_argument"

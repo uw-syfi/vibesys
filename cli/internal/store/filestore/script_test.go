@@ -65,6 +65,13 @@ func bound(name, objective string, value float64, n int) op {
 	}}
 }
 
+func startWorkstream(name, title string, n int) op {
+	return op{name, func(ctx context.Context, s store.Store) error {
+		_, err := s.StartWorkstream(ctx, core.NewWorkstream{Title: title, Origin: core.RecordOrigin{Run: "run-a", Agent: "lead", At: at(n)}})
+		return err
+	}}
+}
+
 func frontier(name string, from uint64, members ...core.Commit) op {
 	return op{name, func(ctx context.Context, s store.Store) error {
 		var ms []core.FrontierMember
@@ -115,7 +122,7 @@ func savedResult(job core.JobID, key core.JobKey, c core.Commit) *core.Result {
 // script is a workload that makes every kind of change a store makes: a job created, joined,
 // moved, finished with a result and reused; plans created and edited; promotions; two revisions of
 // the frontier; events of two
-// runs; and a log appended in pieces. Each operation is one call to the store, so a crash during
+// runs; a log appended in pieces; and a workstream started, joined by a plan and edited. Each operation is one call to the store, so a crash during
 // it leaves the state before the call or the state after it.
 func script() []op {
 	note := func(text string, n int) *core.Note { return &core.Note{Text: text, At: at(n), Agent: "agent-a"} }
@@ -158,5 +165,16 @@ func script() []op {
 		appendLog("append to the log of j2", "j2", "boom"),
 		submit("create a command job", core.Submission{Spec: core.JobSpec{Commit: "c3", Settings: core.CommandSettings{Argv: []string{"make", "test"}}}, At: at(30)}),
 		move("cancel it", core.Transition{Job: "j3", From: core.JobQueued, To: core.JobCancelled, At: at(31), CancelReason: "not needed"}),
+		startWorkstream("start a workstream", "KV cache layout", 32),
+		{"move the plan into it", func(ctx context.Context, s store.Store) error {
+			workstream := core.WorkstreamNumber(1)
+			_, err := s.EditPlan(ctx, 1, core.PlanEdit{Workstream: &workstream, Origin: core.RecordOrigin{Run: "run-b", Agent: "planner", At: at(33)}})
+			return err
+		}},
+		{"pause the workstream", func(ctx context.Context, s store.Store) error {
+			status, note := core.WorkstreamPaused, "paused: accuracy gate"
+			_, err := s.EditWorkstream(ctx, 1, core.WorkstreamEdit{Status: &status, Note: &note, At: at(34)})
+			return err
+		}},
 	}
 }
