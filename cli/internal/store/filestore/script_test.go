@@ -55,6 +55,16 @@ func promotion(name string, c, previous core.Commit, n int) op {
 	}}
 }
 
+func bound(name, objective string, value float64, n int) op {
+	return op{name, func(ctx context.Context, s store.Store) error {
+		_, err := s.DeclareBound(ctx, core.NewBound{
+			Origin:    core.RecordOrigin{Run: "run-a", Agent: "lead", At: at(n)},
+			Objective: objective, Direction: core.Maximize, Value: value, Unit: "ops/s", Note: "derived from the memory bandwidth",
+		})
+		return err
+	}}
+}
+
 func frontier(name string, from uint64, members ...core.Commit) op {
 	return op{name, func(ctx context.Context, s store.Store) error {
 		var ms []core.FrontierMember
@@ -134,6 +144,8 @@ func script() []op {
 			_, err := s.EditPlan(ctx, 1, core.PlanEdit{Status: &status, Comment: &core.PlanComment{Text: "go", At: at(12), Agent: "agent-a"}, At: at(12)})
 			return err
 		}},
+		bound("declare a bound", "ops", 15000, 12),
+		bound("revise it", "ops", 12000, 13),
 		promotion("record a promotion", "c1", "c0", 13),
 		promotion("record a second promotion", "c4", "c1", 14),
 		frontier("admit a commit to the frontier", 0, "c1"),

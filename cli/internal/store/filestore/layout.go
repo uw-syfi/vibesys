@@ -28,6 +28,7 @@ const (
 	resultsDir    = "results"
 	plansDir      = "plans"
 	promotionsDir = "promotions"
+	boundsDir     = "bounds"
 	frontierDir   = "frontier"
 	runsDir       = "runs"
 	logsDir       = "logs"
@@ -41,7 +42,10 @@ const (
 )
 
 // topDirs are the directories of an initialized store, in the order they are made.
-var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir, frontierDir}
+//
+// A store made before the bounds directory has none, which is no bound declared: loadBounds reads
+// it as empty and the first declaration makes it, so no format version separates the two.
+var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir, frontierDir, boundsDir}
 
 func jobPath(root string, id core.JobID) string {
 	return path.Join(root, jobsDir, string(id)+recordSuffix)
@@ -57,6 +61,10 @@ func planPath(root string, n core.PlanNumber) string {
 
 func promotionPath(root string, seq uint64) string {
 	return path.Join(root, promotionsDir, strconv.FormatUint(seq, 10)+recordSuffix)
+}
+
+func boundPath(root string, seq uint64) string {
+	return path.Join(root, boundsDir, strconv.FormatUint(seq, 10)+recordSuffix)
 }
 
 func frontierPath(root string, seq uint64) string {

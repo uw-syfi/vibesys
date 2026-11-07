@@ -116,7 +116,7 @@ func (d *driver) text() string {
 func (d *driver) step(step int) {
 	g, ctx := d.g, context.Background()
 	jobs := d.jobs()
-	switch op := g.pick(17); {
+	switch op := g.pick(18); {
 	case op < 4:
 		sub := core.Submission{Spec: g.spec(), Key: core.JobKey(fmt.Sprintf("k%d", g.pick(5))), NoCache: g.pick(6) == 0, At: d.instant()}
 		sub.Spec.Commit = commit(g.pick(3))
@@ -196,6 +196,19 @@ func (d *driver) step(step int) {
 			admission = core.FrontierAdmission{}
 		}
 		d.do(step, "UpdateFrontier", func(s store.Store) (any, error) { return s.UpdateFrontier(ctx, admission) })
+	case op == 15:
+		nb := core.NewBound{
+			Origin:    core.RecordOrigin{Run: core.RunID(g.text()), Agent: g.text(), At: d.instant()},
+			Objective: d.text(), Direction: []core.Direction{core.Maximize, core.Minimize}[g.pick(2)],
+			Value: float64(1 + g.pick(1000)), Unit: g.text(), Note: d.text(),
+		}
+		switch g.pick(10) {
+		case 0:
+			nb.Value = 0
+		case 1:
+			nb.Unit = ""
+		}
+		d.do(step, "DeclareBound", func(s store.Store) (any, error) { return s.DeclareBound(ctx, nb) })
 	default:
 		d.read(step, jobs)
 	}
@@ -246,6 +259,7 @@ func (d *driver) read(step int, jobs []core.Job) {
 	case 3:
 		d.do(step, "Promotions", func(s store.Store) (any, error) { return s.Promotions(ctx) })
 		d.do(step, "Frontier", func(s store.Store) (any, error) { return s.Frontier(ctx) })
+		d.do(step, "Bounds", func(s store.Store) (any, error) { return s.Bounds(ctx) })
 	case 4:
 		n := d.planNumber()
 		d.do(step, "Plan", func(s store.Store) (any, error) { return s.Plan(ctx, n) })

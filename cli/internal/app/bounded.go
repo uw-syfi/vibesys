@@ -190,6 +190,15 @@ func (s boundedStore) EditPlan(ctx context.Context, number core.PlanNumber, edit
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Plan, error) { return st.EditPlan(ctx, number, edit) })
 }
 
+func (s boundedStore) DeclareBound(ctx context.Context, bound core.NewBound) (core.Bound, error) {
+	defer touched(s.tasks)
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Bound, error) { return st.DeclareBound(ctx, bound) })
+}
+
+func (s boundedStore) Bounds(ctx context.Context) ([]core.Bound, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) ([]core.Bound, error) { return st.Bounds(ctx) })
+}
+
 func (s boundedStore) AppendEvent(ctx context.Context, draft core.EventDraft) (core.Event, error) {
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Event, error) { return st.AppendEvent(ctx, draft) })
 }

@@ -30,6 +30,7 @@
     "LeaseRecord.pid"
   ],
   "proto/vibesys/cli/v1/store.proto": [
+    "BoundFile",
     "EventFile",
     "FormatFile",
     "FrontierFile",

@@ -7,11 +7,13 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { ObjectiveBound } from "../../cli/v1/bound_pb.js";
+import { file_vibesys_cli_v1_bound } from "../../cli/v1/bound_pb.js";
 import type { Job } from "../../cli/v1/job_pb.js";
 import { file_vibesys_cli_v1_job } from "../../cli/v1/job_pb.js";
 import type { Plan } from "../../cli/v1/plan_pb.js";
 import { file_vibesys_cli_v1_plan } from "../../cli/v1/plan_pb.js";
-import type { Result } from "../../cli/v1/result_pb.js";
+import type { Direction, Result } from "../../cli/v1/result_pb.js";
 import { file_vibesys_cli_v1_result } from "../../cli/v1/result_pb.js";
 import type { Head, JobTrouble, Judgment, PromotionRecord } from "../../cli/v1/service_pb.js";
 import { file_vibesys_cli_v1_service } from "../../cli/v1/service_pb.js";
@@ -21,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/search.proto.
  */
 export const file_vibesys_orchestrator_v1_search: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIpcECgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCCKLAQoMU2VhcmNoSGVhbHRoEjAKCmxpdmVfc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAASOQoKdW5yZWFkYWJsZRgCIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEioAEKClVucmVhZGFibGUSRQoGcmVhc29uGAEgASgOMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIxCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgKq8DChBVbnJlYWRhYmxlUmVhc29uEiEKHVVOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobVU5SRUFEQUJMRV9SRUFTT05fTk9fREFFTU9OEAESIgoeVU5SRUFEQUJMRV9SRUFTT05fU1RBUlRfRkFJTEVEEAISJwojVU5SRUFEQUJMRV9SRUFTT05fQ0xJX05PVF9JTlNUQUxMRUQQAxIkCiBVTlJFQURBQkxFX1JFQVNPTl9DTElFTlRfVE9PX09MRBAEEiQKIFVOUkVBREFCTEVfUkVBU09OX0RBRU1PTl9UT09fT0xEEAUSKwonVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfT1dORURfRUxTRVdIRVJFEAYSIAocVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfQVdBWRAHEiEKHVVOUkVBREFCTEVfUkVBU09OX1NUUkVBTV9MT1NUEAgSJwojVU5SRUFEQUJMRV9SRUFTT05fTUVTU0FHRV9UT09fTEFSR0UQCRIjCh9VTlJFQURBQkxFX1JFQVNPTl9OT1RfQU5TV0VSSU5HEApCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxItsECgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAIvkDCg9PYmplY3RpdmVCb3VuZHMSHQoJb2JqZWN0aXZlGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI8Cgh2ZXJzaW9ucxgDIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZUJvdW5kQgq6SAeSAQQIARBAEiAKCmhlYWRfdmFsdWUYBCABKAFCB7pIBBICQAFIAIgBARIvChBwZXJjZW50X29mX2JvdW5kGAUgASgBQhC6SA0SC0ABIQAAAAAAAAAASAGIAQE61wG6SNMBGtABCi5vYmplY3RpdmVfYm91bmRzLnZlcnNpb25zX2FyZV9vZl90aGVfb2JqZWN0aXZlEkhldmVyeSB2ZXJzaW9uIGRlY2xhcmVzIHRoaXMgb2JqZWN0aXZlLCBpbiB0aGUgZGlyZWN0aW9uIG9mIHRoZSBvYmplY3RpdmUaVHRoaXMudmVyc2lvbnMuYWxsKHYsIHYub2JqZWN0aXZlID09IHRoaXMub2JqZWN0aXZlICYmIHYuZGlyZWN0aW9uID09IHRoaXMuZGlyZWN0aW9uKUINCgtfaGVhZF92YWx1ZUITChFfcGVyY2VudF9vZl9ib3VuZCKLAQoMU2VhcmNoSGVhbHRoEjAKCmxpdmVfc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAASOQoKdW5yZWFkYWJsZRgCIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEioAEKClVucmVhZGFibGUSRQoGcmVhc29uGAEgASgOMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIxCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgKq8DChBVbnJlYWRhYmxlUmVhc29uEiEKHVVOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobVU5SRUFEQUJMRV9SRUFTT05fTk9fREFFTU9OEAESIgoeVU5SRUFEQUJMRV9SRUFTT05fU1RBUlRfRkFJTEVEEAISJwojVU5SRUFEQUJMRV9SRUFTT05fQ0xJX05PVF9JTlNUQUxMRUQQAxIkCiBVTlJFQURBQkxFX1JFQVNPTl9DTElFTlRfVE9PX09MRBAEEiQKIFVOUkVBREFCTEVfUkVBU09OX0RBRU1PTl9UT09fT0xEEAUSKwonVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfT1dORURfRUxTRVdIRVJFEAYSIAocVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfQVdBWRAHEiEKHVVOUkVBREFCTEVfUkVBU09OX1NUUkVBTV9MT1NUEAgSJwojVU5SRUFEQUJMRV9SRUFTT05fTUVTU0FHRV9UT09fTEFSR0UQCRIjCh9VTlJFQURBQkxFX1JFQVNPTl9OT1RfQU5TV0VSSU5HEApCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service]);
 
 /**
  * SearchState is a whole, ephemeral view. Revisions are comparable only within
@@ -89,6 +91,14 @@ export type SearchState = Message<"vibesys.orchestrator.v1.SearchState"> & {
    * @generated from field: bool truncated = 12;
    */
   truncated: boolean;
+
+  /**
+   * The performance bounds the run's agents declared, one entry per objective, by objective name.
+   * Kept whole under the byte budget: a few small entries, bounded by construction.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveBounds bounds = 13;
+   */
+  bounds: ObjectiveBounds[];
 };
 
 /**
@@ -97,6 +107,62 @@ export type SearchState = Message<"vibesys.orchestrator.v1.SearchState"> & {
  */
 export const SearchStateSchema: GenMessage<SearchState> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_search, 0);
+
+/**
+ * ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
+ * earlier version of it, so a chart can draw the bound as it stood at each moment.
+ *
+ * @generated from message vibesys.orchestrator.v1.ObjectiveBounds
+ */
+export type ObjectiveBounds = Message<"vibesys.orchestrator.v1.ObjectiveBounds"> & {
+  /**
+   * @generated from field: string objective = 1;
+   */
+  objective: string;
+
+  /**
+   * Which way the objective improves, as the task declared it.
+   *
+   * @generated from field: vibesys.cli.v1.Direction direction = 2;
+   */
+  direction: Direction;
+
+  /**
+   * Every declaration for the objective in this run, oldest first. The last is the bound that
+   * stands. When the run declared more versions than fit, the newest are kept and the state is
+   * marked truncated.
+   *
+   * @generated from field: repeated vibesys.cli.v1.ObjectiveBound versions = 3;
+   */
+  versions: ObjectiveBound[];
+
+  /**
+   * The head's value on the objective, the number percent_of_bound is a share of. Absent when the
+   * run has no head, the head has no value for the objective, or the head measured the objective in
+   * another direction than the bound's.
+   *
+   * @generated from field: optional double head_value = 4;
+   */
+  headValue?: number | undefined;
+
+  /**
+   * How close the head is to the standing bound, in percent: 100 at the bound, and above 100 when
+   * the head has gone past it, which says the bound was too modest. For an objective that is
+   * maximized it is head_value over the bound, and for one that is minimized the bound over
+   * head_value, so more is better for both. Absent when head_value is, and when either number is not
+   * above zero.
+   *
+   * @generated from field: optional double percent_of_bound = 5;
+   */
+  percentOfBound?: number | undefined;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.ObjectiveBounds.
+ * Use `create(ObjectiveBoundsSchema)` to create a new message.
+ */
+export const ObjectiveBoundsSchema: GenMessage<ObjectiveBounds> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 1);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SearchHealth
@@ -125,7 +191,7 @@ export type SearchHealth = Message<"vibesys.orchestrator.v1.SearchHealth"> & {
  * Use `create(SearchHealthSchema)` to create a new message.
  */
 export const SearchHealthSchema: GenMessage<SearchHealth> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 1);
+  messageDesc(file_vibesys_orchestrator_v1_search, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Unreadable
@@ -154,7 +220,7 @@ export type Unreadable = Message<"vibesys.orchestrator.v1.Unreadable"> & {
  * Use `create(UnreadableSchema)` to create a new message.
  */
 export const UnreadableSchema: GenMessage<Unreadable> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 2);
+  messageDesc(file_vibesys_orchestrator_v1_search, 3);
 
 /**
  * @generated from enum vibesys.orchestrator.v1.UnreadableReason

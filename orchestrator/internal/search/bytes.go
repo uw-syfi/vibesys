@@ -30,6 +30,9 @@ func Detail(detail string) string {
 	return detail[:end]
 }
 
+// lastToGo is the age of an entry that is dropped for bytes after every entry that has a time.
+var lastToGo = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+
 type byteEntry struct {
 	field   protoreflect.FieldDescriptor
 	index   int
@@ -138,6 +141,10 @@ func entryAge(m proto.Message, jobs, commits map[string]time.Time) time.Time {
 		return x.GetPromotion().GetAt().AsTime()
 	case *cli.JobTrouble:
 		return jobs[x.JobId]
+	case *pb.ObjectiveBounds:
+		// A run's declared bounds are a few entries it states once and revises rarely: they go last,
+		// after every job, result and judgment that is older than the end of time.
+		return lastToGo
 	default:
 		panic("search: unknown historical entry")
 	}

@@ -62,6 +62,9 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 	s.Judgments = capList(s.Judgments, 100, &s.Truncated)
 	s.Promotions = capList(s.Promotions, 200, &s.Truncated)
 	s.Plans = capList(s.Plans, 200, &s.Truncated)
+	var leftOut bool
+	s.Bounds, leftOut = Bounds(v.Facts, s.RunId, s.Head)
+	s.Truncated = s.Truncated || leftOut
 	boundBytes(s, v)
 	return s
 }

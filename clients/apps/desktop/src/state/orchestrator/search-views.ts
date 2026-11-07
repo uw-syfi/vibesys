@@ -1,6 +1,8 @@
 /** Pure reads of CLI-owned facts. No verdict or headline is inferred from agent text. */
 import {
+  type Direction,
   JobState,
+  type ObjectiveBound,
   oneofIs,
   PlanStatus,
   type SearchState,
@@ -93,4 +95,63 @@ export function planStatus(
 
 export function jobsWithNoRun(search: SearchState): number {
   return search.unattributedJobs;
+}
+
+/** One declaration of a bound, as the agent made it. Nothing here is derived. */
+interface BoundVersionView {
+  readonly seq: bigint;
+  readonly value: number;
+  readonly unit: string;
+  /** How the agent derived the bound: the provenance a reader judges it by. */
+  readonly note: string;
+  /** Empty for a declaration made outside a run. */
+  readonly agent: string;
+  readonly atMs: number | null;
+}
+
+/**
+ * The performance bound of one objective: the bound that stands, every version of it (a chart draws
+ * the bound as it stood at each moment) and how close the head is. `headValue` and `percentOfBound`
+ * are the orchestrator's: the app shows them and never divides, so they are absent exactly when the
+ * orchestrator sent none.
+ */
+export interface ObjectiveBoundsView {
+  readonly objective: string;
+  readonly direction: Direction;
+  readonly current: BoundVersionView;
+  /** Oldest first, ending with `current`. */
+  readonly history: readonly BoundVersionView[];
+  readonly headValue: number | undefined;
+  readonly percentOfBound: number | undefined;
+}
+
+function boundVersion(version: ObjectiveBound): BoundVersionView {
+  return {
+    seq: version.seq,
+    value: version.value,
+    unit: version.unit,
+    note: version.note,
+    agent: version.origin?.agent ?? '',
+    atMs: ms(version.origin?.at),
+  };
+}
+
+/** The bounds the run's agents declared, by objective name as the orchestrator serves them. */
+export function objectiveBounds(search: SearchState): readonly ObjectiveBoundsView[] {
+  return search.bounds.flatMap(entry => {
+    const history = entry.versions.map(boundVersion);
+    const current = history.at(-1);
+    return current === undefined
+      ? []
+      : [
+          {
+            objective: entry.objective,
+            direction: entry.direction,
+            current,
+            history,
+            headValue: entry.headValue,
+            percentOfBound: entry.percentOfBound,
+          },
+        ];
+  });
 }

@@ -74,6 +74,7 @@ type JobTrouble struct {
 type TaskContent struct {
 	Head       ResultAnswer
 	Plans      []Plan
+	Bounds     []Bound
 	Promotions []PromotionRecord
 	Jobs       []Job
 	Results    []Result
@@ -93,7 +94,7 @@ type TaskView struct {
 type FactKey string
 
 // Fact is one keyed piece of a task's state. Value is a Job, Result, Judgment, PromotionRecord,
-// Plan, ResultAnswer (the head), StoreHealth or JobTrouble.
+// Plan, Bound, ResultAnswer (the head), StoreHealth or JobTrouble.
 type Fact struct {
 	Key   FactKey
 	Value any
@@ -106,8 +107,8 @@ const (
 	prefixTrouble = "trouble/"
 )
 
-// Facts returns the view's facts in the order they are sent: health, head, plans, promotions,
-// jobs, results, judgments, troubles, each by its key. A view with no content has only its
+// Facts returns the view's facts in the order they are sent: health, head, plans, bounds,
+// promotions, jobs, results, judgments, troubles, each by its key. A view with no content has only its
 // health.
 func (v TaskView) Facts() []Fact {
 	out := []Fact{{Key: keyHealth, Value: v.Health}}
@@ -118,6 +119,9 @@ func (v TaskView) Facts() []Fact {
 	out = append(out, Fact{Key: keyHead, Value: c.Head})
 	for _, p := range c.Plans {
 		out = append(out, Fact{Key: FactKey("plan/" + strconv.Itoa(int(p.Number))), Value: p})
+	}
+	for _, b := range c.Bounds {
+		out = append(out, Fact{Key: FactKey("bound/" + strconv.FormatUint(b.Seq, 10)), Value: b})
 	}
 	for _, p := range c.Promotions {
 		out = append(out, Fact{Key: FactKey("promotion/" + strconv.FormatUint(p.Seq, 10)), Value: p})
