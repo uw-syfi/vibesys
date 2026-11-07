@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
@@ -43,7 +44,7 @@ func reportCommand(kind pb.ReportKind, headline string) *pb.Command {
 func summariesIn(frames []*pb.WatchRunsResponse) []*pb.RunSummary {
 	var out []*pb.RunSummary
 	for _, f := range frames {
-		if s := f.GetSummary(); s != nil {
+		if s := client.WatchRunsSummary(f); s != nil {
 			out = append(out, s)
 		}
 	}
@@ -74,7 +75,7 @@ func TestACatchUpAnswerIsNotTheReportARunIsSummedUpBy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	snap := first[0].GetSnapshot()
+	snap := client.WatchRunsSnapshot(first[0])
 	if len(snap.GetSummaries()) != 1 || snap.GetSummaries()[0].GetReport().GetId() != whole.GetMessageId() ||
 		len(snap.GetTurns())+len(snap.GetMessages())+len(snap.GetAgents()) != 0 {
 		t.Fatalf("a summary snapshot of one run: %v", snap)
@@ -121,7 +122,7 @@ func TestACatchUpAnswerIsNotTheReportARunIsSummedUpBy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := late[0].GetSnapshot().GetSummaries()[0]; !proto.Equal(got, summary[len(summary)-1]) {
+	if got := client.WatchRunsSnapshot(late[0]).GetSummaries()[0]; !proto.Equal(got, summary[len(summary)-1]) {
 		t.Fatalf("a new connection is told %v, the stream said %v", got, summary[len(summary)-1])
 	}
 }
@@ -136,8 +137,8 @@ func TestOnlyAStreamThatAskedForSummariesIsSentSummaryFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	if len(first[0].GetSnapshot().GetSummaries()) != 1 || first[0].GetSnapshot().GetSummaries()[0].GetRunId() != string(run.ID) {
-		t.Fatalf("a snapshot of whole histories has no summaries: %v", first[0].GetSnapshot())
+	if len(client.WatchRunsSnapshot(first[0]).GetSummaries()) != 1 || client.WatchRunsSnapshot(first[0]).GetSummaries()[0].GetRunId() != string(run.ID) {
+		t.Fatalf("a snapshot of whole histories has no summaries: %v", client.WatchRunsSnapshot(first[0]))
 	}
 	post(t, rig, lead.ID, "r", reportCommand(pb.ReportKind_REPORT_KIND_FINAL, "done"))
 	frames, err := w.Poll()
@@ -167,7 +168,7 @@ func TestARunSummaryCountsWorkingAgentsOnceForEveryScreen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary := frames[0].GetSnapshot().GetSummaries()[0]
+	summary := client.WatchRunsSnapshot(frames[0]).GetSummaries()[0]
 	var statuses []core.AgentStatus
 	for _, a := range rig.Daemon.State().Agents(run.ID) {
 		statuses = append(statuses, a.Status)
@@ -230,7 +231,7 @@ func TestASummarySnapshotIsBoundedByTheNumberOfRunsAndNeverDropsOne(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			snap := frames[0].GetSnapshot()
+			snap := client.WatchRunsSnapshot(frames[0])
 			if len(snap.GetRuns()) != runs || len(snap.GetSummaries()) != runs || snap.GetRunsLeftOut() != 0 || snap.GetTruncated() {
 				t.Fatalf("%d runs listed as %d runs and %d summaries, %d left out, truncated %t", runs, len(snap.GetRuns()), len(snap.GetSummaries()), snap.GetRunsLeftOut(), snap.GetTruncated())
 			}
@@ -254,7 +255,7 @@ func TestASummarySnapshotIsBoundedByTheNumberOfRunsAndNeverDropsOne(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			full := whole[0].GetSnapshot()
+			full := client.WatchRunsSnapshot(whole[0])
 			held := len(full.GetMessages())
 			total := 0
 			for _, id := range ids {
@@ -298,7 +299,7 @@ func TestRunsThatDoNotFitAreCountedAndTheOldestGoFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	snap := frames[0].GetSnapshot()
+	snap := client.WatchRunsSnapshot(frames[0])
 	if snap.GetRunsLeftOut() == 0 || !snap.GetTruncated() || len(snap.GetRuns())+int(snap.GetRunsLeftOut()) != len(ids) {
 		t.Fatalf("%d runs of 150 KB summaries: %d listed, %d left out, truncated %t", len(ids), len(snap.GetRuns()), snap.GetRunsLeftOut(), snap.GetTruncated())
 	}
@@ -443,7 +444,7 @@ func TestARunRecordedBeforeItsSummaryReportWasNamedStillHasOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := frames[0].GetSnapshot().GetSummaries()[0].GetReport().GetId(); got != whole.GetMessageId() {
+	if got := client.WatchRunsSnapshot(frames[0]).GetSummaries()[0].GetReport().GetId(); got != whole.GetMessageId() {
 		t.Fatalf("the summary of a run that names none is %s, want the newest report about the run, %s", got, whole.GetMessageId())
 	}
 }
