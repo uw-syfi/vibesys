@@ -1,11 +1,13 @@
 /**
  * The window over a fake daemon, as a browser page: for looking at the screens and driving them
  * with Playwright without Electron. Built by `vite build --mode fixture` into `dist/fixture`.
- * `?scenario=<seed>-<subagents>-<live|done>` picks the run; `cost=<priced|ended|none|empty|long|old|absent>`
- * picks the cost the host serves for it (priced turns and unpriced ones when absent from the
- * address; `old` is a host without the cost stream, `absent` one that has no view for the run); one `host=<key>` per host to show
- * (this machine when none); `appearance=<mode>-<light theme>-<dark theme>` sets what is saved.
- * Saved appearance lives in memory, so a reload starts again from the address.
+ * `?scenario=<seed>-<subagents>-<live|done>[-tree[-<depth>]]` picks the run (`tree` has agents spawn
+ * each other and uses every kind of tool call; `depth` makes histories longer);
+ * `cost=<priced|ended|none|empty|long|old|absent>` picks the cost the host serves for it (priced and
+ * unpriced turns when absent from the address; `old` is a host without the cost stream, `absent`
+ * one that has no view for the run); one `host=<key>` per host to show (this machine when none);
+ * `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
+ * memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
@@ -51,13 +53,15 @@ const DEFAULT_SCENARIO = '5-4-live';
 const THIS_MACHINE = {key: 'local', label: 'This machine'} as const;
 
 function scenarioOf(search: string) {
-  const [seed = '5', subagents = '4', mode = 'live'] = (
+  const [seed = '5', subagents = '4', mode = 'live', shape = 'flat', depth = '0'] = (
     new URLSearchParams(search).get('scenario') ?? DEFAULT_SCENARIO
   ).split('-');
   return generateScenario({
     seed: Number(seed),
     subagents: Number(subagents),
     live: mode === 'live',
+    tree: shape === 'tree',
+    depth: Number(depth),
   });
 }
 

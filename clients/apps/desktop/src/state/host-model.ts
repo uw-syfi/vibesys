@@ -1,7 +1,7 @@
 /**
  * Everything a client knows about one host's orchestrator: the folded state of its streams (the
- * runs, each agent's and each run's cost), and how far each agent's stream has been applied. The cursor lives inside the value, so the data and
- * the cursor can only change together.
+ * runs, each agent's and each run's cost), and how far each agent's stream has been applied. The
+ * cursor lives inside the value, so the data and the cursor can only change together.
  */
 import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
 import type {CostView} from './orchestrator/cost.js';
@@ -25,6 +25,11 @@ export interface HostModel {
 export type HostFrame =
   | {readonly from: 'runs'; readonly body: WatchRunsResponse['body']}
   | {readonly from: 'agent'; readonly agentId: string; readonly frame: AgentFrame}
+  /**
+   * An answer to a request about an agent's past (an older page, one item whole). It folds like an
+   * agent frame but says nothing about where the agent's stream is, so no cursor moves.
+   */
+  | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame}
   /** A run's whole cost view, as the host works it out, already read from its message. */
   | {readonly from: 'cost'; readonly view: CostView};
 
@@ -35,6 +40,7 @@ export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
  * reconcile by sequence (`fold.ts`); a cost view is a whole fact of its own.
  */
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
+  if (frame.from === 'history') return {...model, data: applyAgentFeed(model.data, frame.frame)};
   if (frame.from === 'cost') return {...model, data: applyCost(model.data, frame.view)};
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;

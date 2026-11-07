@@ -64,13 +64,13 @@ func (t *tx) item(a agentState, b ItemObserved) {
 	if a.turn == nil || a.turn.ID != b.Turn {
 		return
 	}
-	item := Item{ID: b.ID, Turn: b.Turn, Agent: a.ID, Status: b.Status, At: t.in.At, Body: b.Body}
+	item := Item{ID: b.ID, Turn: b.Turn, Agent: a.ID, Status: b.Status, At: t.in.At, Started: t.in.At, Body: b.Body}
 	if seen, ok := a.current[b.ID]; !ok {
 		item.Ordinal = a.items + 1
 	} else if seen.Status != ItemRunning {
 		return
 	} else {
-		item.Ordinal = seen.Ordinal
+		item.Ordinal, item.Started = seen.Ordinal, seen.Started
 	}
 	t.emit(a.Run, item)
 }

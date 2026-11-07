@@ -13,7 +13,6 @@ import {
   Rejection,
   RunStatus,
   type ToolCall,
-  TurnStatus,
 } from '@vibesys/orchestrator-proto';
 import type {FaultKind} from '../../state/index.js';
 
@@ -60,16 +59,6 @@ const RUN: Readonly<Record<RunStatus, Word>> = {
 };
 
 export const runWord = (status: RunStatus): Word => RUN[status];
-
-const TURN: Readonly<Record<TurnStatus, string>> = {
-  [TurnStatus.UNSPECIFIED]: 'Unknown',
-  [TurnStatus.RUNNING]: 'In progress',
-  [TurnStatus.COMPLETED]: 'Completed',
-  [TurnStatus.INTERRUPTED]: 'Interrupted',
-  [TurnStatus.FAILED]: 'Failed',
-};
-
-export const turnWord = (status: TurnStatus): string => TURN[status];
 
 const HARNESS: Readonly<Record<Harness, string>> = {
   [Harness.UNSPECIFIED]: 'Unknown tool',

@@ -21,6 +21,7 @@
  */
 import {
   type Delta,
+  type Elision,
   type Item,
   ItemStatus,
   oneofIs,
@@ -99,20 +100,66 @@ function overlaysAfter(
   return pieces.length === 0 ? rest : {...rest, [item.id]: overlayOf(overlay.agentId, pieces)};
 }
 
-function withItem(state: OrchestratorState, item: Item, sequence: bigint): OrchestratorState {
+/**
+ * Stores `item` when it is the newer copy. `elided` is how many bytes of text the copy left out (a
+ * page does that for large reasoning and tool output); null for a whole item. A final item does not
+ * change, so a whole copy beats an elided one whatever the sequences say, and an elided copy never
+ * replaces a whole one.
+ */
+/** Whether a copy of an item (elided or whole, at `sequence`) takes the place of the one stored. */
+function replaces(
+  state: OrchestratorState,
+  stored: Item,
+  item: Item,
+  sequence: bigint,
+  elided: number | null,
+): boolean {
+  if (isFinalItem(stored) && !isFinalItem(item)) return false;
+  if (isFinalItem(stored) !== isFinalItem(item)) return true;
+  const heldElided = state.elided[item.id] !== undefined;
+  // A final item does not change: a whole copy beats an elided one, whatever the sequences say.
+  if (isFinalItem(item) && !heldElided && elided !== null) return false;
+  if (isFinalItem(item) && heldElided && elided === null) return true;
+  return sequence >= (state.itemSequences[item.id] ?? 0n);
+}
+
+/**
+ * Stores `item` when it is the newer copy. `elided` is how many bytes of text the copy left out (a
+ * page does that for large reasoning and tool output); null for a whole item. An elided copy never
+ * replaces a whole final one (see `replaces`).
+ */
+function withItem(
+  state: OrchestratorState,
+  item: Item,
+  sequence: bigint,
+  elided: number | null = null,
+): OrchestratorState {
   const stored = state.items[item.id];
-  const at = state.itemSequences[item.id] ?? 0n;
-  if (stored !== undefined) {
-    if (isFinalItem(stored) && !isFinalItem(item)) return state;
-    if (isFinalItem(stored) === isFinalItem(item) && sequence < at) return state;
-  }
-  const newest = sequence > at ? sequence : at;
+  if (stored !== undefined && !replaces(state, stored, item, sequence, elided)) return state;
+  const newest =
+    sequence > (state.itemSequences[item.id] ?? 0n) ? sequence : state.itemSequences[item.id];
+  const {[item.id]: _was, ...rest} = state.elided;
   return {
     ...state,
     items: {...state.items, [item.id]: item},
-    itemSequences: {...state.itemSequences, [item.id]: newest},
-    overlays: overlaysAfter(state.overlays, item, newest),
+    itemSequences: {...state.itemSequences, [item.id]: newest ?? sequence},
+    elided: elided === null ? rest : {...rest, [item.id]: elided},
+    overlays: overlaysAfter(state.overlays, item, newest ?? sequence),
   };
+}
+
+/** The items of a page with what the page says it left out of each, by ordinal. */
+function withPage(
+  state: OrchestratorState,
+  items: readonly Item[],
+  elisions: readonly Elision[],
+  sequence: bigint,
+): OrchestratorState {
+  const left = new Map(elisions.map(elision => [elision.ordinal, Number(elision.bodyBytes)]));
+  return items.reduce(
+    (next, item) => withItem(next, item, sequence, left.get(item.ordinal) ?? null),
+    state,
+  );
 }
 
 function withTurn(state: OrchestratorState, turn: Turn): OrchestratorState {
@@ -184,12 +231,21 @@ function withDelta(state: OrchestratorState, delta: Delta, sequence: bigint): Or
 
 /** A page of items read on request (`ListItems`): older history, with the sequence it is current to. */
 export interface OlderFrame {
-  readonly body: {readonly case: 'older'; readonly value: {readonly items: readonly Item[]}};
+  readonly body: {
+    readonly case: 'older';
+    readonly value: {readonly items: readonly Item[]; readonly elisions: readonly Elision[]};
+  };
   readonly sequence: bigint;
 }
 
-/** What the per-agent stream carries, and the older pages read on request. */
-export type AgentFrame = Pick<WatchAgentResponse, 'body' | 'sequence'> | OlderFrame;
+/** One item read whole on request (`GetItem`), with the sequence it is current to. */
+interface WholeFrame {
+  readonly body: {readonly case: 'whole'; readonly value: {readonly item: Item}};
+  readonly sequence: bigint;
+}
+
+/** What the per-agent stream carries, and what is read on request. */
+export type AgentFrame = Pick<WatchAgentResponse, 'body' | 'sequence'> | OlderFrame | WholeFrame;
 
 export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): OrchestratorState {
   const {body, sequence} = frame;
@@ -200,13 +256,17 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
       const overlays = Object.fromEntries(
         Object.entries(state.overlays).filter(([, overlay]) => !agents.has(overlay.agentId)),
       );
-      return body.value.items.reduce((next, item) => withItem(next, item, body.value.sequence), {
-        ...state,
-        overlays,
-      });
+      return withPage(
+        {...state, overlays},
+        body.value.items,
+        body.value.elisions,
+        body.value.sequence,
+      );
     }
     case 'older':
-      return body.value.items.reduce((next, item) => withItem(next, item, sequence), state);
+      return withPage(state, body.value.items, body.value.elisions, sequence);
+    case 'whole':
+      return withItem(state, body.value.item, sequence);
     case 'item':
       return withItem(state, body.value, sequence);
     case 'delta':

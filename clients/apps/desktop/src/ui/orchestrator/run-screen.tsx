@@ -21,6 +21,7 @@ import {
   type OrchestratorState,
   type RunView,
 } from '../../state/index.js';
+import {AgentsScreen} from '../agents/agents-screen.js';
 import {CostScreen} from '../cost/index.js';
 import {CommandLine} from './command-line.js';
 import {COST_WORDS} from './cost-words.js';
@@ -32,6 +33,7 @@ import {agentWord, harnessWord, runWord} from './words.js';
 
 const VIEWS = [
   {value: 'timeline', label: 'Timeline'},
+  {value: 'agents', label: 'Agents'},
   {value: 'cost', label: 'Cost'},
   {value: 'handoffs', label: 'Handoffs and reports'},
 ] as const;
@@ -105,6 +107,15 @@ export function RunScreen(props: {
         agentId={props.agentId}
         pick={props.pick}
       />
+    ) : props.view === 'agents' ? (
+      <AgentsScreen
+        state={props.state}
+        runId={props.runId}
+        host={props.host}
+        nowMs={props.nowMs}
+        selected={props.agentId}
+        open={props.pick}
+      />
     ) : props.view === 'cost' ? (
       <CostScreen
         view={props.state.costs[props.runId]}
@@ -146,7 +157,6 @@ export function RunScreen(props: {
       {search === undefined ? null : <SearchPanels search={search} nowMs={props.nowMs} />}
       <Split
         asideFirst
-        asideSticky
         aside={
           <AgentTree
             state={props.state}

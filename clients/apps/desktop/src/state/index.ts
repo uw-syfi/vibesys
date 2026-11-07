@@ -5,6 +5,7 @@
  * (`desktop-state-*` rules in `.dependency-cruiser.mjs`), so a fold is a function from data to
  * data that any test calls directly.
  */
+export * from './agents/index.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
   type HostConnectionState,
@@ -59,6 +60,8 @@ export {
   isFinalItem,
   type OlderFrame,
 } from './orchestrator/fold.js';
+export {type ItemOf, itemIs} from './orchestrator/items.js';
+export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
 export {
   candidates,
   jobQueue,

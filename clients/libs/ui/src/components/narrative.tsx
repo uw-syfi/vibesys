@@ -5,6 +5,7 @@ import {Markdown} from './markdown.js';
 import {markdownToPlain} from './markdown-plain.js';
 import type {ToolState} from './message.js';
 import {NewBelow} from './new-below.js';
+import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
 /** The height a block is taken to have until it has been drawn and measured. */
@@ -90,6 +91,10 @@ function previewOf(text: string): string {
  */
 export function Thought(props: {
   readonly text: string;
+  /** What the line says instead of "Thought", for example how long it took. */
+  readonly label?: string;
+  /** Muted words in place of text that is not here (yet). */
+  readonly notice?: string;
   readonly live?: boolean;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
@@ -102,7 +107,7 @@ export function Thought(props: {
       data-live={props.live === true || undefined}
     >
       <Collapsible
-        label={props.live === true ? 'Thinking' : 'Thought'}
+        label={props.label ?? (props.live === true ? 'Thinking' : 'Thought')}
         leading={
           <span className="vs-thought-icon">
             <Icon name="brain" />
@@ -112,7 +117,13 @@ export function Thought(props: {
         open={props.open}
         toggle={props.toggle}
       >
-        <Markdown text={props.text} />
+        {props.text === '' && props.notice !== undefined ? (
+          <Text variant="small" tone="muted">
+            {props.notice}
+          </Text>
+        ) : (
+          <Markdown text={props.text} />
+        )}
       </Collapsible>
     </div>
   );

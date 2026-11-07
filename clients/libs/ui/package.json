@@ -61,6 +61,8 @@
     "src/surfaces.css",
     "src/documents.css",
     "src/threads.css",
+    "src/gantt-tree.css",
+    "src/conversation.css",
     "src/fonts"
   ],
   "scripts": {

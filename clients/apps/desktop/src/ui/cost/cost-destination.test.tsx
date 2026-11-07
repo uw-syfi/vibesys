@@ -35,6 +35,7 @@ function hostWith(
     freshness: {status: 'live', lastUpdateMs: null},
     runsFeed: {_tag: 'Live'},
     agentFeeds: {},
+    history: {earlier: {_tag: 'Idle'}, wholes: {}},
     costFeeds: feed === undefined ? {} : {[scenario.runId]: feed},
   };
 }
@@ -65,6 +66,8 @@ function Window(props: {
         retryStop: () => undefined,
         sendMessage: () => undefined,
         retrySend: () => undefined,
+        loadEarlier: () => undefined,
+        expand: () => undefined,
       }}
       retryHost={() => undefined}
       retryCost={(host, runId) => props.retries.push(`${host}/${runId}`)}

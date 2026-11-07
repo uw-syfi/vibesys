@@ -1,4 +1,5 @@
 /** The app's Effect services, transport and atoms (`neutral` runtime). */
+export {type AgentHistory, type HistoryStatus, makeAgentHistory} from './agent-history.js';
 export {type AgentView, makeAgentView} from './agent-view.js';
 export {
   type CallOptions,

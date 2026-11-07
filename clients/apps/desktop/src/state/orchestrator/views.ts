@@ -15,6 +15,7 @@ import {
   type Turn,
   TurnStatus,
 } from '@vibesys/orchestrator-proto';
+import {messageIs} from './messages.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
 
@@ -194,39 +195,9 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
     }),
   }));
   const jobs = Object.values(state.messages)
-    .filter(
-      message =>
-        message.runId === runId &&
-        oneofIs(message.body, 'jobFinished', {
-          text: true,
-          handoff: true,
-          report: true,
-          jobFinished: true,
-          subagentSettled: true,
-          brief: true,
-          leadBrief: true,
-          handoffReminder: true,
-          leadIdleReminder: true,
-          reportDue: true,
-          runLimitReached: true,
-        }),
-    )
+    .filter(message => message.runId === runId && messageIs(message, 'jobFinished'))
     .flatMap((message): JobBar[] => {
-      const job = oneofIs(message.body, 'jobFinished', {
-        text: true,
-        handoff: true,
-        report: true,
-        jobFinished: true,
-        subagentSettled: true,
-        brief: true,
-        leadBrief: true,
-        handoffReminder: true,
-        leadIdleReminder: true,
-        reportDue: true,
-        runLimitReached: true,
-      })
-        ? message.body.value
-        : null;
+      const job = messageIs(message, 'jobFinished') ? message.body.value : null;
       const fact = state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId);
       const startMs = ms(fact?.startedAt) ?? ms(fact?.submittedAt);
       const endMs = ms(fact?.finishedAt) ?? ms(message.at);
