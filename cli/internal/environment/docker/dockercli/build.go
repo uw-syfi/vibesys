@@ -88,6 +88,65 @@ func (e *Engine) Save(ctx context.Context, image string, w io.Writer) error {
 	return unavailable("docker save %s failed (exit %d): %s", image, exit.ExitCode(), clip(errs.last()))
 }
 
+// Export writes the files of a container of the image to w, as `docker export` does, streaming: a
+// container is created of it (never started, with a command of its own, since an image may have
+// none), exported, and removed whatever happens, so no bound is put on the copy but the caller's.
+func (e *Engine) Export(ctx context.Context, image string, w io.Writer) error {
+	if image == "" || strings.HasPrefix(image, "-") {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: %q is not an image reference", image)}
+	}
+	res, err := e.call(ctx, "create", "create", "--label", docker.Owner+".export=1", "--entrypoint", "", image, "/")
+	if err != nil {
+		return err
+	}
+	if res.code != 0 {
+		return failed("create", res)
+	}
+	id := strings.TrimSpace(res.stdout)
+	if id == "" || strings.ContainsAny(id, " \n") || strings.HasPrefix(id, "-") {
+		return unavailable("docker create printed %q, which is not a container's id", clip(res.stdout))
+	}
+	defer func() {
+		// The container holds nothing but the image's files: removing it may outlive the caller.
+		_, _ = e.call(context.WithoutCancel(ctx), "rm", "rm", "--force", id)
+	}()
+	cmd := e.command(ctx, nil, "export", id)
+	cmd.Stdout = w
+	errs := &tail{w: io.Discard}
+	cmd.Stderr = errs
+	err = cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var exit *exec.ExitError
+	if !asExit(err, &exit) {
+		return unavailable("cannot run %q to export the image %s: %v; %s", e.program, image, err, hint)
+	}
+	return unavailable("docker export of a container of %s failed (exit %d): %s", image, exit.ExitCode(), clip(errs.last()))
+}
+
+// Env returns the image's environment, as `docker image inspect` says it, in its order.
+func (e *Engine) Env(ctx context.Context, image string) ([]string, error) {
+	if image == "" || strings.HasPrefix(image, "-") {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: %q is not an image reference", image)}
+	}
+	res, err := e.call(ctx, "image inspect", "image", "inspect", "--format", "{{json .Config.Env}}", image)
+	if err != nil {
+		return nil, err
+	}
+	if res.code != 0 {
+		return nil, failed("image inspect", res)
+	}
+	var env []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(res.stdout)), &env); err != nil {
+		return nil, unavailable("docker image inspect wrote what is not an environment: %v", err)
+	}
+	return env, nil
+}
+
 // Sizes returns the size of the image unpacked, as `docker image ls` says it, and the size of its
 // content as the engine stores it, as `docker image inspect` says it. With the containerd image
 // store, Docker's default, the content is the layers compressed, about what `docker save` writes;

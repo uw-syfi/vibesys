@@ -118,6 +118,18 @@ message SlurmSettings {
   double queue_timeout_seconds = 9 [(buf.validate.field).double.gte = 0];
 }
 
+// ContainerRuntime is what runs a container of the apptainer kind on a compute node.
+enum ContainerRuntime {
+  CONTAINER_RUNTIME_UNSPECIFIED = 0;
+  // Apptainer: this machine's apptainer converts each image to a SIF, which the nodes' apptainer
+  // runs.
+  CONTAINER_RUNTIME_APPTAINER = 1;
+  // Slurm's Pyxis plugin and Enroot: each image's root file system (docker export) is streamed to
+  // the login node, which makes an Enroot squashfs of it with sqfstar, and each process is a step of
+  // srun --container-image.
+  CONTAINER_RUNTIME_PYXIS = 2;
+}
+
 // ApptainerSettings is how the apptainer kind makes an allocation and runs a container in it.
 message ApptainerSettings {
   // The program, with its arguments, that submits a batch job on the login node: sbatch, or a site's
@@ -126,14 +138,18 @@ message ApptainerSettings {
   // Passed to the submit command after the options the CLI sets, such as an account (--account=x) or
   // a QOS a site requires on every job. Each is an option.
   repeated string submit_arguments = 2 [(buf.validate.field).repeated.items.string.pattern = "^-"];
-  // The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer.
+  // The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer. Only for
+  // the apptainer runtime.
   string program = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_./+-]*$"];
   // The absolute directory of this machine where an image is converted to a SIF by this machine's
   // apptainer (on the daemon's PATH): the archive, the image unpacked (APPTAINER_TMPDIR) and the
-  // SIF. Unset means apptainer/ under the user's cache directory.
+  // SIF. Unset means apptainer/ under the user's cache directory. Only for the apptainer runtime.
   string local_scratch_dir = 4 [(buf.validate.field).string.pattern = "^(/.*[^/])?$"];
-  // The bound on converting one image and copying its SIF to the cluster. Zero means an hour.
+  // The bound on converting one image and copying its SIF to the cluster, or on streaming its root
+  // file system to the login node and making its squashfs there. Zero means an hour.
   double convert_timeout_seconds = 5 [(buf.validate.field).double.gte = 0];
+  // What runs the containers on the compute nodes. Unset means apptainer.
+  ContainerRuntime runtime = 6 [(buf.validate.field).enum.defined_only = true];
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind

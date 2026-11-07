@@ -54,6 +54,8 @@ type setup struct {
 	// scope is the rig's; empty is the tests' scope. A scope is one process's: a run sweeps what
 	// every other process of its scope left, as a dead one's.
 	scope string
+	// runtime is what runs the containers; under RuntimePyxis the rig has no converter.
+	runtime apptainer.Runtime
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -78,8 +80,13 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	if o.scope == "" {
 		o.scope = scope
 	}
-	if o.converter == nil {
-		o.converter = clusterfake.NewConverter()
+	var converter apptainer.Converter
+	dir := ""
+	if o.runtime == apptainer.RuntimeApptainer {
+		if o.converter == nil {
+			o.converter = clusterfake.NewConverter()
+		}
+		converter, dir = o.converter, localDir
 	}
 	local := dockerfake.NewDaemon(w.MemoryGates, o.daemon...).Connect()
 	client := cluster.Connect()
@@ -87,7 +94,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
 		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
 		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
-		NodeScripts: o.scripts, Converter: o.converter, LocalDir: localDir,
+		NodeScripts: o.scripts, Runtime: o.runtime, Converter: converter, LocalDir: dir,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -132,19 +139,25 @@ func nothingLeft(t testing.TB, c *clusterfake.Cluster) {
 }
 
 // The docker environment over the apptainer engine is held to the same contract as every
-// environment.
+// environment, under each runtime.
 func TestTheDockerEnvironmentOnApptainerPassesTheEnvironmentContract(t *testing.T) {
+	for name, runtime := range map[string]apptainer.Runtime{"apptainer": apptainer.RuntimeApptainer, "pyxis": apptainer.RuntimePyxis} {
+		t.Run(name, func(t *testing.T) { contract(t, runtime) })
+	}
+}
+
+func contract(t *testing.T, runtime apptainer.Runtime) {
 	envtest.Run(t, envtest.Rig{
 		New: func(t *testing.T, w envtest.World, timers clock.Timers) environment.Environment {
 			cluster := clusterfake.New(w.(fakeworld.World).MemoryGates)
 			t.Cleanup(func() { nothingLeft(t, cluster) })
-			return newRig(t, w.(fakeworld.World), cluster, setup{timers: timers}).env
+			return newRig(t, w.(fakeworld.World), cluster, setup{timers: timers, runtime: runtime}).env
 		},
 		World:    func(t *testing.T) envtest.World { return fakeworld.New() },
 		Checkout: func(t *testing.T, _ envtest.World) core.Checkout { return checkout(t) },
 		Spawn: func(t *testing.T, w envtest.World, x core.Execution) func() {
 			cluster := clusterfake.New(w.(fakeworld.World).MemoryGates)
-			r := newRig(t, w.(fakeworld.World), cluster, setup{})
+			r := newRig(t, w.(fakeworld.World), cluster, setup{runtime: runtime})
 			var wg sync.WaitGroup
 			wg.Go(func() { _ = r.env.Run(context.Background(), x, io.Discard) })
 			var once sync.Once

@@ -25,16 +25,30 @@ import (
 
 // fakeSrun runs a step here: it drops srun's options, takes the job's id from --jobid, and exits
 // with the step's code, 128 plus the signal for one a signal ended, as srun does. With $SRUN_FAIL
-// set it fails as srun does before a step starts, with that code.
+// set it fails as srun does before a step starts, with that code. A step of a container
+// (--container-image) is Pyxis's: its options go to pyxis.log, one step a line, and the command
+// runs in --container-workdir with the environment srun was given, as Pyxis passes it in. The node's
+// file system is the directory the file node_root beside it names, under which a step's mkdir
+// makes its directories.
 const fakeSrun = `#!/bin/sh
 if [ -n "${SRUN_FAIL:-}" ]; then echo "srun: error: Unable to confirm allocation for job" >&2; exit "$SRUN_FAIL"; fi
+NODE_ROOT=$(cat "$(dirname "$0")/node_root" 2>/dev/null)
+image= pyxis=
 while [ $# -gt 0 ]; do
   case "$1" in
     --jobid=*) SLURM_JOB_ID="${1#--jobid=}"; export SLURM_JOB_ID; shift ;;
+    --container-image=*) image="${1#--container-image=}"; pyxis="$pyxis $1"; shift ;;
+    --container-workdir=*) workdir="${1#--container-workdir=}"; pyxis="$pyxis $1"; shift ;;
+    --container-*|--no-container-*) pyxis="$pyxis $1"; shift ;;
     --*) shift ;;
     *) break ;;
   esac
 done
+if [ "$1" = mkdir ] && [ -n "${NODE_ROOT:-}" ]; then exec mkdir -p "$NODE_ROOT$3"; fi
+if [ -n "$image" ]; then
+  echo "$pyxis" >> "$(dirname "$0")/pyxis.log"
+  if [ -n "${workdir:-}" ]; then cd "$NODE_ROOT$workdir" || exit 1; fi
+fi
 "$@"
 `
 

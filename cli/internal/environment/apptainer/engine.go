@@ -53,6 +53,11 @@ type Exporter interface {
 	// image's ID is the digest of its manifest or index, which differs from one build to the next of
 	// the same Dockerfile and files when BuildKit attaches attestations to it.
 	Content(ctx context.Context, image string) (string, error)
+	// Export writes the files of a container of the image, as `docker export` does, a tar archive
+	// of its root file system with every layer applied, streaming.
+	Export(ctx context.Context, image string, w io.Writer) error
+	// Env returns the image's environment, KEY=VALUE each, in the image's order.
+	Env(ctx context.Context, image string) ([]string, error)
 }
 
 // Sizing is what an allocation asks for, by what its container runs.
@@ -127,12 +132,15 @@ type Config struct {
 	Sizing Sizing
 	// NodeScripts are scripts each node runs with its facts, whose output Facts reads by name.
 	NodeScripts map[string]string
-	// Converter converts the images to SIFs on this machine.
+	// Runtime is what runs the containers on the nodes, which says what an image becomes.
+	Runtime Runtime
+	// Converter converts the images to SIFs on this machine, under RuntimeApptainer.
 	Converter Converter
-	// LocalDir is the absolute directory of this machine a conversion writes in.
+	// LocalDir is the absolute directory of this machine a conversion writes in, under
+	// RuntimeApptainer.
 	LocalDir string
-	// ConvertTimeout bounds an image's conversion and the copy of its SIF; zero is
-	// DefaultConvertTimeout.
+	// ConvertTimeout bounds an image's conversion and the copy of its SIF, or the stream of its
+	// root file system and its squashfs; zero is DefaultConvertTimeout.
 	ConvertTimeout time.Duration
 }
 
@@ -191,6 +199,10 @@ func New(cfg Config) (*Engine, error) {
 		cfg.ConvertTimeout = DefaultConvertTimeout
 	}
 	switch {
+	case cfg.Runtime != RuntimeApptainer && cfg.Runtime != RuntimePyxis:
+		return nil, invalid("the runtime %d is not one this engine runs", cfg.Runtime)
+	case cfg.Runtime == RuntimePyxis:
+		// The login node makes the squashfs: nothing is converted on this machine.
 	case cfg.Converter == nil:
 		return nil, missing("Converter")
 	case !path.IsAbs(cfg.LocalDir) || path.Clean(cfg.LocalDir) == "/":
@@ -483,11 +495,16 @@ func orUnknown(s string) string {
 	return s
 }
 
-// sifPath is where the cluster keeps the SIF of an image's content, named by the content's digest
-// (Exporter.Content). It is not named by the image's ID, which two builds of one content may not
-// share; a SIF named by an ID, as earlier versions named them, is used by nothing.
+// sifPath is where the cluster keeps the image of an image's content, named by the content's
+// digest (Exporter.Content): its SIF, or its squashfs under RuntimePyxis. It is not named by the
+// image's ID, which two builds of one content may not share; a SIF named by an ID, as earlier
+// versions named them, is used by nothing.
 func (e *Engine) sifPath(content string) string {
-	return path.Join(e.cfg.Root, "images", strings.TrimPrefix(content, "sha256:")+".sif")
+	ext := ".sif"
+	if e.cfg.Runtime == RuntimePyxis {
+		ext = ".sqsh"
+	}
+	return path.Join(e.cfg.Root, "images", strings.TrimPrefix(content, "sha256:")+ext)
 }
 
 // contentOf is the digest of the image's content, checked to be one, since it names files.
@@ -536,6 +553,9 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 	if err != nil || has {
 		return sif, err
 	}
+	if e.cfg.Runtime == RuntimePyxis {
+		return sif, e.squash(ctx, image, content, sif, log)
+	}
 	lock, err := e.lockConversion(ctx, image, content, log)
 	if err != nil {
 		return "", err
@@ -561,6 +581,61 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 		return "", err
 	}
 	return sif, nil
+}
+
+// squash makes the image's squashfs at the path on the cluster from its root file system, streamed
+// to the login node as it is exported, bounded by ConvertTimeout: nothing of it is kept on this
+// machine, and a squash that fails leaves nothing there, for the next publisher to make again.
+func (e *Engine) squash(ctx context.Context, image, content, sqsh string, log io.Writer) error {
+	ctx, stop := clock.Deadline(ctx, e.cfg.Timers, e.cfg.ConvertTimeout)
+	defer stop()
+	by, err := e.squashOnce(ctx, image, content, sqsh, log)
+	if err == nil {
+		err = e.copy(ctx, sqsh+BuiltBy, func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(by + ", from docker export\n")), nil
+		}, log)
+	}
+	if err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return unavailable("streaming the image %s to the login node and making its squashfs did not end within %v "+
+				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
+		}
+		return err
+	}
+	_, _ = fmt.Fprintf(log, "[apptainer] %s is %s, made by %s\n", image, sqsh, by)
+	return nil
+}
+
+func (e *Engine) squashOnce(ctx context.Context, image, content, sqsh string, log io.Writer) (string, error) {
+	env, err := e.cfg.Export.Env(ctx, image)
+	if err != nil {
+		return "", fmt.Errorf("reading the environment of the image %s: %w", image, err)
+	}
+	_, _ = fmt.Fprintf(log, "[apptainer] streaming the files of %s to the login node, which makes its squashfs %s\n", image, sqsh)
+	exported, exportW := io.Pipe()
+	rootfs, rootfsW := io.Pipe()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		err := e.cfg.Export.Export(ctx, image, exportW)
+		if err != nil {
+			err = fmt.Errorf("exporting the files of the image %s: %w", image, err)
+		}
+		exportW.CloseWithError(err)
+	})
+	wg.Go(func() {
+		err := RootFS(exported, env, content, rootfsW)
+		// A RootFS that stopped reading leaves the export nothing to write to.
+		exported.CloseWithError(errors.New("apptainer: the root file system's stream ended"))
+		rootfsW.CloseWithError(err)
+	})
+	by, err := e.cfg.Cluster.Squash(ctx, sqsh, content, rootfs)
+	// A login node that stopped reading, having the squashfs already or failing, ends the stream.
+	rootfs.CloseWithError(errors.New("apptainer: the login node stopped reading"))
+	wg.Wait()
+	if err != nil {
+		return "", fmt.Errorf("making the squashfs of the image %s: %w", image, err)
+	}
+	return by, nil
 }
 
 // convert converts the image to a SIF kept in the local directory, copies it to sif on the cluster,

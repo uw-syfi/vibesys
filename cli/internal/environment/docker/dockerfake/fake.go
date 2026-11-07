@@ -1,6 +1,8 @@
 package dockerfake
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -34,12 +36,14 @@ const (
 	OpExec Op = "exec"
 	// OpPort is the choice of a container's free port.
 	OpPort Op = "port"
-	// OpSave is the export of an image as a docker archive.
+	// OpSave is the export of an image as a docker archive, or of what it holds.
 	OpSave Op = "save"
+	// OpExport is the export of the files of a container of an image.
+	OpExport Op = "export"
 )
 
 // Ops lists every call a fault can fail.
-var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec, OpPort, OpSave}
+var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec, OpPort, OpSave, OpExport}
 
 // Call is one call of the engine, as a fault sees it.
 type Call struct {
@@ -342,6 +346,88 @@ func (c *Client) Save(ctx context.Context, image string, w io.Writer) error {
 
 // Archive is the archive Save writes of the image with the ID.
 func Archive(id string) []byte { return []byte("docker archive of " + id + "\n") }
+
+// imageID is the ID of the image of the ID or a tag, and false when there is none.
+func (c *Client) imageID(image string) (string, bool) {
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			return img.ID, true
+		}
+	}
+	return "", false
+}
+
+// Export writes the files of a container of the image, found by its ID or a tag: Files of its ID,
+// as a tar archive, as docker export writes one. A Late fault writes part of the archive first.
+func (c *Client) Export(ctx context.Context, image string, w io.Writer) error {
+	fault, err := c.enter(ctx, Call{OpExport, image})
+	if err != nil {
+		return err
+	}
+	if fault != nil && !fault.Late {
+		return fault.Err
+	}
+	id, ok := c.imageID(image)
+	if !ok {
+		return &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+	}
+	archive := exported(id)
+	if fault != nil {
+		_, _ = w.Write(archive[:len(archive)/2])
+		return fault.Err
+	}
+	_, err = w.Write(archive)
+	return err
+}
+
+// exported is the archive Export writes of the image with the ID.
+func exported(id string) []byte {
+	var b bytes.Buffer
+	tw := tar.NewWriter(&b)
+	for _, f := range Files(id) {
+		h := &tar.Header{Name: f.Name, Mode: 0o644, Typeflag: tar.TypeReg, Size: int64(len(f.Data))}
+		if strings.HasSuffix(f.Name, "/") {
+			h = &tar.Header{Name: f.Name, Mode: 0o755, Typeflag: tar.TypeDir}
+		}
+		// Writing to memory fails for nothing.
+		_ = tw.WriteHeader(h)
+		_, _ = io.WriteString(tw, f.Data)
+	}
+	_ = tw.Close()
+	return b.Bytes()
+}
+
+// File is a file of an image's root file system; a name that ends with a slash is a directory.
+type File struct{ Name, Data string }
+
+// Files are the files of a container of the image with the ID, as docker export writes them: what
+// Docker adds to every container (.dockerenv, devices) among them.
+func Files(id string) []File {
+	return []File{
+		{".dockerenv", ""}, {"bin/", ""}, {"bin/sh", "a shell of " + id + "\n"}, {"dev/", ""}, {"dev/console", ""},
+		{"etc/", ""}, {"etc/environment", "FROM_THE_IMAGE_FILE=1\n"}, {"etc/hostname", ""}, {"etc/os-release", "ID=fake\n"},
+	}
+}
+
+// Env is the environment of every image the fake builds.
+var Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8"}
+
+// Env returns the environment of the image, found by its ID or a tag: Env.
+func (c *Client) Env(ctx context.Context, image string) ([]string, error) {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return nil, err
+	}
+	if fault != nil {
+		return nil, fault.Err
+	}
+	if _, ok := c.imageID(image); !ok {
+		return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+	}
+	return slices.Clone(Env), nil
+}
 
 // UnpackedFactor is how many times larger than its archive an image of the fake is unpacked: the
 // layers of an archive are compressed.

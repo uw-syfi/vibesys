@@ -166,6 +166,7 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 	remote := p.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_LOCAL
 	apptainer := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER
 	slurm := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SLURM || apptainer
+	pyxis := p.GetApptainer().GetRuntime() == cliv1.ContainerRuntime_CONTAINER_RUNTIME_PYXIS
 	switch {
 	case remote && p.GetRemote() == nil:
 		return invalid("%s %q needs a %s section with the host", n.kind, kind, n.remote)
@@ -185,6 +186,12 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 		return invalid("%s %q gives AMD GPUs only, with a rocm resource; it has no gpu resource", n.kind, kind)
 	case apptainer && p.GetResources().GetKubernetes() != nil:
 		return invalid("%s %q gives no kubernetes resource", n.kind, kind)
+	case pyxis && p.GetApptainer().GetProgram() != "":
+		// The pyxis runtime runs no apptainer program on the nodes, and converts nothing on this
+		// machine: a setting of the other runtime would be quietly ignored.
+		return invalid("%s program: runtime \"pyxis\" runs no apptainer program", n.apptainer)
+	case pyxis && p.GetApptainer().GetLocalScratchDir() != "":
+		return invalid("%s local_scratch_dir: runtime \"pyxis\" converts the images on the login node, not on this machine", n.apptainer)
 	case remote && p.GetMaxJobs() > 1:
 		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
 		// one job of its scope, so a second one beside it would be swept away.

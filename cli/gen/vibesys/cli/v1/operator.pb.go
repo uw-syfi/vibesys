@@ -84,6 +84,61 @@ func (PlacementKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{0}
 }
 
+// ContainerRuntime is what runs a container of the apptainer kind on a compute node.
+type ContainerRuntime int32
+
+const (
+	ContainerRuntime_CONTAINER_RUNTIME_UNSPECIFIED ContainerRuntime = 0
+	// Apptainer: this machine's apptainer converts each image to a SIF, which the nodes' apptainer
+	// runs.
+	ContainerRuntime_CONTAINER_RUNTIME_APPTAINER ContainerRuntime = 1
+	// Slurm's Pyxis plugin and Enroot: each image's root file system (docker export) is streamed to
+	// the login node, which makes an Enroot squashfs of it with sqfstar, and each process is a step of
+	// srun --container-image.
+	ContainerRuntime_CONTAINER_RUNTIME_PYXIS ContainerRuntime = 2
+)
+
+// Enum value maps for ContainerRuntime.
+var (
+	ContainerRuntime_name = map[int32]string{
+		0: "CONTAINER_RUNTIME_UNSPECIFIED",
+		1: "CONTAINER_RUNTIME_APPTAINER",
+		2: "CONTAINER_RUNTIME_PYXIS",
+	}
+	ContainerRuntime_value = map[string]int32{
+		"CONTAINER_RUNTIME_UNSPECIFIED": 0,
+		"CONTAINER_RUNTIME_APPTAINER":   1,
+		"CONTAINER_RUNTIME_PYXIS":       2,
+	}
+)
+
+func (x ContainerRuntime) Enum() *ContainerRuntime {
+	p := new(ContainerRuntime)
+	*p = x
+	return p
+}
+
+func (x ContainerRuntime) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ContainerRuntime) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_operator_proto_enumTypes[1].Descriptor()
+}
+
+func (ContainerRuntime) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_operator_proto_enumTypes[1]
+}
+
+func (x ContainerRuntime) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ContainerRuntime.Descriptor instead.
+func (ContainerRuntime) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{1}
+}
+
 // OperatorConfig is the operator config, cli.toml: the settings of the machines that run
 // vibesys-cli's jobs, which belong to whoever runs the CLI and never to a task. The TOML file is
 // decoded into this message by its field names, an enum value is written as its name without the
@@ -533,16 +588,20 @@ type ApptainerSettings struct {
 	// Passed to the submit command after the options the CLI sets, such as an account (--account=x) or
 	// a QOS a site requires on every job. Each is an option.
 	SubmitArguments []string `protobuf:"bytes,2,rep,name=submit_arguments,json=submitArguments,proto3" json:"submit_arguments,omitempty"`
-	// The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer.
+	// The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer. Only for
+	// the apptainer runtime.
 	Program string `protobuf:"bytes,3,opt,name=program,proto3" json:"program,omitempty"`
 	// The absolute directory of this machine where an image is converted to a SIF by this machine's
 	// apptainer (on the daemon's PATH): the archive, the image unpacked (APPTAINER_TMPDIR) and the
-	// SIF. Unset means apptainer/ under the user's cache directory.
+	// SIF. Unset means apptainer/ under the user's cache directory. Only for the apptainer runtime.
 	LocalScratchDir string `protobuf:"bytes,4,opt,name=local_scratch_dir,json=localScratchDir,proto3" json:"local_scratch_dir,omitempty"`
-	// The bound on converting one image and copying its SIF to the cluster. Zero means an hour.
+	// The bound on converting one image and copying its SIF to the cluster, or on streaming its root
+	// file system to the login node and making its squashfs there. Zero means an hour.
 	ConvertTimeoutSeconds float64 `protobuf:"fixed64,5,opt,name=convert_timeout_seconds,json=convertTimeoutSeconds,proto3" json:"convert_timeout_seconds,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// What runs the containers on the compute nodes. Unset means apptainer.
+	Runtime       ContainerRuntime `protobuf:"varint,6,opt,name=runtime,proto3,enum=vibesys.cli.v1.ContainerRuntime" json:"runtime,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ApptainerSettings) Reset() {
@@ -608,6 +667,13 @@ func (x *ApptainerSettings) GetConvertTimeoutSeconds() float64 {
 		return x.ConvertTimeoutSeconds
 	}
 	return 0
+}
+
+func (x *ApptainerSettings) GetRuntime() ContainerRuntime {
+	if x != nil {
+		return x.Runtime
+	}
+	return ContainerRuntime_CONTAINER_RUNTIME_UNSPECIFIED
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
@@ -980,13 +1046,14 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSecondsB\f\n" +
 	"\n" +
 	"_exclusiveB\a\n" +
-	"\x05_cpus\"\xc2\x02\n" +
+	"\x05_cpus\"\x88\x03\n" +
 	"\x11ApptainerSettings\x123\n" +
 	"\x0esubmit_command\x18\x01 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\rsubmitCommand\x129\n" +
 	"\x10submit_arguments\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\x0fsubmitArguments\x124\n" +
 	"\aprogram\x18\x03 \x01(\tB\x1a\xbaH\x17r\x152\x13^[A-Za-z0-9_./+-]*$R\aprogram\x12?\n" +
 	"\x11local_scratch_dir\x18\x04 \x01(\tB\x13\xbaH\x10r\x0e2\f^(/.*[^/])?$R\x0flocalScratchDir\x12F\n" +
-	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\"\xe6\x02\n" +
+	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\x12D\n" +
+	"\aruntime\x18\x06 \x01(\x0e2 .vibesys.cli.v1.ContainerRuntimeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aruntime\"\xe6\x02\n" +
 	"\tResources\x12-\n" +
 	"\x03gpu\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.GpuResourceR\x03gpu\x12B\n" +
 	"\n" +
@@ -1021,7 +1088,11 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x14PLACEMENT_KIND_LOCAL\x10\x01\x12\x16\n" +
 	"\x12PLACEMENT_KIND_SSH\x10\x02\x12\x18\n" +
 	"\x14PLACEMENT_KIND_SLURM\x10\x03\x12\x1c\n" +
-	"\x18PLACEMENT_KIND_APPTAINER\x10\x04B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x18PLACEMENT_KIND_APPTAINER\x10\x04*s\n" +
+	"\x10ContainerRuntime\x12!\n" +
+	"\x1dCONTAINER_RUNTIME_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCONTAINER_RUNTIME_APPTAINER\x10\x01\x12\x1b\n" +
+	"\x17CONTAINER_RUNTIME_PYXIS\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_operator_proto_rawDescOnce sync.Once
@@ -1035,48 +1106,50 @@ func file_vibesys_cli_v1_operator_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_operator_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_operator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_cli_v1_operator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	(PlacementKind)(0),         // 0: vibesys.cli.v1.PlacementKind
-	(*OperatorConfig)(nil),     // 1: vibesys.cli.v1.OperatorConfig
-	(*Scheduler)(nil),          // 2: vibesys.cli.v1.Scheduler
-	(*Placement)(nil),          // 3: vibesys.cli.v1.Placement
-	(*RemoteSettings)(nil),     // 4: vibesys.cli.v1.RemoteSettings
-	(*SlurmSettings)(nil),      // 5: vibesys.cli.v1.SlurmSettings
-	(*ApptainerSettings)(nil),  // 6: vibesys.cli.v1.ApptainerSettings
-	(*Resources)(nil),          // 7: vibesys.cli.v1.Resources
-	(*RocmResource)(nil),       // 8: vibesys.cli.v1.RocmResource
-	(*GpuResource)(nil),        // 9: vibesys.cli.v1.GpuResource
-	(*KubernetesResource)(nil), // 10: vibesys.cli.v1.KubernetesResource
-	(*LegacyDocker)(nil),       // 11: vibesys.cli.v1.LegacyDocker
-	nil,                        // 12: vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	nil,                        // 13: vibesys.cli.v1.Resources.MountsEntry
-	nil,                        // 14: vibesys.cli.v1.LegacyDocker.MountsEntry
+	(ContainerRuntime)(0),      // 1: vibesys.cli.v1.ContainerRuntime
+	(*OperatorConfig)(nil),     // 2: vibesys.cli.v1.OperatorConfig
+	(*Scheduler)(nil),          // 3: vibesys.cli.v1.Scheduler
+	(*Placement)(nil),          // 4: vibesys.cli.v1.Placement
+	(*RemoteSettings)(nil),     // 5: vibesys.cli.v1.RemoteSettings
+	(*SlurmSettings)(nil),      // 6: vibesys.cli.v1.SlurmSettings
+	(*ApptainerSettings)(nil),  // 7: vibesys.cli.v1.ApptainerSettings
+	(*Resources)(nil),          // 8: vibesys.cli.v1.Resources
+	(*RocmResource)(nil),       // 9: vibesys.cli.v1.RocmResource
+	(*GpuResource)(nil),        // 10: vibesys.cli.v1.GpuResource
+	(*KubernetesResource)(nil), // 11: vibesys.cli.v1.KubernetesResource
+	(*LegacyDocker)(nil),       // 12: vibesys.cli.v1.LegacyDocker
+	nil,                        // 13: vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	nil,                        // 14: vibesys.cli.v1.Resources.MountsEntry
+	nil,                        // 15: vibesys.cli.v1.LegacyDocker.MountsEntry
 }
 var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
-	12, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	11, // 1: vibesys.cli.v1.OperatorConfig.docker:type_name -> vibesys.cli.v1.LegacyDocker
-	4,  // 2: vibesys.cli.v1.OperatorConfig.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	5,  // 3: vibesys.cli.v1.OperatorConfig.slurm:type_name -> vibesys.cli.v1.SlurmSettings
-	2,  // 4: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
+	13, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	12, // 1: vibesys.cli.v1.OperatorConfig.docker:type_name -> vibesys.cli.v1.LegacyDocker
+	5,  // 2: vibesys.cli.v1.OperatorConfig.remote:type_name -> vibesys.cli.v1.RemoteSettings
+	6,  // 3: vibesys.cli.v1.OperatorConfig.slurm:type_name -> vibesys.cli.v1.SlurmSettings
+	3,  // 4: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
 	0,  // 5: vibesys.cli.v1.Placement.kind:type_name -> vibesys.cli.v1.PlacementKind
-	4,  // 6: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	5,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
-	7,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
-	6,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
-	9,  // 10: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
-	10, // 11: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	13, // 12: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	8,  // 13: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
-	0,  // 14: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
-	14, // 15: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
-	3,  // 16: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	5,  // 6: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
+	6,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
+	8,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
+	7,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
+	1,  // 10: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
+	10, // 11: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
+	11, // 12: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	14, // 13: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	9,  // 14: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
+	0,  // 15: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
+	15, // 16: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
+	4,  // 17: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
@@ -1092,7 +1165,7 @@ func file_vibesys_cli_v1_operator_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_operator_proto_rawDesc), len(file_vibesys_cli_v1_operator_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,

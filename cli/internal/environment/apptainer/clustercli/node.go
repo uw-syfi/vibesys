@@ -38,8 +38,8 @@ func (n *node) run(ctx context.Context, d time.Duration, script string, args ...
 
 // holdScript says it runs, then holds the allocation until its input ends, which is when the caller
 // closes it or dies, or until it is told to stop; either way it cancels the allocation, which ends
-// every step of it, after removing the job's own directory of the node.
-const holdScript = `end() { rm -rf "` + jobDir + `"; scancel "$SLURM_JOB_ID"; exit 0; }
+// every step of it, after removing the job's own directories of the node.
+const holdScript = `end() { rm -rf "` + jobDir + `" "` + pyxisJobDir + `"; scancel "$SLURM_JOB_ID"; exit 0; }
 trap end HUP INT TERM
 echo vibesys-held
 cat >/dev/null
@@ -236,6 +236,9 @@ func (n *node) StepArgv(box apptainer.Box, argv []string) ([]string, error) {
 	if err := checkPath(box.Image); err != nil {
 		return nil, err
 	}
+	if n.c.cfg.Runtime == apptainer.RuntimePyxis {
+		return n.pyxisArgv(box, argv)
+	}
 	env := []string{"env"}
 	vars := maps.Clone(box.Env)
 	if vars == nil {
@@ -268,6 +271,75 @@ func (n *node) StepArgv(box apptainer.Box, argv []string) ([]string, error) {
 	}
 	args = append(args, box.Image, "/bin/sh", "-c", wrapper, "vs-exec")
 	return n.step(append(append(env, args...), argv...)...), nil
+}
+
+// pyxisJobDir is the job's own directory on its node under the pyxis runtime, which holds the
+// boxes' homes. It is a path the login node names, since srun --container-mounts names it there,
+// so it cannot follow the node's TMPDIR as jobDir does.
+const pyxisJobDir = `/tmp/vibesys-job-$SLURM_JOB_ID`
+
+// pyxisLogin runs on the login node and starts a box's process under pyxis: it makes the box's
+// home ($2) on the job's ($1) node with a step of its own, since srun --container-mounts needs the
+// directory there before the step, then runs srun (where the first -- of the rest is) with the rest,
+// with nothing of the login node's environment but PATH and the box's variables, which come first
+// in the rest. A failure before the box's step is the step's own, which the wrapper's missing start
+// marker makes lost.
+const pyxisLogin = `j=$1 h=$2; shift 2
+s=$(command -v srun) || exit 255
+"$s" --jobid="$j" --overlap --nodes=1 --ntasks=1 --quiet mkdir -p "$h" || exit 255
+put=
+for a do
+  shift
+  if [ -z "$put" ] && [ "$a" = -- ]; then put=1; set -- "$@" "$s"; else set -- "$@" "$a"; fi
+done
+exec env -i PATH="$PATH" "$@"`
+
+// pyxisArgv is StepArgv under the pyxis runtime: srun runs the wrapper in a container of the
+// squashfs (Pyxis's --container-image), read-only, unnamed so it goes with the step, with the
+// box's variables (env -i, then --container-env so they win over the image's own), the box's
+// mounts, its home at /tmp, its directory as the working directory, and no home, entrypoint or
+// root of the user's. The site's Enroot binds the node's /dev, which holds the GPUs, and its own
+// files (/etc/hosts among them) into every container, and none of the shared file system; Slurm
+// sets the variables naming the GPUs it assigned in the step, which Pyxis passes in.
+func (n *node) pyxisArgv(box apptainer.Box, argv []string) ([]string, error) {
+	vars := maps.Clone(box.Env)
+	if vars == nil {
+		vars = map[string]string{}
+	}
+	vars[apptainer.EnvBox] = box.Name
+	names := slices.Sorted(maps.Keys(vars))
+	for _, k := range names {
+		if k == "" || strings.ContainsAny(k, ",=\x00") {
+			return nil, invalid("the variable %q of %s is not one Pyxis can pass", k, box.Name)
+		}
+	}
+	home := strings.ReplaceAll(pyxisJobDir, "$SLURM_JOB_ID", n.job) + "/home-" + box.Name
+	mounts := []string{home + ":/tmp"}
+	for _, m := range box.Mounts {
+		if strings.ContainsAny(m.Host+m.Container, ",:") {
+			return nil, invalid("the mount %s of %s has a comma or a colon, which srun's --container-mounts cannot hold", m.Host, m.Container)
+		}
+		bind := m.Host + ":" + m.Container
+		if m.ReadOnly {
+			bind += ":ro"
+		}
+		mounts = append(mounts, bind)
+	}
+	out := []string{"/bin/sh", "-c", pyxisLogin, "vs-pyxis", n.job, home}
+	for _, k := range names {
+		out = append(out, k+"="+vars[k])
+	}
+	out = append(out, "--")
+	out = append(out, n.step(
+		"--container-image="+box.Image, "--container-readonly", "--container-mounts="+strings.Join(mounts, ","),
+		"--container-env="+strings.Join(names, ","), "--no-container-mount-home", "--no-container-remap-root",
+		"--no-container-entrypoint",
+	)[1:]...)
+	if box.Dir != "" {
+		out = append(out, "--container-workdir="+box.Dir)
+	}
+	out = append(out, "/bin/sh", "-c", wrapper, "vs-exec")
+	return append(out, argv...), nil
 }
 
 // Start implements apptainer.Node.
