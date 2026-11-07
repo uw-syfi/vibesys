@@ -1,16 +1,55 @@
 import {RunStatus} from '@vibesys/orchestrator-proto';
 import {Button, Chip, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {CommandProgress, HostStatus, RunReport} from '../../../state/index.js';
+import type {CommandProgress, HostStatus, RunReport, SearchReading} from '../../../state/index.js';
 import {useDisplayClock} from '../../display-clock.js';
+import type {DisplayClock} from '../../display-time.js';
 import {HostStatusChip} from '../../host-status-chip.js';
+import {unreadableWord} from '../search-words.js';
 import {runWord} from '../words.js';
 import {formatAge, formatElapsed} from './format.js';
+
+type UnreadableSearch = Extract<SearchReading, {readonly state: 'unreadable'}>;
+
+/**
+ * The account behind the chip of a search the host cannot read: what its reason means, since when
+ * the host has said so (or that it did not say), and the host's own words as Details.
+ */
+function unreadableHint(search: UnreadableSearch, nowMs: number, clock: DisplayClock): string {
+  const since =
+    search.sinceMs === null
+      ? 'The host did not say since when.'
+      : `Since ${clock.reportMoment(search.sinceMs)} (${formatAge(nowMs - search.sinceMs)}).`;
+  return [
+    unreadableWord(search.reason).hint,
+    since,
+    search.detail === '' ? '' : `Details: ${search.detail}`,
+  ]
+    .filter(part => part !== '')
+    .join(' ');
+}
+
+/** The chip of a search the host cannot read: its reason as the label, the account as the hint. */
+function UnreadableChip(props: {
+  readonly search: UnreadableSearch;
+  readonly nowMs: number;
+}): JSX.Element {
+  const clock = useDisplayClock();
+  const word = unreadableWord(props.search.reason);
+  return (
+    <Chip
+      label={word.label}
+      tone={word.tone}
+      hint={unreadableHint(props.search, props.nowMs, clock)}
+    />
+  );
+}
 
 /**
  * What the report's title row says about the run: its state, the host it runs on, how long it has
  * run and when it began, in Seattle time. The state chip is the run's own; a second chip says when
- * what is shown is not current. What is best so far is the objective tiles' to say, not this row's.
+ * what is shown is not current, and another says why the host cannot read the run's job log when it
+ * cannot. What is best so far is the objective tiles' to say, not this row's.
  */
 export function ReportMeta(props: {
   readonly report: RunReport;
@@ -26,11 +65,7 @@ export function ReportMeta(props: {
       <Chip label={status.label} tone={status.tone} dot />
       {props.status.kind === 'live' ? null : <HostStatusChip status={props.status} />}
       {props.report.search.state === 'unreadable' ? (
-        <Chip
-          label="Search stale"
-          tone="warn"
-          hint={`The search service was lost ${formatAge(props.report.search.sinceMs === 0 ? 0 : props.nowMs - props.report.search.sinceMs)}. The measurements shown were the last read.`}
-        />
+        <UnreadableChip search={props.report.search} nowMs={props.nowMs} />
       ) : null}
       <Chip label={props.host} mono clip />
       <Text variant="small" title={header.endedMs === null ? 'Running for' : 'Ran for'}>

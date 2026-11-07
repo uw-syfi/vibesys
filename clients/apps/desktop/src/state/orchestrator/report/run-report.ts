@@ -3,7 +3,13 @@
  * facts, the report the host sums the run up by, the objectives with their history and bounds, the
  * trade-off and the agents by type. A pure function of the state and the time the caller passes.
  */
-import type {RunStatus, RunStopReason, SearchState, TaskCard} from '@vibesys/orchestrator-proto';
+import type {
+  RunStatus,
+  RunStopReason,
+  SearchState,
+  TaskCard,
+  UnreadableReason,
+} from '@vibesys/orchestrator-proto';
 import {oneofIs} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
@@ -27,11 +33,19 @@ export interface ReportHeader {
   readonly elapsedMs: number;
 }
 
-/** Whether the search facts behind the performance are being read now. */
+/** Whether the search facts behind the performance are being read now, and if not, why. */
 export type SearchReading =
   | {readonly state: 'none'}
   | {readonly state: 'live'}
-  | {readonly state: 'unreadable'; readonly sinceMs: number};
+  | {
+      readonly state: 'unreadable';
+      /** Why the host cannot read the run's job log now. */
+      readonly reason: UnreadableReason;
+      /** The host's own words about it, to be shown as they are; empty when it sent none. */
+      readonly detail: string;
+      /** Since when the host has said so, or null when its message says no time. */
+      readonly sinceMs: number | null;
+    };
 
 export interface RunReport {
   readonly runId: string;
@@ -53,7 +67,12 @@ function searchReading(search: SearchState | undefined): SearchReading {
   const health = search?.health?.state;
   if (search === undefined) return {state: 'none'};
   return oneofIs(health, 'unreadable', {liveSince: true, unreadable: true})
-    ? {state: 'unreadable', sinceMs: ms(health.value.since) ?? 0}
+    ? {
+        state: 'unreadable',
+        reason: health.value.reason,
+        detail: health.value.detail,
+        sinceMs: ms(health.value.since),
+      }
     : {state: 'live'};
 }
 

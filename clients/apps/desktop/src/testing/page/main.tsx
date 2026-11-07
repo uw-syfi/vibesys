@@ -17,13 +17,16 @@
  * on the run (none when absent), and a press of Catch me up makes another that stays pending while
  * the lead writes; `measured=<candidates>` gives the run that many measured candidates on two
  * objectives, with the lead's bounds, so the report has its charts and tiles (the head is the best
- * of the first); `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
- * memory, so a reload starts again from the address.
+ * of the first); `stale[=<reason>]` has the host say it cannot read the run's job log, for the
+ * `UnreadableReason` of that name (`STREAM_LOST` when it names none, and always without
+ * `measured`), and `staleDetail=<words>` gives its own words about it (with `measured`); a name
+ * that is no reason fails the page; `appearance=<mode>-<light theme>-<dark theme>` sets what is
+ * saved. Saved appearance lives in memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
-import {ReportKind} from '@vibesys/orchestrator-proto';
+import {ReportKind, UnreadableReason, UnreadableReasonSchema} from '@vibesys/orchestrator-proto';
 import {DesktopLinkProblem} from '@vibesys/proto';
 import {type Appearance, parseAppearance} from '@vibesys/ui/tokens';
 import * as Clock from 'effect/Clock';
@@ -202,6 +205,18 @@ const scenario = query.has('report')
     })
   : base;
 const measured = query.get('measured');
+/** The reason `stale=<name>` names: the link lost when it names none; a wrong name fails the page. */
+function staleReason(name: string): UnreadableReason {
+  if (name === '') return UnreadableReason.STREAM_LOST;
+  const named = UnreadableReasonSchema.values.find(value => value.localName === name);
+  if (named === undefined) throw new Error(`stale=${name} names no UnreadableReason`);
+  return named.number;
+}
+const unreadable = {
+  stale: query.has('stale'),
+  reason: staleReason(query.get('stale') ?? ''),
+  detail: query.get('staleDetail') ?? '',
+};
 const daemon = new FakeDaemon({
   ...scenario,
   search: true,
@@ -221,7 +236,7 @@ const daemon = new FakeDaemon({
               objectives: SERVING,
               ...(query.has('ideas') ? {ideas: Number(query.get('ideas'))} : {}),
             },
-            {stale: query.has('stale')},
+            unreadable,
           ),
         ],
       }),
