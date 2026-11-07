@@ -16,7 +16,7 @@ describe('the window chrome', () => {
   it('insets the traffic lights on macOS and overlays the controls elsewhere', () => {
     expect(windowChromeOptions('darwin')).toMatchObject({
       titleBarStyle: 'hiddenInset',
-      trafficLightPosition: {x: 16, y: 14},
+      trafficLightPosition: {x: 10, y: 13},
     });
     expect(windowChromeOptions('linux').titleBarOverlay).toBeDefined();
   });

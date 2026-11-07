@@ -13,7 +13,11 @@ export interface WindowChrome {
   readonly endHeight: number;
 }
 
-const TRAFFIC_LIGHTS = {x: 16, y: 14} as const;
+/**
+ * The three lights are 60 by 14 px: x 10 centres them in the 80 px corner (the rail's own centre
+ * line), y 13 centres them in the corner's 40 px header band.
+ */
+const TRAFFIC_LIGHTS = {x: 10, y: 13} as const;
 const MAC_CORNER = {width: 80, height: 40} as const;
 const OVERLAY_HEIGHT = 40;
 
