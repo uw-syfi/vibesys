@@ -22,7 +22,12 @@ export interface HostModel {
 /** One frame of either stream, tagged with where it came from. */
 export type HostFrame =
   | {readonly from: 'runs'; readonly body: WatchRunsResponse['body']}
-  | {readonly from: 'agent'; readonly agentId: string; readonly frame: AgentFrame};
+  | {readonly from: 'agent'; readonly agentId: string; readonly frame: AgentFrame}
+  /**
+   * An answer to a request about an agent's past (an older page, one item whole). It folds like an
+   * agent frame but says nothing about where the agent's stream is, so no cursor moves.
+   */
+  | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame};
 
 export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
 
@@ -31,6 +36,7 @@ export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
  * reconcile by sequence (`fold.ts`).
  */
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
+  if (frame.from === 'history') return {...model, data: applyAgentFeed(model.data, frame.frame)};
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;
     const at = frame.frame.sequence > before ? frame.frame.sequence : before;

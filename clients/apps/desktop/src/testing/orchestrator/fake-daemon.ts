@@ -9,6 +9,7 @@ import {
   AgentStatus,
   type Command,
   Delivery,
+  ElisionSchema,
   type Item,
   type ItemsPage,
   ItemsPageSchema,
@@ -30,6 +31,39 @@ import {emptyState, type OrchestratorState} from '../../state/orchestrator/state
 import {invokeCallback} from '../callback-errors.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
+
+/** The size past which a page leaves out reasoning text and tool output, as the real daemon does. */
+export const ELIDE_OVER = 4096;
+
+const bytesOf = (text: string): number => new TextEncoder().encode(text).length;
+
+/** `item` as a page carries it: the large reasoning text or tool output left out, with how large it was. */
+function elided(item: Item): {readonly item: Item; readonly bytes: number | null} {
+  const {body} = item;
+  switch (body.case) {
+    case 'reasoning':
+      return bytesOf(body.value.text) > ELIDE_OVER
+        ? {
+            item: {...item, body: {case: 'reasoning', value: {...body.value, text: ''}}},
+            bytes: bytesOf(body.value.text),
+          }
+        : {item, bytes: null};
+    case 'tool':
+      return bytesOf(body.value.output) > ELIDE_OVER
+        ? {
+            item: {...item, body: {case: 'tool', value: {...body.value, output: ''}}},
+            bytes: bytesOf(body.value.output),
+          }
+        : {item, bytes: null};
+    case 'assistant':
+    case 'prompt':
+    case undefined:
+      return {item, bytes: null};
+    default:
+      body satisfies never;
+      return {item, bytes: null};
+  }
+}
 
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
 
@@ -108,13 +142,25 @@ export class FakeDaemon {
     const all = this.#items(agentId).filter(
       item => beforeOrdinal === 0 || item.ordinal < beforeOrdinal,
     );
-    const items = all.slice(0, pageSize);
+    const whole = all.slice(0, pageSize);
+    const shown = whole.map(elided);
+    const items = shown.map(one => one.item);
     const oldest = items[items.length - 1];
     return create(ItemsPageSchema, {
       items,
+      elisions: shown.flatMap(one =>
+        one.bytes === null
+          ? []
+          : [create(ElisionSchema, {ordinal: one.item.ordinal, bodyBytes: BigInt(one.bytes)})],
+      ),
       sequence: this.sequence,
       nextBeforeOrdinal: oldest !== undefined && oldest.ordinal > 1 ? oldest.ordinal : 0,
     });
+  }
+
+  /** One item of an agent, whole, or undefined when there is none at that ordinal. */
+  item(agentId: string, ordinal: number): Item | undefined {
+    return this.#items(agentId).find(item => item.ordinal === ordinal);
   }
 
   /** Carry out a command: the same id answers with the same receipt. */

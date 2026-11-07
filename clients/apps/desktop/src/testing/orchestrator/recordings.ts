@@ -10,6 +10,8 @@ import {
   Compatibility,
   DispatchRequestSchema,
   DispatchResponseSchema,
+  GetItemRequestSchema,
+  GetItemResponseSchema,
   HelloResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
@@ -92,6 +94,29 @@ function agentFrameOf(
   return null;
 }
 
+/** The page of items a `ListItems` call asks for. */
+function listItems(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> {
+  const request = fromBinary(ListItemsRequestSchema, target.request);
+  const page = daemon.page(request.agentId, request.pageSize, request.beforeOrdinal);
+  const bytes = toBinary(
+    ListItemsResponseSchema,
+    create(ListItemsResponseSchema, {page: create(ItemsPageSchema, page)}),
+  );
+  return [{frame: bytes}];
+}
+
+/** The whole item a `GetItem` call asks for, or NotFound. */
+function getItem(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> {
+  const request = fromBinary(GetItemRequestSchema, target.request);
+  const item = daemon.item(request.agentId, request.ordinal);
+  if (item === undefined) return [{end: {message: 'no such item', status: RpcStatus.NOT_FOUND}}];
+  const bytes = toBinary(
+    GetItemResponseSchema,
+    create(GetItemResponseSchema, {item, sequence: daemon.sequence}),
+  );
+  return [{frame: bytes}];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -117,16 +142,6 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     const receipt = daemon.dispatch(command);
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
-    return [{frame: bytes}];
-  };
-
-  const listItems = (target: CallTarget): ReadonlyArray<Step> => {
-    const request = fromBinary(ListItemsRequestSchema, target.request);
-    const page = daemon.page(request.agentId, request.pageSize, request.beforeOrdinal);
-    const bytes = toBinary(
-      ListItemsResponseSchema,
-      create(ListItemsResponseSchema, {page: create(ItemsPageSchema, page)}),
-    );
     return [{frame: bytes}];
   };
 
@@ -186,7 +201,9 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('Dispatch'):
           return dispatch(target, nth);
         case methodPathOf('ListItems'):
-          return listItems(target);
+          return listItems(daemon, target);
+        case methodPathOf('GetItem'):
+          return getItem(daemon, target);
         case methodPathOf('WatchRuns'):
           return watchRuns(target);
         case methodPathOf('WatchAgent'):

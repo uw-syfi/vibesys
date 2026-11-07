@@ -19,3 +19,11 @@ export {
   type Tick,
   toggled,
 } from './spawn-tree.js';
+export {
+  type Crumb,
+  type Entry,
+  type Party,
+  type Transcript,
+  type TurnOutcome,
+  transcript,
+} from './transcript.js';

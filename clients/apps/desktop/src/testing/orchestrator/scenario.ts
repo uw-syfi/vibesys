@@ -117,7 +117,7 @@ const IDEAS = [
 ];
 
 /** One step of a turn: builds the item that happens `atMs` into turn `turnId`. */
-type Step = (atMs: number, turnId: string) => Item;
+type Step = (atMs: number, turnId: string, startedMs: number) => Item;
 
 class Builder {
   readonly rng: Rng;
@@ -174,7 +174,7 @@ class Builder {
       call?: ToolCall['call'];
     } = {},
   ): Step {
-    return (atMs, turnId) => {
+    return (atMs, turnId, startedMs) => {
       const ordinal = (this.#itemCount.get(agent.id) ?? 0) + 1;
       this.#itemCount.set(agent.id, ordinal);
       return itemOf({
@@ -183,6 +183,7 @@ class Builder {
         agentId: agent.id,
         ordinal,
         atMs,
+        startedMs,
         kind,
         text,
         ...extra,
@@ -212,8 +213,10 @@ class Builder {
     this.log.push(startMs, {case: 'turn', value: open});
     let at = startMs;
     for (const step of steps) {
+      const before = at;
       at += this.rng.between(4, 40) * 1000;
-      const item = step(at, open.id);
+      // The host first saw the item a little after the step before it ended.
+      const item = step(at, open.id, before + Math.floor((at - before) / 3));
       this.log.push(at, {case: 'item', value: item});
       if (item.status === ItemStatus.RUNNING) this.progress(agent.id, item.id);
     }
@@ -464,7 +467,7 @@ function richSteps(builder: Builder, agent: Agent): Step[] {
     builder.step(agent, 'tool', LONG_ARGUMENT, {
       output: [
         ...Array.from(
-          {length: 80},
+          {length: 160},
           (_, at) => `variant ${at}  ${1000 + at * 7} tok/s  p99 ${200 - at} ms`,
         ),
         LONG_LINE,
