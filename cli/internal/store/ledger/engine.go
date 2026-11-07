@@ -200,6 +200,16 @@ func (e *Engine) EditPlan(ctx context.Context, number core.PlanNumber, edit core
 	return write(e, ctx, func(l *Ledger) (Change, core.Plan, error) { return l.EditPlan(number, edit) })
 }
 
+// DeclareBound implements store.BoundStore.
+func (e *Engine) DeclareBound(ctx context.Context, bound core.NewBound) (core.Bound, error) {
+	return write(e, ctx, func(l *Ledger) (Change, core.Bound, error) { return l.DeclareBound(bound) })
+}
+
+// Bounds implements store.BoundStore.
+func (e *Engine) Bounds(ctx context.Context) ([]core.Bound, error) {
+	return read(e, ctx, func(l *Ledger) ([]core.Bound, error) { return l.Bounds(), nil })
+}
+
 // AppendEvent implements store.EventStore.
 func (e *Engine) AppendEvent(ctx context.Context, draft core.EventDraft) (core.Event, error) {
 	return write(e, ctx, func(l *Ledger) (Change, core.Event, error) { return l.AppendEvent(draft) })
@@ -248,6 +258,6 @@ func (e *Engine) ReadLog(ctx context.Context, id core.JobID, offset uint64, max 
 func (e *Engine) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
 	return read(e, ctx, func(l *Ledger) (store.TaskSnapshot, error) {
 		return store.TaskSnapshot{Revision: e.revision, Jobs: l.Jobs(core.JobFilter{}),
-			Results: l.Results(core.ResultFilter{}), Promotions: l.Promotions(), Plans: l.Plans(core.PlanFilter{})}, nil
+			Results: l.Results(core.ResultFilter{}), Promotions: l.Promotions(), Plans: l.Plans(core.PlanFilter{}), Bounds: l.Bounds()}, nil
 	})
 }

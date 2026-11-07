@@ -46,6 +46,7 @@ type TaskSnapshot struct {
 	Results    []core.Result
 	Promotions []core.Promotion
 	Plans      []core.Plan
+	Bounds     []core.Bound
 }
 
 type Store interface {
@@ -54,6 +55,7 @@ type Store interface {
 	ResultStore
 	FrontierStore
 	PlanStore
+	BoundStore
 	EventStore
 	LogStore
 }
@@ -128,6 +130,18 @@ type PlanStore interface {
 
 	// EditPlan applies an edit, including a status change and a comment, as one change.
 	EditPlan(ctx context.Context, number core.PlanNumber, edit core.PlanEdit) (core.Plan, error)
+}
+
+// BoundStore holds the log of declared performance bounds. It is append-only: a bound is never
+// changed or removed, and which one stands for an objective is core.StandingBounds' decision.
+type BoundStore interface {
+	// DeclareBound appends a decided bound at the next place in the log, from 1, and returns it.
+	// A bound with no origin time, objective, direction or unit, or with a note that is empty, or
+	// a value that is not finite and above zero, is refused as invalid input.
+	DeclareBound(ctx context.Context, bound core.NewBound) (core.Bound, error)
+
+	// Bounds returns every declared bound, oldest first. An empty answer is not an error.
+	Bounds(ctx context.Context) ([]core.Bound, error)
 }
 
 // EventStore holds the append-only event log. Events are a record for later features: nothing

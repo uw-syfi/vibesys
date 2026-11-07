@@ -50,6 +50,9 @@ type AddPromotion struct {
 	Promotion core.Promotion
 }
 
+// AddBound appends a declared bound. Its Seq is its position in the log of bounds, from 1.
+type AddBound struct{ Bound core.Bound }
+
 // SetFrontier replaces the frontier with its next revision.
 type SetFrontier struct{ Frontier core.Frontier }
 
@@ -66,6 +69,7 @@ type AddLog struct {
 func (PutJob) change()       {}
 func (PutPlan) change()      {}
 func (AddPromotion) change() {}
+func (AddBound) change()     {}
 func (SetFrontier) change()  {}
 func (AddEvent) change()     {}
 func (AddLog) change()       {}
@@ -77,6 +81,8 @@ type Snapshot struct {
 	Results    []SavedResult
 	Plans      []core.Plan
 	Promotions []core.Promotion
+	// Bounds is the log of declared bounds, in the order of its places.
+	Bounds []core.Bound
 	// Frontier is the frontier at its last revision, the zero Frontier when it never changed.
 	Frontier core.Frontier
 	// Events is the number of events of each run.
@@ -95,6 +101,7 @@ type Ledger struct {
 	resultOf   map[core.JobID]int    // index into results
 	plans      []core.Plan           // plan number n is plans[n-1]
 	promotions []core.Promotion
+	bounds     []core.Bound // the bound at place n is bounds[n-1]
 	frontier   core.Frontier
 	events     map[core.RunID]uint64
 	logs       map[core.JobID]uint64
@@ -327,6 +334,21 @@ func (l *Ledger) RecordPromotion(approved core.Approved) (Change, error) {
 	return AddPromotion{Seq: uint64(len(l.promotions)) + 1, Promotion: p}, nil
 }
 
+// DeclareBound decides appending a bound to the log, at the next place. A bound that is not well
+// formed (core.NewBound.Check) or that no store can hold is refused as invalid input.
+func (l *Ledger) DeclareBound(nb core.NewBound) (Change, core.Bound, error) {
+	var none core.Bound
+	held, err := Hold("bound", nb)
+	if err != nil {
+		return nil, none, err
+	}
+	if err := held.Check(); err != nil {
+		return nil, none, err
+	}
+	b := core.Bound{Seq: uint64(len(l.bounds)) + 1, NewBound: held}
+	return AddBound{Bound: b}, Copy(b), nil
+}
+
 // UpdateFrontier decides making an admission's members the next revision of the frontier. An
 // admission of a member, which changes nothing, yields a nil Change.
 func (l *Ledger) UpdateFrontier(admission core.FrontierAdmission) (Change, core.Frontier, error) {
@@ -461,6 +483,8 @@ func (l *Ledger) Apply(c Change) {
 		}
 	case AddPromotion:
 		l.promotions = append(l.promotions, Copy(c.Promotion))
+	case AddBound:
+		l.bounds = append(l.bounds, Copy(c.Bound))
 	case SetFrontier:
 		l.frontier = Copy(c.Frontier)
 	case AddEvent:
@@ -543,6 +567,9 @@ func (l *Ledger) Results(f core.ResultFilter) []core.Result {
 
 // Promotions returns every recorded promotion, oldest first.
 func (l *Ledger) Promotions() []core.Promotion { return Copy(l.promotions) }
+
+// Bounds returns every declared bound, oldest first.
+func (l *Ledger) Bounds() []core.Bound { return Copy(l.bounds) }
 
 // Frontier returns the frontier.
 func (l *Ledger) Frontier() core.Frontier { return Copy(l.frontier) }

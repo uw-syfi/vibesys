@@ -72,7 +72,10 @@ export interface OwnWindows {
  * Whether a call comes from the main frame of one of this app's windows, showing one of its own
  * pages. Anything else (a subframe, another window, a page the window navigated to) is refused.
  */
-export function isOwnWindow(event: PortEvent, own: OwnWindows): boolean {
+export function isOwnWindow(
+  event: Pick<PortEvent, 'sender' | 'senderFrame'>,
+  own: OwnWindows,
+): boolean {
   const frame = event.senderFrame;
   return (
     frame !== null &&

@@ -203,7 +203,8 @@ func (w *Workload) newCommand() core.InputBody {
 		}
 		return w.command(core.Operator{}, core.StartRun{
 			Repository: "repo-a", Task: "task-" + w.id("t"), FanoutLimit: uint32(1 + w.r.IntN(4)), MaxTime: maxTime,
-			Lead: core.AgentSpec{Harness: core.ClaudeCode, Model: "model-a", Effort: "high"}, Brief: "do the task",
+			SummaryEvery: []time.Duration{0, 5 * time.Minute, 90 * time.Minute}[w.r.IntN(3)],
+			Lead:         core.AgentSpec{Harness: core.ClaudeCode, Model: "model-a", Effort: "high"}, Brief: "do the task",
 		})
 	}
 	run := live[w.r.IntN(len(live))]

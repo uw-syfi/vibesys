@@ -118,6 +118,12 @@ type (
 		Workers     uint32
 		Judges      uint32
 	}
+
+	// reportDueData is how often the operator expects a report and how many the lead has posted.
+	reportDueData struct {
+		EveryMinutes uint32
+		Reports      uint32
+	}
 )
 
 // dataOf names the template of m's body and gathers the data it renders.
@@ -150,6 +156,9 @@ func dataOf(m core.Message) (string, any, error) {
 			d.HasSpent, d.Spent = true, *b.Spent
 		}
 		return "run_limit_reached", d, nil
+	case core.ReportDue:
+		// Whole seconds in a uint32, as the message is stored, like the idle reminder's.
+		return "report_due", reportDueData{EveryMinutes: uint32(b.Every/time.Second) / 60, Reports: b.Reports}, nil
 	case core.LeadIdleReminder:
 		// Whole seconds in a uint32, as the message is stored, so the minutes do not depend on
 		// whether the message was read back or is still the one that was built.

@@ -1,9 +1,10 @@
 /**
- * Everything a client knows about one host's orchestrator: the folded state of both streams, and
- * how far each agent's stream has been applied. The cursor lives inside the value, so the data and
+ * Everything a client knows about one host's orchestrator: the folded state of its streams (the
+ * runs, each agent's and each run's cost), and how far each agent's stream has been applied. The cursor lives inside the value, so the data and
  * the cursor can only change together.
  */
-import type {WatchRunCostResponse, WatchRunsResponse} from '@vibesys/orchestrator-proto';
+import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
+import type {CostView} from './orchestrator/cost.js';
 import {
   type AgentFrame,
   applyAgentFeed,
@@ -24,20 +25,17 @@ export interface HostModel {
 export type HostFrame =
   | {readonly from: 'runs'; readonly body: WatchRunsResponse['body']}
   | {readonly from: 'agent'; readonly agentId: string; readonly frame: AgentFrame}
-  /** A run's whole cost view, as the host works it out. */
-  | {readonly from: 'cost'; readonly response: WatchRunCostResponse};
+  /** A run's whole cost view, as the host works it out, already read from its message. */
+  | {readonly from: 'cost'; readonly view: CostView};
 
 export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
 
 /**
  * Fold one frame. Runs and agents fold into one state, so the two streams' copies of an item
- * reconcile by sequence (`fold.ts`).
+ * reconcile by sequence (`fold.ts`); a cost view is a whole fact of its own.
  */
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
-  if (frame.from === 'cost') {
-    const {cost} = frame.response;
-    return cost === undefined ? model : {...model, data: applyCost(model.data, cost)};
-  }
+  if (frame.from === 'cost') return {...model, data: applyCost(model.data, frame.view)};
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;
     const at = frame.frame.sequence > before ? frame.frame.sequence : before;

@@ -74,6 +74,48 @@ function runsNote(host: HostSnapshot, retry: (host: string) => void): Connection
   };
 }
 
+/** The runs of every host, and the form that starts one. */
+function RunsPage(props: {
+  readonly hosts: readonly HostSnapshot[];
+  readonly commands: AppCommands;
+  readonly retryHost: (host: string) => void;
+  readonly go: (action: RouteAction) => void;
+}): JSX.Element {
+  const {hosts, commands, go} = props;
+  return (
+    <Page
+      key="runs"
+      width="wide"
+      state={pageState(hosts.length === 0)}
+      header={
+        <Text variant="title">
+          {hosts.some(host => host.connection._tag === 'Unusable')
+            ? 'Runs unavailable'
+            : commands.start?._tag === 'Refused'
+              ? 'Start run refused'
+              : TITLE}
+        </Text>
+      }
+    >
+      <Stack gap="space-4">
+        <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
+        <StartRunForm
+          hosts={hosts.map(({key, label}) => ({key, label}))}
+          progress={commands.start}
+          start={commands.startRun}
+          retry={commands.retryStart}
+          openRun={(host, runId) => go({type: 'open-run', host, runId})}
+        />
+        <RunList
+          unreadHosts={hosts.filter(host => host.runsFeed._tag !== 'Live').map(host => host.label)}
+          hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
+          open={(host, runId) => go({type: 'open-run', host, runId})}
+        />
+      </Stack>
+    </Page>
+  );
+}
+
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
 export function OrchestratorApp(props: {
   readonly hosts: readonly HostSnapshot[];
@@ -90,44 +132,12 @@ export function OrchestratorApp(props: {
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
-    return (
-      <Page
-        width="wide"
-        state={pageState(hosts.length === 0)}
-        header={
-          <Text variant="title">
-            {hosts.some(host => host.connection._tag === 'Unusable')
-              ? 'Runs unavailable'
-              : commands.start?._tag === 'Refused'
-                ? 'Start run refused'
-                : TITLE}
-          </Text>
-        }
-      >
-        <Stack gap="space-4">
-          <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
-          <StartRunForm
-            hosts={hosts.map(({key, label}) => ({key, label}))}
-            progress={commands.start}
-            start={commands.startRun}
-            retry={commands.retryStart}
-            openRun={(host, runId) => go({type: 'open-run', host, runId})}
-          />
-          <RunList
-            unreadHosts={hosts
-              .filter(host => host.runsFeed._tag !== 'Live')
-              .map(host => host.label)}
-            hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
-            open={(host, runId) => go({type: 'open-run', host, runId})}
-          />
-        </Stack>
-      </Page>
-    );
+    return <RunsPage hosts={hosts} commands={commands} retryHost={props.retryHost} go={go} />;
   }
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
     return (
-      <Page state="loading" header={<Text variant="title">{TITLE}</Text>}>
+      <Page key="run" state="loading" header={<Text variant="title">{TITLE}</Text>}>
         <Text tone="muted">Connecting.</Text>
       </Page>
     );
@@ -153,7 +163,7 @@ export function OrchestratorApp(props: {
         ]),
   ];
   return (
-    <Page width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
+    <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />
         <RunScreen

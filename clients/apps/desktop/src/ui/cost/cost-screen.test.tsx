@@ -23,6 +23,7 @@ import {
   PRICED_AND_UNPRICED,
 } from '../../testing/orchestrator/cost-views.js';
 import {FakeDaemon, generateScenario, hostHarness} from '../../testing/orchestrator/index.js';
+import {COST_WORDS} from '../orchestrator/cost-words.js';
 import {CostScreen} from './cost-screen.js';
 
 const LIVE: FeedStatus = {_tag: 'Live'};
@@ -44,6 +45,7 @@ function screen(
       freshness={options.freshness ?? 'live'}
       status={options.status ?? LIVE}
       runOver={options.runOver ?? false}
+      words={COST_WORDS}
       retry={options.retry ?? (() => undefined)}
     />,
   );

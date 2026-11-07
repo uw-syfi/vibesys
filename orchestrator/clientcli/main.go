@@ -17,7 +17,8 @@ const Program = "vibesys-client"
 // Usage is the text printed for a usage error and for --help.
 const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
-            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
+            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS]
+            [--summary-every DURATION] [--detach] [--json]
   run list [--all] [--json]
   run attach [RUN] [--agent AGENT] [--full-history]
   run get [RUN] [--json]
@@ -58,6 +59,9 @@ the start. The cost is the sum of what the agents' finished turns reported, so a
 what is in flight when the limit is reached, and a turn whose provider reports no cost adds nothing: for a
 model the agent library cannot price, --max-cost never takes effect, and run get says so once a turn has
 finished with no cost reported.
+While a run's work moves, its lead is asked for a progress report about every hour, or every --summary-every
+(at least 5 minutes, such as 30m): a lead that reports on its own restarts the interval, and a run where nothing
+moved is not asked.
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
 no run is live there, an omitted RUN means its most recent run, for every verb but steer: get shows it,
 attach replays it, wait returns at once as for any RUN that has ended, and stop says the run has

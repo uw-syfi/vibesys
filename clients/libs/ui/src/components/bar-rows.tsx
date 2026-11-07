@@ -37,7 +37,7 @@ const GAP = SPACE['space-4'];
 /** What the name and the bar need so that neither collapses, in pixels. */
 const NAME_FLOOR = SPACE['space-8'] * 3;
 const BAR_FLOOR = SPACE['space-8'] * 2;
-/** What a figure the host did not report is written as. */
+/** What a figure that was not reported is written as. */
 const NOT_REPORTED = '—';
 
 function widthOf(column: BarColumn, at: number, rows: readonly BarRow[]): number {

@@ -21,8 +21,9 @@ import {
   type OrchestratorState,
   type RunView,
 } from '../../state/index.js';
-import {CostScreen} from '../cost/cost-screen.js';
+import {CostScreen} from '../cost/index.js';
 import {CommandLine} from './command-line.js';
+import {COST_WORDS} from './cost-words.js';
 import {HandoffCards} from './handoff-cards.js';
 import {agentNames} from './names.js';
 import {SearchPanels} from './search-panels.js';
@@ -110,6 +111,7 @@ export function RunScreen(props: {
         freshness={props.costFeed.freshness}
         status={props.costFeed.status}
         runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
+        words={COST_WORDS}
         retry={props.retryCost}
       />
     ) : (
@@ -121,7 +123,7 @@ export function RunScreen(props: {
         <Breadcrumb
           label="Where you are"
           items={[
-            {id: 'runs', label: 'Runs'},
+            {id: 'runs', label: 'Runs', press: props.goRuns},
             {id: props.runId, label: run.task},
           ]}
         />

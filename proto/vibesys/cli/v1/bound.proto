@@ -1,0 +1,47 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/cli/v1/record.proto";
+import "vibesys/cli/v1/result.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// ObjectiveBound is one declaration of the best an objective of the task can reach, as an agent
+// derived it: the speed of light of the workload. The bounds of a task are an append-only log: a
+// declaration is never changed or removed, and the bound that stands for an objective is the newest
+// one declared for it, so the log keeps every version with who declared it and when. The framework
+// compares nothing with a bound, and an agent is not required to declare one: a reader that
+// divides a measurement by it relies on the value being in the objective's own unit.
+message ObjectiveBound {
+  // The place in the task's log of bounds, 1 for the first. vibesysd assigns it.
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  RecordOrigin origin = 2 [(buf.validate.field).required = true];
+  // An objective the task declares: its scored metric, or another metric its benchmark reports.
+  string objective = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // Which way the objective improves, as the task declares it, which vibesysd fills in. The bound
+  // is the most a maximized objective can reach and the least a minimized one can.
+  Direction direction = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Finite and above zero: a bound on a quantity measured as a time, a rate or a size has no meaning
+  // at zero or below, and a share of it would have none either.
+  double value = 5 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // What the value is counted in, such as "tok/s" or "ms". A label for people: nothing converts it.
+  string unit = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 64
+  }];
+  // How the bound was derived, in a few sentences: the provenance a reader judges it by.
+  string note = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+}

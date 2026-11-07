@@ -19,6 +19,9 @@ func (t *tx) post(m Message) Message {
 		t.route(&m, t.s.agents[m.To])
 	}
 	t.emit(m.Run, m)
+	if moved(m) {
+		t.markMoved(m.Run)
+	}
 	return m
 }
 
@@ -146,6 +149,7 @@ func (t *tx) closeSession(a agentState) {
 // beginStop moves a live run to stopping and stops its agents.
 func (t *tx) beginStop(run Run, reason RunStopReason) {
 	run.Status, run.StopReason = RunStopping, reason
+	run = run.unscheduled()
 	t.emit(run.ID, run)
 	for _, a := range t.sortedAgents(run.ID) {
 		t.stopAgent(a.ID)

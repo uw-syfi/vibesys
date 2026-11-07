@@ -105,7 +105,7 @@ func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
 	w := newWorld(t, serveFake(t, f))
 	w.dir = "/elsewhere"
 	w.run(context.Background(), "run", "start", "--task", "toy", "--repository", "rel/repo", "--brief", "b", "--harness", "codex",
-		"--fanout", "7", "--model", "m", "--effort", "high", "--max-time", "90m", "--max-cost", "5.5")
+		"--fanout", "7", "--model", "m", "--effort", "high", "--max-time", "90m", "--max-cost", "5.5", "--summary-every", "30m")
 	sent := f.sent()
 	if len(sent) != 1 {
 		t.Fatalf("sent %d commands", len(sent))
@@ -113,7 +113,7 @@ func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
 	got := sent[0].GetStartRun()
 	if got.GetRepository() != "/elsewhere/rel/repo" || got.GetTask() != "toy" || got.GetBrief() != "b" || got.GetFanoutLimit() != 7 ||
 		got.GetLead().GetHarness() != pb.Harness_HARNESS_CODEX || got.GetLead().GetModel() != "m" || got.GetLead().GetReasoningEffort() != "high" ||
-		got.GetMaxTime().AsDuration() != 90*time.Minute || got.GetMaxCostUsd() != 5.5 {
+		got.GetMaxTime().AsDuration() != 90*time.Minute || got.GetMaxCostUsd() != 5.5 || got.GetSummaryEvery().AsDuration() != 30*time.Minute {
 		t.Errorf("StartRun = %v", got)
 	}
 }
@@ -236,6 +236,7 @@ func TestStartRefusesALimitThatIsNotPositive(t *testing.T) {
 	for _, args := range [][]string{
 		{"--max-time", "0"}, {"--max-time", "-5m"}, {"--max-time", "soon"}, {"--max-time", "30"},
 		{"--max-cost", "0"}, {"--max-cost", "-1"}, {"--max-cost", "abc"}, {"--max-cost", "NaN"}, {"--max-cost", "Inf"},
+		{"--summary-every", "0"}, {"--summary-every", "-5m"}, {"--summary-every", "hourly"}, {"--summary-every", "60"},
 	} {
 		got := w.run(context.Background(), append([]string{"run", "start", "--task", "toy"}, args...)...)
 		if got.code != 2 {
@@ -250,5 +251,6 @@ func TestStartRefusesALimitThatIsNotPositive(t *testing.T) {
 
 // The usage text is where a person finds what a limit does, including what the cost can and cannot say.
 func TestTheUsageSaysWhatALimitDoes(t *testing.T) {
-	contains(t, "usage", clientcli.Usage, "--max-time", "--max-cost", "told once to finish", "10 minutes", "what is in flight", "reports no cost adds nothing")
+	contains(t, "usage", clientcli.Usage, "--max-time", "--max-cost", "told once to finish", "10 minutes", "what is in flight", "reports no cost adds nothing",
+		"--summary-every", "progress report")
 }

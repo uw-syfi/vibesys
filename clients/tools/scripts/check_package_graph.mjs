@@ -1040,6 +1040,7 @@ const searchBindings = new Set(
   [
     'orchestrator/v1/search',
     'orchestrator/v1/orchestrator',
+    'cli/v1/bound',
     'cli/v1/job',
     'cli/v1/plan',
     'cli/v1/result',

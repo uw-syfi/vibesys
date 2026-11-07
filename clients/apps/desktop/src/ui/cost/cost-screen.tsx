@@ -3,19 +3,17 @@ import {
   Button,
   Card,
   Chip,
-  Meter,
   Row,
   Stack,
   StackedBars,
-  Stat,
   SwatchLegend,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CostView, FeedStatus, Freshness} from '../../state/index.js';
-import {faultWord} from '../orchestrator/words.js';
 import {type CostScreenModel, costScreenModel} from './cost-model.js';
-import {formatAxisUsd, NOT_REPORTED} from './words.js';
+import {SpendCard} from './spend-card.js';
+import {type CostWords, formatAxisUsd} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -40,6 +38,7 @@ function Header(props: {
   readonly freshness: Freshness;
   readonly status: FeedStatus;
   readonly runOver: boolean;
+  readonly words: CostWords;
   readonly retry: () => void;
 }): JSX.Element {
   const {label, tone} = statusOf(props.freshness, props.runOver);
@@ -50,7 +49,7 @@ function Header(props: {
       {failed === null ? null : (
         <Row gap="space-3" wrap>
           <Text tone="warn" variant="small">
-            {faultWord(failed.kind)}
+            {props.words.fault(failed.kind)}
           </Text>
           {failed.retryable ? (
             <Button
@@ -64,37 +63,6 @@ function Header(props: {
         </Row>
       )}
     </Row>
-  );
-}
-
-function SpendCard(props: {readonly spend: CostScreenModel['spend']}): JSX.Element {
-  const {spend} = props;
-  const figure = `${spend.floor ? '≥ ' : ''}${spend.figure ?? NOT_REPORTED}`;
-  return (
-    <Card section="Spend">
-      <Stack gap="space-4">
-        <Row gap="space-4" align="baseline" wrap>
-          <Text variant="hero" tone={spend.figure === null ? 'muted' : 'default'}>
-            {figure}
-          </Text>
-          {spend.cap === null ? null : (
-            <Text variant="heading" tone="muted">{`of ${spend.cap}`}</Text>
-          )}
-        </Row>
-        {spend.capShare === null ? null : (
-          <Meter label={`${figure} of ${spend.cap ?? ''}`} value={spend.capShare} />
-        )}
-        <Row gap="space-7" rowGap="space-4" wrap>
-          <Stat
-            label="Last hour"
-            value={spend.lastHour ?? NOT_REPORTED}
-            quiet={spend.lastHour === null}
-          />
-          <Stat label="Turns" value={spend.turns} />
-          <Stat label="Unpriced turns" value={spend.unpricedTurns} />
-        </Row>
-      </Stack>
-    </Card>
   );
 }
 
@@ -171,6 +139,8 @@ export function CostScreen(props: {
   readonly status: FeedStatus;
   /** The run has ended, so its view is final. */
   readonly runOver: boolean;
+  /** The words of the run's own vocabulary: a type of agent, a harness, a fault, a moment. */
+  readonly words: CostWords;
   readonly retry: () => void;
 }): JSX.Element {
   const header = (
@@ -178,11 +148,12 @@ export function CostScreen(props: {
       freshness={props.freshness}
       status={props.status}
       runOver={props.runOver}
+      words={props.words}
       retry={props.retry}
     />
   );
   if (props.view === undefined) return header;
-  const model = costScreenModel(props.view);
+  const model = costScreenModel(props.view, props.words);
   return (
     <Stack gap="space-4">
       {header}

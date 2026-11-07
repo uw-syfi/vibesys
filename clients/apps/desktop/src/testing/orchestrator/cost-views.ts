@@ -10,9 +10,9 @@ export const START = Date.parse('2026-11-01T09:00:00Z');
 export const HOUR = 3_600_000;
 
 /** What a model is called when no one has named it: not a real model id. */
-export const MODEL_A: CostModel = {harness: Harness.CLAUDE_CODE, model: 'model-a'};
-export const MODEL_B: CostModel = {harness: Harness.CODEX, model: 'model-b'};
-export const MODEL_DEFAULT: CostModel = {harness: Harness.CODEX, model: ''};
+const MODEL_A: CostModel = {harness: Harness.CLAUDE_CODE, model: 'model-a'};
+const MODEL_B: CostModel = {harness: Harness.CODEX, model: 'model-b'};
+const MODEL_DEFAULT: CostModel = {harness: Harness.CODEX, model: ''};
 export const MODEL_LONG: CostModel = {
   harness: Harness.CLAUDE_CODE,
   model: 'model-with-an-identifier-so-long-that-no-column-of-a-screen-holds-it-whole-v2',
@@ -29,7 +29,7 @@ const none: CostUsage = {
 
 export const usage = (fields: Partial<CostUsage>): CostUsage => ({...none, ...fields});
 
-export const bucket = (at: number, spends: readonly (readonly [CostModel, number])[]) => ({
+const bucket = (at: number, spends: readonly (readonly [CostModel, number])[]) => ({
   startMs: START + at * HOUR,
   costUsd: spends.reduce((total, [, usd]) => total + usd, 0),
   byModel: spends.map(([model, costUsd]) => ({model, costUsd})),

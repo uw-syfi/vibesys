@@ -3,8 +3,23 @@
  * a figure the host served and says it in words, the same way for every figure of a screen so
  * that a column of them lines up.
  */
-import type {CostModel} from '../../state/index.js';
-import {harnessWord} from '../orchestrator/words.js';
+import type {AgentRole, Harness} from '@vibesys/orchestrator-proto';
+import type {CostModel, FaultKind} from '../../state/index.js';
+
+/**
+ * The words the run's own vocabulary owns and this screen needs. The run screen passes them in, so
+ * the Cost feature imports nothing from the feature that shows it.
+ */
+export interface CostWords {
+  /** What a type of agent is called. */
+  readonly role: (role: AgentRole) => string;
+  /** What a harness is called, for a model that is its default. */
+  readonly harness: (harness: Harness) => string;
+  /** Why a stream failed, in a sentence a person can act on. */
+  readonly fault: (kind: FaultKind) => string;
+  /** A moment with its date and the zone it is told in. */
+  readonly moment: (atMs: number) => string;
+}
 
 /** What a figure the host did not report is written as, never a zero. */
 export const NOT_REPORTED = '—';
@@ -133,8 +148,8 @@ export function labelStride(bucketMs: number, buckets: number): number {
 }
 
 /** The name of a model: the id the host served, or the harness's own words for its default. */
-export function modelName(model: CostModel): string {
-  return model.model === '' ? harnessWord(model.harness) : model.model;
+export function modelName(model: CostModel, words: CostWords): string {
+  return model.model === '' ? words.harness(model.harness) : model.model;
 }
 
 /** What identifies a model across views of a run. */

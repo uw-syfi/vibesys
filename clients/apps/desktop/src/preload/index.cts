@@ -1,7 +1,8 @@
 /**
  * Sandboxed preload (`preload` runtime): the page's only way out. It exposes `vibesysGateway`, a
  * byte-only bridge that opens one MessagePort to the main process per call and carries protobuf
- * bytes both ways; generated schemas and application state stay outside it. A sandboxed preload
+ * bytes both ways, and `vibesysPreferences`, which reads and replaces the saved appearance as
+ * protobuf bytes; generated schemas and application state stay outside them. A sandboxed preload
  * cannot import local modules, so the channel name and the bridge's shape are repeated here (a
  * test holds the name to `GATEWAY_CHANNEL` and the shape to `GatewayPortBridge` in
  * `core/gateway-codec.ts`) and it loads only Electron at run time (`preload-sandbox`).
@@ -62,12 +63,60 @@ function createGatewayPreload(capabilities: {channel(): GatewayPreloadChannel}):
   };
 }
 
-module.exports = {createGatewayPreload, GATEWAY_PRELOAD_CHANNEL};
+/** The channels main serves for the saved appearance; they must equal `PREFERENCES_*_CHANNEL` in `core/settings/preferences-codec.ts`, which a test holds. */
+const PREFERENCES_PRELOAD_CHANNELS = {
+  read: 'vibesys:preferences:read',
+  write: 'vibesys:preferences:write',
+};
+
+/** What the preload exposes for the saved appearance; `PreferencesBridge` in `core/settings/preferences-codec.ts` is the page's view of it. */
+interface PreferencesPreloadBridge {
+  read(done: (bytes: Uint8Array | null) => void, failed: (error: string) => void): void;
+  write(bytes: Uint8Array, done: () => void, failed: (error: string) => void): void;
+}
+
+/** The one Electron call the preferences bridge makes, injectable like the gateway's channel. */
+interface PreferencesInvoker {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+}
+
+/** Each call ends in exactly one callback: the reply is bytes (or null for a read), or it is a failure. */
+function createPreferencesPreload(ipc: PreferencesInvoker): PreferencesPreloadBridge {
+  const text = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  return {
+    read(done, failed) {
+      ipc.invoke(PREFERENCES_PRELOAD_CHANNELS.read).then(
+        reply =>
+          reply === null || reply instanceof Uint8Array
+            ? done(reply)
+            : failed('preferences reply must be protobuf bytes or nothing'),
+        error => failed(text(error)),
+      );
+    },
+    write(bytes, done, failed) {
+      ipc.invoke(PREFERENCES_PRELOAD_CHANNELS.write, bytes).then(
+        () => done(),
+        error => failed(text(error)),
+      );
+    },
+  };
+}
+
+module.exports = {
+  createGatewayPreload,
+  GATEWAY_PRELOAD_CHANNEL,
+  createPreferencesPreload,
+  PREFERENCES_PRELOAD_CHANNELS,
+};
 
 // Electron's sandboxed preload has no renderer process under test, so the factory above is what a
 // test exercises and this is the production wiring.
 if (process.type === 'renderer') {
   const electron: typeof import('electron') = require('electron');
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysPreferences',
+    createPreferencesPreload(electron.ipcRenderer),
+  );
   electron.contextBridge.exposeInMainWorld(
     'vibesysGateway',
     createGatewayPreload({

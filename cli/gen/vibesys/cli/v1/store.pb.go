@@ -296,6 +296,61 @@ func (x *PromotionFile) GetPromotion() *Promotion {
 	return nil
 }
 
+// BoundFile is bounds/<seq>.json: the declared bound at that place in the task's log of bounds. A
+// bound is written once and never replaced. A store made before bounds existed has no such
+// directory, and is read as having none.
+type BoundFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Format        int32                  `protobuf:"varint,1,opt,name=format,proto3" json:"format,omitempty"`
+	Bound         *ObjectiveBound        `protobuf:"bytes,2,opt,name=bound,proto3" json:"bound,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BoundFile) Reset() {
+	*x = BoundFile{}
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BoundFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BoundFile) ProtoMessage() {}
+
+func (x *BoundFile) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BoundFile.ProtoReflect.Descriptor instead.
+func (*BoundFile) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *BoundFile) GetFormat() int32 {
+	if x != nil {
+		return x.Format
+	}
+	return 0
+}
+
+func (x *BoundFile) GetBound() *ObjectiveBound {
+	if x != nil {
+		return x.Bound
+	}
+	return nil
+}
+
 // FrontierFile is frontier/<n>.json: the task's frontier after its nth change, whole. The frontier is
 // the last of them, and a store with none has an empty frontier.
 type FrontierFile struct {
@@ -309,7 +364,7 @@ type FrontierFile struct {
 
 func (x *FrontierFile) Reset() {
 	*x = FrontierFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +376,7 @@ func (x *FrontierFile) String() string {
 func (*FrontierFile) ProtoMessage() {}
 
 func (x *FrontierFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +389,7 @@ func (x *FrontierFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrontierFile.ProtoReflect.Descriptor instead.
 func (*FrontierFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FrontierFile) GetFormat() int32 {
@@ -369,7 +424,7 @@ type EventFile struct {
 
 func (x *EventFile) Reset() {
 	*x = EventFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -381,7 +436,7 @@ func (x *EventFile) String() string {
 func (*EventFile) ProtoMessage() {}
 
 func (x *EventFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -394,7 +449,7 @@ func (x *EventFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventFile.ProtoReflect.Descriptor instead.
 func (*EventFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EventFile) GetFormat() int32 {
@@ -429,7 +484,7 @@ type OwnerFile struct {
 
 func (x *OwnerFile) Reset() {
 	*x = OwnerFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -441,7 +496,7 @@ func (x *OwnerFile) String() string {
 func (*OwnerFile) ProtoMessage() {}
 
 func (x *OwnerFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -454,7 +509,7 @@ func (x *OwnerFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OwnerFile.ProtoReflect.Descriptor instead.
 func (*OwnerFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *OwnerFile) GetFormat() int32 {
@@ -511,7 +566,7 @@ type TaskFile struct {
 
 func (x *TaskFile) Reset() {
 	*x = TaskFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +578,7 @@ func (x *TaskFile) String() string {
 func (*TaskFile) ProtoMessage() {}
 
 func (x *TaskFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +591,7 @@ func (x *TaskFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFile.ProtoReflect.Descriptor instead.
 func (*TaskFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TaskFile) GetFormat() int32 {
@@ -564,7 +619,7 @@ var File_vibesys_cli_v1_store_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_store_proto_rawDesc = "" +
 	"\n" +
-	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\"-\n" +
+	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\"-\n" +
 	"\n" +
 	"FormatFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\"Y\n" +
@@ -582,7 +637,10 @@ const file_vibesys_cli_v1_store_proto_rawDesc = "" +
 	"\rPromotionFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x19\n" +
 	"\x03seq\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12?\n" +
-	"\tpromotion\x18\x03 \x01(\v2\x19.vibesys.cli.v1.PromotionB\x06\xbaH\x03\xc8\x01\x01R\tpromotion\"{\n" +
+	"\tpromotion\x18\x03 \x01(\v2\x19.vibesys.cli.v1.PromotionB\x06\xbaH\x03\xc8\x01\x01R\tpromotion\"j\n" +
+	"\tBoundFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12<\n" +
+	"\x05bound\x18\x02 \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\x06\xbaH\x03\xc8\x01\x01R\x05bound\"{\n" +
 	"\fFrontierFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x128\n" +
@@ -618,36 +676,39 @@ func file_vibesys_cli_v1_store_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_store_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_cli_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_cli_v1_store_proto_goTypes = []any{
 	(*FormatFile)(nil),     // 0: vibesys.cli.v1.FormatFile
 	(*JobFile)(nil),        // 1: vibesys.cli.v1.JobFile
 	(*ResultFile)(nil),     // 2: vibesys.cli.v1.ResultFile
 	(*PlanFile)(nil),       // 3: vibesys.cli.v1.PlanFile
 	(*PromotionFile)(nil),  // 4: vibesys.cli.v1.PromotionFile
-	(*FrontierFile)(nil),   // 5: vibesys.cli.v1.FrontierFile
-	(*EventFile)(nil),      // 6: vibesys.cli.v1.EventFile
-	(*OwnerFile)(nil),      // 7: vibesys.cli.v1.OwnerFile
-	(*TaskFile)(nil),       // 8: vibesys.cli.v1.TaskFile
-	(*Job)(nil),            // 9: vibesys.cli.v1.Job
-	(*Result)(nil),         // 10: vibesys.cli.v1.Result
-	(*Plan)(nil),           // 11: vibesys.cli.v1.Plan
-	(*Promotion)(nil),      // 12: vibesys.cli.v1.Promotion
-	(*FrontierMember)(nil), // 13: vibesys.cli.v1.FrontierMember
-	(*Event)(nil),          // 14: vibesys.cli.v1.Event
+	(*BoundFile)(nil),      // 5: vibesys.cli.v1.BoundFile
+	(*FrontierFile)(nil),   // 6: vibesys.cli.v1.FrontierFile
+	(*EventFile)(nil),      // 7: vibesys.cli.v1.EventFile
+	(*OwnerFile)(nil),      // 8: vibesys.cli.v1.OwnerFile
+	(*TaskFile)(nil),       // 9: vibesys.cli.v1.TaskFile
+	(*Job)(nil),            // 10: vibesys.cli.v1.Job
+	(*Result)(nil),         // 11: vibesys.cli.v1.Result
+	(*Plan)(nil),           // 12: vibesys.cli.v1.Plan
+	(*Promotion)(nil),      // 13: vibesys.cli.v1.Promotion
+	(*ObjectiveBound)(nil), // 14: vibesys.cli.v1.ObjectiveBound
+	(*FrontierMember)(nil), // 15: vibesys.cli.v1.FrontierMember
+	(*Event)(nil),          // 16: vibesys.cli.v1.Event
 }
 var file_vibesys_cli_v1_store_proto_depIdxs = []int32{
-	9,  // 0: vibesys.cli.v1.JobFile.job:type_name -> vibesys.cli.v1.Job
-	10, // 1: vibesys.cli.v1.ResultFile.result:type_name -> vibesys.cli.v1.Result
-	11, // 2: vibesys.cli.v1.PlanFile.plan:type_name -> vibesys.cli.v1.Plan
-	12, // 3: vibesys.cli.v1.PromotionFile.promotion:type_name -> vibesys.cli.v1.Promotion
-	13, // 4: vibesys.cli.v1.FrontierFile.members:type_name -> vibesys.cli.v1.FrontierMember
-	14, // 5: vibesys.cli.v1.EventFile.event:type_name -> vibesys.cli.v1.Event
-	6,  // [6:6] is the sub-list for method output_type
-	6,  // [6:6] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	10, // 0: vibesys.cli.v1.JobFile.job:type_name -> vibesys.cli.v1.Job
+	11, // 1: vibesys.cli.v1.ResultFile.result:type_name -> vibesys.cli.v1.Result
+	12, // 2: vibesys.cli.v1.PlanFile.plan:type_name -> vibesys.cli.v1.Plan
+	13, // 3: vibesys.cli.v1.PromotionFile.promotion:type_name -> vibesys.cli.v1.Promotion
+	14, // 4: vibesys.cli.v1.BoundFile.bound:type_name -> vibesys.cli.v1.ObjectiveBound
+	15, // 5: vibesys.cli.v1.FrontierFile.members:type_name -> vibesys.cli.v1.FrontierMember
+	16, // 6: vibesys.cli.v1.EventFile.event:type_name -> vibesys.cli.v1.Event
+	7,  // [7:7] is the sub-list for method output_type
+	7,  // [7:7] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_store_proto_init() }
@@ -655,6 +716,7 @@ func file_vibesys_cli_v1_store_proto_init() {
 	if File_vibesys_cli_v1_store_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_bound_proto_init()
 	file_vibesys_cli_v1_event_proto_init()
 	file_vibesys_cli_v1_frontier_proto_init()
 	file_vibesys_cli_v1_job_proto_init()
@@ -667,7 +729,7 @@ func file_vibesys_cli_v1_store_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_store_proto_rawDesc), len(file_vibesys_cli_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

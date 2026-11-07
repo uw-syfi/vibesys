@@ -55,6 +55,29 @@
       }
     ],
     "unattributedJobs": 1,
-    "truncated": true
+    "truncated": true,
+    "bounds": [
+      {
+        "objective": "tok_s",
+        "direction": "DIRECTION_MAXIMIZE",
+        "versions": [
+          {
+            "seq": "1",
+            "origin": {
+              "runId": "run-1",
+              "agent": "lead",
+              "at": "2026-01-01T00:00:00Z"
+            },
+            "objective": "tok_s",
+            "direction": "DIRECTION_MAXIMIZE",
+            "value": 15600,
+            "unit": "tok/s",
+            "note": "memory bandwidth over bytes per token"
+          }
+        ],
+        "headValue": 11076,
+        "percentOfBound": 71
+      }
+    ]
   }
 }

@@ -212,15 +212,31 @@ export const ELEVATION: Readonly<Record<ElevationLevel, ElevationSpec>> = {
   overlay: {shadow: '0 12px 40px rgb(0 0 0 / 0.25)', scrim: 'rgb(10 14 22 / 0.5)'},
 };
 
-export type DurationToken = 'instant' | 'fast' | 'base';
+/**
+ * How long a change takes, by what it is. `fast` (120 ms) answers a touch: a hover, a press, a
+ * selection. `base` (200 ms) is a part of a screen changing: a panel or a tab's content arriving.
+ * `slow` (250 ms) is the whole screen: a new page arriving, a theme crossfading. `instant` is for
+ * what must not move.
+ */
+export type DurationToken = 'instant' | 'fast' | 'base' | 'slow';
+
+/**
+ * The three curves: `easing` for a change between two states (`--easing`), `easingEnter` for
+ * something arriving, which starts quickly and settles (`--easing-enter`), and `easingExit` for
+ * something leaving, which gathers speed (`--easing-exit`).
+ */
 export interface MotionSpec {
   readonly duration: Readonly<Record<DurationToken, number>>;
   readonly easing: string;
+  readonly easingEnter: string;
+  readonly easingExit: string;
 }
 /** Under `prefers-reduced-motion: reduce` the generated CSS sets every duration to 0. */
 export const MOTION: MotionSpec = {
-  duration: {instant: 0, fast: 120, base: 200},
+  duration: {instant: 0, fast: 120, base: 200, slow: 250},
   easing: 'cubic-bezier(0.2, 0, 0, 1)',
+  easingEnter: 'cubic-bezier(0, 0, 0, 1)',
+  easingExit: 'cubic-bezier(0.3, 0, 1, 1)',
 };
 
 /**

@@ -49,6 +49,15 @@ provisioning, connections and calls. The preload transfers typed bytes across
 the Electron boundary. The renderer composes services and displays their state.
 An SSH authentication failure is reported for the operator to fix in a terminal.
 
+Inside each role folder the code is grouped by feature: the shell (rail and
+navigation), the settings and the orchestrator each have a subfolder in `state`,
+`core`, `ui` and `testing` where they have something to put there. A feature's
+fold is a reducer, its I/O is a service, and its screens only display. The
+shell composes the others: it owns where the person is, and every screen sends
+a navigation intent that the shell's fold takes. A dependency rule keeps the
+features from importing one another, and a test holds each declared intent to a
+control that sends it.
+
 ## State
 
 Control state is Effect services and atoms. Data folds are plain reducers.
@@ -80,9 +89,21 @@ has one source of truth; generated styles derive from typed token tables.
 Theme colors use semantic roles, so components ask for a role rather than
 choosing a literal color. Missing roles fail type checking.
 
-Themes follow the operating system until the operator chooses one. Reduced
-motion and contrast requirements belong to the design system, not to each app.
-Fonts ship with the app rather than being fetched while a screen opens.
+Themes follow the operating system until the operator chooses one. The
+operator's choice (a mode, and a light and a dark theme) is a protobuf message
+the main process keeps in the app's user data; the list of themes is read from
+the token table, so a theme is added by a token block and an enum value with no
+change to a screen. A theme change crossfades and the first theme shown does
+not. Reduced motion and contrast requirements belong to the design system, not
+to each app. Fonts ship with the app rather than being fetched while a screen
+opens.
+
+Motion has one scale. Durations are `fast` (a hover, a press, a selection),
+`base` (a part of a screen arriving) and `slow` (a whole screen arriving, a theme
+crossfade), with `instant` for what must not move; easings are `easing` between
+two states, `easing-enter` for something arriving and `easing-exit` for something
+leaving. Motion marks a change of meaning and never loops. Under reduced motion
+every duration is zero.
 
 ## Design system enforcement
 

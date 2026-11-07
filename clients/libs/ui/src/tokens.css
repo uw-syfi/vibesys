@@ -139,7 +139,10 @@
   --duration-instant: 0ms;
   --duration-fast: 120ms;
   --duration-base: 200ms;
+  --duration-slow: 250ms;
   --easing: cubic-bezier(0.2, 0, 0, 1);
+  --easing-enter: cubic-bezier(0, 0, 0, 1);
+  --easing-exit: cubic-bezier(0.3, 0, 1, 1);
   --series-0: #56b4e9;
   --series-1: #e69f00;
   --series-2: #3dbb8c;
@@ -298,11 +301,80 @@
   --log-text: #bdf0cb;
   --grid: #d6f5de11;
 }
+@property --bg {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --panel {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --panel-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --line {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --text {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --muted {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --ok {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --warn {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --err {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --log-bg {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --log-text {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --grid {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+:root[data-theme-motion] {
+  transition: --bg var(--duration-slow) var(--easing), --panel var(--duration-slow) var(--easing), --panel-2 var(--duration-slow) var(--easing), --line var(--duration-slow) var(--easing), --text var(--duration-slow) var(--easing), --muted var(--duration-slow) var(--easing), --accent var(--duration-slow) var(--easing), --ok var(--duration-slow) var(--easing), --warn var(--duration-slow) var(--easing), --err var(--duration-slow) var(--easing), --log-bg var(--duration-slow) var(--easing), --log-text var(--duration-slow) var(--easing), --grid var(--duration-slow) var(--easing);
+}
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-instant: 0ms;
     --duration-fast: 0ms;
     --duration-base: 0ms;
+    --duration-slow: 0ms;
   }
 }
 /*

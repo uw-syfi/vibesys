@@ -8,13 +8,14 @@ import {
   NO_TURNS,
   PRICED_AND_UNPRICED,
 } from '../../testing/orchestrator/cost-views.js';
+import {COST_WORDS} from '../orchestrator/cost-words.js';
 import {costScreenModel} from './cost-model.js';
 
 const NUMBER_WORDS = /NaN|undefined|Infinity|\[object/;
 
 /** Every string the model says, so a property can read all of it. */
 function sayings(view: Parameters<typeof costScreenModel>[0]): string[] {
-  const model = costScreenModel(view);
+  const model = costScreenModel(view, COST_WORDS);
   return [
     model.spend.figure ?? '',
     model.spend.cap ?? '',
@@ -35,7 +36,7 @@ describe('the cost screen model', () => {
   it('says only what was served: a price that was never reported stays absent and is never a zero', () => {
     fc.assert(
       fc.property(costViewArb, view => {
-        const model = costScreenModel(view);
+        const model = costScreenModel(view, COST_WORDS);
         expect(model.spend.figure === null).toBe(view.total.costUsd === null);
         expect(model.spend.lastHour === null).toBe(view.lastHourUsd === null);
         expect(model.spend.cap === null).toBe(view.maxCostUsd === null);
@@ -67,7 +68,7 @@ describe('the cost screen model', () => {
   it('keeps the order the host sent and the value it sent, never sorting or adding up', () => {
     fc.assert(
       fc.property(costViewArb, view => {
-        const model = costScreenModel(view);
+        const model = costScreenModel(view, COST_WORDS);
         expect(model.types.map(row => row.value)).toEqual(view.roles.map(r => r.usage.costUsd));
         expect(model.models.map(row => row.value)).toEqual(view.models.map(m => m.usage.costUsd));
         if (model.chart !== null) {
@@ -86,7 +87,7 @@ describe('the cost screen model', () => {
   it('is a floor exactly when a price is shown and turns without one are behind it', () => {
     fc.assert(
       fc.property(costViewArb, view => {
-        expect(costScreenModel(view).spend.floor).toBe(
+        expect(costScreenModel(view, COST_WORDS).spend.floor).toBe(
           view.total.costUsd !== null && view.unpricedTurns > 0,
         );
       }),
@@ -102,7 +103,7 @@ describe('the cost screen model', () => {
           models: [...view.models.slice(turned), ...view.models.slice(0, turned)],
         };
         const colors = (v: typeof view) =>
-          new Map(costScreenModel(v).models.map(row => [row.key, row.series]));
+          new Map(costScreenModel(v, COST_WORDS).models.map(row => [row.key, row.series]));
         expect(colors(reordered)).toEqual(colors(view));
       }),
     );
@@ -111,7 +112,7 @@ describe('the cost screen model', () => {
   it('labels the first bucket and then round times, in order, and draws no label a bar has not got', () => {
     fc.assert(
       fc.property(costViewArb, view => {
-        const chart = costScreenModel(view).chart;
+        const chart = costScreenModel(view, COST_WORDS).chart;
         const marks = chart?.marks ?? [];
         if (chart !== null) {
           expect(marks[0]?.at).toBe(0);
@@ -136,7 +137,7 @@ describe('the cost screen model', () => {
   it('writes every figure of a screen at one precision', () => {
     const cents = (text: string | null) => text !== null && /\.\d\d(\/h)?$/.test(text);
     const dollars = (text: string | null) => text !== null && !text.includes('.');
-    const model = costScreenModel(PRICED_AND_UNPRICED);
+    const model = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
     // The run costs $318: whole dollars everywhere a dollar figure is written.
     expect(model.spend.figure).toBe('$318');
     expect(model.spend.cap).toBe('$500');
@@ -145,37 +146,37 @@ describe('the cost screen model', () => {
       const figure = row.figures.at(-1) ?? null;
       expect(figure === null || dollars(figure)).toBe(true);
     }
-    const cheap = costScreenModel({
-      ...PRICED_AND_UNPRICED,
-      total: {...PRICED_AND_UNPRICED.total, costUsd: 12.5},
-    });
+    const cheap = costScreenModel(
+      {...PRICED_AND_UNPRICED, total: {...PRICED_AND_UNPRICED.total, costUsd: 12.5}},
+      COST_WORDS,
+    );
     expect(cents(cheap.spend.figure)).toBe(true);
     expect(cents(cheap.spend.lastHour)).toBe(true);
   });
 
   it('draws no chart where no bucket holds a priced model, and a chart where one does', () => {
-    expect(costScreenModel(NO_PRICES).chart).toBeNull();
-    expect(costScreenModel(PRICED_AND_UNPRICED).chart).not.toBeNull();
+    expect(costScreenModel(NO_PRICES, COST_WORDS).chart).toBeNull();
+    expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).chart).not.toBeNull();
     fc.assert(
       fc.property(costViewArb, view => {
         const priced = view.series.buckets.some(bucket => bucket.byModel.length > 0);
-        expect(costScreenModel(view).chart === null).toBe(!priced);
+        expect(costScreenModel(view, COST_WORDS).chart === null).toBe(!priced);
       }),
     );
   });
 
   it('is empty exactly when no turn has finished', () => {
-    expect(costScreenModel(NO_TURNS).empty).toBe(true);
-    expect(costScreenModel(NO_PRICES).empty).toBe(false);
+    expect(costScreenModel(NO_TURNS, COST_WORDS).empty).toBe(true);
+    expect(costScreenModel(NO_PRICES, COST_WORDS).empty).toBe(false);
     fc.assert(
       fc.property(costViewArb, view => {
-        expect(costScreenModel(view).empty).toBe(view.turns === 0);
+        expect(costScreenModel(view, COST_WORDS).empty).toBe(view.turns === 0);
       }),
     );
   });
 
   it('names an unpriced type, an unpriced model and a run with a price missing for some turns', () => {
-    const model = costScreenModel(PRICED_AND_UNPRICED);
+    const model = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
     expect(model.types.map(row => [row.name, row.note])).toEqual([
       ['Worker', undefined],
       ['Lead', '12 unpriced'],
@@ -184,17 +185,17 @@ describe('the cost screen model', () => {
     ]);
     expect(model.types.at(-1)?.figures).toEqual(['×1', '41', null]);
     expect(model.spend.floor).toBe(true);
-    expect(costScreenModel(ENDED_RUN).spend.floor).toBe(false);
-    expect(costScreenModel(NO_PRICES).spend.figure).toBeNull();
+    expect(costScreenModel(ENDED_RUN, COST_WORDS).spend.floor).toBe(false);
+    expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
   it('shows the model id as the host served it, and the harness for its own default', () => {
-    expect(costScreenModel(PRICED_AND_UNPRICED).models.map(row => row.name)).toEqual([
+    expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
       'model-a',
       'model-b',
       'Codex',
     ]);
-    const long = costScreenModel(LONG_NAMES);
+    const long = costScreenModel(LONG_NAMES, COST_WORDS);
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
     expect(long.models[0]?.mono).toBe(true);
     expect(long.chart?.legend[0]?.mono).toBe(true);

@@ -18,6 +18,9 @@
   gap: var(--space-1);
   border: var(--hairline) solid transparent;
   border-radius: var(--radius);
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    border-color var(--duration-fast) var(--easing);
 }
 .vs-sidebar-item:hover {
   background: var(--panel-2);
@@ -302,6 +305,20 @@
 .vs-app-content {
   flex: 1 1 0;
   min-height: 0;
+}
+/*
+ * A screen arriving: the page fades in and settles a step down into place, the one motion that says
+ * the screen changed. The app gives each screen its own key, so a new screen is a new page and
+ * plays it; the same screen updating plays nothing. Reduced motion zeroes the duration.
+ */
+@keyframes vs-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--space-2) * -1));
+  }
+}
+.vs-app-content > * {
+  animation: vs-arrive var(--duration-slow) var(--easing-enter);
 }
 /*
  * A narrow window never stacks the column above the page: the rail always stays beside the page

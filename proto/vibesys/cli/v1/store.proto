@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
+import "vibesys/cli/v1/bound.proto";
 import "vibesys/cli/v1/event.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
@@ -53,6 +54,14 @@ message PromotionFile {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
   uint64 seq = 2 [(buf.validate.field).uint64.gt = 0];
   Promotion promotion = 3 [(buf.validate.field).required = true];
+}
+
+// BoundFile is bounds/<seq>.json: the declared bound at that place in the task's log of bounds. A
+// bound is written once and never replaced. A store made before bounds existed has no such
+// directory, and is read as having none.
+message BoundFile {
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  ObjectiveBound bound = 2 [(buf.validate.field).required = true];
 }
 
 // FrontierFile is frontier/<n>.json: the task's frontier after its nth change, whole. The frontier is

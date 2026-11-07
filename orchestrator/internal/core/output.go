@@ -117,9 +117,9 @@ func (e ArmTimer) Timer() TimerID {
 	switch e.Kind {
 	case TimerRunDeadline, TimerLimitGrace:
 		return TimerID(fmt.Sprintf("%s/%s", e.Kind, e.Run))
-	case TimerLeadIdle:
-		// Each stall is its own timer: a stall that ended and began again must not be answered by
-		// the timer of the first.
+	case TimerLeadIdle, TimerSummaryDue:
+		// Each stall, and each time a report comes due, is its own timer: one that ended and began
+		// again must not be answered by the timer of the first.
 		return TimerID(fmt.Sprintf("%s/%s/%d", e.Kind, e.Run, e.FireAt.UnixNano()))
 	}
 	return TimerID(fmt.Sprintf("%s/%s/%d", e.Kind, e.Session.Agent, e.Session.N))

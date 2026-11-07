@@ -22,6 +22,8 @@
 //	results/<job>.json         the result a job saved, with its place in the order of saving
 //	plans/<number>.json        one plan, replaced whole on each change
 //	promotions/<n>.json        the nth promotion
+//	bounds/<n>.json            the nth declared performance bound, written once; a store made before
+//	                           bounds has no such directory, which reads as none declared
 //	frontier/<n>.json          the frontier after its nth change, whole; the last one is the frontier
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written

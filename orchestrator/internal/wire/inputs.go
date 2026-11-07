@@ -50,8 +50,8 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 		r := b.StartRun
 		c.Body = core.StartRun{
 			Repository: r.GetRepository(), Task: r.GetTask(), FanoutLimit: r.GetFanoutLimit(),
-			MaxTime: r.GetMaxTime().AsDuration(), MaxCostUSD: r.GetMaxCostUsd(), Lead: specIn(r.GetLead(), &errs), Brief: r.GetBrief(),
-			Allow: choicesIn(r.GetAllowAgents(), &errs),
+			MaxTime: r.GetMaxTime().AsDuration(), MaxCostUSD: r.GetMaxCostUsd(), SummaryEvery: r.GetSummaryEvery().AsDuration(),
+			Lead: specIn(r.GetLead(), &errs), Brief: r.GetBrief(), Allow: choicesIn(r.GetAllowAgents(), &errs),
 		}
 	case *pb.Command_StopRun:
 		c.Body = core.StopRun{Run: core.RunID(b.StopRun.GetRunId())}

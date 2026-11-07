@@ -43,6 +43,9 @@ func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
 		}
 		l.promotions = append(l.promotions, held)
 	}
+	if err := l.restoreBounds(snap.Bounds); err != nil {
+		return nil, err
+	}
 	frontier, err := Hold("frontier", snap.Frontier)
 	if err != nil {
 		return nil, err
@@ -62,6 +65,25 @@ func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
 		l.logs[id] = length
 	}
 	return l, nil
+}
+
+// restoreBounds takes the log of bounds, whose places are consecutive from 1 and whose every entry
+// is well formed, so a record edited by hand cannot get past what DeclareBound would have refused.
+func (l *Ledger) restoreBounds(bounds []core.Bound) error {
+	for i, b := range bounds {
+		held, err := Hold(fmt.Sprintf("bound %d", i+1), b)
+		if err != nil {
+			return err
+		}
+		if want := uint64(i) + 1; held.Seq != want {
+			return internal("the bound at place %d of the log is numbered %d", want, held.Seq)
+		}
+		if err := held.Check(); err != nil {
+			return internal("bound %d: %v", held.Seq, err)
+		}
+		l.bounds = append(l.bounds, held)
+	}
+	return nil
 }
 
 func (l *Ledger) restoreJobs(jobs []core.Job) error {

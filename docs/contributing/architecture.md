@@ -70,7 +70,10 @@ Rules for the whole picture:
 - The desktop app sees the whole system through generated types. Its protocol bindings come from the shared service contracts; display names come from the Python catalog.
 
 The orchestrator also projects deterministic search state for the app: jobs, results,
-judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator. This view is
+judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator.
+An agent may also declare the performance bound of an objective (`vibesys-cli bound declare`); `vibesysd`
+records each version with who declared it and when, and the view carries, per objective, the versions the
+run declared and the head's percent of the standing one, computed there so the app only shows it. This view is
 ephemeral and bounded. It is replaced as a whole, with revisions meaningful only
 within one connection. A lost or incompatible daemon makes the view unreadable
 with a typed reason; it never becomes an apparently empty successful search.

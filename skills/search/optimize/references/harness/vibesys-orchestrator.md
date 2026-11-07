@@ -46,17 +46,20 @@ measure before they hand off.
 
 ## Schedule periodic work
 
-There is no scheduler. Send the hourly report with `post_report` (`kind`, `headline`, `changed`,
-`in_flight`, `decisions`, `open_for_user`) when a handoff wakes you and an hour has passed since
-the last, and after each promotion. The operator reads it in the run; it is not a question and
-needs no reply.
+You set no timer for the hourly report: the run asks for it. When work has moved since your last
+report (a subagent started, a handoff or a job's end reached you) and an hour has passed since that
+report, you are sent a message that says a progress report is due. Answer it with `post_report`
+(`kind` `progress`, `headline`, `changed`, `in_flight`, `decisions`, `open_for_user`), covering the
+whole run, and send one after each promotion as well. Any report you send, asked or not, starts the
+hour again. A run where nothing moved is not asked. The operator reads the report in the run; it is
+not a question and needs no reply.
 
 Every report has a `kind`. Use `progress` for the hourly report and the note after a promotion:
 the run goes on. Use `final` once, as your last report, when the SKILL's Finish rule holds, or
 when you cannot go on and say why in its headline. An operator or a script that waits for the
 result waits for the `final` report; a `progress` report never satisfies it, so do not mark a
 note along the way `final`, and do not end the work without one. A progress report after every
-job or handoff is noise: send it after a promotion or when an hour has passed.
+job or handoff is noise: send it after a promotion or when the run asks for one.
 
 Do not end a turn with a provider wake-up or timer of your own (such as `ScheduleWakeup`) as a way
 to wait: the run starts none for you, and the run wakes you on every handoff, finished job and

@@ -116,8 +116,11 @@ type SearchState struct {
 	Troubles         []*v1.JobTrouble       `protobuf:"bytes,10,rep,name=troubles,proto3" json:"troubles,omitempty"`
 	UnattributedJobs uint32                 `protobuf:"varint,11,opt,name=unattributed_jobs,json=unattributedJobs,proto3" json:"unattributed_jobs,omitempty"`
 	Truncated        bool                   `protobuf:"varint,12,opt,name=truncated,proto3" json:"truncated,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The performance bounds the run's agents declared, one entry per objective, by objective name.
+	// Kept whole under the byte budget: a few small entries, bounded by construction.
+	Bounds        []*ObjectiveBounds `protobuf:"bytes,13,rep,name=bounds,proto3" json:"bounds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchState) Reset() {
@@ -234,6 +237,103 @@ func (x *SearchState) GetTruncated() bool {
 	return false
 }
 
+func (x *SearchState) GetBounds() []*ObjectiveBounds {
+	if x != nil {
+		return x.Bounds
+	}
+	return nil
+}
+
+// ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
+// earlier version of it, so a chart can draw the bound as it stood at each moment.
+type ObjectiveBounds struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Objective string                 `protobuf:"bytes,1,opt,name=objective,proto3" json:"objective,omitempty"`
+	// Which way the objective improves, as the task declared it.
+	Direction v1.Direction `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
+	// Every declaration for the objective in this run, oldest first. The last is the bound that
+	// stands. When the run declared more versions than fit, the newest are kept and the state is
+	// marked truncated.
+	Versions []*v1.ObjectiveBound `protobuf:"bytes,3,rep,name=versions,proto3" json:"versions,omitempty"`
+	// The head's value on the objective, the number percent_of_bound is a share of. Absent when the
+	// run has no head, the head has no value for the objective, or the head measured the objective in
+	// another direction than the bound's.
+	HeadValue *float64 `protobuf:"fixed64,4,opt,name=head_value,json=headValue,proto3,oneof" json:"head_value,omitempty"`
+	// How close the head is to the standing bound, in percent: 100 at the bound, and above 100 when
+	// the head has gone past it, which says the bound was too modest. For an objective that is
+	// maximized it is head_value over the bound, and for one that is minimized the bound over
+	// head_value, so more is better for both. Absent when head_value is, and when either number is not
+	// above zero.
+	PercentOfBound *float64 `protobuf:"fixed64,5,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ObjectiveBounds) Reset() {
+	*x = ObjectiveBounds{}
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveBounds) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveBounds) ProtoMessage() {}
+
+func (x *ObjectiveBounds) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveBounds.ProtoReflect.Descriptor instead.
+func (*ObjectiveBounds) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ObjectiveBounds) GetObjective() string {
+	if x != nil {
+		return x.Objective
+	}
+	return ""
+}
+
+func (x *ObjectiveBounds) GetDirection() v1.Direction {
+	if x != nil {
+		return x.Direction
+	}
+	return v1.Direction(0)
+}
+
+func (x *ObjectiveBounds) GetVersions() []*v1.ObjectiveBound {
+	if x != nil {
+		return x.Versions
+	}
+	return nil
+}
+
+func (x *ObjectiveBounds) GetHeadValue() float64 {
+	if x != nil && x.HeadValue != nil {
+		return *x.HeadValue
+	}
+	return 0
+}
+
+func (x *ObjectiveBounds) GetPercentOfBound() float64 {
+	if x != nil && x.PercentOfBound != nil {
+		return *x.PercentOfBound
+	}
+	return 0
+}
+
 type SearchHealth struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to State:
@@ -247,7 +347,7 @@ type SearchHealth struct {
 
 func (x *SearchHealth) Reset() {
 	*x = SearchHealth{}
-	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +359,7 @@ func (x *SearchHealth) String() string {
 func (*SearchHealth) ProtoMessage() {}
 
 func (x *SearchHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +372,7 @@ func (x *SearchHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchHealth.ProtoReflect.Descriptor instead.
 func (*SearchHealth) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SearchHealth) GetState() isSearchHealth_State {
@@ -328,7 +428,7 @@ type Unreadable struct {
 
 func (x *Unreadable) Reset() {
 	*x = Unreadable{}
-	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -340,7 +440,7 @@ func (x *Unreadable) String() string {
 func (*Unreadable) ProtoMessage() {}
 
 func (x *Unreadable) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_search_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -353,7 +453,7 @@ func (x *Unreadable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Unreadable.ProtoReflect.Descriptor instead.
 func (*Unreadable) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Unreadable) GetReason() UnreadableReason {
@@ -381,7 +481,7 @@ var File_vibesys_orchestrator_v1_search_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\x8a\x05\n" +
+	"$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\xd6\x05\n" +
 	"\vSearchState\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\x05runId\x12#\n" +
@@ -398,7 +498,21 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\btroubles\x18\n" +
 	" \x03(\v2\x1a.vibesys.cli.v1.JobTroubleB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\btroubles\x12+\n" +
 	"\x11unattributed_jobs\x18\v \x01(\rR\x10unattributedJobs\x12\x1c\n" +
-	"\ttruncated\x18\f \x01(\bR\ttruncated\"\xa2\x01\n" +
+	"\ttruncated\x18\f \x01(\bR\ttruncated\x12J\n" +
+	"\x06bounds\x18\r \x03(\v2(.vibesys.orchestrator.v1.ObjectiveBoundsB\b\xbaH\x05\x92\x01\x02\x10@R\x06bounds\"\xb4\x04\n" +
+	"\x0fObjectiveBounds\x12(\n" +
+	"\tobjective\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\tobjective\x12C\n" +
+	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12F\n" +
+	"\bversions\x18\x03 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\n" +
+	"\xbaH\a\x92\x01\x04\b\x01\x10@R\bversions\x12+\n" +
+	"\n" +
+	"head_value\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12?\n" +
+	"\x10percent_of_bound\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0epercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n" +
+	".objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n" +
+	"\v_head_valueB\x13\n" +
+	"\x11_percent_of_bound\"\xa2\x01\n" +
 	"\fSearchHealth\x12;\n" +
 	"\n" +
 	"live_since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\tliveSince\x12E\n" +
@@ -439,39 +553,45 @@ func file_vibesys_orchestrator_v1_search_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_search_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_search_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_vibesys_orchestrator_v1_search_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_vibesys_orchestrator_v1_search_proto_goTypes = []any{
 	(UnreadableReason)(0),         // 0: vibesys.orchestrator.v1.UnreadableReason
 	(*SearchState)(nil),           // 1: vibesys.orchestrator.v1.SearchState
-	(*SearchHealth)(nil),          // 2: vibesys.orchestrator.v1.SearchHealth
-	(*Unreadable)(nil),            // 3: vibesys.orchestrator.v1.Unreadable
-	(*v1.Job)(nil),                // 4: vibesys.cli.v1.Job
-	(*v1.Result)(nil),             // 5: vibesys.cli.v1.Result
-	(*v1.Judgment)(nil),           // 6: vibesys.cli.v1.Judgment
-	(*v1.PromotionRecord)(nil),    // 7: vibesys.cli.v1.PromotionRecord
-	(*v1.Plan)(nil),               // 8: vibesys.cli.v1.Plan
-	(*v1.Head)(nil),               // 9: vibesys.cli.v1.Head
-	(*v1.JobTrouble)(nil),         // 10: vibesys.cli.v1.JobTrouble
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*ObjectiveBounds)(nil),       // 2: vibesys.orchestrator.v1.ObjectiveBounds
+	(*SearchHealth)(nil),          // 3: vibesys.orchestrator.v1.SearchHealth
+	(*Unreadable)(nil),            // 4: vibesys.orchestrator.v1.Unreadable
+	(*v1.Job)(nil),                // 5: vibesys.cli.v1.Job
+	(*v1.Result)(nil),             // 6: vibesys.cli.v1.Result
+	(*v1.Judgment)(nil),           // 7: vibesys.cli.v1.Judgment
+	(*v1.PromotionRecord)(nil),    // 8: vibesys.cli.v1.PromotionRecord
+	(*v1.Plan)(nil),               // 9: vibesys.cli.v1.Plan
+	(*v1.Head)(nil),               // 10: vibesys.cli.v1.Head
+	(*v1.JobTrouble)(nil),         // 11: vibesys.cli.v1.JobTrouble
+	(v1.Direction)(0),             // 12: vibesys.cli.v1.Direction
+	(*v1.ObjectiveBound)(nil),     // 13: vibesys.cli.v1.ObjectiveBound
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_search_proto_depIdxs = []int32{
-	2,  // 0: vibesys.orchestrator.v1.SearchState.health:type_name -> vibesys.orchestrator.v1.SearchHealth
-	4,  // 1: vibesys.orchestrator.v1.SearchState.jobs:type_name -> vibesys.cli.v1.Job
-	5,  // 2: vibesys.orchestrator.v1.SearchState.results:type_name -> vibesys.cli.v1.Result
-	6,  // 3: vibesys.orchestrator.v1.SearchState.judgments:type_name -> vibesys.cli.v1.Judgment
-	7,  // 4: vibesys.orchestrator.v1.SearchState.promotions:type_name -> vibesys.cli.v1.PromotionRecord
-	8,  // 5: vibesys.orchestrator.v1.SearchState.plans:type_name -> vibesys.cli.v1.Plan
-	9,  // 6: vibesys.orchestrator.v1.SearchState.head:type_name -> vibesys.cli.v1.Head
-	10, // 7: vibesys.orchestrator.v1.SearchState.troubles:type_name -> vibesys.cli.v1.JobTrouble
-	11, // 8: vibesys.orchestrator.v1.SearchHealth.live_since:type_name -> google.protobuf.Timestamp
-	3,  // 9: vibesys.orchestrator.v1.SearchHealth.unreadable:type_name -> vibesys.orchestrator.v1.Unreadable
-	0,  // 10: vibesys.orchestrator.v1.Unreadable.reason:type_name -> vibesys.orchestrator.v1.UnreadableReason
-	11, // 11: vibesys.orchestrator.v1.Unreadable.since:type_name -> google.protobuf.Timestamp
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	3,  // 0: vibesys.orchestrator.v1.SearchState.health:type_name -> vibesys.orchestrator.v1.SearchHealth
+	5,  // 1: vibesys.orchestrator.v1.SearchState.jobs:type_name -> vibesys.cli.v1.Job
+	6,  // 2: vibesys.orchestrator.v1.SearchState.results:type_name -> vibesys.cli.v1.Result
+	7,  // 3: vibesys.orchestrator.v1.SearchState.judgments:type_name -> vibesys.cli.v1.Judgment
+	8,  // 4: vibesys.orchestrator.v1.SearchState.promotions:type_name -> vibesys.cli.v1.PromotionRecord
+	9,  // 5: vibesys.orchestrator.v1.SearchState.plans:type_name -> vibesys.cli.v1.Plan
+	10, // 6: vibesys.orchestrator.v1.SearchState.head:type_name -> vibesys.cli.v1.Head
+	11, // 7: vibesys.orchestrator.v1.SearchState.troubles:type_name -> vibesys.cli.v1.JobTrouble
+	2,  // 8: vibesys.orchestrator.v1.SearchState.bounds:type_name -> vibesys.orchestrator.v1.ObjectiveBounds
+	12, // 9: vibesys.orchestrator.v1.ObjectiveBounds.direction:type_name -> vibesys.cli.v1.Direction
+	13, // 10: vibesys.orchestrator.v1.ObjectiveBounds.versions:type_name -> vibesys.cli.v1.ObjectiveBound
+	14, // 11: vibesys.orchestrator.v1.SearchHealth.live_since:type_name -> google.protobuf.Timestamp
+	4,  // 12: vibesys.orchestrator.v1.SearchHealth.unreadable:type_name -> vibesys.orchestrator.v1.Unreadable
+	0,  // 13: vibesys.orchestrator.v1.Unreadable.reason:type_name -> vibesys.orchestrator.v1.UnreadableReason
+	14, // 14: vibesys.orchestrator.v1.Unreadable.since:type_name -> google.protobuf.Timestamp
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_search_proto_init() }
@@ -479,7 +599,8 @@ func file_vibesys_orchestrator_v1_search_proto_init() {
 	if File_vibesys_orchestrator_v1_search_proto != nil {
 		return
 	}
-	file_vibesys_orchestrator_v1_search_proto_msgTypes[1].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_search_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_search_proto_msgTypes[2].OneofWrappers = []any{
 		(*SearchHealth_LiveSince)(nil),
 		(*SearchHealth_Unreadable)(nil),
 	}
@@ -489,7 +610,7 @@ func file_vibesys_orchestrator_v1_search_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_search_proto_rawDesc), len(file_vibesys_orchestrator_v1_search_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

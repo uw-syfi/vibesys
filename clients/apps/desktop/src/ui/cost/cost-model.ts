@@ -7,8 +7,8 @@
  */
 import type {BarMark, BarRow, StackedBar, SwatchItem} from '@vibesys/ui';
 import type {CostModel, CostUsage, CostView} from '../../state/index.js';
-import {formatMoment, roleWord} from '../orchestrator/words.js';
 import {
+  type CostWords,
   formatCount,
   formatElapsed,
   formatRate,
@@ -37,7 +37,7 @@ export interface SpendFigures {
   readonly unpricedTurns: string;
 }
 
-export interface SpendChart {
+interface SpendChart {
   readonly bars: readonly StackedBar[];
   readonly marks: readonly BarMark[];
   readonly legend: readonly SwatchItem[];
@@ -96,18 +96,23 @@ function spendOf(view: CostView, precision: Precision): SpendFigures {
 
 /** What hovering a bucket says: when it starts, and what each model spent in it. */
 function bucketTitle(
+  words: CostWords,
   startMs: number,
   costUsd: number,
   byModel: readonly {readonly model: CostModel; readonly costUsd: number}[],
 ): string {
   return [
-    formatMoment(startMs),
+    words.moment(startMs),
     formatUsd(costUsd, 2),
-    ...byModel.map(spend => `${modelName(spend.model)} ${formatUsd(spend.costUsd, 2)}`),
+    ...byModel.map(spend => `${modelName(spend.model, words)} ${formatUsd(spend.costUsd, 2)}`),
   ].join('\n');
 }
 
-function chartOf(view: CostView, slots: ReadonlyMap<string, number>): SpendChart | null {
+function chartOf(
+  view: CostView,
+  slots: ReadonlyMap<string, number>,
+  words: CostWords,
+): SpendChart | null {
   const {buckets, startMs, bucketMs} = view.series;
   // A bucket has a model's spend only where a turn was priced: with none anywhere there is no
   // spend to draw, and an axis would make up a scale for it.
@@ -117,7 +122,7 @@ function chartOf(view: CostView, slots: ReadonlyMap<string, number>): SpendChart
     (bucket): StackedBar => ({
       id: String(bucket.startMs),
       total: bucket.costUsd,
-      title: bucketTitle(bucket.startMs, bucket.costUsd, bucket.byModel),
+      title: bucketTitle(words, bucket.startMs, bucket.costUsd, bucket.byModel),
       // Stacked in the palette's order, so a model keeps its place in the stack while the run goes on.
       segments: bucket.byModel
         .map(spend => ({
@@ -134,7 +139,7 @@ function chartOf(view: CostView, slots: ReadonlyMap<string, number>): SpendChart
   );
   const legend = view.models.map(
     (cost): SwatchItem => ({
-      label: modelName(cost.model),
+      label: modelName(cost.model, words),
       series: slot(cost.model),
       ...(cost.model.model === '' ? {} : {mono: true}),
     }),
@@ -142,10 +147,10 @@ function chartOf(view: CostView, slots: ReadonlyMap<string, number>): SpendChart
   return {bars, marks, legend};
 }
 
-const typeRows = (view: CostView, precision: Precision): BarRow[] =>
+const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRow[] =>
   view.roles.map(role => ({
     key: `role-${role.role}`,
-    name: roleWord(role.role),
+    name: words.role(role.role),
     value: role.usage.costUsd,
     ...optionalNote(noteOf(role.usage, role.unpricedTurns)),
     figures: [
@@ -155,11 +160,16 @@ const typeRows = (view: CostView, precision: Precision): BarRow[] =>
     ],
   }));
 
-const modelRows = (view: CostView, precision: Precision, slots: ReadonlyMap<string, number>) =>
+const modelRows = (
+  view: CostView,
+  precision: Precision,
+  slots: ReadonlyMap<string, number>,
+  words: CostWords,
+) =>
   view.models.map(
     (cost): BarRow => ({
       key: modelKey(cost.model),
-      name: modelName(cost.model),
+      name: modelName(cost.model, words),
       ...(cost.model.model === '' ? {} : {mono: true}),
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
@@ -181,15 +191,15 @@ const optionalNote = (note: string | undefined): {readonly note?: string} =>
   note === undefined ? {} : {note};
 
 /** The screen's model of one run's cost view. */
-export function costScreenModel(view: CostView): CostScreenModel {
+export function costScreenModel(view: CostView, words: CostWords): CostScreenModel {
   const precision = precisionOf(view.total.costUsd);
   const slots = slotsOf(view);
   return {
     empty: view.turns === 0,
     spend: spendOf(view, precision),
-    chart: chartOf(view, slots),
-    types: typeRows(view, precision),
-    models: modelRows(view, precision, slots),
+    chart: chartOf(view, slots, words),
+    types: typeRows(view, precision, words),
+    models: modelRows(view, precision, slots, words),
     kinds: kindRows(view),
   };
 }

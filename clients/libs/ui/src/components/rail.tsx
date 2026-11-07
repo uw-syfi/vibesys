@@ -12,10 +12,13 @@ import {WindowFrame} from './window-frame.js';
  * and the second from the bottom. `label` names the rail for assistive technology. `state` says
  * whether what the rail's own choices rest on has been read (such as where the mark goes), as
  * `data-state` on the rail: the rail is the app's navigation, so it says so for every screen.
+ * The `mark` (the app's own button, a `RailItem` with `hideLabel`) stands first, set apart from the
+ * destinations by a line, so it is never read as one of them.
  */
 export function RailFrame(props: {
   readonly label: string;
   readonly state: PageState;
+  readonly mark?: ReactNode;
   readonly top: ReactNode;
   readonly bottom?: ReactNode;
   readonly children: ReactNode;
@@ -24,7 +27,10 @@ export function RailFrame(props: {
     <WindowFrame
       start={
         <nav className="vs-rail" aria-label={props.label} data-state={props.state}>
-          <div className="vs-rail-group">{props.top}</div>
+          <div className="vs-rail-group">
+            {props.mark === undefined ? null : <div className="vs-rail-mark">{props.mark}</div>}
+            {props.top}
+          </div>
           {props.bottom === undefined ? null : (
             <div className="vs-rail-group" data-end>
               {props.bottom}

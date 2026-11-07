@@ -11,7 +11,7 @@ import {
   WatchRunCostRequestSchema,
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
-import {costViewOf, type FeedStatus} from '../state/index.js';
+import {type FeedStatus, readCost} from '../state/index.js';
 import {
   FakeDaemon,
   faultsOn,
@@ -77,7 +77,9 @@ describe('a run cost stream', () => {
       expect(yield* h.read(h.session.costs.status(RUN))).toEqual({_tag: 'Live'});
       expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('live');
       const held = (yield* h.model).data.costs[RUN];
-      expect(held).toEqual(costViewOf(sent));
+      const read = readCost(sent);
+      expect(read._tag).toBe('View');
+      expect(held).toEqual(read._tag === 'View' ? read.view : undefined);
       // The numbers a screen shows are the host's, never a sum of its parts.
       expect(held?.total.costUsd).toBe(12.5);
       expect(held?.maxCostUsd).toBe(500);
@@ -122,6 +124,30 @@ describe('a run cost stream', () => {
       expect(costCalls(h)).toHaveLength(2);
       expect((yield* h.model).data.costs[RUN]?.total.costUsd).toBe(3);
     }),
+  );
+
+  it.effect(
+    'fails with the field named when a view lacks one the contract requires, and holds none',
+    () =>
+      Effect.gen(function* () {
+        const daemon = new FakeDaemon(scenario);
+        // A host that broke the contract: the view has no series.
+        daemon.publishCost(create(RunCostSchema, {...hostCost(5), series: undefined}));
+        const h = yield* hostHarness(daemon);
+        h.mount(h.session.runs.watch);
+        h.mount(h.session.costs.watch(RUN));
+        yield* h.elapse(30);
+        const status = yield* h.read(h.session.costs.status(RUN));
+        expect(status).toMatchObject({
+          _tag: 'Failed',
+          fault: {kind: 'InvalidMessage', retryable: false},
+        });
+        expect(status._tag === 'Failed' ? status.fault.detail : '').toContain('series');
+        // No view is made of it: nothing is held, and the rest of the app carries on.
+        expect((yield* h.model).data.costs[RUN]).toBeUndefined();
+        expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('unavailable');
+        expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      }),
   );
 
   it.effect('a host without the method fails the cost stream alone and leaves the link up', () =>
