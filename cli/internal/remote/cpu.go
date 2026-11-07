@@ -36,7 +36,7 @@ func (c *CPU) system(ctx context.Context) (*cpu.Proc, error) {
 	}
 	bounded, done := Bounded(ctx, c.Timers, c.Timeout)
 	defer done()
-	out, err := Output(bounded, c.Shell, []string{"sh", "-c", "uname -s; uname -m; hostname; nproc"}, nil)
+	out, err := Output(bounded, c.Timers, c.Shell, []string{"sh", "-c", "uname -s; uname -m; hostname; nproc"}, "")
 	if err != nil {
 		return nil, err
 	}

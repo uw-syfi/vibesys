@@ -5,6 +5,10 @@
 // Every call is bounded by the caller's context. An exit code that is the transport's own, such as
 // ssh's 255 when the connection fails, is reported as such (Shell.Lost), so a caller never takes
 // it for the program's: an exit status nobody saw is unknown, never a success.
+//
+// A call whose transport failed before its program started (Shell.Unreached), such as an ssh
+// connection a login node closed during its key exchange, never ran, so it is made again after a
+// short wait, as Reconnect says, before it is reported.
 package remote
 
 import (
@@ -12,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os/exec"
 	"strings"
@@ -32,6 +35,10 @@ type Shell interface {
 	// Lost reports whether an exit code is the transport's own, so how the program ended is not
 	// known.
 	Lost(code int) bool
+	// Unreached reports whether a call that exited with code, having written stderr, failed before
+	// its program started: the program did not run, so the call is safe to make again whatever it
+	// does. A call that may have reached its program is never unreached.
+	Unreached(code int, stderr string) bool
 	// Where names the machine in messages.
 	Where() string
 }
@@ -48,6 +55,9 @@ func (Local) Command(ctx context.Context, argv []string) *exec.Cmd {
 
 // Lost implements Shell. A program run here is waited for directly, so every exit code is its own.
 func (Local) Lost(int) bool { return false }
+
+// Unreached implements Shell. A program run here is started directly, so it is never unreached.
+func (Local) Unreached(int, string) bool { return false }
 
 // Where implements Shell.
 func (Local) Where() string { return "this machine" }
@@ -86,6 +96,37 @@ func (s SSH) Command(ctx context.Context, argv []string) *exec.Cmd {
 // Lost implements Shell.
 func (SSH) Lost(code int) bool { return code == sshLost }
 
+// unconnected are the starts of the line ssh ends with when it could not connect: it failed to
+// reach the host, or the host closed or reset the connection during the key exchange or the
+// authentication, which is what a login node at its limit of unauthenticated connections does.
+// ssh says these before it opens a session, so the remote command did not run. A connection lost
+// after that ends in another line ("Connection to host-a closed by remote host.", "client_loop:
+// ...", "Timeout, server host-a not responding."), and the command may have run.
+var unconnected = []string{
+	"kex_exchange_identification: ",
+	"ssh_exchange_identification: ",
+	"Connection closed by ",
+	"Connection reset by ",
+	"Connection timed out during banner exchange",
+	"ssh: connect to host ",
+}
+
+// Unreached implements Shell: ssh exited with its own code, and the last line it wrote says it
+// could not connect.
+func (SSH) Unreached(code int, stderr string) bool {
+	if code != sshLost {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	for _, start := range unconnected {
+		if strings.HasPrefix(last, start) {
+			return true
+		}
+	}
+	return false
+}
+
 // Where implements Shell.
 func (s SSH) Where() string { return s.Host }
 
@@ -105,33 +146,80 @@ func quoteWord(w string) string {
 	return "'" + strings.ReplaceAll(w, "'", `'"'"'`) + "'"
 }
 
-// Output runs argv on the machine to its end and returns what it wrote to standard output. A
-// program that exits non-zero is an error that carries the end of what it wrote to standard error;
-// one the transport lost is unavailable.
-func Output(ctx context.Context, sh Shell, argv []string, stdin io.Reader) (string, error) {
+// The policy of Reconnect.
+const (
+	// ReconnectAttempts is how many times in all a call that does not reach its machine is made.
+	ReconnectAttempts = 5
+	// ReconnectWait is the wait before the second attempt; each later wait is twice the one before,
+	// so the waits are 1s, 2s, 4s and 8s.
+	ReconnectWait = time.Second
+)
+
+// Reconnect calls try until it returns a call that reached the machine, and returns that call's
+// result: try reports with unreached that its call failed before its program started. Such a call
+// is made again after a wait, ReconnectWait and then twice the one before each time, up to
+// ReconnectAttempts in all; the last unreached call's result is returned, its error saying how many
+// were made. A wait that ctx ends returns the last result at once.
+func Reconnect[T any](ctx context.Context, timers clock.Timers, try func() (result T, unreached bool, err error)) (T, error) {
+	wait := ReconnectWait
+	for attempt := 1; ; attempt++ {
+		res, unreached, err := try()
+		if !unreached {
+			return res, err
+		}
+		if attempt == ReconnectAttempts {
+			return res, fmt.Errorf("%w (not reached in %d attempts)", err, attempt)
+		}
+		if !clock.Sleep(ctx, timers, wait) {
+			return res, err
+		}
+		wait *= 2
+	}
+}
+
+// Unreached says whether a call of sh that ended with err, from exec.Cmd's Run or Wait, having
+// written stderr, failed before its program started, as Shell.Unreached says.
+func Unreached(sh Shell, err error, stderr string) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && sh.Unreached(exit.ExitCode(), stderr)
+}
+
+// Output runs argv on the machine to its end and returns what it wrote to standard output, with
+// stdin as its input. A program that exits non-zero is an error that carries the end of what it
+// wrote to standard error; one the transport lost is unavailable. A call that does not reach the
+// machine is made again as Reconnect says, waiting on the timers.
+func Output(ctx context.Context, timers clock.Timers, sh Shell, argv []string, stdin string) (string, error) {
+	return Reconnect(ctx, timers, func() (string, bool, error) { return output(ctx, sh, argv, stdin) })
+}
+
+// output makes one attempt of Output.
+func output(ctx context.Context, sh Shell, argv []string, stdin string) (string, bool, error) {
 	cmd := sh.Command(ctx, argv)
 	var out, errb bytes.Buffer
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &errb
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return "", ctx.Err()
+		return "", false, ctx.Err()
 	}
 	if err == nil {
-		return out.String(), nil
+		return out.String(), false, nil
 	}
-	var exit *exec.ExitError
 	what := strings.Join(argv, " ")
 	if len(what) > 80 {
 		what = what[:80] + "..."
 	}
 	msg := clip(strings.TrimSpace(errb.String()))
+	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit) && sh.Lost(exit.ExitCode()):
-		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}
+		return "", Unreached(sh, err, errb.String()), &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}
 	case errors.As(err, &exit):
-		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s on %s exited with %d: %s", what, sh.Where(), exit.ExitCode(), msg)}
+		return "", false, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s on %s exited with %d: %s", what, sh.Where(), exit.ExitCode(), msg)}
 	}
-	return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot run %s on %s: %v", what, sh.Where(), err)}
+	return "", false, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot run %s on %s: %v", what, sh.Where(), err)}
 }
 
 func clip(s string) string {
@@ -171,7 +259,7 @@ func (r Rsync) copy(ctx context.Context, from, to string, mirror bool) error {
 		argv = append(argv, "--delete")
 	}
 	argv = append(argv, "--", from, to)
-	_, err := Output(ctx, Local{}, argv, nil)
+	_, _, err := output(ctx, Local{}, argv, "")
 	return err
 }
 
@@ -212,7 +300,7 @@ func (p ProcFS) Open(name string) (fs.File, error) {
 	}
 	ctx, done := Bounded(context.Background(), p.Timers, p.Timeout)
 	defer done()
-	text, err := Output(ctx, p.Shell, []string{"cat", "/proc/" + name}, nil)
+	text, err := Output(ctx, p.Timers, p.Shell, []string{"cat", "/proc/" + name}, "")
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
