@@ -73,8 +73,9 @@ It selects a working CLI or installs one only after explicit user approval.
    harness file, for you and for every subagent that inherits your environment. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
-   `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
-   (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
+   `vibesys-cli submit measure <base> --samples 5 --no-plan`, as a tracked background `wait`
+   (`vibesys:measure`). The base tests no plan, which `--no-plan` says. No comparison means
+   anything until it lands. Plan while it runs.
 6. Early, from first principles, declare the speed-of-light bound of each objective the task scores:
    `vibesys-cli bound declare --objective <name> --value <v> --unit <u> --note "<how derived>"`.
    It is yours to state, and nothing requires it. Revise it by declaring again (nothing is
@@ -88,16 +89,24 @@ It selects a working CLI or installs one only after explicit user approval.
    planner none, and every few rounds one the nudge "bold" (a high-risk, high-reward idea). Fund a
    bold plan by expected value, upside times chance, and start it with its feasibility step; a low
    chance alone is no reason to drop it. Keep one bold track alive.
-2. Read the proposals (`vibesys-cli plan list`, `plan view <n>`). Dedupe, check each against the
-   rules in `OBJECTIVE.md` before funding it, check that chosen plans touch disjoint files, and
-   write each decision as a plan comment, then set the status (`vibesys:state`).
+2. Read the proposals (`vibesys-cli plan list`, `plan view <n>`). A plan is the record of one idea:
+   its title is the hypothesis a measurement can falsify, and its status says where the idea stands.
+   Dedupe, check each against the rules in `OBJECTIVE.md` before funding it, check that chosen
+   plans touch disjoint files, and write each decision as a plan comment, then set the status
+   (`vibesys:state`). A plan whose title is not something a measurement can show true or false
+   goes back to its planner, or is rewritten as such a claim in a comment before a worker starts.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with
-   `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Combine parked or won
-   plans with combine-candidates, and use profile-revision when a question needs evidence. Record
-   outcomes and lessons as plan comments, link every job to its plan (`--plan`), and close the plan
-   with its gain or its reason.
+   `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Link every measure
+   to the plan it tests: `vibesys-cli submit measure <sha> --samples 5 --plan <n>`. That link is how
+   each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that
+   names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
+   re-measuring the head, which test no idea. Combine parked or won plans with
+   combine-candidates, and use profile-revision when a question needs evidence. Record outcomes
+   and lessons as plan comments, link every other job to its plan too (`--plan`), and close the
+   plan with its gain or its reason: `won` when promoted, `parked` or `rejected` when a
+   measurement settles it, set when it happens and not at the end.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
@@ -140,7 +149,7 @@ It selects a working CLI or installs one only after explicit user approval.
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
 - A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
-  is none: for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`, submit `vibesys-cli submit measure <head SHA>` and report after
+  is none: for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`, submit `vibesys-cli submit measure <head SHA> --no-plan` and report after
   that lands.
   Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
 - Workers may submit their own jobs. The daemon runs as many at once as its capacity allows, and

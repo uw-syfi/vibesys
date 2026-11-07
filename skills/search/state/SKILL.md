@@ -71,7 +71,11 @@ Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (pro
 | Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
 Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
-Write each comment when the thing happens, not at the end.
+Every measure is linked to the plan it tests (`submit measure <sha> --plan <n>`): that link ties
+each point on the run's chart to its idea, and `vibesysd` refuses a measure from a run that names
+neither `--plan <n>` nor `--no-plan`. `--no-plan` is for the baseline and for re-measuring the
+head, which test no idea. A plan's status is the idea's standing, set when it changes. Write each
+comment when the thing happens, not at the end.
 
 Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`. What is live:
 `plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`. Whether every open or
@@ -86,7 +90,7 @@ parked plan's gain bound is under a share: `plan check-gain --under 10%`.
 3. Relaunch or park every plan whose agent is gone, and comment why. A job that is still queued
    or running needs no resubmission.
 4. After a long gap or a change of environment, re-measure the head as a control
-   (`submit measure <head> --no-cache`).
+   (`submit measure <head> --no-cache --no-plan`).
 
 ## Housekeeping
 
