@@ -48,10 +48,9 @@ from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_GO_MODULES_ROOT,
-    REMOTE_EVALUATOR_TOOLS_ROOT,
-    TrustedEvaluationCommandPaths,
     TrustedEvaluatorRequirements,
     prepare_trusted_evaluation_plan,
+    remote_stage_command_paths,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
@@ -778,20 +777,7 @@ def remote_evaluation(  # noqa: PLR0913  # lint-waiver: LW-930094 [PLR0913]; the
             profile_command=profile_command,
         ),
         requirements,
-        TrustedEvaluationCommandPaths(
-            source_project_root=workspace,
-            runtime_project_root=".",
-            python_executable=policy.remote_python,
-            runtime_package_root=(
-                ".vibesys-evaluator-package" if requirements.package_root is not None else None
-            ),
-            runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-            runtime_go_module_cache_root=(
-                str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
-                if requirements.go_module is not None
-                else None
-            ),
-        ),
+        remote_stage_command_paths(workspace, requirements, python_executable=policy.remote_python),
     )
 
     def remote(command: str | None) -> tuple[str, ...] | None:

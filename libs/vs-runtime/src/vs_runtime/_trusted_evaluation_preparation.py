@@ -34,6 +34,7 @@ type EvaluatorToolchain = Literal["go", "rust"]
 
 SANDBOX_EVALUATOR_TOOLS_ROOT = Path("/opt/vibesys-evaluator-tools")
 SANDBOX_EVALUATOR_GO_MODULES_ROOT = Path("/opt/vibesys-evaluator-go-modules")
+REMOTE_EVALUATOR_PACKAGE_ROOT = Path(".vibesys-evaluator-package")
 REMOTE_EVALUATOR_TOOLS_ROOT = Path(".vibesys-evaluator-tools")
 REMOTE_EVALUATOR_GO_MODULES_ROOT = Path(".vibesys-evaluator-go-modules")
 REMOTE_EVALUATOR_TOOLCHAINS_ROOT = Path(".vibesys-evaluator-toolchains")
@@ -399,6 +400,35 @@ class TrustedEvaluationCommandPaths:
     runtime_go_module_cache_root: str | None = None
 
 
+def remote_stage_command_paths(
+    source_project_root: Path,
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    python_executable: str,
+) -> TrustedEvaluationCommandPaths:
+    """Bind trusted commands to the directory a remote run environment runs them from.
+
+    Modal, SkyPilot and Slurm run a trusted command on another machine, from one
+    directory that holds the command's workspace inputs and, at the ``REMOTE_EVALUATOR_*``
+    names, the framework's evaluator package, tools and Go module cache. Every path is
+    therefore relative to that directory, ``${PROJECT_ROOT}`` included: an absolute path
+    names the editor's copy of the workspace, which the remote machine does not have, and
+    the inputs it points at are neither staged nor found there.
+    """
+    return TrustedEvaluationCommandPaths(
+        source_project_root=source_project_root,
+        runtime_project_root=".",
+        python_executable=python_executable,
+        runtime_package_root=(
+            str(REMOTE_EVALUATOR_PACKAGE_ROOT) if requirements.package_root is not None else None
+        ),
+        runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+        runtime_go_module_cache_root=(
+            str(REMOTE_EVALUATOR_GO_MODULES_ROOT) if requirements.go_module is not None else None
+        ),
+    )
+
+
 def prepare_trusted_evaluation_plan(
     plan: TrustedEvaluationPlan,
     requirements: TrustedEvaluatorRequirements,
@@ -568,7 +598,7 @@ def remote_evaluator_setup_command(
         commands.append(
             evaluator_go_module_setup_command(
                 requirements,
-                runtime_package_root=".vibesys-evaluator-package",
+                runtime_package_root=str(REMOTE_EVALUATOR_PACKAGE_ROOT),
                 runtime_cache_root=str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
             )
         )
