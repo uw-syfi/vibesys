@@ -4,6 +4,7 @@ import {
   Card,
   Chart,
   ChartColumns,
+  ChartDetail,
   ChartLegend,
   ChartPanel,
   type ChartPoint,
@@ -705,6 +706,20 @@ export const RICH_ENTRIES = {
           </ChartPanel>
         ))}
       </ChartColumns>
+    ),
+  },
+  ChartDetail: {
+    render: () => (
+      <Stack>
+        <ChartDetail label="Chosen point">
+          <Text variant="code">a75e3bfc</Text>
+          <Text variant="small" tone="muted">
+            score 10.01
+          </Text>
+          <Chip label="No plan" />
+        </ChartDetail>
+        <ChartDetail label="No point chosen" />
+      </Stack>
     ),
   },
   ParetoChart: {
