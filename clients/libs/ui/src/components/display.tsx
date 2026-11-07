@@ -157,9 +157,11 @@ export function EmptyState(props: {
   readonly title: string;
   readonly body?: string;
   readonly action?: ReactNode;
+  /** Where the words sit: centered (the default), or at the start, in line with the rest of a screen. */
+  readonly align?: 'center' | 'start';
 }): JSX.Element {
   return (
-    <div className="vs-empty">
+    <div className="vs-empty" data-align={props.align}>
       <Text variant="heading">{props.title}</Text>
       {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
       {props.action === undefined ? null : <div className="vs-empty-action">{props.action}</div>}

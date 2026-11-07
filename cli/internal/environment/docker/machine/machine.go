@@ -81,7 +81,7 @@ var _ docker.Machine = (*Remote)(nil)
 func (r *Remote) run(ctx context.Context, script string, args ...string) (string, error) {
 	bounded, done := remote.Bounded(ctx, r.Timers, CallTimeout)
 	defer done()
-	return remote.Output(bounded, r.Shell, append([]string{"sh", "-c", script, "vs-machine"}, args...), nil)
+	return remote.Output(bounded, r.Timers, r.Shell, append([]string{"sh", "-c", script, "vs-machine"}, args...), "")
 }
 
 // base is the directory of a staged checkout: one per checkout, so a job's commands share it and

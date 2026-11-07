@@ -6,6 +6,7 @@ import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   Breadcrumb,
+  CellSparkline,
   Chart,
   ChartColumns,
   ChartLegend,
@@ -17,6 +18,7 @@ import {
   Meter,
   MetricTile,
   MetricTiles,
+  MiddleText,
   Narrative,
   NewBelow,
   Pane,
@@ -1495,6 +1497,87 @@ describe('series colors', () => {
     expect(
       one(items[0] as HTMLElement, '.vs-series-swatch').style.getPropertyValue('--seg-color'),
     ).toBe('var(--series-3)');
+  });
+});
+
+describe('a sparkline', () => {
+  const steps = [
+    {x: 0, y: 1},
+    {x: 5, y: 3},
+  ];
+  const points = [
+    {x: 0, y: 1},
+    {x: 2, y: 0.5},
+    {x: 5, y: 3},
+  ];
+
+  test('draws a faint dot for each point under the line, and none when it has no points', async () => {
+    const {container} = await mount(
+      <>
+        <Sparkline label="With" steps={steps} points={points} from={0} to={5} />
+        <Sparkline label="Without" steps={steps} from={0} to={5} />
+      </>,
+    );
+    const [withPoints, without] = all(container, 'svg.vs-spark');
+    expect(withPoints?.querySelectorAll('.vs-spark-dots')).toHaveLength(1);
+    expect(
+      withPoints?.querySelector('.vs-spark-dots')?.getAttribute('d')?.match(/M/g),
+    ).toHaveLength(3);
+    // The dots are drawn first, so the line is over them.
+    expect(withPoints?.querySelector('path')?.getAttribute('class')).toBe('vs-spark-dots');
+    expect(without?.querySelector('.vs-spark-dots')).toBeNull();
+  });
+
+  test('fits the range to the points as well as the line, so no dot is drawn outside its box', async () => {
+    const {container} = await mount(
+      <Sparkline label="Range" steps={steps} points={points} from={0} to={5} />,
+    );
+    const ys = [
+      ...(one(container, '.vs-spark-dots').getAttribute('d') ?? '').matchAll(
+        /M[-\d.]+ ([-\d.]+)h0/g,
+      ),
+    ].map(match => Number(match[1]));
+    expect(ys).toHaveLength(3);
+    for (const y of ys) {
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(36);
+    }
+  });
+
+  test('tones the line quiet for a series that is over', async () => {
+    const {container} = await mount(
+      <Sparkline label="Over" steps={steps} from={0} to={5} tone="muted" />,
+    );
+    expect(one(container, '.vs-spark-line').getAttribute('data-tone')).toBe('muted');
+  });
+
+  test('in a list cell keeps a slot for how many more series there are, empty when there are none', async () => {
+    const {container} = await mount(
+      <>
+        <CellSparkline label="More" steps={steps} from={0} to={5} more={2} />
+        <CellSparkline label="Alone" steps={steps} from={0} to={5} more={0} />
+        <CellSparkline label="Unsaid" steps={steps} from={0} to={5} />
+      </>,
+    );
+    const slots = all(container, '.vs-columnlist-spark-more');
+    expect(slots.map(slot => slot.textContent)).toEqual(['+2', '', '']);
+    expect(all(container, 'svg.vs-spark')).toHaveLength(3);
+  });
+});
+
+describe('a middle-cut name', () => {
+  test('keeps the whole name as its text and its hover, and the last characters apart so they stay', async () => {
+    const {container} = await mount(
+      <>
+        <MiddleText text="host-b-a-vega-cluster-1" />
+        <MiddleText text="ab" />
+      </>,
+    );
+    const [long, short] = all(container, '.vs-middle');
+    expect(long?.textContent).toBe('host-b-a-vega-cluster-1');
+    expect(long?.getAttribute('title')).toBe('host-b-a-vega-cluster-1');
+    expect(long?.querySelector('.vs-middle-tail')?.textContent).toBe('luster-1');
+    expect(short?.textContent).toBe('ab');
   });
 });
 

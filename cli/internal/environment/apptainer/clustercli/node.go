@@ -3,6 +3,7 @@ package clustercli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
 // node is a running job's node, reached with steps of the job.
@@ -48,21 +50,27 @@ end`
 // heldMarker is the line holdScript prints once it runs.
 const heldMarker = "vibesys-held"
 
-// Hold implements apptainer.Node.
+// Hold implements apptainer.Node. A step that does not reach the login node is started again as
+// remote.Reconnect says.
 func (n *node) Hold(ctx context.Context) (io.Closer, error) {
+	return remote.Reconnect(ctx, n.c.cfg.Timers, func() (io.Closer, bool, error) { return n.holdOnce(ctx) })
+}
+
+// holdOnce makes one attempt of Hold, and reports whether it did not reach the login node.
+func (n *node) holdOnce(ctx context.Context) (io.Closer, bool, error) {
 	cmd := n.c.cfg.Shell.Command(context.Background(), n.step("/bin/sh", "-c", holdScript, "vs-hold"))
 	in, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var errb lockedBuffer
 	cmd.Stderr = &errb
 	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot hold the allocation %s: %v", n.job, err)
+		return nil, false, unavailable("cannot hold the allocation %s: %v", n.job, err)
 	}
 	h := &hold{n: n, cmd: cmd, in: in, done: make(chan struct{})}
 	held := make(chan bool, 1)
@@ -81,16 +89,17 @@ func (n *node) Hold(ctx context.Context) (io.Closer, error) {
 	select {
 	case ok := <-held:
 		if ok {
-			return h, nil
+			return h, false, nil
 		}
 		_ = h.Close()
-		return nil, unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
+		return nil, remote.Unreached(n.c.cfg.Shell, h.waitErr, errb.String()),
+			unavailable("the step that holds the allocation %s did not start: %s", n.job, clip(errb.String()))
 	case <-limit:
 		_ = h.Close()
-		return nil, unavailable("the step that holds the allocation %s did not start within %v", n.job, CallTimeout)
+		return nil, false, unavailable("the step that holds the allocation %s did not start within %v", n.job, CallTimeout)
 	case <-ctx.Done():
 		_ = h.Close()
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 }
 
@@ -158,21 +167,27 @@ const (
 	releasedMarker = "vibesys-released"
 )
 
-// Claim implements apptainer.Node.
+// Claim implements apptainer.Node. A step that does not reach the login node is started again as
+// remote.Reconnect says: it never ran, so it claimed nothing.
 func (n *node) Claim(ctx context.Context) (io.Closer, error) {
+	return remote.Reconnect(ctx, n.c.cfg.Timers, func() (io.Closer, bool, error) { return n.claimOnce(ctx) })
+}
+
+// claimOnce makes one attempt of Claim, and reports whether it did not reach the login node.
+func (n *node) claimOnce(ctx context.Context) (io.Closer, bool, error) {
 	cmd := n.c.cfg.Shell.Command(context.Background(), n.step("/bin/sh", "-c", claimScript, "vs-claim"))
 	in, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var errb lockedBuffer
 	cmd.Stderr = &errb
 	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot claim the allocation %s: %v", n.job, err)
+		return nil, false, unavailable("cannot claim the allocation %s: %v", n.job, err)
 	}
 	cl := &claim{hold: hold{n: n, cmd: cmd, in: in, done: make(chan struct{})}, errb: &errb}
 	first := make(chan string, 1)
@@ -193,19 +208,20 @@ func (n *node) Claim(ctx context.Context) (io.Closer, error) {
 	case line := <-first:
 		switch line {
 		case heldMarker:
-			return cl, nil
+			return cl, false, nil
 		case takenMarker:
 			_ = cl.Close()
-			return nil, apptainer.ErrTaken
+			return nil, false, apptainer.ErrTaken
 		}
 		_ = cl.Close()
-		return nil, unavailable("the step that claims the allocation %s did not start: %s", n.job, clip(errb.String()))
+		return nil, remote.Unreached(n.c.cfg.Shell, cl.waitErr, errb.String()),
+			unavailable("the step that claims the allocation %s did not start: %s", n.job, clip(errb.String()))
 	case <-limit:
 		_ = cl.Close()
-		return nil, unavailable("the step that claims the allocation %s did not start within %v", n.job, CallTimeout)
+		return nil, false, unavailable("the step that claims the allocation %s did not start within %v", n.job, CallTimeout)
 	case <-ctx.Done():
 		_ = cl.Close()
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	}
 }
 
@@ -457,22 +473,71 @@ func (n *node) pyxisArgv(box apptainer.Box, argv []string) ([]string, error) {
 	return append(out, argv...), nil
 }
 
-// Start implements apptainer.Node.
+// Start implements apptainer.Node. A step whose client does not reach the login node never ran,
+// so its client is started again as remote.Reconnect says, writing to the same sink, before the
+// process is said to have ended.
 func (n *node) Start(box apptainer.Box, argv []string, sink io.Writer) (environment.Process, error) {
 	full, err := n.StepArgv(box, argv)
 	if err != nil {
 		return nil, err
 	}
-	cmd := n.c.cfg.Shell.Command(context.Background(), full)
-	var stderr lockedBuffer
-	cmd.Stdout, cmd.Stderr = sink, &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, unavailable("cannot reach %s to start a step: %v", n.c.cfg.Shell.Where(), err)
+	ctx, cancel := context.WithCancel(context.Background())
+	first, err := n.client(ctx, full, sink)
+	if err != nil {
+		cancel()
+		return nil, err
 	}
-	p := &process{n: n, box: box.Name, cmd: cmd, exited: make(chan environment.Exit, 1)}
-	p.wg.Go(func() { p.exited <- n.finish(box.Name, cmd.Wait(), stderr.String()) })
+	p := &process{n: n, box: box.Name, kill: cancel, exited: make(chan environment.Exit, 1)}
+	p.wg.Go(func() {
+		defer cancel()
+		p.exited <- n.follow(ctx, box.Name, full, sink, first)
+	})
 	return p, nil
 }
+
+// stepClient is the started client of a step, and what it writes to standard error.
+type stepClient struct {
+	cmd    *exec.Cmd
+	stderr *lockedBuffer
+}
+
+// client starts the client of the step full, which ctx ends.
+func (n *node) client(ctx context.Context, full []string, sink io.Writer) (stepClient, error) {
+	cmd := n.c.cfg.Shell.Command(ctx, full)
+	c := stepClient{cmd: cmd, stderr: &lockedBuffer{}}
+	cmd.Stdout, cmd.Stderr = sink, c.stderr
+	if err := cmd.Start(); err != nil {
+		return stepClient{}, unavailable("cannot reach %s to start a step: %v", n.c.cfg.Shell.Where(), err)
+	}
+	return c, nil
+}
+
+// follow waits for the step's client, starting it again while it does not reach the login node,
+// and says how the box's process ended.
+func (n *node) follow(ctx context.Context, box string, full []string, sink io.Writer, first stepClient) environment.Exit {
+	c := &first
+	exit, _ := remote.Reconnect(ctx, n.c.cfg.Timers, func() (environment.Exit, bool, error) {
+		if c == nil {
+			next, err := n.client(ctx, full, sink)
+			if err != nil {
+				return docker.Lost(fmt.Sprintf("the client of a command of %s could not be started again: %v", box, err)), false, nil
+			}
+			c = &next
+		}
+		waitErr := c.cmd.Wait()
+		stderr := c.stderr.String()
+		c = nil
+		exit := n.finish(box, waitErr, stderr)
+		if ctx.Err() == nil && remote.Unreached(n.c.cfg.Shell, waitErr, stderr) {
+			return exit, true, errStepUnreached
+		}
+		return exit, false, nil
+	})
+	return exit
+}
+
+// errStepUnreached is the failure of a step's client that did not reach the login node.
+var errStepUnreached = errors.New("the step's client did not reach the login node")
 
 // finish says how a box's process ended, from how its client did.
 func (n *node) finish(box string, waitErr error, stderr string) environment.Exit {
@@ -522,7 +587,7 @@ func (n *node) Signal(ctx context.Context, box string, sig apptainer.Signal) err
 type process struct {
 	n      *node
 	box    string
-	cmd    *exec.Cmd
+	kill   context.CancelFunc
 	exited chan environment.Exit
 	wg     sync.WaitGroup
 }
@@ -539,8 +604,4 @@ func (p *process) Terminate() {
 
 // Kill implements environment.Process: it ends the step's client at once. The command ends no
 // later than its box is killed or its allocation ends.
-func (p *process) Kill() {
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-	}
-}
+func (p *process) Kill() { p.kill() }

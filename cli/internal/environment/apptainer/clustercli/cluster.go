@@ -103,7 +103,7 @@ func unavailable(format string, args ...any) error {
 func (c *Cluster) sh(ctx context.Context, d time.Duration, script string, args ...string) (string, error) {
 	bounded, done := remote.Bounded(ctx, c.cfg.Timers, d)
 	defer done()
-	out, err := remote.Output(bounded, c.cfg.Shell, append([]string{"/bin/sh", "-c", script, "vs-apptainer"}, args...), nil)
+	out, err := remote.Output(bounded, c.cfg.Timers, c.cfg.Shell, append([]string{"/bin/sh", "-c", script, "vs-apptainer"}, args...), "")
 	if err != nil && ctx.Err() == nil && bounded.Err() != nil {
 		return "", unavailable("%s did not answer within %v", c.cfg.Shell.Where(), d)
 	}
@@ -293,7 +293,7 @@ func (c *Cluster) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	argv := append(slices.Clone(c.cfg.Submit), SubmitArgs(a)...)
 	bounded, done := remote.Bounded(ctx, c.cfg.Timers, CallTimeout)
 	defer done()
-	out, err := remote.Output(bounded, c.cfg.Shell, argv, nil)
+	out, err := remote.Output(bounded, c.cfg.Timers, c.cfg.Shell, argv, "")
 	if err != nil {
 		return "", fmt.Errorf("submitting the allocation %s: %w", a.Name, err)
 	}

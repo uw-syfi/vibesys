@@ -355,7 +355,7 @@ func TestResultOfAHeadMovedOutsidePromoteIsItsOwnMeasurement(t *testing.T) {
 
 	r := c.run(withTask("result")...)
 	mustExit(t, r, exitFailed, "result at an unmeasured head")
-	if want := "run `vibesys-cli submit measure " + string(rev(2)) + "`"; !strings.Contains(r.stdout, want) || !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) {
+	if want := "run `vibesys-cli submit measure " + string(rev(2)) + " --no-plan`"; !strings.Contains(r.stdout, want) || !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) {
 		t.Fatalf("result = %q, want it to say %q", r.stdout, want)
 	}
 	if got := noneReason(t, c.run(withTask("result", "--json")...)); got != "NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED" {

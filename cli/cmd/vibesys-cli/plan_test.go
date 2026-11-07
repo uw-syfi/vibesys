@@ -282,7 +282,7 @@ func TestSubmitPlanLinksTheJobToThePlan(t *testing.T) {
 	}
 
 	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--plan", "7", "--", "exit", "0")...)
-	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "plan 7") {
+	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "plan 7") || !strings.Contains(r.stderr, "--plan") {
 		t.Fatalf("submit --plan of an unknown plan = %+v", r)
 	}
 }

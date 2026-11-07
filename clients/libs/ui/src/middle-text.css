@@ -1,0 +1,19 @@
+/*
+ * A name cut in its middle (`MiddleText`): the start is cut with an ellipsis and the end stays.
+ * Every value is a token variable from `tokens.css`.
+ */
+
+.vs-middle {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre;
+}
+.vs-middle-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-middle-tail {
+  flex: none;
+}
