@@ -178,11 +178,6 @@ export class FakeDaemon {
   /** How many runs the host says its snapshot left out, for a test of a host with more runs than it lists. */
   runsLeftOut = 0;
 
-  /** The search views the host holds now. */
-  searches(): SearchState[] {
-    return [...this.snapshot().searches];
-  }
-
   /** The summary the host serves of each run it lists, as it stands now. */
   summaries(): RunSummary[] {
     return [...this.snapshot().summaries];

@@ -166,10 +166,10 @@ const frameOf = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>
 
 /** The summaries that differ from the ones in `held`, which then holds them: what the host would send. */
 function changedSummaries(
-  daemon: FakeDaemon,
+  now: readonly RunSummary[],
   held: Map<string, Uint8Array>,
 ): ReadonlyArray<RunSummary> {
-  return daemon.summaries().filter(summary => {
+  return now.filter(summary => {
     const bytes = toBinary(RunSummarySchema, summary);
     const before = held.get(summary.runId);
     if (before !== undefined && equalBytes(before, bytes)) return false;
@@ -195,7 +195,7 @@ function followRuns(daemon: FakeDaemon, summaries: Map<string, Uint8Array> | nul
           emit(frameOf({body: {case: 'change', value: event}}));
         }
         if (summaries !== null)
-          for (const summary of changedSummaries(daemon, summaries))
+          for (const summary of changedSummaries(daemon.summaries(), summaries))
             emit(frameOf({body: {case: 'summary', value: summary}}));
       }),
   };
@@ -220,22 +220,23 @@ function runsSteps(
   const steps: Step[] = [];
   const seen = new Map<string, bigint>();
   const summaries = detail === SnapshotDetail.SUMMARY ? new Map<string, Uint8Array>() : null;
+  // The host as it stands now: what the snapshot says, and what has not been sent beside it.
+  const now = daemon.snapshot(detail);
   if (after === 0n) {
-    const snapshot = daemon.snapshot(detail);
-    after = snapshot.sequence;
-    steps.push(encode({body: {case: 'snapshot', value: snapshot}}));
-    for (const search of snapshot.searches) seen.set(search.runId, search.revision);
-    if (summaries !== null) changedSummaries(daemon, summaries);
+    after = now.sequence;
+    steps.push(encode({body: {case: 'snapshot', value: now}}));
+    for (const search of now.searches) seen.set(search.runId, search.revision);
+    if (summaries !== null) changedSummaries(now.summaries, summaries);
   }
   for (const event of daemon.changesAfter(after)) {
     steps.push(encode({body: {case: 'change', value: event}}));
   }
-  for (const search of daemon.searches()) {
+  for (const search of now.searches) {
     if (search.revision > (seen.get(search.runId) ?? 0n))
       steps.push(encode({body: {case: 'search', value: search}}));
   }
   if (summaries !== null)
-    for (const summary of changedSummaries(daemon, summaries))
+    for (const summary of changedSummaries(now.summaries, summaries))
       steps.push(encode({body: {case: 'summary', value: summary}}));
   return [...steps, ...(live ? [followRuns(daemon, summaries)] : tail)];
 }
