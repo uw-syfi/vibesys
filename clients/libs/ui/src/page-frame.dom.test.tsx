@@ -240,7 +240,7 @@ describe('StackedBars with few bars', () => {
     const frame = css('frame.css');
     expect(frame).toMatch(/--bar-max: calc\(var\(--space-8\) \+ var\(--space-5\)\)/);
     expect(frame).toMatch(
-      /\.vs-bars-plot,\s*\.vs-bars-marks,\s*\.vs-bars-axis \{[^}]*max-width: calc\(var\(--bars-count\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)/,
+      /\.vs-bars-plot,\s*\.vs-bars-marks,\s*\.vs-bars-axis \{[^}]*max-width: max\(var\(--chart-min\), calc\(var\(--bars-count\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)\)/,
     );
     // The stacked area shares the axis row and counts no bars: a fallback count would squeeze its labels.
     expect(frame).not.toMatch(/var\(--bars-count,/);

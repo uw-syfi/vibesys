@@ -123,7 +123,9 @@ describe('an agent page', () => {
       const text = sections.map(each => each.textContent ?? '');
       const placement = text.findIndex(each => each.startsWith('Placement'));
       const box = text.findIndex(each => each.startsWith('Message'));
-      const conversation = sections.findIndex(each => each.matches('.vs-conversation[data-size="fill"]'));
+      const conversation = sections.findIndex(each =>
+        each.matches('.vs-conversation[data-size="fill"]'),
+      );
       expect(placement).toBeGreaterThanOrEqual(0);
       expect(conversation).toBeGreaterThan(placement);
       expect(box).toBeGreaterThan(conversation);
@@ -132,6 +134,46 @@ describe('an agent page', () => {
       expect(body?.textContent).toContain('host-a');
       screen.unmount();
     }
+  });
+
+  it('says in its header that older turns are not shown only when the host left them out', () => {
+    const agent = Object.values(state.agents)[0];
+    if (agent === undefined) throw new Error('the run has agents');
+    const read = (turnsLeftOut: boolean) => ({
+      ...state,
+      histories: {
+        ...state.histories,
+        [agent.runId]: {sequence: 1n, complete: true, turnsLeftOut, checkInsLeftOut: false},
+      },
+    });
+    const shown = (held: OrchestratorState) => {
+      const screen = mount(
+        <AgentPage
+          state={held}
+          nowMs={scenario.endMs}
+          agent={agent}
+          host="host-a"
+          trail={[{id: 'runs', label: 'Runs'}]}
+          reading={null}
+          sendProgress={undefined}
+          history={{
+            earlier: {_tag: 'Idle'},
+            wholes: {},
+            loadEarlier: () => undefined,
+            expand: () => undefined,
+          }}
+          send={() => undefined}
+          retrySend={() => undefined}
+          open={() => undefined}
+        />,
+      );
+      const text = screen.container.querySelector('.vs-page-meta')?.textContent ?? '';
+      screen.unmount();
+      return text;
+    };
+    expect(shown(read(true))).toContain('Older turns not shown');
+    expect(shown(read(false))).not.toContain('not shown');
+    expect(shown(state)).not.toContain('not shown');
   });
 
   it('names its place in the spawn tree only when it has one: the lead is at the top', () => {

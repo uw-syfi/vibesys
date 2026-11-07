@@ -1,10 +1,10 @@
-import {Refusal, Rejection} from '@vibesys/orchestrator-proto';
 import {describe, expect, it} from '@effect/vitest';
+import {Refusal, Rejection} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {
-  type Fault,
   FAULT_KINDS,
+  type Fault,
   type FeedStatus,
   type HostConnectionState,
   REFUSAL_CAUSES,
@@ -26,18 +26,18 @@ const connection: fc.Arbitrary<HostConnectionState> = fc.oneof(
   fc
     .tuple(fault, fc.integer({min: 1, max: 9}))
     .map(([each, attempt]) => ({_tag: 'Waiting', attempt, fault: each, retryAtMs: 5}) as const),
-  fc.constantFrom('client-too-old', 'daemon-too-old').map(
-    side => ({_tag: 'Incompatible', side}) as const,
-  ),
+  fc
+    .constantFrom('client-too-old', 'daemon-too-old')
+    .map(side => ({_tag: 'Incompatible', side}) as const),
   fault.map(each => ({_tag: 'Unusable', fault: each}) as const),
 );
 
 const feed: fc.Arbitrary<FeedStatus> = fc.oneof(
   fc.constant({_tag: 'Opening'} as const),
   fc.constant({_tag: 'Live'} as const),
-  fc.constantFrom('gap', 'fell-behind', 'reconnect').map(
-    why => ({_tag: 'Restarting', why}) as const,
-  ),
+  fc
+    .constantFrom('gap', 'fell-behind', 'reconnect')
+    .map(why => ({_tag: 'Restarting', why}) as const),
   fault.map(each => ({_tag: 'Failed', fault: each}) as const),
 );
 
@@ -114,8 +114,8 @@ describe('the words of a refusal', () => {
     distinct(numbers(Rejection).map(rejectionWord));
     for (const cause of REFUSAL_CAUSES) expect(causeHint(cause)).toMatch(/\.$/);
     for (const kind of FAULT_KINDS) expect(faultAdvice(kind)).toMatch(/\.$/);
-    expect(faultText({kind: 'Refused', detail: '', retryable: false, cause: REFUSAL_CAUSES[0]})).toBe(
-      causeWord(REFUSAL_CAUSES[0]),
-    );
+    expect(
+      faultText({kind: 'Refused', detail: '', retryable: false, cause: REFUSAL_CAUSES[0]}),
+    ).toBe(causeWord(REFUSAL_CAUSES[0]));
   });
 });

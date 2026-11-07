@@ -100,34 +100,34 @@ export function AgentPage(props: {
       }
     >
       {place.length < 2 ? null : (
-          <Breadcrumb
-            label="Place in the spawn tree"
-            items={place.map(crumb => ({
-              id: crumb.agentId,
-              label: agentLabel(crumb.name),
-              ...(crumb.agentId === agent.id ? {} : {press: () => props.open(crumb.agentId)}),
-            }))}
-          />
+        <Breadcrumb
+          label="Place in the spawn tree"
+          items={place.map(crumb => ({
+            id: crumb.agentId,
+            label: agentLabel(crumb.name),
+            ...(crumb.agentId === agent.id ? {} : {press: () => props.open(crumb.agentId)}),
+          }))}
+        />
+      )}
+      <Placement agent={agent} host={props.host} nowMs={props.nowMs} turns={turns} />
+      <AgentTranscript
+        state={state}
+        agentId={agent.id}
+        host={props.host}
+        nowMs={props.nowMs}
+        history={props.history}
+        open={props.open}
+      />
+      <MessageBox
+        nowMs={props.nowMs}
+        agent={agent}
+        progress={props.sendProgress}
+        sent={messagesOf(state, agent.id).filter(
+          message => message.fromAgentId === '' && messageIs(message, 'text'),
         )}
-        <Placement agent={agent} host={props.host} nowMs={props.nowMs} turns={turns} />
-        <AgentTranscript
-          state={state}
-          agentId={agent.id}
-          host={props.host}
-          nowMs={props.nowMs}
-          history={props.history}
-          open={props.open}
-        />
-        <MessageBox
-          nowMs={props.nowMs}
-          agent={agent}
-          progress={props.sendProgress}
-          sent={messagesOf(state, agent.id).filter(
-            message => message.fromAgentId === '' && messageIs(message, 'text'),
-          )}
-          send={props.send}
-          retry={props.retrySend}
-        />
+        send={props.send}
+        retry={props.retrySend}
+      />
     </Page>
   );
 }

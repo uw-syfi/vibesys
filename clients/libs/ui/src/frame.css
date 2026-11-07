@@ -1351,7 +1351,8 @@ button.vs-crumb:focus-visible {
 .vs-bars-plot,
 .vs-bars-marks,
 .vs-bars-axis {
-  max-width: calc(var(--bars-count) * (var(--bar-max) + var(--space-1)));
+  /* Never narrower than a chart reads: two bars are a short chart, not two thin posts at the corner. */
+  max-width: max(var(--chart-min), calc(var(--bars-count) * (var(--bar-max) + var(--space-1))));
 }
 .vs-bars-bar {
   display: flex;

@@ -766,9 +766,9 @@ describe('the candidates cell of the fleet screen', () => {
     expect(bar([cut(7)])).toHaveLength(quiet.length);
     // The second host answers late, stale or with runs left out: the same cells as when it is live.
     const both = bar([hostA, {...hostB, freshness: 'live', staleForMs: null}]);
-    expect(bar([hostA, {...hostB, freshness: 'empty', staleForMs: null, data: emptyState}])).toHaveLength(
-      both.length,
-    );
+    expect(
+      bar([hostA, {...hostB, freshness: 'empty', staleForMs: null, data: emptyState}]),
+    ).toHaveLength(both.length);
     expect(bar([hostA, hostB])).toHaveLength(both.length);
     expect(
       bar([

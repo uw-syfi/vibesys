@@ -5,6 +5,7 @@
 import type {Agent, Message, Turn} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
+
 const startOf = (agent: Agent): number => ms(agent.startedAt) ?? 0;
 
 export function runAgents(state: OrchestratorState, runId: string): Agent[] {

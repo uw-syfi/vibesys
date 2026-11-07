@@ -116,11 +116,7 @@ function Stats(props: {readonly tree: SpawnTree}): JSX.Element {
   const {stats} = props.tree;
   return (
     <>
-      <Chip
-        label={`${stats.running} running`}
-        tone={stats.running > 0 ? 'live' : 'neutral'}
-        dot
-      />
+      <Chip label={`${stats.running} running`} tone={stats.running > 0 ? 'live' : 'neutral'} dot />
       <Text variant="small" tone="muted">{`${stats.total} total`}</Text>
       <Text variant="small" tone="muted">{`${stats.failed} failed`}</Text>
       <Text variant="small" tone="muted">{`peak ${stats.peak}`}</Text>

@@ -22,7 +22,8 @@ function capabilityLine(agent: Agent): string {
 /** What a stored message's delivery says now, with the reason when it was rejected. */
 function storedLine(message: Message): {label: string; tone: Word['tone']} {
   const word = deliveryWord(message.delivery);
-  const why = message.delivery === Delivery.REJECTED ? ` \u00b7 ${rejectionWord(message.rejection)}` : '';
+  const why =
+    message.delivery === Delivery.REJECTED ? ` \u00b7 ${rejectionWord(message.rejection)}` : '';
   return {label: `${word.label}${why}`, tone: word.tone};
 }
 
@@ -42,9 +43,7 @@ function SentMessage(props: {
     <Row gap="space-3" wrap>
       <Text tone="muted">{props.text}</Text>
       <Chip label={props.line.label} tone={props.line.tone} dot />
-      {props.atMs === null ? null : (
-        <Text variant="small">{formatClock(props.atMs)}</Text>
-      )}
+      {props.atMs === null ? null : <Text variant="small">{formatClock(props.atMs)}</Text>}
     </Row>
   );
 }
@@ -72,11 +71,7 @@ function SentMessages(props: {
         />
       ))}
       {pending === null ? null : (
-        <SentMessage
-          atMs={props.pendingAtMs}
-          text="Last message"
-          line={receiptLine(pending)}
-        />
+        <SentMessage atMs={props.pendingAtMs} text="Last message" line={receiptLine(pending)} />
       )}
     </>
   );
