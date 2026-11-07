@@ -14,6 +14,7 @@ import {
   Card,
   ChartColumns,
   Gantt,
+  Menu,
   MetricTile,
   MetricTiles,
   Page,
@@ -129,6 +130,16 @@ describe('a button with words', () => {
     expect(named?.hasAttribute('data-icon-only')).toBe(false);
     expect(plain?.hasAttribute('data-icon-only')).toBe(false);
     expect(icon?.hasAttribute('data-icon-only')).toBe(true);
+    // A menu's trigger is a button too: an icon alone is a square, with words it is not.
+    const menus = await mount(
+      <>
+        <Menu icon="more" label="More" items={[{id: 'a', label: 'A', press: () => undefined}]} />
+        <Menu text="Actions" items={[{id: 'a', label: 'A', press: () => undefined}]} />
+      </>,
+    );
+    const [more, actions] = menus.querySelectorAll('.vs-button');
+    expect(more?.hasAttribute('data-icon-only')).toBe(true);
+    expect(actions?.hasAttribute('data-icon-only')).toBe(false);
     // The square is for what is marked, not for whatever carries an aria-label.
     expect(css('inputs.css')).toMatch(/\.vs-button\[data-icon-only\] \{\s*padding: 0/);
     expect(css('inputs.css')).not.toMatch(/\.vs-button\[aria-label\]/);
@@ -229,7 +240,7 @@ describe('StackedBars with few bars', () => {
     const frame = css('frame.css');
     expect(frame).toMatch(/--bar-max: calc\(var\(--space-8\) \+ var\(--space-5\)\)/);
     expect(frame).toMatch(
-      /\.vs-bars-plot,\s*\.vs-bars-marks \{\s*max-width: calc\(var\(--bars-count, 1\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)/,
+      /\.vs-bars-plot,\s*\.vs-bars-marks,\s*\.vs-bars-axis \{\s*max-width: calc\(var\(--bars-count, 1\) \* \(var\(--bar-max\) \+ var\(--space-1\)\)\)/,
     );
   });
 });

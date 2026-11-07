@@ -98,6 +98,7 @@ export function Menu(
         className="vs-button"
         data-variant={props.variant ?? 'secondary'}
         data-size={props.size ?? 'md'}
+        data-icon-only={props.text === undefined || undefined}
         aria-label={props.label}
         aria-haspopup="menu"
         aria-expanded={open}

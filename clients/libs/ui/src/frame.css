@@ -1353,7 +1353,8 @@ button.vs-crumb:focus-visible {
   --bar-max: calc(var(--space-8) + var(--space-5));
 }
 .vs-bars-plot,
-.vs-bars-marks {
+.vs-bars-marks,
+.vs-bars-axis {
   max-width: calc(var(--bars-count, 1) * (var(--bar-max) + var(--space-1)));
 }
 .vs-bars-bar {
