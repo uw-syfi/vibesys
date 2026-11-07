@@ -111,9 +111,9 @@ interface BoundVersionView {
 
 /**
  * The performance bound of one objective: the bound that stands, every version of it (a chart draws
- * the bound as it stood at each moment) and how close the head is. `headValue` and `percentOfBound`
- * are the orchestrator's: the app shows them and never divides, so they are absent exactly when the
- * orchestrator sent none.
+ * the bound as it stood at each moment) and how close the head, and the best the run measured, are.
+ * `headValue`, `percentOfBound` and `bestPercentOfBound` are the orchestrator's: the app shows them
+ * and never divides, so they are absent exactly when the orchestrator sent none.
  */
 export interface ObjectiveBoundsView {
   readonly objective: string;
@@ -123,6 +123,8 @@ export interface ObjectiveBoundsView {
   readonly history: readonly BoundVersionView[];
   readonly headValue: number | undefined;
   readonly percentOfBound: number | undefined;
+  /** How close the best measured value is to the bound in percent; the head is not always the best. */
+  readonly bestPercentOfBound: number | undefined;
 }
 
 function boundVersion(version: ObjectiveBound): BoundVersionView {
@@ -151,6 +153,7 @@ export function objectiveBounds(search: SearchState): readonly ObjectiveBoundsVi
             history,
             headValue: entry.headValue,
             percentOfBound: entry.percentOfBound,
+            bestPercentOfBound: entry.bestPercentOfBound,
           },
         ];
   });

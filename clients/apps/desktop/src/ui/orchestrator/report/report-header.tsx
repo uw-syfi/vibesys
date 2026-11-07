@@ -25,10 +25,9 @@ const FRESHNESS: Readonly<
 
 /** What the objective's best is, as it reads on one line: its value and, when served, how close to its bound. */
 function BestLine(props: {readonly objectives: readonly ObjectiveReport[]}): JSX.Element | null {
-  const rows = props.objectives.flatMap(objective => {
-    const value = objective.headValue ?? objective.best?.value;
-    return value === undefined ? [] : [{objective, value}];
-  });
+  const rows = props.objectives.flatMap(objective =>
+    objective.best === undefined ? [] : [{objective, value: objective.best.value}],
+  );
   if (rows.length === 0) return null;
   return (
     <Row gap="space-5" rowGap="space-1" wrap align="baseline">
@@ -43,9 +42,9 @@ function BestLine(props: {readonly objectives: readonly ObjectiveReport[]}): JSX
           <Text variant="small" tone="muted" title={objective.name}>
             {[
               objective.unit === null ? objective.name : `${objective.unit} ${objective.name}`,
-              ...(objective.percentOfBound === undefined
+              ...(objective.bestPercentOfBound === undefined
                 ? []
-                : [`${Math.round(objective.percentOfBound)}% of bound`]),
+                : [`${Math.round(objective.bestPercentOfBound)}% of bound`]),
             ].join(' · ')}
           </Text>
         </Row>

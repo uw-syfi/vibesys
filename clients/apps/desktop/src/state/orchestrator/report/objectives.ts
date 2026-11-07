@@ -1,9 +1,10 @@
 /**
  * The performance of a run, objective by objective, as the orchestrator serves it: every measured
  * candidate, the points that set a new best (the best-so-far line), the standing bound with its
- * provenance, and the head's value and its percent of the bound. Nothing here is worked out: the
- * best marks and the percent come from the host, so this only changes their shape (bigints and
- * timestamps become numbers) and joins what one objective has under its name.
+ * provenance, the head's value and the percent of the bound the head and the best are at. Nothing
+ * here is worked out: the best marks and the percents come from the host, so this only changes
+ * their shape (bigints and timestamps become numbers) and joins what one objective has under its
+ * name.
  */
 import {Direction, oneofIs, type SearchState} from '@vibesys/orchestrator-proto';
 import {type ObjectiveBoundsView, objectiveBounds} from '../search-views.js';
@@ -38,6 +39,8 @@ export interface ObjectiveReport {
   readonly headValue: number | undefined;
   /** How close the head is to the standing bound in percent, as the host worked it out. */
   readonly percentOfBound: number | undefined;
+  /** How close the best measured value (`best`) is to the standing bound, as the host worked it out. */
+  readonly bestPercentOfBound: number | undefined;
   readonly bound: ObjectiveBoundsView | undefined;
 }
 
@@ -83,6 +86,7 @@ export function objectiveReports(search: SearchState): readonly ObjectiveReport[
       best: bestPath.at(-1),
       headValue: bound?.headValue ?? headReading(search, series.objective),
       percentOfBound: bound?.percentOfBound,
+      bestPercentOfBound: bound?.bestPercentOfBound,
       bound,
     };
   });
@@ -99,6 +103,7 @@ export function objectiveReports(search: SearchState): readonly ObjectiveReport[
       best: undefined,
       headValue: bound.headValue,
       percentOfBound: bound.percentOfBound,
+      bestPercentOfBound: bound.bestPercentOfBound,
       bound,
     }));
   return [...measured, ...unmeasured];
