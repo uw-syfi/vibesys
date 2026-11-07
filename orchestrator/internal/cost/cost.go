@@ -162,10 +162,13 @@ type Ledger struct {
 	sorted bool
 }
 
-// Agent tells the ledger an agent exists, so that its type counts even before its first turn ends.
-// Telling it again changes nothing, whatever the order of the calls.
-func (l *Ledger) Agent(a core.Agent) {
+// Agent tells the ledger an agent exists, so that its type counts even before its first turn ends,
+// and says whether the ledger had not known it. Telling it again changes nothing, whatever the order
+// of the calls.
+func (l *Ledger) Agent(a core.Agent) (added bool) {
+	_, known := l.agents[a.ID]
 	l.info(a)
+	return !known
 }
 
 func (l *Ledger) info(a core.Agent) *agentInfo {

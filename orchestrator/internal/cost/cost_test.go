@@ -326,6 +326,9 @@ func TestBucketsPartitionTheTurns(t *testing.T) {
 		if !last.Start.Before(v.AsOf) && len(s.Buckets) > 1 {
 			t.Errorf("the last bucket starts %v, at or after the view's %v", last.Start, v.AsOf)
 		}
+		if end := s.Start.Add(time.Duration(len(s.Buckets)) * s.Width); end.Before(v.AsOf) {
+			t.Errorf("the buckets end %v, before the view's %v", end, v.AsOf)
+		}
 		for _, m := range v.Models {
 			if perModel[m.Model] != costOf(m.Usage.CostUSD) {
 				t.Errorf("model %v: buckets hold %v, its cost is %v", m.Model, perModel[m.Model], costOf(m.Usage.CostUSD))
@@ -422,6 +425,30 @@ func TestLastHourIsTheHourBeforeTheView(t *testing.T) {
 			t.Errorf("last hour %v, want %v", *v.LastHour, want)
 		}
 	})
+}
+
+// The hour the rate looks at is open at its start and closed at the view's instant: a turn that
+// ended exactly an hour before is out, and one a nanosecond later or exactly at the instant is in.
+func TestLastHourBoundaries(t *testing.T) {
+	agent := core.Agent{ID: "a", Role: core.RoleWorker, Spec: core.AgentSpec{Harness: core.ClaudeCode}}
+	asOf := start.Add(5 * time.Hour)
+	ends := map[string]struct {
+		end  time.Time
+		want float64
+	}{
+		"an hour before":               {asOf.Add(-time.Hour), 0},
+		"a nanosecond inside the hour": {asOf.Add(-time.Hour + 1), 1},
+		"at the instant":               {asOf, 1},
+	}
+	for name, c := range ends {
+		var l cost.Ledger
+		one := 1.0
+		l.Add(core.Turn{Agent: "a", Ordinal: 1, Status: core.TurnCompleted, Usage: core.Usage{CostUSD: &one}, EndedAt: c.end}, agent)
+		v := l.View(core.Run{ID: "r", CreatedAt: start}, asOf)
+		if v.LastHour == nil || *v.LastHour != c.want {
+			t.Errorf("%s: last hour %v, want %v", name, v.LastHour, c.want)
+		}
+	}
 }
 
 // The instant of a view is the given time while the run lives and its end once it is over, so the
