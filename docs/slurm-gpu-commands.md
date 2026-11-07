@@ -149,7 +149,12 @@ Add the path it names (normally the Python installation directory, which is
 what a venv's `python` links to). On Linux, a listed path that is itself a
 symlink (uv's `cpython-3.12-...` alias directory) is exposed as the directory it
 points to, so listing the alias is enough and the real install need not be
-listed; on macOS the resolved path must be listed too. Symlinks outside `bin` and
+listed; on macOS the resolved path must be listed too. A listed path or `PATH`
+entry reached through a symlink inside a directory the job already sees
+(`/usr/local/cuda-12/bin`, where `/usr/local/cuda-12` links through
+`/etc/alternatives`) is bound where it resolves, because bubblewrap cannot
+create a mount point beneath that link; the job reaches it through the link.
+Symlinks outside `bin` and
 `sbin` are not checked. The same list applies to the
 Linux (bubblewrap) and macOS (Seatbelt) confinement. The agent's prompt says
 that GPU commands run in the host's environment, not the container's, and

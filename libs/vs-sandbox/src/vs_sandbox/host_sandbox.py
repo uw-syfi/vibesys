@@ -335,6 +335,22 @@ class HostSandbox(WorkspaceSandbox):
                 mounts += ["--tmpfs", temp_dir]
         return mounts
 
+    def _resource_mount_points(self) -> tuple[list[Path], list[Path]]:
+        """Return where the read and write resources are bound, in bind order.
+
+        Each resource's mount point is chosen against the trees bound before it
+        (the system roots, then the earlier resources), the order :meth:`wrap`
+        emits them in.
+        """
+        mounts = [Path(root) for root in self.system_read_roots]
+        read_points: list[Path] = []
+        write_points: list[Path] = []
+        for paths, points in ((self.read_paths, read_points), (self.write_paths, write_points)):
+            for path in paths:
+                points.append(_mount_point(path, mounts))
+                mounts.append(points[-1])
+        return read_points, write_points
+
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
         """Return *argv* wrapped so it runs inside the confinement namespace.
 
@@ -369,13 +385,14 @@ class HostSandbox(WorkspaceSandbox):
         # private tmpfs; it vanishes with the namespace when the job ends.
         for name in _TEMP_ENV_NAMES:
             cmd += ["--setenv", name, _PRIVATE_TMP]
+        read_points, write_points = self._resource_mount_points()
         # Leaf config mounts such as ~/.codex/auth.json need their destination
         # parents to exist in bubblewrap's otherwise-empty /home tree. These
         # directories are ephemeral inside the namespace; only the explicitly
         # bound files below are sourced from the host.
         parent_dirs = {
             parent
-            for path in (*self.read_paths, *self.write_paths)
+            for path in (*read_points, *write_points)
             if not path.is_dir()
             for parent in path.parents
             if parent != Path("/")
@@ -384,11 +401,11 @@ class HostSandbox(WorkspaceSandbox):
             cmd += ["--dir", str(parent)]
         for root in self.system_read_roots:
             cmd += ["--ro-bind-try", root, root]
-        for path in self.read_paths:
+        for path in read_points:
             cmd += ["--ro-bind-try", str(path), str(path)]
         for node in self.gpu_device_nodes:
             cmd += ["--dev-bind-try", str(node), str(node)]
-        for path in self.write_paths:
+        for path in write_points:
             cmd += ["--bind-try", str(path), str(path)]
         # The project bind wins over imported host resources. Nested project
         # restrictions are then overlaid in increasing strength: read-only
@@ -404,6 +421,32 @@ class HostSandbox(WorkspaceSandbox):
         cmd += ["--chdir", ws, "--"]
         cmd += argv
         return cmd
+
+
+def _mount_point(path: Path, mounts: Iterable[Path]) -> Path:
+    """Return where bubblewrap can bind *path*: at *path*, or where it resolves.
+
+    Bubblewrap creates a bind's mount point by walking its destination inside the
+    new root, where every tree bound earlier (*mounts*) shows the host's entries,
+    symlinks included. It resolves a symlink met there against its setup root, not
+    the new root, so an absolute target (``/usr/local/cuda-12 ->
+    /etc/alternatives/cuda-12``) does not resolve and the launch fails with
+    ``Can't mkdir``. A path whose walk meets a symlink inside an earlier mount is
+    bound at its resolved path instead, which holds no symlink; its own name
+    reaches that mount through the links wherever the namespace shows each of
+    them, as it shows ``/etc/alternatives``. Any other path is bound under its own
+    name, so a path that is itself a symlink outside every mount still shows there
+    as what it points to.
+    """
+    for mount in mounts:
+        if mount not in path.parents:
+            continue
+        current = mount
+        for part in path.relative_to(mount).parts:
+            current /= part
+            if current.is_symlink():
+                return path.resolve()
+    return path
 
 
 def _gpu_device_nodes() -> list[Path]:
