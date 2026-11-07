@@ -136,7 +136,12 @@ function timingOf(rng: Rng, options: FleetOptions, index: number): Timing {
     return {live, startMs, endMs: undefined, status};
   }
   const status = rng.int(5) === 0 ? RunStatus.FAILED : RunStatus.ENDED;
-  return {live, startMs, endMs: startMs + (1 + rng.int(40)) * HOUR, status};
+  // A run that is over ended before the fleet is read, whatever its length.
+  const endMs = Math.min(
+    startMs + (1 + rng.int(40)) * HOUR,
+    options.nowMs - (1 + rng.int(60)) * MINUTE,
+  );
+  return {live, startMs, endMs, status};
 }
 
 function nameOf(options: FleetOptions, index: number): string {

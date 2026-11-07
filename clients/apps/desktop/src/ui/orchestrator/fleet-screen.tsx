@@ -289,6 +289,7 @@ export function FleetScreen(props: {
       columns={columns(nowMs)}
       rows={shown}
       rowKey={row => row.key}
+      lines={2}
       selected={place.selected ?? undefined}
       select={open}
       marks={row => ({fresh: isFresh(row, nowMs)})}

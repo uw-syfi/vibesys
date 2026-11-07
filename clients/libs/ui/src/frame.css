@@ -1097,6 +1097,11 @@ button.vs-crumb:focus-visible {
   border-radius: var(--radius);
   cursor: pointer;
 }
+.vs-columnlist[data-lines="2"] .vs-columnlist-row {
+  min-height: calc(
+    var(--text-body-line) + var(--text-small-line) + var(--space-3) * 2 + var(--hairline) * 2
+  );
+}
 .vs-columnlist-row:hover {
   background: var(--panel-2);
 }

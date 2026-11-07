@@ -9,6 +9,7 @@ import {
 import fc from 'fast-check';
 import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState} from '../../state/orchestrator/state.js';
+import {ms} from '../../state/orchestrator/time.js';
 import {FakeDaemon, fleetScenario} from './index.js';
 
 const NOW = Date.UTC(2026, 10, 7, 12, 0, 0);
@@ -48,5 +49,20 @@ describe('a generated fleet', () => {
     expect(runs).toHaveLength(12);
     expect(working).toHaveLength(5);
     expect(fleetScenario(options)).toEqual(fleetScenario(options));
+  });
+
+  it('has every run begin before it ends and end before the fleet is read', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 1, max: 5000}), fc.integer({min: 1, max: 40}), (seed, runs) => {
+        const scenario = fleetScenario({seed, prefix: 'h0', runs, live: 0, nowMs: NOW});
+        const state = scenario.changes.reduce(applyChange, emptyState);
+        for (const run of Object.values(state.runs)) {
+          const start = ms(run.createdAt) ?? Number.NaN;
+          const end = ms(run.endedAt) ?? Number.NaN;
+          expect(start).toBeLessThan(end);
+          expect(end).toBeLessThan(NOW);
+        }
+      }),
+    );
   });
 });
