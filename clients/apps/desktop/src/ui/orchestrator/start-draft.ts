@@ -20,7 +20,7 @@ export const DEFAULT_FANOUT = 3;
 
 /** The time limits a run can start with, in minutes; null is none. */
 export const TIME_LIMITS = [null, 30, 60, 120, 240, 480, 1440] as const;
-export type TimeLimit = (typeof TIME_LIMITS)[number];
+type TimeLimit = (typeof TIME_LIMITS)[number];
 
 /**
  * The daemon requires some brief, and the brief is steering on top of the task the lead already
