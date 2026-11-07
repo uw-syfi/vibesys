@@ -10,7 +10,7 @@ describe('commit ids in text', () => {
     fc.assert(
       fc.property(hex40, fc.string({maxLength: 12}), (commit, around) => {
         const text = `${around} landed ${commit}, then ${commit}.`;
-        const html = renderToStaticMarkup(<>{withShortCommits(text)}</>);
+        const html = renderToStaticMarkup(withShortCommits(text));
         expect(html).not.toContain(`>${commit}<`);
         expect(html.split(`title="${commit}"`)).toHaveLength(3);
         expect(html).toContain(shortCommit(commit));
@@ -20,7 +20,7 @@ describe('commit ids in text', () => {
   });
 
   it('leave text without one as it is', () => {
-    expect(renderToStaticMarkup(<>{withShortCommits('Fused dispatch landed')}</>)).toBe(
+    expect(renderToStaticMarkup(withShortCommits('Fused dispatch landed'))).toBe(
       'Fused dispatch landed',
     );
   });
