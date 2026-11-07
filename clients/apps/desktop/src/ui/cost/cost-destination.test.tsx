@@ -7,9 +7,9 @@ import {
   type CostFeedSnapshot,
   costTarget,
   emptyState,
-  initialRoute,
-  type RouteAction,
-  routeReducer,
+  initialNavigation,
+  type NavigationAction,
+  navigationReducer,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {PRICED_AND_UNPRICED} from '../../testing/orchestrator/cost-views.js';
@@ -40,18 +40,18 @@ function hostWith(
   };
 }
 
-/** The runs as the shell composes them, over the route fold, recording what is watched and retried. */
+/** The runs as the shell composes them, over the navigation fold, recording what is watched and retried. */
 function Window(props: {
   readonly host: HostSnapshot;
   readonly log: string[];
   readonly retries: string[];
 }): JSX.Element {
-  const [route, move] = useReducer(routeReducer, initialRoute);
-  const go = (action: RouteAction): void => {
+  const [navigation, move] = useReducer(navigationReducer, initialNavigation);
+  const go = (action: NavigationAction): void => {
     move(action);
   };
   // What the entry would mount: the log says which run's cost stream is open after each render.
-  props.log.push(JSON.stringify(costTarget(route)));
+  props.log.push(JSON.stringify(costTarget(navigation.runs)));
   return (
     <OrchestratorApp
       hosts={[props.host]}
@@ -71,7 +71,8 @@ function Window(props: {
       }}
       retryHost={() => undefined}
       retryCost={(host, runId) => props.retries.push(`${host}/${runId}`)}
-      route={route}
+      route={navigation.runs}
+      fleet={navigation.fleet}
       go={go}
     />
   );
@@ -81,7 +82,7 @@ function openCost(host: HostSnapshot) {
   const log: string[] = [];
   const retries: string[] = [];
   const screen = mount(<Window host={host} log={log} retries={retries} />);
-  const [row] = screen.container.querySelectorAll<HTMLElement>('tr[data-selectable]');
+  const [row] = screen.container.querySelectorAll<HTMLElement>('[role="option"]');
   if (row === undefined) throw new Error('no run listed');
   screen.press(row);
   return {screen, log, retries};

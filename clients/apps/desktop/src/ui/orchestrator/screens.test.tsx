@@ -34,7 +34,6 @@ import {searchFixture} from '../../testing/orchestrator/search.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
 import {HandoffCards, verdictOf} from './handoff-cards.js';
-import {RunList} from './run-list.js';
 import {RunScreen} from './run-screen.js';
 import {SearchPanels} from './search-panels.js';
 import {describeCall, harnessWord} from './words.js';
@@ -119,22 +118,6 @@ describe('the screens', () => {
       ),
       {numRuns: 20},
     );
-  });
-
-  it('the run list shows runs of every host and says when a host is not connected', () => {
-    const a = stateOf(1, 3, true);
-    const b = stateOf(2, 1, false);
-    const html = renderToStaticMarkup(
-      <RunList
-        hosts={[
-          {key: 'ssh:host-a', label: 'host-a', state: a.state},
-          {key: 'ssh:host-b', label: 'host-b', state: b.state},
-        ]}
-        open={() => undefined}
-      />,
-    );
-    expect(html).toContain('host-a');
-    expect(html).toContain('host-b');
   });
 
   it('a connection that is not working says so with the reason and a Retry, and a working one is silent', () => {
@@ -385,19 +368,6 @@ describe('the screens', () => {
     expect(harnessWord(Harness.CLAUDE_CODE)).toBe('Claude Code');
     expect(harnessWord(Harness.CODEX)).toBe('Codex');
   });
-});
-
-it('an unread run inventory is unknown rather than a claim that no runs exist', () => {
-  fc.assert(
-    fc.property(fc.array(fc.string(), {minLength: 1, maxLength: 8}), unreadHosts => {
-      const html = renderToStaticMarkup(
-        <RunList hosts={[]} unreadHosts={unreadHosts} open={() => undefined} />,
-      );
-      expect(html).toContain('has not been read');
-      expect(html).not.toContain('No runs yet');
-    }),
-    {seed: 3858, examples: [[['host-a']]]},
-  );
 });
 
 it('shows the truncation note exactly when facts are truncated, and the unreadable banner only when stale', () => {

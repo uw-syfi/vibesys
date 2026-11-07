@@ -7,13 +7,19 @@ import {
   useId,
   useRef,
 } from 'react';
-import {SIZE} from '../tokens/index.js';
+import {SIZE, SPACE, TYPE} from '../tokens/index.js';
 import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
 import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
+
+/**
+ * The height of a row of two lines (a figure and a note under it): the two lines, the row's padding
+ * and its hairline borders, from the same tokens the stylesheet takes them from.
+ */
+const TWO_LINES_ROW = TYPE.body.line + TYPE.small.line + 2 * SPACE['space-3'] + 2 * SIZE.hairline;
 
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */
 export type {ColumnSize};
@@ -207,13 +213,19 @@ export function ColumnList<Row>(props: {
   readonly crowded?: boolean;
   /** `fill`: the rows take the height the container gives the list; the default is their own, to a cap. */
   readonly size?: 'default' | 'fill';
+  /**
+   * Rows of two lines (`CellLines`): every row keeps the height of two, so a row with one line is as
+   * tall as one with two, and the list knows how tall it is before any row is drawn (nothing below
+   * it moves when the rows are measured).
+   */
+  readonly lines?: 1 | 2;
 }): JSX.Element {
   const headerId = useId();
   const ids = props.rows.map(props.rowKey);
   const win = useWindowed({
     count: props.rows.length,
     keyOf: index => ids[index] ?? String(index),
-    estimate: SIZE.row,
+    estimate: props.lines === 2 ? TWO_LINES_ROW : SIZE.row,
     follow: false,
   });
   const selectedIndex = props.selected === undefined ? -1 : ids.indexOf(props.selected);
@@ -241,6 +253,7 @@ export function ColumnList<Row>(props: {
       style={tracks}
       data-tier={tier}
       data-size={props.size ?? 'default'}
+      data-lines={props.lines === 2 ? 2 : undefined}
     >
       <Header columns={props.columns} id={headerId} watch={watch} />
       <div
@@ -279,18 +292,24 @@ export function ColumnList<Row>(props: {
   );
 }
 
-/** A cell's two lines: the figure and a quieter line under it (a status and its cause). */
+/**
+ * A cell's two lines: the figure and a quieter line under it (a status and its cause). The note is
+ * text, set small and muted; a note that is more than text (parts that come and go with the list's
+ * width) is the caller's own element, which then sets its own face.
+ */
 export function CellLines(props: {
   readonly main: ReactNode;
-  readonly note?: string | null | undefined;
+  readonly note?: ReactNode;
 }): JSX.Element {
   return (
     <span className="vs-columnlist-lines">
       {props.main}
-      {props.note === undefined || props.note === null ? null : (
+      {props.note === undefined || props.note === null ? null : typeof props.note === 'string' ? (
         <Text variant="small" tone="muted">
           {props.note}
         </Text>
+      ) : (
+        props.note
       )}
     </span>
   );

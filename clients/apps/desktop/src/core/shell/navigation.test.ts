@@ -66,7 +66,37 @@ describe('the navigation of the window', () => {
       yield* keys.press(plain);
       expect((yield* read).runs).toEqual({screen: 'runs'});
       yield* keys.press(plain);
-      expect(yield* read).toEqual(initialNavigation);
+      // The list is as it was, except that it remembers the row the run was opened from.
+      expect(yield* read).toEqual({
+        ...initialNavigation,
+        fleet: {...initialNavigation.fleet, selected: 'host-a/run-1'},
+      });
     }),
+  );
+
+  itQuiet(
+    'keeps the list filters through a run and the settings, and Escape does not clear them',
+    () =>
+      Effect.gen(function* () {
+        const {store, keys, read} = yield* open;
+        yield* store.go({type: 'filter-runs-by-state', state: 'live'});
+        yield* store.go({type: 'filter-runs-by-host', host: 'host-b'});
+        yield* store.go({type: 'open-run', host: 'host-b', runId: 'run-2'});
+        yield* store.go({type: 'open-settings'});
+        yield* keys.press(plain);
+        yield* keys.press(plain);
+        expect((yield* read).runs).toEqual({screen: 'runs'});
+        expect((yield* read).fleet).toEqual({
+          state: 'live',
+          host: 'host-b',
+          selected: 'host-b/run-2',
+        });
+        yield* keys.press(plain);
+        expect((yield* read).fleet).toEqual({
+          state: 'live',
+          host: 'host-b',
+          selected: 'host-b/run-2',
+        });
+      }),
   );
 });
