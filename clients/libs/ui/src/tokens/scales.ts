@@ -103,7 +103,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'gantt-label-max': 420,
   'gantt-figure': 96,
   'gantt-tag': 112,
-  'chip-even': 112,
+  'chip-even': 160,
   'gantt-bar': 12,
   hairline: 1,
   'focus-ring': 2,
