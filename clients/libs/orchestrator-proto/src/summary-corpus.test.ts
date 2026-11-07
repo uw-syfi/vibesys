@@ -4,6 +4,7 @@ import {
   decodeValidated,
   decodeValidatedJson,
   encodeMessage,
+  oneofIs,
   ReportScope,
   WatchRunsResponseSchema,
 } from './index.js';
@@ -12,6 +13,23 @@ const corpus = new URL(
   '../../../../proto/vibesys/orchestrator/v1/conformance/summary/',
   import.meta.url,
 );
+
+/** Every kind of frame of the run stream, and of body of a message. */
+const KINDS = {snapshot: true, change: true, search: true, summary: true} as const;
+const MESSAGE_KINDS = {
+  text: true,
+  handoff: true,
+  report: true,
+  jobFinished: true,
+  subagentSettled: true,
+  brief: true,
+  leadBrief: true,
+  handoffReminder: true,
+  leadIdleReminder: true,
+  reportDue: true,
+  catchUpRequest: true,
+  runLimitReached: true,
+} as const;
 
 const read = (name: string) =>
   decodeValidatedJson(
@@ -37,9 +55,11 @@ describe('run summary conformance', () => {
 
   test('a summary frame carries the whole-run report and the counts the host worked out', () => {
     const {body} = read('frame.json');
-    if (body.case !== 'summary') throw new Error('not a summary frame');
+    if (!oneofIs(body, 'summary', KINDS)) throw new Error('not a summary frame');
     const {report} = body.value;
-    expect(report?.body.case === 'report' && report.body.value.scope).toBe(ReportScope.RUN);
+    expect(oneofIs(report?.body, 'report', MESSAGE_KINDS) && report.body.value.scope).toBe(
+      ReportScope.RUN,
+    );
     expect(body.value.agentsWorking).toBe(2);
     expect(body.value.objectives.map(objective => objective.name)).toEqual([
       'latency',
@@ -50,7 +70,7 @@ describe('run summary conformance', () => {
 
   test('a snapshot says how many runs it left out', () => {
     const {body} = read('snapshot.json');
-    if (body.case !== 'snapshot') throw new Error('not a snapshot');
+    if (!oneofIs(body, 'snapshot', KINDS)) throw new Error('not a snapshot');
     expect(body.value.runs).toHaveLength(2);
     expect(body.value.summaries.map(summary => summary.runId)).toEqual(['run-1', 'run-2']);
     expect([body.value.truncated, body.value.runsLeftOut]).toEqual([true, 7]);
