@@ -25,6 +25,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
@@ -54,6 +55,9 @@ type sim struct {
 	noops  int
 	next   int // the next command id, never reused.
 	tally  counter
+	// usage draws what the turns the fake sidecars end report, apart from the rng that steers the
+	// simulation, so that giving turns a cost leaves every seed's course as it was.
+	usage *rand.Rand
 	// clockMoved says the clock advanced since the daemon last settled, so a timer may be due.
 	clockMoved bool
 }
@@ -688,15 +692,76 @@ func (s *sim) pollSome() {
 
 // init sets up a hold on some turns, and the log that counts inputs that changed nothing.
 func (s *sim) init() {
+	s.usage = rand.New(rand.NewPCG(s.seed, 31))
 	s.rig.Sidecars.React = func(se *daemontest.Session, cmd *pb.SessionCommand) {
 		if st := cmd.GetStartTurn(); st != nil && s.pick(4) == 0 {
 			s.stuck[st.GetTurnId()] = se
+			return
+		}
+		if st := cmd.GetStartTurn(); st != nil {
+			daemontest.AnswerTurnWith(se, st.GetTurnId(), "ok", s.turnUsage())
 			return
 		}
 		daemontest.DefaultReaction(se, cmd)
 	}
 	s.rig.Log = slog.New(noopLog{n: &s.noops})
 	s.rig.Restart(s.t)
+}
+
+// turnUsage is what a turn reports: nothing, tokens with no price, or tokens and a price. A price is a
+// multiple of 1/1024 so that any order of adding them gives the same sum.
+func (s *sim) turnUsage() *pb.Usage {
+	switch s.usage.IntN(3) {
+	case 0:
+		return nil
+	case 1:
+		n := uint64(s.usage.IntN(900) + 1)
+		return &pb.Usage{InputTokens: &n}
+	}
+	c, n := float64(s.usage.IntN(2048))/1024, uint64(s.usage.IntN(900))
+	return &pb.Usage{CostUsd: &c, OutputTokens: &n}
+}
+
+// checkCost holds each run's cost view to what the core and the store say, whatever the faults did: the
+// view a client is given holds the run's own usage, counts every finished turn the store has and
+// every agent the run had, and meets the contract.
+func (s *sim) checkCost() {
+	state := s.rig.Daemon.State()
+	for _, run := range state.Runs() {
+		w, first, err := s.rig.Service.WatchRunCostFrom(run.ID)
+		if err != nil {
+			s.fail("cost of %s: %v", run.ID, err)
+		}
+		w.Close()
+		cost := first[0].GetCost()
+		if err := wire.Validate(first[0]); err != nil {
+			s.fail("the cost view of %s breaks the contract: %v", run.ID, err)
+		}
+		if got, want := cost.GetTotal().GetCostUsd(), costOf(run.Usage); !approx(got, want) {
+			s.fail("the cost view of %s totals %v, the run's usage is %v", run.ID, got, want)
+		}
+		if (cost.GetTotal().CostUsd == nil) != (run.Usage.CostUSD == nil) {
+			s.fail("the cost view of %s has a total of %v, the run's usage %v", run.ID, cost.GetTotal().CostUsd, run.Usage.CostUSD)
+		}
+		window, err := s.rig.Store.Turns(run.ID, time.Time{}, time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), store.MaxWindowTurns)
+		if err != nil {
+			s.fail("turns of %s: %v", run.ID, err)
+		}
+		var finished uint32
+		for _, turn := range window.Turns {
+			if turn.Status != core.TurnRunning {
+				finished++
+			}
+		}
+		var agents uint32
+		for _, r := range cost.GetRoles() {
+			agents += r.GetAgents()
+		}
+		if cost.GetTurns() != finished || agents != uint32(len(state.Agents(run.ID))) {
+			s.fail("the cost view of %s counts %d turns and %d agents, the store has %d and %d", run.ID, cost.GetTurns(), agents, finished, len(state.Agents(run.ID)))
+		}
+		s.tally["cost checked"]++
+	}
 }
 
 // finish stops every run and lets every timer and stuck turn run out, then checks the whole.
@@ -756,6 +821,7 @@ func (s *sim) finish() {
 	if err := s.rig.Store.Verify(); err != nil {
 		s.fail("verify: %v", err)
 	}
+	s.checkCost()
 	for i, w := range s.runs {
 		s.poll(w)
 		s.compare(i, w)
@@ -907,7 +973,7 @@ func TestDaemonSimulation(t *testing.T) {
 		}
 	}
 	if len(seeds()) > 1 {
-		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing", "stalled call", "restart alone checked", "delivery checked", "job count checked", "lead reminder", "crash " + daemontest.CrashAfterClaim, "crash " + daemontest.CrashBeforeComplete, "crash after send"} {
+		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing", "stalled call", "restart alone checked", "delivery checked", "job count checked", "cost checked", "lead reminder", "crash " + daemontest.CrashAfterClaim, "crash " + daemontest.CrashBeforeComplete, "crash after send"} {
 			if total[k] == 0 {
 				t.Errorf("no seed reached %q: the simulation never exercised it (reached: %v)", k, total)
 			}

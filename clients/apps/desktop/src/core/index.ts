@@ -14,6 +14,7 @@ export {
   type HostConnectionApi,
   makeHostConnection,
 } from './connection.js';
+export {type CostFeed, makeCostFeed} from './cost-feed.js';
 export {
   type AppError,
   AuthenticationFailed,

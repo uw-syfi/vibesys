@@ -231,10 +231,10 @@ func (t *tx) rollUp(a agentState, u Usage) {
 		return
 	}
 	a = t.s.agents[a.ID]
-	a.Usage = a.Usage.plus(u)
+	a.Usage = a.Usage.Plus(u)
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
-	run.Usage = run.Usage.plus(u)
+	run.Usage = run.Usage.Plus(u)
 	t.emit(run.ID, run)
 }
 
