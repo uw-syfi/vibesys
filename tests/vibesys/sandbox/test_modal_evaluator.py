@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shlex
+import shutil
 import stat
 import sys
 import tarfile
@@ -25,6 +26,7 @@ from vs_sandbox import (
     modal_evaluator,  # test-isolation: this suite exercises the installed helper's private process and lease state machines directly.
 )
 from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remote helper protocol limits that this suite verifies directly.
+    _EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE,
     _MAX_DIAGNOSTIC_CHARS,
     _MAX_ENCODED_SETUP_COMMAND_CHARS,
     _RELEASE_DEPLOYMENT_ENV,
@@ -38,7 +40,7 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
     _modal_health_url,
     _stop_modal_app,
 )
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock
 
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 
@@ -1046,6 +1048,128 @@ def test_bootstrap_script_maps_setup_failure_to_distinct_exit(
     assert "__VIBESYS_EXEC_RC__=96" in result.stdout
     assert "setup failed (exit 23)" in result.stderr
     assert not evaluator_ran.exists()
+
+
+_BOOTSTRAP_TOOLS = ("base64", "chmod", "dirname", "gzip", "ln", "mkdir", "rm", "sh", "tar")
+_PIP_INSTALLS_UV = """\
+target=
+previous=
+for argument; do
+  [ "$previous" = --target ] && target=$argument
+  previous=$argument
+done
+mkdir -p "$target/uv"
+exit 0
+"""
+_PIP_IS_MISSING = """\
+echo "$0: No module named pip" >&2
+exit 1
+"""
+# The bootstrap's shim runs ``python3 -I -c <runpy of uv> <pip root> <uv arguments>``. The
+# real interpreter's part of it (loading ``uv`` from the pip root alone) is
+# ``test_evaluator_bootstrap_runs_command_verbatim_and_relays_outputs``'s.
+_PYTHON3 = """\
+#!/bin/sh
+case "$1 $2" in
+  "-I -m")
+{pip};;
+  "-I -c")
+    [ -d "$4/uv" ] || exit 1
+    echo 'uv from pip'
+    exit 0;;
+esac
+echo "unexpected python3 call: $*" >&2
+exit 2
+"""
+
+
+def _write_executable(path: Path, script: str) -> None:
+    path.write_text(script)
+    path.chmod(0o755)
+
+
+def _bootstrap_path(tmp_path: Path, *, pip_works: bool, image_uv: Path | None) -> str:
+    """A ``PATH`` holding only the bootstrap's tools, a ``python3``, and ``image_uv``'s directory.
+
+    ``python3 -m pip`` either installs a ``uv`` module, which the shim then runs, printing
+    ``uv from pip``, or fails as in a virtual environment uv made. ``mktemp`` makes the stage
+    under ``tmp_path``. No other ``uv`` is reachable.
+    """
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for tool in _BOOTSTRAP_TOOLS:
+        found = shutil.which(tool)
+        assert found is not None, tool
+        (tools / tool).symlink_to(found)
+    real_mktemp = shutil.which("mktemp")
+    assert real_mktemp is not None
+    stages = tmp_path / "stages"
+    stages.mkdir()
+    _write_executable(
+        tools / "mktemp",
+        f"#!/bin/sh\nexec {shlex.quote(real_mktemp)} -d {shlex.quote(str(stages))}/eval-XXXXXX\n",
+    )
+    pip = _PIP_INSTALLS_UV if pip_works else _PIP_IS_MISSING
+    _write_executable(tools / "python3", _PYTHON3.format(pip=pip))
+    if image_uv is None:
+        return str(tools)
+    return f"{tools}{os.pathsep}{image_uv.parent}"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("pip_works", "image_has_uv", "uv_from"),
+    [
+        pytest.param(True, True, "uv from pip", id="pip-and-image-uv"),
+        pytest.param(True, False, "uv from pip", id="pip-only"),
+        pytest.param(False, True, "uv from the image", id="image-uv-only"),
+        pytest.param(False, False, None, id="neither"),
+    ],
+)
+def test_the_bootstrap_installs_uv_with_pip_else_runs_the_images_uv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    pip_works: bool,
+    image_has_uv: bool,
+    uv_from: str | None,
+) -> None:
+    """Regression for #4096: images built by Modal's ``uv_sync`` have a ``uv`` but no pip.
+
+    Pip stays first, so an image's own ``uv`` answers only when pip cannot install one.
+    """
+    if uv_from is None and os.access("/.uv/uv", os.X_OK):
+        pytest.skip("this host has Modal's image uv at /.uv/uv, so the bootstrap finds a uv")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+    image_uv = tmp_path / "image" / "uv"
+    image_uv.parent.mkdir()
+    _write_executable(image_uv, "#!/bin/sh\necho 'uv from the image'\n")
+    _result, calls = _run_public_evaluator(workspace, ["uv", "--version"], tmp_path, monkeypatch)
+    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    path = _bootstrap_path(
+        tmp_path, pip_works=pip_works, image_uv=image_uv if image_has_uv else None
+    )
+
+    result = run_test_command(
+        ["sh", "-c", exec_command[9], "vibesys-eval", "".join(exec_command[11:])],
+        capture_output=True,
+        check=False,
+        env={"PATH": path},
+        text=True,
+        timeout=HANG_GUARD_S,
+    )
+
+    assert result.returncode == 0, result.stderr
+    if uv_from is None:
+        failure = f"__VIBESYS_EXEC_RC__={_EVALUATOR_BOOTSTRAP_FAILURE_EXIT_CODE}"
+        assert result.stdout.split() == [failure]
+        assert "neither python3 -m pip nor uv" in result.stderr
+    else:
+        assert result.stdout.split("\n") == [uv_from, "", "__VIBESYS_EXEC_RC__=0", ""]
+        ran_image_uv = uv_from == "uv from the image"
+        assert (str(image_uv) in result.stderr) == ran_image_uv, "it names the image uv it runs"
 
 
 def test_evaluator_execs_in_container_and_returns_sentinel_rc(
