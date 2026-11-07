@@ -458,6 +458,81 @@ describe('open streams (P8)', () => {
 });
 
 /**
+ * A host that restarts having lost the tail of its log (a power cut, or its state reset) tells a
+ * client whose cursor is past the end to start again from a snapshot. The client reads from the
+ * start and shows what the host holds, however much of the tail it lost; it never asks after the
+ * same cursor again.
+ */
+describe('a host whose log ends before the cursor', () => {
+  const requestedAfter = (h: HostHarness, method: 'WatchRuns' | 'WatchAgent') =>
+    callsTo(h, method).map(call =>
+      method === 'WatchRuns'
+        ? fromBinary(WatchRunsRequestSchema, call.target.request).afterSequence
+        : fromBinary(WatchAgentRequestSchema, call.target.request).afterSequence,
+    );
+
+  /** The first stream of `method` delivers its frames; then the host restarts, `lost` events short. */
+  const restartLosing =
+    (method: string, daemon: FakeDaemon, lost: number) =>
+    (base: Recording): Recording => ({
+      respond: (target, nth) => {
+        const steps = base.respond(target, nth);
+        if (target.method !== methodPathOf(method) || nth !== 0) return steps;
+        daemon.loseTail(lost);
+        return [
+          ...steps.filter(step => 'frame' in step),
+          {end: {message: 'the host restarted', status: RpcStatus.UNAVAILABLE}},
+        ];
+      },
+    });
+
+  const losses = {lost: between(1, TOTAL)};
+
+  it.effect.prop(
+    'the run stream reads a snapshot and shows what the host has',
+    losses,
+    ({lost}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = daemonAt();
+          const h = yield* hostHarness(daemon, {wrap: restartLosing('WatchRuns', daemon, lost)});
+          h.mount(h.session.runs.watch);
+          yield* h.elapse(60, 5);
+          expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+          expect(requestedAfter(h, 'WatchRuns')).toEqual([0n, BigInt(TOTAL), 0n]);
+          const kept = runStreamShape({
+            ...scenario.changes.slice(0, TOTAL - lost).reduce(applyChange, emptyState),
+            summaries: Object.fromEntries(
+              daemon.summaries().map(summary => [summary.runId, summary]),
+            ),
+          });
+          expect(runStreamShape((yield* h.model).data)).toEqual(kept);
+        }).pipe(Random.withSeed(SEED)),
+      ),
+    {arbitrary: {runs: 20}},
+  );
+
+  it.effect.prop(
+    "an agent's stream reads its newest page again",
+    losses,
+    ({lost}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = daemonAt();
+          const id = agentIdOf(daemon);
+          const h = yield* hostHarness(daemon, {wrap: restartLosing('WatchAgent', daemon, lost)});
+          h.mount(h.session.agents.watch(id));
+          yield* h.elapse(60, 5);
+          expect(yield* h.read(h.session.agents.status(id))).toEqual({_tag: 'Live'});
+          expect(requestedAfter(h, 'WatchAgent')).toEqual([0n, BigInt(TOTAL), 0n]);
+          expect((yield* h.model).agentCursors[id]).toBe(daemon.sequence);
+        }).pipe(Random.withSeed(SEED)),
+      ),
+    {arbitrary: {runs: 20}},
+  );
+});
+
+/**
  * A run stream that reads a snapshot, then `inOrder - 1` events in order, then ends the way
  * `terminal` says: the next event skipped (`gap`), a reader too slow for the stream (`overflow`), a
  * clean close by the host (`close`). The first `passes` opens play this and later ones play the
@@ -744,6 +819,7 @@ it.effect('opening a feed without begin publishes no unchanged model', () =>
           heard: Effect.void,
           ready: () => Effect.succeed(1),
           suspect: () => Effect.void,
+          blocked: Effect.succeed(undefined),
           retry,
           leftTerminal: Effect.never,
         },

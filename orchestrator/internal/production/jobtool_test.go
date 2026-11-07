@@ -25,9 +25,9 @@ const (
 
 func newJobToolWorld() *jobToolWorld {
 	return newWorld(map[string]worldTool{
-		plainTool:   {Build: "build-a"},
-		wrappedTool: {Build: "build-a", Sandbox: true},
-		otherTool:   {Build: "build-b"},
+		plainTool:   {Build: "build-a", Protocol: RequiredJobToolProtocol},
+		wrappedTool: {Build: "build-a", Sandbox: true, Protocol: RequiredJobToolProtocol},
+		otherTool:   {Build: "build-b", Protocol: RequiredJobToolProtocol},
 	})
 }
 

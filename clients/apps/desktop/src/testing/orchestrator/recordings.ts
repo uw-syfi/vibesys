@@ -15,6 +15,9 @@ import {
   GetRunHistoryRequestSchema,
   GetRunHistoryResponseSchema,
   HelloResponseSchema,
+  HostControlService,
+  type IdentifyResponse,
+  IdentifyResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
   ListItemsResponseSchema,
@@ -62,6 +65,8 @@ export interface DaemonOptions {
    * real host's does, instead of holding its first frames for ever.
    */
   readonly live?: boolean;
+  /** What the host's control service answers to Identify; with none it is not served (UNIMPLEMENTED). */
+  readonly identify?: () => IdentifyResponse;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -71,7 +76,28 @@ const FAKE_DAEMON = {binaryVersion: 'fake', protocolVersion: 1, minProtocolVersi
 
 export const methodPathOf = (method: string): string => `${PREFIX}${method}`;
 
+/** The one call of the host's control service that a session makes. */
+const IDENTIFY = `/${HostControlService.typeName}/Identify`;
+
 const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVAILABLE}});
+
+/** The sequence each stream asks to continue after, read from its request, by method. */
+const CURSORS: Readonly<Record<string, (request: Uint8Array) => bigint>> = {
+  [methodPathOf('WatchRuns')]: request => fromBinary(WatchRunsRequestSchema, request).afterSequence,
+  [methodPathOf('WatchAgent')]: request =>
+    fromBinary(WatchAgentRequestSchema, request).afterSequence,
+};
+
+/**
+ * What the host answers a stream asked to continue after a sequence its log has not reached, as
+ * the daemon's `ErrAheadOfLog` does; undefined for a call with no cursor or one the log holds.
+ */
+function aheadOfLog(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> | undefined {
+  const after = CURSORS[target.method]?.(target.request) ?? 0n;
+  if (after <= daemon.sequence) return undefined;
+  const message = `daemon: that sequence is ahead of the log; start again from a snapshot (asked after ${after}, the log is at ${daemon.sequence})`;
+  return [{end: {message, status: RpcStatus.OUT_OF_RANGE}}];
+}
 
 /** The per-agent frame an event becomes for `agentId`, or null when it is not about that agent. */
 function agentFrameOf(
@@ -298,11 +324,17 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
 
   return {
     respond: (target, nth) => {
+      const ahead = aheadOfLog(daemon, target);
+      if (ahead !== undefined) return ahead;
       switch (target.method) {
         case methodPathOf('Hello'):
           return hello(nth);
         case methodPathOf('Dispatch'):
           return dispatch(target, nth);
+        case IDENTIFY:
+          return options.identify === undefined
+            ? [{end: {message: 'no host control', status: RpcStatus.UNIMPLEMENTED}}]
+            : [{frame: toBinary(IdentifyResponseSchema, options.identify())}];
         case methodPathOf('ListItems'):
           return listItemsSteps(daemon, target);
         case methodPathOf('GetItem'):

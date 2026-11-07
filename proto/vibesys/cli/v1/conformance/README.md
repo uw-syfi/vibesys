@@ -6,7 +6,7 @@ orchestrator's fake daemon) replays the same files without importing the first.
 
 | File | Says | Read by the cli module in |
 | --- | --- | --- |
-| `protocol.json` | `watch_task_since`: the protocol version that added `WatchTask`. A client that needs the stream asks for at least it. | `internal/core` (`TestTheProtocolConstantsAreTheConformanceFile`) |
+| `protocol.json` | `watch_task_since`: the protocol version that added `WatchTask`. A client that needs the stream asks for at least it. `task_schema_02_since`: the protocol version that added task schema 0.2; a host that runs this release's tasks asks its job tool for at least it. | `internal/core` (`TestTheProtocolConstantsAreTheConformanceFile`), and the orchestrator's `internal/production` |
 | `environment.json` | The variables a job's process is started with and the message (`JobEnvironment`, `KubernetesEnvironment`) they read as, or the variables a read refuses. Writing the message gives the variables back. | `envcodec` (`TestTheCorpusIsWhatTheCodecDoes`), and the evaluator package's Python codec (`sdk/vibesys-evaluator/python/tests/test_environment.py`) |
 | `task_watch/*.json` | A scenario for `WatchTask`: what happens to a task, and the exact messages a stream sends. | `internal/daemon` (`TestTaskWatchConformance`) |
 

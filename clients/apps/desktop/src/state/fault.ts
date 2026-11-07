@@ -26,7 +26,9 @@ export type FaultKind = (typeof FAULT_KINDS)[number];
  * what to change. The first five are the app's own refusals (a method, a request, a platform no
  * host program is built for, a build that holds none for it, a host that lacks what installing it
  * needs); the rest are the host's, typed from
- * what it says about why it does not serve.
+ * what it says about why it does not serve, or about a part of it that a run needs (what it
+ * answers to `Identify`: the program that holds an agent session, the skills, the job tool, each
+ * missing or too old for this host).
  */
 export const REFUSAL_CAUSES = [
   'method-not-available',
@@ -38,6 +40,12 @@ export const REFUSAL_CAUSES = [
   'state-unknown-filesystem',
   'state-refused',
   'config-refused',
+  'session-holder-missing',
+  'session-holder-too-old',
+  'skills-missing',
+  'skills-too-old',
+  'job-tool-missing',
+  'job-tool-too-old',
 ] as const;
 
 export type RefusalCause = (typeof REFUSAL_CAUSES)[number];

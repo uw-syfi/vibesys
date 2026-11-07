@@ -195,6 +195,9 @@ const (
 	PartProblemReason_PART_PROBLEM_REASON_RELEASE_INCOMPLETE PartProblemReason = 2
 	// The operator's choice cannot be used.
 	PartProblemReason_PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED PartProblemReason = 3
+	// The part is there and runs, but it is older than this host needs: it does not speak the
+	// revision of its contract that the host was built against, or does not answer which it speaks.
+	PartProblemReason_PART_PROBLEM_REASON_TOO_OLD PartProblemReason = 4
 )
 
 // Enum value maps for PartProblemReason.
@@ -204,12 +207,14 @@ var (
 		1: "PART_PROBLEM_REASON_NO_RELEASE",
 		2: "PART_PROBLEM_REASON_RELEASE_INCOMPLETE",
 		3: "PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED",
+		4: "PART_PROBLEM_REASON_TOO_OLD",
 	}
 	PartProblemReason_value = map[string]int32{
 		"PART_PROBLEM_REASON_UNSPECIFIED":             0,
 		"PART_PROBLEM_REASON_NO_RELEASE":              1,
 		"PART_PROBLEM_REASON_RELEASE_INCOMPLETE":      2,
 		"PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED": 3,
+		"PART_PROBLEM_REASON_TOO_OLD":                 4,
 	}
 )
 
@@ -1372,12 +1377,13 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"PartOrigin\x12\x1b\n" +
 	"\x17PART_ORIGIN_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13PART_ORIGIN_RELEASE\x10\x01\x12\x18\n" +
-	"\x14PART_ORIGIN_OPERATOR\x10\x02*\xb9\x01\n" +
+	"\x14PART_ORIGIN_OPERATOR\x10\x02*\xda\x01\n" +
 	"\x11PartProblemReason\x12#\n" +
 	"\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n" +
 	"&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n" +
-	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*y\n" +
+	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03\x12\x1f\n" +
+	"\x1bPART_PROBLEM_REASON_TOO_OLD\x10\x04*y\n" +
 	"\fStateRefusal\x12\x1d\n" +
 	"\x19STATE_REFUSAL_UNSPECIFIED\x10\x00\x12$\n" +
 	" STATE_REFUSAL_NETWORK_FILESYSTEM\x10\x01\x12$\n" +

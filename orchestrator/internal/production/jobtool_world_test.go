@@ -24,6 +24,9 @@ import (
 type worldTool struct {
 	Build   string
 	Sandbox bool
+	// Protocol is what `--version --json` says the build speaks. Zero is a build that predates the
+	// command, which takes it for no command.
+	Protocol uint32
 }
 
 // worldDaemon is a daemon that runs in a World.
@@ -68,6 +71,9 @@ func newWorld(tools map[string]worldTool) *jobToolWorld {
 // ensureCommand is the one command that may record a directory's places for a process told to use it.
 var ensureCommand = []string{"daemon", "ensure", "--json"}
 
+// versionCommand asks a tool which versions it speaks, which starts no daemon.
+var versionCommand = []string{"--version", "--json"}
+
 // exitNoAnswer is the status of a command that got no answer.
 var exitNoAnswer = errors.New("exit status 4")
 
@@ -78,6 +84,13 @@ func (w *jobToolWorld) Run(_ context.Context, program string, args, env []string
 	tool, ok := w.Tools[program]
 	if !ok {
 		return nil, nil, &fs.PathError{Op: "fork/exec", Path: program, Err: fs.ErrNotExist}
+	}
+	if slices.Equal(args, versionCommand) {
+		if tool.Protocol == 0 {
+			return refuse(pb.FailureKind_FAILURE_KIND_INVALID_INPUT, `"--version" is not a command`)
+		}
+		out, err := protojson.Marshal(&pb.BuildVersions{BinaryVersion: tool.Build, ProtocolVersion: tool.Protocol, MinProtocolVersion: 1})
+		return out, nil, err
 	}
 	getenv := envcodec.FromEnviron(env)
 	place := &pb.JobToolPlace{}

@@ -17,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // version is the release version. Release builds set it with
@@ -144,6 +145,12 @@ answer this build cannot read). The README lists every failure kind and wait out
 func run(args []string, d deps) int {
 	if len(args) == 1 && args[0] == "--version" {
 		_, _ = fmt.Fprintln(d.stdout, versionLine())
+		return exitOK
+	}
+	if len(args) == 2 && args[0] == "--version" && args[1] == "--json" {
+		// What this build speaks, typed, for a program that decides whether it can use this tool
+		// without starting a daemon: the message `daemon ensure --json` carries for the daemon.
+		printJSON(d, wire.BuildVersions(version, production.CurrentVersions()))
 		return exitOK
 	}
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {

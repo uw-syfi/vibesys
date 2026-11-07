@@ -6,7 +6,7 @@
  * receipt it already holds.
  */
 import {create} from '@bufbuild/protobuf';
-import {type Command, CommandSchema} from '@vibesys/orchestrator-proto';
+import {type Command, CommandSchema, oneofIs} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Atom from 'effect/reactivity/Atom';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
@@ -60,6 +60,26 @@ const noReceipt = new InvalidMessage({
 });
 
 /**
+ * A run is not started on a host that says it cannot run one (a part it needs is missing or too
+ * old): that is refused here, in the host's typed words, before any agent is launched. The host
+ * checks the same when the start reaches it; this is the answer that names the cause. Nothing but a
+ * start is held back by it.
+ */
+const refusedStart = (parts: HostParts, command: Command) =>
+  oneofIs(command.body, 'startRun', {
+    startRun: true,
+    stopRun: true,
+    spawnAgent: true,
+    stopAgent: true,
+    sendMessage: true,
+    postHandoff: true,
+    postReport: true,
+    requestCatchUp: true,
+  })
+    ? parts.connection.blocked
+    : Effect.succeed(undefined);
+
+/**
  * Waits for a Ready connection (a command is not sent into the void), then sends once. A call
  * that failed because of the link tells the connection, so a dropped link is noticed even when no
  * feed is mounted to see it.
@@ -78,6 +98,8 @@ const dispatchOnce = (parts: HostParts, command: Command) =>
       } as const;
     }
     const epoch = ready.success;
+    const blocked = yield* refusedStart(parts, command);
+    if (blocked !== undefined) return failedWith(command, blocked);
     const sent = yield* parts.client
       .dispatch({command}, {deadline: COMMAND_DEADLINE})
       .pipe(Effect.result);

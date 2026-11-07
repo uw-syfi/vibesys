@@ -6,6 +6,7 @@ import {
   CallEnded,
   fromEnd,
   fromTransportError,
+  isAheadOfLog,
   isRetryable,
   NoBridge,
   RpcStatus,
@@ -53,6 +54,14 @@ it.prop(
     const error = fromEnd(endOf(message, code));
     expect(error._tag).toBe(expectedTag(code));
     expect(isRetryable(error)).toBe(RETRYABLE.has(error._tag));
+  },
+);
+
+it.prop(
+  'only an end of status 11 says the cursor is past the end of the host log',
+  {code: status, message: Schema.String},
+  ({code, message}) => {
+    expect(isAheadOfLog(fromEnd(endOf(message, code)))).toBe(code === RpcStatus.OUT_OF_RANGE);
   },
 );
 
