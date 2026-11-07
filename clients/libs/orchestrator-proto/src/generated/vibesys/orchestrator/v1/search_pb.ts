@@ -17,13 +17,15 @@ import type { Direction, Result } from "../../cli/v1/result_pb.js";
 import { file_vibesys_cli_v1_result } from "../../cli/v1/result_pb.js";
 import type { Head, JobTrouble, Judgment, PromotionRecord } from "../../cli/v1/service_pb.js";
 import { file_vibesys_cli_v1_service } from "../../cli/v1/service_pb.js";
+import type { Workstream } from "../../cli/v1/workstream_pb.js";
+import { file_vibesys_cli_v1_workstream } from "../../cli/v1/workstream_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/orchestrator/v1/search.proto.
  */
 export const file_vibesys_orchestrator_v1_search: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxItQFCgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAEkIKBnNlcmllcxgOIAMoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZVNlcmllc0IIukgFkgECEAgSMwoIdHJhZGVvZmYYDyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZiL6BAoPT2JqZWN0aXZlQm91bmRzEh0KCW9iamVjdGl2ZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAASPAoIdmVyc2lvbnMYAyADKAsyHi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVCb3VuZEIKukgHkgEECAEQQBIgCgpoZWFkX3ZhbHVlGAQgASgBQge6SAQSAkABSACIAQESLwoQcGVyY2VudF9vZl9ib3VuZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgBiAEBEiAKCmJlc3RfdmFsdWUYBiABKAFCB7pIBBICQAFIAogBARI0ChViZXN0X3BlcmNlbnRfb2ZfYm91bmQYByABKAFCELpIDRILQAEhAAAAAAAAAABIA4gBATrXAbpI0wEa0AEKLm9iamVjdGl2ZV9ib3VuZHMudmVyc2lvbnNfYXJlX29mX3RoZV9vYmplY3RpdmUSSGV2ZXJ5IHZlcnNpb24gZGVjbGFyZXMgdGhpcyBvYmplY3RpdmUsIGluIHRoZSBkaXJlY3Rpb24gb2YgdGhlIG9iamVjdGl2ZRpUdGhpcy52ZXJzaW9ucy5hbGwodiwgdi5vYmplY3RpdmUgPT0gdGhpcy5vYmplY3RpdmUgJiYgdi5kaXJlY3Rpb24gPT0gdGhpcy5kaXJlY3Rpb24pQg0KC19oZWFkX3ZhbHVlQhMKEV9wZXJjZW50X29mX2JvdW5kQg0KC19iZXN0X3ZhbHVlQhgKFl9iZXN0X3BlcmNlbnRfb2ZfYm91bmQirwEKD09iamVjdGl2ZVNlcmllcxIdCglvYmplY3RpdmUYASABKAlCCrpIB3IFEAEogAISOAoJZGlyZWN0aW9uGAIgASgOMhkudmliZXN5cy5jbGkudjEuRGlyZWN0aW9uQgq6SAeCAQQQASAAEkMKBnBvaW50cxgDIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lYXN1cmVkUG9pbnRCC7pICJIBBQgBEJADIqQBCg1NZWFzdXJlZFBvaW50EhoKBmpvYl9pZBgBIAEoCUIKukgHcgUQASiAAhIaCgZjb21taXQYAiABKAlCCrpIB3IFEAEogAISLgoCYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESFgoFdmFsdWUYBCABKAFCB7pIBBICQAESEwoLYmVzdF9zb19mYXIYBSABKAgitQIKCFRyYWRlb2ZmEkoKCm9iamVjdGl2ZXMYASADKAsyKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZk9iamVjdGl2ZUIKukgHkgEECAIQCBJBCgZwb2ludHMYAiADKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZlBvaW50Qgm6SAaSAQMQkAM6mQG6SJUBGpIBCiV0cmFkZW9mZi52YWx1ZXNfYXJlX29mX3RoZV9vYmplY3RpdmVzEixldmVyeSBwb2ludCBoYXMgb25lIHZhbHVlIGZvciBlYWNoIG9iamVjdGl2ZRo7dGhpcy5wb2ludHMuYWxsKHAsIHNpemUocC52YWx1ZXMpID09IHNpemUodGhpcy5vYmplY3RpdmVzKSkiZwoRVHJhZGVvZmZPYmplY3RpdmUSGAoEbmFtZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAAiqgEKDVRyYWRlb2ZmUG9pbnQSGgoGam9iX2lkGAEgASgJQgq6SAdyBRABKIACEhoKBmNvbW1pdBgCIAEoCUIKukgHcgUQASiAAhIuCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIcCgZ2YWx1ZXMYBCADKAFCDLpICZIBBiIEEgJAARITCgtvbl9mcm9udGllchgFIAEoCCKLAQoMU2VhcmNoSGVhbHRoEjAKCmxpdmVfc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAASOQoKdW5yZWFkYWJsZRgCIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEioAEKClVucmVhZGFibGUSRQoGcmVhc29uGAEgASgOMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIxCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgKq8DChBVbnJlYWRhYmxlUmVhc29uEiEKHVVOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobVU5SRUFEQUJMRV9SRUFTT05fTk9fREFFTU9OEAESIgoeVU5SRUFEQUJMRV9SRUFTT05fU1RBUlRfRkFJTEVEEAISJwojVU5SRUFEQUJMRV9SRUFTT05fQ0xJX05PVF9JTlNUQUxMRUQQAxIkCiBVTlJFQURBQkxFX1JFQVNPTl9DTElFTlRfVE9PX09MRBAEEiQKIFVOUkVBREFCTEVfUkVBU09OX0RBRU1PTl9UT09fT0xEEAUSKwonVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfT1dORURfRUxTRVdIRVJFEAYSIAocVU5SRUFEQUJMRV9SRUFTT05fU1RPUkVfQVdBWRAHEiEKHVVOUkVBREFCTEVfUkVBU09OX1NUUkVBTV9MT1NUEAgSJwojVU5SRUFEQUJMRV9SRUFTT05fTUVTU0FHRV9UT09fTEFSR0UQCRIjCh9VTlJFQURBQkxFX1JFQVNPTl9OT1RfQU5TV0VSSU5HEApCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZWFyY2gucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIqwHCgtTZWFyY2hTdGF0ZRIaCgZydW5faWQYASABKAlCCrpIB3IFEAEogAISGQoIcmV2aXNpb24YAiABKARCB7pIBDICIAASPQoGaGVhbHRoGAMgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoSGVhbHRoQga6SAPIAQESLAoEam9icxgEIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkIJukgGkgEDEPQDEjIKB3Jlc3VsdHMYBSADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRCCbpIBpIBAxD0AxI1CglqdWRnbWVudHMYBiADKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEIIukgFkgECEGQSPgoKcHJvbW90aW9ucxgHIAMoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEIJukgGkgEDEMgBEi4KBXBsYW5zGAggAygLMhQudmliZXN5cy5jbGkudjEuUGxhbkIJukgGkgEDEMgBEiIKBGhlYWQYCSABKAsyFC52aWJlc3lzLmNsaS52MS5IZWFkEjcKCHRyb3VibGVzGAogAygLMhoudmliZXN5cy5jbGkudjEuSm9iVHJvdWJsZUIJukgGkgEDEPQDEhkKEXVuYXR0cmlidXRlZF9qb2JzGAsgASgNEhEKCXRydW5jYXRlZBgMIAEoCBJCCgZib3VuZHMYDSADKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PYmplY3RpdmVCb3VuZHNCCLpIBZIBAhBAEkIKBnNlcmllcxgOIAMoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZVNlcmllc0IIukgFkgECEAgSMwoIdHJhZGVvZmYYDyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UcmFkZW9mZhI5Cgt3b3Jrc3RyZWFtcxgQIAMoCzIaLnZpYmVzeXMuY2xpLnYxLldvcmtzdHJlYW1CCLpIBZIBAhBkEjsKBWlkZWFzGBEgAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSWRlYVZpZXdCCbpIBpIBAxDIARJLChB3b3Jrc3RyZWFtX3ZpZXdzGBIgAygLMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV29ya3N0cmVhbVZpZXdCCLpIBZIBAhBlEhEKCXVucGxhbm5lZBgTIAEoDSKKAQoNT2JqZWN0aXZlR2FpbhIaCgZtZXRyaWMYASABKAlCCrpIB3IFEAEogAISHwoFcmF0aW8YAiABKAFCELpIDRILQAEhAAAAAAAAAAASGwoKYmVzdF92YWx1ZRgDIAEoAUIHukgEEgJAARIfCg5iYXNlbGluZV92YWx1ZRgEIAEoAUIHukgEEgJAASLqAQoISWRlYVZpZXcSHAoLcGxhbl9udW1iZXIYASABKA1CB7pIBCoCIAASQQoHdmVyZGljdBgCIAEoDjIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLklkZWFWZXJkaWN0Qgq6SAeCAQQQASAAEi0KEWNhbmRpZGF0ZV9qb2JfaWRzGAMgAygJQhK6SA+SAQwQyAEiB3IFEAEogAISPgoEYmVzdBgEIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIEg4KBmluX3J1bhgFIAEoCCKeAQoOV29ya3N0cmVhbVZpZXcSDgoGbnVtYmVyGAEgASgNEgwKBGtlcHQYAiABKA0SEAoIcmVqZWN0ZWQYAyABKA0SDAoEb3BlbhgEIAEoDRIOCgZwYXJrZWQYBSABKA0SPgoEYmVzdBgGIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUdhaW5CCLpIBZIBAhAIIvoECg9PYmplY3RpdmVCb3VuZHMSHQoJb2JqZWN0aXZlGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI8Cgh2ZXJzaW9ucxgDIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZUJvdW5kQgq6SAeSAQQIARBAEiAKCmhlYWRfdmFsdWUYBCABKAFCB7pIBBICQAFIAIgBARIvChBwZXJjZW50X29mX2JvdW5kGAUgASgBQhC6SA0SC0ABIQAAAAAAAAAASAGIAQESIAoKYmVzdF92YWx1ZRgGIAEoAUIHukgEEgJAAUgCiAEBEjQKFWJlc3RfcGVyY2VudF9vZl9ib3VuZBgHIAEoAUIQukgNEgtAASEAAAAAAAAAAEgDiAEBOtcBukjTARrQAQoub2JqZWN0aXZlX2JvdW5kcy52ZXJzaW9uc19hcmVfb2ZfdGhlX29iamVjdGl2ZRJIZXZlcnkgdmVyc2lvbiBkZWNsYXJlcyB0aGlzIG9iamVjdGl2ZSwgaW4gdGhlIGRpcmVjdGlvbiBvZiB0aGUgb2JqZWN0aXZlGlR0aGlzLnZlcnNpb25zLmFsbCh2LCB2Lm9iamVjdGl2ZSA9PSB0aGlzLm9iamVjdGl2ZSAmJiB2LmRpcmVjdGlvbiA9PSB0aGlzLmRpcmVjdGlvbilCDQoLX2hlYWRfdmFsdWVCEwoRX3BlcmNlbnRfb2ZfYm91bmRCDQoLX2Jlc3RfdmFsdWVCGAoWX2Jlc3RfcGVyY2VudF9vZl9ib3VuZCKvAQoPT2JqZWN0aXZlU2VyaWVzEh0KCW9iamVjdGl2ZRgBIAEoCUIKukgHcgUQASiAAhI4CglkaXJlY3Rpb24YAiABKA4yGS52aWJlc3lzLmNsaS52MS5EaXJlY3Rpb25CCrpIB4IBBBABIAASQwoGcG9pbnRzGAMgAygLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVhc3VyZWRQb2ludEILukgIkgEFCAEQkAMipAEKDU1lYXN1cmVkUG9pbnQSGgoGam9iX2lkGAEgASgJQgq6SAdyBRABKIACEhoKBmNvbW1pdBgCIAEoCUIKukgHcgUQASiAAhIuCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIWCgV2YWx1ZRgEIAEoAUIHukgEEgJAARITCgtiZXN0X3NvX2ZhchgFIAEoCCK1AgoIVHJhZGVvZmYSSgoKb2JqZWN0aXZlcxgBIAMoCzIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRyYWRlb2ZmT2JqZWN0aXZlQgq6SAeSAQQIAhAIEkEKBnBvaW50cxgCIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRyYWRlb2ZmUG9pbnRCCbpIBpIBAxCQAzqZAbpIlQEakgEKJXRyYWRlb2ZmLnZhbHVlc19hcmVfb2ZfdGhlX29iamVjdGl2ZXMSLGV2ZXJ5IHBvaW50IGhhcyBvbmUgdmFsdWUgZm9yIGVhY2ggb2JqZWN0aXZlGjt0aGlzLnBvaW50cy5hbGwocCwgc2l6ZShwLnZhbHVlcykgPT0gc2l6ZSh0aGlzLm9iamVjdGl2ZXMpKSJnChFUcmFkZW9mZk9iamVjdGl2ZRIYCgRuYW1lGAEgASgJQgq6SAdyBRABKIACEjgKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgACKqAQoNVHJhZGVvZmZQb2ludBIaCgZqb2JfaWQYASABKAlCCrpIB3IFEAEogAISGgoGY29tbWl0GAIgASgJQgq6SAdyBRABKIACEi4KAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhwKBnZhbHVlcxgEIAMoAUIMukgJkgEGIgQSAkABEhMKC29uX2Zyb250aWVyGAUgASgIIosBCgxTZWFyY2hIZWFsdGgSMAoKbGl2ZV9zaW5jZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIABI5Cgp1bnJlYWRhYmxlGAIgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5yZWFkYWJsZUgAQg4KBXN0YXRlEgW6SAIIASKgAQoKVW5yZWFkYWJsZRJFCgZyZWFzb24YASABKA4yKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnJlYWRhYmxlUmVhc29uQgq6SAeCAQQQASAAEjEKBXNpbmNlGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhgKBmRldGFpbBgDIAEoCUIIukgFcgMogCAqjQEKC0lkZWFWZXJkaWN0EhwKGElERUFfVkVSRElDVF9VTlNQRUNJRklFRBAAEhUKEUlERUFfVkVSRElDVF9PUEVOEAESFQoRSURFQV9WRVJESUNUX0tFUFQQAhIZChVJREVBX1ZFUkRJQ1RfUkVKRUNURUQQAxIXChNJREVBX1ZFUkRJQ1RfUEFSS0VEEAQqrwMKEFVucmVhZGFibGVSZWFzb24SIQodVU5SRUFEQUJMRV9SRUFTT05fVU5TUEVDSUZJRUQQABIfChtVTlJFQURBQkxFX1JFQVNPTl9OT19EQUVNT04QARIiCh5VTlJFQURBQkxFX1JFQVNPTl9TVEFSVF9GQUlMRUQQAhInCiNVTlJFQURBQkxFX1JFQVNPTl9DTElfTk9UX0lOU1RBTExFRBADEiQKIFVOUkVBREFCTEVfUkVBU09OX0NMSUVOVF9UT09fT0xEEAQSJAogVU5SRUFEQUJMRV9SRUFTT05fREFFTU9OX1RPT19PTEQQBRIrCidVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9PV05FRF9FTFNFV0hFUkUQBhIgChxVTlJFQURBQkxFX1JFQVNPTl9TVE9SRV9BV0FZEAcSIQodVU5SRUFEQUJMRV9SRUFTT05fU1RSRUFNX0xPU1QQCBInCiNVTlJFQURBQkxFX1JFQVNPTl9NRVNTQUdFX1RPT19MQVJHRRAJEiMKH1VOUkVBREFCTEVfUkVBU09OX05PVF9BTlNXRVJJTkcQCkJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_bound, file_vibesys_cli_v1_job, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_result, file_vibesys_cli_v1_service, file_vibesys_cli_v1_workstream]);
 
 /**
  * SearchState is a whole, ephemeral view. Revisions are comparable only within
@@ -117,6 +119,40 @@ export type SearchState = Message<"vibesys.orchestrator.v1.SearchState"> & {
    * @generated from field: vibesys.orchestrator.v1.Tradeoff tradeoff = 15;
    */
   tradeoff?: Tradeoff | undefined;
+
+  /**
+   * The task's workstreams, by number. Those the run's ideas belong to are kept before the others,
+   * and the newest of each go last; over the limit the state is marked truncated.
+   *
+   * @generated from field: repeated vibesys.cli.v1.Workstream workstreams = 16;
+   */
+  workstreams: Workstream[];
+
+  /**
+   * One view for each plan in `plans`, in the same order: what a screen shows of an idea beyond the
+   * plan's own record, derived here so that no screen works out a verdict, a count or a gain.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.IdeaView ideas = 17;
+   */
+  ideas: IdeaView[];
+
+  /**
+   * The run's ideas counted by workstream, ascending by workstream number, over every idea of the
+   * run (IdeaView.in_run), including those the cap left out of `ideas`. Absent for a run with no
+   * idea.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.WorkstreamView workstream_views = 18;
+   */
+  workstreamViews: WorkstreamView[];
+
+  /**
+   * How many of the run's measured candidates (the points of `series`, counted once for each job)
+   * name no plan: the baseline and the deliberate --no-plan measurements. `unattributed_jobs` is
+   * another count, of jobs that no run claimed.
+   *
+   * @generated from field: uint32 unplanned = 19;
+   */
+  unplanned: number;
 };
 
 /**
@@ -125,6 +161,145 @@ export type SearchState = Message<"vibesys.orchestrator.v1.SearchState"> & {
  */
 export const SearchStateSchema: GenMessage<SearchState> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_search, 0);
+
+/**
+ * ObjectiveGain is what an idea's candidates reached on one objective, against where the run began.
+ *
+ * @generated from message vibesys.orchestrator.v1.ObjectiveGain
+ */
+export type ObjectiveGain = Message<"vibesys.orchestrator.v1.ObjectiveGain"> & {
+  /**
+   * @generated from field: string metric = 1;
+   */
+  metric: string;
+
+  /**
+   * The best value among the idea's measured candidates over the run's baseline, oriented so that
+   * more than 1 is better whichever way the objective improves: best over baseline when it is
+   * maximized, baseline over best when it is minimized. The baseline is the run's first measurement
+   * of the objective (the series' first point). Absent entries: a gain is left out when either number
+   * is not above zero, as a ratio of them would say nothing.
+   *
+   * @generated from field: double ratio = 2;
+   */
+  ratio: number;
+
+  /**
+   * The best value itself, in the unit of the measurements.
+   *
+   * @generated from field: double best_value = 3;
+   */
+  bestValue: number;
+
+  /**
+   * @generated from field: double baseline_value = 4;
+   */
+  baselineValue: number;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.ObjectiveGain.
+ * Use `create(ObjectiveGainSchema)` to create a new message.
+ */
+export const ObjectiveGainSchema: GenMessage<ObjectiveGain> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 1);
+
+/**
+ * IdeaView is what is derived of one plan for the run: see SearchState.ideas.
+ *
+ * @generated from message vibesys.orchestrator.v1.IdeaView
+ */
+export type IdeaView = Message<"vibesys.orchestrator.v1.IdeaView"> & {
+  /**
+   * @generated from field: uint32 plan_number = 1;
+   */
+  planNumber: number;
+
+  /**
+   * @generated from field: vibesys.orchestrator.v1.IdeaVerdict verdict = 2;
+   */
+  verdict: IdeaVerdict;
+
+  /**
+   * The measure jobs of the run that name the plan, oldest first, which are the chart points of the
+   * idea. Empty when nothing the run measured names it.
+   *
+   * @generated from field: repeated string candidate_job_ids = 3;
+   */
+  candidateJobIds: string[];
+
+  /**
+   * One for each objective on which a linked candidate was measured, by metric name. Empty when
+   * nothing linked was measured.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveGain best = 4;
+   */
+  best: ObjectiveGain[];
+
+  /**
+   * The plan was made in this run, or a status change of it was (its recorded origin and
+   * transitions: RecordOrigin.run_id equal to this run's). Never inferred from time or from the jobs
+   * that overlapped it. A plan saved before its origin was recorded is not in any run.
+   *
+   * @generated from field: bool in_run = 5;
+   */
+  inRun: boolean;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.IdeaView.
+ * Use `create(IdeaViewSchema)` to create a new message.
+ */
+export const IdeaViewSchema: GenMessage<IdeaView> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 2);
+
+/**
+ * WorkstreamView counts the run's ideas of one workstream.
+ *
+ * @generated from message vibesys.orchestrator.v1.WorkstreamView
+ */
+export type WorkstreamView = Message<"vibesys.orchestrator.v1.WorkstreamView"> & {
+  /**
+   * 0 holds the ideas that name no workstream.
+   *
+   * @generated from field: uint32 number = 1;
+   */
+  number: number;
+
+  /**
+   * @generated from field: uint32 kept = 2;
+   */
+  kept: number;
+
+  /**
+   * @generated from field: uint32 rejected = 3;
+   */
+  rejected: number;
+
+  /**
+   * @generated from field: uint32 open = 4;
+   */
+  open: number;
+
+  /**
+   * @generated from field: uint32 parked = 5;
+   */
+  parked: number;
+
+  /**
+   * For each objective, the best gain among the counted ideas, by metric name.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveGain best = 6;
+   */
+  best: ObjectiveGain[];
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.WorkstreamView.
+ * Use `create(WorkstreamViewSchema)` to create a new message.
+ */
+export const WorkstreamViewSchema: GenMessage<WorkstreamView> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_search, 3);
 
 /**
  * ObjectiveBounds is the performance bound the run's agents declared for one objective, with every
@@ -204,7 +379,7 @@ export type ObjectiveBounds = Message<"vibesys.orchestrator.v1.ObjectiveBounds">
  * Use `create(ObjectiveBoundsSchema)` to create a new message.
  */
 export const ObjectiveBoundsSchema: GenMessage<ObjectiveBounds> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 1);
+  messageDesc(file_vibesys_orchestrator_v1_search, 4);
 
 /**
  * ObjectiveSeries is the measured history of one objective of the run: one point for every measure
@@ -245,7 +420,7 @@ export type ObjectiveSeries = Message<"vibesys.orchestrator.v1.ObjectiveSeries">
  * Use `create(ObjectiveSeriesSchema)` to create a new message.
  */
 export const ObjectiveSeriesSchema: GenMessage<ObjectiveSeries> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 2);
+  messageDesc(file_vibesys_orchestrator_v1_search, 5);
 
 /**
  * MeasuredPoint is one measurement of one candidate on one objective.
@@ -296,7 +471,7 @@ export type MeasuredPoint = Message<"vibesys.orchestrator.v1.MeasuredPoint"> & {
  * Use `create(MeasuredPointSchema)` to create a new message.
  */
 export const MeasuredPointSchema: GenMessage<MeasuredPoint> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 3);
+  messageDesc(file_vibesys_orchestrator_v1_search, 6);
 
 /**
  * Tradeoff is the measured candidates of a task that declares two or more objectives, placed on all
@@ -329,7 +504,7 @@ export type Tradeoff = Message<"vibesys.orchestrator.v1.Tradeoff"> & {
  * Use `create(TradeoffSchema)` to create a new message.
  */
 export const TradeoffSchema: GenMessage<Tradeoff> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 4);
+  messageDesc(file_vibesys_orchestrator_v1_search, 7);
 
 /**
  * @generated from message vibesys.orchestrator.v1.TradeoffObjective
@@ -351,7 +526,7 @@ export type TradeoffObjective = Message<"vibesys.orchestrator.v1.TradeoffObjecti
  * Use `create(TradeoffObjectiveSchema)` to create a new message.
  */
 export const TradeoffObjectiveSchema: GenMessage<TradeoffObjective> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 5);
+  messageDesc(file_vibesys_orchestrator_v1_search, 8);
 
 /**
  * @generated from message vibesys.orchestrator.v1.TradeoffPoint
@@ -390,7 +565,7 @@ export type TradeoffPoint = Message<"vibesys.orchestrator.v1.TradeoffPoint"> & {
  * Use `create(TradeoffPointSchema)` to create a new message.
  */
 export const TradeoffPointSchema: GenMessage<TradeoffPoint> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 6);
+  messageDesc(file_vibesys_orchestrator_v1_search, 9);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SearchHealth
@@ -419,7 +594,7 @@ export type SearchHealth = Message<"vibesys.orchestrator.v1.SearchHealth"> & {
  * Use `create(SearchHealthSchema)` to create a new message.
  */
 export const SearchHealthSchema: GenMessage<SearchHealth> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 7);
+  messageDesc(file_vibesys_orchestrator_v1_search, 10);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Unreadable
@@ -448,7 +623,50 @@ export type Unreadable = Message<"vibesys.orchestrator.v1.Unreadable"> & {
  * Use `create(UnreadableSchema)` to create a new message.
  */
 export const UnreadableSchema: GenMessage<Unreadable> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_search, 8);
+  messageDesc(file_vibesys_orchestrator_v1_search, 11);
+
+/**
+ * IdeaVerdict is where an idea stands as a person reads it, derived from PlanStatus.
+ *
+ * @generated from enum vibesys.orchestrator.v1.IdeaVerdict
+ */
+export enum IdeaVerdict {
+  /**
+   * @generated from enum value: IDEA_VERDICT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A plan that is open or chosen, and one whose status was never set (a plan saved before plans
+   * had a status).
+   *
+   * @generated from enum value: IDEA_VERDICT_OPEN = 1;
+   */
+  OPEN = 1,
+
+  /**
+   * A plan that won.
+   *
+   * @generated from enum value: IDEA_VERDICT_KEPT = 2;
+   */
+  KEPT = 2,
+
+  /**
+   * @generated from enum value: IDEA_VERDICT_REJECTED = 3;
+   */
+  REJECTED = 3,
+
+  /**
+   * @generated from enum value: IDEA_VERDICT_PARKED = 4;
+   */
+  PARKED = 4,
+}
+
+/**
+ * Describes the enum vibesys.orchestrator.v1.IdeaVerdict.
+ */
+export const IdeaVerdictSchema: GenEnum<IdeaVerdict> = /*@__PURE__*/
+  enumDesc(file_vibesys_orchestrator_v1_search, 0);
 
 /**
  * @generated from enum vibesys.orchestrator.v1.UnreadableReason
@@ -519,5 +737,5 @@ export enum UnreadableReason {
  * Describes the enum vibesys.orchestrator.v1.UnreadableReason.
  */
 export const UnreadableReasonSchema: GenEnum<UnreadableReason> = /*@__PURE__*/
-  enumDesc(file_vibesys_orchestrator_v1_search, 0);
+  enumDesc(file_vibesys_orchestrator_v1_search, 1);
 

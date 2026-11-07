@@ -27,8 +27,6 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 			s.Judgments = append(s.Judgments, b.Judgment)
 		case *cli.TaskFact_Promotion:
 			s.Promotions = append(s.Promotions, b.Promotion)
-		case *cli.TaskFact_Plan:
-			s.Plans = append(s.Plans, b.Plan)
 		case *cli.TaskFact_Head:
 			s.Head = b.Head
 		case *cli.TaskFact_Trouble:
@@ -58,11 +56,21 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 		return cmp.Compare(a.Commit, b.Commit)
 	})
 	slices.SortFunc(s.Promotions, func(a, b *cli.PromotionRecord) int { return cmp.Compare(b.Seq, a.Seq) })
-	slices.SortFunc(s.Plans, func(a, b *cli.Plan) int { return cmp.Compare(b.Number, a.Number) })
 	s.Judgments = capList(s.Judgments, 100, &s.Truncated)
 	s.Promotions = capList(s.Promotions, 200, &s.Truncated)
-	s.Plans = capList(s.Plans, 200, &s.Truncated)
-	var leftOut bool
+	// A plan is kept with its idea: the plans the run made or measured come before the others when
+	// there are too many, so the cap never hides what the run did behind an older task's ideas.
+	all, unplanned := ideas(v.Facts, s.RunId)
+	chosen, leftOut := chooseIdeas(all)
+	for _, i := range chosen {
+		s.Plans, s.Ideas = append(s.Plans, i.plan), append(s.Ideas, i.view)
+	}
+	s.Truncated = s.Truncated || leftOut
+	s.WorkstreamViews, leftOut = workstreamViews(all)
+	s.Truncated = s.Truncated || leftOut
+	s.Workstreams, leftOut = chooseWorkstreams(v.Facts, all)
+	s.Truncated = s.Truncated || leftOut
+	s.Unplanned = unplanned
 	s.Bounds, leftOut = Bounds(v.Facts, s.RunId, s.Head)
 	s.Truncated = s.Truncated || leftOut
 	s.Series, s.Tradeoff, leftOut = Trajectory(v.Facts, s.RunId)
