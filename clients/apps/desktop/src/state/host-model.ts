@@ -86,3 +86,22 @@ export function runsCursor(model: HostModel): bigint {
 export function beginRunsStream(model: HostModel): HostModel {
   return {...model, data: {...model.data, searchRevisions: {}}};
 }
+
+/**
+ * The model once the host said its log ends before the run stream's cursor: what it holds stays on
+ * screen, and the next open reads a snapshot that replaces it (`applySnapshot` takes the read that
+ * closes a gap as authoritative, whatever its sequence).
+ */
+export function rewindRunsStream(model: HostModel): HostModel {
+  const gap = {expected: model.data.sequence + 1n, got: null};
+  return {...model, data: {...model.data, gap}};
+}
+
+/**
+ * The model once the host said its log ends before `agentId`'s stream cursor: the cursor is
+ * forgotten, so the next open reads the agent's newest page again.
+ */
+export function rewindAgentStream(model: HostModel, agentId: string): HostModel {
+  const {[agentId]: _forgotten, ...agentCursors} = model.agentCursors;
+  return {...model, agentCursors};
+}

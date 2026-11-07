@@ -9,6 +9,7 @@ import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
+import {rewindRunsStream} from '../state/host-model.js';
 import {
   applyHostFrame,
   beginRunsStream,
@@ -40,6 +41,7 @@ const runsSpec = ({client}: HostParts): FeedSpec<HostFrame> => ({
   begin: beginRunsStream,
   apply: applyHostFrame,
   gapped: model => model.data.gap !== null,
+  rewind: rewindRunsStream,
 });
 
 /** Whether the run stream has told this client anything yet. */

@@ -10,7 +10,7 @@ import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
 import type {FeedStatus, HostModel} from '../state/index.js';
 import type {HostConnectionApi} from './connection.js';
-import {type AppError, isRetryable, Unavailable} from './errors.js';
+import {type AppError, isAheadOfLog, isRetryable, Unavailable} from './errors.js';
 import {faultOf} from './fault.js';
 import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 
@@ -23,6 +23,12 @@ export interface FeedSpec<F> {
   readonly apply: (model: HostModel, frame: F) => HostModel;
   /** The model skipped events and must read again from a snapshot. */
   readonly gapped: (model: HostModel) => boolean;
+  /**
+   * The model once the host said its log ends before this stream's cursor (`isAheadOfLog`): the
+   * cursor is dropped, so the next open reads from the start. A stream that resumes from no cursor
+   * has none, and that answer then fails it like any other refusal.
+   */
+  readonly rewind?: (model: HostModel) => HostModel;
 }
 
 /** What a feed reads and writes. */
@@ -39,9 +45,10 @@ type Why = Extract<FeedStatus, {readonly _tag: 'Restarting'}>['why'];
 /** How one open stream ended. */
 type Ended =
   /**
-   * The stream, not the link, ended: a gap, a reader that fell behind, or a host that closed this
-   * stream cleanly. Open it again; `progressed` says the pass delivered `STABLE_PASS_FRAMES`
-   * frames in order, so it was healthy and the restarts before it no longer count.
+   * The stream, not the link, ended: a gap, a reader that fell behind, a cursor past the end of the
+   * host's log, or a host that closed this stream cleanly. Open it again; `progressed` says the pass
+   * delivered `STABLE_PASS_FRAMES` frames in order, so it was healthy and the restarts before it no
+   * longer count.
    */
   | {readonly _tag: 'Restart'; readonly why: Why; readonly progressed: boolean}
   /** The link failed: hand it to the connection. */
@@ -89,7 +96,15 @@ const pass = <F>(ports: FeedPorts, spec: FeedSpec<F>, firstOpen: boolean) =>
       Effect.result,
     );
     const progressed = inOrder >= STABLE_PASS_FRAMES;
-    if (result._tag === 'Failure') return classify(result.failure, progressed);
+    if (result._tag === 'Failure') {
+      const {failure} = result;
+      if (isAheadOfLog(failure) && spec.rewind !== undefined) {
+        // The host no longer has what the cursor points past: reopening from it is refused again.
+        yield* SubscriptionRef.update(ports.model, spec.rewind);
+        return {_tag: 'Restart', why: 'ahead-of-log', progressed} as const;
+      }
+      return classify(failure, progressed);
+    }
     const closed = yield* SubscriptionRef.get(ports.model);
     // A gap ended the stream on purpose; otherwise the host closed this stream.
     return {_tag: 'Restart', why: spec.gapped(closed) ? 'gap' : 'reconnect', progressed} as const;

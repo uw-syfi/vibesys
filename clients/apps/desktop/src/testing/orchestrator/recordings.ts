@@ -81,6 +81,24 @@ const IDENTIFY = `/${HostControlService.typeName}/Identify`;
 
 const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVAILABLE}});
 
+/** The sequence each stream asks to continue after, read from its request, by method. */
+const CURSORS: Readonly<Record<string, (request: Uint8Array) => bigint>> = {
+  [methodPathOf('WatchRuns')]: request => fromBinary(WatchRunsRequestSchema, request).afterSequence,
+  [methodPathOf('WatchAgent')]: request =>
+    fromBinary(WatchAgentRequestSchema, request).afterSequence,
+};
+
+/**
+ * What the host answers a stream asked to continue after a sequence its log has not reached, as
+ * the daemon's `ErrAheadOfLog` does; undefined for a call with no cursor or one the log holds.
+ */
+function aheadOfLog(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> | undefined {
+  const after = CURSORS[target.method]?.(target.request) ?? 0n;
+  if (after <= daemon.sequence) return undefined;
+  const message = `daemon: that sequence is ahead of the log; start again from a snapshot (asked after ${after}, the log is at ${daemon.sequence})`;
+  return [{end: {message, status: RpcStatus.OUT_OF_RANGE}}];
+}
+
 /** The per-agent frame an event becomes for `agentId`, or null when it is not about that agent. */
 function agentFrameOf(
   event: RunChange,
@@ -306,6 +324,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
 
   return {
     respond: (target, nth) => {
+      const ahead = aheadOfLog(daemon, target);
+      if (ahead !== undefined) return ahead;
       switch (target.method) {
         case methodPathOf('Hello'):
           return hello(nth);

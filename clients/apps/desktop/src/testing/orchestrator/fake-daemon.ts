@@ -142,6 +142,14 @@ export class FakeDaemon {
   }
 
   /**
+   * Forget the last `count` events committed, as a host does that restarts after a power cut took
+   * the tail of its log: a client that read them holds a cursor past the end of the log.
+   */
+  loseTail(count: number): void {
+    this.#visible = Math.max(0, this.#visible - count);
+  }
+
+  /**
    * Set the whole cost view the host works out for a run. The Fake computes none: a test says what
    * the host would send, and a stream opened after it starts with this view.
    */
