@@ -48,15 +48,22 @@ const scenario = generateScenario({seed: 7, subagents: 2, live: false});
 const TOTAL = scenario.changes.length;
 const daemonAt = (visible: number = TOTAL) => new FakeDaemon(scenario, visible);
 
-/** What the run stream defines of the state: a snapshot and the events after it agree on it. */
+/**
+ * What the run stream defines of the state: the runs and what the host says of each (a snapshot and the
+ * frames after it agree on it). A run's agents and turns are its history, which a screen reads on request.
+ */
 const runStreamShape = (s: OrchestratorState) => ({
   sequence: s.sequence,
   runs: s.runs,
-  agents: s.agents,
-  turns: s.turns,
+  summaries: s.summaries,
   gap: s.gap,
 });
-const everything = runStreamShape(scenario.changes.reduce(applyChange, emptyState));
+const everything = runStreamShape({
+  ...scenario.changes.reduce(applyChange, emptyState),
+  summaries: Object.fromEntries(
+    new FakeDaemon(scenario).summaries().map(summary => [summary.runId, summary]),
+  ),
+});
 
 const agentIdOf = (daemon: FakeDaemon): string => {
   const [agent] = daemon.snapshot().agents;
@@ -703,7 +710,8 @@ it.effect('the Fake sends current search frames on resume after replayed events'
     });
     h.mount(h.session.runs.watch);
     const data = (yield* h.model).data;
-    expect(resumed).toEqual([{cursor: daemon.sequence, cases: ['search']}]);
+    // The host sends a stream that resumed the search view and the summary of each run, which it holds none of.
+    expect(resumed).toEqual([{cursor: daemon.sequence, cases: ['search', 'summary']}]);
     expect(data.searches[scenario.runId]).toEqual(daemon.snapshot().searches[0]);
     expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
     expect(data.gap).toBeNull();

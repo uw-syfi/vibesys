@@ -1,4 +1,9 @@
-/** The run stream: every run, agent and turn of the host, kept up to date while a screen watches. */
+/**
+ * The run stream: every run of the host with its summary, kept up to date while a screen watches. It
+ * asks for the snapshot of detail SUMMARY, so the host lists every run and sends no mailbox with it; a
+ * run's history is read when a screen of the run opens (`run-history.ts`).
+ */
+import {SnapshotDetail} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
@@ -30,7 +35,7 @@ export interface RunsView {
 const runsSpec = ({client}: HostParts): FeedSpec<HostFrame> => ({
   open: model =>
     client
-      .watchRuns({afterSequence: runsCursor(model)})
+      .watchRuns({afterSequence: runsCursor(model), detail: SnapshotDetail.SUMMARY})
       .pipe(Stream.map(response => ({from: 'runs', body: response.body}) as const)),
   begin: beginRunsStream,
   apply: applyHostFrame,

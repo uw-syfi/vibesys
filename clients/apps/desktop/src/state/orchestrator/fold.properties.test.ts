@@ -166,7 +166,13 @@ describe('a snapshot', () => {
         const at = 1 + (cut % total);
         const stale = new FakeDaemon(scenario, at - 1).snapshot();
         const held = fold(scenario.changes.slice(0, at));
-        expect(applySnapshot(held, stale)).toEqual({...held, searches: {}});
+        // What it replaces whatever its sequence: the search views, the summaries and what the host left out.
+        expect(applySnapshot(held, stale)).toEqual({
+          ...held,
+          searches: {},
+          summaries: Object.fromEntries(stale.summaries.map(each => [each.runId, each])),
+          cut: {truncated: stale.truncated, runsLeftOut: stale.runsLeftOut},
+        });
       }),
       {numRuns: 40},
     );

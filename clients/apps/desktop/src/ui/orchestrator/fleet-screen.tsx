@@ -217,7 +217,9 @@ function figureColumns(
       size: 'compact',
       align: 'end',
       optional: true,
-      cell: row => <Text>{row.live ? String(row.agentsRunning) : '—'}</Text>,
+      cell: row => (
+        <Text>{row.live && row.agentsRunning !== null ? String(row.agentsRunning) : '—'}</Text>
+      ),
     },
     {
       key: 'cost',
@@ -311,6 +313,20 @@ function HostFilter(props: {
 }
 
 /**
+ * How many runs the hosts shown did not list: a status beside the filters, absent when every run is
+ * listed. The host says it (`runs_left_out`); the screen never counts the rows it was given.
+ */
+function RunsLeftOut(props: {
+  readonly hosts: readonly FleetHostView[];
+  readonly host: string | null;
+}): JSX.Element | null {
+  const left = props.hosts
+    .filter(host => props.host === null || host.key === props.host)
+    .reduce((sum, host) => sum + host.runsLeftOut, 0);
+  return left === 0 ? null : <Chip label={`${left} older runs not shown`} tone="warn" dot />;
+}
+
+/**
  * Every run of every connected host: the live ones, then the history, each row a summary that opens
  * the run. The filters and the selected row are the navigation's (`place`), so a run opened and left
  * finds the list as it was. The rows scroll inside their lists and only the ones in view are drawn,
@@ -379,6 +395,7 @@ export function FleetScreen(props: {
             change={state => go({type: 'filter-runs-by-state', state})}
           />
           <HostFilter hosts={view.hosts} host={place.host} go={go} />
+          <RunsLeftOut hosts={view.hosts} host={place.host} />
           {needRetry.length === 0 ? null : (
             <Button
               text="Retry"

@@ -10,8 +10,11 @@ import {
   applyAgentFeed,
   applyChange,
   applyCost,
+  applyRunHistory,
   applySearch,
   applySnapshot,
+  applySummary,
+  type RunHistoryFrame,
 } from './orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from './orchestrator/state.js';
 
@@ -31,7 +34,12 @@ export type HostFrame =
    */
   | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame}
   /** A run's whole cost view, as the host works it out, already read from its message. */
-  | {readonly from: 'cost'; readonly view: CostView};
+  | {readonly from: 'cost'; readonly view: CostView}
+  /**
+   * One page of a run's history (its agents, turns, messages and check-ins), read on request: a
+   * snapshot of runs holds none, and the run stream's cursor does not move for it.
+   */
+  | ({readonly from: 'run-history'} & RunHistoryFrame);
 
 export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
 
@@ -42,6 +50,7 @@ export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
   if (frame.from === 'history') return {...model, data: applyAgentFeed(model.data, frame.frame)};
   if (frame.from === 'cost') return {...model, data: applyCost(model.data, frame.view)};
+  if (frame.from === 'run-history') return {...model, data: applyRunHistory(model.data, frame)};
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;
     const at = frame.frame.sequence > before ? frame.frame.sequence : before;
@@ -56,6 +65,8 @@ export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
       return {...model, data: applySnapshot(model.data, body.value)};
     case 'search':
       return {...model, data: applySearch(model.data, body.value)};
+    case 'summary':
+      return {...model, data: applySummary(model.data, body.value)};
     case 'change':
       return {...model, data: applyChange(model.data, body.value)};
     case undefined:

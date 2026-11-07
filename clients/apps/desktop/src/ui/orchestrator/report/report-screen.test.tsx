@@ -25,6 +25,7 @@ import {
   measuredSearch,
   type ObjectiveSpec,
   SERVING,
+  serveSummaries,
   withReport,
 } from '../../../testing/orchestrator/index.js';
 import {RunScreen} from '../run-screen.js';
@@ -79,7 +80,7 @@ function stateOf(world: World): OrchestratorState {
   let state = withText.changes.reduce(applyChange, emptyState);
   state = applySearch(state, measuredSearch(RUN, options, {stale: world.stale === true}));
   const cost = world.cost === undefined ? COST : world.cost;
-  return cost === null ? state : applyCost(state, cost);
+  return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
 
 function render(

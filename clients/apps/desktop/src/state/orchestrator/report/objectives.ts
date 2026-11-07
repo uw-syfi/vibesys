@@ -2,11 +2,12 @@
  * The performance of a run, objective by objective, as the orchestrator serves it: every measured
  * candidate, the points that set a new best (the best-so-far line), the standing bound with its
  * provenance, the head's value and the percent of the bound the head and the best are at. Nothing
- * here is worked out: the best marks and the percents come from the host, so this only changes
- * their shape (bigints and timestamps become numbers) and joins what one objective has under its
- * name.
+ * here is worked out: the best marks come from the search state, the head's value and percent from
+ * the run's summary and the best's percent from the bounds, all served by the host, so this only
+ * changes their shape (bigints and timestamps become numbers) and joins what one objective has under
+ * its name.
  */
-import {Direction, oneofIs, type SearchState} from '@vibesys/orchestrator-proto';
+import {Direction, type ObjectiveStanding, type SearchState} from '@vibesys/orchestrator-proto';
 import {type ObjectiveBoundsView, objectiveBounds} from '../search-views.js';
 import {ms} from '../time.js';
 
@@ -35,7 +36,7 @@ export interface ObjectiveReport {
   readonly bestPath: readonly MeasuredPointView[];
   /** The newest point that set a best, or undefined with no measurement. */
   readonly best: MeasuredPointView | undefined;
-  /** The head's value on the objective, as the host read it; undefined when it has none. */
+  /** The head's value on the objective, as the host served it; undefined when it has none. */
   readonly headValue: number | undefined;
   /** How close the head is to the standing bound in percent, as the host worked it out. */
   readonly percentOfBound: number | undefined;
@@ -47,26 +48,16 @@ export interface ObjectiveReport {
 export const betterOf = (direction: Direction): Better =>
   direction === Direction.MINIMIZE ? 'lower' : 'higher';
 
-/** The head's own reading of an objective, when the bound view carries none. */
-function headReading(search: SearchState, name: string): number | undefined {
-  const head = search.head?.state;
-  const result = oneofIs(head, 'current', {current: true, none: true})
-    ? head.value.result?.outcome
-    : undefined;
-  const measure = oneofIs(result, 'measure', {check: true, measure: true})
-    ? result.value
-    : undefined;
-  if (measure === undefined) return undefined;
-  if (measure.metric?.name === name) return measure.value;
-  return measure.observations.find(observation => observation.name === name)?.value;
-}
-
 /**
  * The objectives of the run in the order the host serves them (the task's own), then the ones that
  * have a declared bound and no measurement yet, by name.
  */
-export function objectiveReports(search: SearchState): readonly ObjectiveReport[] {
+export function objectiveReports(
+  search: SearchState,
+  standings: readonly ObjectiveStanding[],
+): readonly ObjectiveReport[] {
   const bounds = new Map(objectiveBounds(search).map(bound => [bound.objective, bound]));
+  const standingOf = new Map(standings.map(standing => [standing.name, standing]));
   const measured: ObjectiveReport[] = search.series.map(series => {
     const points = series.points.map(point => ({
       id: point.jobId,
@@ -84,8 +75,8 @@ export function objectiveReports(search: SearchState): readonly ObjectiveReport[
       points,
       bestPath,
       best: bestPath.at(-1),
-      headValue: bound?.headValue ?? headReading(search, series.objective),
-      percentOfBound: bound?.percentOfBound,
+      headValue: standingOf.get(series.objective)?.headValue,
+      percentOfBound: standingOf.get(series.objective)?.headPercentOfBound,
       bestPercentOfBound: bound?.bestPercentOfBound,
       bound,
     };
@@ -101,8 +92,8 @@ export function objectiveReports(search: SearchState): readonly ObjectiveReport[
       points: [],
       bestPath: [],
       best: undefined,
-      headValue: bound.headValue,
-      percentOfBound: bound.percentOfBound,
+      headValue: standingOf.get(bound.objective)?.headValue,
+      percentOfBound: standingOf.get(bound.objective)?.headPercentOfBound,
       bestPercentOfBound: bound.bestPercentOfBound,
       bound,
     }));

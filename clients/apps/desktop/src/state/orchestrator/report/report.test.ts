@@ -3,13 +3,15 @@ import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
   AgentRole,
-  AgentSchema,
-  AgentStatus,
   Direction,
   MessageSchema,
+  ObjectiveStandingSchema,
   ReportKind,
+  ReportScope,
+  RoleAgentsSchema,
   RunSchema,
   RunStatus,
+  RunSummarySchema,
   SearchStateSchema,
   UnreadableReason,
 } from '@vibesys/orchestrator-proto';
@@ -18,7 +20,7 @@ import {emptyState, type OrchestratorState} from '../state.js';
 import {agentsStrip} from './agents-strip.js';
 import {objectiveReports} from './objectives.js';
 import {runReport} from './run-report.js';
-import {latestReport} from './summary.js';
+import {summaryReport} from './summary.js';
 import {tradeoffReport} from './tradeoff.js';
 
 const direction = fc.constantFrom(Direction.MAXIMIZE, Direction.MINIMIZE);
@@ -44,7 +46,7 @@ describe('the objectives of a report', () => {
   it('keep every point, mark and objective as served, in the order served', () => {
     fc.assert(
       fc.property(series, served => {
-        const reports = objectiveReports(create(SearchStateSchema, {series: served}));
+        const reports = objectiveReports(create(SearchStateSchema, {series: served}), []);
         expect(reports.map(r => r.name)).toEqual(served.map(s => s.objective));
         reports.forEach((report, index) => {
           const from = served[index];
@@ -62,7 +64,7 @@ describe('the objectives of a report', () => {
     );
   });
 
-  it('show the head value and the percents of the bound exactly as served, whatever they are', () => {
+  it('show the head value and the percents of the bound exactly as the run summary and the bounds served them, whatever they are', () => {
     fc.assert(
       fc.property(
         fc.double({min: 1e-3, max: 1e9, noNaN: true}),
@@ -84,12 +86,20 @@ describe('the objectives of a report', () => {
                   objective: 'tok_s',
                   direction: Direction.MAXIMIZE,
                   versions: [{seq: 1n, value: bound, unit: 'tok/s', note: 'n', objective: 'tok_s'}],
-                  headValue,
-                  percentOfBound,
+                  // The search state's own head figures are not read: the summary's are.
+                  headValue: headValue + 1,
+                  percentOfBound: percentOfBound + 1,
                   bestPercentOfBound,
                 },
               ],
             }),
+            [
+              create(ObjectiveStandingSchema, {
+                name: 'tok_s',
+                headValue,
+                headPercentOfBound: percentOfBound,
+              }),
+            ],
           );
           expect(report?.headValue).toBe(headValue);
           expect(report?.percentOfBound).toBe(percentOfBound);
@@ -102,7 +112,7 @@ describe('the objectives of a report', () => {
     );
   });
 
-  it('say nothing of a percent the host did not send, and read the head for a value of an objective with no bound', () => {
+  it('have no head value or percent for an objective the summary served no head for, and compute none from the search state', () => {
     const search = create(SearchStateSchema, {
       series: [
         {
@@ -123,8 +133,8 @@ describe('the objectives of a report', () => {
         },
       },
     });
-    const [report] = objectiveReports(search);
-    expect(report?.headValue).toBe(7);
+    const [report] = objectiveReports(search, []);
+    expect(report?.headValue).toBeUndefined();
     expect(report?.percentOfBound).toBeUndefined();
     expect(report?.bestPercentOfBound).toBeUndefined();
     expect(report?.bound).toBeUndefined();
@@ -149,7 +159,9 @@ describe('the objectives of a report', () => {
           },
         ],
       }),
+      [create(ObjectiveStandingSchema, {name: 'a', headValue: 4})],
     );
+    expect(bare?.headValue).toBe(4);
     expect([measured?.name, bare?.name, bare?.points.length, bare?.better]).toEqual([
       'b',
       'a',
@@ -159,7 +171,7 @@ describe('the objectives of a report', () => {
   });
 
   it('are none for a search with nothing measured or declared', () => {
-    expect(objectiveReports(create(SearchStateSchema, {}))).toEqual([]);
+    expect(objectiveReports(create(SearchStateSchema, {}), [])).toEqual([]);
   });
 });
 
@@ -224,29 +236,41 @@ const report = (id: string, runId: string, sequence: number, atS: number, extra 
     at: timestampFromMs(atS * 1000),
     body: {
       case: 'report',
-      value: {headline: `h-${id}`, kind: ReportKind.PROGRESS, sequence, ...extra},
+      value: {
+        headline: `h-${id}`,
+        kind: ReportKind.PROGRESS,
+        scope: ReportScope.RUN,
+        sequence,
+        ...extra,
+      },
     },
   });
 
-const withMessages = (...messages: ReturnType<typeof report>[]): OrchestratorState => ({
+const withSummary = (runId: string, message?: ReturnType<typeof report>): OrchestratorState => ({
   ...emptyState,
-  messages: Object.fromEntries(messages.map(m => [m.id, m])),
+  summaries: {
+    [runId]: create(RunSummarySchema, {runId, ...(message === undefined ? {} : {report: message})}),
+  },
 });
 
 describe('the lead summary', () => {
-  it('is the report with the highest number whatever order they arrive in, and never another run’s', () => {
+  // The host picks the report that sums a run up. Which messages the app holds, in what order, of
+  // whatever scope, changes nothing: the summary is the one report the host served.
+  it('is the report the host served, whatever messages are held of the run, a window report among them', () => {
     fc.assert(
       fc.property(
         fc.uniqueArray(fc.integer({min: 1, max: 50}), {minLength: 1, maxLength: 10}),
-        fc.nat(1000),
-        (sequences, shuffle) => {
-          const mine = sequences.map((n, i) =>
-            report(`m${i}`, 'r', n, 100 + ((i * 7 + shuffle) % 13)),
-          );
-          const other = report('x', 'other', 999, 9999);
-          const state = withMessages(other, ...mine);
-          expect(latestReport(state, 'r')?.sequence).toBe(Math.max(...sequences));
-          expect(latestReport(state, 'other')?.id).toBe('x');
+        fc.constantFrom(ReportScope.RUN, ReportScope.WINDOW, ReportScope.UNSPECIFIED),
+        (sequences, scope) => {
+          const held = sequences.map((n, i) => report(`m${i}`, 'r', n, 100 + i, {scope}));
+          const served = report('served', 'r', 1, 5);
+          const state: OrchestratorState = {
+            ...withSummary('r', served),
+            messages: Object.fromEntries(held.map(m => [m.id, m])),
+          };
+          expect(summaryReport(state, 'r')?.id).toBe('served');
+          // Another run's summary is its own.
+          expect(summaryReport(state, 'other')).toBeUndefined();
         },
       ),
       {seed: 14},
@@ -254,14 +278,15 @@ describe('the lead summary', () => {
   });
 
   it('keeps only the parts the lead filled in, in the lead’s order, and says when it is final', () => {
-    const state = withMessages(
+    const state = withSummary(
+      'r',
       report('a', 'r', 1, 1, {
         changed: 'c',
         openForUser: 'o',
         kind: ReportKind.FINAL,
       }),
     );
-    const summary = latestReport(state, 'r');
+    const summary = summaryReport(state, 'r');
     expect(summary?.fields).toEqual([
       {field: 'changed', text: 'c'},
       {field: 'openForUser', text: 'o'},
@@ -270,15 +295,13 @@ describe('the lead summary', () => {
     expect(summary?.atMs).toBe(1000);
   });
 
-  it('is absent before the lead has posted a report', () => {
-    expect(latestReport(emptyState, 'r')).toBeUndefined();
+  it('is absent before the host has served a report, and a message that is not a report is none', () => {
+    expect(summaryReport(emptyState, 'r')).toBeUndefined();
+    expect(summaryReport(withSummary('r'), 'r')).toBeUndefined();
     const text = create(MessageSchema, {id: 't', runId: 'r', body: {case: 'text', value: 'hi'}});
-    expect(latestReport({...emptyState, messages: {t: text}}, 'r')).toBeUndefined();
+    expect(summaryReport(withSummary('r', text), 'r')).toBeUndefined();
   });
 });
-
-const agent = (id: string, runId: string, role: AgentRole, status: AgentStatus) =>
-  create(AgentSchema, {id, runId, role, status});
 
 describe('the agents strip', () => {
   const roles = fc.constantFrom(
@@ -289,47 +312,45 @@ describe('the agents strip', () => {
     AgentRole.COMBINER,
     AgentRole.PROFILER,
   );
-  const statuses = fc.constantFrom(
-    AgentStatus.LAUNCHING,
-    AgentStatus.ACTIVE,
-    AgentStatus.WAITING,
-    AgentStatus.IDLE,
-    AgentStatus.ENDED,
-    AgentStatus.FAILED,
-    AgentStatus.LOST,
-  );
 
-  it('counts the run’s agents once, by type, and the running ones among them', () => {
+  it('is the agents of the run as the host counted them, by type, in the order served', () => {
     fc.assert(
       fc.property(
-        fc.array(fc.tuple(roles, statuses, fc.constantFrom('r', 'other')), {maxLength: 30}),
+        fc.uniqueArray(
+          fc.record({
+            role: roles,
+            total: fc.integer({min: 1, max: 9}),
+            working: fc.integer({min: 0, max: 9}),
+          }),
+          {selector: row => row.role, maxLength: 6},
+        ),
         rows => {
+          const served = rows.map(row => ({...row, working: Math.min(row.working, row.total)}));
           const state: OrchestratorState = {
             ...emptyState,
-            agents: Object.fromEntries(
-              rows.map(([role, status, runId], i) => [
-                `a${i}`,
-                agent(`a${i}`, runId, role, status),
-              ]),
-            ),
+            summaries: {
+              r: create(RunSummarySchema, {
+                runId: 'r',
+                agentsTotal: served.reduce((n, row) => n + row.total, 0),
+                agentsWorking: served.reduce((n, row) => n + row.working, 0),
+                roles: served.map(row => create(RoleAgentsSchema, row)),
+              }),
+            },
           };
-          const mine = rows.filter(([, , runId]) => runId === 'r');
           const strip = agentsStrip(state, 'r');
-          expect(strip.total).toBe(mine.length);
-          expect(strip.types.reduce((n, t) => n + t.total, 0)).toBe(mine.length);
-          expect(strip.running).toBe(strip.types.reduce((n, t) => n + t.running, 0));
-          expect(strip.running).toBe(
-            mine.filter(([, s]) => s === AgentStatus.ACTIVE || s === AgentStatus.LAUNCHING).length,
+          expect(strip.types).toEqual(
+            served.map(({role, total, working}) => ({role, total, running: working})),
           );
-          for (const type of strip.types) {
-            expect(type.total).toBe(mine.filter(([role]) => role === type.role).length);
-            expect(type.running).toBeLessThanOrEqual(type.total);
-          }
-          expect(new Set(strip.types.map(t => t.role)).size).toBe(strip.types.length);
+          expect(strip.total).toBe(state.summaries['r']?.agentsTotal);
+          expect(strip.running).toBe(state.summaries['r']?.agentsWorking);
         },
       ),
       {seed: 15},
     );
+  });
+
+  it('is empty before the host has served the run’s summary', () => {
+    expect(agentsStrip(emptyState, 'r')).toEqual({types: [], total: 0, running: 0});
   });
 });
 

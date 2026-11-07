@@ -36,6 +36,7 @@ type Engine struct {
 	EngineDeps
 	mu       sync.Mutex
 	searches map[core.RunID]*pb.SearchState
+	reports  reportCache
 	state    core.State
 	last     uint64
 }
@@ -54,7 +55,7 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}}
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: newReportCache()}
 	return e, nil
 }
 

@@ -19,9 +19,12 @@ import "time"
 // sets NextSummaryAt to LastSummaryAt plus SummaryEvery, or to that moment when it is already past, and
 // arms a timer for it. When the timer fires for the time the run still holds, the lead is asked once,
 // the request becomes LastSummaryAt and the run is quiet again until the work next moves. A report
-// from the lead, of either kind, makes its own time LastSummaryAt and clears NextSummaryAt, so the lead
-// that reports unasked has the interval counted from its report and the timer armed for the old time
-// fires harmlessly. Reaching a limit or beginning to stop clears it too, and a lead that has given its
+// from the lead about the whole run, of either kind, makes its own time LastSummaryAt and clears
+// NextSummaryAt, so the lead that reports unasked has the interval counted from its report and the timer
+// armed for the old time fires harmlessly. A report that answers a check-in (see checkin.go) is about a
+// window of the run and not the run: the lead was asked for it by a viewer, not by this schedule, so it
+// moves neither LastSummaryAt nor NextSummaryAt, and the hour goes on being counted from the last report
+// of the whole run. Reaching a limit or beginning to stop clears it too, and a lead that has given its
 // final report is not asked until it starts new work.
 //
 // What this guarantees, which the simulation holds the core to: two requests to one lead are at least
@@ -84,8 +87,8 @@ func (t *tx) summaryDue(b TimerFired) {
 	t.sweep(run.ID)
 }
 
-// reported counts the schedule from a report the lead posted at at, and cancels the request that was
-// waiting for its timer.
+// reported counts the schedule from a report about the whole run that the lead posted at at, and cancels
+// the request that was waiting for its timer.
 func (r Run) reported(at time.Time) Run {
 	r.LastSummaryAt, r.NextSummaryAt = at, time.Time{}
 	return r

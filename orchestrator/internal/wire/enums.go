@@ -157,6 +157,11 @@ var (
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
 		core.ReportFinal:    pb.ReportKind_REPORT_KIND_FINAL,
 	})
+	reportScopes = newEnum(map[core.ReportScope]pb.ReportScope{
+		"":                     pb.ReportScope_REPORT_SCOPE_UNSPECIFIED,
+		core.ReportScopeRun:    pb.ReportScope_REPORT_SCOPE_RUN,
+		core.ReportScopeWindow: pb.ReportScope_REPORT_SCOPE_WINDOW,
+	})
 	verdicts = newEnum(map[core.Verdict]pb.JudgeVerdict{
 		core.VerdictPass:       pb.JudgeVerdict_JUDGE_VERDICT_PASS,
 		core.VerdictFail:       pb.JudgeVerdict_JUDGE_VERDICT_FAIL,

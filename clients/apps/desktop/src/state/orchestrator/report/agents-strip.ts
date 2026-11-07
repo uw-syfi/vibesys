@@ -1,54 +1,36 @@
 /**
- * The agents of a run by type: how many the run has had and how many are working a turn now. The
- * lead spawns agents freely, so there is no fixed set of roles: a type with no agent is left out.
+ * The agents of a run by type, as the host counts them (`RunSummary`): how many the run has had and
+ * how many are working now. The lead spawns agents freely, so there is no fixed set of roles: a type
+ * with no agent is not served. The host owns what working means (starting, in a turn, or waiting on
+ * subagents), so this screen and the run list can never disagree on it.
  */
-import {AgentRole, AgentStatus} from '@vibesys/orchestrator-proto';
+import type {AgentRole} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from '../state.js';
 
 export interface AgentTypeCount {
   readonly role: AgentRole;
   /** Agents of the type the run has had, over or not. */
   readonly total: number;
-  /** Agents of the type whose session is opening or in a turn. */
+  /** Agents of the type that are working, as the host counts them. */
   readonly running: number;
 }
 
 export interface AgentsStrip {
-  /** In the order of the contract's roles. */
+  /** In the order the host serves them. */
   readonly types: readonly AgentTypeCount[];
   readonly total: number;
   readonly running: number;
 }
 
-const RUNNING = new Set<AgentStatus>([AgentStatus.LAUNCHING, AgentStatus.ACTIVE]);
+const NONE: AgentsStrip = {types: [], total: 0, running: 0};
 
-const ROLES: readonly AgentRole[] = [
-  AgentRole.LEAD,
-  AgentRole.PLANNER,
-  AgentRole.WORKER,
-  AgentRole.JUDGE,
-  AgentRole.COMBINER,
-  AgentRole.PROFILER,
-  AgentRole.UNSPECIFIED,
-];
-
+/** The agents of the run as the host served them; none before it sent the run's summary. */
 export function agentsStrip(state: OrchestratorState, runId: string): AgentsStrip {
-  const agents = Object.values(state.agents).filter(agent => agent.runId === runId);
-  const types = ROLES.flatMap(role => {
-    const ofType = agents.filter(agent => agent.role === role);
-    return ofType.length === 0
-      ? []
-      : [
-          {
-            role,
-            total: ofType.length,
-            running: ofType.filter(agent => RUNNING.has(agent.status)).length,
-          },
-        ];
-  });
+  const summary = state.summaries[runId];
+  if (summary === undefined) return NONE;
   return {
-    types,
-    total: agents.length,
-    running: types.reduce((sum, type) => sum + type.running, 0),
+    types: summary.roles.map(({role, total, working}) => ({role, total, running: working})),
+    total: summary.agentsTotal,
+    running: summary.agentsWorking,
   };
 }

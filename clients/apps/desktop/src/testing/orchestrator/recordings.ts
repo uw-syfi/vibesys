@@ -12,6 +12,8 @@ import {
   DispatchResponseSchema,
   GetItemRequestSchema,
   GetItemResponseSchema,
+  GetRunHistoryRequestSchema,
+  GetRunHistoryResponseSchema,
   HelloResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
@@ -19,6 +21,9 @@ import {
   OrchestratorService,
   oneofIs,
   type RunChange,
+  type RunSummary,
+  RunSummarySchema,
+  SnapshotDetail,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
   WatchRunCostRequestSchema,
@@ -50,6 +55,8 @@ export interface DaemonOptions {
   readonly dispatch?: (nth: number) => DispatchFate;
   /** A stream ends cleanly after its frames instead of staying open. */
   readonly closeStreams?: boolean;
+  /** How many of a run's messages one page of its history holds; the host's own bound by default. */
+  readonly historyPageMessages?: number;
   /**
    * The run stream stays open and carries each change the daemon commits after it opened, as the
    * real host's does, instead of holding its first frames for ever.
@@ -141,23 +148,97 @@ function costSteps(
   return [{frame}, ...tail];
 }
 
-/** A step that carries each change the daemon commits from now on, as it commits it, in the log's order. */
-function followRuns(daemon: FakeDaemon): Step {
+/** The whole page of a run's history a `GetRunHistory` call asks for, or NotFound for a run the host lacks. */
+function runHistorySteps(
+  daemon: FakeDaemon,
+  target: CallTarget,
+  pageMessages: number | undefined,
+): ReadonlyArray<Step> {
+  const request = fromBinary(GetRunHistoryRequestSchema, target.request);
+  if (!daemon.summaries().some(summary => summary.runId === request.runId))
+    return [{end: {message: `no run ${request.runId}`, status: RpcStatus.NOT_FOUND}}];
+  const page = daemon.history(request.runId, request.cursor, pageMessages);
+  return [{frame: toBinary(GetRunHistoryResponseSchema, page)}];
+}
+
+const frameOf = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>[1]): Uint8Array =>
+  toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, body));
+
+/** The summaries that differ from the ones in `held`, which then holds them: what the host would send. */
+function changedSummaries(
+  now: readonly RunSummary[],
+  held: Map<string, Uint8Array>,
+): ReadonlyArray<RunSummary> {
+  return now.filter(summary => {
+    const bytes = toBinary(RunSummarySchema, summary);
+    const before = held.get(summary.runId);
+    if (before !== undefined && equalBytes(before, bytes)) return false;
+    held.set(summary.runId, bytes);
+    return true;
+  });
+}
+
+const equalBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
+
+/**
+ * A step that carries each change the daemon commits from now on, as it commits it, in the log's
+ * order, and, for a stream that asked for summaries, the summaries each batch of changes moved.
+ */
+function followRuns(daemon: FakeDaemon, summaries: Map<string, Uint8Array> | null): Step {
   let sent = daemon.sequence;
   return {
     follow: emit =>
       daemon.watch(() => {
         for (const event of daemon.changesAfter(sent)) {
           sent = event.sequence;
-          emit(
-            toBinary(
-              WatchRunsResponseSchema,
-              create(WatchRunsResponseSchema, {body: {case: 'change', value: event}}),
-            ),
-          );
+          emit(frameOf({body: {case: 'change', value: event}}));
         }
+        if (summaries !== null)
+          for (const summary of changedSummaries(daemon.summaries(), summaries))
+            emit(frameOf({body: {case: 'summary', value: summary}}));
       }),
   };
+}
+
+/**
+ * What a WatchRuns call does: the snapshot when it starts from none, the changes after its cursor, the
+ * search views and summaries it has not been sent, and then the stream. A stream of detail SUMMARY is the
+ * one that is sent summary frames; it holds the summaries it sent.
+ */
+function runsSteps(
+  daemon: FakeDaemon,
+  target: CallTarget,
+  live: boolean,
+  tail: ReadonlyArray<Step>,
+): ReadonlyArray<Step> {
+  const {afterSequence, detail} = fromBinary(WatchRunsRequestSchema, target.request);
+  const encode = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>[1]): Step => ({
+    frame: frameOf(body),
+  });
+  let after = afterSequence;
+  const steps: Step[] = [];
+  const seen = new Map<string, bigint>();
+  const summaries = detail === SnapshotDetail.SUMMARY ? new Map<string, Uint8Array>() : null;
+  // The host as it stands now: what the snapshot says, and what has not been sent beside it.
+  const now = daemon.snapshot(detail);
+  if (after === 0n) {
+    after = now.sequence;
+    steps.push(encode({body: {case: 'snapshot', value: now}}));
+    for (const search of now.searches) seen.set(search.runId, search.revision);
+    if (summaries !== null) changedSummaries(now.summaries, summaries);
+  }
+  for (const event of daemon.changesAfter(after)) {
+    steps.push(encode({body: {case: 'change', value: event}}));
+  }
+  for (const search of now.searches) {
+    if (search.revision > (seen.get(search.runId) ?? 0n))
+      steps.push(encode({body: {case: 'search', value: search}}));
+  }
+  if (summaries !== null)
+    for (const summary of changedSummaries(now.summaries, summaries))
+      steps.push(encode({body: {case: 'summary', value: summary}}));
+  return [...steps, ...(live ? [followRuns(daemon, summaries)] : tail)];
 }
 
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
@@ -189,30 +270,6 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
     return [{frame: bytes}];
-  };
-
-  const watchRuns = (target: CallTarget): ReadonlyArray<Step> => {
-    const {afterSequence} = fromBinary(WatchRunsRequestSchema, target.request);
-    const encode = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>[1]): Step => ({
-      frame: toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, body)),
-    });
-    let after = afterSequence;
-    const steps: Step[] = [];
-    const seen = new Map<string, bigint>();
-    if (after === 0n) {
-      const snapshot = daemon.snapshot();
-      after = snapshot.sequence;
-      steps.push(encode({body: {case: 'snapshot', value: snapshot}}));
-      for (const search of snapshot.searches) seen.set(search.runId, search.revision);
-    }
-    for (const event of daemon.changesAfter(after)) {
-      steps.push(encode({body: {case: 'change', value: event}}));
-    }
-    for (const search of daemon.snapshot().searches) {
-      if (search.revision > (seen.get(search.runId) ?? 0n))
-        steps.push(encode({body: {case: 'search', value: search}}));
-    }
-    return [...steps, ...(options.live === true ? [followRuns(daemon)] : tail)];
   };
 
   const watchAgent = (target: CallTarget): ReadonlyArray<Step> => {
@@ -250,8 +307,10 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return listItemsSteps(daemon, target);
         case methodPathOf('GetItem'):
           return getItemSteps(daemon, target);
+        case methodPathOf('GetRunHistory'):
+          return runHistorySteps(daemon, target, options.historyPageMessages);
         case methodPathOf('WatchRuns'):
-          return watchRuns(target);
+          return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):
           return watchAgent(target);
         case methodPathOf('WatchRunCost'):

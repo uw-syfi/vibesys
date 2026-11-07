@@ -1,0 +1,55 @@
+{
+  "snapshot": {
+    "sequence": "40",
+    "runs": [
+      {
+        "id": "run-1",
+        "repository": "repo",
+        "task": "task",
+        "status": "RUN_STATUS_RUNNING",
+        "leadAgentId": "agent-1",
+        "createdAt": "2026-01-01T00:00:00Z"
+      },
+      {
+        "id": "run-2",
+        "repository": "repo-2",
+        "task": "task",
+        "status": "RUN_STATUS_ENDED",
+        "leadAgentId": "agent-2",
+        "createdAt": "2025-12-31T00:00:00Z",
+        "endedAt": "2025-12-31T05:00:00Z"
+      }
+    ],
+    "summaries": [
+      {
+        "runId": "run-1",
+        "agentsWorking": 1,
+        "agentsTotal": 1,
+        "roles": [{"role": "AGENT_ROLE_LEAD", "total": 1, "working": 1}]
+      },
+      {
+        "runId": "run-2",
+        "report": {
+          "id": "message-4",
+          "runId": "run-2",
+          "fromAgentId": "agent-2",
+          "delivery": "DELIVERY_CONSUMED",
+          "at": "2025-12-31T04:59:00Z",
+          "report": {
+            "headline": "Done",
+            "kind": "REPORT_KIND_FINAL",
+            "scope": "REPORT_SCOPE_RUN",
+            "sequence": 2
+          }
+        },
+        "agentsTotal": 2,
+        "roles": [
+          {"role": "AGENT_ROLE_LEAD", "total": 1},
+          {"role": "AGENT_ROLE_WORKER", "total": 1}
+        ]
+      }
+    ],
+    "truncated": true,
+    "runsLeftOut": 7
+  }
+}

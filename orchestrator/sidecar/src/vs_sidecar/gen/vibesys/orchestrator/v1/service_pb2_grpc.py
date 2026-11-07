@@ -66,6 +66,11 @@ class OrchestratorServiceStub(object):
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemResponse.FromString,
                 _registered_method=True)
+        self.GetRunHistory = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.FromString,
+                _registered_method=True)
         self.WatchRunCost = channel.unary_stream(
                 '/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost',
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
@@ -93,7 +98,8 @@ class OrchestratorServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def WatchRuns(self, request, context):
-        """Snapshot of runs and agents, then every change after its sequence.
+        """Snapshot of runs, then every change after its sequence, and a RunSummary each time a run's summary
+        moves. What the snapshot holds of each run is the request's `detail`.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -115,6 +121,14 @@ class OrchestratorServiceServicer(object):
 
     def GetItem(self, request, context):
         """One item of an agent, whole: what a page left out.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRunHistory(self, request, context):
+        """One run's history, paged: the agents, turns and check-ins it has and its messages, which a
+        snapshot of detail SUMMARY leaves out.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -160,6 +174,11 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.GetItem,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemResponse.SerializeToString,
+            ),
+            'GetRunHistory': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRunHistory,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.SerializeToString,
             ),
             'WatchRunCost': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchRunCost,
@@ -331,6 +350,33 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/GetItem',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetItemResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRunHistory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory',
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -10,7 +10,7 @@ import type * as Effect from 'effect/Effect';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
-import type {HistoryStatus, HostSession, Intent} from '../../core/index.js';
+import type {HistoryStatus, HostSession, Intent, RunHistoryStatus} from '../../core/index.js';
 import type {
   CommandProgress,
   CostFeedSnapshot,
@@ -53,17 +53,24 @@ export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}};
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
 const IDLE: HistoryStatus = {_tag: 'Idle'};
+const RUN_HISTORY_IDLE: RunHistoryStatus = {_tag: 'Idle'};
 
-/** One agent's stream on its host, followed while this is mounted. */
-const watchAgent = (
+/**
+ * One agent's stream and one run's history on their host, followed while this is mounted. The history
+ * of a run is read, and read again after a new snapshot forgot it, for as long as a screen of the run
+ * is open.
+ */
+const watchOpen = (
   hosts: readonly ConnectedHost[],
   host: string | undefined,
   agentId: string | null | undefined,
+  runId: string | undefined,
 ): Atom.Atom<void> =>
   Atom.make(get => {
     const found = hosts.find(candidate => candidate.key === host);
-    if (found !== undefined && agentId !== null && agentId !== undefined)
-      get(found.session.agents.watch(agentId));
+    if (found === undefined) return;
+    if (agentId !== null && agentId !== undefined) get(found.session.agents.watch(agentId));
+    if (runId !== undefined) get(found.session.runHistory.watch(runId));
   });
 
 /** One run's cost stream on its host, followed while this is mounted. */
@@ -77,12 +84,37 @@ const watchCost = (
     if (found !== undefined && runId !== undefined) get(found.session.costs.watch(runId));
   });
 
+/** How the atom below reads another atom. */
+type Reader = <A>(atom: Atom.Atom<A>) => A;
+
+/** Where the read of the open run's history stands on `session`; idle when no run of it is open. */
+const openRunHistory = (
+  get: Reader,
+  session: HostSession,
+  runId: string | undefined,
+): RunHistoryStatus =>
+  runId === undefined ? RUN_HISTORY_IDLE : get(session.runHistory.status(runId));
+
+/** Where the reads of the open agent's past stand on `session`; idle when no agent of it is open. */
+const openAgentHistory = (
+  get: Reader,
+  session: HostSession,
+  agentId: string | null | undefined,
+): HostSnapshot['history'] =>
+  agentId === null || agentId === undefined
+    ? {earlier: IDLE, wholes: {}}
+    : {
+        earlier: get(session.history.earlier(agentId)),
+        wholes: get(session.history.wholes(agentId)),
+      };
+
 /** Everything the screens show, read from the sessions. */
 const snapshots = (
   hosts: readonly ConnectedHost[],
   issues: Issues,
   openHost: string | undefined,
   openAgent: string | null | undefined,
+  openRun: string | undefined,
   cost: CostTarget | null,
 ): Atom.Atom<{
   readonly hosts: readonly HostSnapshot[];
@@ -123,13 +155,8 @@ const snapshots = (
                 } satisfies CostFeedSnapshot,
               }
             : {},
-        history:
-          openHost === key && openAgent !== null && openAgent !== undefined
-            ? {
-                earlier: get(session.history.earlier(openAgent)),
-                wholes: get(session.history.wholes(openAgent)),
-              }
-            : {earlier: IDLE, wholes: {}},
+        runHistory: openRunHistory(get, session, openHost === key ? openRun : undefined),
+        history: openAgentHistory(get, session, openHost === key ? openAgent : undefined),
       })),
       progress: {
         start: progressOf(issues.start),
@@ -140,6 +167,18 @@ const snapshots = (
   });
 
 type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send'>;
+
+/** What the route has open: the host, the agent and the run, and the run whose cost stream is followed. */
+function openOf(route: Route) {
+  const cost = costTarget(route);
+  return {
+    openHost: route.screen === 'run' ? route.host : undefined,
+    openAgent: route.screen === 'run' ? route.agentId : undefined,
+    openRun: route.screen === 'run' ? route.runId : undefined,
+    costHost: cost?.host,
+    costRun: cost?.runId,
+  };
+}
 
 /**
  * The runs of every host, one open at a time. The run streams are followed by the window (the
@@ -155,13 +194,16 @@ export function ConnectedApp(props: {
   readonly setIssues: (update: (all: Issues) => Issues) => void;
 }): JSX.Element {
   const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
-  const openHost = route.screen === 'run' ? route.host : undefined;
-  const openAgent = route.screen === 'run' ? route.agentId : undefined;
-  useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
+  const {openHost, openAgent, openRun, costHost, costRun} = openOf(route);
+  // The open agent's stream, and the open run's history, which the run stream does not carry: both are
+  // followed while a screen of them is open.
+  useAtomMount(
+    useMemo(
+      () => watchOpen(hosts, openHost, openAgent, openRun),
+      [hosts, openHost, openAgent, openRun],
+    ),
+  );
   // The cost stream is open only while the Cost view shows: leaving it closes the stream.
-  const cost = costTarget(route);
-  const costHost = cost?.host;
-  const costRun = cost?.runId;
   useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
   const clock = useAtomValue(nowMs);
   const view = useAtomValue(
@@ -172,9 +214,10 @@ export function ConnectedApp(props: {
           issues,
           openHost,
           openAgent,
+          openRun,
           costHost === undefined || costRun === undefined ? null : {host: costHost, runId: costRun},
         ),
-      [hosts, issues, openHost, openAgent, costHost, costRun],
+      [hosts, issues, openHost, openAgent, openRun, costHost, costRun],
     ),
   );
   const sessionOf = (host: string): HostSession | undefined =>
@@ -236,6 +279,8 @@ export function ConnectedApp(props: {
         dispatch(session.runs.retry, () => undefined);
         if (openHost === host && openAgent !== null && openAgent !== undefined)
           dispatch(session.agents.retry(openAgent), () => undefined);
+        if (openHost === host && openRun !== undefined)
+          dispatch(session.runHistory.retry(openRun), () => undefined);
       }}
     />
   );

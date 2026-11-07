@@ -161,6 +161,18 @@ func (c *Client) WatchRuns(ctx context.Context, after uint64) (grpc.ServerStream
 	return c.svc.WatchRuns(ctx, &pb.WatchRunsRequest{AfterSequence: after})
 }
 
+// WatchRunsSummary opens the stream of runs with a snapshot of detail SUMMARY: the runs and their
+// summaries, and a summary again each time one changes. A run's history is read with GetRunHistory.
+func (c *Client) WatchRunsSummary(ctx context.Context, after uint64) (grpc.ServerStreamingClient[pb.WatchRunsResponse], error) {
+	return c.svc.WatchRuns(ctx, &pb.WatchRunsRequest{AfterSequence: after, Detail: pb.SnapshotDetail_SNAPSHOT_DETAIL_SUMMARY})
+}
+
+// GetRunHistory reads one page of a run's history: the agents, turns and check-ins on the first page
+// (cursor zero) and the messages on every page, until a page's next cursor is zero.
+func (c *Client) GetRunHistory(ctx context.Context, run string, cursor uint64) (*pb.GetRunHistoryResponse, error) {
+	return c.svc.GetRunHistory(ctx, &pb.GetRunHistoryRequest{RunId: run, Cursor: cursor})
+}
+
 // WatchAgent opens the stream of one agent: a page of its newest items, then items, turns and
 // deltas.
 func (c *Client) WatchAgent(ctx context.Context, agent string, pageSize uint32, after uint64) (grpc.ServerStreamingClient[pb.WatchAgentResponse], error) {
