@@ -1089,8 +1089,13 @@ type SubmitRequest struct {
 	NoCache bool `protobuf:"varint,3,opt,name=no_cache,json=noCache,proto3" json:"no_cache,omitempty"`
 	// A note to attach to the job, including one reached by a cache hit or a duplicate.
 	Note string `protobuf:"bytes,4,opt,name=note,proto3" json:"note,omitempty"`
-	// A plan to link the job to, or zero.
-	Plan          uint32 `protobuf:"varint,5,opt,name=plan,proto3" json:"plan,omitempty"`
+	// A plan to link the job to, or zero. A job may be linked to several plans over its life, since
+	// a submission that joins or reuses it adds its own link.
+	Plan uint32 `protobuf:"varint,5,opt,name=plan,proto3" json:"plan,omitempty"`
+	// The caller says the measure job tests no plan (the baseline, or a re-measure of the head).
+	// Only a measure job takes it. Zero plan and false no_plan is a caller that said nothing, which
+	// vibesysd refuses for a measure job submitted from a run.
+	NoPlan        bool `protobuf:"varint,6,opt,name=no_plan,json=noPlan,proto3" json:"no_plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1158,6 +1163,13 @@ func (x *SubmitRequest) GetPlan() uint32 {
 		return x.Plan
 	}
 	return 0
+}
+
+func (x *SubmitRequest) GetNoPlan() bool {
+	if x != nil {
+		return x.NoPlan
+	}
+	return false
 }
 
 type SubmitResponse struct {
@@ -4572,13 +4584,15 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"repository\"D\n" +
 	"\x18ForgetRepositoryResponse\x12\x14\n" +
 	"\x05tasks\x18\x01 \x03(\tR\x05tasks\x12\x12\n" +
-	"\x04left\x18\x02 \x03(\tR\x04left\"\xbe\x01\n" +
+	"\x04left\x18\x02 \x03(\tR\x04left\"\xdb\x02\n" +
 	"\rSubmitRequest\x125\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x123\n" +
 	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecB\x06\xbaH\x03\xc8\x01\x01R\x04spec\x12\x19\n" +
 	"\bno_cache\x18\x03 \x01(\bR\anoCache\x12\x12\n" +
 	"\x04note\x18\x04 \x01(\tR\x04note\x12\x12\n" +
-	"\x04plan\x18\x05 \x01(\rR\x04plan\"|\n" +
+	"\x04plan\x18\x05 \x01(\rR\x04plan\x12\x17\n" +
+	"\ano_plan\x18\x06 \x01(\bR\x06noPlan:\x81\x01\xbaH~\x1a|\n" +
+	"\x16submit.plan_or_no_plan\x12>give --plan or --no-plan, not both: a job tests a plan or none\x1a\"!(this.no_plan && this.plan != 0u)\"|\n" +
 	"\x0eSubmitResponse\x12%\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\x12C\n" +
 	"\vdisposition\x18\x02 \x01(\x0e2!.vibesys.cli.v1.SubmitDispositionR\vdisposition\"^\n" +

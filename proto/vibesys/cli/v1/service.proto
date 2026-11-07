@@ -215,14 +215,24 @@ message ForgetRepositoryResponse {
 }
 
 message SubmitRequest {
+  option (buf.validate.message).cel = {
+    id: "submit.plan_or_no_plan"
+    message: "give --plan or --no-plan, not both: a job tests a plan or none"
+    expression: "!(this.no_plan && this.plan != 0u)"
+  };
   CallContext context = 1;
   JobSpec spec = 2 [(buf.validate.field).required = true];
   // Run a new job even when a reusable result or a matching queued or running job exists.
   bool no_cache = 3;
   // A note to attach to the job, including one reached by a cache hit or a duplicate.
   string note = 4;
-  // A plan to link the job to, or zero.
+  // A plan to link the job to, or zero. A job may be linked to several plans over its life, since
+  // a submission that joins or reuses it adds its own link.
   uint32 plan = 5;
+  // The caller says the measure job tests no plan (the baseline, or a re-measure of the head).
+  // Only a measure job takes it. Zero plan and false no_plan is a caller that said nothing, which
+  // vibesysd refuses for a measure job submitted from a run.
+  bool no_plan = 6;
 }
 
 // SubmitDisposition says what a submission turned into.

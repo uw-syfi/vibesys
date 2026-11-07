@@ -212,6 +212,7 @@ func (s *Server) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.S
 		NoCache: req.GetNoCache(),
 		Note:    req.GetNote(),
 		Plan:    core.PlanNumber(req.GetPlan()),
+		NoPlan:  req.GetNoPlan(),
 	})
 	if err != nil {
 		return nil, wire.Error(err)

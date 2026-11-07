@@ -19,7 +19,10 @@ type SubmitRequest struct {
 	Spec    core.JobSpec
 	NoCache bool
 	Note    string
-	Plan    core.PlanNumber
+	// Plan is the plan the job is linked to, or zero. NoPlan says the job tests no plan. A caller
+	// gives at most one of them; Submit refuses both.
+	Plan   core.PlanNumber
+	NoPlan bool
 }
 
 func invalid(format string, args ...any) *core.Failure {
@@ -44,6 +47,15 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
 	}
+	// The plan link is checked before the task is read, so a submission the caller must correct
+	// costs nothing.
+	link, err := core.NewPlanLink(req.Plan, req.NoPlan)
+	if err == nil {
+		err = link.Check(req.Spec.Settings.Kind())
+	}
+	if err != nil {
+		return core.SubmitOutcome{}, err
+	}
 	if !req.Spec.Commit.Valid() {
 		return core.SubmitOutcome{}, invalid("spec.commit: %q is not a full 40-digit commit id", req.Spec.Commit)
 	}
@@ -59,8 +71,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	}
 	// A submission that cannot be keyed, such as one for a task its commit does not have, makes no
 	// store. Only a submission that can be queued does.
-	sub := core.Submission{Context: req.Context, Spec: req.Spec, NoCache: req.NoCache, Plan: req.Plan}
-	var err error
+	sub := core.Submission{Context: req.Context, Spec: req.Spec, NoCache: req.NoCache, Plan: link.Plan()}
 	if sub.Spec.Settings.Kind() != core.JobCommand {
 		sub, err = a.keyFlow(ctx, sub)
 	} else {

@@ -173,7 +173,7 @@ func (l *Ledger) Submit(sub core.Submission) (Change, core.SubmitOutcome, error)
 		return nil, none, err
 	}
 	if sub.Plan != 0 && !l.hasPlan(sub.Plan) {
-		return nil, none, notFound("plan %d", sub.Plan)
+		return nil, none, notFound("--plan: plan %d does not exist in this task; `plan list` shows the plans there are", sub.Plan)
 	}
 	if kind != core.JobCommand && !sub.NoCache {
 		if i, ok := l.joinable(sub); ok {
