@@ -20,7 +20,7 @@ type Source interface {
 
 // PartsReport says which parts a run is started with can be used now.
 type PartsReport interface {
-	Readiness() []*pb.PartReadiness
+	Readiness(ctx context.Context) []*pb.PartReadiness
 }
 
 // ControlConfig is what HostControlService is made of.
@@ -53,13 +53,13 @@ type control struct {
 
 // Identify implements pb.HostControlServiceServer. The parts are resolved now, not when the host
 // started, so the answer follows a repaired install.
-func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
+func (c *control) Identify(ctx context.Context, req *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
 	id := &pb.IdentifyResponse{
 		Release:   c.c.Release,
 		Relation:  release.Relate(c.c.Release, req.GetClientRelease()),
 		StartedAt: timestamppb.New(c.c.Started),
 		LiveRuns:  c.c.Host.LiveRuns(),
-		Parts:     c.c.Parts.Readiness(),
+		Parts:     c.c.Parts.Readiness(ctx),
 
 		ConfigDigest:     c.c.ConfigDigest,
 		ApiSchemaHash:    c.c.APISchemaHash,

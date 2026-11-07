@@ -39,6 +39,7 @@ Check what you installed, and the task schema versions it reads:
 
 ```sh
 vibesys-cli --version    # vibesys-cli v0.x.y (task schemas 0.1, 0.2)
+vibesys-cli --version --json   # the same build as a BuildVersions: binary_version and the protocol it speaks
 ```
 
 The checksum guards against a damaged or truncated download. To check that a binary was built by

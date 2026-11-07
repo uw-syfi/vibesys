@@ -1,5 +1,5 @@
 /** What the Resources tab shows of each host the app is connected to, as plain facts. */
-import type {HostConnectionState} from '../connection.js';
+import {type HostConnectionState, refusalCauseOf} from '../connection.js';
 import type {RefusalCause} from '../fault.js';
 import type {FeedStatus} from '../feed.js';
 import {type Freshness, freshnessOf} from '../freshness.js';
@@ -57,9 +57,6 @@ export const resourceRow = (host: ResourceHost): ResourceRow => ({
   key: host.key,
   label: host.label,
   connection: connectionOf(host.connection),
-  cause:
-    host.connection._tag === 'Unusable' && host.connection.fault.cause !== undefined
-      ? host.connection.fault.cause
-      : null,
+  cause: refusalCauseOf(host.connection),
   freshness: freshnessOf(host.connection, host.runsFeed, host.hasData),
 });

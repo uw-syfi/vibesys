@@ -3,7 +3,8 @@
  * eye; the whole value is the text on hover. Every time is told in Seattle time, the zone named, so
  * a list that spans days never leaves a reader to guess which clock it is on.
  */
-import type {FleetObjective, Freshness} from '../../state/index.js';
+import type {FleetHostRef, FleetObjective, Freshness} from '../../state/index.js';
+import {causeWord} from '../refusal-words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -71,6 +72,38 @@ export function freshnessPhrase(freshness: Freshness, staleForMs: number | null)
   return freshness === 'stale' && staleForMs !== null && staleForMs >= AGE_WORTH_SAYING_MS
     ? `${label} ${span(staleForMs)}`
     : label;
+}
+
+/** The tone of a host's dot: a host that refuses for good is an error, whatever its link is doing. */
+export const hostTone = (host: Pick<FleetHostRef, 'freshness' | 'refusal'>): Tone =>
+  host.refusal === null ? FRESHNESS_WORD[host.freshness].tone : 'err';
+
+/**
+ * What a host's status chip says: the cause when the host refuses for good (its state on a network
+ * disk, a job tool too old), never "Unavailable" or "Waiting", which say nothing a person can act on;
+ * otherwise its freshness.
+ */
+export function hostPhrase(
+  host: Pick<FleetHostRef, 'freshness' | 'staleForMs' | 'refusal'>,
+): string {
+  return host.refusal === null
+    ? freshnessPhrase(host.freshness, host.staleForMs)
+    : causeWord(host.refusal);
+}
+
+/**
+ * What the Runs list says when no host has been read: "Not read yet", or the cause when every host
+ * that has not been read cannot be (it refused for good), since waiting will not read those. A host
+ * that is read but cannot run a run is only being read, and says its cause on its chip.
+ */
+export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 'refusal'>[]): string {
+  const unread = hosts.filter(h => h.freshness === 'empty' || h.freshness === 'unavailable');
+  const first = unread[0]?.refusal;
+  return first !== null &&
+    first !== undefined &&
+    unread.every(h => h.freshness === 'unavailable' && h.refusal !== null)
+    ? causeWord(first)
+    : 'Not read yet';
 }
 
 /**

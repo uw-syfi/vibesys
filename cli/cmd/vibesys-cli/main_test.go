@@ -11,6 +11,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -18,7 +22,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 var full = core.Commit("0123456789abcdef0123456789abcdef01234567")
@@ -123,6 +129,21 @@ func TestVersionNamesTheBinaryAndExitsZero(t *testing.T) {
 	r := c.run("--version")
 	if r.code != exitOK || r.stdout != "vibesys-cli "+version+" (task schemas 0.1, 0.2)\n" || r.stderr != "" {
 		t.Fatalf("result = %+v", r)
+	}
+}
+
+// `--version --json` prints the versions the build speaks as one typed message, for a program that
+// asks before it uses the tool, and starts no daemon.
+func TestVersionJSONSaysWhatTheBuildSpeaks(t *testing.T) {
+	c := newCLI(t)
+	r := c.run("--version", "--json")
+	var got cliv1.BuildVersions
+	if r.code != exitOK || r.stderr != "" || protojson.Unmarshal([]byte(r.stdout), &got) != nil {
+		t.Fatalf("result = %+v", r)
+	}
+	want := wire.BuildVersions(version, production.CurrentVersions())
+	if !proto.Equal(&got, want) || got.GetProtocolVersion() < core.TaskSchema02Since {
+		t.Errorf("printed %v, want %v at protocol %d or above", &got, want, core.TaskSchema02Since)
 	}
 }
 

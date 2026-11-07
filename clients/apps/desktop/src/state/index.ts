@@ -18,6 +18,7 @@ export {
   type HostConnectionState,
   idleConnection,
   isTerminal,
+  refusalCauseOf,
 } from './connection.js';
 export {
   FAULT_KINDS,
@@ -58,7 +59,7 @@ export {
   PREREQUISITE_SCRIPT,
   prerequisiteMessage,
 } from './host-prerequisites.js';
-export {type HostRefusal, refusalOf} from './host-refusal.js';
+export {type HostRefusal, partRefusalOf, readinessOf, refusalOf} from './host-refusal.js';
 export {
   type CheckInRead,
   type Facts,

@@ -14,7 +14,7 @@ import {type CatchUp, makeCatchUp} from './catch-up.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
-import {makeWhyUnserved} from './host-control.js';
+import {makeHostReadiness} from './host-control.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
@@ -43,11 +43,8 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   host: HostKey,
 ): Effect.fn.Return<HostSession, never, GatewayTransport | Ids | Scope.Scope> {
   const client = yield* makeOrchestratorClient(host);
-  const connection = yield* makeHostConnection(
-    client,
-    defaultReconnect,
-    yield* makeWhyUnserved(host),
-  );
+  const readiness = yield* makeHostReadiness(host);
+  const connection = yield* makeHostConnection(client, defaultReconnect, readiness);
   const store = yield* makeHostStore;
   const ambient = yield* Effect.context<never>();
   const parts = {client, connection, store, ambient};

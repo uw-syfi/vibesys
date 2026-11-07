@@ -22,8 +22,12 @@ export * from './generated/vibesys/orchestrator/v1/cost_pb.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export {
   HostControlService,
+  HostPart,
   type IdentifyResponse,
   IdentifyResponseSchema,
+  PartProblemReason,
+  type PartReadiness,
+  PartReadinessSchema,
   ReleaseRelation,
   StateRefusal,
   type Unserved,

@@ -81,12 +81,16 @@ func TestTheProtocolConstantsAreTheConformanceFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var file struct {
-		WatchTaskSince *uint32 `json:"watch_task_since"`
+		WatchTaskSince    *uint32 `json:"watch_task_since"`
+		TaskSchema02Since *uint32 `json:"task_schema_02_since"`
 	}
 	dec := json.NewDecoder(bytesReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&file); err != nil || file.WatchTaskSince == nil {
-		t.Fatalf("protocol.json: %v, want watch_task_since", err)
+	if err := dec.Decode(&file); err != nil || file.WatchTaskSince == nil || file.TaskSchema02Since == nil {
+		t.Fatalf("protocol.json: %v, want watch_task_since and task_schema_02_since", err)
+	}
+	if core.TaskSchema02Since != *file.TaskSchema02Since || core.ProtocolVersion < core.TaskSchema02Since {
+		t.Errorf("TaskSchema02Since = %d, protocol.json says %d, and this build speaks protocol %d", core.TaskSchema02Since, *file.TaskSchema02Since, core.ProtocolVersion)
 	}
 	if core.WatchTaskSince != *file.WatchTaskSince {
 		t.Errorf("WatchTaskSince = %d, protocol.json says %d", core.WatchTaskSince, *file.WatchTaskSince)

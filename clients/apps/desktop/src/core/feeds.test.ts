@@ -744,6 +744,7 @@ it.effect('opening a feed without begin publishes no unchanged model', () =>
           heard: Effect.void,
           ready: () => Effect.succeed(1),
           suspect: () => Effect.void,
+          blocked: Effect.succeed(undefined),
           retry,
           leftTerminal: Effect.never,
         },

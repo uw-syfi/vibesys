@@ -27,6 +27,7 @@ import {
   type NavigationAction,
   navigationReducer,
   type OrchestratorState,
+  REFUSAL_CAUSES,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {
@@ -36,6 +37,7 @@ import {
   SERVING,
   serveSummaries,
 } from '../../testing/orchestrator/index.js';
+import {causeWord} from '../refusal-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {freshnessPhrase} from './fleet-words.js';
 
@@ -323,6 +325,70 @@ describe('the fleet screen', () => {
       {key: 'local', label: 'This Mac', freshness: 'live', staleForMs: null, data: emptyState},
     ]);
     expect(screen.text()).toContain('No runs');
+    screen.unmount();
+  });
+
+  it('says why a host that refuses for good cannot be read, in a short label of its own, with no banner', () => {
+    for (const cause of REFUSAL_CAUSES) {
+      const label = causeWord(cause);
+      // Its only host, never read: the label is the host's chip and what the empty list says.
+      const only = open([
+        {
+          key: 'ssh:h',
+          label: 'host-a',
+          freshness: 'unavailable',
+          staleForMs: null,
+          refusal: cause,
+          data: emptyState,
+        },
+      ]);
+      const text = only.screen.text();
+      expect(text, cause).toContain(label);
+      expect(text, cause).not.toContain('Not read yet');
+      expect(text, cause).not.toContain('Unavailable');
+      expect(only.screen.controls('Retry'), cause).toHaveLength(1);
+      expect(only.screen.container.querySelector('[role="alert"], .vs-banner'), cause).toBeNull();
+      only.screen.unmount();
+      // Beside another host: the host filter names the cause, and the other host is still read.
+      const beside = open([
+        {
+          key: 'ssh:h',
+          label: 'host-a',
+          freshness: 'unavailable',
+          staleForMs: null,
+          refusal: cause,
+          data: emptyState,
+        },
+        hostA,
+      ]);
+      expect(
+        [...beside.screen.container.querySelectorAll('option')].map(option => option.textContent),
+        cause,
+      ).toContain(`host-a · ${label}`);
+      beside.screen.unmount();
+    }
+  });
+
+  it('still says Not read yet for a host that is being read and cannot run a run', () => {
+    const {screen} = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'empty',
+        staleForMs: null,
+        refusal: 'job-tool-too-old',
+        data: emptyState,
+      },
+    ]);
+    expect(screen.text()).toContain('Not read yet');
+    expect(screen.text()).toContain('Job tool too old');
+    screen.unmount();
+  });
+
+  it('shows a host that is read but cannot run a run with its cause on its chip, and keeps its rows', () => {
+    const {screen} = open([{...hostA, refusal: 'job-tool-too-old'}]);
+    expect(screen.text()).toContain('Job tool too old');
+    expect(rows(screen)).not.toHaveLength(0);
     screen.unmount();
   });
 

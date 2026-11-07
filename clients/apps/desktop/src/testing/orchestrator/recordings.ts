@@ -15,6 +15,9 @@ import {
   GetRunHistoryRequestSchema,
   GetRunHistoryResponseSchema,
   HelloResponseSchema,
+  HostControlService,
+  type IdentifyResponse,
+  IdentifyResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
   ListItemsResponseSchema,
@@ -62,6 +65,8 @@ export interface DaemonOptions {
    * real host's does, instead of holding its first frames for ever.
    */
   readonly live?: boolean;
+  /** What the host's control service answers to Identify; with none it is not served (UNIMPLEMENTED). */
+  readonly identify?: () => IdentifyResponse;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -70,6 +75,9 @@ const PREFIX = `/${OrchestratorService.typeName}/`;
 const FAKE_DAEMON = {binaryVersion: 'fake', protocolVersion: 1, minProtocolVersion: 1} as const;
 
 export const methodPathOf = (method: string): string => `${PREFIX}${method}`;
+
+/** The one call of the host's control service that a session makes. */
+const IDENTIFY = `/${HostControlService.typeName}/Identify`;
 
 const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVAILABLE}});
 
@@ -303,6 +311,10 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return hello(nth);
         case methodPathOf('Dispatch'):
           return dispatch(target, nth);
+        case IDENTIFY:
+          return options.identify === undefined
+            ? [{end: {message: 'no host control', status: RpcStatus.UNIMPLEMENTED}}]
+            : [{frame: toBinary(IdentifyResponseSchema, options.identify())}];
         case methodPathOf('ListItems'):
           return listItemsSteps(daemon, target);
         case methodPathOf('GetItem'):
