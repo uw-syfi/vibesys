@@ -40,11 +40,9 @@ from vs_runtime._run_environment_facts import (
 )
 from vs_runtime._skypilot_step_work_reaper import SkyPilotStepWorkReaper
 from vs_runtime._trusted_evaluation_preparation import (
-    REMOTE_EVALUATOR_GO_MODULES_ROOT,
-    REMOTE_EVALUATOR_TOOLS_ROOT,
-    TrustedEvaluationCommandPaths,
     evaluator_agent_toolchains,
     remote_evaluator_setup_command,
+    remote_stage_command_paths,
 )
 from vs_sandbox.api import (
     SandboxKind,
@@ -250,19 +248,8 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
         evaluation = _prepare_evaluation_plan(
             request,
             requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root=".",
-                python_executable="python3",
-                runtime_package_root=(
-                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
-                ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-                runtime_go_module_cache_root=(
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
-                    if requirements.go_module is not None
-                    else None
-                ),
+            remote_stage_command_paths(
+                request.workspace, requirements, python_executable="python3"
             ),
         )
         commands: dict[str, tuple[str, ...]] = {}
