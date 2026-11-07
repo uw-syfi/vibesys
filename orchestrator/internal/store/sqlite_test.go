@@ -1,10 +1,13 @@
 package store_test
 
 import (
+	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs/localfstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
@@ -128,15 +131,75 @@ func TestEveryConnectionIsInWriteAheadLogModeWithItsBusyTimeout(t *testing.T) {
 	}
 }
 
-// A store written under another schema version is refused, whichever way the version differs: no
-// code converts rows, so a host reads exactly the version it was built with.
+// A store written under a version this build neither reads nor writes is refused, whichever way the
+// version differs, with the advice to move the state directory away: no code converts rows. The versions
+// it does read are the one it writes and the one before it, which differ by additions only.
 func TestAStoreOfAnotherSchemaVersionIsRefused(t *testing.T) {
-	for _, version := range []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 99} {
+	for _, version := range []int{0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 99} {
 		dir, _ := populated(t, 1, 3)
 		damage(t, dir, fmt.Sprintf(`UPDATE meta SET value = %d WHERE key = 'schema_version'`, version))
 		_, err := store.OpenSQLite(dir, store.SQLiteOptions{})
-		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d", version)) {
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d", version)) || !strings.Contains(err.Error(), "move the state directory") {
 			t.Fatalf("a store of version %d opened or failed for another reason: %v", version, err)
+		}
+	}
+}
+
+func storedVersion(t *testing.T, dir localfs.Dir) int {
+	t.Helper()
+	raw, err := sql.Open("sqlite", filepath.Join(dir.Path(), store.DatabaseFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var v int
+	if err := raw.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func recoverFrom(t *testing.T, dir localfs.Dir) core.State {
+	t.Helper()
+	s, err := store.OpenSQLite(dir, store.SQLiteOptions{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	state, err := s.Recover()
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	return state
+}
+
+// A log of version 12 that carries check-ins, as the first tag's format with the additions of the
+// catch-up feature, is read by this build exactly as it was written, and the open stamps the new version
+// on it before anything is replayed. The stamp is what a build that reads only 12 sees: it refuses the
+// store by the number, and is never handed an event body it cannot decode. The upgrade is one-way on
+// purpose, and the store is never refused for the version it came from.
+func TestAStoreOfTheVersionBeforeIsReadAsItIsAndStampedSoAnOlderBuildRefusesIt(t *testing.T) {
+	for seed := uint64(1); seed <= 5; seed++ {
+		dir, _ := populated(t, seed, 250)
+		before := recoverFrom(t, dir)
+		checkIns := 0
+		for _, r := range before.Runs() {
+			checkIns += len(before.CheckIns(r.ID))
+		}
+		if checkIns == 0 {
+			t.Fatalf("seed %d: the workload makes no check-ins, so this test shows nothing", seed)
+		}
+		damage(t, dir, `UPDATE meta SET value = 12 WHERE key = 'schema_version'`)
+		after := recoverFrom(t, dir)
+		if !after.Equal(before) {
+			t.Fatalf("seed %d: a store of version 12 was read as another state", seed)
+		}
+		if got := storedVersion(t, dir); got != 13 {
+			t.Fatalf("seed %d: the version after the open is %d, want 13, which a build that reads only 12 refuses", seed, got)
+		}
+		// Opening again changes nothing, and it is not the version 12 path any more.
+		if again := recoverFrom(t, dir); !again.Equal(before) || storedVersion(t, dir) != 13 {
+			t.Fatalf("seed %d: the second open changed the store", seed)
 		}
 	}
 }

@@ -1,0 +1,28 @@
+{
+  "id": "c1",
+  "runId": "r1",
+  "viewer": {"id": "install-ann", "label": "Ann's laptop"},
+  "since": "2026-01-01T09:00:00Z",
+  "at": "2026-01-01T11:35:20Z",
+  "state": "CHECK_IN_STATE_READY",
+  "facts": {
+    "spend": {"turns": 12, "unpricedTurns": 2, "usage": {"costUsd": 3.456}},
+    "agentsStarted": 3,
+    "agentsEnded": 1,
+    "jobsMeasured": 7,
+    "objectives": [
+      {
+        "metric": "latency_ms", "direction": "OBJECTIVE_DIRECTION_MINIMIZE",
+        "start": {"value": 41.5, "jobId": "j3", "commit": "a1b2c3", "at": "2026-01-01T08:00:00Z"},
+        "end": {"value": 37.25, "jobId": "j9", "commit": "d4e5f6", "at": "2026-01-01T11:00:00Z"}
+      },
+      {
+        "metric": "throughput", "direction": "OBJECTIVE_DIRECTION_MAXIMIZE",
+        "end": {"value": 1200, "jobId": "j7", "commit": "0f9e8d", "at": "2026-01-01T10:00:00Z"}
+      }
+    ],
+    "plansCreated": [4, 5],
+    "plansChanged": [2],
+    "reportMessageIds": ["m7"]
+  }
+}

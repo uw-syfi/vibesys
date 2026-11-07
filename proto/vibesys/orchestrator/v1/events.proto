@@ -149,11 +149,12 @@ message PostReport {
 }
 
 // RequestCatchUp is the press of Catch me up. The host records a check-in for the viewer who pressed
-// it, covering everything since that viewer's last check-in in the run, works its facts out, and on a
-// run that can be asked also asks the lead for a report covering the window. The viewer is not in the
-// body: it is the call's metadata (see Viewer), and a call without it is refused. The receipt answers
-// at once with the check-in's id, and a press while the viewer's last check-in is still being worked
-// out answers with that one. Allowed on a run that is over.
+// it, covering everything since that viewer's last check-in in the run, and works its facts out. When
+// they are frozen, a run that can be asked is also asked for a report covering the window (the check-in's
+// ask_message_id), worded from those facts. The viewer is not in the body: it is the call's metadata (see
+// Viewer), and a call without it is refused. The receipt answers at once with the check-in's id and no
+// message, since the lead is not asked yet, and a press while the viewer's last check-in is still being
+// worked out answers with that one. Allowed on a run that is over.
 message RequestCatchUp {
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
 }

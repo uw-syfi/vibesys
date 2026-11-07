@@ -3,7 +3,7 @@ import type {JSX} from 'react';
 import type {ObjectiveReport} from '../../../state/index.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
 
-/** The words a tile's hover says: the best, the bound and what the head scored. */
+/** The words a tile's hover says: what the head scored, the best and the bound. Head and best differ when the head is the best of another objective. */
 function hintOf(objective: ObjectiveReport): string | undefined {
   const lines = [
     objective.headValue === undefined
@@ -20,9 +20,10 @@ function hintOf(objective: ObjectiveReport): string | undefined {
 }
 
 /**
- * One tile for each objective: its value (the head's, else the best measured), and how close that is
- * to the bound the agents declared, as the host worked it out. An objective with no value shows a dash
- * and one with no bound shows no share.
+ * One tile for each objective: its best measured value, the number the header and the over-time chart
+ * show, and how close that is to the bound the agents declared, as the host worked it out. The head's
+ * own value is in the hover. An objective with no value shows a dash and one with no bound shows no
+ * share.
  */
 export function ObjectiveTiles(props: {
   readonly objectives: readonly ObjectiveReport[];
@@ -31,8 +32,8 @@ export function ObjectiveTiles(props: {
   return (
     <MetricTiles label="Objectives" count={props.objectives.length} track="chart">
       {props.objectives.map(objective => {
-        const value = objective.headValue ?? objective.best?.value;
-        const percent = objective.percentOfBound;
+        const value = objective.best?.value;
+        const percent = objective.bestPercentOfBound;
         const hint = hintOf(objective);
         return (
           <MetricTile

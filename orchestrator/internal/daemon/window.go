@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -14,48 +16,105 @@ import (
 // maxFailureBytes bounds what a failed check-in says, as the contract does.
 const maxFailureBytes = 500
 
+// maxWindowTries is how many times the facts of a check-in are tried when a record the host keeps cannot be
+// read. A viewer's next press is held until the last check-in is settled, so a store that never answers
+// must end in a failed check-in and not in a press that never gets through.
+const maxWindowTries = 5
+
 // computeWindowFacts carries out a ComputeWindowFacts: it reads the records the facts are made of,
 // works them out with window.Facts, and answers the core with them, or with the reason they cannot be
 // worked out. The answer is what is frozen in the check-in, so an effect carried out twice, or after
 // the check-in was settled, changes nothing: the core drops a second answer.
 //
-// What it reads that the core does not hold: the job log of the run's task as the host last read it (not
-// the capped copy that clients are served), the run's finished turns and the run's messages, from the
-// store. A job log that cannot be read now fails the check-in rather than leaving its measurements and
-// plans out of the facts, because a window that says nothing was measured is a different statement from a
-// window the host could not look into. A store that cannot be read is an error, which retries the effect.
-func (d *Daemon) computeWindowFacts(e core.ComputeWindowFacts) error {
+// What it reads that the core does not hold: the job log of the run's task (not the capped copy that
+// clients are served), the run's finished turns and the run's messages, from the store. The job log of a
+// run that is live is read afresh, after the window ended (see JobLog): the kept view follows a stream and
+// can be behind it, and a result recorded inside the window that arrives after the facts froze would be in
+// no window at all. A job log that cannot be read now fails the check-in rather than leaving its
+// measurements and plans out of the facts, because a window that says nothing was measured is a different
+// statement from a window the host could not look into. A store that cannot be read is tried again, and
+// fails the check-in after maxWindowTries.
+func (d *Daemon) computeWindowFacts(ctx context.Context, e core.ComputeWindowFacts) error {
 	state := d.State()
 	check, ok := state.CheckIn(e.CheckIn)
 	if _, pending := check.Outcome.(core.CheckInPending); !ok || !pending {
+		delete(d.windowTries, e.CheckIn)
 		return nil
 	}
 	run, ok := state.Run(e.Run)
 	if !ok {
 		return fmt.Errorf("window facts of check-in %s: no run %s", e.CheckIn, e.Run)
 	}
-	view, why := d.readableView(run.ID)
-	if why != "" {
-		_, err := d.Apply(core.WindowFactsFailed{CheckIn: e.CheckIn, Detail: why})
-		return err
+	view, why := d.jobLogOf(ctx, run)
+	if why == "" {
+		err := d.factsFrom(view, e, check)
+		if err == nil {
+			delete(d.windowTries, e.CheckIn)
+			return nil
+		}
+		if d.windowTries[e.CheckIn]++; d.windowTries[e.CheckIn] < maxWindowTries {
+			return err
+		}
+		why = clip(fmt.Sprintf("the host could not read its records for this window after %d tries: %v", maxWindowTries, err))
 	}
-	ledger := &cost.Ledger{}
-	for _, a := range state.Agents(run.ID) {
-		ledger.Agent(a)
+	delete(d.windowTries, e.CheckIn)
+	_, err := d.Apply(core.WindowFactsFailed{CheckIn: e.CheckIn, Detail: why})
+	return err
+}
+
+// jobLogOf returns the job log the facts of a check-in are worked out from, or why it cannot be read.
+func (d *Daemon) jobLogOf(ctx context.Context, run core.Run) (search.View, string) {
+	// A run that is over is read once, after its end, and that read is its last (see the reconciler), so
+	// the view held is complete for a window that ends with the run. A live run's is read now.
+	if d.cfg.JobLog != nil && !run.Status.Final() {
+		view, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (search.View, error) { return d.cfg.JobLog.ReadJobLog(c, run) })
+		switch {
+		case errors.Is(err, ErrExpired):
+			return search.View{}, "the job log of this run's task did not answer in time: try again later"
+		case err != nil:
+			return search.View{}, clip("the job log of this run's task cannot be read now (" + err.Error() + "): try again later")
+		case view.Reason != core.Readable:
+			return search.View{}, clip("the job log of this run's task cannot be read now (" + reasonWords(view.Reason) + "): try again later")
+		}
+		return view, ""
 	}
-	if err := d.Engine.readTurns(state, run.ID, ledger); err != nil {
-		return err
-	}
-	records, err := d.Engine.readMessages(run.ID)
+	return d.readableView(run.ID)
+}
+
+// factsFrom works the facts of a check-in out from a job log and the run's other records, and answers
+// the core with them or with the reason a window is too big to keep. An error is a record the host could
+// not read, to be tried again.
+func (d *Daemon) factsFrom(view search.View, e core.ComputeWindowFacts, check core.CheckIn) error {
+	// The messages are read before the state, so that every check-in answer in the messages is linked in
+	// the state: the state is at least as new.
+	records, err := d.Engine.readMessages(e.Run)
 	if err != nil {
 		return err
 	}
+	state := d.State()
+	ledger := &cost.Ledger{}
+	for _, a := range state.Agents(e.Run) {
+		ledger.Agent(a)
+	}
+	if err := d.Engine.readTurns(state, e.Run, ledger); err != nil {
+		return err
+	}
+	// A catch-up answer is a report like any other, dated after the window it answers, and belongs to its
+	// check-in: counting it again in the next window would tell the viewer of it twice.
+	answers := map[core.MessageID]bool{}
+	for _, c := range state.CheckIns(e.Run) {
+		if c.Report != "" {
+			answers[c.Report] = true
+		}
+	}
 	messages := make([]core.Message, 0, len(records))
 	for _, r := range records {
-		messages = append(messages, r.Message)
+		if !answers[r.Message.ID] {
+			messages = append(messages, r.Message)
+		}
 	}
 	facts := window.Facts(window.Input{
-		Run: run.ID, Since: e.Since, Until: e.Until, View: view, Ledger: ledger, Agents: state.Agents(run.ID), Messages: messages,
+		Run: e.Run, Since: e.Since, Until: e.Until, View: view, Ledger: ledger, Agents: state.Agents(e.Run), Messages: messages,
 	})
 	// A window with more in it than the contract allows is not cut short, which would say less than
 	// happened: the check-in fails, naming the limit, and the viewer sees that the host could not keep it.

@@ -21,4 +21,4 @@ export {
   SERVING,
   withReport,
 } from './report-fixtures.js';
-export {generateScenario} from './scenario.js';
+export {generateScenario, START_MS} from './scenario.js';

@@ -2,6 +2,7 @@ package search_test
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
@@ -210,7 +211,15 @@ func TestABoundedObservationIsChartedAndBoundedAlike(t *testing.T) {
 			}
 		}
 		if !bounded || len(wantJobs) == 0 {
-			return series == nil
+			return series == nil && (boundsOf == nil || (boundsOf.BestValue == nil && boundsOf.BestPercentOfBound == nil))
+		}
+		// The best served beside the bound is the best of the series, and its share of the bound is the share
+		// of that number.
+		best := bestOf(direction, wantValues)
+		wantPercent, hasPercent := search.PercentOfBound(direction, boundsOf.Versions[len(boundsOf.Versions)-1].Value, best)
+		if boundsOf.BestValue == nil || *boundsOf.BestValue != best || (boundsOf.BestPercentOfBound != nil) != hasPercent || (hasPercent && *boundsOf.BestPercentOfBound != wantPercent) {
+			t.Logf("seed %d: best %v, percent %v; want %v, %v (%v)", seed, boundsOf.BestValue, boundsOf.BestPercentOfBound, best, wantPercent, hasPercent)
+			return false
 		}
 		if series == nil || series.Direction != direction || !slices.Equal(jobsOf(series), wantJobs) {
 			t.Logf("seed %d: series %v, want jobs %v in %v", seed, series, wantJobs, direction)
@@ -303,6 +312,56 @@ func TestTheHeadReadsAResultAsTheSeriesDoes(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 400, Rand: rand.New(rand.NewSource(23))}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The best the run measured is served beside the head's value, each with its share of the bound: the
+// head is the candidate the run last promoted, so for an objective other than the one it was promoted
+// for it is not the best, and a screen that says "best" shows the number the series ends at.
+func TestTheBestIsServedBesideTheHeadsValue(t *testing.T) {
+	scored := func(id string, at int64, throughput, latency float64) []*cli.TaskFact {
+		m := &cli.MeasureResult{
+			Metric: &cli.Metric{Name: "throughput", Direction: maximize}, Value: throughput,
+			Objectives:   &cli.Objectives{Metrics: []*cli.Metric{{Name: "throughput", Direction: maximize}, {Name: "latency_ms", Direction: minimize}}},
+			Observations: []*cli.Observation{{Name: "latency_ms", Value: proto.Float64(latency)}},
+		}
+		return []*cli.TaskFact{
+			{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, Submitters: mine}}},
+			{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id, Commit: strings.Repeat("c", 40), RecordedAt: &timestamppb.Timestamp{Seconds: at}, Outcome: &cli.Result_Measure{Measure: m}}}},
+		}
+	}
+	// The head has the best throughput; another candidate has the best latency.
+	var facts []*cli.TaskFact
+	facts = append(facts, scored("fast", 1, 100, 138)...)
+	facts = append(facts, scored("quick", 2, 80, 124)...)
+	headResult := &cli.Result{JobId: "fast", Outcome: &cli.Result_Measure{Measure: facts[1].GetResult().GetMeasure()}}
+	facts = append(facts,
+		&cli.TaskFact{Fact: &cli.TaskFact_Head{Head: &cli.Head{State: &cli.Head_Current{Current: &cli.CurrentResult{Head: strings.Repeat("a", 40), Result: headResult}}}}},
+		boundFact(1, "r", "throughput", maximize, 200), boundFact(2, "r", "latency_ms", minimize, 62))
+	s := project(t, facts...)
+	latency := byObjective(s, "latency_ms")
+	if latency.GetHeadValue() != 138 || latency.GetBestValue() != 124 {
+		t.Fatalf("latency_ms head %v, best %v; want 138 and 124", latency.GetHeadValue(), latency.GetBestValue())
+	}
+	if math.Abs(latency.GetPercentOfBound()-62.0/138*100) > 1e-9 || math.Abs(latency.GetBestPercentOfBound()-50) > 1e-9 {
+		t.Fatalf("latency_ms shares %v of the head and %v of the best", latency.GetPercentOfBound(), latency.GetBestPercentOfBound())
+	}
+	if series := seriesNamed(s, "latency_ms"); series.Points[len(series.Points)-1].Value != 124 {
+		t.Fatalf("the series ends at %v", series.Points)
+	}
+	if throughput := byObjective(s, "throughput"); throughput.GetHeadValue() != 100 || throughput.GetBestValue() != 100 {
+		t.Fatalf("throughput head %v, best %v: the head is the best of the objective it was promoted for", throughput.GetHeadValue(), throughput.GetBestValue())
+	}
+}
+
+// A best measured the other way than the bound says the objective improves is not compared with it, as
+// the head's value is not: a share of a bound in the other direction would mean nothing.
+func TestABestInTheOtherDirectionThanTheBoundHasNoShareOfIt(t *testing.T) {
+	s := project(t,
+		append(measuredFacts("j1", trial{owners: mine, at: 1, values: []float64{5}}, []objective{{"score", maximize}}),
+			boundFact(1, "r", "score", minimize, 2))...)
+	if bound := byObjective(s, "score"); bound.BestValue != nil || bound.BestPercentOfBound != nil {
+		t.Fatalf("score is measured as maximized and bounded as minimized, and has best %v, share %v", bound.BestValue, bound.BestPercentOfBound)
 	}
 }
 

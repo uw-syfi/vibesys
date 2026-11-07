@@ -55,9 +55,10 @@ describe('declared performance bounds', () => {
         declared,
         fc.option(fc.double({min: 1, max: 1e9, noNaN: true}), {nil: undefined}),
         fc.option(fc.double({min: 1, max: 500, noNaN: true}), {nil: undefined}),
-        (versions, headValue, percentOfBound) => {
+        fc.option(fc.double({min: 1, max: 500, noNaN: true}), {nil: undefined}),
+        (versions, headValue, percentOfBound, bestPercentOfBound) => {
           const search = create(SearchStateSchema, {
-            bounds: [served('tok_s', versions, {headValue, percentOfBound})],
+            bounds: [served('tok_s', versions, {headValue, percentOfBound, bestPercentOfBound})],
           });
           const [view] = objectiveBounds(search);
           expect(view?.objective).toBe('tok_s');
@@ -70,6 +71,7 @@ describe('declared performance bounds', () => {
           // there is none, whatever the numbers beside it would give.
           expect(view?.headValue).toBe(headValue);
           expect(view?.percentOfBound).toBe(percentOfBound);
+          expect(view?.bestPercentOfBound).toBe(bestPercentOfBound);
         },
       ),
       {seed: 49},

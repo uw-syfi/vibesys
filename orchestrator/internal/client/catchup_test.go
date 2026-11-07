@@ -61,15 +61,16 @@ func TestAViewerCatchesUpOverTheService(t *testing.T) {
 
 	catchUp := &pb.Command{Id: "catch-up-1", Body: &pb.Command_RequestCatchUp{RequestCatchUp: &pb.RequestCatchUp{RunId: run}}}
 	receipt, err := op.Dispatch(ctx, catchUp)
-	if err != nil || receipt.GetCheckInId() == "" || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED || receipt.GetMessageId() == "" {
+	if err != nil || receipt.GetCheckInId() == "" || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED || receipt.GetMessageId() != "" {
 		t.Fatalf("catch up: %v %v", receipt, err)
 	}
 	made := feed.until("the check-in", isCheckIn(receipt.GetCheckInId(), pb.CheckInState_CHECK_IN_STATE_PENDING)).GetCheckIn()
-	if made.GetViewer().GetId() != viewer.ID || made.GetViewer().GetLabel() != viewer.Label || made.GetAskMessageId() != receipt.GetMessageId() {
-		t.Fatalf("the check-in %v does not say who pressed or what was asked", made)
+	if made.GetViewer().GetId() != viewer.ID || made.GetViewer().GetLabel() != viewer.Label || made.GetAskMessageId() != "" {
+		t.Fatalf("the check-in %v does not say who pressed, or already asked the lead", made)
 	}
+	// The lead is asked when the facts are frozen, in the same change.
 	done := feed.until("the facts", isCheckIn(receipt.GetCheckInId(), pb.CheckInState_CHECK_IN_STATE_READY)).GetCheckIn()
-	if done.GetFacts().GetAgentsStarted() != 1 || done.GetSince().AsTime() != state.CreatedAt.UTC() {
+	if done.GetFacts().GetAgentsStarted() != 1 || done.GetSince().AsTime() != state.CreatedAt.UTC() || done.GetAskMessageId() == "" {
 		t.Fatalf("the facts of the first window: %v", done)
 	}
 

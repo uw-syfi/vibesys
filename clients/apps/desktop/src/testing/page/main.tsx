@@ -10,7 +10,9 @@
  * long, `down=<n>` has the host at that position lose its link after its first snapshot);
  * `catchUp=<none|history|writing|written|pending|failed>` gives the viewer check-ins already made
  * on the run (none when absent), and a press of Catch me up makes another that stays pending while
- * the lead writes; `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
+ * the lead writes; `measured=<candidates>` gives the run that many measured candidates on two
+ * objectives, with the lead's bounds, so the report has its charts and tiles (the head is the best
+ * of the first); `appearance=<mode>-<light theme>-<dark theme>` sets what is saved. Saved appearance lives in
  * memory, so a reload starts again from the address.
  */
 import '@vibesys/ui/tokens.css';
@@ -55,7 +57,10 @@ import {
   FakeDaemon,
   fleetScenario,
   generateScenario,
+  measuredSearch,
   methodPathOf,
+  SERVING,
+  START_MS,
 } from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
@@ -142,11 +147,29 @@ function fleetRecording(spec: string): Recording {
 }
 
 const scenario = scenarioOf(window.location.search);
+const measured = query.get('measured');
 const daemon = new FakeDaemon({
   ...scenario,
   search: true,
   searchStale: query.has('stale'),
   searchTruncated: query.has('truncated'),
+  ...(measured === null
+    ? {}
+    : {
+        searches: [
+          measuredSearch(
+            scenario.runId,
+            {
+              seed: 4,
+              candidates: Number(measured),
+              startMs: START_MS,
+              endMs: scenario.endMs,
+              objectives: SERVING,
+            },
+            {stale: query.has('stale')},
+          ),
+        ],
+      }),
 });
 const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
