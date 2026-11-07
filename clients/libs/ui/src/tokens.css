@@ -154,6 +154,8 @@
   --series-6: #5ec4c4;
   --series-7: #c4a27c;
   --selection: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --rail-hover: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  --rail-selected: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
   --log-err: color-mix(in srgb, var(--err) 60%, var(--log-text));
   --chip-accent-bg: color-mix(in srgb, var(--accent) 12%, var(--panel));
   --chip-accent-border: color-mix(in srgb, var(--accent) 35%, var(--panel));

@@ -42,9 +42,11 @@ describe('the rail', () => {
 
   test('draws the selection as a tint, without a border or an outline', () => {
     const selected = declarations('rail.css', '.vs-rail-item[data-active]');
-    expect(selected).toContain('background: color-mix(');
+    expect(selected).toContain('background: var(--rail-selected);');
     expect(selected).not.toMatch(/border|outline|box-shadow/);
-    expect(declarations('rail.css', '.vs-rail-item:hover')).toContain('background: color-mix(');
+    expect(declarations('rail.css', '.vs-rail-item:hover')).toContain(
+      'background: var(--rail-hover);',
+    );
   });
 
   test('moves only through the motion tokens', () => {

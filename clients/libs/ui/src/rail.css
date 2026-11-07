@@ -112,14 +112,14 @@
 }
 /*
  * A hover is the selection's shape in a lighter tint, and neither touches its neighbour (the group's
- * gap). The rail's own ground is `--panel-2`, so the tints are of the accent over it.
+ * gap). The rail's own ground is `--panel-2`, so its tints are tokens of their own.
  */
 .vs-rail-item:hover {
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  background: var(--rail-hover);
   color: var(--text);
 }
 .vs-rail-item[data-active] {
-  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  background: var(--rail-selected);
   color: var(--accent);
 }
 .vs-rail-item:focus-visible {

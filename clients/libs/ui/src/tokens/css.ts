@@ -32,7 +32,14 @@ export const LEGACY_ALIASES: Readonly<Record<string, string>> = {
 
 const TONES = ['accent', 'ok', 'warn', 'err'] as const;
 /** How much of a role is mixed into its surface: selection, chip fill, chip border, banner fill. */
-const MIX = {selection: 14, fill: CHIP_FILL_MIX.share, border: 35, banner: 8};
+const MIX = {
+  selection: 14,
+  railHover: 8,
+  railSelected: 16,
+  fill: CHIP_FILL_MIX.share,
+  border: 35,
+  banner: 8,
+};
 
 const HEADER = `/*
  * GENERATED, do not edit. Change the tables in src/tokens/ (or the primitives' styles in
@@ -89,6 +96,9 @@ function scaleDeclarations(): string[] {
 function derivedDeclarations(): string[] {
   return [
     `--selection: ${mix('accent', MIX.selection, 'bg')};`,
+    // A rail item sits on the rail's own ground (`--panel-2`): hover and selection are tints of the accent over it.
+    `--rail-hover: ${mix('accent', MIX.railHover, 'panel-2')};`,
+    `--rail-selected: ${mix('accent', MIX.railSelected, 'panel-2')};`,
     `--log-err: ${mix(LOG_ERR_MIX.role, LOG_ERR_MIX.share, LOG_ERR_MIX.into)};`,
     ...TONES.flatMap(tone => [
       `--chip-${tone}-bg: ${mix(tone, MIX.fill, CHIP_FILL_MIX.into)};`,
