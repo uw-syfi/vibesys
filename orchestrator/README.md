@@ -766,7 +766,11 @@ id that already has a receipt gets that receipt without the check. The check is 
 implemented by `production.StartChecks`; only the operator's `StartRun` is checked. It also returns the repository
 with its symbolic links resolved, and the service starts the run in that form, so one directory is one
 repository whichever name a client used (the command's digest stays that of what the client sent, so a
-retry is the same command). `vibesys-client` resolves links the same way when it compares the working
+retry is the same command). `CheckRepository` asks the part of that check that needs the repository alone (an
+absolute path that exists and is the root of a git work tree, then that agents can be launched) for a path an operator is still typing: it answers with the
+refusal's words, and with `not_ready` when the host cannot launch agents whatever the path is, and makes no run,
+event or receipt. It is for the operator, and a client that gets `Unimplemented` from an older host treats the path
+as unchecked and leaves the start to the check above. `vibesys-client` resolves links the same way when it compares the working
 directory with a run's repository (`Env.Canonical`).
 
 **One live run per repository.** The lead works in the repository itself, so two runs would share one

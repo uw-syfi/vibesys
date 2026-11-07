@@ -44,9 +44,33 @@ service OrchestratorService {
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
+  // Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+  // makes that needs the repository alone (an absolute path that exists and is the root of a git work
+  // tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
+  // client can ask while its operator is still filling in the rest.
+  rpc CheckRepository(CheckRepositoryRequest) returns (CheckRepositoryResponse);
   // What every run the host holds has cost, live and ended: the whole host cost view, then the whole
   // view again each time any run's cost changes. The host works it out, so the client sums nothing.
   rpc WatchHostCost(WatchHostCostRequest) returns (stream WatchHostCostResponse);
+}
+
+message CheckRepositoryRequest {
+  // The repository path as the operator typed it, which the check resolves as StartRun's does.
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message CheckRepositoryResponse {
+  // Why a StartRun in this repository would be refused, in the words its refusal has; unset when the
+  // repository passes this part of the check.
+  StartRefusal refusal = 1;
+}
+
+// StartRefusal is a refusal of a start by the host's own check.
+message StartRefusal {
+  string reason = 1 [(buf.validate.field).string.min_len = 1];
+  // The host cannot start any run now (no way to launch agents) whatever the repository: not a fault
+  // of what the operator typed.
+  bool not_ready = 2;
 }
 
 message DispatchRequest {

@@ -94,6 +94,44 @@ func TestAStartNeedsAnAbsoluteGitWorkTreeHoldingTheTask(t *testing.T) {
 	}
 }
 
+// CheckRepository is the repository part of CheckStart and nothing else: it refuses what CheckStart
+// refuses before it looks at the task, with the same words, and accepts a repository whatever the
+// task is (a task still being typed, one the repository does not hold).
+func TestCheckRepositoryAsksTheRepositoryAloneAndRefusesAsAStartDoes(t *testing.T) {
+	tree := fakeTree{"/repo/.git": true, "/nogit/.vibesys/tasks/demo": true}
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: readyParts{}, Tree: tree}
+	for _, repository := range []string{"/repo", "/nogit", "/missing", "relative", ""} {
+		_, repositoryErr := checks.CheckRepository(repository)
+		for _, task := range []string{"demo", "", "../x", "absent"} {
+			_, startErr := checks.CheckStart(repository, task)
+			if repositoryErr != nil {
+				if startErr == nil || startErr.Error() != repositoryErr.Error() {
+					t.Fatalf("%q with task %q: CheckStart gave %v, want CheckRepository's refusal %v", repository, task, startErr, repositoryErr)
+				}
+			}
+		}
+		if repositoryErr == nil && repository != "/repo" {
+			t.Fatalf("%q was accepted, want only /repo", repository)
+		}
+		if repositoryErr != nil && refusal(t, repositoryErr).NotReady {
+			t.Fatalf("%q: the repository is at fault, not the daemon", repository)
+		}
+	}
+}
+
+// A repository with something wrong is refused with that, even by a daemon that cannot launch yet;
+// a good one on such a daemon is refused as NotReady.
+func TestCheckRepositoryNamesTheRepositoryBeforeTheDaemonsReadiness(t *testing.T) {
+	tree := fakeTree{"/repo/.git": true}
+	checks := StartChecks{Sidecars: readyLauncher{}, Parts: brokenParts("no session holder"), Tree: tree}
+	if r := refusal(t, func() error { _, err := checks.CheckRepository("/missing"); return err }()); r.NotReady || !strings.Contains(r.Reason, "/missing") {
+		t.Fatalf("a missing repository gave %+v, want the repository's refusal", r)
+	}
+	if r := refusal(t, func() error { _, err := checks.CheckRepository("/repo"); return err }()); !r.NotReady {
+		t.Fatalf("a good repository on a daemon that cannot launch gave %+v, want NotReady", r)
+	}
+}
+
 // A daemon with a part missing refuses every start, with the part's own reason, before it looks at
 // the repository.
 func TestADaemonWithAPartMissingRefusesEveryStartWithItsReason(t *testing.T) {

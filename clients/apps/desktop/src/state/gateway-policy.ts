@@ -7,10 +7,13 @@
  * - the copy of the host program: measured by progress. Each chunk must be accepted within
  *   `COPY_STALL_MS`, so a slow copy that keeps moving is never cut and a stalled one is, however
  *   large the program grows;
- * - a request once the program runs, the handshake included: measured by progress as well. A call
- *   is stalled when a whole `REPLY_STALL_MS` window passed with nothing heard on it, so a reply
- *   that keeps arriving, however slowly and however large, is never cut, and one that stops is.
- *   A stream is held to this until its first reply only: a quiet feed afterwards is not stalled.
+ * - a request once the program runs, the handshake included: two different silences. A link that
+ *   delivers nothing at all for a whole `REPLY_STALL_MS` window is silent, and its call is cut:
+ *   there is no sign the host is there. A link that keeps delivering (a keepalive, a probe's
+ *   answer, the middle of a message) while the call has had no reply of its own is alive and the
+ *   host is slow: the call waits for `SLOW_ANSWER_BOUND_MS`, a bound on a host that answers
+ *   nothing for this call at all, not on a host that is busy. A stream is held to this until its
+ *   first reply only: a quiet feed afterwards is not stalled.
  *
  * There is no bound on a whole dial, because one would cut a slow copy for being slow. Whether an
  * open session is alive is a separate question (`liveness.ts`). A host's connection outlives its
@@ -30,6 +33,12 @@ export const COPY_STALL_MS = 20_000;
  * something in every window never is.
  */
 export const REPLY_STALL_MS = 10_000;
+/**
+ * The longest a call waits for its first reply (or its end) from a host whose link keeps
+ * delivering bytes. A heavily loaded host answers slowly, not never; the bound only ends a host
+ * that is alive on the link yet never answers this call.
+ */
+export const SLOW_ANSWER_BOUND_MS = 300_000;
 /** How long a host's connection stays up after its last call ends, for the next call to find it. */
 export const CONNECTION_LINGER_MS = 10_000;
 
@@ -50,6 +59,9 @@ export interface FailedDial {
   readonly refused: boolean;
 }
 
+/** gRPC status of a call cut by a stalled link or a host that did not answer in time. */
+const DEADLINE_EXCEEDED = 4;
+
 export type Verdict =
   | {readonly _tag: 'redial'; readonly afterMs: number}
   | {readonly _tag: 'offline'};
@@ -62,5 +74,8 @@ export function afterFailure(failures: number, failed: FailedDial = {refused: fa
   if (failed.refused) return {_tag: 'offline'};
   if (failed.code !== undefined && FATAL_CODES.has(failed.code)) return {_tag: 'offline'};
   if (failures >= MAX_DIALS) return {_tag: 'offline'};
-  return {_tag: 'redial', afterMs: Math.min(BACKOFF_BASE_MS * 2 ** failures, BACKOFF_CAP_MS)};
+  // A dial that stalled already waited a whole window: the host was slow, not refusing, and a
+  // longer pause would only add to the wait. Only failures that came back at once back off.
+  const steps = failed.code === DEADLINE_EXCEEDED ? 1 : failures;
+  return {_tag: 'redial', afterMs: Math.min(BACKOFF_BASE_MS * 2 ** steps, BACKOFF_CAP_MS)};
 }

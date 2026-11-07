@@ -10,7 +10,7 @@ import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import type * as Scope from 'effect/Scope';
-import {REPLY_STALL_MS} from '../state/gateway-policy.js';
+import {REPLY_STALL_MS, SLOW_ANSWER_BOUND_MS} from '../state/gateway-policy.js';
 import {decodeFrames, encodeFrame, isFault} from '../state/grpc-frames.js';
 import {callStatus} from '../state/grpc-status.js';
 import {GatewayFailed, GrpcCode, GrpcFailed} from './errors.js';
@@ -29,10 +29,12 @@ export interface GatewaySession {
   /**
    * One call: send `bytes`, hand each reply message to `receive` in order, end with the status.
    * `receive` throwing ends the call with INTERNAL. Interrupting the call resets its stream. With
-   * `watch`, the call fails with DEADLINE_EXCEEDED once a whole `REPLY_STALL_MS` window passes with
-   * no byte heard on the link (a frame, a chunk of one, a connection-level frame): bytes that keep
-   * arriving, however slowly, are progress and never cut it. Without `watch` it is bounded by the session's liveness
-   * alone, as a quiet feed must be.
+   * `watch`, the call fails with DEADLINE_EXCEEDED in two cases, told apart by what the link
+   * delivers. When a whole `REPLY_STALL_MS` window passes with no byte heard on the link (a frame,
+   * a chunk of one, a connection-level frame such as a keepalive or the answer to a probe) the link
+   * is silent and the call is cut. While the link keeps delivering, the host is alive and merely
+   * slow: the call waits, and fails only once `SLOW_ANSWER_BOUND_MS` passes with nothing of its own
+   * answered. Without `watch` it is bounded by the session's liveness alone, as a quiet feed must be.
    */
   readonly call: (
     method: string,
@@ -54,10 +56,10 @@ export interface GatewaySession {
   readonly activity: Effect.Effect<number>;
   /**
    * A unary call that asks the link whether it is alive, for the liveness monitor. Its reply is
-   * bytes, so it counts as `activity`, but it proves nothing about any other call: the bytes
-   * heard while it is outstanding are not progress for the calls that are watched, or a call the
-   * host never answers would be kept alive by the probes that ask about it. It is not watched
-   * itself: whether the link answers is the monitor's verdict.
+   * bytes, so it counts as `activity` and shows the link is alive to every watched call; it is not
+   * an answer to any of them, so a call the host never answers is still ended at
+   * `SLOW_ANSWER_BOUND_MS`. It is not watched itself: whether the link answers is the monitor's
+   * verdict.
    */
   readonly probe: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, CallFailed>;
 }
@@ -163,13 +165,15 @@ const watchStream = (
 /** What one call has delivered, which its watch reads. */
 interface Tally {
   replied: boolean;
+  /** How many events of this call's own stream arrived (headers, a chunk of data, trailers). */
+  own: number;
 }
 
 /** What a call needs of its session: the connection, what the link was heard to deliver, and the metadata of every call. */
 interface Line {
   readonly http2: ClientHttp2Session;
-  /** How many chunks the link has delivered that count as progress for a watched call. */
-  readonly progress: () => number;
+  /** How many chunks the link has delivered: any byte shows the host is alive. */
+  readonly heard: () => number;
   readonly metadata: CallMetadata;
 }
 
@@ -188,6 +192,10 @@ const startCall = (
     if (stream instanceof GrpcFailed || stream instanceof GatewayFailed)
       return resume(Effect.fail(stream));
     let settled = false;
+    for (const event of ['response', 'trailers', 'data'] as const)
+      stream.on(event, () => {
+        tally.own += 1;
+      });
     watchStream(
       stream,
       message => {
@@ -216,23 +224,37 @@ const startCall = (
   });
 
 /**
- * Fails when a whole window passes with no byte heard on the link. Bytes are counted on the
+ * Fails a call the host is not answering, by what the link shows. Bytes are counted on the
  * duplex, not at the call's own events: an HTTP/2 frame only becomes an event once it is whole, so
- * a link slower than a frame per window would read as silent while it delivers. Calls share the
- * link, so its bytes are the progress of every call on it, except what a probe heard
- * (`GatewaySession.probe`). Never ends otherwise: it is raced
- * against the call, and a watch `to-first-reply` stops watching once the first reply came.
+ * a link slower than a frame per window would read as silent while it delivers.
+ *
+ * - A window with no byte on the link: the link is silent, nothing says the host is there, and the
+ *   call is cut at once.
+ * - A window with bytes but nothing of the call's own: the link is alive and the host slow (a
+ *   keepalive, the answer to a probe or another call's reply all arrive). The call waits, up to
+ *   `SLOW_ANSWER_BOUND_MS` without a reply of its own, which ends a host that never answers it.
+ *
+ * Never ends otherwise: it is raced against the call, and a watch `to-first-reply` stops
+ * watching once the first reply came.
  */
 const stalled = (line: Line, tally: Tally, watch: Watch): Effect.Effect<never, CallFailed> =>
   Effect.gen(function* () {
+    let unanswered = 0;
     while (true) {
-      const before = line.progress();
+      const heard = line.heard();
+      const own = tally.own;
       yield* Effect.sleep(`${REPLY_STALL_MS} millis`);
       if (watch === 'to-first-reply' && tally.replied) return yield* Effect.never;
-      if (line.progress() === before)
+      if (line.heard() === heard)
         return yield* new GrpcFailed({
           code: GrpcCode.DEADLINE_EXCEEDED,
           message: `gRPC deadline exceeded: nothing heard for ${REPLY_STALL_MS / 1000} seconds`,
+        });
+      unanswered = tally.own === own ? unanswered + REPLY_STALL_MS : 0;
+      if (unanswered >= SLOW_ANSWER_BOUND_MS)
+        return yield* new GrpcFailed({
+          code: GrpcCode.DEADLINE_EXCEEDED,
+          message: `gRPC deadline exceeded: no answer for ${SLOW_ANSWER_BOUND_MS / 1000} seconds, though the link is alive`,
         });
     }
   });
@@ -242,7 +264,7 @@ const callOver =
   (line: Line): GatewaySession['call'] =>
   (method, bytes, receive, watch) =>
     Effect.suspend(() => {
-      const tally: Tally = {replied: false};
+      const tally: Tally = {replied: false, own: 0};
       const run = startCall(line, tally, method, bytes, receive);
       return watch === undefined ? run : Effect.raceFirst(run, stalled(line, tally, watch));
     });
@@ -283,8 +305,6 @@ export const openSession = (
   Effect.gen(function* () {
     const lost = Deferred.makeUnsafe<void>();
     let heard = 0;
-    let progress = 0;
-    let probes = 0;
     const markLost = (): void => {
       Deferred.doneUnsafe(lost, Exit.void);
     };
@@ -298,7 +318,6 @@ export const openSession = (
         // Counted here, on the link, before the session parses anything: see `activity`.
         duplex.on('data', () => {
           heard += 1;
-          if (probes === 0) progress += 1;
         });
         return session;
       }),
@@ -308,22 +327,12 @@ export const openSession = (
           markLost();
         }),
     );
-    const call = callOver({http2, progress: () => progress, metadata});
+    const call = callOver({http2, heard: () => heard, metadata});
     const probeCall = unaryOver(call, 'none');
     return {
       call,
       unary: unaryOver(call),
-      probe: (method, bytes) =>
-        Effect.acquireUseRelease(
-          Effect.sync(() => {
-            probes += 1;
-          }),
-          () => probeCall(method, bytes),
-          () =>
-            Effect.sync(() => {
-              probes -= 1;
-            }),
-        ),
+      probe: probeCall,
       lost: Deferred.await(lost),
       activity: Effect.sync(() => heard),
     } satisfies GatewaySession;

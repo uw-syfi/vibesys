@@ -142,6 +142,7 @@ const snapshots = (
         connection: get(session.connection.state),
         freshness: get(session.connection.freshness),
         runsFeed: get(session.runs.status),
+        repositoryChecked: get(session.repositoryCheck.state),
         agentFeeds:
           openHost === key && openAgent !== null && openAgent !== undefined
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
@@ -178,6 +179,20 @@ function openOf(route: Route) {
     costHost: cost?.host,
     costRun: cost?.runId,
   };
+}
+
+/** Try again everything of `session` that may be down: the connection, the runs, and what is open. */
+function retryFeeds(
+  dispatch: Dispatch,
+  session: HostSession,
+  agentId: string | null | undefined,
+  runId: string | undefined,
+): void {
+  dispatch(session.connection.retry, () => undefined);
+  dispatch(session.runs.retry, () => undefined);
+  if (agentId !== null && agentId !== undefined)
+    dispatch(session.agents.retry(agentId), () => undefined);
+  if (runId !== undefined) dispatch(session.runHistory.retry(runId), () => undefined);
 }
 
 /**
@@ -240,6 +255,8 @@ export function ConnectedApp(props: {
     ...view.progress,
     startRun: (host: string, request: StartRunRequest) =>
       issue(host, startIntent(request), start => setIssues(all => ({...all, start}))),
+    checkRepository: (host, repository) =>
+      on(host, session => session.repositoryCheck.ask(repository)),
     retryStart: () => retry(issues.start),
     stopRun: (host, runId) =>
       issue(host, stopIntent(runId), stop =>
@@ -274,12 +291,8 @@ export function ConnectedApp(props: {
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;
-        dispatch(session.connection.retry, () => undefined);
-        dispatch(session.runs.retry, () => undefined);
-        if (openHost === host && openAgent !== null && openAgent !== undefined)
-          dispatch(session.agents.retry(openAgent), () => undefined);
-        if (openHost === host && openRun !== undefined)
-          dispatch(session.runHistory.retry(openRun), () => undefined);
+        const open = openHost === host;
+        retryFeeds(dispatch, session, open ? openAgent : undefined, open ? openRun : undefined);
       }}
     />
   );

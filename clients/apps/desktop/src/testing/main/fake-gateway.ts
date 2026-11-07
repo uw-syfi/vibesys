@@ -76,6 +76,8 @@ export interface FakeGateway {
    * the link has not carried is held.
    */
   throttle(): Throttle;
+  /** Send a keepalive PING from the peer on every open connection, as a host does on a quiet link. */
+  ping(): void;
   /** Called with each call received on a scripted method, as it arrives. */
   onCall: ((call: FakeCall) => void) | undefined;
 }
@@ -256,6 +258,9 @@ export function fakeGateway(): FakeGateway {
       sockets.add(peer);
       server.emit('connection', peer);
       return client;
+    },
+    ping: () => {
+      for (const session of sessions) if (!session.destroyed) session.ping(() => {});
     },
     drop: () => {
       for (const session of sessions) session.destroy();

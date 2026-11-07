@@ -19,15 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrchestratorService_Hello_FullMethodName         = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
-	OrchestratorService_Dispatch_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
-	OrchestratorService_WatchRuns_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
-	OrchestratorService_WatchAgent_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
-	OrchestratorService_ListItems_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
-	OrchestratorService_GetItem_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
-	OrchestratorService_GetRunHistory_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
-	OrchestratorService_WatchRunCost_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
-	OrchestratorService_WatchHostCost_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost"
+	OrchestratorService_Hello_FullMethodName           = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
+	OrchestratorService_Dispatch_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
+	OrchestratorService_WatchRuns_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
+	OrchestratorService_WatchAgent_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
+	OrchestratorService_ListItems_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
+	OrchestratorService_GetItem_FullMethodName         = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
+	OrchestratorService_GetRunHistory_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
+	OrchestratorService_WatchRunCost_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
+	OrchestratorService_CheckRepository_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/CheckRepository"
+	OrchestratorService_WatchHostCost_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -56,6 +57,11 @@ type OrchestratorServiceClient interface {
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error)
+	// Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+	// makes that needs the repository alone (an absolute path that exists and is the root of a git work
+	// tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
+	// client can ask while its operator is still filling in the rest.
+	CheckRepository(ctx context.Context, in *CheckRepositoryRequest, opts ...grpc.CallOption) (*CheckRepositoryResponse, error)
 	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
 	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
 	WatchHostCost(ctx context.Context, in *WatchHostCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchHostCostResponse], error)
@@ -176,6 +182,16 @@ func (c *orchestratorServiceClient) WatchRunCost(ctx context.Context, in *WatchR
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type OrchestratorService_WatchRunCostClient = grpc.ServerStreamingClient[WatchRunCostResponse]
 
+func (c *orchestratorServiceClient) CheckRepository(ctx context.Context, in *CheckRepositoryRequest, opts ...grpc.CallOption) (*CheckRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckRepositoryResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_CheckRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *orchestratorServiceClient) WatchHostCost(ctx context.Context, in *WatchHostCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchHostCostResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &OrchestratorService_ServiceDesc.Streams[3], OrchestratorService_WatchHostCost_FullMethodName, cOpts...)
@@ -221,6 +237,11 @@ type OrchestratorServiceServer interface {
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error
+	// Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+	// makes that needs the repository alone (an absolute path that exists and is the root of a git work
+	// tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
+	// client can ask while its operator is still filling in the rest.
+	CheckRepository(context.Context, *CheckRepositoryRequest) (*CheckRepositoryResponse, error)
 	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
 	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
 	WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error
@@ -257,6 +278,9 @@ func (UnimplementedOrchestratorServiceServer) GetRunHistory(context.Context, *Ge
 }
 func (UnimplementedOrchestratorServiceServer) WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchRunCost not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) CheckRepository(context.Context, *CheckRepositoryRequest) (*CheckRepositoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckRepository not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchHostCost not implemented")
@@ -405,6 +429,24 @@ func _OrchestratorService_WatchRunCost_Handler(srv interface{}, stream grpc.Serv
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type OrchestratorService_WatchRunCostServer = grpc.ServerStreamingServer[WatchRunCostResponse]
 
+func _OrchestratorService_CheckRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).CheckRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_CheckRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).CheckRepository(ctx, req.(*CheckRepositoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrchestratorService_WatchHostCost_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(WatchHostCostRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -442,6 +484,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRunHistory",
 			Handler:    _OrchestratorService_GetRunHistory_Handler,
+		},
+		{
+			MethodName: "CheckRepository",
+			Handler:    _OrchestratorService_CheckRepository_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
