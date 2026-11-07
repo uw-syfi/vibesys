@@ -23,6 +23,7 @@ import fc from 'fast-check';
 import {itemOf} from '../../testing/orchestrator/builders.js';
 import {itemIs} from '../orchestrator/items.js';
 import {emptyState, type OrchestratorState} from '../orchestrator/state.js';
+import {ms} from '../orchestrator/time.js';
 import {type Entry, type Transcript, transcript} from './transcript.js';
 
 const RUN = 'run';
@@ -215,8 +216,7 @@ const hasWords = (item: Item, state: OrchestratorState): boolean => {
   return false;
 };
 
-const startOf = (item: Item): number =>
-  Number(item.startedAt?.seconds ?? item.at?.seconds ?? 0n) * 1000;
+const startOf = (item: Item): number => ms(item.startedAt) ?? ms(item.at) ?? 0;
 
 /**
  * An event comes right before the first item of its turn (in item order, whether or not the item

@@ -238,7 +238,7 @@ export interface OlderFrame {
 }
 
 /** One item read whole on request (`GetItem`), with the sequence it is current to. */
-export interface WholeFrame {
+interface WholeFrame {
   readonly body: {readonly case: 'whole'; readonly value: {readonly item: Item}};
   readonly sequence: bigint;
 }
