@@ -76,6 +76,8 @@ export function machineRequestFromBytes(bytes: Uint8Array): MachineRequest {
       return {op: 'restore', undo: op.value};
     case undefined:
       throw new Error('the machine request names no operation');
+    default:
+      return op satisfies never;
   }
 }
 
@@ -122,5 +124,7 @@ export function machineReplyFromBytes(bytes: Uint8Array): MachineReply {
       return {kind: 'refused', reason: result.value.reason};
     case undefined:
       throw new Error('the machine reply names no result');
+    default:
+      return result satisfies never;
   }
 }
