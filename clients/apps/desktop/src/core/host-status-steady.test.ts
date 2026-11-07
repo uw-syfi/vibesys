@@ -14,12 +14,11 @@ import {type HostConnectionState, hostStatusOf} from '../state/index.js';
 import {daemonRecording, FakeDaemon, generateScenario} from '../testing/orchestrator/index.js';
 import {quiescent, settle} from '../testing/settle.js';
 import {makeFakeTransport} from '../testing/transport/index.js';
-import {hostStatusWord} from '../ui/host-status-words.js';
 import {makeHostConnection} from './connection.js';
 import {RpcStatus, Unavailable} from './errors.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 
-/** The word of a host with this link and nothing read from it (or something already on screen). */
+/** The status kind (which has one word) of a host with this link and nothing read from it (or something already on screen). */
 const word = (connection: HostConnectionState, hasData: boolean): string =>
   hostStatusWord(hostStatusOf({connection, feed: {_tag: 'Opening'}, hasData, staleForMs: null}))
     .label;
@@ -86,11 +85,11 @@ describe('the word of a host while its connection retries', () => {
             () => true,
             waited.map(ms => ({kind: 'wait', ms}) as const),
           );
-          // Nothing asked for the host yet reads Waiting; after that, at most a first dial.
+          // Nothing asked for the host yet reads waiting; after that, at most a first dial.
           const read = states
             .map(state => word(state, false))
-            .filter((each, index, all) => each !== all[index - 1] && each !== 'Waiting');
-          expect(['', 'Connecting', 'Unreachable', 'Connecting,Unreachable']).toContain(
+            .filter((each, index, all) => each !== all[index - 1] && each !== 'waiting');
+          expect(['', 'connecting', 'unreachable', 'connecting,unreachable']).toContain(
             read.join(','),
           );
         }),
