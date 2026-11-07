@@ -5,7 +5,6 @@ import * as Atom from 'effect/reactivity/Atom';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {emptyHostModel, type HostModel} from '../state/index.js';
 import type {HostConnectionApi} from './connection.js';
-import type {HostBlock} from './host-control.js';
 import type {OrchestratorClient} from './orchestrator-client.js';
 
 export interface HostStore {
@@ -30,6 +29,4 @@ export interface HostParts {
    * session's, not the registry's.
    */
   readonly ambient: Context.Context<never>;
-  /** What the host says now stands in the way of starting a run on it, asked fresh. */
-  readonly blocked: HostBlock;
 }

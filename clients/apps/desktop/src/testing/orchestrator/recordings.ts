@@ -66,7 +66,7 @@ export interface DaemonOptions {
    */
   readonly live?: boolean;
   /** What the host's control service answers to Identify; with none it is not served (UNIMPLEMENTED). */
-  readonly identify?: IdentifyResponse;
+  readonly identify?: () => IdentifyResponse;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -314,7 +314,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case IDENTIFY:
           return options.identify === undefined
             ? [{end: {message: 'no host control', status: RpcStatus.UNIMPLEMENTED}}]
-            : [{frame: toBinary(IdentifyResponseSchema, options.identify)}];
+            : [{frame: toBinary(IdentifyResponseSchema, options.identify())}];
         case methodPathOf('ListItems'):
           return listItemsSteps(daemon, target);
         case methodPathOf('GetItem'):

@@ -66,7 +66,7 @@ const noReceipt = new InvalidMessage({
  * start is held back by it.
  */
 const refusedStart = (parts: HostParts, command: Command) =>
-  command.body.case === 'startRun' ? parts.blocked : Effect.succeed(undefined);
+  command.body.case === 'startRun' ? parts.connection.blocked : Effect.succeed(undefined);
 
 /**
  * Waits for a Ready connection (a command is not sent into the void), then sends once. A call

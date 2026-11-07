@@ -661,10 +661,11 @@ const playLost = (how: 'cut' | 'drop', count: number) =>
     const failedHellos = world.logs.filter(line =>
       line.startsWith(`gateway call failed: ${HELLO}`),
     );
-    // Each lost Hello is named once, and nothing asked the host `Identify`: no host answered.
+    // Each lost Hello is named once, and the host is not asked why it did not answer (no host
+    // answered). It is asked once its link is Ready, for what stands in the way of a run: once.
     expect(failedHellos).toHaveLength(count);
-    expect(world.identifies()).toBe(0);
-    expect(world.logs.filter(line => line.includes(IDENTIFY))).toEqual([]);
+    expect(yield* world.until(() => world.identifies() > 0, 60_000)).not.toBeNull();
+    expect(world.identifies()).toBe(1);
   });
 
 const REFUSED_CAUSE = {

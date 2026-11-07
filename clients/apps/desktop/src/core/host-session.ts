@@ -47,7 +47,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const connection = yield* makeHostConnection(client, defaultReconnect, readiness);
   const store = yield* makeHostStore;
   const ambient = yield* Effect.context<never>();
-  const parts = {client, connection, store, ambient, blocked: readiness.blocked};
+  const parts = {client, connection, store, ambient};
   const commands = yield* makeCommands(parts);
   return {
     connection,

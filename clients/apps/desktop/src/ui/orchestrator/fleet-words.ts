@@ -93,12 +93,15 @@ export function hostPhrase(
 
 /**
  * What the Runs list says when no host has been read: "Not read yet", or the cause when every host
- * that has not been read refuses for good, since waiting will not read those.
+ * that has not been read cannot be (it refused for good), since waiting will not read those. A host
+ * that is read but cannot run a run is only being read, and says its cause on its chip.
  */
 export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 'refusal'>[]): string {
   const unread = hosts.filter(h => h.freshness === 'empty' || h.freshness === 'unavailable');
   const first = unread[0]?.refusal;
-  return first !== null && first !== undefined && unread.every(h => h.refusal !== null)
+  return first !== null &&
+    first !== undefined &&
+    unread.every(h => h.freshness === 'unavailable' && h.refusal !== null)
     ? causeLabel(first)
     : 'Not read yet';
 }

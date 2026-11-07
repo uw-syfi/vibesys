@@ -29,7 +29,7 @@ import {
   idleConnection,
   isTerminal,
 } from '../state/index.js';
-import {type AppError, InvalidMessage, isRetryable} from './errors.js';
+import {type AppError, InvalidMessage, isRetryable, type Refused} from './errors.js';
 import {faultOf} from './fault.js';
 import type {HostBlock, HostReadiness, WhyUnserved} from './host-control.js';
 import type {OrchestratorClient} from './orchestrator-client.js';
@@ -65,6 +65,11 @@ export interface HostConnectionApi {
   readonly ready: (after?: number) => Effect.Effect<number, ConnectionTerminal>;
   /** A feed saw `error` on `epoch`. A no-op when that epoch is already over. */
   readonly suspect: (epoch: number, error: AppError) => Effect.Effect<void>;
+  /**
+   * Asks the host now what stands in the way of a run on it, records the answer on the Ready state
+   * (which the screens show), and answers it. Nothing but a Ready connection records anything.
+   */
+  readonly blocked: Effect.Effect<Refused | undefined>;
   /** The user asked to try again: skips a wait, or leaves a terminal state. */
   readonly retry: Effect.Effect<void>;
   /** Suspends while the connection is terminal; returns once the user's retry leaves that state. */
@@ -126,16 +131,17 @@ const failedHello = (w: Wiring, error: AppError, failures: number) =>
     return yield* afterFailure(w, refused ?? error, failuresAfter(w.policy, failures, null));
   });
 
-/** Records what the host says stands in the way of a run on the Ready epoch it was asked in. */
-const noteBlock = (w: Wiring, epoch: number) =>
-  Effect.gen(function* () {
-    const refused = yield* w.blocked;
-    if (refused === undefined) return;
-    yield* SubscriptionRef.update(w.state, state =>
-      state._tag === 'Ready' && state.epoch === epoch
-        ? {...state, blocked: {cause: refused.cause, detail: refused.detail}}
-        : state,
-    );
+/**
+ * Records what the host says stands in the way of a run on the Ready epoch it was asked in, and
+ * clears it when the host says nothing does any more (the person repaired the host).
+ */
+const noteBlock = (w: Wiring, epoch: number, refused: Refused | undefined) =>
+  SubscriptionRef.update(w.state, (state): HostConnectionState => {
+    if (state._tag !== 'Ready' || state.epoch !== epoch) return state;
+    const {blocked: _, ...rest} = state;
+    return refused === undefined
+      ? rest
+      : {...rest, blocked: {cause: refused.cause, detail: refused.detail}};
   });
 
 /** One pass of the loop: dial, then stay until the connection is lost. Answers the next count. */
@@ -172,7 +178,7 @@ const connectOnce = (w: Wiring, failures: number, epoch: number) =>
     yield* SubscriptionRef.set(w.lastHeard, readyAt);
     yield* SubscriptionRef.set(w.state, {_tag: 'Ready', epoch: next, daemon});
     // The runs can be read at once; what stands in the way of starting one is learned beside them.
-    yield* Effect.forkChild(noteBlock(w, next));
+    yield* Effect.forkChild(Effect.flatMap(w.blocked, refused => noteBlock(w, next, refused)));
     const error = yield* Deferred.await(lost);
     yield* Ref.set(w.current, null);
     const readyFor = (yield* Clock.currentTimeMillis) - readyAt;
@@ -228,6 +234,13 @@ export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
     if (held !== null && held.epoch === epoch) yield* Deferred.succeed(held.lost, error);
   });
 
+  const blocked = Effect.gen(function* () {
+    const refused = yield* w.blocked;
+    const s = yield* SubscriptionRef.get(w.state);
+    if (s._tag === 'Ready') yield* noteBlock(w, s.epoch, refused);
+    return refused;
+  });
+
   const retry = Effect.gen(function* () {
     const s = yield* SubscriptionRef.get(w.state);
     if (s._tag === 'Waiting' || isTerminal(s)) yield* Queue.offer(w.retries, true);
@@ -251,6 +264,7 @@ export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
     heard,
     ready,
     suspect,
+    blocked,
     retry,
     leftTerminal,
   };

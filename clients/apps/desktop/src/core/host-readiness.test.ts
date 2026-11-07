@@ -129,7 +129,7 @@ describe('what a host says stands in the way of a run', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const h = yield* hostHarness(daemon(), {
-          identify: identify(serving, [part(HostPart.JOB_TOOL, PartProblemReason.TOO_OLD)]),
+          identify: () => identify(serving, [part(HostPart.JOB_TOOL, PartProblemReason.TOO_OLD)]),
         });
         yield* h.session.connection.ready();
         yield* h.elapse(5);
@@ -144,9 +144,8 @@ describe('what a host says stands in the way of a run', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const h = yield* hostHarness(daemon(), {
-          identify: identify(serving, [
-            part(HostPart.JOB_TOOL, PartProblemReason.TOO_OLD, 'old build'),
-          ]),
+          identify: () =>
+            identify(serving, [part(HostPart.JOB_TOOL, PartProblemReason.TOO_OLD, 'old build')]),
         });
         const id = yield* h.session.commands.submit(start);
         yield* h.elapse(60, 5);
@@ -181,16 +180,46 @@ describe('what a host says stands in the way of a run', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const h = yield* hostHarness(daemon(), {
-          identify: identify(
-            serving,
-            PARTS.map(which => part(which, null)),
-          ),
+          identify: () =>
+            identify(
+              serving,
+              PARTS.map(which => part(which, null)),
+            ),
         });
         yield* h.session.commands.submit(start);
         yield* h.elapse(60, 5);
         expect(dispatches(h)).toBe(1);
       }),
     ),
+  );
+
+  it.effect(
+    'is asked again at the next start, so a repaired host is sent it and its chip clears',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          let repaired = false;
+          const h = yield* hostHarness(daemon(), {
+            identify: () =>
+              identify(serving, [
+                part(HostPart.JOB_TOOL, repaired ? null : PartProblemReason.TOO_OLD),
+              ]),
+          });
+          yield* h.session.connection.ready();
+          yield* h.elapse(5);
+          expect(refusalCauseOf(yield* h.read(h.session.connection.state))).toBe(
+            'job-tool-too-old',
+          );
+          yield* h.session.commands.submit(start);
+          yield* h.elapse(60, 5);
+          expect(dispatches(h)).toBe(0);
+          repaired = true;
+          yield* h.session.commands.submit(start);
+          yield* h.elapse(60, 5);
+          expect(dispatches(h)).toBe(1);
+          expect(refusalCauseOf(yield* h.read(h.session.connection.state))).toBeNull();
+        }),
+      ),
   );
 });
 
@@ -211,7 +240,7 @@ describe('a host whose orchestrator is unserved, read through a handshake it ans
         ]) {
           const h = yield* hostHarness(daemon(), {
             helloFails: () => RpcStatus.UNAVAILABLE,
-            identify: identify(unserved(UnservedReason.STATE_REFUSED, place)),
+            identify: () => identify(unserved(UnservedReason.STATE_REFUSED, place)),
           });
           const failure = yield* Effect.flip(h.session.connection.ready());
           expect(failure.state).toMatchObject({
@@ -234,7 +263,7 @@ describe('a host whose orchestrator is unserved, read through a handshake it ans
       Effect.gen(function* () {
         const h = yield* hostHarness(daemon(), {
           helloFails: () => RpcStatus.UNAVAILABLE,
-          identify: identify(unserved(UnservedReason.HELD_ELSEWHERE)),
+          identify: () => identify(unserved(UnservedReason.HELD_ELSEWHERE)),
         });
         yield* Effect.forkChild(h.session.connection.ready());
         yield* h.elapse(120, 10);

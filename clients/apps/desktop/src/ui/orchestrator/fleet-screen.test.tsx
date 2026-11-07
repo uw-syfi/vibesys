@@ -365,6 +365,22 @@ describe('the fleet screen', () => {
     }
   });
 
+  it('still says Not read yet for a host that is being read and cannot run a run', () => {
+    const {screen} = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'empty',
+        staleForMs: null,
+        refusal: 'job-tool-too-old',
+        data: emptyState,
+      },
+    ]);
+    expect(screen.text()).toContain('Not read yet');
+    expect(screen.text()).toContain('Job tool too old');
+    screen.unmount();
+  });
+
   it('shows a host that is read but cannot run a run with its cause on its chip, and keeps its rows', () => {
     const {screen} = open([{...hostA, refusal: 'job-tool-too-old'}]);
     expect(screen.text()).toContain('Job tool too old');
