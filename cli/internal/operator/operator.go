@@ -194,10 +194,13 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 		return invalid("%s program: runtime \"pyxis\" runs no apptainer program", n.apptainer)
 	case pyxis && p.GetApptainer().GetLocalScratchDir() != "":
 		return invalid("%s local_scratch_dir: runtime \"pyxis\" converts the images on the login node, not on this machine", n.apptainer)
-	case remote && p.GetMaxJobs() > 1:
-		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
-		// one job of its scope, so a second one beside it would be swept away.
-		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\"", n.maxJobs, n.kind, kind, n.kind)
+	case remote && !apptainer && p.GetMaxJobs() > 1:
+		// An ssh or slurm placement stages each job's directories and sweeps its containers and
+		// allocations as the one job of its scope, so a second one beside it would be swept away; and
+		// both share one Docker daemon on the remote machine, whose builder a slurm placement's builds
+		// also share. An apptainer placement keeps each job's apart (production.machineEnvironments),
+		// and gives each container an allocation of its own.
+		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\" or \"apptainer\"", n.maxJobs, n.kind, kind, n.kind)
 	}
 	return nil
 }

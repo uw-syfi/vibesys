@@ -1,19 +1,10 @@
 import {RunStatus} from '@vibesys/orchestrator-proto';
 import {Button, Chip, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {CommandProgress, Freshness, RunReport} from '../../../state/index.js';
+import type {CommandProgress, HostStatus, RunReport} from '../../../state/index.js';
+import {HostStatusChip} from '../../host-status-chip.js';
 import {runWord} from '../words.js';
 import {formatAge, formatElapsed, seattleMoment} from './format.js';
-
-/** What a data state is called when the data is not current; a current one needs no word. */
-const FRESHNESS: Readonly<
-  Record<Exclude<Freshness, 'live'>, {label: string; tone: 'neutral' | 'warn'; hint: string}>
-> = {
-  'catching-up': {label: 'Catching up', tone: 'neutral', hint: 'Reading what changed.'},
-  stale: {label: 'Stale', tone: 'warn', hint: 'The connection is down. What is shown is older.'},
-  empty: {label: 'Connecting', tone: 'neutral', hint: 'Nothing has been read yet.'},
-  unavailable: {label: 'Unavailable', tone: 'warn', hint: 'Nothing can be read until you act.'},
-};
 
 /**
  * What the report's title row says about the run: its state, the host it runs on, how long it has
@@ -23,29 +14,15 @@ const FRESHNESS: Readonly<
 export function ReportMeta(props: {
   readonly report: RunReport;
   readonly host: string;
-  readonly freshness: Freshness;
+  readonly status: HostStatus;
   readonly nowMs: number;
-  readonly staleForMs: number | null;
 }): JSX.Element {
   const {header} = props.report;
   const status = runWord(header.status);
-  const stale = props.freshness === 'live' ? undefined : FRESHNESS[props.freshness];
-  const staleHint =
-    stale === undefined
-      ? undefined
-      : props.staleForMs === null
-        ? stale.hint
-        : `${stale.hint} Last current ${formatAge(props.staleForMs)}.`;
   return (
     <>
       <Chip label={status.label} tone={status.tone} dot />
-      {stale === undefined ? null : (
-        <Chip
-          label={stale.label}
-          tone={stale.tone}
-          {...(staleHint === undefined ? {} : {hint: staleHint})}
-        />
-      )}
+      {props.status.kind === 'live' ? null : <HostStatusChip status={props.status} />}
       {props.report.search.state === 'unreadable' ? (
         <Chip
           label="Search stale"

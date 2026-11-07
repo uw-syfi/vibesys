@@ -52,13 +52,11 @@ const quiet: HostSnapshot = {
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
 const resources: readonly ResourceRow[] = [
-  {key: 'local', label: 'This machine', connection: 'connected', cause: null, freshness: 'live'},
+  {key: 'local', label: 'This machine', status: {kind: 'live', cause: null, staleForMs: null}},
   {
     key: 'ssh:long',
     label: `ssh:${'a-very-long-host-name-'.repeat(8)}`,
-    connection: 'reconnecting',
-    cause: null,
-    freshness: 'stale',
+    status: {kind: 'stale', cause: null, staleForMs: 3 * 60_000},
   },
 ];
 const idle: CommandProgress | undefined = undefined;
@@ -358,9 +356,9 @@ describe('the settings screen', () => {
     const names = [...screen.container.querySelectorAll<HTMLElement>('td[data-clip]')];
     expect(names.map(cell => cell.textContent)).toEqual(resources.map(row => row.label));
     expect(names.map(cell => cell.getAttribute('title'))).toEqual(resources.map(row => row.label));
-    expect(screen.text()).toContain('Connected');
-    expect(screen.text()).toContain('Reconnecting');
-    expect(screen.text()).toContain('Stale');
+    expect(screen.text()).toContain('Live');
+    expect(screen.text()).toContain('Stale 3m');
+    expect(screen.text()).not.toContain('Freshness');
     screen.unmount();
   });
 

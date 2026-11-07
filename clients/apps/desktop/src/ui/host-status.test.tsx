@@ -1,0 +1,112 @@
+import {describe, expect, it} from '@effect/vitest';
+import fc from 'fast-check';
+import {
+  emptyState,
+  HOST_STATUS_KINDS,
+  type HostStatus,
+  initialAppearance,
+  initialNavigation,
+  REFUSAL_CAUSES,
+} from '../state/index.js';
+import {installDom, mount} from '../testing/dom/harness.js';
+import {CostScreen} from './cost/index.js';
+import {hostStatusWord} from './host-status-words.js';
+import {COST_WORDS} from './orchestrator/cost-words.js';
+import {FleetScreen} from './orchestrator/fleet-screen.js';
+import {SettingsScreen} from './settings/settings-screen.js';
+
+installDom();
+
+/** Every status a host can have, with a cause for each refusal and an age for a stale host. */
+const statuses: fc.Arbitrary<HostStatus> = fc.oneof(
+  fc.constantFrom(...HOST_STATUS_KINDS.filter(kind => kind !== 'refused')).map(kind => ({
+    kind,
+    cause: null,
+    staleForMs: kind === 'stale' ? 3 * 60_000 : null,
+  })),
+  fc.constantFrom(null, ...REFUSAL_CAUSES).map(cause => ({
+    kind: 'refused' as const,
+    cause,
+    staleForMs: null,
+  })),
+);
+
+/** The words every status chip on screen says: what a screen's text says of a host. */
+const chips = (screen: ReturnType<typeof mount>): string[] =>
+  [...screen.container.querySelectorAll('.vs-chip')].map(chip => chip.textContent ?? '');
+
+/** The words a different status would say, which no screen may say of this one. */
+const otherWords = (status: HostStatus): string[] =>
+  HOST_STATUS_KINDS.filter(kind => kind !== status.kind).map(
+    kind => hostStatusWord({kind, cause: null, staleForMs: null}).label,
+  );
+
+function settings(status: HostStatus) {
+  return mount(
+    <SettingsScreen
+      tab="resources"
+      pick={() => undefined}
+      appearance={initialAppearance('dark')}
+      choose={() => undefined}
+      resources={[{key: 'ssh:host-a', label: 'host-a', status}]}
+    />,
+  );
+}
+
+function runs(status: HostStatus) {
+  return mount(
+    <FleetScreen
+      hosts={[{key: 'ssh:host-a', label: 'host-a', data: emptyState, freshness: 'empty', status}]}
+      place={initialNavigation.fleet}
+      nowMs={0}
+      go={() => undefined}
+      retryHost={() => undefined}
+      newRun={null}
+    />,
+  );
+}
+
+function cost(status: HostStatus) {
+  return mount(
+    <CostScreen
+      view={undefined}
+      status={status}
+      feed={{_tag: 'Live'}}
+      runOver={false}
+      words={COST_WORDS}
+      trail={[]}
+      reading={null}
+      retry={() => undefined}
+    />,
+  );
+}
+
+describe('a host that says one thing on every screen', () => {
+  it('reads the same word on Settings, the Runs list and Cost, and no second word beside it', () => {
+    fc.assert(
+      fc.property(statuses, status => {
+        const {label} = hostStatusWord(status);
+        for (const open of [settings, runs, cost]) {
+          const screen = open(status);
+          const said = chips(screen);
+          // A live host is the quiet case on the Runs list: it says nothing there.
+          const quiet = status.kind === 'live' && open === runs;
+          expect(said.includes(label), open.name).toBe(!quiet);
+          expect(
+            said.filter(word => otherWords(status).includes(word)),
+            open.name,
+          ).toEqual([]);
+          screen.unmount();
+        }
+      }),
+      {numRuns: 60},
+    );
+  });
+
+  it('has one status column in Settings: no separate Freshness', () => {
+    const screen = settings({kind: 'stale', cause: null, staleForMs: 60_000});
+    const headers = [...screen.container.querySelectorAll('th')].map(th => th.textContent);
+    expect(headers).toEqual(['Name', 'Status']);
+    screen.unmount();
+  });
+});

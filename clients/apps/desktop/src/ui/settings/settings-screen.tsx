@@ -32,9 +32,9 @@ import {
   withMode,
   withTheme,
 } from '../../state/index.js';
-import {causeHint, causeWord} from '../refusal-words.js';
+import {HostStatusChip} from '../host-status-chip.js';
 import type {MachineControls} from './add-machine/machine-controls.js';
-import {CONNECTION_WORD, FRESHNESS_WORD, MODE_WORD, TAB_WORD, themeWord} from './words.js';
+import {MODE_WORD, TAB_WORD, themeWord} from './words.js';
 
 const MODES = APPEARANCE_MODES.map(value => ({value, label: MODE_WORD[value]}));
 const THEME_MODES: readonly {readonly mode: ThemeMode; readonly section: string}[] = [
@@ -114,27 +114,9 @@ function AppearanceTab(props: {
 const COLUMNS: readonly TableColumn<ResourceRow>[] = [
   {key: 'name', header: 'Name', lead: true, clip: row => row.label, cell: row => row.label},
   {
-    key: 'state',
-    header: 'State',
-    cell: row => {
-      const word = CONNECTION_WORD[row.connection];
-      return (
-        <Row gap="space-2" align="center">
-          <Chip label={word.label} tone={word.tone} dot even />
-          {row.cause === null ? null : (
-            <Chip label={causeWord(row.cause)} tone="warn" hint={causeHint(row.cause)} />
-          )}
-        </Row>
-      );
-    },
-  },
-  {
-    key: 'data',
-    header: 'Freshness',
-    cell: row => {
-      const word = FRESHNESS_WORD[row.freshness];
-      return <Chip label={word.label} tone={word.tone} dot even />;
-    },
+    key: 'status',
+    header: 'Status',
+    cell: row => <HostStatusChip status={row.status} even />,
   },
 ];
 

@@ -3,11 +3,10 @@
  * eye; the whole value is the text on hover. Every time is told in Seattle time, the zone named, so
  * a list that spans days never leaves a reader to guess which clock it is on.
  */
-import type {FleetHostRef, FleetObjective, Freshness} from '../../state/index.js';
+import type {FleetHostRef, FleetObjective} from '../../state/index.js';
+import {span} from '../duration.js';
 import {formatFigure} from '../figures.js';
-import {causeWord} from '../refusal-words.js';
-
-type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
+import {hostStatusWord} from '../host-status-words.js';
 
 const EXACT = new Intl.NumberFormat('en-US', {maximumFractionDigits: 6});
 
@@ -19,19 +18,7 @@ export const dollars = (usd: number): string =>
     ? `$${Math.round(usd).toLocaleString('en-US')}`
     : `$${usd.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
-const SECOND = 1000;
-const MINUTE = 60 * SECOND;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-/** How long, in its two largest units: `2d 6h`, `5h 20m`, `18m`, `42s`. */
-export function span(totalMs: number): string {
-  const ms = Math.max(0, totalMs);
-  if (ms < MINUTE) return `${Math.floor(ms / SECOND)}s`;
-  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m`;
-  if (ms < DAY) return `${Math.floor(ms / HOUR)}h ${Math.floor((ms % HOUR) / MINUTE)}m`;
-  return `${Math.floor(ms / DAY)}d ${Math.floor((ms % DAY) / HOUR)}h`;
-}
+export {span};
 
 /** How long ago: `3s ago`. */
 export const ago = (elapsedMs: number): string => `${span(elapsedMs)} ago`;
@@ -48,58 +35,17 @@ const SEATTLE = new Intl.DateTimeFormat('en-US', {
 /** A moment in Seattle time with its zone: `Nov 2, 4:10 PM PST`. */
 export const seattle = (atMs: number): string => SEATTLE.format(new Date(atMs));
 
-/** How a host's freshness reads, as a word and the tone of its dot. */
-export const FRESHNESS_WORD: Readonly<Record<Freshness, {label: string; tone: Tone}>> = {
-  live: {label: 'Live', tone: 'ok'},
-  'catching-up': {label: 'Catching up', tone: 'live'},
-  stale: {label: 'Stale', tone: 'warn'},
-  empty: {label: 'Waiting', tone: 'neutral'},
-  unavailable: {label: 'Unavailable', tone: 'err'},
-};
-
-/** A host stale for less than this has no age worth saying: it has only just lost its link. */
-const AGE_WORTH_SAYING_MS = 10 * SECOND;
-
 /**
- * A host's freshness as one phrase: `Stale 14m` once its age is worth saying, `Stale` before that
- * and when it is not known (never `Stale 0s`).
+ * What the Runs list says when no host has been read: "Not read yet", or the host's own word when
+ * every host that has not been read cannot be (it refused for good), since waiting will not read
+ * those. A host that is read but cannot run a run is only being read, and says its cause on its chip.
  */
-export function freshnessPhrase(freshness: Freshness, staleForMs: number | null): string {
-  const {label} = FRESHNESS_WORD[freshness];
-  return freshness === 'stale' && staleForMs !== null && staleForMs >= AGE_WORTH_SAYING_MS
-    ? `${label} ${span(staleForMs)}`
-    : label;
-}
-
-/** The tone of a host's dot: a host that refuses for good is an error, whatever its link is doing. */
-export const hostTone = (host: Pick<FleetHostRef, 'freshness' | 'refusal'>): Tone =>
-  host.refusal === null ? FRESHNESS_WORD[host.freshness].tone : 'err';
-
-/**
- * What a host's status chip says: the cause when the host refuses for good (its state on a network
- * disk, a job tool too old), never "Unavailable" or "Waiting", which say nothing a person can act on;
- * otherwise its freshness.
- */
-export function hostPhrase(
-  host: Pick<FleetHostRef, 'freshness' | 'staleForMs' | 'refusal'>,
-): string {
-  return host.refusal === null
-    ? freshnessPhrase(host.freshness, host.staleForMs)
-    : causeWord(host.refusal);
-}
-
-/**
- * What the Runs list says when no host has been read: "Not read yet", or the cause when every host
- * that has not been read cannot be (it refused for good), since waiting will not read those. A host
- * that is read but cannot run a run is only being read, and says its cause on its chip.
- */
-export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 'refusal'>[]): string {
+export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 'status'>[]): string {
   const unread = hosts.filter(h => h.freshness === 'empty' || h.freshness === 'unavailable');
-  const first = unread[0]?.refusal;
-  return first !== null &&
-    first !== undefined &&
-    unread.every(h => h.freshness === 'unavailable' && h.refusal !== null)
-    ? causeWord(first)
+  const [first] = unread;
+  return first !== undefined &&
+    unread.every(h => h.freshness === 'unavailable' && h.status.kind === 'refused')
+    ? hostStatusWord(first.status).label
     : 'Not read yet';
 }
 

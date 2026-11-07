@@ -14,7 +14,8 @@ import {
   Text,
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import type {CostView, FeedStatus, Freshness} from '../../state/index.js';
+import type {CostView, FeedStatus, HostStatus} from '../../state/index.js';
+import {HostStatusChip} from '../host-status-chip.js';
 import {
   type CostScreenModel,
   costScreenModel,
@@ -24,24 +25,6 @@ import {
 } from './cost-model.js';
 import {SpendCard} from './spend-card.js';
 import {type CostWords, formatAxisUsd} from './words.js';
-
-type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
-
-/** The word and tone of the status beside the title: how far to trust the figures on the screen. */
-function statusOf(freshness: Freshness, runOver: boolean): {label: string; tone: Tone} {
-  switch (freshness) {
-    case 'live':
-      return runOver ? {label: 'Final', tone: 'ok'} : {label: 'Live', tone: 'live'};
-    case 'catching-up':
-      return {label: 'Catching up', tone: 'neutral'};
-    case 'stale':
-      return {label: 'Stale', tone: 'warn'};
-    case 'empty':
-      return {label: 'Loading', tone: 'neutral'};
-    case 'unavailable':
-      return {label: 'Unavailable', tone: 'err'};
-  }
-}
 
 /** What went wrong with the figures, with the way to try again when there is one. */
 function Problem(props: {
@@ -127,8 +110,10 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
  */
 export function CostScreen(props: {
   readonly view: CostView | undefined;
-  readonly freshness: Freshness;
-  readonly status: FeedStatus;
+  /** The host's one status, the same word every screen says of it. */
+  readonly status: HostStatus;
+  /** How the cost stream stands, for what went wrong with it. */
+  readonly feed: FeedStatus;
   /** The run has ended, so its view is final. */
   readonly runOver: boolean;
   /** The words of the run's own vocabulary: a type of agent, a harness, a fault, a moment. */
@@ -139,23 +124,27 @@ export function CostScreen(props: {
   readonly reading: ReactNode;
   readonly retry: () => void;
 }): JSX.Element {
-  const {label, tone} = statusOf(props.freshness, props.runOver);
   const model = props.view === undefined ? undefined : costScreenModel(props.view, props.words);
   return (
     <Page
       key="cost"
       width="wide"
-      state={pageState(props.view === undefined && props.freshness === 'empty')}
+      state={pageState(
+        props.view === undefined &&
+          (props.status.kind === 'waiting' || props.status.kind === 'connecting'),
+      )}
       trail={props.trail}
       title="Cost"
       meta={
         <>
-          <Chip label={label} tone={tone} dot />
+          {props.runOver && props.status.kind === 'live' ? null : (
+            <HostStatusChip status={props.status} />
+          )}
           {props.reading}
         </>
       }
     >
-      <Problem status={props.status} words={props.words} retry={props.retry} />
+      <Problem status={props.feed} words={props.words} retry={props.retry} />
       {model === undefined ? null : (
         <>
           <SpendCard spend={model.spend} runOver={props.runOver} />

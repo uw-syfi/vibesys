@@ -348,12 +348,17 @@ func TestAQueuedJobsStateSaysWhenSlurmExpectsItToStart(t *testing.T) {
 	}
 }
 
+// A job of the scope is one whose comment is the scope, or a run's scope under it; a scope that
+// only starts with the scope's name is another.
 func TestOnlyThisPackagesJobsOfTheScopeAreListed(t *testing.T) {
 	out := "vibesys-apptainer-vibesys-cli-01|d1|11|RUNNING|1-02:03:04\nvibesys-apptainer-vibesys-cli-02|d2|12|RUNNING|5:00\n" +
-		"other-job|d1|13|RUNNING|5:00\nvibesys-docker-vibesys-cli-03|d1|14|RUNNING|5:00\nvibesys-apptainer-pool-x|d1|15|PENDING|1-00:00:00\n\n"
+		"other-job|d1|13|RUNNING|5:00\nvibesys-docker-vibesys-cli-03|d1|14|RUNNING|5:00\nvibesys-apptainer-pool-x|d1|15|PENDING|1-00:00:00\n" +
+		"vibesys-apptainer-vibesys-cli-04|d1.r1|16|PENDING|5:00\nvibesys-apptainer-vibesys-cli-05|d10|17|PENDING|5:00\n" +
+		"vibesys-apptainer-vibesys-cli-06|d1.|18|PENDING|5:00\n\n"
 	want := []apptainer.Job{
-		{ID: "11", Name: "vibesys-apptainer-vibesys-cli-01", Phase: apptainer.Running, Left: 26*time.Hour + 3*time.Minute + 4*time.Second},
-		{ID: "15", Name: "vibesys-apptainer-pool-x", Phase: apptainer.Queued},
+		{ID: "11", Name: "vibesys-apptainer-vibesys-cli-01", Comment: "d1", Phase: apptainer.Running, Left: 26*time.Hour + 3*time.Minute + 4*time.Second},
+		{ID: "15", Name: "vibesys-apptainer-pool-x", Comment: "d1", Phase: apptainer.Queued},
+		{ID: "16", Name: "vibesys-apptainer-vibesys-cli-04", Comment: "d1.r1", Phase: apptainer.Queued},
 	}
 	if got := clustercli.ParseJobs(out, "d1"); !slices.Equal(got, want) {
 		t.Errorf("%+v", got)

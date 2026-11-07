@@ -17,7 +17,7 @@ import (
 const (
 	// LabelOwner marks what this tool made. Its value is Owner.
 	LabelOwner = "io.vibesys.cli.owner"
-	// LabelScope names the daemon's scope: the containers of one scope are one run at a time.
+	// LabelScope names the scope: the containers of one scope are one job's runs at a time.
 	LabelScope = "io.vibesys.cli.scope"
 	// LabelRun names the run a container belongs to.
 	LabelRun = "io.vibesys.cli.run"

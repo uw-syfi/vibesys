@@ -117,8 +117,15 @@ type Config struct {
 	// Root is the absolute directory of the shared file system that holds the images, the SIFs and
 	// the readings of the nodes.
 	Root string
-	// Scope names whose last reading of a node is kept (nodes/<scope>.json under Root).
+	// Scope is the placement's: it names whose last reading of a node is kept (nodes/<scope>.json
+	// under Root), and the reusable allocations, which every run of the placement claims.
 	Scope string
+	// Runs, when set, says which runs of the placement live, where its jobs run at once, each
+	// job's runs in a scope of their own (their containers' docker.LabelScope) under Scope: an
+	// allocation is commented with both (RunComment), and a run's sweep finds the allocations of
+	// its own scope and those of every dead run of the placement, never a live one's. Without it,
+	// one run at a time runs in a scope, and a run's sweep finds every allocation of its scope.
+	Runs docker.Runs
 	// Timers makes the engine's own waits: the pause between two reads of a queued job, the bound
 	// on the queue, and the bound of a signal.
 	Timers clock.Timers
@@ -270,7 +277,9 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 
 // Containers implements docker.Engine: the containers of this engine that carry the labels, and,
 // with a scope among them, the scope's allocations, which are what a run of another process
-// started, live or dead.
+// started. With Runs, those are the allocations of the scope's own runs, live or dead, and those of
+// the placement's other runs that are dead; asking for them holds the scope's run (Runs.Hold),
+// since a run's sweep comes before anything it leaves.
 func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -284,7 +293,11 @@ func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string,
 	}
 	e.mu.Unlock()
 	if scope, ok := match[docker.LabelScope]; ok {
-		jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
+		if err := e.hold(ctx, scope); err != nil {
+			return nil, err
+		}
+		placement := e.placementScope(scope)
+		jobs, err := e.cfg.Cluster.Jobs(ctx, placement)
 		if err != nil {
 			return nil, err
 		}
@@ -293,13 +306,58 @@ func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string,
 				// A reusable allocation is not a container: a claim clears what it ran.
 				continue
 			}
-			if name, ok := strings.CutPrefix(job.Name, JobPrefix); ok && !slices.Contains(names, name) {
-				names = append(names, name)
+			name, ok := strings.CutPrefix(job.Name, JobPrefix)
+			if !ok || slices.Contains(names, name) {
+				continue
 			}
+			run, _ := InScope(job.Comment, placement)
+			if run != scope && !e.dead(run) {
+				continue
+			}
+			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
 	return names, nil
+}
+
+// placementScope is the scope of the placement whose run's scope is scope: Config.Scope with Runs,
+// and the run's own without, where a run's scope is the placement's.
+func (e *Engine) placementScope(scope string) string {
+	if e.cfg.Runs == nil || e.cfg.Scope == "" {
+		return scope
+	}
+	return e.cfg.Scope
+}
+
+// hold holds the run of the scope, with Runs, before it leaves anything on the cluster.
+func (e *Engine) hold(ctx context.Context, scope string) error {
+	if e.cfg.Runs == nil || e.cfg.Scope == "" {
+		return nil
+	}
+	if err := e.cfg.Runs.Hold(ctx, scope); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return unavailable("cannot mark the run %s live: %v", scope, err)
+	}
+	return nil
+}
+
+// dead reports whether the run of the placement's scope is dead, so that what it left is a
+// leftover. Without Runs every run of a scope but the caller's is. A run whose scope cannot be
+// told is not taken to be dead: its allocation is left alone. The run is not held while its
+// allocation is removed: an allocation is named by its container, which no later run reuses.
+func (e *Engine) dead(run string) bool {
+	if e.cfg.Runs == nil || e.cfg.Scope == "" {
+		return true
+	}
+	release, dead, err := e.cfg.Runs.Claim(run)
+	if err != nil || !dead {
+		return false
+	}
+	release()
+	return true
 }
 
 func hasLabels(have, want docker.Labels) bool {
@@ -458,8 +516,12 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	if b.spec.Limit > 0 {
 		limit = b.spec.Limit
 	}
+	scope := b.labels[docker.LabelScope]
+	if err := e.hold(ctx, scope); err != nil {
+		return err
+	}
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
-		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit + StopMargin,
+		Name: JobName(b.name), Comment: RunComment(e.placementScope(scope), scope), Limit: limit + StopMargin,
 		Options: e.cfg.Sizing.Options(b.spec.Measured),
 	})
 	if err != nil {
@@ -491,13 +553,14 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 		limit = b.spec.Limit
 	}
 	need := limit + StopMargin
-	scope := b.labels[docker.LabelScope]
+	// The reusable allocations are the placement's, claimed by any of its runs.
+	scope := e.placementScope(b.labels[docker.LabelScope])
 	jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
 	if err != nil {
 		return err
 	}
 	jobs = slices.DeleteFunc(jobs, func(j Job) bool {
-		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Phase != Running || j.Left < need
+		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Comment != scope || j.Phase != Running || j.Left < need
 	})
 	// The one with the least time left first, which keeps the longer ones for longer limits.
 	slices.SortStableFunc(jobs, func(a, b Job) int { return int((a.Left - b.Left) / time.Second) })
