@@ -8,6 +8,7 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
+  BoundUnitCheck,
   Delivery,
   Direction,
   IdeaVerdict,
@@ -133,6 +134,7 @@ function seriesOf(options: MeasuredOptions, candidates: readonly Candidate[]) {
     return {
       objective: objective.name,
       direction: objective.direction,
+      unit: objective.unit,
       points: candidates.map(candidate => {
         const value = candidate.values[at] ?? 0;
         const bestSoFar = best === undefined || beats(objective.direction, value, best);
@@ -166,6 +168,9 @@ function tradeoffOf(options: MeasuredOptions, candidates: readonly Candidate[]) 
     })),
   };
 }
+
+/** The bound's unit check of measurements counted in the unit the bound is declared in. */
+const measuredIn = (unit: string) => ({measuredUnit: unit, unitCheck: BoundUnitCheck.MATCH});
 
 const percentOf = (direction: Direction, bound: number, value: number): number =>
   direction === Direction.MINIMIZE ? (bound / value) * 100 : (value / bound) * 100;
@@ -398,6 +403,7 @@ export function measuredSearch(
             note: `Derived from the memory bandwidth over the bytes each ${objective.name} step moves.`,
             origin: {...submitter, at: timestampFromMs(options.startMs + 600_000 * seq)},
           })),
+          ...measuredIn(objective.unit),
           ...(headValue === undefined
             ? {}
             : {

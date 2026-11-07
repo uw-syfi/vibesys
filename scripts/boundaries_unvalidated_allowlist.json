@@ -46,10 +46,8 @@
     "CheckResult",
     "MeasureResult",
     "Measurement",
-    "Metric",
     "ObjectiveNoise",
     "Objectives",
-    "Observation",
     "Result"
   ],
   "proto/vibesys/cli/v1/service.proto": [
@@ -88,7 +86,6 @@
     "CommandEnd",
     "ExecutionOutcome",
     "FlowEnd",
-    "FlowPlan",
     "HandshakeResponse",
     "OutputChunk",
     "SupervisorOutcome"

@@ -55,6 +55,7 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 			fmt.Fprintf(&b, "    %s  %s\n", k.GetAgentId(), k.GetLocation())
 		}
 	}
+	row("head", "%s", head(v.Search))
 	row("best", "%s", best(v.Search))
 	row("last report", "%s", lastReport(v, zone))
 	return b.String()
@@ -238,16 +239,67 @@ func notLoaded(u *pb.Unreadable) string {
 	return "not loaded, the job log cannot be read: " + statusWord(u.GetReason().String(), "UNREADABLE_REASON_")
 }
 
-func best(s *pb.SearchState) string {
+// head is the candidate the run last promoted and the value it measured on the metric it scored, which
+// for a task of several objectives is not the best the run measured on the others.
+func head(s *pb.SearchState) string {
 	current := s.GetHead().GetCurrent()
 	if current == nil {
-		if s.GetHealth().GetUnreadable() != nil {
-			return "not known yet"
-		}
-		return "none yet"
+		return none(s)
 	}
 	m := current.GetResult().GetMeasure()
-	return fmt.Sprintf("%s = %g at %s", m.GetMetric().GetName(), m.GetValue(), shortCommit(current.GetHead()))
+	return fmt.Sprintf("%s = %s at %s", m.GetMetric().GetName(), withUnit(m.GetValue(), m.GetMetric().GetUnit()), shortCommit(current.GetHead()))
+}
+
+// best is the best the run measured on each objective, as the search state serves it and never
+// recomputed here: the bound's best value when the run has a bound for the objective, else the newest
+// point of the series that set a best. A bound counted in another unit than the measurements says so.
+func best(s *pb.SearchState) string {
+	bounds := map[string]*pb.ObjectiveBounds{}
+	for _, b := range s.GetBounds() {
+		bounds[b.GetObjective()] = b
+	}
+	var parts []string
+	for _, series := range s.GetSeries() {
+		value, found := 0.0, false
+		if b := bounds[series.GetObjective()]; b != nil && b.BestValue != nil {
+			value, found = b.GetBestValue(), true
+		} else {
+			for _, p := range slices.Backward(series.GetPoints()) {
+				if p.GetBestSoFar() {
+					value, found = p.GetValue(), true
+					break
+				}
+			}
+		}
+		if !found {
+			continue
+		}
+		part := fmt.Sprintf("%s = %s", series.GetObjective(), withUnit(value, series.GetUnit()))
+		if b := bounds[series.GetObjective()]; b != nil && b.GetUnitCheck() == pb.BoundUnitCheck_BOUND_UNIT_CHECK_MISMATCH {
+			part += fmt.Sprintf(" (its bound is in %s, unverified)", b.GetVersions()[len(b.GetVersions())-1].GetUnit())
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return none(s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func none(s *pb.SearchState) string {
+	if s.GetHealth().GetUnreadable() != nil {
+		return "not known yet"
+	}
+	return "none yet"
+}
+
+// withUnit is a value followed by the unit it is counted in, and the value alone when the unit is not
+// known.
+func withUnit(value float64, unit string) string {
+	if unit == "" {
+		return fmt.Sprintf("%g", value)
+	}
+	return fmt.Sprintf("%g %s", value, unit)
 }
 
 func lastReport(v *View, zone *time.Location) string {

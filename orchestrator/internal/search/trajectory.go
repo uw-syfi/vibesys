@@ -45,8 +45,10 @@ func seriesOf(all []*measured) (out []*pb.ObjectiveSeries, truncated bool) {
 			continue
 		}
 		var points []*pb.MeasuredPoint
+		var units []string
 		for _, m := range all {
 			if v, ok := m.values[name]; ok {
+				units = append(units, v.unit)
 				points = append(points, &pb.MeasuredPoint{JobId: m.jobID, Commit: m.commit, At: timestamppb.New(m.at), Value: v.value, BestSoFar: v.best})
 			}
 		}
@@ -59,7 +61,7 @@ func seriesOf(all []*measured) (out []*pb.ObjectiveSeries, truncated bool) {
 		}
 		kept := keepFirst(points, maxSeriesPoints, func(p *pb.MeasuredPoint) bool { return p.BestSoFar })
 		truncated = truncated || len(kept) < len(points)
-		out = append(out, &pb.ObjectiveSeries{Objective: name, Direction: direction, Points: kept})
+		out = append(out, &pb.ObjectiveSeries{Objective: name, Direction: direction, Points: kept, Unit: CommonUnit(units)})
 	}
 	return out, truncated
 }

@@ -99,7 +99,7 @@ func Result(r core.Result) *cliv1.Result {
 
 func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
 	m := &cliv1.MeasureResult{
-		Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction)},
+		Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction), Unit: o.Metric.Unit},
 		Samples: slices.Clone(o.Samples), CheckJobId: string(o.CheckJob),
 		Value: core.Headline(o.Samples),
 	}
@@ -113,7 +113,7 @@ func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
 // observation is the contract's message for an observation, with its headline value, the number
 // compare weighs when the observation is an objective; an observation with no values has none.
 func observation(ob core.Observation) *cliv1.Observation {
-	out := &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)}
+	out := &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values), Unit: ob.Unit}
 	if len(ob.Values) > 0 {
 		v := core.Headline(ob.Values)
 		out.Value = &v
@@ -163,7 +163,7 @@ func Objectives(o core.Objectives) *cliv1.Objectives {
 		out.Noise = append(out.Noise, &cliv1.ObjectiveNoise{Name: n.Name, RelativeNoise: n.RelativeNoise})
 	}
 	for _, m := range o.Metrics {
-		out.Metrics = append(out.Metrics, &cliv1.Metric{Name: m.Name, Direction: direction(m.Direction)})
+		out.Metrics = append(out.Metrics, &cliv1.Metric{Name: m.Name, Direction: direction(m.Direction), Unit: m.Unit})
 	}
 	return out
 }
@@ -183,7 +183,7 @@ func toObjectives(field string, o *cliv1.Objectives, toDirection func(string, cl
 		if err != nil {
 			return core.Objectives{}, err
 		}
-		out.Metrics = append(out.Metrics, core.Metric{Name: m.GetName(), Direction: d})
+		out.Metrics = append(out.Metrics, core.Metric{Name: m.GetName(), Direction: d, Unit: m.GetUnit()})
 	}
 	return out, nil
 }
@@ -193,7 +193,7 @@ func ObjectiveVerdicts(vs []core.ObjectiveVerdict) []*cliv1.ObjectiveVerdict {
 	var out []*cliv1.ObjectiveVerdict
 	for _, v := range vs {
 		out = append(out, &cliv1.ObjectiveVerdict{
-			Metric:  &cliv1.Metric{Name: v.Metric.Name, Direction: direction(v.Metric.Direction)},
+			Metric:  &cliv1.Metric{Name: v.Metric.Name, Direction: direction(v.Metric.Direction), Unit: v.Metric.Unit},
 			Verdict: Verdict(v.Verdict),
 		})
 	}
@@ -315,11 +315,11 @@ func toResult(field string, r *cliv1.Result) (core.Result, error) {
 			return core.Result{}, err
 		}
 		m := core.MeasureOutcome{
-			Metric:  core.Metric{Name: o.Measure.GetMetric().GetName(), Direction: dir},
+			Metric:  core.Metric{Name: o.Measure.GetMetric().GetName(), Direction: dir, Unit: o.Measure.GetMetric().GetUnit()},
 			Samples: slices.Clone(o.Measure.GetSamples()), CheckJob: core.JobID(o.Measure.GetCheckJobId()),
 		}
 		for _, ob := range o.Measure.GetObservations() {
-			m.Observations = append(m.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues())})
+			m.Observations = append(m.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues()), Unit: ob.GetUnit()})
 		}
 		if m.Objectives, err = toObjectives(field+".measure.objectives", o.Measure.GetObjectives(), toDirection); err != nil {
 			return core.Result{}, err

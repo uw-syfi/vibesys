@@ -295,6 +295,14 @@ message TaskObjective {
   // The relative change below which two measurements of this objective are one, for this objective
   // alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor.
   optional double relative_noise = 3;
+  // What the quantity is counted in, such as "tok/s" or "ms": a label for people, which nothing
+  // converts. Every measurement of the objective records it, so a bound declared for the objective
+  // can be checked against the unit of the numbers it bounds. Absent declares none, and the
+  // measurements then have an unknown unit. One line, without whitespace at its edges.
+  string unit = 4 [(buf.validate.field).string = {
+    max_bytes: 64
+    pattern: "^([^\\s](.*[^\\s])?)?$"
+  }];
 }
 
 // TaskPareto is `[pareto]`.

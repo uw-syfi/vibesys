@@ -54,7 +54,7 @@ func windowFactsOut(f core.WindowFacts) *pb.WindowFacts {
 	}
 	for _, m := range f.Objectives {
 		out.Objectives = append(out.Objectives, &pb.ObjectiveMove{
-			Metric: m.Metric, Direction: objectiveDirections.out(m.Direction), Start: bestOut(m.Start), End: bestOut(m.End),
+			Metric: m.Metric, Direction: objectiveDirections.out(m.Direction), Unit: m.Unit, Start: bestOut(m.Start), End: bestOut(m.End),
 		})
 	}
 	for _, id := range f.Reports {
@@ -71,7 +71,7 @@ func windowFactsIn(f *pb.WindowFacts, errs *errorList) core.WindowFacts {
 	}
 	for _, m := range f.GetObjectives() {
 		out.Objectives = append(out.Objectives, core.ObjectiveMove{
-			Metric: m.GetMetric(), Direction: objectiveDirections.in(m.GetDirection(), errs), Start: bestIn(m.GetStart(), errs), End: bestIn(m.GetEnd(), errs),
+			Metric: m.GetMetric(), Direction: objectiveDirections.in(m.GetDirection(), errs), Unit: m.GetUnit(), Start: bestIn(m.GetStart(), errs), End: bestIn(m.GetEnd(), errs),
 		})
 	}
 	for _, id := range f.GetReportMessageIds() {

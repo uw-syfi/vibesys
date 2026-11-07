@@ -76,12 +76,7 @@ type idea struct {
 // measurements the series are drawn from, and counts the run's measured candidates that name no plan
 // (once for each job). A plan number appears once: the last fact of it holds.
 func ideas(facts []*cli.TaskFact, run string) (out []*idea, unplanned uint32) {
-	plans := map[uint32]*cli.Plan{}
-	for _, f := range facts {
-		if p := f.GetPlan(); p != nil && p.GetNumber() != 0 {
-			plans[p.GetNumber()] = p
-		}
-	}
+	plans := latestPlans(facts)
 	all := measurements(facts, run)
 	linked := linkedPlans(facts, run)
 	baselines := baselineValues(all)
@@ -106,6 +101,18 @@ func ideas(facts []*cli.TaskFact, run string) (out []*idea, unplanned uint32) {
 		}
 	}
 	return out, unplanned
+}
+
+// latestPlans are the plans of the facts by number: a plan number appears once, and the last fact of
+// it holds.
+func latestPlans(facts []*cli.TaskFact) map[uint32]*cli.Plan {
+	plans := map[uint32]*cli.Plan{}
+	for _, f := range facts {
+		if p := f.GetPlan(); p != nil && p.GetNumber() != 0 {
+			plans[p.GetNumber()] = p
+		}
+	}
+	return plans
 }
 
 // linkedPlans are the plan numbers each job of the run names.
