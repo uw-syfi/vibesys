@@ -40,6 +40,7 @@ export {
 export {faultOf} from './fault.js';
 export {type HostSession, makeHostSession} from './host-session.js';
 export {Ids} from './ids.js';
+export {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
 export {
   type AddOutcome,
   type MachineActions,
