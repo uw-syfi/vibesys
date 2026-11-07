@@ -50,7 +50,9 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
    first step a measurement. Bound the whole system too: the most the task's fixed resources allow
    end to end, including whatever drives the load. Say which resource sets that ceiling and where
-   the current result sits under it. A part's headroom is real only below that ceiling.
+   the current result sits under it. A part's headroom is real only below that ceiling. When your
+   ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
+   `bound declare` and say how you derived it; the earlier one stays in the history.
 3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
    --body-file -` with a stub body (one line of mechanism) and `--gain-bound <share>`, the most
    the idea could gain as a share of the headline (see step 5); note the number it prints. Before

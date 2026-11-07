@@ -75,6 +75,11 @@ It selects a working CLI or installs one only after explicit user approval.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
    (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
+6. Early, from first principles, declare the speed-of-light bound of each objective the task scores:
+   `vibesys-cli bound declare --objective <name> --value <v> --unit <u> --note "<how derived>"`.
+   It is yours to state, and nothing requires it. Revise it by declaring again (nothing is
+   replaced) when a profile or a measurement shows a tighter ceiling, or that the bound was too
+   modest: a result past it says so. `bound list` shows what stands.
 
 ## Loop
 
