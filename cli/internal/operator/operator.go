@@ -186,6 +186,8 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 		return invalid("%s %q gives AMD GPUs only, with a rocm resource; it has no gpu resource", n.kind, kind)
 	case apptainer && p.GetResources().GetKubernetes() != nil:
 		return invalid("%s %q gives no kubernetes resource", n.kind, kind)
+	case p.GetApptainer().GetAllocationLimitSeconds() > 0 && p.GetApptainer().GetIdleReleaseSeconds() == 0:
+		return invalid("%s allocation_limit_seconds: it limits reused allocations, and idle_release_seconds is unset, so none is reused", n.apptainer)
 	case pyxis && p.GetApptainer().GetProgram() != "":
 		// The pyxis runtime runs no apptainer program on the nodes, and converts nothing on this
 		// machine: a setting of the other runtime would be quietly ignored.

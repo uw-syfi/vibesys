@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"os/exec"
 	"path"
 	"slices"
@@ -299,7 +300,9 @@ func (c *Cluster) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	return ParseJobID(out)
 }
 
-// SubmitArgs are the submit command's arguments of an allocation.
+// SubmitArgs are the submit command's arguments of an allocation. A reusable one runs
+// ReaperScript, which ends it once it has been idle for its Idle; any other sleeps until it is
+// cancelled.
 func SubmitArgs(a apptainer.Allocation) []string {
 	minutes := int64((a.Limit + time.Minute - 1) / time.Minute)
 	args := []string{
@@ -307,7 +310,64 @@ func SubmitArgs(a apptainer.Allocation) []string {
 		"--time=" + strconv.FormatInt(minutes, 10), "--nodes=1", "--ntasks=1",
 	}
 	args = append(args, a.Options...)
-	return append(args, "--output=/dev/null", "--wrap=exec sleep infinity")
+	wrap := "exec sleep infinity"
+	if a.Idle > 0 {
+		wrap = ReaperScript(a.Idle, ReaperPoll)
+	}
+	return append(args, "--output=/dev/null", "--wrap="+wrap)
+}
+
+// ReaperPoll is how often a reusable allocation looks at its claim.
+const ReaperPoll = 30 * time.Second
+
+// poolDir is a reusable allocation's own directory on its node, which holds its claim: the lock
+// of the claim (lock), the process that holds it (claim), and whether the allocation is ending
+// (ended). It is a path every step and the batch script name alike.
+const poolDir = `/tmp/vibesys-pool-$SLURM_JOB_ID`
+
+// cleanFunction defines clean, which kills every process of a container in the job (one that
+// carries EnvBox and is in the job's cgroup, or carries the job's id), waits for none to be left,
+// up to a minute, and removes the containers' homes. It fails when some are left.
+const cleanFunction = `clean() {
+  i=0
+  while :; do
+    left=
+    for f in $(grep -lz '^` + apptainer.EnvBox + `=' /proc/[0-9]*/environ 2>/dev/null); do
+      p=${f#/proc/}; p=${p%/environ}
+      if grep -q "/job_$SLURM_JOB_ID/" "/proc/$p/cgroup" 2>/dev/null || grep -qxz "SLURM_JOB_ID=$SLURM_JOB_ID" "/proc/$p/environ" 2>/dev/null; then
+        kill -9 "$p" 2>/dev/null && left=1
+      fi
+    done
+    [ -z "$left" ] && break
+    i=$((i+1)); [ "$i" -ge 60 ] && return 1
+    sleep 1
+  done
+  rm -rf "` + jobDir + `" "` + pyxisJobDir + `"
+}`
+
+// ReaperScript is the batch script of a reusable allocation: every poll, under the claim's lock,
+// it counts the allocation busy while the process of its claim lives, clears what a dead claim
+// left, and once no claim has lived for idle it marks the allocation ending, so nothing claims it,
+// and exits, which ends the allocation.
+func ReaperScript(idle, poll time.Duration) string {
+	return cleanFunction + `
+d="` + poolDir + `"
+mkdir -p "$d"
+idle=` + strconv.FormatInt(int64(idle/time.Second), 10) + `
+last=$(date +%s)
+exec 9>>"$d/lock"
+while sleep ` + strconv.FormatFloat(poll.Seconds(), 'f', -1, 64) + `; do
+  flock 9
+  c=$(cat "$d/claim" 2>/dev/null)
+  if [ -n "$c" ] && kill -0 "$c" 2>/dev/null; then
+    last=$(date +%s)
+  elif [ -n "$c" ]; then
+    rm -f "$d/claim"; clean; last=$(date +%s)
+  elif [ $(( $(date +%s) - last )) -ge "$idle" ]; then
+    touch "$d/ended"; exit 0
+  fi
+  flock -u 9
+done`
 }
 
 // ParseJobID reads the job's id from what sbatch --parsable printed: its last line, "id" or
@@ -389,25 +449,61 @@ func phaseOf(state string) apptainer.Phase {
 }
 
 // Jobs implements apptainer.Cluster.
-func (c *Cluster) Jobs(ctx context.Context, scope string) ([]string, error) {
-	out, err := c.sh(ctx, CallTimeout, `squeue -h -u `+user+` -o '%j|%k'`)
+func (c *Cluster) Jobs(ctx context.Context, scope string) ([]apptainer.Job, error) {
+	out, err := c.sh(ctx, CallTimeout, `squeue -h -u `+user+` -o '%j|%k|%i|%T|%L'`)
 	if err != nil {
 		return nil, fmt.Errorf("listing the Slurm jobs: %w", err)
 	}
 	return ParseJobs(out, scope), nil
 }
 
-// ParseJobs reads squeue's "name|comment" lines and returns the names of this package's jobs whose
-// comment is the scope.
-func ParseJobs(out, scope string) []string {
-	var names []string
+// ParseJobs reads squeue's "name|comment|id|state|time left" lines and returns this package's jobs
+// whose comment is the scope.
+func ParseJobs(out, scope string) []apptainer.Job {
+	var jobs []apptainer.Job
 	for _, line := range strings.Split(out, "\n") {
-		name, comment, ok := strings.Cut(strings.TrimSpace(line), "|")
-		if ok && strings.HasPrefix(name, apptainer.JobPrefix) && strings.TrimSpace(comment) == scope {
-			names = append(names, name)
+		f := strings.Split(strings.TrimSpace(line), "|")
+		if len(f) < 2 || !strings.HasPrefix(f[0], apptainer.JobPrefix) || strings.TrimSpace(f[1]) != scope {
+			continue
 		}
+		f = append(f, "", "", "")
+		j := apptainer.Job{Name: f[0], ID: strings.TrimSpace(f[2]), Phase: phaseOf(f[3])}
+		if j.Phase == apptainer.Running {
+			j.Left = ParseTimeLeft(f[4])
+		}
+		jobs = append(jobs, j)
 	}
-	return names
+	return jobs
+}
+
+// ParseTimeLeft reads the time left as squeue writes it (%L): [days-][hours:]minutes:seconds,
+// UNLIMITED, or what says it is not known (NOT_SET, INVALID), which is no time left.
+func ParseTimeLeft(s string) time.Duration {
+	s = strings.TrimSpace(s)
+	if s == "UNLIMITED" {
+		return math.MaxInt64
+	}
+	var days int64
+	if d, rest, ok := strings.Cut(s, "-"); ok {
+		n, err := strconv.ParseInt(d, 10, 32)
+		if err != nil || n < 0 {
+			return 0
+		}
+		days, s = n, rest
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) > 3 || (days > 0 && len(parts) != 3) {
+		return 0
+	}
+	var secs int64
+	for _, p := range parts {
+		n, err := strconv.ParseInt(p, 10, 32)
+		if err != nil || n < 0 || len(p) == 0 {
+			return 0
+		}
+		secs = secs*60 + n
+	}
+	return time.Duration(days*86400+secs) * time.Second
 }
 
 // Cancel implements apptainer.Cluster: Slurm's cancel by name, confirmed by squeue and then sacct.

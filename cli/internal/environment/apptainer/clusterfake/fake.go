@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -58,6 +59,8 @@ type Cluster struct {
 	fail      func(op string) error
 	started   []apptainer.Box
 	submitted []apptainer.Allocation
+	now       time.Duration // how long the cluster has run, which Advance moves
+	linger    bool          // a dead claim leaves its containers' processes running
 }
 
 // job is a batch allocation.
@@ -70,6 +73,10 @@ type job struct {
 	saying            []apptainer.JobState // what Slurm says of it while it is queued, read by read
 	boxes             map[string]*box
 	ports             []int // the ports the node chose in it
+	limit, idle       time.Duration
+	ran               time.Duration // when it started running
+	idleSince         time.Duration // when its last claim was released, or it started
+	claim             *claim        // the live claim of a reusable allocation
 }
 
 // box is a container's processes on the job's node.
@@ -182,7 +189,7 @@ func (c *Cluster) Plant(name, comment string) string {
 	defer c.mu.Unlock()
 	c.ids++
 	id := strconv.Itoa(1000 + c.ids)
-	c.jobs[id] = &job{id: id, name: name, comment: comment, phase: apptainer.Running, state: "RUNNING", boxes: map[string]*box{}}
+	c.jobs[id] = &job{id: id, name: name, comment: comment, phase: apptainer.Running, state: "RUNNING", boxes: map[string]*box{}, limit: apptainer.NoLimit, ran: c.now}
 	return id
 }
 
@@ -216,6 +223,40 @@ func (c *Cluster) Running() []string {
 	return out
 }
 
+// Advance moves the cluster's time on: a job that has run for its time limit ends, and so does a
+// reusable allocation that has had no live claim for its idle time.
+func (c *Cluster) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now += d
+	var ending []*job
+	for _, j := range c.jobs {
+		if j.phase != apptainer.Running {
+			continue
+		}
+		if c.now-j.ran >= j.limit || (j.idle > 0 && j.claim == nil && c.now-j.idleSince >= j.idle) {
+			ending = append(ending, j)
+		}
+	}
+	c.mu.Unlock()
+	for _, j := range ending {
+		c.end(j, "COMPLETED")
+	}
+}
+
+// Claimed returns the names of the reusable allocations a live claim holds, sorted.
+func (c *Cluster) Claimed() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, j := range c.jobs {
+		if j.phase == apptainer.Running && j.claim != nil {
+			out = append(out, j.name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // end ends the job and every process on its node.
 func (c *Cluster) end(j *job, state string) {
 	c.mu.Lock()
@@ -241,7 +282,7 @@ type Client struct {
 
 	mu    sync.Mutex
 	dead  bool
-	holds []*hold
+	holds []io.Closer
 }
 
 var _ apptainer.Cluster = (*Client)(nil)
@@ -373,9 +414,12 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	defer c.mu.Unlock()
 	c.ids++
 	id := strconv.Itoa(1000 + c.ids)
-	j := &job{id: id, name: a.Name, comment: a.Comment, phase: apptainer.Queued, state: "PENDING", waits: c.queued, saying: c.saying, boxes: map[string]*box{}}
+	j := &job{
+		id: id, name: a.Name, comment: a.Comment, phase: apptainer.Queued, state: "PENDING", waits: c.queued, saying: c.saying,
+		boxes: map[string]*box{}, limit: a.Limit, idle: a.Idle,
+	}
 	if c.queued == 0 && !c.ends {
-		j.phase, j.state = apptainer.Running, "RUNNING"
+		j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
 	}
 	c.jobs[id] = j
 	c.submitted = append(c.submitted, a)
@@ -396,7 +440,7 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 	}
 	if j.phase == apptainer.Queued {
 		if j.waits--; j.waits < 0 {
-			j.phase, j.state = apptainer.Running, "RUNNING"
+			j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
 			if c.ends {
 				j.phase, j.state = apptainer.Ended, "FAILED"
 			}
@@ -418,20 +462,24 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 }
 
 // Jobs implements apptainer.Cluster.
-func (cl *Client) Jobs(ctx context.Context, scope string) ([]string, error) {
+func (cl *Client) Jobs(ctx context.Context, scope string) ([]apptainer.Job, error) {
 	if err := cl.enter(ctx, "jobs"); err != nil {
 		return nil, err
 	}
 	c := cl.c
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []string
+	var out []apptainer.Job
 	for _, j := range c.jobs {
 		if j.phase != apptainer.Ended && j.comment == scope {
-			out = append(out, j.name)
+			job := apptainer.Job{ID: j.id, Name: j.name, Phase: j.phase}
+			if j.phase == apptainer.Running {
+				job.Left = j.limit - (c.now - j.ran)
+			}
+			out = append(out, job)
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b apptainer.Job) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }
 
@@ -499,6 +547,99 @@ type hold struct {
 func (h *hold) Close() error {
 	h.once.Do(func() { h.c.end(h.j, "CANCELLED") })
 	return nil
+}
+
+// claim is the claim of a reusable allocation.
+type claim struct {
+	c    *Cluster
+	j    *job
+	once sync.Once
+	err  error
+}
+
+// clear kills every process of the job's boxes. c.mu is not held.
+func (c *Cluster) clear(j *job) {
+	c.mu.Lock()
+	boxes := slices.Collect(maps.Values(j.boxes))
+	j.boxes = map[string]*box{}
+	c.mu.Unlock()
+	for _, b := range boxes {
+		b.machine.End()
+	}
+}
+
+// Close releases the claim: the boxes' processes are killed, and the allocation is idle from now.
+// A fault "release" leaves the release unconfirmed, and the claim dead.
+func (h *claim) Close() error {
+	h.once.Do(func() {
+		h.err = h.c.fault("release")
+		if h.err == nil {
+			h.c.clear(h.j)
+		}
+		h.c.drop(h)
+	})
+	return h.err
+}
+
+// drop ends the claim, as its holder's end does.
+func (c *Cluster) drop(h *claim) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if h.j.claim == h {
+		h.j.claim, h.j.idleSince = nil, c.now
+	}
+}
+
+// Linger makes the claim of a process that dies leave its containers' processes running, as a
+// holder killed outright does until its allocation's next look at its claim; by default they are
+// killed, as the holder's own release on its hangup, or that look, kills them.
+func (c *Cluster) Linger(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.linger = on
+}
+
+// crashed is a claim whose holder died: the claim is dead.
+type crashed struct{ h *claim }
+
+func (k crashed) Close() error {
+	k.h.once.Do(func() {
+		k.h.c.mu.Lock()
+		linger := k.h.c.linger
+		k.h.c.mu.Unlock()
+		if !linger {
+			k.h.c.clear(k.h.j)
+		}
+		k.h.c.drop(k.h)
+	})
+	return nil
+}
+
+// Claim implements apptainer.Node.
+func (n *node) Claim(ctx context.Context) (io.Closer, error) {
+	j, err := n.enter(ctx, "claim")
+	if err != nil {
+		return nil, err
+	}
+	c := n.cl.c
+	c.mu.Lock()
+	if j.idle == 0 {
+		c.mu.Unlock()
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "clusterfake: the job " + j.id + " is not reusable"}
+	}
+	if j.claim != nil {
+		c.mu.Unlock()
+		return nil, apptainer.ErrTaken
+	}
+	h := &claim{c: c, j: j}
+	j.claim = h
+	c.mu.Unlock()
+	// What a dead claim left is gone before the claim is held.
+	c.clear(j)
+	n.cl.mu.Lock()
+	n.cl.holds = append(n.cl.holds, crashed{h})
+	n.cl.mu.Unlock()
+	return h, nil
 }
 
 // Hold implements apptainer.Node.

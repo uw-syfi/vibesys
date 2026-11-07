@@ -266,7 +266,7 @@ A benchmark sample is one command run, and one run is one container. Each
 sample starts from the same state, the server a script started for an earlier
 sample cannot answer for a later one, and the cleanup rule stays one rule. The
 cost is a container start (about a second) and, under Slurm, one allocation per
-sample: another job may run between two samples, which does not touch a
+sample (under `apptainer`, unless allocations are reused; see below): another job may run between two samples, which does not touch a
 measurement because each sample holds the whole node while it runs. The
 candidate's build is not repeated: it lives in the cache directory.
 
@@ -495,6 +495,40 @@ the resources, the stop) hold unchanged; only how a container exists differs.
 - A step whose command never started (srun or apptainer failed first, which
   the wrapper's start marker on standard error tells) or whose ssh exit is 255
   is unknown, never the command's exit.
+
+### Reused allocations under apptainer
+
+"Every sample starts its own container" holds, but under `apptainer` one
+allocation per container made a measure of five samples wait in the queue six
+times, which on a contended cluster (hours per wait, one running job per user)
+made a job take days. With `idle_release_seconds` an allocation is kept for
+the next container instead. It is off by default: a reused allocation always
+asks for the whole node, which a check alone does not need, and holds it
+while idle, which other users of the partition pay for.
+
+- The pool is on the cluster, not in a process. A run's containers live in
+  its supervisor process, which ends with the job, so a pool in the engine
+  would have lasted one job. The allocations are found by name and scope with
+  `squeue` (with their time left), claimed by a step on the node that records
+  its own process under a lock (`flock` in `/tmp/vibesys-pool-<job>`), and kept
+  alive by the allocation's own batch script, which ends the allocation once no
+  claim has lived for the idle time. So a daemon's death needs no one to cancel
+  anything: its claim's step dies with its ssh connection, and the allocation
+  ends itself, or is claimed by the next daemon of the scope first.
+- One claim at a time is the arbitration: no container runs in a claimed
+  allocation but the claimer's own (and the one that joins it in a task of two
+  images), so a measured sample still holds the whole node while it runs.
+  Nothing is leased between daemons for it, as before; `max_jobs` is 1 for
+  every remote placement.
+- A claim kills every process of a container left in the allocation (one
+  that carries `VIBESYS_BOX` and is in the job's cgroup, or carries the job's
+  id) and waits for none to be left before it is held; a release does the same
+  before the claim is dropped, and an unconfirmed release cancels the
+  allocation. So nothing a run left runs beside the next, which is what the
+  sweep of a run's scope ensured before; the sweep now leaves the reused
+  allocations alone, since cancelling them would undo the reuse.
+- A container claims only an allocation with its limit and the stop's margin
+  left, the one with the least time left first.
 
 ### Pyxis and Enroot: a runtime of the apptainer kind, not a kind of its own
 

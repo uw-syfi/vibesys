@@ -56,6 +56,8 @@ type setup struct {
 	scope string
 	// runtime is what runs the containers; under RuntimePyxis the rig has no converter.
 	runtime apptainer.Runtime
+	// idle and allocationLimit make the allocations reusable.
+	idle, allocationLimit time.Duration
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -95,6 +97,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
 		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
 		NodeScripts: o.scripts, Runtime: o.runtime, Converter: converter, LocalDir: dir,
+		Idle: o.idle, AllocationLimit: o.allocationLimit,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,23 +144,30 @@ func nothingLeft(t testing.TB, c *clusterfake.Cluster) {
 // The docker environment over the apptainer engine is held to the same contract as every
 // environment, under each runtime.
 func TestTheDockerEnvironmentOnApptainerPassesTheEnvironmentContract(t *testing.T) {
-	for name, runtime := range map[string]apptainer.Runtime{"apptainer": apptainer.RuntimeApptainer, "pyxis": apptainer.RuntimePyxis} {
-		t.Run(name, func(t *testing.T) { contract(t, runtime) })
+	for name, o := range map[string]setup{
+		"apptainer": {}, "pyxis": {runtime: apptainer.RuntimePyxis}, "reused allocations": {runtime: apptainer.RuntimePyxis, idle: time.Hour},
+	} {
+		t.Run(name, func(t *testing.T) { contract(t, o) })
 	}
 }
 
-func contract(t *testing.T, runtime apptainer.Runtime) {
+func contract(t *testing.T, o setup) {
+	runtime := o.runtime
 	envtest.Run(t, envtest.Rig{
 		New: func(t *testing.T, w envtest.World, timers clock.Timers) environment.Environment {
 			cluster := clusterfake.New(w.(fakeworld.World).MemoryGates)
-			t.Cleanup(func() { nothingLeft(t, cluster) })
-			return newRig(t, w.(fakeworld.World), cluster, setup{timers: timers, runtime: runtime}).env
+			t.Cleanup(func() {
+				// A reused allocation waits for its idle bound once its run ends.
+				cluster.Advance(o.idle)
+				nothingLeft(t, cluster)
+			})
+			return newRig(t, w.(fakeworld.World), cluster, setup{timers: timers, runtime: runtime, idle: o.idle}).env
 		},
 		World:    func(t *testing.T) envtest.World { return fakeworld.New() },
 		Checkout: func(t *testing.T, _ envtest.World) core.Checkout { return checkout(t) },
 		Spawn: func(t *testing.T, w envtest.World, x core.Execution) func() {
 			cluster := clusterfake.New(w.(fakeworld.World).MemoryGates)
-			r := newRig(t, w.(fakeworld.World), cluster, setup{runtime: runtime})
+			r := newRig(t, w.(fakeworld.World), cluster, setup{runtime: runtime, idle: o.idle})
 			var wg sync.WaitGroup
 			wg.Go(func() { _ = r.env.Run(context.Background(), x, io.Discard) })
 			var once sync.Once
