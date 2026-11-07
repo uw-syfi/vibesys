@@ -15,13 +15,100 @@ extend google.protobuf.FieldOptions {
 
 // Desktop-owned data. The original JSON files are read-only import sources.
 message DesktopHostSettings {
-  string checkout = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 1024
-    pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
-  }];
+  // Unset until the person sets a checkout; a host can be saved without one.
+  string checkout = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+      pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+    }
+  ];
   reserved 2;
   reserved "run_transport_v2";
+  // What an ssh command added beyond the destination; absent for an alias of the person's ssh config.
+  optional DesktopSshOptions ssh = 3;
+}
+
+// The options of a pasted ssh command, held beside the saved host: the host key names the
+// destination (`ssh:[user@]host`), these are the rest. Each is passed to ssh as the flag of the
+// same name (-p, -J, -i) and never joined into a shell string.
+message DesktopSshOptions {
+  optional uint32 port = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 65535
+  }];
+  // A comma-separated ProxyJump list; it cannot start with a dash, which ssh would read as a flag.
+  string jump = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 512
+      pattern: "^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$"
+    }
+  ];
+  string identity = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 1024
+      pattern: "^[^\\x00\\r\\n-][^\\x00\\r\\n]*$"
+    }
+  ];
+}
+
+// The window's requests about the machines (hosts) it can reach, answered by the main process,
+// which reads the person's ssh config and keeps the saved hosts.
+message DesktopMachineRestore {
+  string host = 1 [(buf.validate.field).string.pattern = "^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$"];
+  DesktopHostSettings settings = 2 [(buf.validate.field).required = true];
+}
+
+message DesktopMachineRequest {
+  oneof op {
+    option (buf.validate.oneof).required = true;
+    // The ssh config aliases that match what the person typed so far.
+    string match = 1 [(buf.validate.field).string.max_len = 512];
+    // An alias or a pasted ssh command: it is parsed, never run.
+    string add = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 4096
+      pattern: "^[^\\x00]*$"
+    }];
+    string remove = 3 [(buf.validate.field).string.pattern = "^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$"];
+    // Puts back what a remove took.
+    DesktopMachineRestore restore = 4;
+  }
+}
+
+message DesktopMachineMatches {
+  repeated string aliases = 1 [(buf.validate.field).repeated.max_items = 50];
+}
+
+message DesktopMachineAdded {
+  string host = 1 [(buf.validate.field).string.pattern = "^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$"];
+  // False when the host was already saved: nothing changed and the caller selects it.
+  bool created = 2;
+}
+
+message DesktopMachineRemoved {
+  DesktopMachineRestore undo = 1 [(buf.validate.field).required = true];
+}
+
+// A request that cannot be served, with the reason the person reads (it names the offending flag).
+message DesktopMachineRefused {
+  string reason = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+  }];
+}
+
+message DesktopMachineReply {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    DesktopMachineMatches matches = 1;
+    DesktopMachineAdded added = 2;
+    DesktopMachineRemoved removed = 3;
+    DesktopMachineRefused refused = 4;
+  }
 }
 
 message DesktopHosts {

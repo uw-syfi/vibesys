@@ -31,6 +31,9 @@
   "clients/apps/desktop/src/main/index.ts": {
     "VIBESYS_DESKTOP_USER_DATA": 1
   },
+  "clients/apps/desktop/src/main/ssh-config.ts": {
+    "VIBESYS_DESKTOP_SSH_CONFIG": 1
+  },
   "orchestrator/gatewayroot/gatewayroot.go": {
     "VIBESYS_HOME": 1
   },

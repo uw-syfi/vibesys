@@ -6,24 +6,32 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {useAtomValue} from '@effect/atom-react';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
 import * as Scope from 'effect/Scope';
-import {StrictMode} from 'react';
+import {type JSX, StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  type AppearanceStore,
   GatewayPortsFromWindow,
   GatewayTransportLive,
   Ids,
+  type MachineActions,
+  Machines,
+  MachinesFromWindow,
   makeAppearance,
-  makeHostSession,
+  makeMachineActions,
   makeNavigation,
+  makeRoster,
+  type NavigationStore,
   PreferencesFromWindow,
+  type Roster,
   Viewer,
   ViewerFromWindow,
 } from '../core/index.js';
 import {hostsOfAddress} from './address.js';
-import type {ConnectedHost, Dispatch} from './orchestrator/connected.js';
+import type {Dispatch} from './orchestrator/connected.js';
 import {
   KeyPressesFromWindow,
   SystemAppearanceFromWindow,
@@ -48,12 +56,12 @@ const open = Effect.gen(function* () {
       Effect.logWarning(`could not read the viewer: ${error.detail}`).pipe(Effect.as(null)),
     ),
   );
-  const sessions: ConnectedHost[] = [];
-  for (const {key, label} of hostsOfAddress(window.location.search)) {
-    const session = yield* makeHostSession(key).pipe(Scope.provide(scope));
-    sessions.push({key, label, session});
-  }
-  return {sessions, appearance, navigation, viewer};
+  // The hosts the address names, and the ones the person adds or removes while the window is open.
+  const roster = yield* makeRoster(
+    hostsOfAddress(window.location.search).map(host => host.key),
+  ).pipe(Scope.provide(scope));
+  const machines = makeMachineActions(yield* Machines, roster);
+  return {roster, machines, appearance, navigation, viewer};
 }).pipe(
   Effect.provide(
     Layer.mergeAll(
@@ -64,20 +72,42 @@ const open = Effect.gen(function* () {
       SystemAppearanceFromWindow,
       ThemeDocumentLive,
       KeyPressesFromWindow,
+      MachinesFromWindow,
     ).pipe(Layer.provide(GatewayPortsFromWindow)),
   ),
 );
+
+/** The window over the hosts as they stand: a host added or removed changes the list it is given. */
+function Window(props: {
+  readonly roster: Roster;
+  readonly machines: MachineActions;
+  readonly navigation: NavigationStore;
+  readonly appearance: AppearanceStore;
+  readonly viewerId: string | null;
+}): JSX.Element {
+  const hosts = useAtomValue(props.roster.entries);
+  return (
+    <ConnectedShell
+      hosts={hosts}
+      dispatch={dispatch}
+      navigation={props.navigation}
+      appearance={props.appearance}
+      viewerId={props.viewerId}
+      machines={props.machines}
+    />
+  );
+}
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('index.html has no #root');
 const page = createRoot(root);
 Effect.runFork(
-  Effect.map(open, ({sessions, appearance, navigation, viewer}) => {
+  Effect.map(open, ({roster, machines, appearance, navigation, viewer}) => {
     page.render(
       <StrictMode>
-        <ConnectedShell
-          hosts={sessions}
-          dispatch={dispatch}
+        <Window
+          roster={roster}
+          machines={machines}
           navigation={navigation}
           appearance={appearance}
           viewerId={viewer}
