@@ -154,33 +154,35 @@ function ObjectiveLine(props: {readonly objective: ObjectiveFigures}): JSX.Eleme
 function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
   const {tiles} = props;
   return (
-    <Grid min="tile" gap="space-4">
-      <Card section="Best">
-        {tiles.objectives.length === 0 ? (
-          <Text tone="muted">{NOT_REPORTED}</Text>
-        ) : (
-          <Stack gap="space-4">
-            {tiles.objectives.map(objective => (
-              <ObjectiveLine key={objective.metric} objective={objective} />
-            ))}
-          </Stack>
-        )}
-      </Card>
-      <Card section="Ideas">
-        <Row gap="space-7" rowGap="space-4" wrap>
-          <Stat label="Created" value={tiles.ideas.created} />
-          <Stat label="Changed" value={tiles.ideas.changed} />
-        </Row>
-      </Card>
-      <Card section="Agents">
-        <Row gap="space-7" rowGap="space-4" wrap>
-          <Stat label="Started" value={tiles.agents.started} />
-          <Stat label="Ended" value={tiles.agents.ended} />
-        </Row>
-      </Card>
-      <Card section="Jobs">
-        <Stat label="Measured" value={tiles.jobsMeasured} />
-      </Card>
+    <Stack gap="space-4">
+      <Grid min="tile" gap="space-4">
+        <Card section="Best">
+          {tiles.objectives.length === 0 ? (
+            <Text tone="muted">{NOT_REPORTED}</Text>
+          ) : (
+            <Stack gap="space-4">
+              {tiles.objectives.map(objective => (
+                <ObjectiveLine key={objective.metric} objective={objective} />
+              ))}
+            </Stack>
+          )}
+        </Card>
+        <Card section="Ideas">
+          <Row gap="space-7" rowGap="space-4" wrap>
+            <Stat label="Created" value={tiles.ideas.created} />
+            <Stat label="Changed" value={tiles.ideas.changed} />
+          </Row>
+        </Card>
+        <Card section="Agents">
+          <Row gap="space-7" rowGap="space-4" wrap>
+            <Stat label="Started" value={tiles.agents.started} />
+            <Stat label="Ended" value={tiles.agents.ended} />
+          </Row>
+        </Card>
+        <Card section="Jobs">
+          <Stat label="Measured" value={tiles.jobsMeasured} />
+        </Card>
+      </Grid>
       <Card section="Spend">
         <Stack gap="space-4">
           <Row gap="space-4" align="baseline" wrap>
@@ -202,7 +204,7 @@ function TileCards(props: {readonly tiles: Tiles}): JSX.Element {
           )}
         </Stack>
       </Card>
-    </Grid>
+    </Stack>
   );
 }
 
