@@ -333,6 +333,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--prefix-cache-entries", type=int, default=16, help="snapshots kept (0 disables the cache)"
     )
+    parser.add_argument(
+        "--experts-implementation",
+        choices=("eager", "grouped_mm", "batched_mm"),
+        default=None,
+        help="Transformers MoE experts implementation (default: eager on ROCm, Transformers' own elsewhere)",
+    )
     args = parser.parse_args(argv)
     revision = args.revision
     if revision is None and args.model == CHECKPOINT["model"]:
@@ -344,6 +350,7 @@ def main(argv: list[str] | None = None) -> None:
         chunk_tokens=args.prefill_chunk_tokens,
         prefix_cache_tokens=args.prefix_cache_tokens,
         prefix_cache_entries=args.prefix_cache_entries,
+        experts=args.experts_implementation,
     )
     server = _Server((args.host, args.port), generator, args.served_model_name or args.model)
     print(f"engine: serving {args.model} on http://{args.host}:{args.port}", flush=True)

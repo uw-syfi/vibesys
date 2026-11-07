@@ -33,7 +33,10 @@ they do in the baseline; the candidate must own its serving path rather than
 proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
-See [the project README](../../../README.md) for AMD environment setup.
+See [the project README](../../../README.md) for AMD environment setup. The
+ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
+not supported on ROCM"), so the baseline loads Transformers' eager experts on
+ROCm; a grouped expert GEMM needs a kernel of your own or another library.
 
 ## Correctness and service interface
 

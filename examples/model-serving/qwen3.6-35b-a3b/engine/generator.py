@@ -32,6 +32,18 @@ from engine.protocol import ChatRequest, FinishReason, RequestError, Sampling
 CHECKPOINT = json.loads((Path(__file__).with_name("checkpoint.json")).read_text())
 
 
+def experts_implementation(hip_version: str | None) -> str | None:
+    """The Transformers MoE experts implementation to request; None keeps its default.
+
+    Transformers 5.22 defaults to ``grouped_mm`` (``torch._grouped_mm``). The
+    torch 2.9.1+rocm6.4 build raises "grouped gemm is not supported on ROCM"
+    when that kernel runs, after Transformers' availability check has passed
+    (an MI250 reports compute capability 9.0), so on ROCm every request would
+    fail. ``eager`` loops over the selected experts with ordinary matmuls.
+    """
+    return "eager" if hip_version else None
+
+
 @dataclass(frozen=True)
 class Step:
     """One generated token. ``emit`` is false for an end-of-sequence token that ends the output."""
@@ -153,12 +165,23 @@ class Generator:
         )
 
     @classmethod
-    def load(cls, model: str, revision: str | None, **options: int) -> Generator:
-        """Load BF16 weights, sharded over all visible GPUs, else on the CPU."""
+    def load(
+        cls, model: str, revision: str | None, *, experts: str | None = None, **options: int
+    ) -> Generator:
+        """Load BF16 weights, sharded over all visible GPUs, else on the CPU.
+
+        ``experts`` names the MoE experts implementation; None chooses
+        ``experts_implementation(torch.version.hip)``.
+        """
         tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
         device_map = "auto" if torch.cuda.is_available() else None
+        chosen = experts or experts_implementation(torch.version.hip)
         lm = AutoModelForCausalLM.from_pretrained(
-            model, revision=revision, dtype=torch.bfloat16, device_map=device_map
+            model,
+            revision=revision,
+            dtype=torch.bfloat16,
+            device_map=device_map,
+            **({"experts_implementation": chosen} if chosen else {}),
         )
         lm.eval()
         if device_map is not None:

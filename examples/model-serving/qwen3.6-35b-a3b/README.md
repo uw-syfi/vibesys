@@ -89,6 +89,13 @@ uv pip install 'torch==2.9.1+rocm6.4' --index-url https://download.pytorch.org/w
 uv pip install -r requirements-agentx.txt
 ```
 
+This torch build cannot run `torch._grouped_mm`, Transformers' default MoE
+experts kernel: it raises "grouped gemm is not supported on ROCM" at the first
+forward pass, even though Transformers' availability check passes (an MI250
+reports compute capability 9.0). The baseline engine therefore loads
+`experts_implementation="eager"` whenever `torch.version.hip` is set
+(`--experts-implementation` overrides it).
+
 Neither AMD task supplies a validated comparison baseline. The baseline engine
 uses Transformers' reference DeltaNet and MoE code; that it runs does not
 establish that an optimized kernel path supports either GPU. The shared

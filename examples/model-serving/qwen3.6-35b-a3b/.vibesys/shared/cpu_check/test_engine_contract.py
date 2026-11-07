@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 import pytest
+from engine.generator import experts_implementation
 
 from conftest import CHUNK, Server
 
@@ -234,3 +235,18 @@ def test_requests_the_server_cannot_honor_are_refused(
     response = httpx.post(f"{server.url}/v1/completions", json=body, timeout=_TIMEOUT)
     assert response.status_code == status
     assert response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize("hip", ["6.4.43484-123eb5128", "7.0.0"])
+def test_rocm_builds_load_the_eager_experts(hip: str) -> None:
+    """torch 2.9.1+rocm6.4 raises on torch._grouped_mm, Transformers' default experts kernel."""
+    assert experts_implementation(hip) == "eager"
+
+
+def test_cuda_and_cpu_builds_keep_the_transformers_default() -> None:
+    assert experts_implementation(None) is None
+
+
+def test_the_eager_experts_path_serves_exact_lengths(eager_server: Server) -> None:
+    chunks, usage = _completion(eager_server, list(range(60, 90)), 9)
+    assert len(_ids(chunks)) == usage["completion_tokens"] == 9

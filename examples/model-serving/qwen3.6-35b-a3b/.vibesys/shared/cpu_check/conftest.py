@@ -21,6 +21,9 @@ import pytest
 from tiny_checkpoint import set_eos, write_checkpoint
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# The engine's own public functions are importable too, as `engine.<module>`.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 CHUNK = 8  # small prefill chunks, so short prompts cross snapshot boundaries
 _STARTUP_GUARD_SECONDS = 180
 
@@ -125,4 +128,15 @@ def cold_server(
     set_eos(copy, [eos_token[1]])
     yield from _serve(
         copy, tmp_path_factory.mktemp("logs") / "cold.log", "--prefix-cache-entries", "0"
+    )
+
+
+@pytest.fixture(scope="session")
+def eager_server(checkpoint: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Server]:
+    """The same weights with the MoE experts implementation the engine uses on ROCm."""
+    yield from _serve(
+        checkpoint,
+        tmp_path_factory.mktemp("logs") / "eager.log",
+        "--experts-implementation",
+        "eager",
     )
