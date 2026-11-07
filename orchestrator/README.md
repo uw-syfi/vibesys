@@ -467,7 +467,8 @@ A viewer presses Catch me up on a run and the host stores a **check-in**: everyt
 since that viewer's last check-in, with figures the host worked out and froze when it was made. The viewer
 sees the check-in again, unchanged, in the list of the ones before it. The host does the whole of it: a client
 sends the press and shows what comes back, and works out nothing. `RequestCatchUp(run_id)` is a command; its
-receipt answers at once with `check_in_id`, and with `message_id` when the lead was asked.
+receipt answers at once with `check_in_id`; the lead is asked later, when the facts are frozen, and the
+check-in's `ask_message_id` says so.
 
 - **Who.** The viewer is the id of an install of a client and a name to show, sent as call metadata
   (`vibesys-viewer-id` and `vibesys-viewer-label`, both or neither) and stamped by the daemon onto the
@@ -480,7 +481,7 @@ receipt answers at once with `check_in_id`, and with `message_id` when the lead 
   press, or at the end of the run when the run is over, so a window never takes in what a later run did to the
   same repository. A press the clock puts before the window's start is an empty window, never a backward one.
   A press on a run that is over is allowed. A press while the viewer's last check-in is still being worked out
-  answers with that check-in: no second window, request or effect.
+  answers with that check-in: no second window or effect.
 - **The facts** (`WindowFacts`, `internal/window`) are a pure function of the host's records for the half-open
   window `[since, at)`: the finished turns' spend in total and by type of agent with unpriced turns counted,
   the agents started and ended, the measurements recorded, each objective's best value at the start and at the
@@ -494,15 +495,21 @@ receipt answers at once with `check_in_id`, and with `message_id` when the lead 
   finds the effect in the outbox and carries it out again, and a second answer for a settled check-in changes
   nothing.
 - **The ask.** A run that can be asked (live, no limit reached, its lead has not given its final report) is
-  also sent a `CatchUpRequest` message, worded from a template, asking its lead for a progress report that
-  covers the window. It goes through the ordinary delivery path, except that it never steers into a turn that
-  is running: it starts a turn of its own, after the lead's current one, so the lead is not interrupted. The
-  report the lead posts in that turn is linked as `report_message_id`, so the report is exactly the answer; any
-  other report links to nothing. While one request is on its way a second press makes its check-in and sends no
-  second request, because each request costs the lead a turn. "Writing" is therefore `ask_message_id` set,
-  `report_message_id` empty and that message's `delivery` not final; a run that could not be asked shows its facts
-  and the reports inside its window (`report_message_ids`). The lead's answer is an ordinary turn of the lead:
-  its cost is the lead's, in the next window's spend, and there is no reporter agent.
+  sent a `CatchUpRequest` message in the same commit that freezes the facts, so the request is worded from
+  them: a template states the check-in's own figures (spend, agents, measurements, each objective's best at
+  the two ends with its job and commit, plans, reports) with times of day in Seattle, and the lead recomputes
+  nothing. A check-in that failed asks nobody. It goes through the ordinary delivery path, except that it
+  never steers into a turn that is running: it starts a turn of its own, after the lead's current one, so the
+  lead is not interrupted. The report the lead posts in that turn is linked as `report_message_id`, so the
+  report is exactly the answer; any other report links to nothing. The lead has **one request at a time**: a
+  viewer's `CatchUpRequest` and the schedule's `ReportDue` each cost the lead a turn, so while either is on its
+  way, or being read, no second is sent. A check-in made then is ready without an ask, and a schedule that falls
+  due then is dropped like one that falls due behind its own (the next movement of work arms it again).
+  "Writing" is `ask_message_id` set, `report_message_id` empty and that message's `delivery` not final; a
+  check-in with no ask shows its facts and the reports inside its window (`report_message_ids`). The lead's
+  answer is an ordinary turn of the lead: its cost is the lead's, in the next window's spend, and there is no
+  reporter agent. A check-in's own answer is dated after its window and is left out of the next window's
+  reports, so no report is counted twice.
 - **Serving.** Check-ins reach watchers on `WatchRuns`, not on a stream of their own: the snapshot holds every
   viewer's check-ins of each run it holds (the newest 64 of each viewer, with `truncated` set when older ones
   are left out), each whole with its frozen facts, and each change to one (made, ready or failed, report
@@ -511,7 +518,11 @@ receipt answers at once with `check_in_id`, and with `message_id` when the lead 
   free. A viewer's own list is the check-ins with its id.
 - **Where it lives.** Check-ins are entities of the core's state and so of the event log, the checkpoint and a
   `check_ins` table: durable and replayed with the run, on the host that owns the run, which is why the
-  rewind list is the same from every machine that watches it.
+  rewind list is the same from every machine that watches it. They are kept for good, with no retention: the
+  rewind list is the product, a check-in is a few kilobytes at most (its facts are bounded by the contract)
+  and made when a person presses a button. The state indexes them by run and by viewer in the order a run
+  shows them, so reading a run's or a viewer's list scans and sorts nothing else; only the served snapshot
+  cuts to the newest 64 of a viewer.
 
 ### The `run attach` view
 

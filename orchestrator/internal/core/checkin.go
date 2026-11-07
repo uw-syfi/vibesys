@@ -31,17 +31,23 @@ import (
 // facts are then in the check-in's event: a replay reads them and never works them out again, which is
 // why a past check-in reads the same forever.
 //
-// The ask. A run that can be asked (see canBeAsked) also gets a CatchUpRequest sent to its lead
-// through the ordinary delivery path. It never steers into a turn that is running: it starts a turn of
-// its own, after the one that is running, so the lead is not interrupted and the report it posts in that
-// turn is known to answer the request. That report is linked to the check-in. No agent but the lead is
-// involved and nothing about it is special in cost: it is the lead's turn like any other.
+// The ask. A run that can be asked (see canBeAsked) is sent a CatchUpRequest once the facts are frozen,
+// and with them: the request is worded from the check-in's own facts, so what the lead is told is what
+// every screen shows and the lead recomputes nothing. A check-in that failed asks nobody. The request
+// goes to the lead through the ordinary delivery path. It never steers into a turn that is running: it
+// starts a turn of its own, after the one that is running, so the lead is not interrupted and the report
+// it posts in that turn is known to answer the request. That report is linked to the check-in. No agent
+// but the lead is involved and nothing about it is special in cost: it is the lead's turn like any other.
+//
+// One request to the lead at a time. A request for a report, a viewer's or the schedule's (ReportDue),
+// costs the lead a turn, and the report it brings is the one to read, so while one is on its way, or being
+// read, no second is sent: a press makes its check-in without an ask, and a schedule that falls due then
+// is not repeated either (see requestInTransit).
 //
 // A press while the viewer's last check-in in the run is still pending answers with that check-in, so a
-// retry, or a second press before the first is answered, makes no second window and sends no second
-// request. A press by another viewer, or after the first is ready, while the lead has still not
-// answered the last request, makes its own check-in and sends no request: each request costs the lead a
-// turn, and the report in flight is the one to read.
+// retry, or a second press before the first is answered, makes no second window and no second effect.
+// A check-in's own answer is a report like any other, but it belongs to that check-in: it is dated
+// after the window it answers and must not be counted again in the next one (the shell leaves it out).
 
 // Viewer is the label a client chose for its install: an id that stays the same for the install and a
 // name to show.
@@ -82,17 +88,47 @@ type CheckIn struct {
 	Report MessageID
 }
 
-// CheckIns returns a run's check-ins, oldest first.
-func (s State) CheckIns(run RunID) []CheckIn {
-	var out []CheckIn
-	for _, c := range s.checkIns {
-		if c.Run == run {
-			out = append(out, c)
-		}
+// checkInList is the check-ins of one run: all of them, and each viewer's, in the order a run shows them
+// (by the end of the window, then its start, then the id). It is replaced and never changed in place, like
+// what a State's maps hold.
+type checkInList struct {
+	all     []CheckInID
+	viewers map[ViewerID][]CheckInID
+}
+
+// with returns the list with a new check-in in its place. byID has the check-in already.
+func (l checkInList) with(c CheckIn, byID map[CheckInID]CheckIn) checkInList {
+	place := func(ids []CheckInID) []CheckInID {
+		i, _ := slices.BinarySearchFunc(ids, c, func(id CheckInID, c CheckIn) int {
+			o := byID[id]
+			return cmp.Or(o.At.Compare(c.At), o.Since.Compare(c.Since), cmp.Compare(o.ID, c.ID))
+		})
+		return slices.Insert(slices.Clone(ids), i, c.ID)
 	}
-	slices.SortFunc(out, func(a, b CheckIn) int {
-		return cmp.Or(a.At.Compare(b.At), a.Since.Compare(b.Since), cmp.Compare(a.ID, b.ID))
-	})
+	out := checkInList{all: place(l.all), viewers: maps.Clone(l.viewers)}
+	if out.viewers == nil {
+		out.viewers = map[ViewerID][]CheckInID{}
+	}
+	out.viewers[c.Viewer.ID] = place(l.viewers[c.Viewer.ID])
+	return out
+}
+
+// CheckIns returns a run's check-ins, oldest first. It reads the run's own list: it neither scans the
+// check-ins of other runs nor sorts.
+func (s State) CheckIns(run RunID) []CheckIn {
+	return s.byIDs(s.checkInIndex[run].all)
+}
+
+// viewerCheckIns returns one viewer's check-ins in a run, oldest first.
+func (s State) viewerCheckIns(run RunID, viewer ViewerID) []CheckIn {
+	return s.byIDs(s.checkInIndex[run].viewers[viewer])
+}
+
+func (s State) byIDs(ids []CheckInID) []CheckIn {
+	out := make([]CheckIn, len(ids))
+	for i, id := range ids {
+		out[i] = s.checkIns[id]
+	}
 	return out
 }
 
@@ -125,10 +161,7 @@ func callerViewer(c Command) Viewer {
 // pending, if any, and the end of the last one that did not fail, or the start of the run.
 func (t *tx) viewerChain(run Run, viewer ViewerID) (pending CheckIn, isPending bool, since time.Time) {
 	since = run.CreatedAt
-	for _, c := range t.s.CheckIns(run.ID) {
-		if c.Viewer.ID != viewer {
-			continue
-		}
+	for _, c := range t.s.viewerCheckIns(run.ID, viewer) {
 		switch c.Outcome.(type) {
 		case CheckInFailed:
 			// A failed check-in is not part of the chain: the next window starts where it started.
@@ -165,31 +198,41 @@ func (t *tx) requestCatchUp(c Command, b RequestCatchUp, r *Receipt) RunID {
 		at = later(run.EndedAt, since)
 	}
 	check := CheckIn{ID: CheckInID(t.mint("checkin")), Run: run.ID, Viewer: viewer, Since: since, At: at, Outcome: CheckInPending{}}
-	if run.canBeAsked() && !t.catchUpInTransit(run.ID) {
-		check.Ask = t.post(Message{Run: run.ID, To: run.Lead, Body: CatchUpRequest{CheckIn: check.ID, Since: since, Until: at}}).ID
-		r.Message = check.Ask
-	}
 	t.emit(run.ID, check)
 	t.effect(ComputeWindowFacts{CheckIn: check.ID, Run: run.ID, Since: since, Until: at})
 	r.CheckIn = check.ID
 	return run.ID
 }
 
-// catchUpInTransit says a request for a report is on its way to the run's lead, or being read by it.
-// Another press does not send a second: the lead's report answers the first, and the later check-in's
-// window is shown with the reports posted inside it, as one of a run that could not be asked is.
-func (t *tx) catchUpInTransit(id RunID) bool {
+// requestInTransit says a request for a report is on its way to the run's lead, or being read by it: a
+// viewer's (CatchUpRequest) or the schedule's (ReportDue). The lead is sent one at a time, because each
+// costs it a turn and the report it brings is the one to read.
+func (t *tx) requestInTransit(id RunID) bool {
 	for _, m := range t.s.messages {
-		if _, ok := m.Body.(CatchUpRequest); ok && m.Run == id {
+		if m.Run != id {
+			continue
+		}
+		switch m.Body.(type) {
+		case CatchUpRequest, ReportDue:
 			return true
 		}
 	}
 	return false
 }
 
-// windowFactsReady freezes the facts of a pending check-in.
+// windowFactsReady freezes the facts of a pending check-in, and asks the lead for a report worded from
+// them when the run can be asked and the lead has no other request.
 func (t *tx) windowFactsReady(b WindowFactsReady) {
-	t.settleCheckIn(b.CheckIn, CheckInReady{Facts: b.Facts})
+	check, ok := t.s.checkIns[b.CheckIn]
+	if _, pending := check.Outcome.(CheckInPending); !ok || !pending {
+		return
+	}
+	if run := t.s.runs[check.Run]; run.canBeAsked() && !t.requestInTransit(run.ID) {
+		check.Ask = t.post(Message{Run: run.ID, To: run.Lead, Body: CatchUpRequest{CheckIn: check.ID, Since: check.Since, Until: check.At}}).ID
+		t.sweep(run.ID)
+	}
+	check.Outcome = CheckInReady{Facts: b.Facts}
+	t.emit(check.Run, check)
 }
 
 // windowFactsFailed fails a pending check-in.

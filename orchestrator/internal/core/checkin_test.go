@@ -1,7 +1,9 @@
 package core_test
 
 import (
+	"cmp"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"slices"
 	"testing"
@@ -60,16 +62,17 @@ func factsOf(spent uint32) core.WindowFacts {
 	return core.WindowFacts{AgentsStarted: spent, PlansCreated: []uint32{1, 2}}
 }
 
-// A press records a check-in over the whole run so far, answers at once with its id, asks the lead for
-// a report in the same window, and asks the host to work the facts out; the facts then freeze.
-func TestAPressRecordsACheckInAsksTheLeadAndFreezesItsFacts(t *testing.T) {
+// A press records a check-in over the whole run so far, answers at once with its id, and asks the host to
+// work the facts out. The facts freeze, and with them the lead is asked for a report in the same window,
+// worded from those facts.
+func TestAPressRecordsACheckInAndTheFrozenFactsAskTheLead(t *testing.T) {
 	w, run, leadID := started(t, 2, steers)
 	created := w.checkRun(run).CreatedAt
 	r, c := w.press(ann, run)
-	if r.Message == "" || r.Agent != "" || r.Run != run {
+	if r.Message != "" || r.Agent != "" || r.Run != run {
 		t.Fatalf("receipt %+v", r)
 	}
-	if c.Run != run || c.Viewer != ann.Viewer || !c.Since.Equal(created) || !c.At.Equal(w.now) || c.Ask != r.Message || c.Report != "" {
+	if c.Run != run || c.Viewer != ann.Viewer || !c.Since.Equal(created) || !c.At.Equal(w.now) || c.Ask != "" || c.Report != "" {
 		t.Fatalf("check-in %+v", c)
 	}
 	if _, pending := c.Outcome.(core.CheckInPending); !pending {
@@ -84,11 +87,8 @@ func TestAPressRecordsACheckInAsksTheLeadAndFreezesItsFacts(t *testing.T) {
 	if len(computing) != 1 || computing[0] != (core.ComputeWindowFacts{CheckIn: c.ID, Run: run, Since: c.Since, Until: c.At}) {
 		t.Fatalf("effects %v", w.kinds())
 	}
-	if asks := w.catchUpRequests(); len(asks) != 1 || asks[0] != (core.CatchUpRequest{CheckIn: c.ID, Since: c.Since, Until: c.At}) {
-		t.Fatalf("the lead was asked %+v", asks)
-	}
-	if got := w.turn(leadID).Trigger; got != core.TriggerOperator {
-		t.Fatalf("the request started a turn triggered by %s", got)
+	if asks := w.catchUpRequests(); len(asks) != 0 {
+		t.Fatalf("the lead was asked before the facts were frozen: %+v", asks)
 	}
 
 	w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
@@ -96,15 +96,31 @@ func TestAPressRecordsACheckInAsksTheLeadAndFreezesItsFacts(t *testing.T) {
 	if !ok || !equalFacts(ready.Facts, factsOf(1)) {
 		t.Fatalf("outcome %+v", w.checkIn(c.ID).Outcome)
 	}
+	if asks := w.catchUpRequests(); len(asks) != 1 || asks[0] != (core.CatchUpRequest{CheckIn: c.ID, Since: c.Since, Until: c.At}) || w.checkIn(c.ID).Ask == "" {
+		t.Fatalf("the lead was asked %+v, the check-in's ask is %q", asks, w.checkIn(c.ID).Ask)
+	}
+	if got := w.turn(leadID).Trigger; got != core.TriggerOperator {
+		t.Fatalf("the request started a turn triggered by %s", got)
+	}
 	// The facts are frozen: no later answer changes them, whatever it says.
 	w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(9)})
 	w.step(core.WindowFactsFailed{CheckIn: c.ID, Detail: "late"})
-	if len(w.events) != 0 || !equalFacts(w.checkIn(c.ID).Outcome.(core.CheckInReady).Facts, factsOf(1)) {
+	if len(w.events) != 0 || !equalFacts(w.checkIn(c.ID).Outcome.(core.CheckInReady).Facts, factsOf(1)) || len(w.catchUpRequests()) != 1 {
 		t.Fatalf("a later answer changed a settled check-in: %+v", w.events)
 	}
 	w.step(core.WindowFactsReady{CheckIn: "no-such-check-in", Facts: factsOf(1)})
 	if len(w.events) != 0 {
 		t.Fatalf("an answer for no check-in changed %+v", w.events)
+	}
+}
+
+// A check-in whose facts could not be worked out asks nobody: the viewer presses again, and that press asks.
+func TestAFailedCheckInAsksNoOne(t *testing.T) {
+	w, run, _ := started(t, 2, steers)
+	_, c := w.press(ann, run)
+	w.step(core.WindowFactsFailed{CheckIn: c.ID, Detail: "the job log cannot be read"})
+	if w.checkIn(c.ID).Ask != "" || len(w.catchUpRequests()) != 0 {
+		t.Fatalf("a failed check-in asked the lead: %+v", w.catchUpRequests())
 	}
 }
 
@@ -138,7 +154,7 @@ func TestAViewersWindowsFollowOneAnother(t *testing.T) {
 }
 
 // A press while the viewer's last check-in is still being worked out answers with that one: no second
-// window, no second request and no second effect, whatever command id it comes under.
+// window and no second effect, whatever command id it comes under.
 func TestAPressWhilePendingAnswersWithTheSameCheckIn(t *testing.T) {
 	w, run, _ := started(t, 2, steers)
 	first, c := w.press(ann, run)
@@ -146,7 +162,7 @@ func TestAPressWhilePendingAnswersWithTheSameCheckIn(t *testing.T) {
 	if second.CheckIn != c.ID || second.Message != first.Message || second.Refusal != "" {
 		t.Fatalf("first %+v, second %+v", first, second)
 	}
-	if len(w.effects) != 0 || len(w.s.CheckIns(run)) != 1 || len(w.catchUpRequests()) != 1 {
+	if len(w.effects) != 0 || len(w.s.CheckIns(run)) != 1 || len(w.catchUpRequests()) != 0 {
 		t.Fatalf("a repeated press made effects %v, check-ins %d, requests %d", w.kinds(), len(w.s.CheckIns(run)), len(w.catchUpRequests()))
 	}
 	// A different viewer is not held up by it.
@@ -240,8 +256,11 @@ func TestTheRequestStartsATurnOfItsOwnAndTheReportInItAnswers(t *testing.T) {
 	// The lead is busy in a turn that something else started, and it can be steered.
 	w.command(operator, core.SendMessage{Agent: leadID, Text: "go on"})
 	busy := w.turn(leadID)
-	r, c := w.press(ann, run)
-	if got := w.delivery(r.Message); got != core.DeliveryQueued {
+	_, c := w.press(ann, run)
+	w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
+	c = w.checkIn(c.ID)
+	r := core.Receipt{Message: c.Ask}
+	if got := w.delivery(r.Message); r.Message == "" || got != core.DeliveryQueued {
 		t.Fatalf("the request to a busy lead is %s, want queued: it must not steer into a turn", got)
 	}
 	// A report the lead posts in the turn it is in is not an answer to the request.
@@ -267,29 +286,70 @@ func TestTheRequestStartsATurnOfItsOwnAndTheReportInItAnswers(t *testing.T) {
 	}
 }
 
-// No press sends a request when the run cannot be asked, or one is already on its way; the check-in is
-// made all the same, with its facts, and the reports in its window are the text.
+// No request is sent when the facts freeze for a run that cannot be asked, or one that has a request on
+// its way, a viewer's or the schedule's; the check-in is made all the same, with its facts, and the reports
+// in its window are the text.
 func TestNoRequestIsSentWhenTheRunCannotBeAskedOrOneIsInFlight(t *testing.T) {
-	t.Run("one already on its way", func(t *testing.T) {
+	t.Run("a viewer's already on its way", func(t *testing.T) {
 		w, run, leadID := started(t, 2, steers)
 		w.command(operator, core.SendMessage{Agent: leadID, Text: "go on"})
 		_, first := w.press(ann, run)
 		w.step(core.WindowFactsReady{CheckIn: first.ID, Facts: factsOf(1)})
 		_, second := w.press(ann, run)
 		_, third := w.press(bob, run)
-		if first.Ask == "" || second.Ask != "" || third.Ask != "" || len(w.catchUpRequests()) != 1 {
-			t.Fatalf("asks %q %q %q, requests %d", first.Ask, second.Ask, third.Ask, len(w.catchUpRequests()))
+		w.step(core.WindowFactsReady{CheckIn: second.ID, Facts: factsOf(2)})
+		w.step(core.WindowFactsReady{CheckIn: third.ID, Facts: factsOf(3)})
+		if w.checkIn(first.ID).Ask == "" || w.checkIn(second.ID).Ask != "" || w.checkIn(third.ID).Ask != "" || len(w.catchUpRequests()) != 1 {
+			t.Fatalf("asks %q %q %q, requests %d", w.checkIn(first.ID).Ask, w.checkIn(second.ID).Ask, w.checkIn(third.ID).Ask, len(w.catchUpRequests()))
 		}
-		if _, pending := second.Outcome.(core.CheckInPending); !pending || second.Since.Before(first.At) {
-			t.Fatalf("second %+v", second)
+		if _, ready := w.checkIn(second.ID).Outcome.(core.CheckInReady); !ready || second.Since.Before(first.At) {
+			t.Fatalf("second %+v", w.checkIn(second.ID))
+		}
+	})
+	t.Run("the schedule's already on its way", func(t *testing.T) {
+		w, run, leadID := scheduledRun(t, 20*time.Minute, 3, steers)
+		w.spawnWorker(run, leadID)
+		timer, ok := w.summaryTimer()
+		if !ok {
+			t.Fatal("work moved and armed no timer")
+		}
+		w.fire(timer)
+		if len(w.requests()) != 1 {
+			t.Fatalf("the schedule asked %+v", w.requests())
+		}
+		_, c := w.press(ann, run)
+		w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
+		if w.checkIn(c.ID).Ask != "" || len(w.catchUpRequests()) != 0 {
+			t.Fatalf("the lead had a scheduled request on its way and was asked %+v too", w.catchUpRequests())
+		}
+		if _, ready := w.checkIn(c.ID).Outcome.(core.CheckInReady); !ready {
+			t.Fatalf("outcome %+v", w.checkIn(c.ID).Outcome)
+		}
+	})
+	t.Run("a viewer's on its way when the schedule falls due", func(t *testing.T) {
+		w, run, leadID := scheduledRun(t, 20*time.Minute, 3, steers)
+		w.spawnWorker(run, leadID)
+		timer, ok := w.summaryTimer()
+		if !ok {
+			t.Fatal("work moved and armed no timer")
+		}
+		_, c := w.press(ann, run)
+		w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
+		if w.checkIn(c.ID).Ask == "" {
+			t.Fatal("the lead was not asked")
+		}
+		w.fire(timer)
+		if len(w.requests()) != 0 {
+			t.Fatalf("the schedule sent %+v while a viewer's request was on its way", w.requests())
 		}
 	})
 	t.Run("a lead that gave its final report", func(t *testing.T) {
 		w, run, leadID := started(t, 2, steers)
 		w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
 		_, c := w.press(ann, run)
-		if c.Ask != "" || len(w.catchUpRequests()) != 0 {
-			t.Fatalf("a finished lead was asked: %+v", c)
+		w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
+		if w.checkIn(c.ID).Ask != "" || len(w.catchUpRequests()) != 0 {
+			t.Fatalf("a finished lead was asked: %+v", w.checkIn(c.ID))
 		}
 	})
 	t.Run("a run that reached its cost limit", func(t *testing.T) {
@@ -302,8 +362,9 @@ func TestNoRequestIsSentWhenTheRunCannotBeAskedOrOneIsInFlight(t *testing.T) {
 			t.Fatalf("run %+v", w.checkRun(r.Run))
 		}
 		_, c := w.press(ann, r.Run)
-		if c.Ask != "" {
-			t.Fatalf("a lead that was told to finish was asked: %+v", c)
+		w.step(core.WindowFactsReady{CheckIn: c.ID, Facts: factsOf(1)})
+		if w.checkIn(c.ID).Ask != "" {
+			t.Fatalf("a lead that was told to finish was asked: %+v", w.checkIn(c.ID))
 		}
 	})
 }
@@ -388,6 +449,64 @@ func TestCheckInsOfEveryViewerTileTheRunWhateverTheOrder(t *testing.T) {
 			if step%11 == 0 {
 				if replayed := core.Replay(core.State{}, w.log); !replayed.Equal(w.s) {
 					t.Fatalf("seed %d: a replay of the log differs from the state", seed)
+				}
+			}
+		}
+	}
+}
+
+// A run's check-ins are read from an index and not by scanning and sorting every check-in of every run, so
+// the index must say what a scan would: the same check-ins, oldest first by the end of the window, then its
+// start, then its id, whatever the order the presses and answers came in, and a replay of the log must
+// build the same.
+func TestTheIndexOfCheckInsSaysWhatAScanWould(t *testing.T) {
+	viewers := []core.Operator{ann, bob, {Viewer: core.Viewer{ID: "install-cy", Label: "Cy"}}}
+	for seed := range uint64(60) {
+		draw := rand.New(rand.NewPCG(seed, 5))
+		w := newScript(t)
+		runs := []core.RunID{}
+		for i := range 3 {
+			run, _ := w.startRunIn(fmt.Sprint("repo-", i), "task", 2, steers)
+			runs = append(runs, run)
+		}
+		var pending []core.CheckInID
+		for step := range 45 {
+			switch draw.IntN(5) {
+			case 0, 1, 2:
+				_, c := w.press(viewers[draw.IntN(len(viewers))], runs[draw.IntN(len(runs))])
+				if _, isPending := c.Outcome.(core.CheckInPending); isPending && !slices.Contains(pending, c.ID) {
+					pending = append(pending, c.ID)
+				}
+			case 3:
+				if len(pending) > 0 {
+					i := draw.IntN(len(pending))
+					w.step(core.WindowFactsReady{CheckIn: pending[i], Facts: factsOf(uint32(step))})
+					pending = slices.Delete(pending, i, i+1)
+				}
+			default:
+				// Clocks go back as well as forward.
+				w.now = w.now.Add(time.Duration(draw.IntN(9)-3) * time.Minute)
+			}
+		}
+		latest := map[core.CheckInID]core.CheckIn{}
+		for _, e := range w.log {
+			if c, ok := e.Body.(core.CheckIn); ok {
+				latest[c.ID] = c
+			}
+		}
+		for _, state := range []core.State{w.s, core.Replay(core.State{}, w.log)} {
+			for _, run := range runs {
+				var want []core.CheckIn
+				for _, c := range latest {
+					if c.Run == run {
+						want = append(want, c)
+					}
+				}
+				slices.SortFunc(want, func(a, b core.CheckIn) int {
+					return cmp.Or(a.At.Compare(b.At), a.Since.Compare(b.Since), cmp.Compare(a.ID, b.ID))
+				})
+				if got := state.CheckIns(run); !reflect.DeepEqual(got, want) {
+					t.Fatalf("seed %d: the index of run %s says %+v, a scan says %+v", seed, run, got, want)
 				}
 			}
 		}

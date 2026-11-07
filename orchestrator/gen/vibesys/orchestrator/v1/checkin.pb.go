@@ -203,8 +203,10 @@ type CheckIn struct {
 	Facts *WindowFacts `protobuf:"bytes,7,opt,name=facts,proto3" json:"facts,omitempty"`
 	// Set exactly when the check-in failed: what could not be read, in words for the viewer to see.
 	Failure string `protobuf:"bytes,8,opt,name=failure,proto3" json:"failure,omitempty"`
-	// The message that asked the lead for a report covering the window. Empty when the run could not be
-	// asked: it was over, stopping, past a limit or its lead had finished. How the request stands (queued,
+	// The message that asked the lead for a report covering the window, set in the same change that makes
+	// the check-in ready: the request is worded from the frozen facts. Empty until then, and when the run
+	// could not be asked (it was over, stopping, past a limit or its lead had finished) or the lead had
+	// another request on its way, a viewer's or the schedule's. How the request stands (queued,
 	// being read, consumed or rejected) is that message's delivery. The app shows "Writing" while the
 	// request is not final and report_message_id is empty.
 	AskMessageId string `protobuf:"bytes,9,opt,name=ask_message_id,json=askMessageId,proto3" json:"ask_message_id,omitempty"`

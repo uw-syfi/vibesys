@@ -31,8 +31,12 @@ type State struct {
 	// messages holds the messages still in transit.
 	messages map[MessageID]Message
 	receipts map[CommandID]Receipt
-	// checkIns holds every check-in of every run. They are few: one for each press of Catch me up.
-	checkIns map[CheckInID]CheckIn
+	// checkIns holds every check-in of every run, kept for good: the list of a viewer's past check-ins is
+	// the product, and a check-in is a few kilobytes at most (the contract bounds its facts) made when a
+	// person presses a button, so there is nothing to retire. checkInIndex says which of them are a run's
+	// and a viewer's, in order, so that no read scans or sorts them all.
+	checkIns     map[CheckInID]CheckIn
+	checkInIndex map[RunID]checkInList
 	// jobs holds the jobs whose end was already told, by run: a job id is only unique within the
 	// store of one task, so two runs can both finish a job called j1.
 	jobs map[toldJob]struct{}
@@ -47,7 +51,7 @@ type toldJob struct {
 // written says which of a State's maps one transaction has its own copy of. A map is copied when
 // the fold first writes to it, so an input costs what it changes and not what the State has
 // remembered. What the maps hold is replaced and never changed in place, so it is shared.
-type written struct{ runs, agents, messages, receipts, checkIns, jobs bool }
+type written struct{ runs, agents, messages, receipts, checkIns, checkInIndex, jobs bool }
 
 // own gives the transaction its own copy of a map, once.
 func own[K comparable, V any](m *map[K]V, done *bool) {
@@ -123,7 +127,14 @@ func (s *State) apply(e Event, w *written) {
 		s.receipts[b.Command] = b
 	case CheckIn:
 		own(&s.checkIns, &w.checkIns)
+		_, known := s.checkIns[b.ID]
 		s.checkIns[b.ID] = b
+		if !known {
+			// A check-in's place never changes (its window and viewer are fixed when it is made), so only
+			// the first sight of it touches the index.
+			own(&s.checkInIndex, &w.checkInIndex)
+			s.checkInIndex[b.Run] = s.checkInIndex[b.Run].with(b, s.checkIns)
+		}
 	default:
 		panic(fmt.Sprintf("core: unknown event body %T", e.Body))
 	}

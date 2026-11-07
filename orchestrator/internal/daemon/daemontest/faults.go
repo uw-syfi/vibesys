@@ -62,6 +62,9 @@ type FaultStore struct {
 	mu sync.Mutex
 	// FailComplete and FailRelease fail that many calls before any succeeds.
 	FailComplete, FailRelease int
+	// FailMessages fails that many reads of a run's messages before any succeeds, and every one when it
+	// is negative.
+	FailMessages int
 	// CrashAt, when set to a crash point, ends the process the next time the daemon reaches it.
 	CrashAt string
 	// Committed lists every effect committed through this store, with the sequence of its result.
@@ -113,6 +116,20 @@ func (f *FaultStore) Complete(ids ...store.OutboxID) error {
 		return ErrInjected
 	}
 	return f.Store.Complete(ids...)
+}
+
+// Messages implements store.Store.
+func (f *FaultStore) Messages(run core.RunID, after uint64, limit int) ([]store.MessageRecord, error) {
+	f.mu.Lock()
+	fail := f.FailMessages != 0
+	if f.FailMessages > 0 {
+		f.FailMessages--
+	}
+	f.mu.Unlock()
+	if fail {
+		return nil, ErrInjected
+	}
+	return f.Store.Messages(run, after, limit)
 }
 
 // Release implements store.Store.
