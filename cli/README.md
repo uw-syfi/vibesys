@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, declared bounds, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 4 is migrated to version 5 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, and version 5 a job's needs and task version); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 5 is migrated to version 6 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, and version 6 a plan's origin, transitions and workstream with the `bounds` and `workstreams` directories, so that a program of version 5 refuses the store and never opens it to ignore them); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -301,13 +301,21 @@ run `compare` on a linked job's commit for one. A submission or `plan create` ma
 the first job. The other plan commands refuse a task with no store with a "no store" error, and
 `plan list` prints nothing for it.
 
+A plan records who made it: `origin` is the run and agent the call carried (`VIBESYS_RUN` and
+`VIBESYS_AGENT`, which the caller states and nothing authenticates) and the time the daemon took, and a
+request has no field for it. `transitions` is the plan's status history, oldest first: its creation as
+`open`, then one entry for each `plan edit` or `plan close` that set a status the plan did not have, with
+the origin of that call. Setting the status a plan has adds nothing. A plan saved before store format 6
+has no origin and no transitions, and none is invented for it: its transitions start at its first status
+change after the upgrade. `plan view --json` and every fact of `WatchTask` carry both.
+
 Bounds belong to a task and are an append-only log, numbered 1, 2, ... by the daemon. Declaring one is
 the agent's choice, early or late, and the daemon only checks that it is well formed and about an
 objective of the task: it never refuses a bound that a measurement has passed, since revising it is the
 agent's to do. Each entry keeps its value, unit, note, direction, and a `RecordOrigin`: the run and agent of
 the call and the time the daemon took. A `bound declare` or `plan create` makes a task's store, and `bound list`
-prints nothing for a task with no store. A store made before bounds existed has no `bounds` directory
-and reads as having none.
+prints nothing for a task with no store. A store made before bounds existed is migrated when it is
+opened and has none declared.
 
 Every command ends with one of five exit codes, and which one is a function of one answer: the
 command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind of a `Failure`.

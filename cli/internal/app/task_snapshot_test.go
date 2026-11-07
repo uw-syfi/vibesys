@@ -61,7 +61,7 @@ func TestTaskViewRetriesAWriteBetweenSnapshotAndDerivedReads(t *testing.T) {
 		result := storetest.SeedMeasurement(t, r.store, storetest.Measurement{Commit: cm(1), Samples: win, At: r.clock.Now()})
 		storetest.SeedPromotion(t, r.store, core.Promotion{Commit: cm(1), PreviousHead: base,
 			ResultJob: result.Job, Environment: result.Environment, At: r.clock.Now(), Verdict: core.Verdict{Kind: core.Better}})
-		if _, err := r.store.CreatePlan(t.Context(), core.NewPlan{Title: "landed during read", At: r.clock.Now()}); err != nil {
+		if _, err := r.store.CreatePlan(t.Context(), core.NewPlan{Title: "landed during read", Origin: core.RecordOrigin{At: r.clock.Now()}}); err != nil {
 			t.Fatal(err)
 		}
 	}

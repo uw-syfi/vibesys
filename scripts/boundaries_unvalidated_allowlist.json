@@ -32,7 +32,6 @@
   ],
   "proto/vibesys/cli/v1/plan.proto": [
     "LinkedJob",
-    "Plan",
     "PlanComment",
     "PlanView"
   ],

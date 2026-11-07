@@ -172,7 +172,7 @@ func testConcurrency(t *testing.T, newStore New) {
 		}
 		numbers, positions := make([]core.PlanNumber, n), make([]uint64, n)
 		parallel(t, n, func(i int) {
-			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: fmt.Sprint(i), At: epoch})
+			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: fmt.Sprint(i), Origin: core.RecordOrigin{At: epoch}})
 			if err != nil {
 				t.Errorf("CreatePlan: %v", err)
 			}

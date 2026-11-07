@@ -48,7 +48,16 @@ import (
 // and keeps the version it was written with. Results of one image taken on two placements, which
 // had two keys, then answer the same key. The migration of a store of 2 to 4 is the one before,
 // writing the format file at version 5 last.
-const formatVersion = 5
+//
+// Version 6 adds a plan's origin, status transitions and workstream, which a version 5 program would
+// refuse as unknown, and the directories of the records that came with them: workstreams/, and
+// bounds/, which the version 5 program that first wrote declared bounds made when it wrote one and
+// read as empty when there was none. It only adds, so this program reads versions 2 to 6, and Open
+// migrates a store of 2 to 5 the same way: it makes every directory the store lacks, and writes the
+// format file at version 6 last. A program of version 5 refuses the store from then on, which is
+// what keeps it from opening a store whose bounds or workstreams it would not see and ignoring them.
+// A plan saved before has no origin and no transitions, and none is invented for it.
+const formatVersion = 6
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -515,24 +524,9 @@ func refusalFromMessage(m *cliv1.PromoteRefusal) (core.PromoteRefusal, error) {
 	return out, nil
 }
 
-func planFromMessage(m *cliv1.Plan) (core.Plan, error) {
-	status, err := wire.ToPlanStatus("plan.status", m.GetStatus())
-	if err != nil {
-		return core.Plan{}, err
-	}
-	bound, err := wire.ToGainBound("plan.gain_bound", m.GetGainBound())
-	if err != nil {
-		return core.Plan{}, err
-	}
-	p := core.Plan{
-		Number: core.PlanNumber(m.GetNumber()), Title: m.GetTitle(), Body: m.GetBody(), Status: status,
-		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()), GainBound: bound,
-	}
-	for _, c := range m.GetComments() {
-		p.Comments = append(p.Comments, core.PlanComment{Text: c.GetText(), At: instant(c.GetAt()), Agent: c.GetAgent()})
-	}
-	return p, nil
-}
+// planFromMessage is the plan a message holds. Every field of a plan is read where the contract is
+// read, so a field added to it is read for the store and for the wire alike.
+func planFromMessage(m *cliv1.Plan) (core.Plan, error) { return wire.ToPlan(m) }
 
 func detailFromMessage(m *cliv1.Event) (core.EventDetail, error) {
 	switch d := m.GetDetail().(type) {

@@ -106,6 +106,19 @@ func (d *driver) instant() time.Time {
 	return at
 }
 
+// origin is who makes a record, with names that are sometimes empty, as outside a run, and a time
+// that is sometimes the zero time, which no store accepts.
+func (d *driver) origin() core.RecordOrigin {
+	o := core.RecordOrigin{At: d.instant()}
+	if d.g.pick(2) == 0 {
+		o.Run, o.Agent = core.RunID(d.g.name()), d.g.text()
+	}
+	if d.g.pick(40) == 0 {
+		o.At = time.Time{}
+	}
+	return o
+}
+
 func (d *driver) text() string {
 	if d.g.pick(30) == 0 {
 		return "bad\xff"
@@ -150,10 +163,10 @@ func (d *driver) step(step int) {
 		}
 		d.do(step, "RecordPromotion", func(s store.Store) (any, error) { return nil, s.RecordPromotion(ctx, core.AssumeApproved(p)) })
 	case op == 10:
-		np := core.NewPlan{Title: d.text(), Body: g.text(), At: d.instant()}
+		np := core.NewPlan{Title: d.text(), Body: g.text(), Origin: d.origin()}
 		d.do(step, "CreatePlan", func(s store.Store) (any, error) { return s.CreatePlan(ctx, np) })
 	case op == 11:
-		number, edit := d.planNumber(), core.PlanEdit{At: d.instant()}
+		number, edit := d.planNumber(), core.PlanEdit{Origin: d.origin()}
 		if g.pick(2) == 0 {
 			edit.Title = ptr(d.text())
 		}
@@ -161,7 +174,7 @@ func (d *driver) step(step int) {
 			edit.Body = ptr(g.text())
 		}
 		if g.pick(2) == 0 {
-			edit.Status = ptr([]core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)])
+			edit.Status = ptr([]core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected, "bogus"}[g.pick(6)])
 		}
 		if g.pick(2) == 0 {
 			edit.Comment = &core.PlanComment{Text: g.text(), At: d.instant(), Agent: g.text()}

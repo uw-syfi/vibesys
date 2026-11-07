@@ -78,13 +78,13 @@ func testValues(t *testing.T, newStore New) {
 				t.Errorf("seed %d: Results = %+v, want %+v", seed, got, res)
 			}
 
-			np := core.NewPlan{Title: g.text(), Body: g.text(), At: g.instant()}
+			np := core.NewPlan{Title: g.text(), Body: g.text(), Origin: core.RecordOrigin{At: g.instant()}}
 			created, err := e.s.CreatePlan(e.ctx, np)
-			if err != nil || created.Title != np.Title || created.Body != np.Body || !created.CreatedAt.Equal(np.At) {
+			if err != nil || created.Title != np.Title || created.Body != np.Body || !created.CreatedAt.Equal(np.Origin.At) {
 				t.Errorf("seed %d: CreatePlan = %+v, %v; want %+v", seed, created, err, np)
 			}
 			title, body, status, comment := g.text(), g.text(), core.PlanRejected, g.comment()
-			edited, err := e.s.EditPlan(e.ctx, created.Number, core.PlanEdit{Title: &title, Body: &body, Status: &status, Comment: &comment, At: g.instant()})
+			edited, err := e.s.EditPlan(e.ctx, created.Number, core.PlanEdit{Title: &title, Body: &body, Status: &status, Comment: &comment, Origin: core.RecordOrigin{At: g.instant()}})
 			if err != nil {
 				t.Fatalf("seed %d: %v", seed, err)
 			}
@@ -278,11 +278,14 @@ func testCancelled(t *testing.T, newStore New) {
 				_, err := e.s.UpdateFrontier(ctx, core.AssumeAdmitted(0, g.members()))
 				return err
 			},
-			"CreatePlan": func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
-			"Plan":       func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
-			"Plans":      func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
+			"CreatePlan": func() error {
+				_, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", Origin: core.RecordOrigin{At: e.now()}})
+				return err
+			},
+			"Plan":  func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
+			"Plans": func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
 			"EditPlan": func() error {
-				_, err := e.s.EditPlan(ctx, plan.Number, core.PlanEdit{Title: &title, At: e.now()})
+				_, err := e.s.EditPlan(ctx, plan.Number, core.PlanEdit{Title: &title, Origin: core.RecordOrigin{At: e.now()}})
 				return err
 			},
 			"AppendEvent": func() error { _, err := e.s.AppendEvent(ctx, g.draft("run-a", nil)); return err },

@@ -58,10 +58,10 @@ func FuzzValues(f *testing.F) {
 				Spec:    measureSpec(core.Commit(text)), Key: "k1", Note: &core.Note{Text: text, At: instant, Agent: text}, At: instant,
 			})
 			got = append(got, answer(sub, err))
-			plan, err := s.CreatePlan(ctx, core.NewPlan{Title: text, Body: text, At: instant})
+			plan, err := s.CreatePlan(ctx, core.NewPlan{Title: text, Body: text, Origin: core.RecordOrigin{At: instant}})
 			got = append(got, answer(plan, err))
 			if err == nil {
-				_, err = s.EditPlan(ctx, plan.Number, core.PlanEdit{Comment: &core.PlanComment{Text: text, At: instant, Agent: text}, At: instant})
+				_, err = s.EditPlan(ctx, plan.Number, core.PlanEdit{Comment: &core.PlanComment{Text: text, At: instant, Agent: text}, Origin: core.RecordOrigin{At: instant}})
 				got = append(got, answer(nil, err))
 			}
 			job, err := s.Job(ctx, "j1")

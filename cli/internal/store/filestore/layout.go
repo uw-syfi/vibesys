@@ -24,14 +24,15 @@ const (
 	// the store: a copy of the store is a store with no owner.
 	ownerFile = ".owner"
 
-	jobsDir       = "jobs"
-	resultsDir    = "results"
-	plansDir      = "plans"
-	promotionsDir = "promotions"
-	boundsDir     = "bounds"
-	frontierDir   = "frontier"
-	runsDir       = "runs"
-	logsDir       = "logs"
+	jobsDir        = "jobs"
+	resultsDir     = "results"
+	plansDir       = "plans"
+	promotionsDir  = "promotions"
+	boundsDir      = "bounds"
+	workstreamsDir = "workstreams"
+	frontierDir    = "frontier"
+	runsDir        = "runs"
+	logsDir        = "logs"
 
 	// artifactsDir, in the state directory, keeps what jobs left for a person to read, by task and
 	// job. It is not a store: no store is named with a leading dot.
@@ -41,11 +42,12 @@ const (
 	tempPrefix   = ".tmp-"
 )
 
-// topDirs are the directories of an initialized store, in the order they are made.
-//
-// A store made before the bounds directory has none, which is no bound declared: loadBounds reads
-// it as empty and the first declaration makes it, so no format version separates the two.
-var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir, frontierDir, boundsDir}
+// topDirs are the directories of an initialized store, in the order they are made. Open makes the
+// ones a store lacks when it migrates a store of an older version, so a store of the current
+// version has every one of them, and a program of an older version, which does not know the
+// directories added since, refuses it by its format version and never opens it to ignore them. A
+// directory added here is one a format version adds, which version6_test.go names.
+var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir, frontierDir, boundsDir, workstreamsDir}
 
 func jobPath(root string, id core.JobID) string {
 	return path.Join(root, jobsDir, string(id)+recordSuffix)

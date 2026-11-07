@@ -56,8 +56,23 @@
                 "body": "raise the batch size",
                 "createdAt": "T",
                 "number": 1,
+                "origin": {
+                  "agent": "agent-1",
+                  "at": "T",
+                  "runId": "run-1"
+                },
                 "status": "PLAN_STATUS_OPEN",
                 "title": "try a bigger batch",
+                "transitions": [
+                  {
+                    "origin": {
+                      "agent": "agent-1",
+                      "at": "T",
+                      "runId": "run-1"
+                    },
+                    "status": "PLAN_STATUS_OPEN"
+                  }
+                ],
                 "updatedAt": "T"
               }
             }
@@ -81,8 +96,23 @@
                 ],
                 "createdAt": "T",
                 "number": 1,
+                "origin": {
+                  "agent": "agent-1",
+                  "at": "T",
+                  "runId": "run-1"
+                },
                 "status": "PLAN_STATUS_OPEN",
                 "title": "try a bigger batch",
+                "transitions": [
+                  {
+                    "origin": {
+                      "agent": "agent-1",
+                      "at": "T",
+                      "runId": "run-1"
+                    },
+                    "status": "PLAN_STATUS_OPEN"
+                  }
+                ],
                 "updatedAt": "T"
               }
             }
