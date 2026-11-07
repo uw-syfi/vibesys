@@ -5,15 +5,12 @@
  */
 import type {FleetHostRef, FleetObjective} from '../../state/index.js';
 import {span} from '../duration.js';
+import {formatFigure} from '../figures.js';
 import {hostStatusWord} from '../host-status-words.js';
 
-const COMPACT = new Intl.NumberFormat('en-US', {notation: 'compact', maximumFractionDigits: 1});
-const THREE_DIGITS = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 3});
 const EXACT = new Intl.NumberFormat('en-US', {maximumFractionDigits: 6});
 
-/** A result as a few digits: `2.31`, `318`, `15.6K`. */
-const figure = (value: number): string =>
-  Math.abs(value) >= 10_000 ? COMPACT.format(value) : THREE_DIGITS.format(value);
+const figure = formatFigure;
 
 /** A cost in dollars: cents below a hundred, whole dollars above. */
 export const dollars = (usd: number): string =>

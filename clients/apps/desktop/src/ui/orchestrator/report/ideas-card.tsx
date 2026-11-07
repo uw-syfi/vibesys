@@ -20,6 +20,7 @@ import {
   ideasOfVerdict,
   type Verdict,
 } from '../../../state/index.js';
+import {nameOf} from '../names.js';
 import {formatExact, formatGain, withUnit} from './format.js';
 
 type Scope = 'run' | 'all' | 'window';
@@ -120,8 +121,8 @@ function ideaColumns(
       key: 'agent',
       header: 'Agent',
       wide: true,
-      clip: row => names.get(row.agent) ?? row.agent,
-      cell: row => (row.agent === '' ? '—' : (names.get(row.agent) ?? row.agent)),
+      clip: row => (row.agent === '' ? '' : nameOf(names, row.agent)),
+      cell: row => (row.agent === '' ? '—' : nameOf(names, row.agent)),
     },
   ];
 }

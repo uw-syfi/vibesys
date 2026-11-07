@@ -27,6 +27,8 @@ import {
   timeTicks,
   valueTicks,
 } from '../../../state/index.js';
+import {shortCommit} from '../../commit-text.js';
+import {nameOf} from '../names.js';
 import {
   axisMoment,
   clip,
@@ -75,7 +77,7 @@ function boundReference(
   const bound = objective.bound?.current;
   if (bound === undefined) return undefined;
   const who = [
-    names.get(bound.agent) ?? bound.agent,
+    bound.agent === '' ? '' : nameOf(names, bound.agent),
     bound.atMs === null ? '' : seattleMoment(bound.atMs),
   ]
     .filter(part => part !== '')
@@ -128,14 +130,14 @@ function ObjectiveChart(props: {
     selected: props.links.picked === point.id,
     lit: props.links.lit.has(point.id),
     label: [
-      point.commit.slice(0, 8),
+      shortCommit(point.commit),
       planWords(plansOf(props.links, point.id)),
       withUnit(formatExact(point.value), objective.unit),
     ]
       .filter(part => part !== '')
       .join(' · '),
     tip: {
-      lead: [point.commit.slice(0, 8), planWords(plansOf(props.links, point.id))]
+      lead: [shortCommit(point.commit), planWords(plansOf(props.links, point.id))]
         .filter(part => part !== '')
         .join(' · '),
       detail: withUnit(formatExact(point.value), objective.unit),
@@ -244,7 +246,7 @@ function PointDetail(props: {
   const plans = plansOf(links, point.id);
   return (
     <ChartDetail label="Chosen point">
-      <Text variant="code">{point.commit.slice(0, 8)}</Text>
+      <Text variant="code">{shortCommit(point.commit)}</Text>
       <Text variant="small" tone="muted">
         {`${objective.name} ${withUnit(formatExact(point.value), objective.unit)}`}
       </Text>
@@ -305,7 +307,7 @@ export function TradeOff(props: {
   const y = tradeoff.objectives[yAt];
   const points: ParetoPoint[] = tradeoff.points.map(point => ({
     id: point.id,
-    label: point.commit.slice(0, 8),
+    label: shortCommit(point.commit),
     x: point.values[xAt] ?? 0,
     y: point.values[yAt] ?? 0,
     time: point.atMs,

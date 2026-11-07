@@ -1,3 +1,4 @@
+import type {ModelCatalog} from '@vibesys/orchestrator-proto';
 import {Button, Field, Row, Select, Stack, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CommandProgress} from '../../state/index.js';
@@ -12,13 +13,58 @@ import {
   type StartDraft,
   type StartRunRequest,
   startRunRequest,
+  TIME_LIMITS,
 } from './start-draft.js';
+import {type ModelChoices, modelChoices, NO_CATALOG, startModel} from './start-models.js';
 import {harnessWord} from './words.js';
 
 /** A host the run can start on: its key, and what it is called on screen. */
 export interface StartHost {
   readonly key: string;
   readonly label: string;
+  /** What the host said it runs agents on and allows, or null before it has said. */
+  readonly models: ModelCatalog | null;
+}
+
+const timeWord = (minutes: number): string =>
+  minutes < 60 ? `${minutes} min` : `${minutes / 60} h`;
+
+/** The model control's options: the tool's default first where the host leaves it free, then the models. */
+const modelOptions = (choices: ModelChoices) => [
+  ...(choices.pinned ? [] : [{value: '', label: 'Default'}]),
+  ...choices.models.map(id => ({value: id, label: id})),
+];
+
+/** The run's bounds: how long it may take and what it may cost, each none unless set. */
+function LimitFields(props: {
+  readonly draft: StartDraft;
+  readonly set: (change: Partial<StartDraft>) => void;
+}): JSX.Element {
+  const {draft, set} = props;
+  return (
+    <>
+      <Field label="Time limit">
+        <Select
+          value={String(draft.timeLimit)}
+          options={TIME_LIMITS.map(minutes => ({
+            value: String(minutes),
+            label: minutes === null ? 'None' : timeWord(minutes),
+          }))}
+          change={chosen =>
+            set({timeLimit: TIME_LIMITS.find(minutes => String(minutes) === chosen) ?? null})
+          }
+        />
+      </Field>
+      <Field label="Cost limit ($)">
+        <TextInput
+          value={draft.costLimit}
+          change={costLimit => set({costLimit})}
+          placeholder="None"
+          mono
+        />
+      </Field>
+    </>
+  );
 }
 
 /**
@@ -45,7 +91,9 @@ export function StartRunForm(props: {
   const {draft} = props;
   const host = props.hosts.find(candidate => candidate.key === props.chosen) ?? props.hosts[0];
   const set = (change: Partial<StartDraft>): void => props.setDraft({...draft, ...change});
-  const missing = host === undefined ? 'No host is connected.' : missingFrom(draft);
+  const choices = host === undefined ? NO_CATALOG : modelChoices(host.models, LEADS[draft.lead]);
+  const model = startModel(draft.model, choices);
+  const missing = host === undefined ? 'No host is connected.' : missingFrom(draft, choices);
   const sending = props.progress?._tag === 'Sending';
   const reason = sending ? 'Sending.' : missing;
   return (
@@ -91,9 +139,18 @@ export function StartRunForm(props: {
             value: choice,
             label: harnessWord(LEADS[choice]),
           }))}
-          change={(choice: LeadChoice) => set({lead: choice})}
+          change={(choice: LeadChoice) => set({lead: choice, model: ''})}
         />
       </Field>
+      <Field label="Model">
+        <Select
+          value={model}
+          options={modelOptions(choices)}
+          change={chosen => set({model: chosen})}
+          mono
+        />
+      </Field>
+      <LimitFields draft={draft} set={set} />
       <Field label="Steering (optional)" help="Anything the lead should know or prefer.">
         <TextInput
           value={draft.steering}
@@ -109,7 +166,7 @@ export function StartRunForm(props: {
           variant="primary"
           press={() => {
             if (host !== undefined && missing === null)
-              props.start(host.key, startRunRequest(draft));
+              props.start(host.key, startRunRequest(draft, choices));
           }}
           {...(reason === null ? {} : {disabledReason: reason, quietReason: sending})}
         />

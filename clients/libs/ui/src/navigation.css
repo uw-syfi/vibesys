@@ -5,7 +5,7 @@
 .vs-sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--group-gap);
   min-width: 0;
 }
 .vs-sidebar-title {
@@ -97,7 +97,7 @@
 .vs-sidebar-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-0);
+  gap: var(--group-gap);
   min-width: 0;
 }
 .vs-sidebar-group-title {

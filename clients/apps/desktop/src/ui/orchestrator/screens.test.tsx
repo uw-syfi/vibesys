@@ -69,7 +69,6 @@ function report(
       openAgents={() => undefined}
       openCost={() => undefined}
       names={agentNames(state, runId)}
-      notice={null}
       reading={null}
     />,
   );

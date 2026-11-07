@@ -8,6 +8,7 @@ import type {
   CheckIn,
   Item,
   Message,
+  ModelCatalog,
   Receipt,
   Run,
   RunSummary,
@@ -86,6 +87,11 @@ export interface OrchestratorState {
   readonly summaries: Readonly<Record<string, RunSummary>>;
   /** What the last snapshot left out. */
   readonly cut: SnapshotCut;
+  /**
+   * The models the host runs agents on and allows, as its last snapshot said: what the Start run form
+   * offers. Null until a snapshot has said, and for a host older than the catalog.
+   */
+  readonly models: ModelCatalog | null;
   /** The runs whose history was read, by run id. */
   readonly histories: Readonly<Record<string, RunHistoryRead>>;
   readonly agents: Readonly<Record<string, Agent>>;
@@ -119,6 +125,7 @@ export const emptyState: OrchestratorState = {
   runs: {},
   summaries: {},
   cut: {truncated: false, runsLeftOut: 0},
+  models: null,
   histories: {},
   agents: {},
   turns: {},

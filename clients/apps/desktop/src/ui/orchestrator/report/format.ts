@@ -78,14 +78,8 @@ export {ago as formatAge, span as formatElapsed} from '../fleet-words.js';
 
 const EXACT = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 6});
 
-/** A number as a figure: three significant digits and a suffix for thousands (`11.1k`, `118`, `0.512`). */
-export function formatFigure(value: number): string {
-  const size = Math.abs(value);
-  const [divisor, suffix] =
-    size >= 1e9 ? [1e9, 'G'] : size >= 1e6 ? [1e6, 'M'] : size >= 1e3 ? [1e3, 'k'] : [1, ''];
-  const scaled = Number((value / divisor).toPrecision(3));
-  return `${scaled === 0 ? 0 : scaled}${suffix}`;
-}
+/** A number as a figure (`11.08k`, `118.4`, `0.5123`): the app's one rule, shared with every screen. */
+export {formatFigure} from '../../figures.js';
 
 /** A gain as the host oriented it, in two decimals and a times sign (`1.25×`); above 1 is better. */
 export const formatGain = (ratio: number): string => `${ratio.toFixed(2)}×`;

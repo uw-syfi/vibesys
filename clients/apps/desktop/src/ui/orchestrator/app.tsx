@@ -200,7 +200,7 @@ export function OrchestratorApp(props: {
         retryHost={props.retryHost}
         newRun={
           <NewRun
-            hosts={hosts.map(({key, label}) => ({key, label}))}
+            hosts={hosts.map(({key, label, model}) => ({key, label, models: model.data.models}))}
             progress={commands.start}
             start={commands.startRun}
             retry={commands.retryStart}
@@ -425,7 +425,6 @@ function ReportDestination(props: {
       openAgents={() => go({type: 'show', view: 'agents'})}
       openCost={() => go({type: 'show', view: 'cost'})}
       names={agentNames(state, runId)}
-      notice={null}
       reading={props.reading}
       ideasWindow={props.ideasWindow}
     />

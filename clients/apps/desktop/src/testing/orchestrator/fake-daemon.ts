@@ -21,6 +21,7 @@ import {
   ItemsPageSchema,
   type Message,
   MessageSchema,
+  type ModelCatalog,
   oneofIs,
   type Plan,
   type Receipt,
@@ -39,6 +40,7 @@ import {
   RunsSnapshotSchema,
   type SearchState,
   SnapshotDetail,
+  type StartRun,
   ViewerSchema,
   type WindowFacts,
 } from '@vibesys/orchestrator-proto';
@@ -116,6 +118,8 @@ export class FakeDaemon {
   readonly #receipts = new Map<string, Receipt>();
   readonly #watchers = new Set<() => void>();
   readonly #costs = new Map<string, RunCost>();
+  readonly #started: StartRun[] = [];
+  #models: ModelCatalog | undefined;
 
   constructor(
     readonly scenario: Scenario,
@@ -125,6 +129,20 @@ export class FakeDaemon {
   ) {
     this.#log = [...scenario.changes];
     this.#visible = visible;
+  }
+
+  /**
+   * What the host says it runs agents on, as its snapshots carry it. A start on a model outside a
+   * non-empty allowed list is refused as the host refuses it (`MODEL_NOT_ALLOWED`, naming the model and
+   * the list); a host with no catalog serves none and allows everything.
+   */
+  setModels(models: ModelCatalog | undefined): void {
+    this.#models = models;
+  }
+
+  /** The starts the host took, in order. */
+  get started(): readonly StartRun[] {
+    return this.#started;
   }
 
   get sequence(): bigint {
@@ -236,6 +254,7 @@ export class FakeDaemon {
       summaries: this.#summariesOf(state, whole.searches),
       runsLeftOut: this.runsLeftOut,
       truncated: this.runsLeftOut > 0,
+      ...(this.#models === undefined ? {} : {models: this.#models}),
       ...(detail === SnapshotDetail.SUMMARY
         ? {agents: [], turns: [], messages: [], checkIns: []}
         : {}),
@@ -324,7 +343,9 @@ export class FakeDaemon {
       ? this.#sendMessage(command.id, body.value.agentId, body.value.text, at)
       : oneofIs(body, 'requestCatchUp', COMMAND_KINDS)
         ? this.#catchUp(command.id, body.value.runId, at)
-        : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
+        : oneofIs(body, 'startRun', COMMAND_KINDS)
+          ? this.#startRun(command.id, body.value)
+          : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
     this.#receipts.set(command.id, receipt);
     return receipt;
   }
@@ -490,6 +511,22 @@ export class FakeDaemon {
       case: 'message',
       value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
     });
+  }
+
+  /** A start: refused when its lead's model is outside the allowed list, taken otherwise. */
+  #startRun(commandId: string, start: StartRun): Receipt {
+    const allowed = this.#models?.allowedModels ?? [];
+    const model = start.lead?.model ?? '';
+    if (allowed.length > 0 && !allowed.includes(model)) {
+      return create(ReceiptSchema, {
+        commandId,
+        refusal: Refusal.MODEL_NOT_ALLOWED,
+        model,
+        allowedModels: [...allowed],
+      });
+    }
+    this.#started.push(start);
+    return create(ReceiptSchema, {commandId, runId: `run-started-${this.#started.length}`});
   }
 
   #refuse(commandId: string, refusal: Refusal, agentId: string, atMs: number): Receipt {
