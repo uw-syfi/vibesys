@@ -47,7 +47,6 @@
     "CheckResult",
     "MeasureResult",
     "Measurement",
-    "Metric",
     "ObjectiveNoise",
     "Objectives",
     "Observation",
