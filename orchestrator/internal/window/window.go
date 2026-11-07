@@ -98,31 +98,32 @@ func reports(in Input, w span) []core.MessageID {
 	return out
 }
 
-// point is one objective's value in one measurement.
+// point is one objective's value in one measurement, and whether the measurement set the best so far
+// of the objective: the mark is the measurements' own (search.Value.Best), so the window works out
+// no best of its own.
 type point struct {
 	at        time.Time
 	direction core.Direction
 	value     float64
 	job       core.JobID
 	commit    core.Commit
+	best      bool
 }
 
 // objectives says, for each objective measured by the end of the window, its best value before the
-// window and its best value before its end. The earliest measurement of a value keeps it against a
-// later one that only ties it.
+// window and its best value before its end.
 func objectives(measured []search.Measurement, w span) []core.ObjectiveMove {
 	byMetric := map[string][]point{}
 	for _, m := range measured {
 		for _, v := range m.Values {
-			byMetric[v.Metric] = append(byMetric[v.Metric], point{at: m.At, direction: v.Direction, value: v.Number, job: m.Job, commit: m.Commit})
+			byMetric[v.Metric] = append(byMetric[v.Metric], point{at: m.At, direction: v.Direction, value: v.Number, job: m.Job, commit: m.Commit, best: v.Best})
 		}
 	}
 	var out []core.ObjectiveMove
 	for _, metric := range slices.Sorted(maps.Keys(byMetric)) {
-		ps := byMetric[metric]
-		slices.SortFunc(ps, func(a, b point) int { return cmp.Or(a.at.Compare(b.at), cmp.Compare(a.job, b.job)) })
+		ps := byMetric[metric] // in order of date, as the measurements are
 		move := core.ObjectiveMove{Metric: metric, Direction: ps[0].direction}
-		move.Start, move.End = best(ps, w.from), best(ps, w.to)
+		move.Start, move.End = bestBefore(ps, w.from), bestBefore(ps, w.to)
 		if move.End != nil {
 			out = append(out, move)
 		}
@@ -130,15 +131,16 @@ func objectives(measured []search.Measurement, w span) []core.ObjectiveMove {
 	return out
 }
 
-// best is the best of the points dated before t, which are in order of date, or nil when none is.
-func best(ps []point, t time.Time) *core.Best {
+// bestBefore is where the best stood before t: the newest point dated before t that set a best, among
+// the points, which are in order of date. It is nil when none is.
+func bestBefore(ps []point, t time.Time) *core.Best {
 	var found *point
 	for i := range ps {
 		p := &ps[i]
 		if !p.at.Before(t) {
 			break
 		}
-		if found == nil || p.direction.Better(p.value, found.value) {
+		if p.best {
 			found = p
 		}
 	}

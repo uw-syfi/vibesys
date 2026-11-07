@@ -22,7 +22,8 @@ All worktrees of the repository share one store per task, so any agent sees the 
 | Jobs, their states, logs and notes | `vibesys-cli jobs --json`, `logs <job>`, `show <sha>` |
 | Saved results: check passes and samples, per commit | `vibesys-cli show <sha> --json` |
 | The head of the result branch and its number | `vibesys-cli result --json` |
-| Plans, their status and comments, and the jobs linked to them | `vibesys-cli plan list\|view` |
+| Plans, their status and comments, who made each and the history of its status, and the jobs linked to them | `vibesys-cli plan list\|view` |
+| Workstreams, the lines of work plans belong to, each with a status and a one-line note | `vibesys-cli workstream list` (`start`, `edit` write) |
 | Performance bounds an agent declared per objective, every version with who and when | `vibesys-cli bound list` (`bound declare` adds a version) |
 | `vibesysd`, the CLI's daemon that runs it all | `vibesys-cli daemon status` |
 
@@ -67,26 +68,43 @@ Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (pro
 
 | Writer | Writes |
 | --- | --- |
-| Planner | `plan create`, and `plan edit` of its own body and its gain bound (`--gain-bound`, the most the plan could gain as a share of the headline) |
+| Planner | `plan create`, and `plan edit` of its own body and its gain bound (`--gain-bound`, the most the plan could gain as a share of the headline); its workstream (`--workstream <n>`, below) |
 | Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
 Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
-Write each comment when the thing happens, not at the end.
+Every measure is linked to the plan it tests (`submit measure <sha> --plan <n>`): that link ties
+each point on the run's chart to its idea, and `vibesysd` refuses a measure from a run that names
+neither `--plan <n>` nor `--no-plan`. `--no-plan` is for the baseline and for re-measuring the
+head, which test no idea. A plan's status is the idea's standing, set when it changes. Write each
+comment when the thing happens, not at the end.
 
 Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`. What is live:
-`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`. Whether every open or
-parked plan's gain bound is under a share: `plan check-gain --under 10%`.
+`plan list --status open,chosen`. A plan's linked jobs, who made it (the run and agent) and every
+status it took, oldest first: `plan view <n>`. Whether every open or parked plan's gain bound is
+under a share: `plan check-gain --under 10%`.
+
+## Workstreams
+
+A workstream is a line of work the planners name, such as "KV cache layout"; a plan joins one with
+`plan create --workstream <n>` or `plan edit <n> --workstream <n>` (a plan moves between
+workstreams and never leaves them). `vibesys-cli workstream list [--status active,paused,closed]`
+shows them by number. `workstream start "<name>"` starts one and prints its number, and a name
+equal to an open workstream's, ignoring case and spacing, returns that workstream, so start
+before you create and two planners of one line share it. `workstream edit <n> [--title t]
+[--status active|paused|closed] [--note "<one line>"]` is the agent's to set; no order of statuses
+is enforced. How many plans a workstream holds and what they gained is read from the plans, never
+written to it.
 
 ## Resume
 
-1. `plan list --status open,chosen`, then the last few closed plans.
+1. `workstream list`, `plan list --status open,chosen`, then the last few closed plans.
 2. Check what is real, not what a plan claims: `git branch --list 'vibesys-work/<task>/*'`,
    `git worktree list`, `vibesys-cli jobs --state queued,running`, `vibesys-cli result`, and the
    running agents.
 3. Relaunch or park every plan whose agent is gone, and comment why. A job that is still queued
    or running needs no resubmission.
 4. After a long gap or a change of environment, re-measure the head as a control
-   (`submit measure <head> --no-cache`).
+   (`submit measure <head> --no-cache --no-plan`).
 
 ## Housekeeping
 

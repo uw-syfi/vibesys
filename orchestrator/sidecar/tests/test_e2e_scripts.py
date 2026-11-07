@@ -43,6 +43,7 @@ class FakeMachine:
     head: str = BASE
     effects: list[Effect] = field(default_factory=list)
     failing: str | None = None
+    plans: int = 0
 
     def run(self, effect: Effect) -> Outcome:
         self.effects.append(effect)
@@ -62,6 +63,9 @@ class FakeMachine:
             )
         if argv[0] == "vibesys-cli" and argv[1] == "compare":
             return Outcome(ok=True, text="better\n")
+        if argv[0] == "vibesys-cli" and argv[1:3] == ("plan", "create"):
+            self.plans += 1
+            return Outcome(ok=True, text=f"{self.plans}\topen\ta title\n")
         return Outcome(ok=True, text="ok")
 
 
@@ -122,6 +126,62 @@ def test_the_lead_starts_a_claude_worker_and_a_codex_worker_after_measuring_the_
     first_spawn = next(i for i, e in enumerate(machine.effects) if isinstance(e, Mcp))
     assert measure < first_spawn
     assert tools(machine)[-1] == "list_agents"
+
+
+def _measures(machine: FakeMachine) -> list[tuple[str, ...]]:
+    """The argv of every ``submit measure`` the scripts ran."""
+    return [
+        tuple(e.argv)
+        for e in machine.effects
+        if isinstance(e, Shell)
+        and e.argv[0] == "vibesys-cli"
+        and e.argv[1:3] == ("submit", "measure")
+    ]
+
+
+def _says_what_it_tests(argv: tuple[str, ...]) -> bool:
+    """A measure names exactly one of ``--plan N`` and ``--no-plan``, as vibesysd requires of a run."""
+    return ("--plan" in argv) != ("--no-plan" in argv)
+
+
+@given(a=COMMITS, b=COMMITS, score_a=st.integers(1, 99), score_b=st.integers(1, 99))
+def test_every_measure_of_the_lead_and_the_workers_says_what_plan_it_tests(
+    a: str, b: str, score_a: int, score_b: int
+) -> None:
+    lead = FakeMachine()
+    perform(ROLES["lead"](ME, lead_messages(a, score_a, b, score_b)), lead)
+    workers = [FakeMachine(head="c" * 40) for _ in range(2)]
+    for plan, machine in enumerate(workers, start=1):
+        brief = f"Plan {plan}: set score.txt to 14, check it and measure it. Base commit {BASE}."
+        perform(ROLES["worker"](ME, [brief]), machine)
+    for machine in (lead, *workers):
+        measures = _measures(machine)
+        assert measures
+        assert all(_says_what_it_tests(argv) for argv in measures), measures
+    # The lead's two measures are the base and the head again: neither tests a plan.
+    assert all("--no-plan" in argv for argv in _measures(lead))
+    # A worker's tests the plan its brief names.
+    for plan, machine in enumerate(workers, start=1):
+        (argv,) = _measures(machine)
+        assert argv[argv.index("--plan") + 1] == str(plan)
+
+
+def test_the_lead_makes_each_workers_plan_before_it_starts_the_worker() -> None:
+    machine = FakeMachine()
+    perform(ROLES["lead"](ME, ["brief"]), machine)
+    order = [
+        "plan" if isinstance(e, Shell) else "spawn"
+        for e in machine.effects
+        if (isinstance(e, Shell) and e.argv[1:3] == ("plan", "create"))
+        or (isinstance(e, Mcp) and e.tool == "spawn_agent")
+    ]
+    assert order == ["plan", "spawn", "plan", "spawn"]
+    spawned = [
+        e.arguments["plan_number"]
+        for e in machine.effects
+        if isinstance(e, Mcp) and e.tool == "spawn_agent"
+    ]
+    assert spawned == [1, 2]
 
 
 @given(count=st.integers(5, 40))

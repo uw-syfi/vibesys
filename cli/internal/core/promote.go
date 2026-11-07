@@ -167,7 +167,7 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 	if moved, measuredAgainst := movedSince(candidate[0].RecordedAt, req.Promotions); moved {
 		reasons = append(reasons, PromoteRefusalReason{
 			Kind:            RefusalStale,
-			Message:         "the result branch moved after commit " + shortCommit(req.Candidate) + " was measured; measure it again with --no-cache",
+			Message:         "the result branch moved after commit " + shortCommit(req.Candidate) + " was measured; measure it again with --no-cache, and with --plan N for the plan it tests (or --no-plan)",
 			MeasuredAgainst: measuredAgainst,
 			CurrentHead:     req.Head,
 		})
