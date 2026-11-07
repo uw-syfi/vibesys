@@ -1,6 +1,18 @@
 /** The run report's view models, as plain reads of the folded state. */
 export {type AgentsStrip, type AgentTypeCount, agentsStrip} from './agents-strip.js';
 export {
+  type GainView,
+  type IdeaRow,
+  type IdeasReport,
+  type IdeaWindow,
+  ideasInRun,
+  ideasInWindow,
+  ideasOfVerdict,
+  ideasReport,
+  type Verdict,
+  type WorkstreamRow,
+} from './ideas.js';
+export {
   type Better,
   betterOf,
   type MeasuredPointView,

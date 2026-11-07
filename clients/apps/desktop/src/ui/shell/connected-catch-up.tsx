@@ -60,6 +60,7 @@ export function ConnectedCatchUp(props: {
       catchUp={() => dispatch(session.catchUp.press(runId), () => undefined)}
       goRuns={() => go({type: 'close-run'})}
       goRun={() => go({type: 'show', view: 'report'})}
+      goIdeas={window => go({type: 'show-ideas', window})}
       words={words}
     />
   );

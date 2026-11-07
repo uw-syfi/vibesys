@@ -1637,6 +1637,15 @@ button.vs-crumb:focus-visible {
 .vs-chart-panel-head .vs-text {
   white-space: nowrap;
 }
+/* What the point a reader chose is: one line under the charts, always as tall as a small control, so
+   choosing a point moves nothing below it. */
+.vs-chart-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--control-sm);
+}
 /* Charts side by side, as many as fit at a readable width, equally wide; the rest wrap below. */
 .vs-chart-columns {
   display: grid;

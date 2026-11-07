@@ -13,6 +13,7 @@ import {
   type HostConnectionState,
   type HostFreshness,
   type HostModel,
+  type IdeaWindow,
   type NavigationAction,
   type OrchestratorState,
   type Route,
@@ -345,6 +346,7 @@ function RunDestination(props: {
   }
   return (
     <ReportDestination
+      ideasWindow={route.ideas}
       host={host}
       runId={runId}
       nowMs={nowMs}
@@ -376,6 +378,8 @@ function MissingRun(props: {readonly goRuns: () => void}): JSX.Element {
 function ReportDestination(props: {
   readonly host: HostSnapshot;
   readonly runId: string;
+  /** The check-in span the report's ideas open narrowed to; null for the run's own. */
+  readonly ideasWindow: IdeaWindow | null;
   readonly nowMs: number;
   readonly notice: JSX.Element | null;
   /** Where the read of the run's history stands, beside the title. */
@@ -411,6 +415,7 @@ function ReportDestination(props: {
       names={agentNames(state, runId)}
       notice={props.notice}
       reading={props.reading}
+      ideasWindow={props.ideasWindow}
     />
   );
 }

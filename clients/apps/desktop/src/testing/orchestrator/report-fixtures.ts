@@ -10,8 +10,10 @@ import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   Delivery,
   Direction,
+  IdeaVerdict,
   JobState,
   MessageSchema,
+  PlanStatus,
   ReportKind,
   RunChangeSchema,
   type SearchState,
@@ -40,6 +42,8 @@ export interface MeasuredOptions {
   readonly objectives: readonly ObjectiveSpec[];
   /** The lead said how it derived the bound, and revised it once. */
   readonly revisedBound?: boolean;
+  /** The lead's agents made this many plans, linked to the candidates, in a few workstreams. */
+  readonly ideas?: number;
 }
 
 /** The two objectives of a serving task, with their declared bounds. */
@@ -56,6 +60,39 @@ export const SERVING: readonly ObjectiveSpec[] = [
 ];
 
 const RUN_AGENT = 'lead';
+
+/** The workstreams of the Fake's ideas: the last has a title longer than any column. */
+const WORKSTREAMS = [
+  'GEMM and MoE',
+  'Decode path',
+  'Scheduler and the long, long name of a line of work that must be cut short',
+] as const;
+
+const IDEA_TITLES = [
+  'hipGraph decode loop',
+  'Fused expert dispatch',
+  'A speculative draft reuse scheme whose title runs on well past any column a table could give it',
+  'FP8 KV cache',
+  'Split-K attention',
+  'Persistent scheduler thread',
+] as const;
+
+const PLAN_STATUSES = [
+  PlanStatus.WON,
+  PlanStatus.REJECTED,
+  PlanStatus.OPEN,
+  PlanStatus.PARKED,
+  PlanStatus.CHOSEN,
+] as const;
+
+const VERDICT_OF = {
+  [PlanStatus.UNSPECIFIED]: IdeaVerdict.OPEN,
+  [PlanStatus.OPEN]: IdeaVerdict.OPEN,
+  [PlanStatus.CHOSEN]: IdeaVerdict.OPEN,
+  [PlanStatus.WON]: IdeaVerdict.KEPT,
+  [PlanStatus.REJECTED]: IdeaVerdict.REJECTED,
+  [PlanStatus.PARKED]: IdeaVerdict.PARKED,
+} as const satisfies Record<PlanStatus, IdeaVerdict>;
 
 interface Candidate {
   readonly jobId: string;
@@ -156,6 +193,110 @@ function measureOf(options: MeasuredOptions, candidate: Candidate) {
   };
 }
 
+interface Gain {
+  readonly metric: string;
+  readonly ratio: number;
+  readonly bestValue: number;
+  readonly baselineValue: number;
+}
+
+/**
+ * The Fake's ideas: `options.ideas` plans, each linked to the candidates that name it (the first
+ * candidate, the baseline, and every seventh name none), the gains the Fake works out plainly (best
+ * linked over the first candidate, oriented), and their counts by workstream.
+ */
+function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], runId: string) {
+  const count = options.ideas ?? 0;
+  const planOf = (index: number): number | undefined =>
+    count === 0 || index === 0 || index % 7 === 6 ? undefined : (index % count) + 1;
+  const plans = Array.from({length: count}, (_, at) => {
+    const number = at + 1;
+    const status = PLAN_STATUSES[at % PLAN_STATUSES.length] ?? PlanStatus.OPEN;
+    const when = timestampFromMs(
+      options.startMs + Math.round(((options.endMs - options.startMs) * number) / (count + 1)),
+    );
+    return {
+      number,
+      title: IDEA_TITLES[at % IDEA_TITLES.length] ?? '',
+      status,
+      createdAt: when,
+      updatedAt: when,
+      workstream: at % (WORKSTREAMS.length + 1),
+      origin: {runId, agent: `impl-${(at % 3) + 1}`, at: when},
+    };
+  });
+  const linked = (number: number): readonly Candidate[] =>
+    candidates.filter((_, index) => planOf(index) === number);
+  const baseline = candidates[0];
+  const gainsOf = (members: readonly Candidate[]): Gain[] =>
+    baseline === undefined
+      ? []
+      : options.objectives.flatMap((objective, at) => {
+          const values = members.map(candidate => candidate.values[at] ?? 0);
+          const best = values.reduce<number | undefined>(
+            (top, value) =>
+              top === undefined || beats(objective.direction, value, top) ? value : top,
+            undefined,
+          );
+          const base = baseline.values[at] ?? 0;
+          if (best === undefined || best <= 0 || base <= 0) return [];
+          return [
+            {
+              metric: objective.name,
+              ratio: objective.direction === Direction.MINIMIZE ? base / best : best / base,
+              bestValue: best,
+              baselineValue: base,
+            },
+          ];
+        });
+  const ideas = plans.map((plan, at) => ({
+    planNumber: plan.number,
+    verdict: VERDICT_OF[plan.status],
+    candidateJobIds: linked(plan.number).map(candidate => candidate.jobId),
+    best: gainsOf(linked(plan.number)),
+    inRun: at % 5 !== 4,
+  }));
+  const numbers = [0, ...WORKSTREAMS.map((_, at) => at + 1)];
+  const workstreamViews = numbers.flatMap(number => {
+    const members = plans.filter(plan => plan.workstream === number);
+    if (members.length === 0) return [];
+    const of = (status: IdeaVerdict): number =>
+      members.filter(plan => VERDICT_OF[plan.status] === status).length;
+    const gains = options.objectives.flatMap(objective =>
+      members
+        .flatMap(plan => gainsOf(linked(plan.number)))
+        .filter(gain => gain.metric === objective.name)
+        .sort((a, b) => b.ratio - a.ratio)
+        .slice(0, 1),
+    );
+    return [
+      {
+        number,
+        kept: of(IdeaVerdict.KEPT),
+        rejected: of(IdeaVerdict.REJECTED),
+        open: of(IdeaVerdict.OPEN),
+        parked: of(IdeaVerdict.PARKED),
+        best: gains,
+      },
+    ];
+  });
+  return {
+    plans,
+    ideas,
+    workstreamViews,
+    workstreams: WORKSTREAMS.map((title, at) => ({
+      number: at + 1,
+      title,
+      status: at + 1,
+      note: 'paused: accuracy gate',
+      origin: {runId, agent: 'lead', at: timestampFromMs(options.startMs)},
+      updatedAt: timestampFromMs(options.startMs),
+    })),
+    jobPlans: candidates.map((_, index) => planOf(index)),
+    unplanned: candidates.filter((_, index) => planOf(index) === undefined).length,
+  };
+}
+
 /**
  * The search view of a run that has measured `options.candidates` candidates between `startMs` and
  * `endMs` on its objectives, with the lead's bounds declared and the head at the best candidate on
@@ -177,7 +318,13 @@ export function measuredSearch(
     undefined,
   );
   const submitter = {runId, agent: RUN_AGENT, at: timestampFromMs(options.startMs)};
+  const served = ideasOf(options, candidates, runId);
   return create(SearchStateSchema, {
+    plans: served.plans,
+    ideas: served.ideas,
+    workstreams: served.workstreams,
+    workstreamViews: served.workstreamViews,
+    unplanned: served.unplanned,
     runId,
     revision: 1n,
     health: {
@@ -188,8 +335,12 @@ export function measuredSearch(
           }
         : {case: 'liveSince', value: timestampFromMs(options.startMs)},
     },
-    jobs: candidates.map(candidate => ({
+    jobs: candidates.map((candidate, index) => ({
       id: candidate.jobId,
+      plans: (() => {
+        const plan = served.jobPlans[index];
+        return plan === undefined ? [] : [plan];
+      })(),
       state: JobState.SUCCEEDED,
       submittedAt: timestampFromMs(candidate.atMs - 60_000),
       submitters: [submitter],

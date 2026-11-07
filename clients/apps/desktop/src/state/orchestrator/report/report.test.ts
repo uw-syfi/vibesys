@@ -129,7 +129,13 @@ describe('the objectives of a report', () => {
                   objective: 'tok_s',
                   direction: Direction.MAXIMIZE,
                   points: [
-                    {jobId: 'j', commit: 'c', at: timestampFromMs(1000), value: seriesBest, bestSoFar: true},
+                    {
+                      jobId: 'j',
+                      commit: 'c',
+                      at: timestampFromMs(1000),
+                      value: seriesBest,
+                      bestSoFar: true,
+                    },
                   ],
                 },
               ],
@@ -137,7 +143,9 @@ describe('the objectives of a report', () => {
                 {
                   objective: 'tok_s',
                   direction: Direction.MAXIMIZE,
-                  versions: [{seq: 1n, value: 9, unit: 'from-bound', note: 'n', objective: 'tok_s'}],
+                  versions: [
+                    {seq: 1n, value: 9, unit: 'from-bound', note: 'n', objective: 'tok_s'},
+                  ],
                   bestPercentOfBound: percent + 1,
                 },
               ],

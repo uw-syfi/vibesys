@@ -15,11 +15,13 @@ export interface SharePart {
 /**
  * One bar cut into labelled parts, each as wide as its share of the whole, and under it a swatch,
  * a label and a figure for each part. A whole of nothing is an empty bar, and a part of nothing is
- * listed without a segment. `label` names the bar.
+ * listed without a segment. `label` names the bar; `bare` leaves the list out.
  */
 export function ShareBar(props: {
   readonly label: string;
   readonly parts: readonly SharePart[];
+  /** The bar alone, for a bar in a table row: each segment still says its part on hover. */
+  readonly bare?: boolean;
 }): JSX.Element {
   const whole = props.parts.reduce((total, part) => total + Math.max(0, part.value), 0);
   return (
@@ -40,20 +42,22 @@ export function ShareBar(props: {
           ) : null;
         })}
       </div>
-      <ul className="vs-share-parts">
-        {props.parts.map(part => {
-          const style: StyleWithVars = {'--seg-color': `var(--series-${part.series})`};
-          return (
-            <li key={part.key} className="vs-share-part">
-              <span className="vs-share-swatch" style={style} aria-hidden="true" />
-              <Text variant="small" tone="muted">
-                {part.label}
-              </Text>
-              <Text variant="small">{part.figure}</Text>
-            </li>
-          );
-        })}
-      </ul>
+      {props.bare === true ? null : (
+        <ul className="vs-share-parts">
+          {props.parts.map(part => {
+            const style: StyleWithVars = {'--seg-color': `var(--series-${part.series})`};
+            return (
+              <li key={part.key} className="vs-share-part">
+                <span className="vs-share-swatch" style={style} aria-hidden="true" />
+                <Text variant="small" tone="muted">
+                  {part.label}
+                </Text>
+                <Text variant="small">{part.figure}</Text>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </figure>
   );
 }

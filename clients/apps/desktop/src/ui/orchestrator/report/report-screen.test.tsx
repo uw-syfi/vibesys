@@ -4,8 +4,10 @@
  * best, a frontier or a cost; each test says what the host sent and reads what a person sees.
  */
 import {describe, expect, it} from '@effect/vitest';
-import {oneofIs, ReportKind} from '@vibesys/orchestrator-proto';
+import {create} from '@bufbuild/protobuf';
+import {oneofIs, ReportKind, SearchStateSchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
+import {act} from 'react';
 import {
   applyChange,
   applyCost,
@@ -14,6 +16,7 @@ import {
   type CostView,
   emptyState,
   type Freshness,
+  type IdeaWindow,
   type OrchestratorState,
   type RunView,
   runReport,
@@ -55,6 +58,9 @@ interface World {
   readonly revisedBound?: boolean;
   readonly live?: boolean;
   readonly stale?: boolean;
+  readonly ideas?: number;
+  readonly truncated?: boolean;
+  readonly window?: IdeaWindow | null;
 }
 
 function stateOf(world: World): OrchestratorState {
@@ -78,9 +84,14 @@ function stateOf(world: World): OrchestratorState {
     endMs: END,
     objectives: world.objectives ?? SERVING,
     ...(world.revisedBound === undefined ? {} : {revisedBound: world.revisedBound}),
+    ...(world.ideas === undefined ? {} : {ideas: world.ideas}),
   };
   let state = withText.changes.reduce(applyChange, emptyState);
-  state = applySearch(state, measuredSearch(RUN, options, {stale: world.stale === true}));
+  const search = measuredSearch(RUN, options, {stale: world.stale === true});
+  state = applySearch(
+    state,
+    world.truncated === true ? create(SearchStateSchema, {...search, truncated: true}) : search,
+  );
   const cost = world.cost === undefined ? COST : world.cost;
   return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
@@ -95,6 +106,7 @@ function render(world: World, options: {freshness?: Freshness; costFeed?: CostFe
     <ReportScreen
       report={report}
       host="host-a"
+      ideasWindow={world.window ?? null}
       nowMs={nowMs}
       freshness={options.freshness ?? 'live'}
       staleForMs={options.freshness === undefined || options.freshness === 'live' ? null : 90_000}
@@ -179,7 +191,7 @@ describe('the report as a page of the run', () => {
     const {screen} = render({});
     expect(cardText(screen.container, 'Spend')).toMatch(/≥ \$318[\s\S]*41 unpriced/);
     const links = [...screen.container.querySelectorAll('.vs-card-head .vs-button')];
-    expect(links.map(link => link.textContent)).toEqual(['Agents', 'Details']);
+    expect(links.map(link => link.textContent)).toEqual(['Details', 'Agents']);
     // One style, in the heading's line of each card.
     expect(new Set(links.map(link => link.getAttribute('data-variant')))).toEqual(
       new Set(['quiet']),
@@ -233,9 +245,11 @@ describe('the report of a run with two objectives and a declared bound', () => {
       'Lead summary',
       'Trade-off',
       'Over time',
-      'Live agents',
+      'Workstreams',
       'Spend',
       'By agent type',
+      'Ideas',
+      'Live agents',
     ]);
     const text = screen.text();
     for (const word of ['throughput', 'p99_latency', 'Running', 'host-a', 'Started']) {
@@ -555,5 +569,146 @@ describe('the report across any data', () => {
       }),
       {numRuns: 25, seed: 4050},
     );
+  });
+});
+
+describe('the ideas and workstreams of the report', () => {
+  const table = (root: HTMLElement, name: string): HTMLTableElement | null =>
+    root.querySelector(`table[aria-label="${name}"]`);
+  const rowsOf = (root: HTMLElement, name: string): string[][] =>
+    [...(table(root, name)?.querySelectorAll('tbody tr') ?? [])].map(row =>
+      [...row.querySelectorAll('td')].map(cell => cell.textContent ?? ''),
+    );
+
+  /** Chooses the segment with this label, as a person does. */
+  const choose = (root: HTMLElement, label: string): void => {
+    const segment = [...root.querySelectorAll('label.vs-segment')].find(
+      each => each.textContent === label,
+    );
+    const input = segment?.querySelector<HTMLInputElement>('input');
+    if (input === null || input === undefined) throw new Error(`no segment ${label}`);
+    act(() => input.click());
+  };
+
+  it('shows the ideas the run worked on by default, each with its served verdict, gain and candidate count', () => {
+    const {screen} = render({ideas: 12});
+    const served = stateOf({ideas: 12}).searches[RUN];
+    const inRun = (served?.ideas ?? []).filter(view => view.inRun);
+    expect(inRun.length).toBeGreaterThan(0);
+    expect(inRun.length).toBeLessThan(12);
+    const rows = rowsOf(screen.container, 'Ideas');
+    expect(rows).toHaveLength(inRun.length);
+    for (const view of inRun) {
+      const row = rows.find(cells => cells[0] === `#${view.planNumber}`);
+      expect(row?.[5]).toBe(String(view.candidateJobIds.length));
+      const gain = view.best[0];
+      expect(row?.[4]).toBe(gain === undefined ? '—' : `${gain.ratio.toFixed(2)}×`);
+    }
+    // Newest first.
+    const numbers = rows.map(cells => Number(cells[0]?.slice(1)));
+    expect(numbers).toEqual([...numbers].sort((a, b) => b - a));
+    screen.unmount();
+  });
+
+  it('cuts a long title to its column and says it whole on hover', () => {
+    const {screen} = render({ideas: 12});
+    choose(screen.container, 'All 12');
+    const long = [...screen.container.querySelectorAll('td[data-clip]')].find(cell =>
+      cell.getAttribute('title')?.startsWith('A speculative draft reuse'),
+    );
+    expect(long?.getAttribute('title')?.length).toBeGreaterThan(60);
+    expect(long?.textContent).toBe(long?.getAttribute('title'));
+    screen.unmount();
+  });
+
+  it('shows the workstreams with the host’s counts and best gain, and no count of its own', () => {
+    const {screen} = render({ideas: 12});
+    const served = stateOf({ideas: 12}).searches[RUN];
+    const rows = rowsOf(screen.container, 'Workstreams');
+    expect(rows).toHaveLength(served?.workstreamViews.length ?? -1);
+    for (const view of served?.workstreamViews ?? []) {
+      const total = view.kept + view.rejected + view.open + view.parked;
+      expect(rows.some(cells => cells[2] === String(total))).toBe(true);
+    }
+    expect(cardText(screen.container, 'Workstreams')).toContain('No workstream');
+    screen.unmount();
+  });
+
+  it('says how many candidates name no plan, and marks a state the host cut short, in a label and not a banner', () => {
+    const {screen} = render({ideas: 12, truncated: true});
+    const served = stateOf({ideas: 12}).searches[RUN];
+    expect(cardText(screen.container, 'Ideas')).toContain(`${served?.unplanned} unplanned`);
+    expect(cardText(screen.container, 'Ideas')).toContain('Some left out');
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    screen.unmount();
+    const whole = render({ideas: 12});
+    expect(cardText(whole.screen.container, 'Ideas')).not.toContain('Some left out');
+    whole.screen.unmount();
+  });
+
+  it('has an empty state for a run with no ideas', () => {
+    const {screen} = render({ideas: 0});
+    expect(cardText(screen.container, 'Ideas')).toContain('No ideas');
+    expect(cardText(screen.container, 'Workstreams')).toContain('No workstreams');
+    screen.unmount();
+  });
+
+  it('opens narrowed to the check-in window it is given, and still shows every idea on All', () => {
+    const served = stateOf({ideas: 12}).searches[RUN];
+    const times = (served?.plans ?? []).map(plan => Number(plan.createdAt?.seconds ?? 0n) * 1000);
+    const from = [...times].sort((a, b) => a - b)[4] ?? 0;
+    const to = Math.max(...times);
+    const {screen} = render({ideas: 12, window: {fromMs: from, toMs: to}});
+    const inside = times.filter(at => at > from && at <= to).length;
+    expect(rowsOf(screen.container, 'Ideas')).toHaveLength(inside);
+    choose(screen.container, 'All 12');
+    expect(rowsOf(screen.container, 'Ideas')).toHaveLength(12);
+    screen.unmount();
+  });
+
+  it('links a chart point to the idea it measured by keyboard, and to its row', () => {
+    const {screen} = render({ideas: 12});
+    const served = stateOf({ideas: 12}).searches[RUN];
+    const planned = served?.jobs.find(job => job.plans.length > 0);
+    const unplanned = served?.jobs.find(job => job.plans.length === 0);
+    expect(planned).toBeDefined();
+    expect(unplanned).toBeDefined();
+    const points = [...screen.container.querySelectorAll<SVGGElement>('.vs-chart-pick')];
+    expect(points.length).toBeGreaterThan(0);
+    // Every point is on the tab order's one stop, and an arrow key moves among them.
+    expect(
+      points.filter(point => point.getAttribute('tabindex') === '0').length,
+    ).toBeLessThanOrEqual(2);
+    const labelOf = (jobId: string | undefined): string | undefined => {
+      const commit = served?.results.find(result => result.jobId === jobId)?.commit.slice(0, 8);
+      return (
+        points
+          .find(point => point.getAttribute('aria-label')?.startsWith(commit ?? '?'))
+          ?.getAttribute('aria-label') ?? undefined
+      );
+    };
+    expect(labelOf(unplanned?.id)).toContain('no plan');
+    expect(labelOf(planned?.id)).toContain(`#${planned?.plans[0]}`);
+    const none = points.find(point => point.getAttribute('aria-label') === labelOf(unplanned?.id));
+    if (none === undefined) throw new Error('the unplanned point is drawn');
+    act(() => {
+      none.dispatchEvent(new window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    });
+    expect(screen.container.querySelector('[aria-label="Chosen point"]')?.textContent).toContain(
+      'No plan',
+    );
+    const linked = points.find(point => point.getAttribute('aria-label') === labelOf(planned?.id));
+    if (linked === undefined) throw new Error('the planned point is drawn');
+    act(() => {
+      linked.dispatchEvent(new window.KeyboardEvent('keydown', {key: ' ', bubbles: true}));
+    });
+    const plan = planned?.plans[0];
+    const show = screen.control(`Show idea ${plan}`);
+    screen.press(show);
+    const current = screen.container.querySelector(
+      'table[aria-label="Ideas"] tr[aria-current="true"]',
+    );
+    expect(current?.textContent).toContain(`#${plan}`);
+    screen.unmount();
   });
 });

@@ -18,6 +18,10 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
       'catch-up' as const,
     ),
   }),
+  fc.record({
+    type: fc.constant('show-ideas' as const),
+    window: fc.record({fromMs: fc.nat(1000), toMs: fc.nat(2000)}),
+  }),
   fc.record({type: fc.constant('pick-agent' as const), agentId: fc.constantFrom('a', 'b')}),
   fc.constant({type: 'close-agent' as const}),
 );
@@ -31,6 +35,7 @@ describe('the route', () => {
       runId: 'run-1',
       view: 'report',
       agentId: null,
+      ideas: null,
     });
   });
 
@@ -51,6 +56,35 @@ describe('the route', () => {
         const reopened = routeReducer(route, {type: 'open-run', host: 'host-b', runId: 'run-2'});
         expect(reopened).toMatchObject({agentId: null, view: 'report'});
       }),
+    );
+  });
+});
+
+describe('the ideas window of the route', () => {
+  it('narrows the report to the window it was given, and every other move drops it', () => {
+    fc.assert(
+      fc.property(
+        fc.array(action, {maxLength: 20}),
+        fc.record({fromMs: fc.nat(1000), toMs: fc.nat(2000)}),
+        action,
+        (moves, window, next) => {
+          const route = moves.reduce(routeReducer, initialRoute);
+          if (route.screen !== 'run') return;
+          const narrowed = routeReducer(route, {type: 'show-ideas', window});
+          expect(narrowed).toMatchObject({view: 'report', agentId: null, ideas: window});
+          const after = routeReducer(narrowed, next);
+          if (next.type === 'show-ideas') return;
+          if (after.screen === 'run' && next.type !== 'close-agent') {
+            expect(after.ideas).toBeNull();
+          }
+        },
+      ),
+    );
+  });
+
+  it('is nothing on the run list', () => {
+    expect(routeReducer(initialRoute, {type: 'show-ideas', window: {fromMs: 1, toMs: 2}})).toBe(
+      initialRoute,
     );
   });
 });

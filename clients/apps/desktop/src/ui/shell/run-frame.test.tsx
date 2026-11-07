@@ -129,7 +129,7 @@ describe('the pages of a run and the pages of the window', () => {
           ['runs', {screen: 'runs'}],
           ...(['report', 'cost', 'agents'] as const).map((view: RunView): [string, Route] => [
             view,
-            {screen: 'run', host: 'local', runId: scenario.runId, view, agentId: null},
+            {screen: 'run', host: 'local', runId: scenario.runId, view, agentId: null, ideas: null},
           ]),
           [
             'agent',
@@ -139,6 +139,7 @@ describe('the pages of a run and the pages of the window', () => {
               runId: scenario.runId,
               view: 'agents',
               agentId: agent?.id ?? '',
+              ideas: null,
             },
           ],
         ];
@@ -193,6 +194,7 @@ describe('the pages of a run and the pages of the window', () => {
         catchUp={() => undefined}
         goRuns={() => undefined}
         goRun={() => undefined}
+        goIdeas={() => undefined}
         words={{role: roleWord, fault: faultWord}}
       />,
     );
@@ -210,15 +212,37 @@ describe('the pages of a run and the pages of the window', () => {
     const {scenario, state} = world(3, 3, true);
     const agent = Object.values(state.agents).find(each => each.parentAgentId !== '');
     const routes: Route[] = [
-      {screen: 'run', host: 'local', runId: scenario.runId, view: 'report', agentId: null},
-      {screen: 'run', host: 'local', runId: scenario.runId, view: 'cost', agentId: null},
-      {screen: 'run', host: 'local', runId: scenario.runId, view: 'agents', agentId: null},
+      {
+        screen: 'run',
+        host: 'local',
+        runId: scenario.runId,
+        view: 'report',
+        agentId: null,
+        ideas: null,
+      },
+      {
+        screen: 'run',
+        host: 'local',
+        runId: scenario.runId,
+        view: 'cost',
+        agentId: null,
+        ideas: null,
+      },
+      {
+        screen: 'run',
+        host: 'local',
+        runId: scenario.runId,
+        view: 'agents',
+        agentId: null,
+        ideas: null,
+      },
       {
         screen: 'run',
         host: 'local',
         runId: scenario.runId,
         view: 'agents',
         agentId: agent?.id ?? '',
+        ideas: null,
       },
     ];
     for (const route of routes) {
@@ -248,6 +272,7 @@ describe('the pages of a run and the pages of the window', () => {
           runId: scenario.runId,
           view,
           agentId: null,
+          ideas: null,
         }),
       );
       const steps = [

@@ -265,6 +265,11 @@
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
 }
+.vs-card .vs-table-scroll {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
 .vs-table {
   width: 100%;
   border-collapse: collapse;

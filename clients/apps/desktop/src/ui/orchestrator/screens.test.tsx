@@ -55,6 +55,7 @@ function report(
     <ReportScreen
       report={summary}
       host="host-a"
+      ideasWindow={null}
       nowMs={nowMs}
       freshness="live"
       staleForMs={null}

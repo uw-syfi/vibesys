@@ -13,6 +13,7 @@ import {
   type CatchUpPress,
   type CheckInRead,
   type HostModel,
+  type IdeaWindow,
   messageIs,
   rewind,
 } from '../../state/index.js';
@@ -41,6 +42,7 @@ interface Props {
   readonly catchUp?: () => void;
   readonly history?: RunHistoryStatus;
   readonly retryHistory?: () => void;
+  readonly goIdeas?: (window: IdeaWindow) => void;
 }
 
 const page = ({
@@ -49,6 +51,7 @@ const page = ({
   catchUp = () => undefined,
   history = {_tag: 'Idle'},
   retryHistory = () => undefined,
+  goIdeas = () => undefined,
 }: Props): JSX.Element => (
   <CatchUpScreen
     run="faster-decode"
@@ -59,6 +62,7 @@ const page = ({
     catchUp={catchUp}
     goRuns={() => undefined}
     goRun={() => undefined}
+    goIdeas={goIdeas}
     words={WORDS}
   />
 );
@@ -122,6 +126,23 @@ describe('the catch-up page of a live run', () => {
       expect(text).toContain('No price');
       screen.unmount();
     }),
+  );
+
+  it.effect(
+    'links the ideas tile to the report’s ideas narrowed to the span the check-in covers',
+    () =>
+      Effect.gen(function* () {
+        const rows = yield* afterwards(new FakeDaemon(live), live.runId, (daemon, press) =>
+          Effect.gen(function* () {
+            daemon.settleCheckIn(yield* press(), busyFacts(0));
+          }),
+        );
+        const asked: IdeaWindow[] = [];
+        const screen = mount(page({rows, goIdeas: window => asked.push(window)}));
+        screen.press(screen.control('Show ideas of this window'));
+        expect(asked).toEqual([{fromMs: rows[0]?.sinceMs, toMs: rows[0]?.atMs}]);
+        screen.unmount();
+      }),
   );
 
   it.effect('reads the window before the list of check-ins it came from, at any width', () =>
