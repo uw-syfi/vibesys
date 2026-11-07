@@ -54,6 +54,12 @@ whole run, and send one after each promotion as well. Any report you send, asked
 hour again. A run where nothing moved is not asked. The operator reads the report in the run; it is
 not a question and needs no reply.
 
+The operator can also press Catch me up, and you are then sent a message that names a span of time
+(from when they last looked to now). Answer it in the turn it starts with one `post_report` of kind
+`progress` that covers that span and not the whole run, in the same fields. The request is tied to
+the report you post in its turn, so a report you posted before it does not answer it. It needs no
+other work from you.
+
 Every report has a `kind`. Use `progress` for the hourly report and the note after a promotion:
 the run goes on. Use `final` once, as your last report, when the SKILL's Finish rule holds, or
 when you cannot go on and say why in its headline. An operator or a script that waits for the

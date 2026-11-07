@@ -250,6 +250,8 @@ const (
 	// agent.
 	RefuseTimeLimitReached Refusal = "time_limit_reached"
 	RefuseCostLimitReached Refusal = "cost_limit_reached"
+	// RefuseNoViewer says a catch-up was asked for by a caller with no viewer.
+	RefuseNoViewer Refusal = "no_viewer"
 	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
 	RefuseHandoffNotYours Refusal = "handoff_not_yours"
 )

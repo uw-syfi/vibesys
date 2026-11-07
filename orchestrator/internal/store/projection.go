@@ -73,6 +73,13 @@ var projections = func() map[string]*projection {
 			},
 		},
 		{
+			table: "check_ins", key: []string{"id"}, dup: []string{"run_id", "viewer_id"},
+			values: func(e core.Event) ([]any, []any) {
+				b := e.Body.(core.CheckIn)
+				return []any{string(b.ID)}, []any{string(b.Run), string(b.Viewer.ID)}
+			},
+		},
+		{
 			table: "messages", key: []string{"id"}, dup: []string{"run_id", "to_agent_id", "delivery"}, first: "seq",
 			values: func(e core.Event) ([]any, []any) {
 				b := e.Body.(core.Message)
@@ -117,6 +124,8 @@ func projectionOf(e core.Event) (*projection, bool) {
 		table = "items"
 	case core.Message:
 		table = "messages"
+	case core.CheckIn:
+		table = "check_ins"
 	default:
 		return nil, false
 	}
@@ -186,7 +195,7 @@ func verifyProjection(tx *sql.Tx) error {
 	if err := verifyReceipts(tx, want); err != nil {
 		return err
 	}
-	for _, name := range []string{"runs", "agents", "turns", "items", "messages"} {
+	for _, name := range []string{"runs", "agents", "turns", "items", "messages", "check_ins"} {
 		if err := verifyTable(tx, projections[name], want, pruned); err != nil {
 			return err
 		}
@@ -227,6 +236,8 @@ func (t *tables) lookup(e core.Event) (row, bool) {
 		r, ok = t.items[b.ID]
 	case core.Message:
 		r, ok = t.messages[b.ID]
+	case core.CheckIn:
+		r, ok = t.checkIns[b.ID]
 	}
 	return r, ok
 }
@@ -241,6 +252,8 @@ func (t *tables) count(table string) int {
 		return len(t.turns)
 	case "items":
 		return len(t.items)
+	case "check_ins":
+		return len(t.checkIns)
 	default:
 		return len(t.messages)
 	}

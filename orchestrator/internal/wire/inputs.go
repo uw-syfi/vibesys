@@ -69,6 +69,8 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 		c.Body = core.PostHandoff{Handoff: handoffIn(b.PostHandoff.GetHandoff(), &errs)}
 	case *pb.Command_PostReport:
 		c.Body = core.PostReport{Report: reportIn(b.PostReport.GetReport(), &errs)}
+	case *pb.Command_RequestCatchUp:
+		c.Body = core.RequestCatchUp{Run: core.RunID(b.RequestCatchUp.GetRunId())}
 	default:
 		errs.errs = append(errs.errs, describe("command", m.GetBody()))
 	}
@@ -165,6 +167,10 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 		out.Body = &pb.Effect_CloseSession{CloseSession: &pb.CloseSession{Session: sessionRef(b.Session), Force: b.Force}}
 	case core.ReleaseCheckouts:
 		out.Body = &pb.Effect_ReleaseCheckouts{ReleaseCheckouts: &pb.ReleaseCheckouts{RunId: string(b.Run)}}
+	case core.ComputeWindowFacts:
+		out.Body = &pb.Effect_ComputeWindowFacts{ComputeWindowFacts: &pb.ComputeWindowFacts{
+			CheckInId: string(b.CheckIn), RunId: string(b.Run), Since: when(b.Since), Until: when(b.Until),
+		}}
 	case core.ArmTimer:
 		timer := &pb.ArmTimer{
 			Kind: timerKinds.out(b.Kind), RunId: string(b.Run), FireAt: when(b.FireAt),
@@ -215,6 +221,11 @@ func DecodeEffect(data []byte) (core.Effect, error) {
 		e = core.CloseSession{Session: session(b.CloseSession.GetSession()), Force: b.CloseSession.GetForce()}
 	case *pb.Effect_ReleaseCheckouts:
 		e = core.ReleaseCheckouts{Run: core.RunID(b.ReleaseCheckouts.GetRunId())}
+	case *pb.Effect_ComputeWindowFacts:
+		w := b.ComputeWindowFacts
+		e = core.ComputeWindowFacts{
+			CheckIn: core.CheckInID(w.GetCheckInId()), Run: core.RunID(w.GetRunId()), Since: moment(w.GetSince(), &errs), Until: moment(w.GetUntil(), &errs),
+		}
 	case *pb.Effect_ArmTimer:
 		t := b.ArmTimer
 		timer := core.ArmTimer{Kind: timerKinds.in(t.GetKind(), &errs), Run: core.RunID(t.GetRunId()), FireAt: moment(t.GetFireAt(), &errs)}

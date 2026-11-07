@@ -1,0 +1,12 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "catchUpRequest": {
+    "checkInId": "c1",
+    "since": "2026-01-01T09:00:00Z",
+    "until": "2026-01-01T11:35:20Z"
+  },
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}
