@@ -3492,7 +3492,7 @@ func (x *ListBoundsRequest) GetContext() *CallContext {
 
 type ListBoundsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Every declared bound, oldest first: their places count 1, 2, ... without a gap.
+	// Every declared bound, oldest first.
 	Bounds        []*ObjectiveBound `protobuf:"bytes,1,rep,name=bounds,proto3" json:"bounds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4728,9 +4728,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x14DeclareBoundResponse\x12<\n" +
 	"\x05bound\x18\x01 \x01(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\x06\xbaH\x03\xc8\x01\x01R\x05bound\"R\n" +
 	"\x11ListBoundsRequest\x12=\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\"Y\n" +
-	"\x12ListBoundsResponse\x12C\n" +
-	"\x06bounds\x18\x01 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundB\v\xbaH\b\x92\x01\x05\"\x03\xc8\x01\x01R\x06bounds\"\xbe\x01\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\"\xbb\x02\n" +
+	"\x12ListBoundsResponse\x126\n" +
+	"\x06bounds\x18\x01 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveBoundR\x06bounds:\xec\x01\xbaH\xe8\x01\x1a\xe5\x01\n" +
+	"#list_bounds.places_end_at_the_count\x12^the places of the bounds count 1, 2, ... without a gap, so the last place is the number listed\x1a^this.bounds.size() == 0 || this.bounds[this.bounds.size() - 1].seq == uint(this.bounds.size())\"\xbe\x01\n" +
 	"\x10WatchTaskRequest\x12=\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\tR\x05epoch\x12%\n" +

@@ -536,8 +536,14 @@ message ListBoundsRequest {
 }
 
 message ListBoundsResponse {
-  // Every declared bound, oldest first: their places count 1, 2, ... without a gap.
-  repeated ObjectiveBound bounds = 1 [(buf.validate.field).repeated.items.required = true];
+  option (buf.validate.message).cel = {
+    id: "list_bounds.places_end_at_the_count"
+    message: "the places of the bounds count 1, 2, ... without a gap, so the last place is the number listed"
+    expression: "this.bounds.size() == 0 || this.bounds[this.bounds.size() - 1].seq == uint(this.bounds.size())"
+  };
+
+  // Every declared bound, oldest first.
+  repeated ObjectiveBound bounds = 1;
 }
 
 message WatchTaskRequest {
