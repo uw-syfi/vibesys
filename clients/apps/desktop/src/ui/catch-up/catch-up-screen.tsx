@@ -17,8 +17,10 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {CatchUpPress, CatchUpRefusal, CheckInRead, FaultKind} from '../../state/index.js';
+import type {RunHistoryStatus} from '../../core/index.js';
 import {formatDayTime, formatSpan} from '../agents/time.js';
 import {NOT_REPORTED} from '../cost/words.js';
+import {HistoryStatusWord} from '../orchestrator/history-status.js';
 import {
   type CatchUpModel,
   type CatchUpWords,
@@ -270,6 +272,9 @@ export function CatchUpScreen(props: {
   /** The run's name, for the breadcrumb. */
   readonly run: string;
   readonly rows: readonly CheckInRead[];
+  /** Where reading the run's history (where check-ins are served) stands: an empty list is "none" only once it is read. */
+  readonly history: RunHistoryStatus;
+  readonly retryHistory: () => void;
   readonly press: CatchUpPress | undefined;
   readonly catchUp: () => void;
   readonly goRuns: () => void;
@@ -294,8 +299,13 @@ export function CatchUpScreen(props: {
       <div role="status" aria-live="polite" aria-label="Catch me up: outcome">
         <PressLine press={props.press} words={props.words} again={props.catchUp} />
       </div>
+      {props.history._tag === 'Idle' ? null : (
+        <HistoryStatusWord status={props.history} retry={props.retryHistory} />
+      )}
       {shown === undefined ? (
-        <EmptyState title="No check-ins yet" />
+        props.history._tag === 'Idle' ? (
+          <EmptyState title="No check-ins yet" />
+        ) : null
       ) : (
         <Split
           asideAtStart

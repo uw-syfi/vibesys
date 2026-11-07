@@ -187,6 +187,8 @@ describe('the pages of a run and the pages of the window', () => {
       <CatchUpScreen
         run="a-run"
         rows={[]}
+        history={{_tag: 'Idle'}}
+        retryHistory={() => undefined}
         press={undefined}
         catchUp={() => undefined}
         goRuns={() => undefined}

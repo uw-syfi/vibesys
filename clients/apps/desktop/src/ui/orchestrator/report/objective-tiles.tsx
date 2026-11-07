@@ -9,9 +9,9 @@ function hintOf(objective: ObjectiveReport): string | undefined {
     objective.headValue === undefined
       ? undefined
       : `Head ${withUnit(formatExact(objective.headValue), objective.unit)}`,
-    objective.best === undefined
+    objective.bestValue === undefined
       ? undefined
-      : `Best ${withUnit(formatExact(objective.best.value), objective.unit)}`,
+      : `Best ${withUnit(formatExact(objective.bestValue), objective.unit)}`,
     objective.bound === undefined
       ? undefined
       : `Bound ${withUnit(formatExact(objective.bound.current.value), objective.bound.current.unit)}`,
@@ -32,7 +32,7 @@ export function ObjectiveTiles(props: {
   return (
     <MetricTiles label="Objectives" count={props.objectives.length} track="chart">
       {props.objectives.map(objective => {
-        const value = objective.best?.value;
+        const value = objective.bestValue;
         const percent = objective.bestPercentOfBound;
         const hint = hintOf(objective);
         return (

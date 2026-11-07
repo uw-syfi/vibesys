@@ -57,7 +57,8 @@ describe('the objectives of a report', () => {
           // The best-so-far line is the marked points and the best is the last of them: nothing is
           // compared here.
           expect(report.bestPath).toEqual(report.points.filter(p => p.bestSoFar));
-          expect(report.best).toBe(report.bestPath.at(-1));
+          // The series draws the line only: the served best is the standing's, absent with none.
+          expect(report.bestValue).toBeUndefined();
         });
       }),
       {seed: 11},
@@ -98,6 +99,8 @@ describe('the objectives of a report', () => {
                 name: 'tok_s',
                 headValue,
                 headPercentOfBound: percentOfBound,
+                bestPercentOfBound,
+                unit: 'tok/s',
               }),
             ],
           );
@@ -109,6 +112,51 @@ describe('the objectives of a report', () => {
         },
       ),
       {seed: 12},
+    );
+  });
+
+  it('show the best, unit and percent the standing served, not the series’ newest best or the bound’s unit, whatever they disagree by', () => {
+    fc.assert(
+      fc.property(
+        fc.double({min: 1, max: 1e6, noNaN: true}),
+        fc.double({min: 1, max: 1e6, noNaN: true}),
+        fc.double({min: 1e-3, max: 1e4, noNaN: true}),
+        (seriesBest, servedBest, percent) => {
+          const [report] = objectiveReports(
+            create(SearchStateSchema, {
+              series: [
+                {
+                  objective: 'tok_s',
+                  direction: Direction.MAXIMIZE,
+                  points: [
+                    {jobId: 'j', commit: 'c', at: timestampFromMs(1000), value: seriesBest, bestSoFar: true},
+                  ],
+                },
+              ],
+              bounds: [
+                {
+                  objective: 'tok_s',
+                  direction: Direction.MAXIMIZE,
+                  versions: [{seq: 1n, value: 9, unit: 'from-bound', note: 'n', objective: 'tok_s'}],
+                  bestPercentOfBound: percent + 1,
+                },
+              ],
+            }),
+            [
+              create(ObjectiveStandingSchema, {
+                name: 'tok_s',
+                bestValue: servedBest,
+                bestPercentOfBound: percent,
+                unit: 'tok/s',
+              }),
+            ],
+          );
+          expect(report?.bestValue).toBe(servedBest);
+          expect(report?.bestPercentOfBound).toBe(percent);
+          expect(report?.unit).toBe('tok/s');
+        },
+      ),
+      {seed: 13},
     );
   });
 

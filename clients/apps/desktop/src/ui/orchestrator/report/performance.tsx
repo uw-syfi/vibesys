@@ -114,9 +114,9 @@ function ObjectiveChart(props: {
   const yTicks = valueLabels(objective);
   const reference = boundReference(objective, props.names);
   const best =
-    objective.best === undefined
+    objective.bestValue === undefined
       ? undefined
-      : withUnit(formatFigure(objective.best.value), objective.unit);
+      : withUnit(formatFigure(objective.bestValue), objective.unit);
   return (
     <ChartPanel
       title={objective.name}

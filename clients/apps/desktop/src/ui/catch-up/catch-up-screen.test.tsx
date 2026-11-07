@@ -5,6 +5,7 @@
  */
 import {describe, expect, it} from '@effect/vitest';
 import {AgentRole, type Report, RunStatus} from '@vibesys/orchestrator-proto';
+import type {RunHistoryStatus} from '../../core/index.js';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
 import type {JSX} from 'react';
@@ -38,12 +39,22 @@ interface Props {
   readonly rows: readonly CheckInRead[];
   readonly press?: CatchUpPress | undefined;
   readonly catchUp?: () => void;
+  readonly history?: RunHistoryStatus;
+  readonly retryHistory?: () => void;
 }
 
-const page = ({rows, press = NO_PRESS, catchUp = () => undefined}: Props): JSX.Element => (
+const page = ({
+  rows,
+  press = NO_PRESS,
+  catchUp = () => undefined,
+  history = {_tag: 'Idle'},
+  retryHistory = () => undefined,
+}: Props): JSX.Element => (
   <CatchUpScreen
     run="faster-decode"
     rows={rows}
+    history={history}
+    retryHistory={retryHistory}
     press={press}
     catchUp={catchUp}
     goRuns={() => undefined}
@@ -223,6 +234,33 @@ describe('the catch-up page with no check-in', () => {
     expect(screen.text()).toContain('No check-ins yet');
     screen.press(screen.control('New check-in'));
     expect(pressed).toBe(1);
+    screen.unmount();
+  });
+});
+
+describe('the catch-up page while the run history is read', () => {
+  it('does not read as having no check-ins while the history loads', () => {
+    const screen = mount(page({rows: [], history: {_tag: 'Loading'}}));
+    expect(screen.text()).toContain('Reading history');
+    expect(screen.text()).not.toContain('No check-ins yet');
+    screen.unmount();
+  });
+
+  it('says the history was not read when it failed, and retries on press', () => {
+    let retried = 0;
+    const screen = mount(
+      page({
+        rows: [],
+        history: {_tag: 'Failed', fault: {kind: 'unreachable', detail: 'down'} as never},
+        retryHistory: () => {
+          retried += 1;
+        },
+      }),
+    );
+    expect(screen.text()).toContain('History not read');
+    expect(screen.text()).not.toContain('No check-ins yet');
+    screen.press(screen.control('Retry'));
+    expect(retried).toBe(1);
     screen.unmount();
   });
 });
