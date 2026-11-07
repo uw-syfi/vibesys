@@ -418,8 +418,9 @@ and model) says how many. A cost no turn reported is absent, never zero, and so 
 
 The ledger (`internal/cost`) is a pure fold: the same turns in any order, told again or not, give the same
 view, and the total, the types, the models and the buckets each hold exactly the total's cost. A stream
-reads the run's turns from the store once when it opens, a window at a time, and adds each turn that
-ends from then on, so a view costs the size of the view and not of the run. The view is as of a time:
+reads the run's turns from the store once when it opens, a window at a time, where nothing commits (as the
+snapshot's reads of turns do), and adds each turn that ends from then on, so a view costs the size of the
+view and not of the run. The view is as of a time:
 the host's clock while the run lives (so a stream sends a fresh view each `daemon.CostRefresh` even when
 nothing happens, and the last hour does not stand still) and the run's end once it is over (so a finished
 run's view never changes and is sent once).

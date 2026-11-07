@@ -344,7 +344,12 @@ export interface UsageReport {
   readonly byRole: Readonly<Partial<Record<AgentRole, UsageTotals>>>;
 }
 
-/** What a run's turns have cost, by agent, by role and in total. */
+/**
+ * What a run's turns have cost, by agent, by role and in total. It sums the turns the client holds,
+ * which the host does not promise to send in full, so it is not the run's cost: that is `CostView`
+ * (`state.costs`, worked out by the host). Only the old Cost screen reads this, and the screen that
+ * replaces it deletes it.
+ */
 export function usageOf(state: OrchestratorState, runId: string): UsageReport {
   let run = noUsage;
   const byAgent: Record<string, UsageTotals> = {};
