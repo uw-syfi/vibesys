@@ -5,7 +5,7 @@ import fc from 'fast-check';
 import type {HostConnectionState} from './connection.js';
 import type {Fault} from './fault.js';
 import type {FeedStatus} from './feed.js';
-import {freshnessOf} from './freshness.js';
+import {freshnessOf, hostFreshness, staleForMs} from './freshness.js';
 
 const fault: Fault = {kind: 'Unavailable', detail: 'link lost', retryable: true};
 const daemon = create(BuildVersionsSchema, {
@@ -65,5 +65,38 @@ describe('freshness', () => {
   it('is catching up only with data on screen and a Ready connection whose feed is not delivering', () => {
     expect(freshnessOf(ready, {_tag: 'Restarting', why: 'gap'}, true)).toBe('catching-up');
     expect(freshnessOf(ready, {_tag: 'Opening'}, false)).toBe('empty');
+  });
+});
+
+describe('the freshness of a whole host', () => {
+  const lastUpdate = fc.option(fc.integer({min: 0, max: 1_000_000}), {nil: null});
+  const anyConnection = fc.oneof(notReady, fc.constant(ready));
+
+  it('is live exactly when the connection is Ready, reconnecting only while a dial is in flight', () => {
+    fc.assert(
+      fc.property(anyConnection, lastUpdate, (connection, at) => {
+        const {status} = hostFreshness(connection, at);
+        expect(status === 'live').toBe(connection._tag === 'Ready');
+        expect(status === 'reconnecting').toBe(connection._tag === 'Connecting');
+      }),
+    );
+  });
+
+  it('keeps the time the host last spoke, whatever the connection does', () => {
+    fc.assert(
+      fc.property(anyConnection, lastUpdate, (connection, at) => {
+        expect(hostFreshness(connection, at).lastUpdateMs).toBe(at);
+      }),
+    );
+  });
+
+  it('has an age only while the link is not live and something was read, never a negative one', () => {
+    fc.assert(
+      fc.property(anyConnection, lastUpdate, fc.integer({min: 0, max: 2_000_000}), (c, at, now) => {
+        const age = staleForMs(hostFreshness(c, at), now);
+        if (c._tag === 'Ready' || at === null) expect(age).toBeNull();
+        else expect(age).toBe(Math.max(0, now - at));
+      }),
+    );
   });
 });

@@ -7,7 +7,7 @@ import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
 import * as Schema from 'effect/Schema';
 import type * as Scope from 'effect/Scope';
 import * as TestClock from 'effect/testing/TestClock';
-import type {HostConnectionState} from '../state/index.js';
+import {type HostConnectionState, staleForMs} from '../state/index.js';
 import {
   type DaemonOptions,
   daemonRecording,
@@ -37,7 +37,11 @@ const connect = (options: DaemonOptions = {}) =>
       return registry.get(connection.state);
     });
     const hellos = () => fake.calls().filter(call => call.target.method === HELLO).length;
-    return {fake, connection, state, hellos};
+    const freshness = Effect.gen(function* () {
+      yield* settle;
+      return registry.get(connection.freshness);
+    });
+    return {fake, connection, state, hellos, freshness};
   });
 
 type Connected = Effect.Success<ReturnType<typeof connect>>;
@@ -130,6 +134,30 @@ describe('the host connection', () => {
         expect(yield* Fiber.join(next)).toBe(2);
         expect(hellos()).toBe(2);
       }),
+  );
+
+  itQuiet('says whether the host is current and when it last spoke, as data for screens', () =>
+    Effect.gen(function* () {
+      const {connection, freshness} = yield* connect();
+      expect(yield* freshness).toEqual({status: 'stale', lastUpdateMs: null});
+      const first = yield* connection.ready();
+      expect(yield* freshness).toEqual({status: 'live', lastUpdateMs: 0});
+      yield* TestClock.adjust('20 seconds');
+      yield* connection.heard;
+      expect(yield* freshness).toEqual({status: 'live', lastUpdateMs: 20_000});
+      yield* TestClock.adjust('5 seconds');
+      yield* connection.suspect(first, loss);
+      // Lost: what is on screen is as old as the last word from the host, and it keeps ageing.
+      const lost = yield* freshness;
+      expect(lost).toEqual({status: 'stale', lastUpdateMs: 20_000});
+      expect(staleForMs(lost, yield* Clock.currentTimeMillis)).toBe(5_000);
+      yield* TestClock.adjust('500 millis');
+      // Redialed after a jittered wait of at most 500 ms: live again, and heard from just now.
+      const back = yield* freshness;
+      expect(back.status).toBe('live');
+      expect(back.lastUpdateMs).toBeGreaterThanOrEqual(25_250);
+      expect(back.lastUpdateMs).toBeLessThanOrEqual(25_500);
+    }),
   );
 
   itQuiet('skips the wait when the user retries', () =>

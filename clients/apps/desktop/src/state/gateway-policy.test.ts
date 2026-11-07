@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {afterFailure, connectBudgetMs, MAX_DIALS} from './gateway-policy.js';
+import {afterFailure, MAX_DIALS} from './gateway-policy.js';
 
 describe('gateway recovery policy', () => {
   it('waits 0.5, 1, 2 and 4 seconds between five dials, then goes offline', () => {
@@ -26,9 +26,5 @@ describe('gateway recovery policy', () => {
         }),
       );
     expect(afterFailure(1, 14)._tag).toBe('redial');
-  });
-
-  it('gives a first connection more time than a reconnect', () => {
-    expect(connectBudgetMs(false)).toBeGreaterThan(connectBudgetMs(true));
   });
 });
