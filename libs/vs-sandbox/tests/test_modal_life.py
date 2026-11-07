@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from hypothesis import given
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 # test-isolation: the translator lives inside the standalone mounted helper, which is its only import path.
@@ -23,9 +26,54 @@ from vs_sandbox.modal_evaluator import (
     exit_status_of,
     health_ready,
     observe_container,
+    started_since_deploy,
 )
 
 _APP = "my-app"
+_FLOOR = datetime(2026, 11, 7, 20, 59, tzinfo=UTC).timestamp()
+_ZONES = st.sampled_from([UTC, timezone(timedelta(hours=-8)), timezone(timedelta(hours=5.5))])
+_NO_INSTANT = st.sampled_from(
+    [
+        "Pending",
+        "",
+        None,
+        _FLOOR + 60,
+        "2026-11-07 21:00:00",
+        "2026-11-07T21:00:00",
+        "21:00:00+00:00",
+        "tomorrow",
+    ]
+)
+"""Start times that name no instant: not started yet, not text, no offset, or not a date-time."""
+
+
+def _modal_start_time(seconds: float, zone: timezone) -> str:
+    """``seconds`` since the epoch as ``modal container list --json`` prints a start time."""
+    return datetime.fromtimestamp(seconds, zone).isoformat(sep=" ", timespec="seconds")
+
+
+@st.composite
+def _start_times(draw: st.DrawFn) -> tuple[object, float | None]:
+    """A listed start time and the instant it names, None if it names none."""
+    if draw(st.booleans()):
+        return draw(_NO_INSTANT), None
+    seconds = _FLOOR + draw(st.integers(-3600, 3600))
+    return _modal_start_time(seconds, draw(_ZONES)), seconds
+
+
+@st.composite
+def _timed_entries(draw: st.DrawFn) -> tuple[dict[str, object], float | None]:
+    """A listed container of the app or another, in either key style, and when it started."""
+    start, instant = draw(_start_times())
+    keys = draw(
+        st.sampled_from(
+            [("container_id", "app_name", "start_time"), ("Container ID", "App Name", "Start Time")]
+        )
+    )
+    values = (draw(st.sampled_from(["ta-1", "ta-2", "ta-3"])), draw(st.sampled_from([_APP, "x"])))
+    return dict(zip(keys, (*values, start), strict=True)), instant
+
+
 _ENTRY = st.one_of(
     st.just({"app_name": _APP, "container_id": "c-1"}),
     st.just({"App Name": _APP, "Container ID": "c-2"}),
@@ -35,11 +83,13 @@ _ENTRY = st.one_of(
     st.just("not-a-dict"),
     st.just(None),
     st.dictionaries(st.text(max_size=5), st.text(max_size=5), max_size=3),
+    _timed_entries().map(lambda timed: timed[0]),
 )
 _LISTING = st.one_of(
     st.builds(ContainerListing, st.lists(_ENTRY, max_size=4).map(tuple)),
     st.builds(ListingFailed, st.text(max_size=20)),
 )
+_STARTED_SINCE = st.one_of(st.none(), st.just(_FLOOR), st.floats(0, 4e9))
 
 
 def _rank(life: ContainerStarting | ContainerRunning | ContainerUnknown) -> int:
@@ -48,13 +98,13 @@ def _rank(life: ContainerStarting | ContainerRunning | ContainerUnknown) -> int:
     return 0 if isinstance(life, ContainerStarting) else -1
 
 
-@given(listings=st.lists(_LISTING, max_size=20))
+@given(listings=st.lists(_LISTING, max_size=20), started_since=_STARTED_SINCE)
 def test_a_listing_never_takes_a_known_container_life_backwards(
-    listings: list[ContainerListing | ListingFailed],
+    listings: list[ContainerListing | ListingFailed], started_since: float | None
 ) -> None:
     held: ContainerStarting | ContainerRunning | ContainerUnknown = ContainerUnknown()
     for listing in listings:
-        after = observe_container(held, listing, _APP)
+        after = observe_container(held, listing, _APP, started_since=started_since)
         assert _rank(after) >= _rank(held)
         if isinstance(held, ContainerRunning):
             assert after == held
@@ -64,10 +114,10 @@ def test_a_listing_never_takes_a_known_container_life_backwards(
 
 
 @given(listing=_LISTING)
-def test_only_a_matching_entry_with_an_id_is_a_running_container(
+def test_without_a_deploy_to_date_any_matching_entry_with_an_id_is_a_running_container(
     listing: ContainerListing | ListingFailed,
 ) -> None:
-    life = container_reading(listing, _APP)
+    life = container_reading(listing, _APP, started_since=None)
     if isinstance(listing, ListingFailed):
         assert life == ContainerUnknown(raw=listing.reason)
     else:
@@ -79,6 +129,90 @@ def test_only_a_matching_entry_with_an_id_is_a_running_container(
             and (entry.get("container_id") or entry.get("Container ID"))
         ]
         assert isinstance(life, ContainerRunning) == bool(matches)
+        assert life == ContainerStarting() or isinstance(life, ContainerRunning)
+
+
+_OLD = {"Container ID": "ta-old", "App ID": "ap-1", "App Name": _APP}
+_NEW = {"Container ID": "ta-new", "App ID": "ap-1", "App Name": _APP}
+
+
+@pytest.mark.regression
+@example(
+    entries=[
+        ({**_OLD, "Start Time": "2026-11-07 20:54:41+00:00"}, _FLOOR - 259),
+        ({**_NEW, "Start Time": "Pending"}, None),
+    ]
+)
+@example(entries=[({**_NEW, "Start Time": "2026-11-07 12:59:00-08:00"}, _FLOOR)])
+@given(entries=st.lists(_timed_entries(), max_size=6))
+def test_after_a_deploy_only_a_container_started_since_it_runs_the_deployed_version(
+    entries: list[tuple[dict[str, object], float | None]],
+) -> None:
+    """Regression for #4097: the first listed container of the app could predate the deploy.
+
+    Whatever the order, key style or offset, the chosen container started at or after the
+    floor; one with no start time that names an instant is never chosen.
+    """
+    life = container_reading(
+        ContainerListing(tuple(entry for entry, _ in entries)), _APP, started_since=_FLOOR
+    )
+
+    def listed(entry: dict[str, object], key: str, title: str) -> object:
+        return entry.get(key, entry.get(title))
+
+    of_app = [
+        (listed(entry, "container_id", "Container ID"), instant)
+        for entry, instant in entries
+        if listed(entry, "app_name", "App Name") == _APP
+    ]
+    serving = [cid for cid, instant in of_app if instant is not None and instant >= _FLOOR]
+    if serving:
+        assert life == ContainerRunning(str(serving[0]))
+    else:
+        assert isinstance(life, ContainerStarting)
+        assert len(life.passed_over) == len(of_app)
+        assert all(
+            str(cid) in shown for (cid, _), shown in zip(of_app, life.passed_over, strict=True)
+        )
+
+
+_DEPLOY_OUTPUT = st.lists(
+    st.sampled_from(
+        [
+            "✓ Created objects.",
+            "├── 🔨 Created web function serve => https://workspace--candidate.modal.run",
+            "✓ App deployed in 43.702s! 🎉",
+            "Using CPython 3.12.3 interpreter at: /usr/bin/python3",
+            "View Deployment: https://modal.com/apps/workspace/main/deployed/candidate-app",
+        ]
+    ),
+    max_size=6,
+)
+_SKIPPED = st.sampled_from(
+    [
+        "✓ Deployment skipped: no changes detected! ⏭️",
+        "\x1b[32m✓\x1b[0m Deployment skipped: no\n│ changes detected! ⏭️",
+    ]
+)
+
+
+@given(
+    began=st.floats(1e9, 4e9),
+    lines=_DEPLOY_OUTPUT,
+    skipped=st.one_of(st.none(), _SKIPPED),
+    at=st.integers(0, 6),
+)
+def test_a_deploy_dates_its_containers_unless_it_changed_nothing(
+    began: float, lines: list[str], skipped: str | None, at: int
+) -> None:
+    if skipped is not None:
+        lines.insert(at, skipped)
+    floor = started_since_deploy(began, "\n".join(lines))
+    if skipped is None:
+        assert floor is not None
+        assert 0 < began - floor <= 5, "a few seconds of skew, never later than the deploy began"
+    else:
+        assert floor is None
 
 
 def test_a_finished_listing_after_running_is_stale() -> None:
