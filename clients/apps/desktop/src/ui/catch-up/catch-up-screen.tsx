@@ -16,6 +16,7 @@ import {
   Text,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
+import type {RunHistoryStatus} from '../../core/index.js';
 import type {
   CatchUpPress,
   CatchUpRefusal,
@@ -23,7 +24,6 @@ import type {
   FaultKind,
   IdeaWindow,
 } from '../../state/index.js';
-import type {RunHistoryStatus} from '../../core/index.js';
 import {formatDayTime, formatSpan} from '../agents/time.js';
 import {NOT_REPORTED} from '../cost/words.js';
 import {HistoryStatusWord} from '../orchestrator/history-status.js';

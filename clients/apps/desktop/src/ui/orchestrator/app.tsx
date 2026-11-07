@@ -2,7 +2,6 @@ import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
 import {type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
-import {HistoryStatusWord} from './history-status.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
@@ -26,6 +25,7 @@ import {CostScreen} from '../cost/index.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
 import {COST_WORDS} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
+import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
 import {ReportScreen} from './report/report-screen.js';

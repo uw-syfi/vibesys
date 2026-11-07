@@ -20,6 +20,17 @@ function hintOf(objective: ObjectiveReport): string | undefined {
   return lines.length === 0 ? undefined : lines.join('\n');
 }
 
+/** What a tile says under its figure: the share of the bound, or both units when they differ. */
+function detailOf(objective: ObjectiveReport): string {
+  if (objective.boundUnitCheck === BoundUnitCheck.MISMATCH) {
+    return `${objective.unit ?? '?'} vs bound ${objective.boundUnit ?? '?'}`;
+  }
+  const percent = objective.bestPercentOfBound;
+  if (percent === undefined) return ' ';
+  const unverified = objective.boundUnitCheck === BoundUnitCheck.UNKNOWN ? ' · unverified' : '';
+  return `${Math.round(percent)}% of bound${unverified}`;
+}
+
 /**
  * One tile for each objective: its best measured value, the number the header and the over-time chart
  * show, and how close that is to the bound the agents declared, as the host worked it out. The head's
@@ -36,12 +47,7 @@ export function ObjectiveTiles(props: {
         const value = objective.bestValue;
         const percent = objective.bestPercentOfBound;
         const hint = hintOf(objective);
-        const mismatch = objective.boundUnitCheck === BoundUnitCheck.MISMATCH;
-        const detail = mismatch
-          ? `${objective.unit ?? '?'} vs bound ${objective.boundUnit ?? '?'}`
-          : percent === undefined
-            ? ' '
-            : `${Math.round(percent)}% of bound${objective.boundUnitCheck === BoundUnitCheck.UNKNOWN ? ' · unverified' : ''}`;
+        const detail = detailOf(objective);
         return (
           <MetricTile
             key={objective.name}

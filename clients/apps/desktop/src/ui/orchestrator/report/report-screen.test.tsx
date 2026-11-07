@@ -3,9 +3,10 @@
  * bounds, the lead's reports and the cost view, as the host would send them. Nothing here works out a
  * best, a frontier or a cost; each test says what the host sent and reads what a person sees.
  */
-import {describe, expect, it} from '@effect/vitest';
+
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
+import {describe, expect, it} from '@effect/vitest';
 import {
   BoundUnitCheck,
   Direction,

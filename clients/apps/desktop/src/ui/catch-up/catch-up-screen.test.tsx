@@ -5,10 +5,10 @@
  */
 import {describe, expect, it} from '@effect/vitest';
 import {AgentRole, type Report, RunStatus} from '@vibesys/orchestrator-proto';
-import type {RunHistoryStatus} from '../../core/index.js';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
 import type {JSX} from 'react';
+import type {RunHistoryStatus} from '../../core/index.js';
 import {
   type CatchUpPress,
   type CheckInRead,

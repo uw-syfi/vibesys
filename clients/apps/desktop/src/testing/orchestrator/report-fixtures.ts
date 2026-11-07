@@ -205,6 +205,32 @@ interface Gain {
   readonly baselineValue: number;
 }
 
+/** The Fake's gains: the best of `members` over the first candidate on each objective, oriented. */
+function gainsAgainst(options: MeasuredOptions, candidates: readonly Candidate[]) {
+  const baseline = candidates[0];
+  return (members: readonly Candidate[]): Gain[] =>
+    baseline === undefined
+      ? []
+      : options.objectives.flatMap((objective, at) => {
+          const values = members.map(candidate => candidate.values[at] ?? 0);
+          const best = values.reduce<number | undefined>(
+            (top, value) =>
+              top === undefined || beats(objective.direction, value, top) ? value : top,
+            undefined,
+          );
+          const base = baseline.values[at] ?? 0;
+          if (best === undefined || best <= 0 || base <= 0) return [];
+          return [
+            {
+              metric: objective.name,
+              ratio: objective.direction === Direction.MINIMIZE ? base / best : best / base,
+              bestValue: best,
+              baselineValue: base,
+            },
+          ];
+        });
+}
+
 /**
  * The Fake's ideas: `options.ideas` plans, each linked to the candidates that name it (the first
  * candidate, the baseline, and every seventh name none), the gains the Fake works out plainly (best
@@ -232,28 +258,7 @@ function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], run
   });
   const linked = (number: number): readonly Candidate[] =>
     candidates.filter((_, index) => planOf(index) === number);
-  const baseline = candidates[0];
-  const gainsOf = (members: readonly Candidate[]): Gain[] =>
-    baseline === undefined
-      ? []
-      : options.objectives.flatMap((objective, at) => {
-          const values = members.map(candidate => candidate.values[at] ?? 0);
-          const best = values.reduce<number | undefined>(
-            (top, value) =>
-              top === undefined || beats(objective.direction, value, top) ? value : top,
-            undefined,
-          );
-          const base = baseline.values[at] ?? 0;
-          if (best === undefined || best <= 0 || base <= 0) return [];
-          return [
-            {
-              metric: objective.name,
-              ratio: objective.direction === Direction.MINIMIZE ? base / best : best / base,
-              bestValue: best,
-              baselineValue: base,
-            },
-          ];
-        });
+  const gainsOf = gainsAgainst(options, candidates);
   const ideas = plans.map((plan, at) => ({
     planNumber: plan.number,
     verdict: VERDICT_OF[plan.status],
@@ -300,6 +305,57 @@ function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], run
     jobPlans: candidates.map((_, index) => planOf(index)),
     unplanned: candidates.filter((_, index) => planOf(index) === undefined).length,
   };
+}
+
+/** The bounds the lead declared, with where the head and the best stand against each. */
+function boundsOf(
+  options: MeasuredOptions,
+  candidates: readonly Candidate[],
+  head: Candidate | undefined,
+  submitter: {
+    readonly runId: string;
+    readonly agent: string;
+    readonly at: ReturnType<typeof timestampFromMs>;
+  },
+) {
+  return options.objectives.flatMap((objective, at) => {
+    const {bound} = objective;
+    if (bound === undefined) return [];
+    const value = (version: number): number =>
+      version === 1 && options.revisedBound === true ? bound * 0.9 : bound;
+    const headValue = head?.values[at];
+    const values = candidates.map(candidate => candidate.values[at] ?? 0);
+    const bestValue = values.reduce<number | undefined>(
+      (best, value) =>
+        best === undefined || beats(objective.direction, value, best) ? value : best,
+      undefined,
+    );
+    return [
+      {
+        objective: objective.name,
+        direction: objective.direction,
+        versions: (options.revisedBound === true ? [1, 2] : [2]).map(seq => ({
+          seq: BigInt(seq + at * 2),
+          objective: objective.name,
+          direction: objective.direction,
+          value: value(seq),
+          unit: objective.unit,
+          note: `Derived from the memory bandwidth over the bytes each ${objective.name} step moves.`,
+          origin: {...submitter, at: timestampFromMs(options.startMs + 600_000 * seq)},
+        })),
+        ...measuredIn(objective.unit),
+        ...(headValue === undefined
+          ? {}
+          : {
+              headValue,
+              percentOfBound: percentOf(objective.direction, bound, headValue),
+            }),
+        ...(bestValue === undefined
+          ? {}
+          : {bestValue, bestPercentOfBound: percentOf(objective.direction, bound, bestValue)}),
+      },
+    ];
+  });
 }
 
 /**
@@ -378,44 +434,7 @@ export function measuredSearch(
     ...(candidates.length === 0 || options.objectives.length < 2
       ? {}
       : {tradeoff: tradeoffOf(options, candidates)}),
-    bounds: options.objectives.flatMap((objective, at) => {
-      const {bound} = objective;
-      if (bound === undefined) return [];
-      const value = (version: number): number =>
-        version === 1 && options.revisedBound === true ? bound * 0.9 : bound;
-      const headValue = head?.values[at];
-      const values = candidates.map(candidate => candidate.values[at] ?? 0);
-      const bestValue = values.reduce<number | undefined>(
-        (best, value) =>
-          best === undefined || beats(objective.direction, value, best) ? value : best,
-        undefined,
-      );
-      return [
-        {
-          objective: objective.name,
-          direction: objective.direction,
-          versions: (options.revisedBound === true ? [1, 2] : [2]).map(seq => ({
-            seq: BigInt(seq + at * 2),
-            objective: objective.name,
-            direction: objective.direction,
-            value: value(seq),
-            unit: objective.unit,
-            note: `Derived from the memory bandwidth over the bytes each ${objective.name} step moves.`,
-            origin: {...submitter, at: timestampFromMs(options.startMs + 600_000 * seq)},
-          })),
-          ...measuredIn(objective.unit),
-          ...(headValue === undefined
-            ? {}
-            : {
-                headValue,
-                percentOfBound: percentOf(objective.direction, bound, headValue),
-              }),
-          ...(bestValue === undefined
-            ? {}
-            : {bestValue, bestPercentOfBound: percentOf(objective.direction, bound, bestValue)}),
-        },
-      ];
-    }),
+    bounds: boundsOf(options, candidates, head, submitter),
   });
 }
 

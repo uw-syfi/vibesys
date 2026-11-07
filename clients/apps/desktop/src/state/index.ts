@@ -133,13 +133,13 @@ export {
   type SummaryField,
   type SummaryView,
   summaryReport,
-  type Verdict,
-  type WorkstreamRow,
   type TradeoffPointView,
   type TradeoffReport,
   timeTicks,
   tradeoffReport,
+  type Verdict,
   valueTicks,
+  type WorkstreamRow,
 } from './orchestrator/report/index.js';
 export {
   candidates,

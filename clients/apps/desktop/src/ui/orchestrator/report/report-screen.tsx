@@ -16,8 +16,8 @@ import {IdeasCard} from './ideas-card.js';
 import {LeadSummary} from './lead-summary.js';
 import {ObjectiveTiles} from './objective-tiles.js';
 import {OverTime, TradeOff} from './performance.js';
-import {WorkstreamsCard} from './workstreams-card.js';
 import {isStoppable, ReportActions, ReportMeta} from './report-title.js';
+import {WorkstreamsCard} from './workstreams-card.js';
 
 /**
  * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row), what

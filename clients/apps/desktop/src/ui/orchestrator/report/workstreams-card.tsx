@@ -1,6 +1,6 @@
+import {WorkstreamStatus} from '@vibesys/orchestrator-proto';
 import {Card, ShareBar, Stack, SwatchLegend, Table, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {WorkstreamStatus} from '@vibesys/orchestrator-proto';
 import type {WorkstreamRow} from '../../../state/index.js';
 import {formatGain} from './format.js';
 

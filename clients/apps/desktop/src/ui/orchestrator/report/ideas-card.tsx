@@ -1,4 +1,14 @@
-import {Card, Chip, Row, SegmentedControl, Stack, type StatusTone, Table, Text} from '@vibesys/ui';
+import {
+  Card,
+  Chip,
+  Row,
+  SegmentedControl,
+  Stack,
+  type StatusTone,
+  Table,
+  type TableColumn,
+  Text,
+} from '@vibesys/ui';
 import {type JSX, useRef, useState} from 'react';
 import {
   type GainView,
@@ -59,6 +69,62 @@ function GainCell(props: {
 
 /** What a set of ideas is counted as in a filter's label. */
 const counted = (label: string, rows: readonly IdeaRow[]): string => `${label} ${rows.length}`;
+
+/** The columns of the ideas table: the numbers and words the host served, one to a column. */
+function ideaColumns(
+  names: ReadonlyMap<string, string>,
+  units: ReadonlyMap<string, string | null>,
+): TableColumn<IdeaRow>[] {
+  return [
+    {
+      key: 'id',
+      header: 'ID',
+      mono: true,
+      align: 'end',
+      cell: row => `#${row.planNumber}`,
+    },
+    {
+      key: 'idea',
+      header: 'Idea',
+      lead: true,
+      clip: row => row.title,
+      cell: row => row.title,
+    },
+    {
+      key: 'workstream',
+      header: 'Workstream',
+      wide: true,
+      clip: row => row.workstreamTitle ?? '',
+      cell: row => row.workstreamTitle ?? '—',
+    },
+    {
+      key: 'verdict',
+      header: 'Verdict',
+      cell: row => <Chip label={VERDICT_WORDS[row.verdict]} tone={VERDICT_TONES[row.verdict]} />,
+    },
+    {
+      key: 'gain',
+      header: 'Gain',
+      mono: true,
+      align: 'end',
+      cell: row => <GainCell gains={row.gains} units={units} />,
+    },
+    {
+      key: 'candidates',
+      header: 'Cand.',
+      mono: true,
+      align: 'end',
+      cell: row => String(row.candidateJobIds.length),
+    },
+    {
+      key: 'agent',
+      header: 'Agent',
+      wide: true,
+      clip: row => names.get(row.agent) ?? row.agent,
+      cell: row => (row.agent === '' ? '—' : (names.get(row.agent) ?? row.agent)),
+    },
+  ];
+}
 
 /**
  * The run's ideas as a table: number, title, workstream, verdict, best gain against the baseline,
@@ -164,57 +230,7 @@ export function IdeasCard(props: {
                 props.select(plan === props.selected ? null : plan);
               }}
               middle
-              columns={[
-                {
-                  key: 'id',
-                  header: 'ID',
-                  mono: true,
-                  align: 'end',
-                  cell: row => `#${row.planNumber}`,
-                },
-                {
-                  key: 'idea',
-                  header: 'Idea',
-                  lead: true,
-                  clip: row => row.title,
-                  cell: row => row.title,
-                },
-                {
-                  key: 'workstream',
-                  header: 'Workstream',
-                  wide: true,
-                  clip: row => row.workstreamTitle ?? '',
-                  cell: row => row.workstreamTitle ?? '—',
-                },
-                {
-                  key: 'verdict',
-                  header: 'Verdict',
-                  cell: row => (
-                    <Chip label={VERDICT_WORDS[row.verdict]} tone={VERDICT_TONES[row.verdict]} />
-                  ),
-                },
-                {
-                  key: 'gain',
-                  header: 'Gain',
-                  mono: true,
-                  align: 'end',
-                  cell: row => <GainCell gains={row.gains} units={props.units} />,
-                },
-                {
-                  key: 'candidates',
-                  header: 'Cand.',
-                  mono: true,
-                  align: 'end',
-                  cell: row => String(row.candidateJobIds.length),
-                },
-                {
-                  key: 'agent',
-                  header: 'Agent',
-                  wide: true,
-                  clip: row => props.names.get(row.agent) ?? row.agent,
-                  cell: row => (row.agent === '' ? '—' : (props.names.get(row.agent) ?? row.agent)),
-                },
-              ]}
+              columns={ideaColumns(props.names, props.units)}
             />
           </div>
         )}
