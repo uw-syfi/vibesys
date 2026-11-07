@@ -9,6 +9,7 @@ import {
   PREFERENCES_WRITE_CHANNEL,
   type PreferencesBridge,
 } from '../core/settings/preferences-codec.js';
+import {VIEWER_READ_CHANNEL, type ViewerBridge} from '../core/viewer/viewer-codec.js';
 
 interface Preload {
   readonly GATEWAY_PRELOAD_CHANNEL: string;
@@ -23,6 +24,10 @@ interface Preload {
   readonly createPreferencesPreload: (ipc: {
     invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   }) => PreferencesBridge;
+  readonly VIEWER_PRELOAD_CHANNEL: string;
+  readonly createViewerPreload: (ipc: {
+    invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  }) => ViewerBridge;
 }
 
 /**
@@ -55,6 +60,8 @@ const {
   GATEWAY_PRELOAD_CHANNEL,
   createPreferencesPreload,
   PREFERENCES_PRELOAD_CHANNELS,
+  createViewerPreload,
+  VIEWER_PRELOAD_CHANNEL,
 } = loadPreload();
 
 class Channel {
@@ -194,4 +201,30 @@ it('a preferences write sends the bytes on the write channel and ends in one cal
   await settled();
   await settled();
   expect(errors).toEqual(['refused']);
+});
+
+it('the viewer channel name is the one main serves', () => {
+  expect(VIEWER_PRELOAD_CHANNEL).toBe(VIEWER_READ_CHANNEL);
+});
+
+it('a viewer read ends in exactly one callback: bytes, or a failure', async () => {
+  for (const [reply, expected] of [
+    [Promise.resolve(REPLY), {bytes: REPLY, errors: 0}],
+    [Promise.resolve(null), {bytes: undefined, errors: 1}],
+    [Promise.resolve('text'), {bytes: undefined, errors: 1}],
+    [Promise.reject(new Error('denied')), {bytes: undefined, errors: 1}],
+  ] as const) {
+    const {ipc, asked} = invoking(() => reply);
+    const got: Uint8Array[] = [];
+    const errors: string[] = [];
+    createViewerPreload(ipc).read(
+      bytes => got.push(bytes),
+      error => errors.push(error),
+    );
+    await settled();
+    await settled();
+    expect(asked.map(call => call.channel)).toEqual([VIEWER_READ_CHANNEL]);
+    expect(got).toEqual(expected.bytes === undefined ? [] : [expected.bytes]);
+    expect(errors).toHaveLength(expected.errors);
+  }
 });

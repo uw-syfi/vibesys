@@ -98,11 +98,23 @@ message DesktopRunRef {
   string run_id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,127}$"];
 }
 
+// Who this install of the app is to the hosts it calls: an id that stays the same for the install and
+// a name to show. The main process stamps both on every call to a host as metadata
+// (vibesys-viewer-id and vibesys-viewer-label), where they say whose check-ins a host keeps for Catch
+// me up; nothing authenticates them and they grant nothing. The label travels as an HTTP/2 header
+// value, so it is printable ASCII.
+message DesktopViewer {
+  string id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9._-]{1,128}$"];
+  string label = 2 [(buf.validate.field).string.pattern = "^[ -~]{1,128}$"];
+}
+
 message DesktopPreferences {
   uint32 version = 1 [(buf.validate.field).uint32.const = 1];
   DesktopAppearance appearance = 2 [(buf.validate.field).required = true];
   optional bool notifications_enabled = 3 [(buf.validate.field).required = true];
   repeated DesktopRunRef archived = 4 [(buf.validate.field).repeated.max_items = 100000];
+  // Absent until the app first runs a version that has one; the main process then makes and saves it.
+  optional DesktopViewer viewer = 5;
 }
 
 message DesktopRunStart {

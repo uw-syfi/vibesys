@@ -67,3 +67,11 @@ export {ThemeDocument} from './settings/theme-document.js';
 export {KeyPresses, makeNavigation, type NavigationStore} from './shell/navigation.js';
 export {type CallTarget, GatewayTransport} from './transport/gateway-transport.js';
 export {GatewayPorts, GatewayPortsFromWindow, GatewayTransportLive} from './transport/live.js';
+export {Viewer, ViewerError, ViewerFromWindow, viewerOver} from './viewer/viewer.js';
+export {
+  VIEWER_READ_CHANNEL,
+  type ViewerBridge,
+  type ViewerIdentity,
+  viewerFromBytes,
+  viewerToBytes,
+} from './viewer/viewer-codec.js';

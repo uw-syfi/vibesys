@@ -232,7 +232,47 @@ class DesktopRunRef(Message[_DesktopRunRefFields]):
         host: str
         run_id: str
 
-_DesktopPreferencesFields: TypeAlias = Literal["version", "appearance", "notifications_enabled", "archived"]
+_DesktopViewerFields: TypeAlias = Literal["id", "label"]
+
+class DesktopViewer(Message[_DesktopViewerFields]):
+    """
+    Who this install of the app is to the hosts it calls: an id that stays the same for the install and
+    a name to show. The main process stamps both on every call to a host as metadata
+    (vibesys-viewer-id and vibesys-viewer-label), where they say whose check-ins a host keeps for Catch
+    me up; nothing authenticates them and they grant nothing. The label travels as an HTTP/2 header
+    value, so it is printable ASCII.
+
+    ```proto
+    message vibesys.desktop.v1.DesktopViewer
+    ```
+
+    Attributes:
+        id:
+            ```proto
+            string id = 1;
+            ```
+        label:
+            ```proto
+            string label = 2;
+            ```
+    """
+
+    __slots__ = ("id", "label")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            id: str = "",
+            label: str = "",
+        ) -> None:
+            pass
+
+        id: str
+        label: str
+
+_DesktopPreferencesFields: TypeAlias = Literal["version", "appearance", "notifications_enabled", "archived", "viewer"]
 
 class DesktopPreferences(Message[_DesktopPreferencesFields]):
     """
@@ -257,9 +297,15 @@ class DesktopPreferences(Message[_DesktopPreferencesFields]):
             ```proto
             repeated vibesys.desktop.v1.DesktopRunRef archived = 4;
             ```
+        viewer:
+            Absent until the app first runs a version that has one; the main process then makes and saves it.
+
+            ```proto
+            optional vibesys.desktop.v1.DesktopViewer viewer = 5;
+            ```
     """
 
-    __slots__ = ("version", "appearance", "notifications_enabled", "archived")
+    __slots__ = ("version", "appearance", "notifications_enabled", "archived", "viewer")
 
     if TYPE_CHECKING:
 
@@ -270,6 +316,7 @@ class DesktopPreferences(Message[_DesktopPreferencesFields]):
             appearance: DesktopAppearance | None = None,
             notifications_enabled: bool | None = None,
             archived: list[DesktopRunRef] | None = None,
+            viewer: DesktopViewer | None = None,
         ) -> None:
             pass
 
@@ -277,6 +324,7 @@ class DesktopPreferences(Message[_DesktopPreferencesFields]):
         appearance: DesktopAppearance | None
         notifications_enabled: bool
         archived: list[DesktopRunRef]
+        viewer: DesktopViewer | None
 
 _DesktopRunStartFields: TypeAlias = Literal["harness", "options", "agents", "measure_on", "args"]
 
@@ -549,7 +597,7 @@ extend google.protobuf.FieldOptions { optional string retained_json_key = 50120 
 
 
 _DESC = file_desc(
-    b'\n!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto"n\n\x13DesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$J\x04\x08\x02\x10\x03R\x10run_transport_v2"\x9d\x02\n\x0cDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x86\x01\n\x05hosts\x18\x02 \x03(\x0b2+.vibesys.desktop.v1.DesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1aa\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12=\n\x05value\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01"\xc0\x01\n\x1bRetainedDesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12H\n\x13discarded_selection\x18\x02 \x01(\x08H\x00R\x12discardedSelectionB\x12\xc2\xbc\x18\x0erunTransportV2\x88\x01\x01B\x16\n\x14_discarded_selection"\xb5\x02\n\x14RetainedDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x8e\x01\n\x05hosts\x18\x02 \x03(\x0b23.vibesys.desktop.v1.RetainedDesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1ai\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12E\n\x05value\x18\x02 \x01(\x0b2/.vibesys.desktop.v1.RetainedDesktopHostSettingsR\x05value:\x028\x01"\xe8\x01\n\x11DesktopAppearance\x12I\n\x04mode\x18\x01 \x01(\x0e2).vibesys.desktop.v1.DesktopAppearanceModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x05light\x18\x02 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x05lightB\x0c\xbaH\t\x82\x01\x06\x18\x01\x18\x02\x18\x03\x12B\n\x04dark\x18\x03 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x04darkB\x0c\xbaH\t\x82\x01\x06\x18\x04\x18\x05\x18\x06"\x9c\x01\n\rDesktopRunRef\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12:\n\x06run_id\x18\x02 \x01(\tR\x05runIdB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$"\xad\x02\n\x12DesktopPreferences\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12M\n\nappearance\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopAppearanceR\nappearanceB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x15notifications_enabled\x18\x03 \x01(\x08H\x00R\x14notificationsEnabledB\x06\xbaH\x03\xc8\x01\x01\x88\x01\x01\x12I\n\x08archived\x18\x04 \x03(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x08archivedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06B\x18\n\x16_notifications_enabled"\xd2\x02\n\x0fDesktopRunStart\x12:\n\x07harness\x18\x01 \x01(\x0b2 .vibesys.host.v1.StartRunHarnessR\x07harness\x12B\n\x07options\x18\x02 \x01(\x0b2 .vibesys.host.v1.StartRunOptionsR\x07optionsB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x06agents\x18\x03 \x03(\x0b2\x1e.vibesys.host.v1.StartRunAgentR\x06agentsB\x08\xbaH\x05\x92\x01\x02\x10 \x12G\n\nmeasure_on\x18\x04 \x01(\x0b2 .vibesys.host.v1.StartRunMeasureR\tmeasureOnB\x06\xbaH\x03\xc8\x01\x01\x124\n\x04args\x18\x05 \x03(\tR\x04argsB \xbaH\x1d\x92\x01\x1a\x10\x80\x02"\x15r\x13(\x80 2\x0e^[^\\r\\n\\x00]*$"\x90\x03\n\x10DesktopRecentRun\x12;\n\x03run\x18\x01 \x01(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x03runB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x07project\x18\x02 \x01(\tR\x07projectB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x04task\x18\x03 \x01(\tH\x00R\x04taskB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$\x88\x01\x01\x12;\n\x0binstance_id\x18\x04 \x01(\tH\x01R\ninstanceIdB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{12}$\x88\x01\x01\x121\n\x0battached_at\x18\x05 \x01(\x01R\nattachedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x129\n\x05start\x18\x06 \x01(\x0b2#.vibesys.desktop.v1.DesktopRunStartR\x05startB\x07\n\x05_taskB\x0e\n\x0c_instance_id"d\n\x1aDesktopRetainedRecentEntry\x12\x14\n\x05after\x18\x01 \x01(\rR\x05after\x120\n\roriginal_json\x18\x02 \x01(\x0cR\x0coriginalJsonB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@"\xd0\x01\n\rDesktopRecent\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12D\n\x04runs\x18\x02 \x03(\x0b2$.vibesys.desktop.v1.DesktopRecentRunR\x04runsB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12V\n\x08retained\x18\x03 \x03(\x0b2..vibesys.desktop.v1.DesktopRetainedRecentEntryR\x08retainedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06*\xa9\x01\n\x15DesktopAppearanceMode\x12\'\n#DESKTOP_APPEARANCE_MODE_UNSPECIFIED\x10\x00\x12"\n\x1eDESKTOP_APPEARANCE_MODE_SYSTEM\x10\x01\x12!\n\x1dDESKTOP_APPEARANCE_MODE_LIGHT\x10\x02\x12 \n\x1cDESKTOP_APPEARANCE_MODE_DARK\x10\x03*\xc5\x01\n\x0cDesktopTheme\x12\x1d\n\x19DESKTOP_THEME_UNSPECIFIED\x10\x00\x12\x17\n\x13DESKTOP_THEME_PAPER\x10\x01\x12\x16\n\x12DESKTOP_THEME_MIST\x10\x02\x12\x16\n\x12DESKTOP_THEME_SAND\x10\x03\x12\x15\n\x11DESKTOP_THEME_INK\x10\x04\x12\x1a\n\x16DESKTOP_THEME_MIDNIGHT\x10\x05\x12\x1a\n\x16DESKTOP_THEME_TERMINAL\x10\x06:K\n\x11retained_json_key\x18\xc8\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x0fretainedJsonKeyBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto"n\n\x13DesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$J\x04\x08\x02\x10\x03R\x10run_transport_v2"\x9d\x02\n\x0cDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x86\x01\n\x05hosts\x18\x02 \x03(\x0b2+.vibesys.desktop.v1.DesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1aa\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12=\n\x05value\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01"\xc0\x01\n\x1bRetainedDesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12H\n\x13discarded_selection\x18\x02 \x01(\x08H\x00R\x12discardedSelectionB\x12\xc2\xbc\x18\x0erunTransportV2\x88\x01\x01B\x16\n\x14_discarded_selection"\xb5\x02\n\x14RetainedDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x8e\x01\n\x05hosts\x18\x02 \x03(\x0b23.vibesys.desktop.v1.RetainedDesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1ai\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12E\n\x05value\x18\x02 \x01(\x0b2/.vibesys.desktop.v1.RetainedDesktopHostSettingsR\x05value:\x028\x01"\xe8\x01\n\x11DesktopAppearance\x12I\n\x04mode\x18\x01 \x01(\x0e2).vibesys.desktop.v1.DesktopAppearanceModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x05light\x18\x02 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x05lightB\x0c\xbaH\t\x82\x01\x06\x18\x01\x18\x02\x18\x03\x12B\n\x04dark\x18\x03 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x04darkB\x0c\xbaH\t\x82\x01\x06\x18\x04\x18\x05\x18\x06"\x9c\x01\n\rDesktopRunRef\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12:\n\x06run_id\x18\x02 \x01(\tR\x05runIdB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$"l\n\rDesktopViewer\x12.\n\x02id\x18\x01 \x01(\tR\x02idB\x1e\xbaH\x1br\x192\x17^[A-Za-z0-9._-]{1,128}$\x12+\n\x05label\x18\x02 \x01(\tR\x05labelB\x15\xbaH\x12r\x102\x0e^[ -~]{1,128}$"\xf8\x02\n\x12DesktopPreferences\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12M\n\nappearance\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopAppearanceR\nappearanceB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x15notifications_enabled\x18\x03 \x01(\x08H\x00R\x14notificationsEnabledB\x06\xbaH\x03\xc8\x01\x01\x88\x01\x01\x12I\n\x08archived\x18\x04 \x03(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x08archivedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12>\n\x06viewer\x18\x05 \x01(\x0b2!.vibesys.desktop.v1.DesktopViewerH\x01R\x06viewer\x88\x01\x01B\x18\n\x16_notifications_enabledB\t\n\x07_viewer"\xd2\x02\n\x0fDesktopRunStart\x12:\n\x07harness\x18\x01 \x01(\x0b2 .vibesys.host.v1.StartRunHarnessR\x07harness\x12B\n\x07options\x18\x02 \x01(\x0b2 .vibesys.host.v1.StartRunOptionsR\x07optionsB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x06agents\x18\x03 \x03(\x0b2\x1e.vibesys.host.v1.StartRunAgentR\x06agentsB\x08\xbaH\x05\x92\x01\x02\x10 \x12G\n\nmeasure_on\x18\x04 \x01(\x0b2 .vibesys.host.v1.StartRunMeasureR\tmeasureOnB\x06\xbaH\x03\xc8\x01\x01\x124\n\x04args\x18\x05 \x03(\tR\x04argsB \xbaH\x1d\x92\x01\x1a\x10\x80\x02"\x15r\x13(\x80 2\x0e^[^\\r\\n\\x00]*$"\x90\x03\n\x10DesktopRecentRun\x12;\n\x03run\x18\x01 \x01(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x03runB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x07project\x18\x02 \x01(\tR\x07projectB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x04task\x18\x03 \x01(\tH\x00R\x04taskB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$\x88\x01\x01\x12;\n\x0binstance_id\x18\x04 \x01(\tH\x01R\ninstanceIdB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{12}$\x88\x01\x01\x121\n\x0battached_at\x18\x05 \x01(\x01R\nattachedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x129\n\x05start\x18\x06 \x01(\x0b2#.vibesys.desktop.v1.DesktopRunStartR\x05startB\x07\n\x05_taskB\x0e\n\x0c_instance_id"d\n\x1aDesktopRetainedRecentEntry\x12\x14\n\x05after\x18\x01 \x01(\rR\x05after\x120\n\roriginal_json\x18\x02 \x01(\x0cR\x0coriginalJsonB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@"\xd0\x01\n\rDesktopRecent\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12D\n\x04runs\x18\x02 \x03(\x0b2$.vibesys.desktop.v1.DesktopRecentRunR\x04runsB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12V\n\x08retained\x18\x03 \x03(\x0b2..vibesys.desktop.v1.DesktopRetainedRecentEntryR\x08retainedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06*\xa9\x01\n\x15DesktopAppearanceMode\x12\'\n#DESKTOP_APPEARANCE_MODE_UNSPECIFIED\x10\x00\x12"\n\x1eDESKTOP_APPEARANCE_MODE_SYSTEM\x10\x01\x12!\n\x1dDESKTOP_APPEARANCE_MODE_LIGHT\x10\x02\x12 \n\x1cDESKTOP_APPEARANCE_MODE_DARK\x10\x03*\xc5\x01\n\x0cDesktopTheme\x12\x1d\n\x19DESKTOP_THEME_UNSPECIFIED\x10\x00\x12\x17\n\x13DESKTOP_THEME_PAPER\x10\x01\x12\x16\n\x12DESKTOP_THEME_MIST\x10\x02\x12\x16\n\x12DESKTOP_THEME_SAND\x10\x03\x12\x15\n\x11DESKTOP_THEME_INK\x10\x04\x12\x1a\n\x16DESKTOP_THEME_MIDNIGHT\x10\x05\x12\x1a\n\x16DESKTOP_THEME_TERMINAL\x10\x06:K\n\x11retained_json_key\x18\xc8\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x0fretainedJsonKeyBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
         descriptor_pb.desc(),
@@ -562,6 +610,7 @@ _DESC = file_desc(
         "RetainedDesktopHosts": RetainedDesktopHosts,
         "DesktopAppearance": DesktopAppearance,
         "DesktopRunRef": DesktopRunRef,
+        "DesktopViewer": DesktopViewer,
         "DesktopPreferences": DesktopPreferences,
         "DesktopRunStart": DesktopRunStart,
         "DesktopRecentRun": DesktopRecentRun,
