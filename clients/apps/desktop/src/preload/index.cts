@@ -102,11 +102,37 @@ function createPreferencesPreload(ipc: PreferencesInvoker): PreferencesPreloadBr
   };
 }
 
+/** The channel main serves for the viewer; it must equal `VIEWER_READ_CHANNEL` in `core/viewer/viewer-codec.ts`, which a test holds. */
+const VIEWER_PRELOAD_CHANNEL = 'vibesys:viewer:read';
+
+/** What the preload exposes for the viewer; `ViewerBridge` in `core/viewer/viewer-codec.ts` is the page's view of it. */
+interface ViewerPreloadBridge {
+  read(done: (bytes: Uint8Array) => void, failed: (error: string) => void): void;
+}
+
+/** The read ends in exactly one callback: the reply is bytes, or it is a failure. */
+function createViewerPreload(ipc: PreferencesInvoker): ViewerPreloadBridge {
+  const text = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  return {
+    read(done, failed) {
+      ipc.invoke(VIEWER_PRELOAD_CHANNEL).then(
+        reply =>
+          reply instanceof Uint8Array
+            ? done(reply)
+            : failed('the viewer reply must be protobuf bytes'),
+        error => failed(text(error)),
+      );
+    },
+  };
+}
+
 module.exports = {
   createGatewayPreload,
   GATEWAY_PRELOAD_CHANNEL,
   createPreferencesPreload,
   PREFERENCES_PRELOAD_CHANNELS,
+  createViewerPreload,
+  VIEWER_PRELOAD_CHANNEL,
 };
 
 // Electron's sandboxed preload has no renderer process under test, so the factory above is what a
@@ -116,6 +142,10 @@ if (process.type === 'renderer') {
   electron.contextBridge.exposeInMainWorld(
     'vibesysPreferences',
     createPreferencesPreload(electron.ipcRenderer),
+  );
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysViewer',
+    createViewerPreload(electron.ipcRenderer),
   );
   electron.contextBridge.exposeInMainWorld(
     'vibesysGateway',

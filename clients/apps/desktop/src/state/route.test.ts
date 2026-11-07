@@ -18,6 +18,7 @@ const action: fc.Arbitrary<RouteAction> = fc.oneof(
       'cost' as const,
       'handoffs' as const,
       'ideas' as const,
+      'catch-up' as const,
     ),
   }),
   fc.record({type: fc.constant('pick-agent' as const), agentId: fc.constantFrom('a', 'b')}),

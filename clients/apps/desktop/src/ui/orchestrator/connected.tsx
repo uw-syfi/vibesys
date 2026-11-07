@@ -179,6 +179,11 @@ export function ConnectedApp(props: {
   );
   const sessionOf = (host: string): HostSession | undefined =>
     hosts.find(candidate => candidate.key === host)?.session;
+  /** Runs what `act` makes on the host's session, if the window has one for it. */
+  const on = (host: string, act: (session: HostSession) => Effect.Effect<void>): void => {
+    const session = sessionOf(host);
+    if (session !== undefined) dispatch(act(session), () => undefined);
+  };
   const issue = (host: string, intent: Intent, kept: (issued: Issued) => void): void => {
     const session = sessionOf(host);
     if (session !== undefined) dispatch(session.commands.submit(intent), id => kept({host, id}));
@@ -203,16 +208,11 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
-    loadEarlier: (host, agentId, before) => {
-      const session = sessionOf(host);
-      if (session !== undefined)
-        dispatch(session.history.loadEarlier(agentId, before), () => undefined);
-    },
-    expand: (host, agentId, ordinal) => {
-      const session = sessionOf(host);
-      if (session !== undefined)
-        dispatch(session.history.expand(agentId, ordinal), () => undefined);
-    },
+    catchUp: (host, runId) => on(host, session => session.catchUp.press(runId)),
+    loadEarlier: (host, agentId, before) =>
+      on(host, session => session.history.loadEarlier(agentId, before)),
+    expand: (host, agentId, ordinal) =>
+      on(host, session => session.history.expand(agentId, ordinal)),
   };
   if (!AsyncResult.isSuccess(clock))
     return (
@@ -228,10 +228,7 @@ export function ConnectedApp(props: {
       route={route}
       fleet={fleet}
       go={go}
-      retryCost={(host, runId) => {
-        const session = sessionOf(host);
-        if (session !== undefined) dispatch(session.costs.retry(runId), () => undefined);
-      }}
+      retryCost={(host, runId) => on(host, session => session.costs.retry(runId))}
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;

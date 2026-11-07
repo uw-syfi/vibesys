@@ -10,6 +10,7 @@ import type * as Scope from 'effect/Scope';
 import type {HostKey, HostModel} from '../state/index.js';
 import {type AgentHistory, makeAgentHistory} from './agent-history.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
+import {type CatchUp, makeCatchUp} from './catch-up.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
@@ -31,6 +32,8 @@ export interface HostSession {
   readonly history: AgentHistory;
   readonly costs: CostFeed;
   readonly commands: Commands;
+  /** The press of Catch me up, over `commands`. */
+  readonly catchUp: CatchUp;
 }
 
 export const makeHostSession = Effect.fn('HostSession.make')(function* (
@@ -45,6 +48,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const store = yield* makeHostStore;
   const ambient = yield* Effect.context<never>();
   const parts = {client, connection, store, ambient};
+  const commands = yield* makeCommands(parts);
   return {
     connection,
     model: store.atom,
@@ -52,6 +56,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     agents: yield* makeAgentView(parts),
     history: yield* makeAgentHistory(parts),
     costs: yield* makeCostFeed(parts),
-    commands: yield* makeCommands(parts),
+    commands,
+    catchUp: yield* makeCatchUp(commands),
   };
 });

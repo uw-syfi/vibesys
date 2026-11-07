@@ -35,6 +35,8 @@ export function ReportScreen(props: {
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
+  /** Press Catch me up on the run and open its page. */
+  readonly catchUp: () => void;
   readonly goRuns: () => void;
   readonly openAgents: () => void;
   readonly openCost: () => void;
@@ -55,6 +57,7 @@ export function ReportScreen(props: {
         stopProgress={props.stopProgress}
         stop={props.stop}
         retryStop={props.retryStop}
+        catchUp={props.catchUp}
         goRuns={props.goRuns}
       />
       <LeadSummary summary={report.summary} nowMs={props.nowMs} />

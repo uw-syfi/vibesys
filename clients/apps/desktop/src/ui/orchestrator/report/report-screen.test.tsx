@@ -85,7 +85,7 @@ function render(
   world: World,
   options: {freshness?: Freshness; costFeed?: CostFeedSnapshot; view?: RunView} = {},
 ) {
-  const probe = {shown: [] as RunView[], stops: 0, runs: 0};
+  const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
   const screen = mount(
     <RunScreen
       state={stateOf(world)}
@@ -104,6 +104,9 @@ function render(
         probe.stops += 1;
       }}
       retryStop={() => undefined}
+      catchUp={() => {
+        probe.catchUps += 1;
+      }}
       goRuns={() => {
         probe.runs += 1;
       }}
@@ -122,6 +125,23 @@ const cardText = (root: HTMLElement, heading: string): string =>
 
 const cards = (root: HTMLElement): string[] =>
   [...root.querySelectorAll('section.vs-card > h2')].map(heading => heading.textContent ?? '');
+
+describe('the header of a report', () => {
+  it('has Catch me up beside Stop while the run lives, and the press goes to the run', () => {
+    const {screen, probe} = render({});
+    screen.press(screen.control('Catch me up'));
+    expect(probe.catchUps).toBe(1);
+    expect(screen.controls('Stop run')).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('keeps Catch me up when the run is over, which has no Stop', () => {
+    const {screen} = render({live: false});
+    expect(screen.controls('Catch me up')).toHaveLength(1);
+    expect(screen.controls('Stop run')).toHaveLength(0);
+    screen.unmount();
+  });
+});
 
 describe('the report of a run with two objectives and a declared bound', () => {
   it('shows each section the data has, and none of an agent’s turns', () => {

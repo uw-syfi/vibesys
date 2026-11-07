@@ -54,16 +54,21 @@ type Receive = (message: Uint8Array) => void;
 const unavailable = (message: string): GrpcFailed =>
   new GrpcFailed({code: GrpcCode.UNAVAILABLE, message});
 
+/** The metadata every call of a session carries: gRPC metadata is HTTP/2 headers, in lowercase. */
+export type CallMetadata = Readonly<Record<string, string>>;
+
 /** Start the HTTP/2 stream of one call, or say why it cannot start. */
 const startStream = (
   http2: ClientHttp2Session,
   method: string,
   frame: Uint8Array,
+  metadata: CallMetadata,
 ): Stream | GrpcFailed => {
   if (!METHOD.test(method))
     return new GrpcFailed({code: GrpcCode.INTERNAL, message: `invalid gRPC method: ${method}`});
   try {
     const stream = http2.request({
+      ...metadata,
       ':method': 'POST',
       ':path': method,
       'content-type': 'application/grpc',
@@ -146,10 +151,16 @@ interface Tally {
   replied: boolean;
 }
 
-/** The send of one call over `http2`; its progress is counted in `tally`. */
+/** What a call needs of its session: the connection, what the peer was heard to send, and the metadata of every call. */
+interface Line {
+  readonly http2: ClientHttp2Session;
+  readonly heard: () => void;
+  readonly metadata: CallMetadata;
+}
+
+/** The send of one call over `line`; its progress is counted in `tally`. */
 const startCall = (
-  http2: ClientHttp2Session,
-  heard: () => void,
+  {http2, heard, metadata}: Line,
   tally: Tally,
   method: string,
   bytes: Uint8Array,
@@ -158,7 +169,7 @@ const startCall = (
   Effect.callback<void, GrpcFailed>(resume => {
     const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
     if (isFault(frame)) return resume(Effect.fail(new GrpcFailed(frame)));
-    const stream = startStream(http2, method, frame);
+    const stream = startStream(http2, method, frame, metadata);
     if (stream instanceof GrpcFailed) return resume(Effect.fail(stream));
     let settled = false;
     watchStream(
@@ -210,13 +221,13 @@ const stalled = (tally: Tally, watch: Watch): Effect.Effect<never, GrpcFailed> =
     }
   });
 
-/** One call over `http2`: send `bytes`, then `watchStream`. Interrupting resets the stream. */
+/** One call over `line`: send `bytes`, then `watchStream`. Interrupting resets the stream. */
 const callOver =
-  (http2: ClientHttp2Session, heard: () => void): GatewaySession['call'] =>
+  (line: Line): GatewaySession['call'] =>
   (method, bytes, receive, watch) =>
     Effect.suspend(() => {
       const tally: Tally = {heard: 0, replied: false};
-      const run = startCall(http2, heard, tally, method, bytes, receive);
+      const run = startCall(line, tally, method, bytes, receive);
       return watch === undefined ? run : Effect.raceFirst(run, stalled(tally, watch));
     });
 
@@ -245,8 +256,14 @@ const unaryOver =
       );
     });
 
-/** Open the session on `duplex`; it is destroyed with `scope`. */
-export const openSession = (duplex: Duplex): Effect.Effect<GatewaySession, never, Scope.Scope> =>
+/**
+ * Open the session on `duplex`; it is destroyed with `scope`. Every call of the session carries
+ * `metadata`, which the host reads (who is calling: `state/viewer.ts`).
+ */
+export const openSession = (
+  duplex: Duplex,
+  metadata: CallMetadata = {},
+): Effect.Effect<GatewaySession, never, Scope.Scope> =>
   Effect.gen(function* () {
     const lost = Deferred.makeUnsafe<void>();
     const markLost = (): void => {
@@ -268,8 +285,12 @@ export const openSession = (duplex: Duplex): Effect.Effect<GatewaySession, never
         }),
     );
     let heard = 0;
-    const call = callOver(http2, () => {
-      heard += 1;
+    const call = callOver({
+      http2,
+      heard: () => {
+        heard += 1;
+      },
+      metadata,
     });
     return {
       call,
