@@ -2,12 +2,12 @@
  * The fleet: every run of every connected host as one row each, live runs first and then history,
  * with the filters of the Runs screen applied. A plain fold over what the hosts have said; it reads
  * no clock and starts no work, and it derives nothing the host serves: the report a run is summed up
- * by, the agents working, the head of each objective, a percent of a bound, a cost and a time are
+ * by, the agents working, the best on each objective, a percent of a bound, a cost and a time are
  * shown as sent (the run's `RunSummary`), and absent exactly when the host sent none. The screen
  * formats.
  */
 import {
-  type ObjectiveHead,
+  type ObjectiveStanding,
   type Run,
   RunStatus,
   type RunSummary,
@@ -55,23 +55,27 @@ export interface FleetHostRef {
   readonly staleForMs: number | null;
 }
 
-/** The head's result on one objective, with the share of the declared bound when the host served one. */
+/**
+ * The best the run measured on one objective, with the share of the declared bound when the host served
+ * one. It is not the head's value: the head is the candidate the run last promoted, which on an
+ * objective it was not promoted for need not be the best.
+ */
 export interface FleetObjective {
   readonly name: string;
-  /** The head's value, or null when the head has none for this objective. */
+  /** The best value measured, or null when the run measured nothing on this objective. */
   readonly value: number | null;
   /** The unit the agents declared the bound in; empty when no bound was declared. */
   readonly unit: string;
-  /** How close the head is to the bound, in percent, as the host served it; null when it did not. */
+  /** How close the best is to the bound, in percent, as the host served it; null when it did not. */
   readonly percentOfBound: number | null;
 }
 
-/** The host's head of one objective as a row carries it: the same four facts, absent as null. */
-const objectiveOf = (head: ObjectiveHead): FleetObjective => ({
-  name: head.name,
-  value: head.value ?? null,
-  unit: head.unit,
-  percentOfBound: head.percentOfBound ?? null,
+/** Where the host says the run stands on one objective, as a row carries its best: absent as null. */
+const objectiveOf = (standing: ObjectiveStanding): FleetObjective => ({
+  name: standing.name,
+  value: standing.bestValue ?? null,
+  unit: standing.unit,
+  percentOfBound: standing.bestPercentOfBound ?? null,
 });
 
 export interface FleetRow {
@@ -88,7 +92,7 @@ export interface FleetRow {
   readonly startedMs: number | null;
   /** When the run left RUNNING; null while it is live. */
   readonly endedMs: number | null;
-  /** The head's result on each objective, in the order the host's measurement names them. */
+  /** The best the run measured on each objective, in the order the host serves them. */
   readonly objectives: readonly FleetObjective[];
   /** What every turn has cost so far, or null when no turn reported a cost. */
   readonly costUsd: number | null;
@@ -214,11 +218,11 @@ export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter)
  */
 export function measuredObjectives(
   search: SearchState | undefined,
-  heads: readonly ObjectiveHead[],
+  standings: readonly ObjectiveStanding[],
 ): readonly ObjectiveReport[] {
   return search === undefined
     ? []
-    : objectiveReports(search, heads).filter(objective => objective.points.length > 0);
+    : objectiveReports(search, standings).filter(objective => objective.points.length > 0);
 }
 
 /**

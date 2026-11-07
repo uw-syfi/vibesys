@@ -141,9 +141,13 @@ function stateOf(
                       },
                     ],
                     headValue: run.result.value,
+                    bestValue: run.result.value,
                     ...(run.result.percent === undefined
                       ? {}
-                      : {percentOfBound: run.result.percent}),
+                      : {
+                          percentOfBound: run.result.percent,
+                          bestPercentOfBound: run.result.percent,
+                        }),
                   },
                 ],
               }),
@@ -657,7 +661,7 @@ describe('the candidates cell of the fleet screen', () => {
     screen.unmount();
   });
 
-  it('is empty for a run of a host that serves no series, though it shows the head and the bound', () => {
+  it('is empty for a run of a host that serves no series, though it shows the best and the bound', () => {
     const {screen} = open([hostA]);
     const row = rowOf(screen, 'queue-rs');
     expect(cell(row, 'best').textContent).toBe('2,310 tok/s · 71%');

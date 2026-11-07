@@ -7,7 +7,7 @@ import {
   AgentStatus,
   Harness,
   MessageSchema,
-  ObjectiveHeadSchema,
+  ObjectiveStandingSchema,
   ReportKind,
   ReportSchema,
   ReportScope,
@@ -146,11 +146,16 @@ function summaryOf(runId: string, spec: SummarySpec): RunSummary {
           }),
         }),
     objectives: spec.objectives.map(objective =>
-      create(ObjectiveHeadSchema, {
+      create(ObjectiveStandingSchema, {
         name: objective.name,
         unit: objective.unit,
-        ...(objective.value === undefined ? {} : {value: objective.value}),
-        ...(objective.percent === undefined ? {} : {percentOfBound: objective.percent}),
+        // The head and the best are two things, and a row shows the best.
+        ...(objective.value === undefined
+          ? {}
+          : {bestValue: objective.value, headValue: objective.value / 2}),
+        ...(objective.percent === undefined
+          ? {}
+          : {bestPercentOfBound: objective.percent, headPercentOfBound: objective.percent / 2}),
       }),
     ),
   });
@@ -386,6 +391,7 @@ describe('the fleet of runs', () => {
           expect(row.lastReportMs).toBe(
             at === undefined ? null : Number(at.seconds) * 1000 + Math.floor(at.nanos / 1e6),
           );
+          // A row shows the best the run measured and its share of the bound, never the head's.
           expect(
             row.objectives.map(({name, value, unit, percentOfBound}) => ({
               name,
@@ -394,11 +400,11 @@ describe('the fleet of runs', () => {
               percentOfBound: percentOfBound ?? undefined,
             })),
           ).toEqual(
-            (summary?.objectives ?? []).map(({name, value, unit, percentOfBound}) => ({
+            (summary?.objectives ?? []).map(({name, bestValue, unit, bestPercentOfBound}) => ({
               name,
-              value,
+              value: bestValue,
               unit,
-              percentOfBound,
+              percentOfBound: bestPercentOfBound,
             })),
           );
         }

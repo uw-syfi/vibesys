@@ -5,7 +5,7 @@ import {
   AgentRole,
   Direction,
   MessageSchema,
-  ObjectiveHeadSchema,
+  ObjectiveStandingSchema,
   ReportKind,
   ReportScope,
   RoleAgentsSchema,
@@ -93,7 +93,13 @@ describe('the objectives of a report', () => {
                 },
               ],
             }),
-            [create(ObjectiveHeadSchema, {name: 'tok_s', value: headValue, percentOfBound})],
+            [
+              create(ObjectiveStandingSchema, {
+                name: 'tok_s',
+                headValue,
+                headPercentOfBound: percentOfBound,
+              }),
+            ],
           );
           expect(report?.headValue).toBe(headValue);
           expect(report?.percentOfBound).toBe(percentOfBound);
@@ -153,7 +159,7 @@ describe('the objectives of a report', () => {
           },
         ],
       }),
-      [create(ObjectiveHeadSchema, {name: 'a', value: 4})],
+      [create(ObjectiveStandingSchema, {name: 'a', headValue: 4})],
     );
     expect(bare?.headValue).toBe(4);
     expect([measured?.name, bare?.name, bare?.points.length, bare?.better]).toEqual([

@@ -143,10 +143,9 @@ message RunSummary {
   uint32 agents_total = 4;
   // The same by type of agent, in the order of the role enum; a type with no agent is left out.
   repeated RoleAgents roles = 5 [(buf.validate.field).repeated.max_items = 16];
-  // The head's value on each objective, in the order of the task's metrics, then the objectives that
-  // have a declared bound and no measurement. The head is the candidate the run last promoted, which is
-  // not the best the run measured on every objective: that is ObjectiveBounds.best_value.
-  repeated ObjectiveHead objectives = 6 [(buf.validate.field).repeated.max_items = 64];
+  // Where the run stands on each objective, in the order of the task's metrics, then the objectives that
+  // have a declared bound and no measurement.
+  repeated ObjectiveStanding objectives = 6 [(buf.validate.field).repeated.max_items = 64];
 }
 
 // RoleAgents counts the agents of one type in a run.
@@ -162,20 +161,29 @@ message RoleAgents {
   uint32 working = 3;
 }
 
-// ObjectiveHead is the run's head on one objective: the candidate the run last promoted, and not the
-// best the run measured on it.
-message ObjectiveHead {
+// ObjectiveStanding is where a run stands on one objective: its head and its best. They are two things.
+// The head is the candidate the run last promoted, and for a task of several objectives it is the best of
+// one of them, so on the others the head is not the best the run measured. Neither is worked out here:
+// both are read from what the run's search state already says (ObjectiveBounds, ObjectiveSeries).
+message ObjectiveStanding {
   string name = 1 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 256
   }];
   // The head's value, absent when the head has none for the objective.
-  optional double value = 2 [(buf.validate.field).double.finite = true];
-  // What the value is counted in, as the agents that declared the bound said; empty with no bound.
+  optional double head_value = 2 [(buf.validate.field).double.finite = true];
+  // What the values are counted in, as the agents that declared the bound said; empty with no bound.
   string unit = 3 [(buf.validate.field).string.max_bytes = 256];
   // How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
   // no bound or no head value.
-  optional double percent_of_bound = 4 [(buf.validate.field).double.finite = true];
+  optional double head_percent_of_bound = 4 [(buf.validate.field).double.finite = true];
+  // The best the run measured on the objective, in the objective's direction: the value of the newest
+  // point of its series that set a best, which is ObjectiveBounds.best_value when the run has a bound.
+  // Absent when the run measured nothing on the objective.
+  optional double best_value = 5 [(buf.validate.field).double.finite = true];
+  // How close best_value is to the standing bound, in percent, as ObjectiveBounds says it
+  // (best_percent_of_bound); absent with no bound or no best.
+  optional double best_percent_of_bound = 6 [(buf.validate.field).double.finite = true];
 }
 
 message WatchRunsResponse {

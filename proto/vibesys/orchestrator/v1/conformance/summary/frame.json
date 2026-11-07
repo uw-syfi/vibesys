@@ -22,8 +22,8 @@
       {"role": "AGENT_ROLE_WORKER", "total": 2, "working": 1}
     ],
     "objectives": [
-      {"name": "latency", "value": 12.5, "unit": "ms", "percentOfBound": 80},
-      {"name": "tput", "value": 90},
+      {"name": "latency", "headValue": 12.5, "unit": "ms", "headPercentOfBound": 80, "bestValue": 9.5, "bestPercentOfBound": 105},
+      {"name": "tput", "headValue": 60, "bestValue": 90},
       {"name": "memory"}
     ]
   }

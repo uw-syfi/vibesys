@@ -466,10 +466,9 @@ type RunSummary struct {
 	AgentsTotal uint32 `protobuf:"varint,4,opt,name=agents_total,json=agentsTotal,proto3" json:"agents_total,omitempty"`
 	// The same by type of agent, in the order of the role enum; a type with no agent is left out.
 	Roles []*RoleAgents `protobuf:"bytes,5,rep,name=roles,proto3" json:"roles,omitempty"`
-	// The head's value on each objective, in the order of the task's metrics, then the objectives that
-	// have a declared bound and no measurement. The head is the candidate the run last promoted, which is
-	// not the best the run measured on every objective: that is ObjectiveBounds.best_value.
-	Objectives    []*ObjectiveHead `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
+	// Where the run stands on each objective, in the order of the task's metrics, then the objectives that
+	// have a declared bound and no measurement.
+	Objectives    []*ObjectiveStanding `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -539,7 +538,7 @@ func (x *RunSummary) GetRoles() []*RoleAgents {
 	return nil
 }
 
-func (x *RunSummary) GetObjectives() []*ObjectiveHead {
+func (x *RunSummary) GetObjectives() []*ObjectiveStanding {
 	if x != nil {
 		return x.Objectives
 	}
@@ -607,36 +606,45 @@ func (x *RoleAgents) GetWorking() uint32 {
 	return 0
 }
 
-// ObjectiveHead is the run's head on one objective: the candidate the run last promoted, and not the
-// best the run measured on it.
-type ObjectiveHead struct {
+// ObjectiveStanding is where a run stands on one objective: its head and its best. They are two things.
+// The head is the candidate the run last promoted, and for a task of several objectives it is the best of
+// one of them, so on the others the head is not the best the run measured. Neither is worked out here:
+// both are read from what the run's search state already says (ObjectiveBounds, ObjectiveSeries).
+type ObjectiveStanding struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The head's value, absent when the head has none for the objective.
-	Value *float64 `protobuf:"fixed64,2,opt,name=value,proto3,oneof" json:"value,omitempty"`
-	// What the value is counted in, as the agents that declared the bound said; empty with no bound.
+	HeadValue *float64 `protobuf:"fixed64,2,opt,name=head_value,json=headValue,proto3,oneof" json:"head_value,omitempty"`
+	// What the values are counted in, as the agents that declared the bound said; empty with no bound.
 	Unit string `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
 	// How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
 	// no bound or no head value.
-	PercentOfBound *float64 `protobuf:"fixed64,4,opt,name=percent_of_bound,json=percentOfBound,proto3,oneof" json:"percent_of_bound,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	HeadPercentOfBound *float64 `protobuf:"fixed64,4,opt,name=head_percent_of_bound,json=headPercentOfBound,proto3,oneof" json:"head_percent_of_bound,omitempty"`
+	// The best the run measured on the objective, in the objective's direction: the value of the newest
+	// point of its series that set a best, which is ObjectiveBounds.best_value when the run has a bound.
+	// Absent when the run measured nothing on the objective.
+	BestValue *float64 `protobuf:"fixed64,5,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
+	// How close best_value is to the standing bound, in percent, as ObjectiveBounds says it
+	// (best_percent_of_bound); absent with no bound or no best.
+	BestPercentOfBound *float64 `protobuf:"fixed64,6,opt,name=best_percent_of_bound,json=bestPercentOfBound,proto3,oneof" json:"best_percent_of_bound,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
-func (x *ObjectiveHead) Reset() {
-	*x = ObjectiveHead{}
+func (x *ObjectiveStanding) Reset() {
+	*x = ObjectiveStanding{}
 	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ObjectiveHead) String() string {
+func (x *ObjectiveStanding) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ObjectiveHead) ProtoMessage() {}
+func (*ObjectiveStanding) ProtoMessage() {}
 
-func (x *ObjectiveHead) ProtoReflect() protoreflect.Message {
+func (x *ObjectiveStanding) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_orchestrator_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -648,35 +656,49 @@ func (x *ObjectiveHead) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ObjectiveHead.ProtoReflect.Descriptor instead.
-func (*ObjectiveHead) Descriptor() ([]byte, []int) {
+// Deprecated: Use ObjectiveStanding.ProtoReflect.Descriptor instead.
+func (*ObjectiveStanding) Descriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ObjectiveHead) GetName() string {
+func (x *ObjectiveStanding) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *ObjectiveHead) GetValue() float64 {
-	if x != nil && x.Value != nil {
-		return *x.Value
+func (x *ObjectiveStanding) GetHeadValue() float64 {
+	if x != nil && x.HeadValue != nil {
+		return *x.HeadValue
 	}
 	return 0
 }
 
-func (x *ObjectiveHead) GetUnit() string {
+func (x *ObjectiveStanding) GetUnit() string {
 	if x != nil {
 		return x.Unit
 	}
 	return ""
 }
 
-func (x *ObjectiveHead) GetPercentOfBound() float64 {
-	if x != nil && x.PercentOfBound != nil {
-		return *x.PercentOfBound
+func (x *ObjectiveStanding) GetHeadPercentOfBound() float64 {
+	if x != nil && x.HeadPercentOfBound != nil {
+		return *x.HeadPercentOfBound
+	}
+	return 0
+}
+
+func (x *ObjectiveStanding) GetBestValue() float64 {
+	if x != nil && x.BestValue != nil {
+		return *x.BestValue
+	}
+	return 0
+}
+
+func (x *ObjectiveStanding) GetBestPercentOfBound() float64 {
+	if x != nil && x.BestPercentOfBound != nil {
+		return *x.BestPercentOfBound
 	}
 	return 0
 }
@@ -1646,16 +1668,16 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\tcheck_ins\x18\b \x03(\v2 .vibesys.orchestrator.v1.CheckInR\bcheckIns\x12A\n" +
 	"\tsummaries\x18\t \x03(\v2#.vibesys.orchestrator.v1.RunSummaryR\tsummaries\x12\"\n" +
 	"\rruns_left_out\x18\n" +
-	" \x01(\rR\vrunsLeftOut\"\xb6\x05\n" +
+	" \x01(\rR\vrunsLeftOut\"\xba\x05\n" +
 	"\n" +
 	"RunSummary\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x128\n" +
 	"\x06report\x18\x02 \x01(\v2 .vibesys.orchestrator.v1.MessageR\x06report\x12%\n" +
 	"\x0eagents_working\x18\x03 \x01(\rR\ragentsWorking\x12!\n" +
 	"\fagents_total\x18\x04 \x01(\rR\vagentsTotal\x12C\n" +
-	"\x05roles\x18\x05 \x03(\v2#.vibesys.orchestrator.v1.RoleAgentsB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12P\n" +
+	"\x05roles\x18\x05 \x03(\v2#.vibesys.orchestrator.v1.RoleAgentsB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05roles\x12T\n" +
 	"\n" +
-	"objectives\x18\x06 \x03(\v2&.vibesys.orchestrator.v1.ObjectiveHeadB\b\xbaH\x05\x92\x01\x02\x10@R\n" +
+	"objectives\x18\x06 \x03(\v2*.vibesys.orchestrator.v1.ObjectiveStandingB\b\xbaH\x05\x92\x01\x02\x10@R\n" +
 	"objectives:\xec\x02\xbaH\xe8\x02\x1a\xec\x01\n" +
 	" run_summary.report_is_of_the_run\x12Rthe report is the whole-run report of this run, never one that answered a check-in\x1at!has(this.report) || (this.report.run_id == this.run_id && has(this.report.report) && this.report.report.scope != 2)\x1aw\n" +
 	" run_summary.working_within_total\x12)agents_working cannot exceed agents_total\x1a(this.agents_working <= this.agents_total\"\xe0\x01\n" +
@@ -1664,15 +1686,21 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\x04role\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04role\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\x12\x18\n" +
 	"\aworking\x18\x03 \x01(\rR\aworking:`\xbaH]\x1a[\n" +
-	" role_agents.working_within_total\x12\x1bworking cannot exceed total\x1a\x1athis.working <= this.total\"\xc8\x01\n" +
-	"\rObjectiveHead\x12\x1e\n" +
+	" role_agents.working_within_total\x12\x1bworking cannot exceed total\x1a\x1athis.working <= this.total\"\xff\x02\n" +
+	"\x11ObjectiveStanding\x12\x1e\n" +
 	"\x04name\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04name\x12\"\n" +
-	"\x05value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\x05value\x88\x01\x01\x12\x1c\n" +
-	"\x04unit\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x04unit\x126\n" +
-	"\x10percent_of_bound\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\x0epercentOfBound\x88\x01\x01B\b\n" +
-	"\x06_valueB\x13\n" +
-	"\x11_percent_of_bound\"\xa6\x02\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04name\x12+\n" +
+	"\n" +
+	"head_value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12\x1c\n" +
+	"\x04unit\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x04unit\x12?\n" +
+	"\x15head_percent_of_bound\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\x12headPercentOfBound\x88\x01\x01\x12+\n" +
+	"\n" +
+	"best_value\x18\x05 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x02R\tbestValue\x88\x01\x01\x12?\n" +
+	"\x15best_percent_of_bound\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x03R\x12bestPercentOfBound\x88\x01\x01B\r\n" +
+	"\v_head_valueB\x18\n" +
+	"\x16_head_percent_of_boundB\r\n" +
+	"\v_best_valueB\x18\n" +
+	"\x16_best_percent_of_bound\"\xa6\x02\n" +
 	"\x11WatchRunsResponse\x12C\n" +
 	"\bsnapshot\x18\x01 \x01(\v2%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\bsnapshot\x12<\n" +
 	"\x06change\x18\x02 \x01(\v2\".vibesys.orchestrator.v1.RunChangeH\x00R\x06change\x12>\n" +
@@ -1770,7 +1798,7 @@ var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
 	(*RunsSnapshot)(nil),             // 6: vibesys.orchestrator.v1.RunsSnapshot
 	(*RunSummary)(nil),               // 7: vibesys.orchestrator.v1.RunSummary
 	(*RoleAgents)(nil),               // 8: vibesys.orchestrator.v1.RoleAgents
-	(*ObjectiveHead)(nil),            // 9: vibesys.orchestrator.v1.ObjectiveHead
+	(*ObjectiveStanding)(nil),        // 9: vibesys.orchestrator.v1.ObjectiveStanding
 	(*WatchRunsResponse)(nil),        // 10: vibesys.orchestrator.v1.WatchRunsResponse
 	(*WatchAgentRequest)(nil),        // 11: vibesys.orchestrator.v1.WatchAgentRequest
 	(*ItemsPage)(nil),                // 12: vibesys.orchestrator.v1.ItemsPage
@@ -1817,7 +1845,7 @@ var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	7,  // 12: vibesys.orchestrator.v1.RunsSnapshot.summaries:type_name -> vibesys.orchestrator.v1.RunSummary
 	30, // 13: vibesys.orchestrator.v1.RunSummary.report:type_name -> vibesys.orchestrator.v1.Message
 	8,  // 14: vibesys.orchestrator.v1.RunSummary.roles:type_name -> vibesys.orchestrator.v1.RoleAgents
-	9,  // 15: vibesys.orchestrator.v1.RunSummary.objectives:type_name -> vibesys.orchestrator.v1.ObjectiveHead
+	9,  // 15: vibesys.orchestrator.v1.RunSummary.objectives:type_name -> vibesys.orchestrator.v1.ObjectiveStanding
 	33, // 16: vibesys.orchestrator.v1.RoleAgents.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	6,  // 17: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
 	34, // 18: vibesys.orchestrator.v1.WatchRunsResponse.change:type_name -> vibesys.orchestrator.v1.RunChange

@@ -423,7 +423,7 @@ shows its earliest in the snapshot.
 
 The host owns the facts a list of runs shows, and no client derives them from messages and agents it may
 not hold. `RunSummary` is the run's report, its agents and the head of each objective, worked out by the
-host (`internal/daemon/summary.go`, `search.Heads`):
+host (`internal/daemon/summary.go`, `search.Standings`):
 
 - **The report.** The summary report is the newest report the lead posted about the whole run. A report that
   answers Catch me up covers a window, and the core marks it: `Report.scope` is `WINDOW` for a progress report
@@ -437,7 +437,7 @@ host (`internal/daemon/summary.go`, `search.Heads`):
   non-window report once in its messages.
 - **The agents.** `agents_working` counts the agents launching, in a turn, or waiting on subagents
   (`AgentStatus.Working`, the one definition), with the same split by type of agent.
-- **The head.** One entry per objective: the head's value, the unit of the standing bound and the share of it.
+- **The standing.** One entry per objective: the head's value and the best the run measured (they are two things: the head is the candidate last promoted), the unit of the standing bound and the share of it each is at. Both are read from the search state, which the one measurement projection fills; nothing is calculated again.
 
 A snapshot carries one summary for every run it lists, whatever its detail, and a stream whose request asked for
 detail `SUMMARY` also receives a `summary` frame, the whole summary of a run, each time something it says

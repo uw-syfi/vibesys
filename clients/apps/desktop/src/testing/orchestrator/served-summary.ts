@@ -6,7 +6,8 @@
  *
  * - The report is the lead's newest report about the whole run: by number, never a window report.
  * - An agent is working when it is launching, in a turn, or waiting on subagents.
- * - The head of each objective is the head's value with the standing bound's unit and share, the
+ * - Where the run stands on each objective is its head (the head's value) and its best (the bound's, or
+ *   where the series' best line ends), with the standing bound's unit and the share each is at: the
  *   measured objectives first in the order the task declares them, then those with only a bound.
  */
 import {create} from '@bufbuild/protobuf';
@@ -15,8 +16,8 @@ import {
   type AgentRole,
   AgentStatus,
   type Message,
-  type ObjectiveHead,
-  ObjectiveHeadSchema,
+  type ObjectiveStanding,
+  ObjectiveStandingSchema,
   oneofIs,
   ReportScope,
   RoleAgentsSchema,
@@ -50,8 +51,8 @@ function summaryMessage(messages: readonly Message[]): Message | undefined {
 const finite = (value: number | undefined): number | undefined =>
   value !== undefined && Number.isFinite(value) ? value : undefined;
 
-/** The head's value on each objective, as the host serves it. */
-function servedHeads(search: SearchState | undefined): ObjectiveHead[] {
+/** Where the run stands on each objective, its head and its best, as the host serves it. */
+function servedStandings(search: SearchState | undefined): ObjectiveStanding[] {
   if (search === undefined) return [];
   const head = search.head?.state;
   const outcome = oneofIs(head, 'current', {current: true, none: true})
@@ -81,16 +82,28 @@ function servedHeads(search: SearchState | undefined): ObjectiveHead[] {
     ...search.bounds
       .filter(entry => !named.has(entry.objective))
       .map(entry => ({name: entry.objective, value: undefined})),
-  ].filter(row => row.name !== '');
-  return rows.map(({name, value}) => {
-    const bound = bounds.get(name);
-    return create(ObjectiveHeadSchema, {
-      name,
-      value: bound?.headValue === undefined ? value : finite(bound.headValue),
-      unit: bound?.versions.at(-1)?.unit ?? '',
-      percentOfBound: finite(bound?.percentOfBound),
+  ];
+  const listed = new Set(rows.map(row => row.name));
+  for (const series of search.series) {
+    if (!listed.has(series.objective)) rows.push({name: series.objective, value: undefined});
+  }
+  return rows
+    .filter(row => row.name !== '')
+    .map(({name, value}) => {
+      const bound = bounds.get(name);
+      const marked = search.series
+        .find(each => each.objective === name)
+        ?.points.filter(point => point.bestSoFar)
+        .at(-1);
+      return create(ObjectiveStandingSchema, {
+        name,
+        headValue: bound?.headValue === undefined ? value : finite(bound.headValue),
+        unit: bound?.versions.at(-1)?.unit ?? '',
+        headPercentOfBound: finite(bound?.percentOfBound),
+        bestValue: bound?.bestValue === undefined ? finite(marked?.value) : finite(bound.bestValue),
+        bestPercentOfBound: finite(bound?.bestPercentOfBound),
+      });
     });
-  });
 }
 
 /** The summary of `runId` the Fake host serves for `state`. */
@@ -119,7 +132,7 @@ export function servedSummary(
         working: ofRole.filter(agent => WORKING.has(agent.status)).length,
       });
     }),
-    objectives: servedHeads(search),
+    objectives: servedStandings(search),
   });
 }
 

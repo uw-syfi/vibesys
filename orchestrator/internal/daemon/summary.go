@@ -19,7 +19,7 @@ import (
 //   - The report is the one the core named when the lead posted it (Run.SummaryReport), read by id. A
 //     run recorded before the core named it is found once in its messages (see legacyReport).
 //   - The agents are counted with core.AgentStatus.Working, by type of agent.
-//   - The head of each objective is search.Heads.
+//   - Where the run stands on each objective, its head and its best, is search.Standings.
 
 // reportCache keeps the message a run is summed up by, so that a snapshot or a change costs a lookup
 // only when the lead has posted a new report. A report never changes once it is recorded, so a message
@@ -47,7 +47,7 @@ func (e *Engine) runSummary(state core.State, run core.Run, agents []core.Agent)
 	if err != nil {
 		return nil, err
 	}
-	out := &pb.RunSummary{RunId: string(run.ID), Report: report, Objectives: search.Heads(e.searchState(run.ID))}
+	out := &pb.RunSummary{RunId: string(run.ID), Report: report, Objectives: search.Standings(e.searchState(run.ID))}
 	out.AgentsTotal = uint32(len(agents))
 	roles := map[pb.AgentRole]*pb.RoleAgents{}
 	for _, a := range agents {

@@ -7,7 +7,7 @@
  * changes their shape (bigints and timestamps become numbers) and joins what one objective has under
  * its name.
  */
-import {Direction, type ObjectiveHead, type SearchState} from '@vibesys/orchestrator-proto';
+import {Direction, type ObjectiveStanding, type SearchState} from '@vibesys/orchestrator-proto';
 import {type ObjectiveBoundsView, objectiveBounds} from '../search-views.js';
 import {ms} from '../time.js';
 
@@ -54,10 +54,10 @@ export const betterOf = (direction: Direction): Better =>
  */
 export function objectiveReports(
   search: SearchState,
-  heads: readonly ObjectiveHead[],
+  standings: readonly ObjectiveStanding[],
 ): readonly ObjectiveReport[] {
   const bounds = new Map(objectiveBounds(search).map(bound => [bound.objective, bound]));
-  const headOf = new Map(heads.map(head => [head.name, head]));
+  const standingOf = new Map(standings.map(standing => [standing.name, standing]));
   const measured: ObjectiveReport[] = search.series.map(series => {
     const points = series.points.map(point => ({
       id: point.jobId,
@@ -75,8 +75,8 @@ export function objectiveReports(
       points,
       bestPath,
       best: bestPath.at(-1),
-      headValue: headOf.get(series.objective)?.value,
-      percentOfBound: headOf.get(series.objective)?.percentOfBound,
+      headValue: standingOf.get(series.objective)?.headValue,
+      percentOfBound: standingOf.get(series.objective)?.headPercentOfBound,
       bestPercentOfBound: bound?.bestPercentOfBound,
       bound,
     };
@@ -92,8 +92,8 @@ export function objectiveReports(
       points: [],
       bestPath: [],
       best: undefined,
-      headValue: headOf.get(bound.objective)?.value,
-      percentOfBound: headOf.get(bound.objective)?.percentOfBound,
+      headValue: standingOf.get(bound.objective)?.headValue,
+      percentOfBound: standingOf.get(bound.objective)?.headPercentOfBound,
       bestPercentOfBound: bound.bestPercentOfBound,
       bound,
     }));
