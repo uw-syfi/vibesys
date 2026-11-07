@@ -53,7 +53,9 @@ func boundBytes(s *pb.SearchState, v View) {
 	var entries []*byteEntry
 	m := s.ProtoReflect()
 	m.Range(func(fd protoreflect.FieldDescriptor, value protoreflect.Value) bool {
-		if !fd.IsList() {
+		// The measured history is compact next to the rows it is derived from, so it is trimmed point by
+		// point after them (shrinkTrajectory), never dropped as a whole entry.
+		if !fd.IsList() || fd.Name() == "series" {
 			return true
 		}
 		list := value.List()
@@ -102,6 +104,7 @@ func boundBytes(s *pb.SearchState, v View) {
 	}
 	s.Results = slices.DeleteFunc(s.Results, func(r *cli.Result) bool { return !kept[r.JobId] })
 	s.Troubles = slices.DeleteFunc(s.Troubles, func(r *cli.JobTrouble) bool { return !kept[r.JobId] })
+	shrinkTrajectory(s, func() bool { return proto.Size(s) <= MaxStateBytes })
 	// Head can contain a result of arbitrary size. Retain health and identity even
 	// when that singleton cannot fit after every historical entry was removed.
 	if proto.Size(s) > MaxStateBytes {

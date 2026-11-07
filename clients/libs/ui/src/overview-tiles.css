@@ -194,3 +194,16 @@
   border-radius: 0;
   background: var(--text);
 }
+
+/* The name of what a tile measures is one line, cut with an ellipsis (its whole text on hover), so
+   tiles of a row keep one height. */
+.vs-tile-name {
+  display: flex;
+  min-width: 0;
+}
+.vs-tile-name > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

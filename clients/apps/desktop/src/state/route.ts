@@ -2,7 +2,7 @@
  * Where the user is: the run list, or one run with an agent picked and one of its views. A plain
  * reducer, so every move is a value and a test can walk any sequence of them.
  */
-export type RunView = 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas';
+export type RunView = 'report' | 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas';
 
 export type Route =
   | {readonly screen: 'runs'}
@@ -31,7 +31,7 @@ export function routeReducer(route: Route, action: RouteAction): Route {
         screen: 'run',
         host: action.host,
         runId: action.runId,
-        view: 'timeline',
+        view: 'report',
         agentId: null,
       };
     case 'close-run':
@@ -52,12 +52,15 @@ export interface CostTarget {
 }
 
 /**
- * Which run's cost stream to keep open: the run whose Cost view is showing, and none while any
- * other view, the run list or an agent opened over the views is. The stream costs the host work
- * and the view is only read where it is shown, so nothing else follows it.
+ * Which run's cost stream to keep open: the run whose report or Cost view is showing (the report
+ * carries the run's spend in brief), and none while any other view, the run list or an agent opened
+ * over the views is. The stream costs the host work and the view is only read where it is shown, so
+ * nothing else follows it.
  */
 export function costTarget(route: Route): CostTarget | null {
-  return route.screen === 'run' && route.view === 'cost' && route.agentId === null
+  return route.screen === 'run' &&
+    (route.view === 'cost' || route.view === 'report') &&
+    route.agentId === null
     ? {host: route.host, runId: route.runId}
     : null;
 }

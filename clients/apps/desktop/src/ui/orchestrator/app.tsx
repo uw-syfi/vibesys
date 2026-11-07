@@ -27,6 +27,7 @@ import type {StartRunRequest} from './start-draft.js';
 
 const TITLE = 'Runs';
 const RUN_TITLES = {
+  report: 'Report',
   timeline: 'Search and activity',
   agents: 'Agents',
   cost: 'Cost',
@@ -155,6 +156,18 @@ function agentNote(
   };
 }
 
+/** The title of a run's page: its name alone on the report, else the name and what is open. */
+function runTitle(
+  state: HostSnapshot['model']['data'],
+  route: Extract<Route, {screen: 'run'}>,
+  names: ReturnType<typeof agentNames>,
+): string {
+  const task = state.runs[route.runId]?.task ?? 'Run';
+  const agent = route.agentId === null ? undefined : state.agents[route.agentId];
+  if (agent !== undefined) return `${task}: ${nameOf(names, agent)}`;
+  return route.view === 'report' ? task : `${task}: ${RUN_TITLES[route.view]}`;
+}
+
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
 export function OrchestratorApp(props: {
   readonly hosts: readonly HostSnapshot[];
@@ -204,13 +217,17 @@ export function OrchestratorApp(props: {
   const {runId} = route;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const names = agentNames(state, runId);
-  const title = `${state.runs[runId]?.task ?? 'Run'}: ${agent === undefined ? RUN_TITLES[route.view] : nameOf(names, agent)}`;
   const notes = [
     runsNote(host, props.retryHost, props.nowMs),
     ...(agent === undefined ? [] : [agentNote(host, agent, names, props)]),
   ];
   return (
-    <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
+    <Page
+      key="run"
+      width="fill"
+      state="ready"
+      header={<Text variant="title">{runTitle(state, route, names)}</Text>}
+    >
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />
         <RunScreen
@@ -218,6 +235,8 @@ export function OrchestratorApp(props: {
           host={host.label}
           runId={runId}
           nowMs={props.nowMs}
+          freshness={freshnessOf(host.connection, host.runsFeed, hasData(host))}
+          staleForMs={staleForMs(host.freshness, props.nowMs)}
           view={route.view}
           costFeed={host.costFeeds[runId] ?? OPENING_COST}
           retryCost={() => props.retryCost(host.key, runId)}

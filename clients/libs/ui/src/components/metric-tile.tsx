@@ -46,9 +46,11 @@ export function MetricTile(props: {
 }): JSX.Element {
   return (
     <article className="vs-tile">
-      <Text variant="small" tone="muted">
-        {props.name}
-      </Text>
+      <span className="vs-tile-name">
+        <Text variant="small" tone="muted" title={props.name}>
+          {props.name}
+        </Text>
+      </span>
       <div className="vs-tile-figure">
         <Text variant="hero" tone={props.tone ?? 'default'}>
           {props.figure}

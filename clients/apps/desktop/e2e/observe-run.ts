@@ -5,8 +5,8 @@
  * task, no model), runs it to the lead's report, then runs this with `VIBESYS_E2E_WORLD` naming
  * what the daemon reported. This launches the built Electron app with its HOME set to the
  * daemon's, so the app's local gateway is the running one, and checks what a person sees, by
- * role and accessible name: the run listed and running, the harness on every agent row, the
- * lead's report. It then presses Stop and sees the run end. The test then checks the daemon's
+ * role and accessible name: the run listed and running, its report with the lead's summary, the
+ * harness on every agent row, the lead's report. It then presses Stop and sees the run end. The test then checks the daemon's
  * side of Stop and that no process of the app is left.
  *
  * Every wait is an expectation with a bound that only guards against a hang; nothing sleeps.
@@ -124,6 +124,14 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
 }
 
+/** A run opens on its report, which carries the lead's latest report as the run's summary. */
+async function checkTheReportShowsTheLeadsSummary(page: Page, world: World): Promise<void> {
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
+  // The report shows no agent's turns: the agents have a screen of their own, one press away.
+  await expect(page.getByRole('tree', {name: 'Agents in this run'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Open agents'}).click();
+}
+
 async function checkEveryAgentShowsItsHarness(page: Page, world: World): Promise<void> {
   const tree = page.getByRole('tree', {name: 'Agents in this run'});
   await expect(tree.getByRole('treeitem')).toHaveCount(world.agents.length);
@@ -197,6 +205,7 @@ test('the app lists the scripted run, shows each agent’s harness and the repor
     app = await launch(world, userData);
     page = await app.firstWindow();
     await checkRunIsListedAndRunning(page, world);
+    await checkTheReportShowsTheLeadsSummary(page, world);
     await checkEveryAgentShowsItsHarness(page, world);
     await checkTheLeadsReportIsShown(page, world);
     await pressStopAndSeeTheRunEnd(page);

@@ -8,4 +8,11 @@ export {
   daemonRecording,
   methodPathOf,
 } from './recordings.js';
+export {
+  type MeasuredOptions,
+  measuredSearch,
+  type ObjectiveSpec,
+  SERVING,
+  withReport,
+} from './report-fixtures.js';
 export {generateScenario} from './scenario.js';

@@ -73,8 +73,11 @@ The orchestrator also projects deterministic search state for the app: jobs, res
 judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator.
 An agent may also declare the performance bound of an objective (`vibesys-cli bound declare`); `vibesysd`
 records each version with who declared it and when, and the view carries, per objective, the versions the
-run declared and the head's percent of the standing one, computed there so the app only shows it. This view is
-ephemeral and bounded. It is replaced as a whole, with revisions meaningful only
+run declared and the head's percent of the standing one, computed there so the app only shows it. The view
+also carries each objective's measured history (every measurement of the run, with the points that set a new
+best marked) and, for a task of two or more objectives, every candidate measured on all of them with the
+ones no other candidate beats marked, so a chart draws a best-so-far line and a frontier and works out
+neither. This view is ephemeral and bounded. It is replaced as a whole, with revisions meaningful only
 within one connection. A lost or incompatible daemon makes the view unreadable
 with a typed reason; it never becomes an apparently empty successful search.
 The app displays that projection without rebuilding search policy locally.

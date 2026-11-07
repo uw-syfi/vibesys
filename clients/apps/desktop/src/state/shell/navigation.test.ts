@@ -23,7 +23,13 @@ const generators: {
   'close-run': fc.constant({type: 'close-run' as const}),
   show: fc.record({
     type: fc.constant('show' as const),
-    view: fc.constantFrom('timeline' as const, 'cost' as const, 'handoffs' as const),
+    view: fc.constantFrom(
+      'report' as const,
+      'timeline' as const,
+      'agents' as const,
+      'cost' as const,
+      'handoffs' as const,
+    ),
   }),
   'pick-agent': fc.record({
     type: fc.constant('pick-agent' as const),
@@ -114,6 +120,39 @@ describe('navigation', () => {
     const run = navigationReducer(agent, {type: 'back'});
     expect(run.runs).toMatchObject({screen: 'run', runId: 'run-1', agentId: null});
     expect(navigationReducer(run, {type: 'back'}).runs).toEqual({screen: 'runs'});
+  });
+
+  it('back from a screen of the run goes to its report, and from the report to the runs', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('timeline', 'agents', 'cost', 'handoffs') as fc.Arbitrary<
+          'timeline' | 'agents' | 'cost' | 'handoffs'
+        >,
+        view => {
+          const screen = walk([
+            {type: 'open-run', host: 'host-a', runId: 'run-1'},
+            {type: 'show', view},
+          ]);
+          const report = navigationReducer(screen, {type: 'back'});
+          expect(report.runs).toMatchObject({screen: 'run', runId: 'run-1', view: 'report'});
+          expect(navigationReducer(report, {type: 'back'}).runs).toEqual({screen: 'runs'});
+        },
+      ),
+    );
+  });
+
+  it('a run always opens on its report, and the report is reached by back from anything of the run', () => {
+    fc.assert(
+      fc.property(moves, steps => {
+        let nav = navigationReducer(walk(steps), {type: 'open-runs'});
+        nav = navigationReducer(nav, {type: 'open-run', host: 'host-a', runId: 'run-1'});
+        expect(nav.runs).toMatchObject({view: 'report', agentId: null});
+        nav = navigationReducer(nav, {type: 'show', view: 'cost'});
+        nav = navigationReducer(nav, {type: 'pick-agent', agentId: 'a'});
+        nav = navigationReducer(navigationReducer(nav, {type: 'back'}), {type: 'back'});
+        expect(nav.runs).toMatchObject({view: 'report'});
+      }),
+    );
   });
 
   it('the moves of a run screen mean nothing while Settings shows', () => {

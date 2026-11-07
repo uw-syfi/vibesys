@@ -23,6 +23,11 @@ export function Chip(props: {
   readonly dot?: boolean;
   /** The label is an identifier a person may copy (a model id), set in the code face. */
   readonly mono?: boolean;
+  /**
+   * The label is a name a person chose and may be long: it is cut with an ellipsis (its whole text
+   * on hover) when the chip's room is less than it needs, instead of pushing its row wider.
+   */
+  readonly clip?: boolean;
   /** The longer account behind a short label; a filesystem path in it is shown by its last name only (`withoutPaths`). */
   readonly hint?: string;
 }): JSX.Element {
@@ -33,6 +38,8 @@ export function Chip(props: {
       className="vs-chip"
       data-tone={tone}
       data-mono-id={props.mono === true || undefined}
+      data-clip={props.clip === true || undefined}
+      title={props.clip === true && hint === undefined ? props.label : undefined}
       aria-description={hint}
       // The hint is information a keyboard and a screen reader must reach (WCAG 1.4.13, 2.1.1), which
       // a `title` is not: so a chip with one is a tab stop. It is no button (it has no action), and a
@@ -40,7 +47,7 @@ export function Chip(props: {
       tabIndex={hint === undefined ? undefined : 0}
     >
       {props.dot === true ? <span className="vs-dot" data-tone={tone} aria-hidden="true" /> : null}
-      {props.label}
+      {props.clip === true ? <span className="vs-chip-label">{props.label}</span> : props.label}
     </span>
   );
 }

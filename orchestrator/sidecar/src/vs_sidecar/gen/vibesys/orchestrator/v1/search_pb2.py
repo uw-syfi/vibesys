@@ -31,7 +31,7 @@ from vs_sidecar.gen.vibesys.cli.v1 import result_pb2 as vibesys_dot_cli_dot_v1_d
 from vs_sidecar.gen.vibesys.cli.v1 import service_pb2 as vibesys_dot_cli_dot_v1_dot_service__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\xd6\x05\n\x0bSearchState\x12!\n\x06run_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x05runId\x12#\n\x08revision\x18\x02 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08revision\x12\x45\n\x06health\x18\x03 \x01(\x0b\x32%.vibesys.orchestrator.v1.SearchHealthB\x06\xbaH\x03\xc8\x01\x01R\x06health\x12\x32\n\x04jobs\x18\x04 \x03(\x0b\x32\x13.vibesys.cli.v1.JobB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x04jobs\x12;\n\x07results\x18\x05 \x03(\x0b\x32\x16.vibesys.cli.v1.ResultB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x07results\x12@\n\tjudgments\x18\x06 \x03(\x0b\x32\x18.vibesys.cli.v1.JudgmentB\x08\xbaH\x05\x92\x01\x02\x10\x64R\tjudgments\x12J\n\npromotions\x18\x07 \x03(\x0b\x32\x1f.vibesys.cli.v1.PromotionRecordB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\npromotions\x12\x35\n\x05plans\x18\x08 \x03(\x0b\x32\x14.vibesys.cli.v1.PlanB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\x05plans\x12(\n\x04head\x18\t \x01(\x0b\x32\x14.vibesys.cli.v1.HeadR\x04head\x12\x41\n\x08troubles\x18\n \x03(\x0b\x32\x1a.vibesys.cli.v1.JobTroubleB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x08troubles\x12+\n\x11unattributed_jobs\x18\x0b \x01(\rR\x10unattributedJobs\x12\x1c\n\ttruncated\x18\x0c \x01(\x08R\ttruncated\x12J\n\x06\x62ounds\x18\r \x03(\x0b\x32(.vibesys.orchestrator.v1.ObjectiveBoundsB\x08\xbaH\x05\x92\x01\x02\x10@R\x06\x62ounds\"\xb4\x04\n\x0fObjectiveBounds\x12(\n\tobjective\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\tobjective\x12\x43\n\tdirection\x18\x02 \x01(\x0e\x32\x19.vibesys.cli.v1.DirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\tdirection\x12\x46\n\x08versions\x18\x03 \x03(\x0b\x32\x1e.vibesys.cli.v1.ObjectiveBoundB\n\xbaH\x07\x92\x01\x04\x08\x01\x10@R\x08versions\x12+\n\nhead_value\x18\x04 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12?\n\x10percent_of_bound\x18\x05 \x01(\x01\x42\x10\xbaH\r\x12\x0b!\x00\x00\x00\x00\x00\x00\x00\x00@\x01H\x01R\x0epercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n.objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n\x0b_head_valueB\x13\n\x11_percent_of_bound\"\xa2\x01\n\x0cSearchHealth\x12;\n\nlive_since\x18\x01 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00R\tliveSince\x12\x45\n\nunreadable\x18\x02 \x01(\x0b\x32#.vibesys.orchestrator.v1.UnreadableH\x00R\nunreadableB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"\xb7\x01\n\nUnreadable\x12M\n\x06reason\x18\x01 \x01(\x0e\x32).vibesys.orchestrator.v1.UnreadableReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x38\n\x05since\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail*\xaf\x03\n\x10UnreadableReason\x12!\n\x1dUNREADABLE_REASON_UNSPECIFIED\x10\x00\x12\x1f\n\x1bUNREADABLE_REASON_NO_DAEMON\x10\x01\x12\"\n\x1eUNREADABLE_REASON_START_FAILED\x10\x02\x12\'\n#UNREADABLE_REASON_CLI_NOT_INSTALLED\x10\x03\x12$\n UNREADABLE_REASON_CLIENT_TOO_OLD\x10\x04\x12$\n UNREADABLE_REASON_DAEMON_TOO_OLD\x10\x05\x12+\n\'UNREADABLE_REASON_STORE_OWNED_ELSEWHERE\x10\x06\x12 \n\x1cUNREADABLE_REASON_STORE_AWAY\x10\x07\x12!\n\x1dUNREADABLE_REASON_STREAM_LOST\x10\x08\x12\'\n#UNREADABLE_REASON_MESSAGE_TOO_LARGE\x10\t\x12#\n\x1fUNREADABLE_REASON_NOT_ANSWERING\x10\nBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\xe1\x06\n\x0bSearchState\x12!\n\x06run_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x05runId\x12#\n\x08revision\x18\x02 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08revision\x12\x45\n\x06health\x18\x03 \x01(\x0b\x32%.vibesys.orchestrator.v1.SearchHealthB\x06\xbaH\x03\xc8\x01\x01R\x06health\x12\x32\n\x04jobs\x18\x04 \x03(\x0b\x32\x13.vibesys.cli.v1.JobB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x04jobs\x12;\n\x07results\x18\x05 \x03(\x0b\x32\x16.vibesys.cli.v1.ResultB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x07results\x12@\n\tjudgments\x18\x06 \x03(\x0b\x32\x18.vibesys.cli.v1.JudgmentB\x08\xbaH\x05\x92\x01\x02\x10\x64R\tjudgments\x12J\n\npromotions\x18\x07 \x03(\x0b\x32\x1f.vibesys.cli.v1.PromotionRecordB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\npromotions\x12\x35\n\x05plans\x18\x08 \x03(\x0b\x32\x14.vibesys.cli.v1.PlanB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\x05plans\x12(\n\x04head\x18\t \x01(\x0b\x32\x14.vibesys.cli.v1.HeadR\x04head\x12\x41\n\x08troubles\x18\n \x03(\x0b\x32\x1a.vibesys.cli.v1.JobTroubleB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x08troubles\x12+\n\x11unattributed_jobs\x18\x0b \x01(\rR\x10unattributedJobs\x12\x1c\n\ttruncated\x18\x0c \x01(\x08R\ttruncated\x12J\n\x06\x62ounds\x18\r \x03(\x0b\x32(.vibesys.orchestrator.v1.ObjectiveBoundsB\x08\xbaH\x05\x92\x01\x02\x10@R\x06\x62ounds\x12J\n\x06series\x18\x0e \x03(\x0b\x32(.vibesys.orchestrator.v1.ObjectiveSeriesB\x08\xbaH\x05\x92\x01\x02\x10\x08R\x06series\x12=\n\x08tradeoff\x18\x0f \x01(\x0b\x32!.vibesys.orchestrator.v1.TradeoffR\x08tradeoff\"\xb4\x04\n\x0fObjectiveBounds\x12(\n\tobjective\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\tobjective\x12\x43\n\tdirection\x18\x02 \x01(\x0e\x32\x19.vibesys.cli.v1.DirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\tdirection\x12\x46\n\x08versions\x18\x03 \x03(\x0b\x32\x1e.vibesys.cli.v1.ObjectiveBoundB\n\xbaH\x07\x92\x01\x04\x08\x01\x10@R\x08versions\x12+\n\nhead_value\x18\x04 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x00R\theadValue\x88\x01\x01\x12?\n\x10percent_of_bound\x18\x05 \x01(\x01\x42\x10\xbaH\r\x12\x0b!\x00\x00\x00\x00\x00\x00\x00\x00@\x01H\x01R\x0epercentOfBound\x88\x01\x01:\xd7\x01\xbaH\xd3\x01\x1a\xd0\x01\n.objective_bounds.versions_are_of_the_objective\x12Hevery version declares this objective, in the direction of the objective\x1aTthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)B\r\n\x0b_head_valueB\x13\n\x11_percent_of_bound\"\xcd\x01\n\x0fObjectiveSeries\x12(\n\tobjective\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\tobjective\x12\x43\n\tdirection\x18\x02 \x01(\x0e\x32\x19.vibesys.cli.v1.DirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\tdirection\x12K\n\x06points\x18\x03 \x03(\x0b\x32&.vibesys.orchestrator.v1.MeasuredPointB\x0b\xbaH\x08\x92\x01\x05\x08\x01\x10\x90\x03R\x06points\"\xc9\x01\n\rMeasuredPoint\x12!\n\x06job_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x05jobId\x12\"\n\x06\x63ommit\x18\x02 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x06\x63ommit\x12\x32\n\x02\x61t\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12\x1d\n\x05value\x18\x04 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01R\x05value\x12\x1e\n\x0b\x62\x65st_so_far\x18\x05 \x01(\x08R\tbestSoFar\"\xc9\x02\n\x08Tradeoff\x12V\n\nobjectives\x18\x01 \x03(\x0b\x32*.vibesys.orchestrator.v1.TradeoffObjectiveB\n\xbaH\x07\x92\x01\x04\x08\x02\x10\x08R\nobjectives\x12I\n\x06points\x18\x02 \x03(\x0b\x32&.vibesys.orchestrator.v1.TradeoffPointB\t\xbaH\x06\x92\x01\x03\x10\x90\x03R\x06points:\x99\x01\xbaH\x95\x01\x1a\x92\x01\n%tradeoff.values_are_of_the_objectives\x12,every point has one value for each objective\x1a;this.points.all(p, size(p.values) == size(this.objectives))\"x\n\x11TradeoffObjective\x12\x1e\n\x04name\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x04name\x12\x43\n\tdirection\x18\x02 \x01(\x0e\x32\x19.vibesys.cli.v1.DirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\tdirection\"\xd1\x01\n\rTradeoffPoint\x12!\n\x06job_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x05jobId\x12\"\n\x06\x63ommit\x18\x02 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x06\x63ommit\x12\x32\n\x02\x61t\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12$\n\x06values\x18\x04 \x03(\x01\x42\x0c\xbaH\t\x92\x01\x06\"\x04\x12\x02@\x01R\x06values\x12\x1f\n\x0bon_frontier\x18\x05 \x01(\x08R\nonFrontier\"\xa2\x01\n\x0cSearchHealth\x12;\n\nlive_since\x18\x01 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00R\tliveSince\x12\x45\n\nunreadable\x18\x02 \x01(\x0b\x32#.vibesys.orchestrator.v1.UnreadableH\x00R\nunreadableB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"\xb7\x01\n\nUnreadable\x12M\n\x06reason\x18\x01 \x01(\x0e\x32).vibesys.orchestrator.v1.UnreadableReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x38\n\x05since\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail*\xaf\x03\n\x10UnreadableReason\x12!\n\x1dUNREADABLE_REASON_UNSPECIFIED\x10\x00\x12\x1f\n\x1bUNREADABLE_REASON_NO_DAEMON\x10\x01\x12\"\n\x1eUNREADABLE_REASON_START_FAILED\x10\x02\x12\'\n#UNREADABLE_REASON_CLI_NOT_INSTALLED\x10\x03\x12$\n UNREADABLE_REASON_CLIENT_TOO_OLD\x10\x04\x12$\n UNREADABLE_REASON_DAEMON_TOO_OLD\x10\x05\x12+\n\'UNREADABLE_REASON_STORE_OWNED_ELSEWHERE\x10\x06\x12 \n\x1cUNREADABLE_REASON_STORE_AWAY\x10\x07\x12!\n\x1dUNREADABLE_REASON_STREAM_LOST\x10\x08\x12\'\n#UNREADABLE_REASON_MESSAGE_TOO_LARGE\x10\t\x12#\n\x1fUNREADABLE_REASON_NOT_ANSWERING\x10\nBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -59,6 +59,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SEARCHSTATE'].fields_by_name['troubles']._serialized_options = b'\272H\006\222\001\003\020\364\003'
   _globals['_SEARCHSTATE'].fields_by_name['bounds']._loaded_options = None
   _globals['_SEARCHSTATE'].fields_by_name['bounds']._serialized_options = b'\272H\005\222\001\002\020@'
+  _globals['_SEARCHSTATE'].fields_by_name['series']._loaded_options = None
+  _globals['_SEARCHSTATE'].fields_by_name['series']._serialized_options = b'\272H\005\222\001\002\020\010'
   _globals['_OBJECTIVEBOUNDS'].fields_by_name['objective']._loaded_options = None
   _globals['_OBJECTIVEBOUNDS'].fields_by_name['objective']._serialized_options = b'\272H\007r\005\020\001(\200\002'
   _globals['_OBJECTIVEBOUNDS'].fields_by_name['direction']._loaded_options = None
@@ -71,6 +73,38 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_OBJECTIVEBOUNDS'].fields_by_name['percent_of_bound']._serialized_options = b'\272H\r\022\013!\000\000\000\000\000\000\000\000@\001'
   _globals['_OBJECTIVEBOUNDS']._loaded_options = None
   _globals['_OBJECTIVEBOUNDS']._serialized_options = b'\272H\323\001\032\320\001\n.objective_bounds.versions_are_of_the_objective\022Hevery version declares this objective, in the direction of the objective\032Tthis.versions.all(v, v.objective == this.objective && v.direction == this.direction)'
+  _globals['_OBJECTIVESERIES'].fields_by_name['objective']._loaded_options = None
+  _globals['_OBJECTIVESERIES'].fields_by_name['objective']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_OBJECTIVESERIES'].fields_by_name['direction']._loaded_options = None
+  _globals['_OBJECTIVESERIES'].fields_by_name['direction']._serialized_options = b'\272H\007\202\001\004\020\001 \000'
+  _globals['_OBJECTIVESERIES'].fields_by_name['points']._loaded_options = None
+  _globals['_OBJECTIVESERIES'].fields_by_name['points']._serialized_options = b'\272H\010\222\001\005\010\001\020\220\003'
+  _globals['_MEASUREDPOINT'].fields_by_name['job_id']._loaded_options = None
+  _globals['_MEASUREDPOINT'].fields_by_name['job_id']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_MEASUREDPOINT'].fields_by_name['commit']._loaded_options = None
+  _globals['_MEASUREDPOINT'].fields_by_name['commit']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_MEASUREDPOINT'].fields_by_name['at']._loaded_options = None
+  _globals['_MEASUREDPOINT'].fields_by_name['at']._serialized_options = b'\272H\003\310\001\001'
+  _globals['_MEASUREDPOINT'].fields_by_name['value']._loaded_options = None
+  _globals['_MEASUREDPOINT'].fields_by_name['value']._serialized_options = b'\272H\004\022\002@\001'
+  _globals['_TRADEOFF'].fields_by_name['objectives']._loaded_options = None
+  _globals['_TRADEOFF'].fields_by_name['objectives']._serialized_options = b'\272H\007\222\001\004\010\002\020\010'
+  _globals['_TRADEOFF'].fields_by_name['points']._loaded_options = None
+  _globals['_TRADEOFF'].fields_by_name['points']._serialized_options = b'\272H\006\222\001\003\020\220\003'
+  _globals['_TRADEOFF']._loaded_options = None
+  _globals['_TRADEOFF']._serialized_options = b'\272H\225\001\032\222\001\n%tradeoff.values_are_of_the_objectives\022,every point has one value for each objective\032;this.points.all(p, size(p.values) == size(this.objectives))'
+  _globals['_TRADEOFFOBJECTIVE'].fields_by_name['name']._loaded_options = None
+  _globals['_TRADEOFFOBJECTIVE'].fields_by_name['name']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_TRADEOFFOBJECTIVE'].fields_by_name['direction']._loaded_options = None
+  _globals['_TRADEOFFOBJECTIVE'].fields_by_name['direction']._serialized_options = b'\272H\007\202\001\004\020\001 \000'
+  _globals['_TRADEOFFPOINT'].fields_by_name['job_id']._loaded_options = None
+  _globals['_TRADEOFFPOINT'].fields_by_name['job_id']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_TRADEOFFPOINT'].fields_by_name['commit']._loaded_options = None
+  _globals['_TRADEOFFPOINT'].fields_by_name['commit']._serialized_options = b'\272H\007r\005\020\001(\200\002'
+  _globals['_TRADEOFFPOINT'].fields_by_name['at']._loaded_options = None
+  _globals['_TRADEOFFPOINT'].fields_by_name['at']._serialized_options = b'\272H\003\310\001\001'
+  _globals['_TRADEOFFPOINT'].fields_by_name['values']._loaded_options = None
+  _globals['_TRADEOFFPOINT'].fields_by_name['values']._serialized_options = b'\272H\t\222\001\006\"\004\022\002@\001'
   _globals['_SEARCHHEALTH'].oneofs_by_name['state']._loaded_options = None
   _globals['_SEARCHHEALTH'].oneofs_by_name['state']._serialized_options = b'\272H\002\010\001'
   _globals['_UNREADABLE'].fields_by_name['reason']._loaded_options = None
@@ -79,14 +113,24 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_UNREADABLE'].fields_by_name['since']._serialized_options = b'\272H\003\310\001\001'
   _globals['_UNREADABLE'].fields_by_name['detail']._loaded_options = None
   _globals['_UNREADABLE'].fields_by_name['detail']._serialized_options = b'\272H\005r\003(\200 '
-  _globals['_UNREADABLEREASON']._serialized_start=1915
-  _globals['_UNREADABLEREASON']._serialized_end=2346
+  _globals['_UNREADABLEREASON']._serialized_start=3132
+  _globals['_UNREADABLEREASON']._serialized_end=3563
   _globals['_SEARCHSTATE']._serialized_start=268
-  _globals['_SEARCHSTATE']._serialized_end=994
-  _globals['_OBJECTIVEBOUNDS']._serialized_start=997
-  _globals['_OBJECTIVEBOUNDS']._serialized_end=1561
-  _globals['_SEARCHHEALTH']._serialized_start=1564
-  _globals['_SEARCHHEALTH']._serialized_end=1726
-  _globals['_UNREADABLE']._serialized_start=1729
-  _globals['_UNREADABLE']._serialized_end=1912
+  _globals['_SEARCHSTATE']._serialized_end=1133
+  _globals['_OBJECTIVEBOUNDS']._serialized_start=1136
+  _globals['_OBJECTIVEBOUNDS']._serialized_end=1700
+  _globals['_OBJECTIVESERIES']._serialized_start=1703
+  _globals['_OBJECTIVESERIES']._serialized_end=1908
+  _globals['_MEASUREDPOINT']._serialized_start=1911
+  _globals['_MEASUREDPOINT']._serialized_end=2112
+  _globals['_TRADEOFF']._serialized_start=2115
+  _globals['_TRADEOFF']._serialized_end=2444
+  _globals['_TRADEOFFOBJECTIVE']._serialized_start=2446
+  _globals['_TRADEOFFOBJECTIVE']._serialized_end=2566
+  _globals['_TRADEOFFPOINT']._serialized_start=2569
+  _globals['_TRADEOFFPOINT']._serialized_end=2778
+  _globals['_SEARCHHEALTH']._serialized_start=2781
+  _globals['_SEARCHHEALTH']._serialized_end=2943
+  _globals['_UNREADABLE']._serialized_start=2946
+  _globals['_UNREADABLE']._serialized_end=3129
 # @@protoc_insertion_point(module_scope)

@@ -80,6 +80,28 @@ export {
 export {type ItemOf, itemIs} from './orchestrator/items.js';
 export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
 export {
+  type AgentsStrip,
+  type AgentTypeCount,
+  agentsStrip,
+  type Better,
+  betterOf,
+  latestReport,
+  type MeasuredPointView,
+  type ObjectiveReport,
+  objectiveReports,
+  type ReportHeader,
+  type RunReport,
+  runReport,
+  type SearchReading,
+  type SummaryField,
+  type SummaryView,
+  type TradeoffPointView,
+  type TradeoffReport,
+  timeTicks,
+  tradeoffReport,
+  valueTicks,
+} from './orchestrator/report/index.js';
+export {
   candidates,
   jobQueue,
   jobsWithNoRun,
