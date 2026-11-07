@@ -2,8 +2,12 @@
  * One ssh link per host, shared by everything that needs a channel to it, so concurrent users
  * never race two sign-ins against one control path. The link is created on the first lease and
  * released (its master ended) when the last lease ends. A host cannot be leased again until its
- * previous link has finished releasing; a release that failed leaves the master possibly still
- * owning the control path, so that host stays refused rather than run two masters on one path.
+ * previous link has finished releasing, because two masters must never own one control path.
+ *
+ * A release that could not be confirmed (the master froze and could not be killed) does not refuse
+ * the host for good: the next lease of that host retries the release, so a master that can be
+ * ended later is redialed, and one that still cannot be is refused with the reason, for that
+ * lease only.
  */
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
@@ -11,7 +15,7 @@ import * as Exit from 'effect/Exit';
 import type * as Scope from 'effect/Scope';
 import {LinkFailed} from './errors.js';
 import {ProcessSpawner} from './process.js';
-import {makeSshLink, type SshLink} from './ssh-link.js';
+import {type MasterCell, makeSshLink, type SshLink} from './ssh-link.js';
 
 export interface LinkPool {
   /** The host's link, held until `scope` closes. */
@@ -34,9 +38,22 @@ export const makeLinkPool = (
   Effect.gen(function* () {
     const spawner = yield* ProcessSpawner;
     const entries = new Map<string, Entry>();
-    /** Releases under way; a failed one stays so the host is refused for good. */
+    /** Releases under way. */
     const retiring = new Map<string, Deferred.Deferred<void, LinkFailed>>();
+    /** Links whose release failed: the host's next lease tries them again before anything else. */
+    const stuck = new Map<string, SshLink>();
+    /** What each host's master reported, kept across its links. */
+    const masters = new Map<string, MasterCell>();
     let closed = false;
+
+    const masterOf = (alias: string): MasterCell => {
+      let cell = masters.get(alias);
+      if (cell === undefined) {
+        cell = {pid: undefined};
+        masters.set(alias, cell);
+      }
+      return cell;
+    };
 
     const retire = (alias: string, entry: Entry) =>
       Effect.gen(function* () {
@@ -44,25 +61,35 @@ export const makeLinkPool = (
         const done = Deferred.makeUnsafe<void, LinkFailed>();
         retiring.set(alias, done);
         const exit = yield* Effect.exit(entry.link.release);
-        if (Exit.isFailure(exit)) log(`could not retire ${alias}`);
-        else if (retiring.get(alias) === done) retiring.delete(alias);
+        if (Exit.isFailure(exit)) {
+          log(`could not retire ${alias}`);
+          stuck.set(alias, entry.link);
+        }
+        if (retiring.get(alias) === done) retiring.delete(alias);
         yield* Deferred.done(done, exit);
       });
 
     const lease: LinkPool['lease'] = alias =>
       Effect.gen(function* () {
-        // Wait for any earlier release of this host; a failed one refuses the host.
+        // Wait for any earlier release of this host to finish, whether it did or not.
         for (
           let barrier = retiring.get(alias);
           barrier !== undefined;
           barrier = retiring.get(alias)
         )
-          yield* Deferred.await(barrier);
+          yield* Effect.exit(Deferred.await(barrier));
         if (closed)
           return yield* new LinkFailed({problem: 'link', message: 'the link pool was released'});
+        const unreleased = stuck.get(alias);
+        if (unreleased !== undefined) {
+          // The last release was not confirmed: try it again; a master that still cannot be ended
+          // refuses this lease with the reason, and the next lease tries once more.
+          yield* unreleased.release;
+          stuck.delete(alias);
+        }
         let entry = entries.get(alias);
         if (entry === undefined) {
-          const link = yield* makeSshLink({alias, controlPath}).pipe(
+          const link = yield* makeSshLink({alias, controlPath, master: masterOf(alias)}).pipe(
             Effect.provideService(ProcessSpawner, spawner),
           );
           entry = {link, users: 0};

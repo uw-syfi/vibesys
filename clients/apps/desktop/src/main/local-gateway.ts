@@ -6,10 +6,11 @@
  */
 import {join} from 'node:path';
 import type {Duplex} from 'node:stream';
+import {DesktopRefusal} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import type * as Scope from 'effect/Scope';
 import {gatewayTarget} from '../state/gateway-target.js';
-import {GatewayFailed} from './errors.js';
+import {GatewayFailed, GatewayRefused} from './errors.js';
 import {bridge} from './gateway-bridge.js';
 import {GatewayArtifacts, HOST_PROGRAM} from './gateway-provision.js';
 import {LocalHost} from './local-host.js';
@@ -44,7 +45,7 @@ export const dialLocalGateway = (
   log: (line: string) => void,
 ): Effect.Effect<
   Duplex,
-  GatewayFailed,
+  GatewayFailed | GatewayRefused,
   LocalHost | GatewayArtifacts | ProcessSpawner | Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -53,7 +54,10 @@ export const dialLocalGateway = (
     const target = yield* Effect.try({
       try: () => gatewayTarget(host.platform),
       catch: cause =>
-        new GatewayFailed({message: cause instanceof Error ? cause.message : String(cause)}),
+        new GatewayRefused({
+          refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+          message: cause instanceof Error ? cause.message : String(cause),
+        }),
     });
     yield* host.ensureDirectory;
     // Read first to fail clearly when development skipped the Go build.

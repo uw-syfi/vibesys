@@ -26,6 +26,7 @@ import {afterWindow, LIVENESS_WINDOW_MS} from '../state/liveness.js';
 import {
   failureMessage,
   GatewayFailed,
+  GatewayRefused,
   GrpcCode,
   GrpcFailed,
   grpcCodeOf,
@@ -43,7 +44,9 @@ export interface GatewayDialer {
    * on a dial as a whole, so a dial bounds each phase itself (`state/gateway-policy.ts`) and
    * measures a copy by its progress.
    */
-  readonly dial: (force: boolean) => Effect.Effect<Duplex, GatewayFailed | LinkFailed, Scope.Scope>;
+  readonly dial: (
+    force: boolean,
+  ) => Effect.Effect<Duplex, GatewayFailed | GatewayRefused | LinkFailed, Scope.Scope>;
 }
 
 type ConnectionState =
@@ -105,7 +108,7 @@ export type SessionOpener = (
   duplex: Duplex,
 ) => Effect.Effect<GatewaySession, GrpcFailed, Scope.Scope>;
 
-type DialError = GrpcFailed | GatewayFailed | LinkFailed;
+type DialError = GrpcFailed | GatewayFailed | GatewayRefused | LinkFailed;
 
 /** Dial, open the session and shake hands; on any failure nothing stays open. */
 const openOnce = (
@@ -163,7 +166,10 @@ const connect = (
       const error = dialed.failure;
       const reason = failureMessage(error);
       failures += 1;
-      const verdict = afterFailure(failures, grpcCodeOf(error));
+      const verdict = afterFailure(failures, {
+        code: grpcCodeOf(error),
+        refused: error._tag === 'GatewayRefused',
+      });
       log(`gateway dial ${failures} failed: ${reason}`);
       if (fatalAuth(error) || verdict._tag === 'offline') return {_tag: 'offline', error} as const;
       yield* Effect.sleep(`${verdict.afterMs} millis`);
@@ -254,8 +260,9 @@ export const makeGatewayConnection = (
 
     return {
       unary: (method, bytes) => onSession(session => session.unary(method, bytes)),
+      // A stream is watched until its first reply: a quiet feed after that is not stalled.
       stream: (method, bytes, receive) =>
-        onSession(session => session.call(method, bytes, receive)),
+        onSession(session => session.call(method, bytes, receive, 'to-first-reply')),
       ended: SubscriptionRef.get(state).pipe(
         Effect.map(current => current._tag === 'offline' || current._tag === 'closed'),
       ),

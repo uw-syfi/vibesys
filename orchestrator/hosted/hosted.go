@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
@@ -77,7 +78,9 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash, BuildID: o.BuildID, Connected: o.Connected})
 	layout, err := production.LayoutFor(o.Config.GetStateDirectory(), gatewayroot.StateDirectory(o.Root, o.Home, o.Getenv))
 	if err != nil {
-		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
+		x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
+		x.why.StateRefusal = stateRefusalOf(err)
+		return x
 	}
 	sidecars, err := production.SidecarsFor(parts, layout.State.Sessions(), o.Executable, o.Log)
 	if err != nil {
@@ -105,6 +108,20 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	}()
 	go x.watchLive(ctx)
 	return x
+}
+
+// stateRefusalOf says what is wrong with the place of a refused state directory, so that a client
+// names the setting that fixes it. Every other refusal (a path too long for its sockets, one that
+// cannot be made) has no such answer and stays unspecified.
+func stateRefusalOf(err error) pb.StateRefusal {
+	var refused *localfs.RefusedError
+	switch {
+	case !errors.As(err, &refused):
+		return pb.StateRefusal_STATE_REFUSAL_UNSPECIFIED
+	case refused.Filesystem.Class == localfs.Network:
+		return pb.StateRefusal_STATE_REFUSAL_NETWORK_FILESYSTEM
+	}
+	return pb.StateRefusal_STATE_REFUSAL_UNKNOWN_FILESYSTEM
 }
 
 func (x *Orchestrator) unavailable(log *slog.Logger, kind pb.UnservedReason, heldBy, reason string) *Orchestrator {

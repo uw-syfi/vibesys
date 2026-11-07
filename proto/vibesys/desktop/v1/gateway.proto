@@ -32,12 +32,28 @@ enum DesktopLinkProblem {
   DESKTOP_LINK_PROBLEM_CAPACITY = 3;
 }
 
+// Why the main process refused a call for good: no retry and no redial changes it, so the window
+// shows it and does not try again. The end's `error` says which platform, method or version.
+enum DesktopRefusal {
+  DESKTOP_REFUSAL_UNSPECIFIED = 0;
+  // The window asked for a method the app does not allow.
+  DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE = 1;
+  // The host's operating system or CPU is one no host program is built for.
+  DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM = 2;
+  // This build of the app holds no host program for the host's platform, so it cannot provision one.
+  DESKTOP_REFUSAL_HOST_PROGRAM_MISSING = 3;
+  // The request breaks its schema, so it can never be answered as sent.
+  DESKTOP_REFUSAL_INVALID_REQUEST = 4;
+}
+
 message DesktopGatewayEnd {
   optional string error = 1 [(buf.validate.field).string.max_bytes = 65536];
   // The gRPC status code when the gateway refused the call, so a typed refusal
   // (not found, unavailable) is not flattened into a retryable disconnect.
   optional int32 status = 2 [(buf.validate.field).int32 = {gte: 0, lte: 16}];
   optional DesktopLinkProblem link_problem = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  // Set when the app itself refused the call for good (never with a status or a link problem).
+  optional DesktopRefusal refusal = 4 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
 }
 message DesktopGatewayReply {
   oneof body {
