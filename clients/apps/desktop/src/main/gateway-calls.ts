@@ -4,9 +4,9 @@
  * `warm`, when its hold runs out unused). An offline connection is replaced by a new one on the
  * next call.
  *
- * The window may call only what the app uses: the handshake and the orchestrator's methods. Every
- * payload is checked against the generated schemas before it is forwarded and again before it is
- * handed on.
+ * The window may call only what the app uses: the handshake, the orchestrator's methods and the
+ * host's topics. Every payload is checked against the generated schemas before it is forwarded and
+ * again before it is handed on.
  */
 import {HostControlService, OrchestratorService} from '@vibesys/orchestrator-proto';
 import {DesktopRefusal, HostService, validateServicePayload} from '@vibesys/proto';
@@ -37,11 +37,13 @@ import {type CallMetadata, openSession} from './grpc-session.js';
 const SERVICES = [HostService, OrchestratorService, HostControlService];
 
 /**
- * The methods the window may call: the handshake, every orchestrator method, and the host's
- * `Identify`, which says why a host does not serve. Never `Stop`: the app does not end hosts.
+ * The methods the window may call: the handshake, the host's `Subscribe` (the app reads the host's
+ * machine stats through it), every orchestrator method, and the host's `Identify`, which says why a
+ * host does not serve. Never `Stop`: the app does not end hosts.
  */
 const ALLOWED: ReadonlySet<string> = new Set([
   HELLO_METHOD,
+  `/${HostService.typeName}/${HostService.method.subscribe.name}`,
   ...OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
   `/${HostControlService.typeName}/${HostControlService.method.identify.name}`,
 ]);
