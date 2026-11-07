@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import tempfile
 from collections.abc import Generator
 from contextlib import suppress
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_sandbox.api import (
@@ -112,6 +113,58 @@ def _failed_cleanup(mode: Literal["raises", "nonzero"]) -> DockerCliOutcome:
 def _assert_container_stopped(sandbox: DockerSandbox) -> None:
     with pytest.raises(RuntimeError, match="no running container"):
         _ = sandbox.container_id
+
+
+def _find_literal(pattern: str) -> str:
+    """Return the one path ``find -path PATTERN`` matches; fail on a pattern that matches more."""
+    literal: list[str] = []
+    escaped = False
+    for char in pattern:
+        if escaped or char != "\\":
+            assert escaped or char not in "*?[", f"{pattern!r} matches more than one path"
+            literal.append(char)
+        escaped = not escaped and char == "\\"
+    assert not escaped, f"{pattern!r} ends in an escape"
+    return "".join(literal)
+
+
+def _ownership_walks(script: str) -> list[tuple[str, set[str]]]:
+    """Return each tree a root setup *script* gives the agent, with the paths it leaves out.
+
+    A tree must be given away as ``find ROOT -xdev [( -path P [-o -path P]... ) -prune -o]
+    -exec chown -h agent:agent {} +``. A recursive ``chown`` fails the test: it descends into
+    every mount below its root.
+    """
+    words = shlex.split(script)
+    assert "-R" not in words, f"recursive chown in {script!r}"
+    walks: list[tuple[str, set[str]]] = []
+    for start in (index for index, word in enumerate(words) if word == "find"):
+        end = words.index("+", start)
+        assert words[start + 2] == "-xdev", script
+        assert words[end - 5 : end + 1] == ["-exec", "chown", "-h", "agent:agent", "{}", "+"]
+        group = words[start + 3 : end - 5]
+        # `-path P1 -o -path P2 ...`, read as the triples `-o -path P`.
+        tests = ["-o", *group[1:-3]]
+        if group:
+            assert [group[0], *group[-3:]] == ["(", ")", "-prune", "-o"], script
+            assert len(tests) % 3 == 0, script
+            assert set(tests[0::3]) == {"-o"}, script
+            assert set(tests[1::3]) == {"-path"}, script
+        walks.append((words[start + 1], {_find_literal(pattern) for pattern in tests[2::3]}))
+    return walks
+
+
+def _chowned_paths(script: str) -> list[str]:
+    """Return the operands of every plain ``chown agent:agent`` in a root setup *script*."""
+    words = shlex.split(script)
+    paths: list[str] = []
+    for start in (index for index, word in enumerate(words) if word == "chown"):
+        if words[start - 1] == "-exec":
+            continue
+        assert words[start + 1] == "agent:agent", script
+        operands = words[start + 2 :]
+        paths.extend(operands[: operands.index("&&")] if "&&" in operands else operands)
+    return paths
 
 
 def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
@@ -336,7 +389,7 @@ class TestAgentUserRemap:
         cmd_str = " ".join(cmd)
         assert "usermod -o -u 4242 agent" in cmd_str
         assert "groupmod -o -g 4343 agent" in cmd_str
-        assert "chown -R agent:agent /home/agent" in cmd_str
+        assert _ownership_walks(cmd[-1]) == [(AGENT_HOME, set())]
 
     def test_skips_remap_when_ids_already_match(
         self, tmp_path: Path, docker: ScriptedDockerCli
@@ -1218,13 +1271,86 @@ class TestWritableCredentialMounts:
         )
 
         copy = next(script for script in self._root_scripts(engine) if "cp -a" in script)
-        assert "! -path /home/agent/.codex/auth.json" in copy
-        assert "chown -R" not in copy
+        assert _ownership_walks(copy) == [("/home/agent/.codex", {"/home/agent/.codex/auth.json"})]
 
     def test_read_only_mounts_need_no_ownership_step(self, tmp_path: Path) -> None:
         engine = self._start(tmp_path, [(str(tmp_path), "/home/agent/.codex/config.toml", True)])
 
         assert not any("chown" in script for script in self._root_scripts(engine))
+
+
+_HOME_NAME = st.text(alphabet="ab.-_ *?[]\\'", min_size=1, max_size=6).filter(
+    lambda name: name not in {".", ".."}
+)
+_IN_HOME = st.lists(_HOME_NAME, min_size=1, max_size=3).map(
+    lambda names: "/".join((AGENT_HOME, *names))
+)
+_OUTSIDE_HOME = st.sampled_from(
+    (
+        "/opt/vibesys-auth/0",
+        "/workspace/reference/model",
+        f"{AGENT_HOME}-other/.modal.toml",
+        "/home/other/.modal.toml",
+    )
+)
+
+
+class TestRootSetupLeavesMountsAlone:
+    """No root setup step changes the owner of a path mounted from the host (#4039).
+
+    A mounted path is the host's, and ``chown`` fails on a read-only one, which
+    stopped the container from starting on a host whose user is not uid 1000.
+    """
+
+    @pytest.mark.regression
+    @given(
+        mounts=st.lists(st.tuples(st.one_of(_IN_HOME, _OUTSIDE_HOME), st.booleans()), max_size=5),
+        auth_destinations=st.lists(_IN_HOME, max_size=2),
+    )
+    @example(
+        # A Modal run's read-only auth mounts beside a provider credential mounted writable.
+        mounts=[
+            ("/home/agent/.modal.toml", True),
+            ("/home/agent/.modal", True),
+            ("/home/agent/.codex/auth.json", False),
+        ],
+        auth_destinations=["/home/agent/.codex/config.toml"],
+    )
+    def test_ownership_changes_leave_out_every_mount(
+        self, mounts: list[tuple[str, bool]], auth_destinations: list[str]
+    ) -> None:
+        docker = ScriptedDockerCli()
+        # Created, then the image's agent ids, mismatched, so the remap runs.
+        docker.then(docker_result(stdout="abc123\n"), docker_result(stdout="1000\n1000\n"))
+        docker.always(docker_result())
+        sandbox = DockerSandbox(
+            docker=docker,
+            host_workspace="/host/workspace",
+            image="test-image",
+            agent_uid=4242,
+            agent_gid=4343,
+            bind_mounts=[
+                (f"/host/mount-{index}", destination, read_only)
+                for index, (destination, read_only) in enumerate(mounts)
+            ],
+            auth_files=[
+                (f"/opt/vibesys-auth/{index}", destination)
+                for index, destination in enumerate(auth_destinations)
+            ],
+            threads=SimThreads(),
+        )
+        sandbox.start(output=DISCARD)
+        sandbox.stop()
+
+        mounted = {"/workspace", *(destination for destination, _ in mounts)}
+        scripts = [argv[-1] for argv in docker.argvs if argv[1:4] == ("exec", "-u", "root")]
+        walks = [walk for script in scripts for walk in _ownership_walks(script)]
+        # The remap still gives the agent its HOME, and each walk leaves out exactly the mounts.
+        assert walks[0][0] == AGENT_HOME
+        for root, left_out in walks:
+            assert left_out == {path for path in mounted if Path(path).is_relative_to(root)}
+        for path in (path for script in scripts for path in _chowned_paths(script)):
+            assert not any(Path(path).is_relative_to(mount) for mount in mounted), path
 
 
 class TestAuthCopyOwnership:

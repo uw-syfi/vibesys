@@ -44,6 +44,7 @@ _REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 
 _LIST_INDEX = ("ls-files", "--stage", "-z")
+_LIST_WORKTREES = ("worktree", "list", "--porcelain")
 
 
 def _text(data: bytes) -> str:
@@ -54,6 +55,19 @@ def _gitlinks(listing: bytes) -> tuple[str, ...]:
     """The paths ``git ls-files --stage -z`` output records as nested repositories."""
     records = (record.partition("\t") for record in _text(listing).split("\0"))
     return tuple(path for metadata, _, path in records if metadata[:6] == GITLINK_MODE)
+
+
+def _worktree_paths(listing: bytes, terminator: str) -> tuple[Path, ...]:
+    """The work trees a ``git worktree list --porcelain`` listing names.
+
+    Each attribute of a record ends with ``terminator``; a record's first one is
+    ``worktree <path>``.
+    """
+    return tuple(
+        Path(attribute.removeprefix("worktree "))
+        for attribute in _text(listing).split(terminator)
+        if attribute.startswith("worktree ")
+    )
 
 
 class CliGitRepository:
@@ -147,8 +161,11 @@ class CliGitRepository:
     ) -> None:
         """Refuse before Git reads ``pathspecs`` of a work tree holding a nested repository.
 
-        See ``_nested_repositories``. An index or a worktree list Git cannot read fails
-        the guarded command the same way, before it reads the work tree.
+        See ``_nested_repositories``. An index Git cannot read fails the guarded command
+        the same way, before it reads the work tree. A worktree list Git cannot give is
+        reported to the fault sink and raised as ``GitCommandError``, not taken as empty:
+        the guarded command may succeed without it, and an empty list would refuse every
+        linked worktree inside the work tree as a nested repository (issue #4024).
         """
         listing = self._run(_LIST_INDEX, index_file=index_file)
         require_no_nested_repository(
@@ -159,15 +176,17 @@ class CliGitRepository:
         )
 
     def _linked_worktrees(self) -> tuple[Path, ...]:
-        """The work trees ``git worktree list`` reports now; none when Git cannot list them."""
-        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
-        if worktrees.returncode != 0:
-            return ()
-        return tuple(
-            Path(record.removeprefix("worktree "))
-            for record in _text(worktrees.stdout).split("\0")
-            if record.startswith("worktree ")
-        )
+        """The work trees ``git worktree list`` reports now.
+
+        ``-z`` keeps a path that holds a newline whole, but Git learned it only in 2.36
+        and older Git rejects it; the newline-terminated listing every Git prints serves
+        then. Raises ``GitCommandError``, reported to the fault sink, when Git lists
+        neither way.
+        """
+        listing = self._run([*_LIST_WORKTREES, "-z"])
+        if listing.returncode == 0:
+            return _worktree_paths(listing.stdout, "\0")
+        return _worktree_paths(self._run_checked(_LIST_WORKTREES).stdout, "\n")
 
     def _prefix(self) -> str:
         return _text(self._run_checked(["rev-parse", "--show-prefix"]).stdout).strip()
