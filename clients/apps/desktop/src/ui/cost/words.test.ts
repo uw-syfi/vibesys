@@ -77,14 +77,19 @@ describe('writing dollars', () => {
   it('writes every axis step of a tidy scale exactly', () => {
     fc.assert(
       fc.property(fc.double({min: 1e-4, max: 1e6, noNaN: true}), top => {
-        for (const tick of niceScale(top, 3).ticks) {
-          expect(Math.abs(Number(formatAxisUsd(tick).slice(1)) - tick)).toBeLessThan(1e-9);
-        }
+        const {ticks} = niceScale(top, 3);
+        const step = ticks[1] ?? 1;
+        const written = ticks.map(tick => formatAxisUsd(tick, step));
+        ticks.forEach((tick, at) => {
+          expect(Math.abs(Number((written[at] ?? '').slice(1)) - tick)).toBeLessThan(1e-9);
+        });
+        // One axis, one number of decimals.
+        expect(new Set(written.map(text => text.split('.')[1]?.length ?? 0)).size).toBe(1);
       }),
     );
-    expect(formatAxisUsd(20)).toBe('$20');
-    expect(formatAxisUsd(2.5)).toBe('$2.5');
-    expect(formatAxisUsd(0.25)).toBe('$0.25');
+    expect([0.05, 0.1, 0.15].map(v => formatAxisUsd(v, 0.05))).toEqual(['$0.05', '$0.10', '$0.15']);
+    expect([20, 40].map(v => formatAxisUsd(v, 20))).toEqual(['$20', '$40']);
+    expect([2.5, 5, 7.5].map(v => formatAxisUsd(v, 2.5))).toEqual(['$2.5', '$5.0', '$7.5']);
   });
 });
 

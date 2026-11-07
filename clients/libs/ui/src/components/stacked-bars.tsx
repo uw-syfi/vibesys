@@ -78,7 +78,8 @@ function BarMarks(props: {
  * measures; `from` and `to` word the axis's two ends. A bar's `title` says what it holds in full.
  *
  * With `valueFormat` the chart draws a value axis, a hairline and a figure at each tidy step, and
- * draws the bars to its top instead of to the tallest bar; `format` words a value. With `marks`
+ * draws the bars to its top instead of to the tallest bar; `format` words a value, given the
+ * distance between two steps so that every figure of the axis has the same decimals. With `marks`
  * the bars they name are labelled underneath, as many as can be read side by side. A segment that
  * changes height eases to its new height.
  */
@@ -88,7 +89,7 @@ export function StackedBars(props: {
   readonly bars: readonly StackedBar[];
   readonly from?: string;
   readonly to?: string;
-  readonly valueFormat?: (value: number) => string;
+  readonly valueFormat?: (value: number, step: number) => string;
   readonly marks?: readonly BarMark[];
   /** The plot's height: the default, or `tall` for a chart that is the point of its screen. */
   readonly size?: 'tall';
@@ -99,7 +100,9 @@ export function StackedBars(props: {
   const top = scale?.top ?? tallest;
   // The baseline is the axis itself, so zero gets no figure and no line.
   const steps = (scale?.ticks ?? []).filter(tick => tick > 0);
-  const labels = format === undefined ? [] : steps.map(tick => ({tick, text: format(tick)}));
+  // The axis steps are equal, so one step tells the formatter how many decimals every figure needs.
+  const step = scale === null ? 0 : (scale.ticks[1] ?? scale.top);
+  const labels = format === undefined ? [] : steps.map(tick => ({tick, text: format(tick, step)}));
   const widest = Math.max(0, ...labels.map(label => label.text.length));
   const share = (value: number): string => `${((value / (top === 0 ? 1 : top)) * 100).toFixed(2)}%`;
   const figure: StyleWithVars = {'--bars-scale-chars': `${widest}ch`};

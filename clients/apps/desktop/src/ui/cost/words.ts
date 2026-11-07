@@ -62,14 +62,22 @@ export const usdOrNothing = (usd: number | null, precision: Precision): string |
 export const formatRate = (usd: number, precision: Precision): string =>
   `${formatUsd(usd, precision)}/h`;
 
+/** How many decimals a step of this size needs to read exactly (20 is 0, 2.5 is 1, 0.05 is 2). */
+function decimalsOf(step: number): number {
+  for (let decimals = 0; decimals < 6; decimals += 1) {
+    const scaled = step * 10 ** decimals;
+    if (Math.abs(scaled - Math.round(scaled)) < 1e-9 * Math.max(1, scaled)) return decimals;
+  }
+  return 6;
+}
+
 /**
- * A value on the chart's axis, with as many decimals as that value needs and no more (`$20`,
- * `$2.5`, `$0.25`): the axis steps are tidy numbers, so each reads exactly.
+ * A value on the chart's axis, written with the decimals the axis's step needs, the same for every
+ * figure of the axis (`$0.05 $0.10 $0.15`, `$2.5 $5.0 $7.5`, `$20 $40`): the steps are tidy
+ * numbers, so each reads exactly.
  */
-export function formatAxisUsd(usd: number): string {
-  const fixed = usd.toFixed(6);
-  const trimmed = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
-  return `$${trimmed}`;
+export function formatAxisUsd(usd: number, step: number): string {
+  return `$${usd.toFixed(decimalsOf(step))}`;
 }
 
 const UNITS = [
