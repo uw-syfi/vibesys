@@ -2,4 +2,3 @@ Report from agent {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> 
 Changed: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
 In flight: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
 Decisions: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
-Open for the user: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``

@@ -98,12 +98,11 @@ type (
 	}
 
 	reportData struct {
-		From        core.AgentID
-		Headline    string
-		Changed     string
-		InFlight    string
-		Decisions   string
-		OpenForUser string
+		From      core.AgentID
+		Headline  string
+		Changed   string
+		InFlight  string
+		Decisions string
 	}
 
 	jobFinishedData struct {
@@ -192,7 +191,7 @@ func dataOf(m core.Message, records Records) (string, any, error) {
 	case core.Report:
 		return "report", reportData{
 			From: m.From, Headline: b.Headline, Changed: b.Changed, InFlight: b.InFlight,
-			Decisions: b.Decisions, OpenForUser: b.OpenForUser,
+			Decisions: b.Decisions,
 		}, nil
 	case core.JobFinished:
 		return "job_finished", jobFinishedData{Job: b.Job, Outcome: b.Outcome, Detail: b.Detail}, nil

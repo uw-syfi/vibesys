@@ -348,14 +348,13 @@ type (
 	// once recorded; Scope is empty in a command and says, once recorded, whether the report is about
 	// the whole run or only a check-in's window.
 	Report struct {
-		Kind        ReportKind
-		Scope       ReportScope
-		Sequence    uint32
-		Headline    string
-		Changed     string
-		InFlight    string
-		Decisions   string
-		OpenForUser string
+		Kind      ReportKind
+		Scope     ReportScope
+		Sequence  uint32
+		Headline  string
+		Changed   string
+		InFlight  string
+		Decisions string
 	}
 	// JobFinished tells the lead a job is over.
 	JobFinished struct {

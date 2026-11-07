@@ -5,11 +5,10 @@
   "id": "m1",
   "report": {
     "changed": "c1\nc2\n",
-    "decisions": "d",
+    "decisions": "d\n\n",
     "headline": "h\nsecond",
     "inFlight": "i",
-    "kind": "REPORT_KIND_PROGRESS",
-    "openForUser": "o\n\n"
+    "kind": "REPORT_KIND_PROGRESS"
   },
   "runId": "r1",
   "toAgentId": "agent-a"
