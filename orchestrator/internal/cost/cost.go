@@ -7,6 +7,9 @@
 // and by model, the spend over time in buckets whose width the ledger picks, and the spend of the
 // last hour. A client displays a View and adds nothing up.
 //
+// A Host folds the turns of every run of a host through one ledger, so the split, the series and the
+// rate of the whole host are the run view's code over more turns, and lists the runs one by one.
+//
 // A turn is priced when its provider reported a cost and unpriced when it reported tokens and no
 // cost. An unpriced turn is counted, with its tokens, everywhere a turn is, and adds no dollar: a
 // price is never made up, so a cost with unpriced turns behind it is a lower bound and the view
@@ -109,6 +112,26 @@ type Series struct {
 	Buckets []Bucket
 }
 
+// Breakdown is what a set of finished turns cost: the total and its tokens by kind, the split by type
+// of agent and by model, the spend over time and the spend of the last hour. A run's View and the
+// host's HostView both hold one, worked out by the same code from the turns of a Ledger.
+type Breakdown struct {
+	// Total holds the tokens by kind and the cost of all finished turns, and no cost when none is
+	// priced.
+	Total    core.Usage
+	Turns    uint32
+	Unpriced uint32
+	// Roles has an entry for each type of agent the ledger has, the most costly first. A type with no
+	// priced turn follows, in the order of the names.
+	Roles []RoleCost
+	// Models has an entry for each model the ledger's agents ran on, ordered as Roles are.
+	Models []ModelCost
+	Series Series
+	// LastHour is the cost of the turns that finished in the hour up to the series' end. Nil when no
+	// turn is priced.
+	LastHour *float64
+}
+
 // View is what a run has cost as of an instant.
 type View struct {
 	Run core.RunID
@@ -116,26 +139,14 @@ type View struct {
 	// for one that is, its end, so that the view of a finished run is always the same. It is never
 	// before the run's start or the end of a turn the view counts.
 	AsOf time.Time
-	// Total holds the tokens by kind and the cost of all finished turns, and no cost when none is
-	// priced.
-	Total core.Usage
 	// MaxCostUSD is the run's cost limit, zero when it has none.
 	MaxCostUSD float64
-	Turns      uint32
-	Unpriced   uint32
-	// Roles has an entry for each type of agent the run has, the most costly first. A type with no
-	// priced turn follows, in the order of the names.
-	Roles []RoleCost
-	// Models has an entry for each model the run's agents ran on, ordered as Roles are.
-	Models []ModelCost
-	Series Series
-	// LastHour is the cost of the turns that finished in the hour up to AsOf. Nil when no turn of the
-	// run is priced.
-	LastHour *float64
+	Breakdown
 }
 
 // agentInfo is what a ledger keeps of an agent: the facts that group its turns.
 type agentInfo struct {
+	run   core.RunID
 	role  core.AgentRole
 	model ModelKey
 }
@@ -157,8 +168,9 @@ func entryOrder(a, b entry) int {
 	return cmp.Or(a.end.Compare(b.end), cmp.Compare(a.key.agent, b.key.agent), cmp.Compare(a.key.ordinal, b.key.ordinal))
 }
 
-// Ledger is the finished turns of one run, and the agents that ran them. The zero value is empty and
-// ready. A Ledger is not safe for concurrent use.
+// Ledger is the finished turns of one run, and the agents that ran them (or, in a Host, of every run it
+// counts: the agents say which run they belong to). The zero value is empty and ready. A Ledger is not
+// safe for concurrent use.
 type Ledger struct {
 	agents  map[core.AgentID]*agentInfo
 	entries []entry
@@ -186,7 +198,7 @@ func (l *Ledger) info(a core.Agent) *agentInfo {
 		info = &agentInfo{}
 		l.agents[a.ID] = info
 	}
-	*info = agentInfo{role: a.Role, model: ModelKey{Harness: a.Spec.Harness, Model: a.Spec.Model}}
+	*info = agentInfo{run: a.Run, role: a.Role, model: ModelKey{Harness: a.Spec.Harness, Model: a.Spec.Model}}
 	return info
 }
 
@@ -279,26 +291,47 @@ func byCost(aCost, bCost *float64, aName, bName string) int {
 
 func (k ModelKey) name() string { return string(k.Harness) + "/" + string(k.Model) }
 
+// order sorts the entries into entryOrder, which breakdown needs and Add keeps true while turns arrive
+// in order.
+func (l *Ledger) order() {
+	if l.sorted {
+		return
+	}
+	slices.SortFunc(l.entries, entryOrder)
+	for i, e := range l.entries {
+		l.at[e.key] = i
+	}
+	l.sorted = true
+}
+
+// lastEnd is when the latest finished turn ended, and false when the ledger has none. It needs the
+// entries in order.
+func (l *Ledger) lastEnd() (time.Time, bool) {
+	if n := len(l.entries); n > 0 {
+		return l.entries[n-1].end, true
+	}
+	return time.Time{}, false
+}
+
 // View works out the view of the run as of now. Passing the run states its start, its limit and
 // whether it is over.
 func (l *Ledger) View(run core.Run, now time.Time) View {
-	if !l.sorted {
-		slices.SortFunc(l.entries, entryOrder)
-		for i, e := range l.entries {
-			l.at[e.key] = i
-		}
-		l.sorted = true
-	}
+	l.order()
 	asOf := now
 	if run.Status.Final() && !run.EndedAt.IsZero() {
 		asOf = run.EndedAt
 	}
-	if n := len(l.entries); n > 0 {
-		asOf = laterOf(asOf, l.entries[n-1].end)
+	if end, ok := l.lastEnd(); ok {
+		asOf = laterOf(asOf, end)
 	}
 	asOf = laterOf(asOf, run.CreatedAt)
+	return View{Run: run.ID, AsOf: asOf, MaxCostUSD: run.MaxCostUSD, Breakdown: l.breakdown(run.CreatedAt, asOf)}
+}
 
-	v := View{Run: run.ID, AsOf: asOf, MaxCostUSD: run.MaxCostUSD}
+// breakdown works out what the ledger's turns cost, with the series running from start to asOf. The
+// entries must be in order.
+func (l *Ledger) breakdown(start, asOf time.Time) Breakdown {
+	var b Breakdown
 	roles := map[core.AgentRole]*tally{}
 	models := map[ModelKey]*tally{}
 	agents := map[core.AgentRole]uint32{}
@@ -313,24 +346,24 @@ func (l *Ledger) View(run core.Run, now time.Time) View {
 		roles[e.agent.role].add(e.usage)
 		models[e.agent.model].add(e.usage)
 	}
-	v.Total, v.Turns, v.Unpriced = total.usage, total.turns, total.unpriced
+	b.Total, b.Turns, b.Unpriced = total.usage, total.turns, total.unpriced
 	for role, t := range roles {
-		v.Roles = append(v.Roles, RoleCost{Role: role, Agents: agents[role], Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
+		b.Roles = append(b.Roles, RoleCost{Role: role, Agents: agents[role], Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
 	}
-	slices.SortFunc(v.Roles, func(a, b RoleCost) int {
+	slices.SortFunc(b.Roles, func(a, b RoleCost) int {
 		return byCost(a.Usage.CostUSD, b.Usage.CostUSD, string(a.Role), string(b.Role))
 	})
 	for model, t := range models {
-		v.Models = append(v.Models, ModelCost{Model: model, Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
+		b.Models = append(b.Models, ModelCost{Model: model, Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage, Tokens: TotalTokens(t.usage)})
 	}
-	slices.SortFunc(v.Models, func(a, b ModelCost) int {
+	slices.SortFunc(b.Models, func(a, b ModelCost) int {
 		return byCost(a.Usage.CostUSD, b.Usage.CostUSD, a.Model.name(), b.Model.name())
 	})
-	v.Series = l.series(v.Models, run.CreatedAt, asOf)
-	if v.Total.CostUSD != nil {
-		v.LastHour = l.lastHour(asOf)
+	b.Series = l.series(b.Models, start, asOf)
+	if b.Total.CostUSD != nil {
+		b.LastHour = l.lastHour(asOf)
 	}
-	return v
+	return b
 }
 
 // Spend works out what the turns that ended in [from, until) cost, in total and by type of agent. It is

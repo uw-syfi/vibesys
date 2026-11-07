@@ -762,6 +762,34 @@ func (s *sim) checkCost() {
 		}
 		s.tally["cost checked"]++
 	}
+	s.checkHostCost(state)
+}
+
+// checkHostCost holds the host's cost view to the runs' own: it meets the contract, counts every run,
+// and its total is the sum of the runs' usage, whatever the faults did.
+func (s *sim) checkHostCost(state core.State) {
+	w, first, err := s.rig.Service.WatchHostCostFrom(time.Time{})
+	if err != nil {
+		s.fail("host cost: %v", err)
+	}
+	w.Close()
+	host := first[0].GetCost()
+	if err := wire.Validate(first[0]); err != nil {
+		s.fail("the host cost view breaks the contract: %v", err)
+	}
+	var usage float64
+	var priced bool
+	for _, run := range state.Runs() {
+		usage += costOf(run.Usage)
+		priced = priced || run.Usage.CostUSD != nil
+	}
+	if got := host.GetTotal().GetCostUsd(); !approx(got, usage) || (host.GetTotal().CostUsd != nil) != priced {
+		s.fail("the host cost view totals %v (priced %v), the runs' usage is %v (priced %v)", got, host.GetTotal().CostUsd != nil, usage, priced)
+	}
+	if host.GetRunCount() != uint32(len(state.Runs())) {
+		s.fail("the host cost view counts %d runs, the host holds %d", host.GetRunCount(), len(state.Runs()))
+	}
+	s.tally["host cost checked"]++
 }
 
 // finish stops every run and lets every timer and stuck turn run out, then checks the whole.

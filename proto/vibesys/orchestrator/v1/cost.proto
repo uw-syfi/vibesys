@@ -153,3 +153,120 @@ message ModelSpend {
     gt: 0
   }];
 }
+
+// HostCost is what every run the host holds has cost, live and ended, worked out by the host from the
+// finished turns of their agents, in the terms RunCost uses: the same turns, the same pricing, the same
+// unpriced turns and the same lists. A client shows these numbers and computes none of them: no sum,
+// ranking, split, rate or bucket is left to it. With no `since`, its total is the sum of the totals of
+// RunCost over the runs it counts.
+//
+// A run is counted unless it ended before the request's `since`. A run that never opened (its lead
+// never ran a turn) is counted like any other, and has cost nothing. A turn is counted when it
+// finished, and with a `since`, when it finished at or after it. The agents are those of the counted
+// runs, whether or not they ran a turn in the window.
+//
+// It is a whole view: each message replaces the one before it.
+message HostCost {
+  option (buf.validate.message).cel = {
+    id: "host_cost.unpriced_turns"
+    message: "unpriced_turns cannot exceed turns"
+    expression: "this.unpriced_turns <= this.turns"
+  };
+  option (buf.validate.message).cel = {
+    id: "host_cost.run_count"
+    message: "run_count is the runs listed plus the runs in other_runs"
+    expression: "this.run_count == uint(size(this.runs)) + (has(this.other_runs) ? this.other_runs.runs : 0u)"
+  };
+
+  // The log sequence the view is current to.
+  uint64 sequence = 1;
+  // The instant the view is worked out at: the host's clock while a counted run is live, and once none
+  // is, the latest end among the counted runs, so that the view of a host with nothing live never
+  // changes. It is never before the first bucket's start.
+  google.protobuf.Timestamp as_of = 2 [(buf.validate.field).required = true];
+  // What the finished turns of every counted run cost. Its tokens are the tokens by kind. cost_usd is
+  // absent when no turn is priced, never zero.
+  Usage total = 3 [(buf.validate.field).required = true];
+  // How many runs the view counts: those in `runs` and those in `other_runs`.
+  uint32 run_count = 4;
+  // How many turns have finished, and how many of them are unpriced. An unpriced turn adds its tokens
+  // and itself to every figure and never a dollar, so a cost with an unpriced turn behind it is a
+  // lower bound, as RunCost says.
+  uint32 turns = 5;
+  uint32 unpriced_turns = 6;
+  // The most costly runs, most costly first, at most 32; a run with no priced turn comes after those,
+  // in the order of the run ids. The runs it leaves out are summed in other_runs.
+  repeated HostRunCost runs = 7 [(buf.validate.field).repeated.max_items = 32];
+  // The runs that are not in `runs`, added up. Absent when every counted run is listed.
+  optional OtherRunsCost other_runs = 8;
+  // One entry for each type of agent the counted runs have, most costly first, as RunCost.roles is,
+  // summed over the runs.
+  repeated RoleCost roles = 9 [(buf.validate.field).repeated.max_items = 16];
+  // One entry for each model the counted runs' agents ran on, most costly first, as RunCost.models
+  // is, summed over the runs. When more models ran than fit, the first ones are kept and
+  // models_truncated says so.
+  repeated ModelCost models = 10 [(buf.validate.field).repeated.max_items = 64];
+  // The cost over time: from the start of the window (the request's `since`, or the start of the
+  // first counted run) to as_of, in buckets of one width the host picks from the ladder RunCost's
+  // series uses.
+  SpendSeries series = 11 [(buf.validate.field).required = true];
+  // What the turns that finished in the hour before as_of cost, across the counted runs. Absent when
+  // no counted turn is priced.
+  optional double last_hour_usd = 12 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // True when the view leaves something of the models out, exactly as RunCost.models_truncated says.
+  // Every figure that is not a list of models still counts every turn.
+  bool models_truncated = 13;
+}
+
+// HostRunCost is what one run has cost, as a line of the host's list of runs by cost.
+message HostRunCost {
+  option (buf.validate.message).cel = {
+    id: "host_run_cost.unpriced_turns"
+    message: "unpriced_turns cannot exceed turns"
+    expression: "this.unpriced_turns <= this.turns"
+  };
+
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  // What the run is called: its task, cut to the limit at a character boundary when it is longer.
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  RunStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The most the run may cost, as Run.max_cost_usd. Absent when the run has no cost limit.
+  optional double max_cost_usd = 4 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // The finished turns the window counts of the run, and how many of them are unpriced.
+  uint32 turns = 5;
+  uint32 unpriced_turns = 6;
+  // Tokens by kind and the cost of the priced turns: absent when none is priced. With no `since` this
+  // is RunCost.total of the run.
+  Usage usage = 7 [(buf.validate.field).required = true];
+  // All the tokens of the run: the sum of the five kinds in usage, a kind no turn reported counting as
+  // none.
+  uint64 total_tokens = 8;
+}
+
+// OtherRunsCost is what the runs HostCost.runs does not list have cost, added up.
+message OtherRunsCost {
+  option (buf.validate.message).cel = {
+    id: "other_runs_cost.unpriced_turns"
+    message: "unpriced_turns cannot exceed turns"
+    expression: "this.unpriced_turns <= this.turns"
+  };
+
+  // How many runs are summed here; at least one, since the message is absent otherwise.
+  uint32 runs = 1 [(buf.validate.field).uint32.gt = 0];
+  uint32 turns = 2;
+  uint32 unpriced_turns = 3;
+  Usage usage = 4 [(buf.validate.field).required = true];
+  uint64 total_tokens = 5;
+}

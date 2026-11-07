@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -99,5 +100,80 @@ func TestAClientReadsARunsCostOverTheService(t *testing.T) {
 	}
 	if _, err := missing.Recv(); status.Code(err) != codes.NotFound {
 		t.Fatalf("the cost of a run the host does not have: %v", err)
+	}
+}
+
+// A client reads what every run of the host has cost over the real service: the whole view first, a
+// whole view again when a run begins and when a turn ends in it, and a failure for a window that
+// begins after the host's clock. The frames cross a real gRPC connection, so the method is registered,
+// the request is validated and the stream wakes on events.
+func TestAClientReadsTheHostsCostOverTheService(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*guard)
+	defer cancel()
+	rig := daemontest.NewRig(t)
+	price := 0.5
+	rig.Sidecars.React = func(s *daemontest.Session, cmd *pb.SessionCommand) {
+		if turn := cmd.GetStartTurn(); turn != nil {
+			daemontest.AnswerTurnWith(s, turn.GetTurnId(), "ok", &pb.Usage{CostUsd: &price})
+			return
+		}
+		daemontest.DefaultReaction(s, cmd)
+	}
+	live := rig.Serve(t)
+	op, err := client.Dial(ctx, live.Listener.Dial, client.Options{BinaryVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.Close()
+	start := func(id string) string {
+		t.Helper()
+		receipt, err := op.Dispatch(ctx, &pb.Command{Id: "start-" + id, Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
+			Repository: "/repo-" + id, Task: "task " + id, FanoutLimit: 1, Brief: "begin", Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE},
+		}}})
+		if err != nil || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED {
+			t.Fatalf("start: %v %v", receipt, err)
+		}
+		return receipt.GetRunId()
+	}
+
+	feed := watchRuns(ctx, t, op, 0)
+	<-feed.snap
+	first := start("a")
+	state, _ := rig.Daemon.State().Run(core.RunID(first))
+	feed.until("the lead's first turn", turnDone(string(state.Lead), 1))
+
+	stream, err := op.WatchHostCost(ctx, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := func(what string) *pb.HostCost {
+		t.Helper()
+		frame, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("waiting for %s: %v", what, err)
+		}
+		return frame.GetCost()
+	}
+	view := next("the first view")
+	if view.GetRunCount() != 1 || view.GetTotal().GetCostUsd() != price || view.GetTurns() != 1 || view.GetRuns()[0].GetRunId() != first {
+		t.Fatalf("first view %v, want the one run with its one priced turn", view)
+	}
+
+	// A run that begins, and the turn its lead ends, are in a view that follows.
+	second := start("b")
+	for view.GetRunCount() < 2 || view.GetTurns() < 2 {
+		view = next("the view with the second run's first turn")
+	}
+	if view.GetTotal().GetCostUsd() != 2*price || len(view.GetRuns()) != 2 || view.GetRuns()[0].GetRunId() == view.GetRuns()[1].GetRunId() {
+		t.Fatalf("view %v, want two runs, %s and %s, at %v each", view, first, second, price)
+	}
+
+	// A window's failure arrives with its first receive.
+	late, err := op.WatchHostCost(ctx, time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := late.Recv(); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("a window that begins after the host's clock: %v", err)
 	}
 }
