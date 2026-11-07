@@ -166,7 +166,7 @@ func (s *SQLite) Settings() (writer Settings, readers []Settings, err error) {
 func (s *SQLite) Explain() (map[string][]string, error) {
 	args := map[string]int{
 		"snapshot runs": 2, "snapshot agents": 1, "events of a run": 3, "events of all": 2, "items page": 3,
-		"messages of a run": 3, "message by id": 1, "turns in window": 4, "receipt": 1, "claim": 2, "checkpoint": 1, "next due": 0,
+		"messages of a run": 3, "message by id": 1, "turns in window": 4, "turn count": 3, "receipt": 1, "claim": 2, "checkpoint": 1, "next due": 0,
 	}
 	out := map[string][]string{}
 	for name, query := range screenQueries {
@@ -387,7 +387,22 @@ func (s *SQLite) Turns(run core.RunID, from, to time.Time, limit int) (TurnWindo
 			}
 			out.Turns = append(out.Turns, turn)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !out.Truncated {
+			return nil
+		}
+		// The loop stopped with the cursor open: close it before the transaction runs another statement.
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		var total int
+		if err := tx.QueryRow(queryTurnCount, string(run), windowBound(from), windowBound(to)).Scan(&total); err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		out.LeftOut = total - len(out.Turns)
+		return nil
 	})
 	return out, err
 }

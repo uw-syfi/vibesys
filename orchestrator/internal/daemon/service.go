@@ -14,8 +14,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -65,6 +63,9 @@ type ServiceDeps struct {
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
 	// a host with no job tool, and its runs record none.
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
+	// HistoryPageBytes is the byte budget of one page of GetRunHistory. Zero is MaxHistoryPageBytes;
+	// a smaller one lets a test fill a page with a small fleet.
+	HistoryPageBytes int
 }
 
 // Service is OrchestratorService over an Engine and the hub, for one Audience.
@@ -85,6 +86,9 @@ func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
 	if deps.Starts == nil {
 		return nil, errors.New("daemon: ServiceDeps.Starts is required")
 	}
+	if deps.HistoryPageBytes <= 0 {
+		deps.HistoryPageBytes = MaxHistoryPageBytes
+	}
 	return &Service{e: e, ServiceDeps: deps}, nil
 }
 
@@ -92,7 +96,7 @@ func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
 func (s *Service) Register(g grpc.ServiceRegistrar) { pb.RegisterOrchestratorServiceServer(g, s) }
 
 func (s *Service) versions() *pb.BuildVersions {
-	return &pb.BuildVersions{BinaryVersion: s.Binary, ProtocolVersion: protocol.Version, MinProtocolVersion: protocol.MinVersion}
+	return protocol.Build(s.Binary)
 }
 
 // Hello answers a handshake with the daemon's versions and whether the two can talk.
@@ -100,15 +104,7 @@ func (s *Service) Hello(_ context.Context, req *pb.HelloRequest) (*pb.HelloRespo
 	if err := wire.Validate(req); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	c := req.GetClient()
-	compat := pb.Compatibility_COMPATIBILITY_COMPATIBLE
-	switch {
-	case c.GetProtocolVersion() < protocol.MinVersion:
-		compat = pb.Compatibility_COMPATIBILITY_CLIENT_TOO_OLD
-	case c.GetMinProtocolVersion() > protocol.Version:
-		compat = pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD
-	}
-	return &pb.HelloResponse{Daemon: s.versions(), Compatibility: compat}, nil
+	return &pb.HelloResponse{Daemon: s.versions(), Compatibility: protocol.Judge(s.versions(), req.GetClient())}, nil
 }
 
 // caller says who is calling, from the call's metadata.
@@ -274,100 +270,8 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 // that sends RunSummary frames: a client that asked for the summaries is one that reads them, and a
 // reader that did not ask would not know the frame.
 func (s *Service) WatchRunsDetailFrom(caller core.Caller, after uint64, detail pb.SnapshotDetail) (*RunsWatch, []*pb.WatchRunsResponse, error) {
-	run := s.runOf(caller)
-	_, scoped := caller.(core.AgentCaller)
-	summaries := detail == pb.SnapshotDetail_SNAPSHOT_DETAIL_SUMMARY
-	// One goroutine owns open, Poll and resync for a watch, including this cursor and these maps.
-	seen := map[string]uint64{}
-	// held is the summary the client holds of each run, and touched the runs something happened in since
-	// a summary of them was last worked out.
-	held := map[string]*pb.RunSummary{}
-	touched := map[core.RunID]bool{}
-	left := map[core.RunID]bool{}
-	visible := func(id core.RunID) bool { return !scoped || id == run }
-	latest := func(search *pb.SearchState) (*pb.WatchRunsResponse, bool) {
-		if !visible(core.RunID(search.RunId)) {
-			return nil, false
-		}
-		if summaries {
-			touched[core.RunID(search.RunId)] = true
-		}
-		if search.Revision <= seen[search.RunId] {
-			return nil, false
-		}
-		seen[search.RunId] = search.Revision
-		return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Search{Search: search}}, true
-	}
-	// summaryFrames returns a frame for each of the runs whose summary the client does not hold as it
-	// now stands, in run order, and keeps what it sends. Called with the engine's lock held.
-	summaryFrames := func(state core.State, only func(core.RunID) bool) []*pb.WatchRunsResponse {
-		var out []*pb.WatchRunsResponse
-		agentsOf := state.AgentsByRun()
-		for _, r := range state.Runs() {
-			if !visible(r.ID) || !only(r.ID) || left[r.ID] {
-				continue
-			}
-			summary, err := s.e.runSummary(state, r, agentsOf[r.ID])
-			if err != nil {
-				// The record the summary reads is missing or unreadable: the client keeps the one it has.
-				s.e.Log.Error("cannot work out the summary of a run", "run", r.ID, "err", err)
-				continue
-			}
-			if proto.Equal(held[string(r.ID)], summary) {
-				continue
-			}
-			held[string(r.ID)] = summary
-			out = append(out, &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Summary{Summary: summary}})
-		}
-		return out
-	}
-	w := &RunsWatch{
-		e: s.e, run: run, maxBytes: MaxWatchFrameBytes,
-		snapshot: func(state core.State, last uint64) (*pb.WatchRunsResponse, error) {
-			clear(touched)
-			return s.runsSnapshot(state, last, run, scoped, detail, seen, held, left)
-		},
-		change: func(c *pb.RunChange) (*pb.WatchRunsResponse, bool) {
-			if !visible(core.RunID(c.GetRunId())) {
-				return nil, false
-			}
-			if summaries {
-				touched[core.RunID(c.GetRunId())] = true
-			}
-			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Change{Change: c}}, true
-		},
-		delta:  func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
-		latest: latest,
-		current: func(state core.State) []*pb.WatchRunsResponse {
-			var out []*pb.WatchRunsResponse
-			for _, r := range state.Runs() {
-				if msg, ok := latest(s.e.searchState(r.ID)); ok {
-					out = append(out, msg)
-				}
-			}
-			if summaries {
-				// A stream that resumed holds no summary yet, and one that began holds those of its snapshot.
-				out = append(out, summaryFrames(state, func(core.RunID) bool { return true })...)
-				clear(touched)
-			}
-			return out
-		},
-	}
-	if summaries {
-		// One frame for the runs the events of a poll touched, after the changes themselves.
-		w.settle = func(uint64) []*pb.WatchRunsResponse {
-			if len(touched) == 0 {
-				return nil
-			}
-			var out []*pb.WatchRunsResponse
-			_ = s.e.Cut(func(state core.State, _ uint64) error {
-				out = summaryFrames(state, func(id core.RunID) bool { return touched[id] })
-				return nil
-			})
-			clear(touched)
-			return out
-		}
-	}
+	st := newRunsStream(s, caller, detail)
+	w := st.watch()
 	first, err := w.open(hub.Interest{Everything: true}, after)
 	return w, first, err
 }

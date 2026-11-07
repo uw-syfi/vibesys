@@ -138,11 +138,18 @@ is a change to something a user already has.
   one writes), or it refuses on purpose and the release notes say that run history is lost. Do
   not raise the number without making that choice in the same change. An additive change to the
   stored bodies raises it for that reason too, because the build before cannot read them.
-- **The client handshake says protocol 1.** `protocol_version` and `min_protocol_version` in
-  `service.proto` are 1: the first protocol a published client speaks. They stayed at 1 through
-  the redesign before the tag because no older client was ever published, so there was nothing to
-  tell apart. From now on a change that breaks a published client raises `protocol_version`, and
-  `min_protocol_version` rises only when the host stops serving the clients below it.
+- **The client handshake says protocol 2.** `protocol_version` and `min_protocol_version` in
+  `service.proto` are 2. Protocol 1 is the first protocol a published client speaks: it stayed at 1
+  through the redesign before the tag because no older client was ever published. Protocol 2 is the
+  host that serves what the desktop app now needs: `WatchRuns` with `detail = SUMMARY` and its
+  `RunSummary` frames, and `GetRunHistory`. A host of protocol 1 ignores `detail` and lacks the call,
+  so a client that needs them has to be refused, and the handshake is the only place that can. The one
+  number is also the client's own floor: a client's `min_protocol_version` is the oldest host it still
+  speaks, and a host answers `DAEMON_TOO_OLD` when that is above its own protocol (`protocol.Judge`).
+  So raising `protocol_version` for a change a client depends on raises `min_protocol_version` with
+  it, and the cost is that the host then refuses the clients below, with `CLIENT_TOO_OLD`. From now on a
+  change that breaks a published client raises `protocol_version`, and `min_protocol_version` rises when
+  a client starts to need the change or the host stops serving the clients below it.
   The session protocol between the host and the process that holds a session
   (`SESSION_PROTOCOL_VERSION_CURRENT` in `agent_session.proto`) is 2. The two sides always come
   from one bundle, so the number matters only to a session that outlived a host upgrade, and no

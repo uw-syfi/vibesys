@@ -82,7 +82,7 @@ func TestEverySearchFrameFitsForGeneratedRunsAndViews(t *testing.T) {
 	}
 }
 
-func TestLargestSnapshotFitsAndOmittedSearchesFollow(t *testing.T) {
+func TestLargestSnapshotFitsAndOmittedSearchesFollowWithinTheBurstBudget(t *testing.T) {
 	r := daemontest.NewRig(t)
 	store := new(search.Store)
 	r.Daemon.Search = store
@@ -104,15 +104,18 @@ func TestLargestSnapshotFitsAndOmittedSearchesFollow(t *testing.T) {
 	for _, s := range snap.Searches {
 		seen[s.RunId] = true
 	}
+	burst := 0
 	for _, f := range frames[1:] {
 		if proto.Size(f) > daemon.MaxWatchFrameBytes {
 			t.Fatal("oversized frame")
 		}
 		if s := client.WatchRunsSearch(f); s != nil {
 			seen[s.RunId] = true
+			burst += proto.Size(f)
 		}
 	}
-	if len(seen) != 12 {
-		t.Fatal("omitted searches were lost", len(seen))
+	// What the snapshot left out follows, but only as much as one burst holds: the rest is sent when it changes.
+	if burst > daemon.MaxFollowUpBytes || len(seen) <= len(snap.Searches) {
+		t.Fatalf("%d bytes followed the snapshot, and %d of 12 views were sent against the snapshot's %d", burst, len(seen), len(snap.Searches))
 	}
 }

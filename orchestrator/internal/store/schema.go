@@ -142,6 +142,7 @@ var screenQueries = map[string]string{
 	"messages of a run": queryMessages,
 	"message by id":     queryMessage,
 	"turns in window":   queryTurns,
+	"turn count":        queryTurnCount,
 	"receipt":           `SELECT result FROM command_receipts WHERE command_id = ?`,
 	"claim":             queryClaim,
 	"checkpoint":        queryCheckpoint,
@@ -162,6 +163,9 @@ const (
 	queryTurns = `SELECT body, started_at, id FROM turns INDEXED BY turns_window
 WHERE run_id = ?1 AND started_at < ?3 AND (ended_at IS NULL OR ended_at > ?2)
 ORDER BY started_at, id LIMIT ?4`
+	// How many turns a window holds, for a window the limit cut: the same index entries, counted.
+	queryTurnCount = `SELECT COUNT(*) FROM turns INDEXED BY turns_window
+WHERE run_id = ?1 AND started_at < ?3 AND (ended_at IS NULL OR ended_at > ?2)`
 	// The oldest ready effects first. outbox_order walks unclaimed rows in id order and tests
 	// run_after on the entry: only timers not yet due are skipped, and they are few.
 	queryClaim      = `SELECT id, effect FROM outbox INDEXED BY outbox_order WHERE state = 0 AND run_after <= ? ORDER BY id LIMIT ?`

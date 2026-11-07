@@ -10,8 +10,8 @@ import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/search.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
-option (protocol_version) = 1;
-option (min_protocol_version) = 1;
+option (protocol_version) = 2;
+option (min_protocol_version) = 2;
 
 extend google.protobuf.FileOptions {
   // The revision of this service's behavior. It rises only when a change breaks a peer. The daemon,
@@ -146,6 +146,11 @@ message RunSummary {
   // Where the run stands on each objective, in the order of the task's metrics, then the objectives that
   // have a declared bound and no measurement.
   repeated ObjectiveStanding objectives = 6 [(buf.validate.field).repeated.max_items = 64];
+  // The host could not serve the run's summary report: its record is missing or unreadable, or it is too
+  // large to send. `report` is absent for that reason and not because the lead posted none, and every
+  // other field of the summary is whole. The next summary of the run after the host can read it again
+  // has the report.
+  bool report_unavailable = 7;
 }
 
 // RoleAgents counts the agents of one type in a run.
@@ -286,6 +291,11 @@ message GetRunHistoryRequest {
 // stream's changes after the client's own sequence keep it so: a client keeps a record it already
 // holds and adds the ones it does not.
 message GetRunHistoryResponse {
+  option (buf.validate.message).cel = {
+    id: "run_history.flags_follow_counts"
+    message: "turns_left_out and check_ins_left_out say exactly whether their counts are not zero"
+    expression: "this.turns_left_out == (this.turns_left_out_count > 0) && this.check_ins_left_out == (this.check_ins_left_out_count > 0)"
+  };
   // The sequence this page is current to.
   uint64 sequence = 1;
   // First page only.
@@ -298,11 +308,19 @@ message GetRunHistoryResponse {
   repeated Message messages = 5;
   // Pass as cursor to read the next page. Zero when this was the last.
   uint64 next_cursor = 6;
-  // First page only: the run has more turns than the timeline window holds, and the later ones are
-  // not here.
+  // First page only: the page does not hold all the run's turns, whether the timeline window or the
+  // page's byte budget cut them. True exactly when turns_left_out_count is not zero.
   bool turns_left_out = 7;
-  // First page only: a viewer made more check-ins than the 64 held, and the older ones are not here.
+  // First page only: the page does not hold all the run's check-ins, whether a viewer made more than
+  // the 64 held or the page's byte budget cut them. True exactly when check_ins_left_out_count is not
+  // zero.
   bool check_ins_left_out = 8;
+  // First page only, and each is how many the run has that this page leaves out, to fit its byte
+  // budget (and, for turns and check-ins, the host's window and the 64 per viewer): the agents, the
+  // later turns, and the older check-ins. Messages are never left out, only paged.
+  uint32 agents_left_out_count = 9;
+  uint32 turns_left_out_count = 10;
+  uint32 check_ins_left_out_count = 11;
 }
 
 message WatchRunCostRequest {

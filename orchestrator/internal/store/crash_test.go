@@ -35,6 +35,9 @@ import (
 // The invariants name no step, so a change that moves the outbox writes into a second transaction,
 // or splits the events from the tables, fails them at the step between the two.
 
+// crashHangBound is how long a child may take to reach its write step before the test gives up on it as hung.
+const crashHangBound = 5 * time.Minute
+
 const (
 	crashDir  = "ORCHESTRATOR_CRASH_DIR"
 	crashSeed = "ORCHESTRATOR_CRASH_SEED"
@@ -120,6 +123,11 @@ func killChildAtStep(t *testing.T, dirPath string, seed uint64, step, commits in
 		t.Fatal(err)
 	}
 	defer func() { _ = cmd.Process.Kill() }() // a no-op once the process has been waited for.
+	// A child that never reaches the step would leave the loop below reading forever. Killing it ends the
+	// read and fails the test as a child that ended early. The bound only guards against a hang: a child
+	// reaches its step by its own writes, never by this clock, and no run is anywhere near it.
+	hang := time.AfterFunc(crashHangBound, func() { _ = cmd.Process.Kill() })
+	defer hang.Stop()
 	var lines []string
 	returned, reached := 0, false
 	for sc := bufio.NewScanner(stdout); !reached && sc.Scan(); {

@@ -503,5 +503,5 @@ func (m *Memory) Turns(run core.RunID, from, to time.Time, limit int) (TurnWindo
 		return cmp.Or(a.StartedAt.Compare(b.StartedAt), cmp.Compare(a.ID, b.ID))
 	})
 	limit = pageLimit(limit, MaxWindowTurns)
-	return TurnWindow{Turns: all[:min(len(all), limit)], Truncated: len(all) > limit}, nil
+	return TurnWindow{Turns: all[:min(len(all), limit)], Truncated: len(all) > limit, LeftOut: max(0, len(all)-limit)}, nil
 }

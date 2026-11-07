@@ -191,7 +191,7 @@ func (m *model) turns(run core.RunID, from, to time.Time, limit int) store.TurnW
 		return cmp.Or(a.StartedAt.Compare(b.StartedAt), cmp.Compare(a.ID, b.ID))
 	})
 	limit = capped(limit, store.MaxWindowTurns)
-	return store.TurnWindow{Turns: all[:min(len(all), limit)], Truncated: len(all) > limit}
+	return store.TurnWindow{Turns: all[:min(len(all), limit)], Truncated: len(all) > limit, LeftOut: max(0, len(all)-limit)}
 }
 
 // runs and agents list every one the log mentions, listed or not, for a test to ask about each.
