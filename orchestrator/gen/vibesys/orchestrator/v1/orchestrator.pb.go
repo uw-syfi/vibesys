@@ -3297,7 +3297,14 @@ type Report struct {
 	Changed   string                 `protobuf:"bytes,2,opt,name=changed,proto3" json:"changed,omitempty"`
 	InFlight  string                 `protobuf:"bytes,3,opt,name=in_flight,json=inFlight,proto3" json:"in_flight,omitempty"`
 	Decisions string                 `protobuf:"bytes,4,opt,name=decisions,proto3" json:"decisions,omitempty"`
-	Kind      ReportKind             `protobuf:"varint,6,opt,name=kind,proto3,enum=vibesys.orchestrator.v1.ReportKind" json:"kind,omitempty"`
+	// Retired: the lead decides every open question itself and records it under decisions, so nothing
+	// writes or reads this. It stays in the schema only because orchestrator/v1 is under buf breaking,
+	// which refuses a deleted field (reserving it does not pass); the next package version drops it.
+	// Hidden from the tool, so the lead cannot send it.
+	//
+	// Deprecated: Marked as deprecated in vibesys/orchestrator/v1/orchestrator.proto.
+	OpenForUser string     `protobuf:"bytes,5,opt,name=open_for_user,json=openForUser,proto3" json:"open_for_user,omitempty"`
+	Kind        ReportKind `protobuf:"varint,6,opt,name=kind,proto3,enum=vibesys.orchestrator.v1.ReportKind" json:"kind,omitempty"`
 	// Zero in a command. The orchestrator numbers the reports of a run from 1 in the order it
 	// records them, so a reader can ask for those after the last one it saw.
 	Sequence uint32 `protobuf:"varint,7,opt,name=sequence,proto3" json:"sequence,omitempty"`
@@ -3362,6 +3369,14 @@ func (x *Report) GetInFlight() string {
 func (x *Report) GetDecisions() string {
 	if x != nil {
 		return x.Decisions
+	}
+	return ""
+}
+
+// Deprecated: Marked as deprecated in vibesys/orchestrator/v1/orchestrator.proto.
+func (x *Report) GetOpenForUser() string {
+	if x != nil {
+		return x.OpenForUser
 	}
 	return ""
 }
@@ -4595,16 +4610,17 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x06answer\x18\x03 \x01(\tB/\xbaH\x04r\x02\x10\x01\xaa\xbb\x18$The direct answer, with the numbers.R\x06answer\x12Z\n" +
 	"\bevidence\x18\x04 \x01(\tB>\xaa\xbb\x18:The paths of the captures, and the command that made each.R\bevidence\x12m\n" +
 	"\vunsupported\x18\x05 \x01(\tBK\xaa\xbb\x18GThe parts of the question the evidence does not answer, and what would.R\vunsupported\x12Y\n" +
-	"\ainforms\x18\x06 \x01(\tB?\xaa\xbb\x18;The decision this informs, and which way the answer points.R\ainforms\"\xa1\a\n" +
+	"\ainforms\x18\x06 \x01(\tB?\xaa\xbb\x18;The decision this informs, and which way the answer points.R\ainforms\"\xb8\a\n" +
 	"\x06Report\x120\n" +
 	"\bheadline\x18\x01 \x01(\tB\x14\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\tOne line.R\bheadline\x12A\n" +
 	"\achanged\x18\x02 \x01(\tB'\xaa\xbb\x18#What changed since the last report.R\achanged\x125\n" +
 	"\tin_flight\x18\x03 \x01(\tB\x18\xaa\xbb\x18\x14What is running now.R\binFlight\x12g\n" +
-	"\tdecisions\x18\x04 \x01(\tBI\xaa\xbb\x18EWhat you decided on your own, including every question that was open.R\tdecisions\x12\x83\x01\n" +
+	"\tdecisions\x18\x04 \x01(\tBI\xaa\xbb\x18EWhat you decided on your own, including every question that was open.R\tdecisions\x12*\n" +
+	"\ropen_for_user\x18\x05 \x01(\tB\x06\xb0\xbb\x18\x01\x18\x01R\vopenForUser\x12\x83\x01\n" +
 	"\x04kind\x18\x06 \x01(\x0e2#.vibesys.orchestrator.v1.ReportKindBJ\xbaH\a\x82\x01\x04\x10\x01 \x00\xaa\xbb\x18<progress for a note along the way; final for your last word.R\x04kind\x12 \n" +
 	"\bsequence\x18\a \x01(\rB\x04\xb0\xbb\x18\x01R\bsequence\x12H\n" +
 	"\x05scope\x18\b \x01(\x0e2$.vibesys.orchestrator.v1.ReportScopeB\f\xbaH\x05\x82\x01\x02\x10\x01\xb0\xbb\x18\x01R\x05scope:\xfa\x02\xaa\xbb\x18\xf5\x02\n" +
-	"\vpost_report\x12\xe5\x02Send the operator a report. Decide every open question yourself and record each decision under decisions. Use kind progress for a note along the way. Use kind final once, when the work is finished, or only when an external factor you cannot fix stops all progress, such as no disk space, no quota or a host that is gone; then name the cause in the headline.J\x04\b\x05\x10\x06R\ropen_for_user\"\xc3\x01\n" +
+	"\vpost_report\x12\xe5\x02Send the operator a report. Decide every open question yourself and record each decision under decisions. Use kind progress for a note along the way. Use kind final once, when the work is finished, or only when an external factor you cannot fix stops all progress, such as no disk space, no quota or a host that is gone; then name the cause in the headline.\"\xc3\x01\n" +
 	"\vJobFinished\x12\x1e\n" +
 	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12I\n" +
 	"\aoutcome\x18\x02 \x01(\x0e2#.vibesys.orchestrator.v1.JobOutcomeB\n" +

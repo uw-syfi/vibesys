@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -39,6 +40,10 @@ func fill(r *rand.Rand, m protoreflect.Message) {
 	fields := m.Descriptor().Fields()
 	for i := range fields.Len() {
 		fd := fields.Get(i)
+		if fd.Options().(*descriptorpb.FieldOptions).GetDeprecated() {
+			// A retired field stays in the schema for buf breaking and no mapper carries it.
+			continue
+		}
 		chosen := fd.ContainingOneof() != nil && !fd.ContainingOneof().IsSynthetic()
 		if !chosen && r.IntN(16) != 0 {
 			set(r, m, fd)

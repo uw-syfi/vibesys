@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
@@ -21,12 +22,24 @@ import (
 // The structural part: the fields of Report are a closed list, so a new field fails here until
 // someone reads it against the rule. That list is the whole contract the lead speaks to the
 // operator through, and a field "for the operator to answer" would have to be added to it.
+// open_for_user is the one retired field: orchestrator/v1 is under buf breaking, which refuses a
+// deleted field, so it stays until the next package version, deprecated and hidden from the tool.
+// The test requires both, so the lead cannot send it and no client is invited to show it.
 func TestReportHasNoFieldThatAsksTheOperator(t *testing.T) {
 	declared := []string{"headline", "changed", "in_flight", "decisions", "kind", "sequence", "scope"}
 	fields := (&pb.Report{}).ProtoReflect().Descriptor().Fields()
 	var got []string
 	for i := 0; i < fields.Len(); i++ {
-		got = append(got, string(fields.Get(i).Name()))
+		field := fields.Get(i)
+		if field.Name() == "open_for_user" {
+			deprecated := field.Options().(*descriptorpb.FieldOptions).GetDeprecated()
+			hidden := proto.GetExtension(field.Options(), pb.E_ToolFieldHidden).(bool)
+			if !deprecated || !hidden {
+				t.Errorf("open_for_user must stay deprecated and hidden from the tool; deprecated=%v hidden=%v", deprecated, hidden)
+			}
+			continue
+		}
+		got = append(got, string(field.Name()))
 	}
 	slices.Sort(got)
 	want := slices.Clone(declared)

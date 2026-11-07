@@ -645,10 +645,14 @@ message Report {
   string changed = 2 [(tool_field_doc) = "What changed since the last report."];
   string in_flight = 3 [(tool_field_doc) = "What is running now."];
   string decisions = 4 [(tool_field_doc) = "What you decided on your own, including every question that was open."];
-  // The lead decides what is open and records it under decisions, so no field asks the operator.
-  // Field 5 carried a question for the operator; reserved so a stored report still parses.
-  reserved 5;
-  reserved "open_for_user";
+  // Retired: the lead decides every open question itself and records it under decisions, so nothing
+  // writes or reads this. It stays in the schema only because orchestrator/v1 is under buf breaking,
+  // which refuses a deleted field (reserving it does not pass); the next package version drops it.
+  // Hidden from the tool, so the lead cannot send it.
+  string open_for_user = 5 [
+    deprecated = true,
+    (tool_field_hidden) = true
+  ];
   ReportKind kind = 6 [
     (buf.validate.field).enum = {
       defined_only: true
