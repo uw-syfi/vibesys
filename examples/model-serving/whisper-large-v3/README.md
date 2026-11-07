@@ -21,24 +21,18 @@ whisper-large-v3/
     ├── reference/           # HF WhisperForConditionalGeneration reference (correctness ground truth)
     │   ├── meta.json        # model id + pinned revision
     │   ├── config.json      # whisper-large-v3 config
-    │   └── reference.py     # reference_transcribe() used by the checker
-    ├── accuracy_checker/    # checker.py: reference-vs-candidate word-overlap gate
+    │   └── reference.py     # reference_transcribe(), which made the checker's references
+    ├── accuracy_checker/    # checker.py: HTTP gate against the stored reference transcripts
     ├── benchmark/           # checked-in Request Factory workload trace
     └── test_audio/          # LibriSpeech test-clean clips + manifest.json
 ```
 
 ## Candidate contract
 
-The Implementer's `main.py` must expose:
-
-```python
-class VibeServeModel:
-    @classmethod
-    def from_pretrained(cls, model_dir, device, dtype) -> "VibeServeModel": ...
-    def transcribe(self, audio: np.ndarray, sampling_rate: int = 16000) -> str: ...
-```
-
-and serve `/v1/audio/transcriptions` for the benchmark.
+The candidate serves an OpenAI-compatible `POST /v1/audio/transcriptions` on
+`http://localhost:8000`. Both the accuracy checker and the benchmark use only
+that endpoint; neither imports the candidate's code
+([accuracy checker](.vibesys/tasks/default/accuracy_checker/README.md)).
 
 The benchmark is executed directly by the pinned
 `vibesys-evaluator-request-factory` engine. Its checked-in 64-request trace

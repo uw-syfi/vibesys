@@ -124,7 +124,7 @@ keep image `ENV` to values that are correct on the compute node too.
 All outer loops use this model. The agent always runs in a local Docker
 container. Modal, SkyPilot, and Slurm change where evaluation runs, not the task
 layout. The Slurm environments reach the cluster through a host-owned broker
-that the container connects to over a mounted socket. Task commands always start in the repository root. `.vibesys` is mounted read-only
+that the container connects to over a mounted socket. Task commands start in the repository root, except check and measure commands on Modal (below). `.vibesys` is mounted read-only
 for coding agents. Machine-local state is outside their workspace.
 
 Modal tasks may set a project-relative deployment file. Omit this block to use
@@ -170,7 +170,17 @@ speaks evaluator result protocol 2 unless it declares a `result` table.
 
 Check, measure and diagnostic profile commands may be task-owned argv arrays,
 or stable entry points supplied by an exact evaluator package; they are trusted
-evaluator code. The build is candidate code: an argv run from the root of a
+evaluator code.
+
+On Modal, check and measure commands run inside the candidate's serving
+container, next to the running server, from a directory that holds only what the
+command names: the directory of each project file it names, and each directory
+it names, at their project-relative paths. The candidate's code is not there and
+the accelerator belongs to the server, so such a command reaches the candidate
+over its network interface (`[agent] interface = "service"`) and names every
+task directory it reads.
+
+The build is candidate code: an argv run from the root of a
 fresh checkout of the measured commit, confined like the agent (in the Docker
 run environment, the candidate's container). After it passes, VibeSys verifies
 every file the evaluator package requires (`candidate_outputs` in its

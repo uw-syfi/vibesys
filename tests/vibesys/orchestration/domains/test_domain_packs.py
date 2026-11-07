@@ -267,6 +267,36 @@ def test_render_role_branches_on_interface(tmp_path: Path) -> None:
     assert "IN_PROCESS_GATE" not in service
 
 
+_LLM_SERVING = resolve_domain(DomainName.LLM_SERVING)
+
+
+@pytest.mark.parametrize("modality", _LLM_SERVING.modalities)
+@pytest.mark.parametrize("role", [DomainRole.IMPLEMENTER, DomainRole.JUDGE])
+def test_a_service_task_is_never_asked_for_the_in_process_adapter(
+    role: DomainRole, modality: str
+) -> None:
+    """A task whose evaluator talks to the server over HTTP imports nothing from the candidate.
+
+    The speech-to-text implementer section still required a test of
+    ``VibeServeModel.from_pretrained`` under ``interface = "service"`` (#4102).
+    """
+    service = render_domain_section(
+        _LLM_SERVING, role, modality=modality, interface="service", profiler_id="none"
+    )
+    assert "VibeServeModel" not in service
+
+
+def test_an_in_process_speech_task_is_asked_to_test_the_adapter_on_real_weights() -> None:
+    implementer = render_domain_section(
+        _LLM_SERVING,
+        DomainRole.IMPLEMENTER,
+        modality="speech_to_text",
+        interface="inprocess",
+        profiler_id="none",
+    )
+    assert 'VibeServeModel.from_pretrained("/model", "cuda", torch.float16)' in implementer
+
+
 def test_single_agent_uses_explicit_section_when_present() -> None:
     # llm-serving ships a bespoke single_agent.md file
     d = resolve_domain(DomainName.LLM_SERVING)
