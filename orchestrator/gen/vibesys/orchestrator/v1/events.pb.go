@@ -470,7 +470,12 @@ type StartRun struct {
 	MaxCostUsd *float64 `protobuf:"fixed64,8,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
 	// How long the run may take, counted from its start by the host, so that a client's clock is not
 	// in it. Absent when the run has no time limit.
-	MaxTime       *durationpb.Duration `protobuf:"bytes,9,opt,name=max_time,json=maxTime,proto3" json:"max_time,omitempty"`
+	MaxTime *durationpb.Duration `protobuf:"bytes,9,opt,name=max_time,json=maxTime,proto3" json:"max_time,omitempty"`
+	// How often the run's lead is asked for a progress report while the run's work moves, counted by the
+	// host. At least five minutes. Absent takes the default of one hour; zero is not "off", it is refused,
+	// so a run that wants fewer reports sets a longer interval. The lead is asked only when work moved
+	// since it last reported or was last asked, and a report it posts on its own restarts the interval.
+	SummaryEvery  *durationpb.Duration `protobuf:"bytes,10,opt,name=summary_every,json=summaryEvery,proto3" json:"summary_every,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -557,6 +562,13 @@ func (x *StartRun) GetMaxCostUsd() float64 {
 func (x *StartRun) GetMaxTime() *durationpb.Duration {
 	if x != nil {
 		return x.MaxTime
+	}
+	return nil
+}
+
+func (x *StartRun) GetSummaryEvery() *durationpb.Duration {
+	if x != nil {
+		return x.SummaryEvery
 	}
 	return nil
 }
@@ -1173,7 +1185,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xf6\x03\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xc3\x04\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1186,7 +1198,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\x127\n" +
 	"\fmax_cost_usd\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
 	"maxCostUsd\x88\x01\x01\x12>\n" +
-	"\bmax_time\x18\t \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTimeB\x0f\n" +
+	"\bmax_time\x18\t \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTime\x12K\n" +
+	"\rsummary_every\x18\n" +
+	" \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xaa\x01\x052\x03\b\xac\x02R\fsummaryEveryB\x0f\n" +
 	"\r_max_cost_usdJ\x04\b\x04\x10\x05R\bdeadline\")\n" +
 	"\aStopRun\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n" +
@@ -1306,25 +1320,26 @@ var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	3,  // 8: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
 	20, // 9: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
 	21, // 10: vibesys.orchestrator.v1.StartRun.max_time:type_name -> google.protobuf.Duration
-	22, // 11: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	3,  // 12: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
-	23, // 13: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	24, // 14: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
-	4,  // 15: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
-	5,  // 16: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
-	6,  // 17: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
-	7,  // 18: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
-	8,  // 19: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
-	9,  // 20: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
-	10, // 21: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
-	0,  // 22: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
-	25, // 23: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	20, // 24: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	21, // 11: vibesys.orchestrator.v1.StartRun.summary_every:type_name -> google.protobuf.Duration
+	22, // 12: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	3,  // 13: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
+	23, // 14: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	24, // 15: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
+	4,  // 16: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
+	5,  // 17: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
+	6,  // 18: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
+	7,  // 19: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
+	8,  // 20: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
+	9,  // 21: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
+	10, // 22: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
+	0,  // 23: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
+	25, // 24: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	20, // 25: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_events_proto_init() }

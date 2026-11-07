@@ -166,6 +166,8 @@ func (t *tx) timer(b TimerFired) {
 		}
 	case TimerLeadIdle:
 		t.leadIdle(b)
+	case TimerSummaryDue:
+		t.summaryDue(b)
 	case TimerStopGrace:
 		if a, ok := t.live(b.Timer.Session); ok && a.Stop != StopNone {
 			t.effect(CloseSession{Session: b.Timer.Session, Force: true})

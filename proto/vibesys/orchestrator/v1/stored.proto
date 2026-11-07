@@ -31,6 +31,10 @@ message RunRecord {
   // The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
   // of any of its sessions meets the same daemon.
   JobToolEndpoint job_tool = 2 [(stored_only) = true];
+  // When the run started, or the lead last posted a report, or the lead was last asked for one,
+  // whichever is latest: the time the next progress report is counted from. Absent on a run recorded
+  // before the schedule existed.
+  google.protobuf.Timestamp last_summary_at = 3 [(stored_only) = true];
 }
 
 // ReceiptRecord is a receipt as it is stored.

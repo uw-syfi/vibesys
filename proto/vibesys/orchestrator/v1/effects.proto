@@ -93,13 +93,16 @@ enum TimerKind {
   TIMER_KIND_LEAD_IDLE = 4;
   // How long the lead has to finish after its run reached a limit, before the run is stopped.
   TIMER_KIND_LIMIT_GRACE = 5;
+  // When a lead that work has moved under is next asked for a progress report. Named by the time, so a
+  // timer of an earlier schedule fires harmlessly.
+  TIMER_KIND_SUMMARY_DUE = 6;
 }
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 message ArmTimer {
   option (buf.validate.message).cel = {
     id: "arm_timer.session"
-    message: "a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not"
+    message: "a stop grace and a launch deadline name a session; the other timers do not"
     expression: "has(this.session) == (this.kind == 2 || this.kind == 3)"
   };
 
