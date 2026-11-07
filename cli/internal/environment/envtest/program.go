@@ -64,7 +64,8 @@ func Crash() Step { return Step{Op: OpCrash} }
 func Child(body ...Step) Step { return Step{Op: OpChild, Body: body} }
 
 // Alive makes the process that runs it observable through World.Gone(name). The test can ask
-// whether the process still runs only after it has reached this step.
+// whether the process still runs only after it has reached this step; the suite's gone refuses a
+// process its case did not wait for.
 func Alive(name string) Step { return Step{Op: OpAlive, Name: name} }
 
 // UnlessFlag ends the process with exit code 1 unless the test has set the flag.
