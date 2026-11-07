@@ -26,7 +26,7 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 		t.Fatalf("run start printed no run: %+v", started)
 	}
 	// The run ends by itself once the lead has reported, so what its sessions recorded is read while they live.
-	sidecars, groups := r.awaitRecordedProcesses()
+	sidecars, groups := r.awaitReportRecordingProcesses(started.RunID)
 	if out := r.client("run", "wait", started.RunID, "--until", "report", "--timeout", "80s"); !strings.Contains(out, "final report 1:") {
 		t.Errorf("wait --until report printed %q", out)
 	}

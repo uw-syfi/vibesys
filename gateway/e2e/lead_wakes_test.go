@@ -17,12 +17,12 @@ import (
 // serves it, which holds the messages of a run that is over. This fixture submits two baseline jobs,
 // four worker jobs, and two post-promotion jobs. The bound only guards against a delivery that never
 // comes.
-func (r *rig) awaitLeadDeliveries(lead string) {
+func (r *rig) awaitLeadDeliveries(run, lead string) {
 	r.t.Helper()
 	deadline := time.Now().Add(bound)
 	for {
 		var snapshot pb.RunsSnapshot
-		if err := protojson.Unmarshal([]byte(r.client("run", "get", "--json")), &snapshot); err != nil {
+		if err := protojson.Unmarshal([]byte(r.client("run", "get", run, "--json")), &snapshot); err != nil {
 			r.t.Fatal(err)
 		}
 		messages := map[string]*pb.Message{}

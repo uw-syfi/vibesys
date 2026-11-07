@@ -12,12 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -262,22 +264,46 @@ func (r *rig) sidecarPids() []int {
 	return pids
 }
 
-// awaitRecordedProcesses returns the sidecar and agent process-group pids the run's sessions have
-// recorded once there are some of each. A run that ends by itself takes its sessions down, so the test
-// reads them while they live; the bound only guards against a session that never records.
-func (r *rig) awaitRecordedProcesses() (sidecars, groups []int) {
+// awaitReportRecordingProcesses waits until the run has a report, and returns every sidecar and agent
+// process-group pid its sessions recorded while it waited. A run that ends by itself takes its sessions
+// down at its report, so they are read while they live; the bound only guards against a report that
+// never comes.
+func (r *rig) awaitReportRecordingProcesses(run string) (sidecars, groups []int) {
 	r.t.Helper()
 	deadline := time.Now().Add(bound)
+	add := func(into []int, pids []int) []int {
+		for _, pid := range pids {
+			if !slices.Contains(into, pid) {
+				into = append(into, pid)
+			}
+		}
+		return into
+	}
 	for {
-		sidecars, groups = r.sidecarPids(), r.pgids()
-		if len(sidecars) > 0 && len(groups) > 0 {
-			return sidecars, groups
+		sidecars, groups = add(sidecars, r.sidecarPids()), add(groups, r.pgids())
+		var snapshot pb.RunsSnapshot
+		if out, err := r.tryClient("run", "get", run, "--json"); err == nil && protojson.Unmarshal([]byte(out), &snapshot) == nil {
+			for _, m := range snapshot.GetMessages() {
+				if m.GetReport() != nil {
+					return sidecars, groups
+				}
+			}
 		}
 		if time.Now().After(deadline) {
-			r.t.Fatalf("a run recorded %d sidecars and %d agent process groups after %s", len(sidecars), len(groups), bound)
+			r.t.Fatalf("the run had no report after %s", bound)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// tryClient runs a vibesys-client verb and returns its output and error, failing nothing.
+func (r *rig) tryClient(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, r.clientBinary, append([]string{"--root", r.root}, args...)...)
+	cmd.Env = r.env
+	out, err := cmd.Output()
+	return string(out), err
 }
 
 func (r *rig) killSidecars() {
