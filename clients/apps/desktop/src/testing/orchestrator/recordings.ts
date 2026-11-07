@@ -75,6 +75,7 @@ function agentFrameOf(
       item: true,
       message: true,
       receipt: true,
+      checkIn: true,
     }) &&
     body.value.agentId === agentId
   ) {
@@ -88,6 +89,7 @@ function agentFrameOf(
       item: true,
       message: true,
       receipt: true,
+      checkIn: true,
     }) &&
     body.value.agentId === agentId
   ) {
