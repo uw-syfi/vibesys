@@ -39,6 +39,7 @@ import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
 import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
 import {type HostConnectionState, hostKey} from '../state/index.js';
+import {HOST_PREREQUISITES} from '../state/host-prerequisites.js';
 import {SILENCE_BOUND_MS} from '../state/liveness.js';
 import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
@@ -393,6 +394,10 @@ interface SshOptions {
   /** The host programs the app's own build holds: a dev build may hold fewer than all. */
   readonly built: readonly GatewayTarget[];
   readonly unserving?: Unserving;
+  /** Prerequisites the host lacks, as `HOST_PREREQUISITES` names them. */
+  readonly lacking?: readonly string[];
+  /** The host already holds the program. */
+  readonly provisioned?: boolean;
   /**
    * The window's run feed: not mounted, mounted and answered at once, or mounted with its first
    * frame held back for the test to deliver.
@@ -405,6 +410,8 @@ const sshHost = (options: SshOptions) =>
   Effect.gen(function* () {
     const peer = fakeGateway();
     const host = fakeSshHost(peer, PLATFORM[options.platform]);
+    for (const name of options.lacking ?? []) host.state.lacking.add(name);
+    host.state.provisioned = options.provisioned ?? false;
     const pending: FakeCall[] = [];
     const {unserving} = options;
     const identity = toBinary(
@@ -478,6 +485,13 @@ const failure = Schema.Union([
     kind: Schema.Literal('build'),
     platform: Schema.Literals([...ALL_TARGETS, 'unsupported']),
     built: Schema.Array(Schema.Literals(ALL_TARGETS)).check(Schema.isMaxLength(3)),
+  }),
+  // A host that lacks something the install needs refuses, naming each, and is never retried.
+  Schema.Struct({
+    kind: Schema.Literal('prerequisite'),
+    lacking: Schema.Array(Schema.Literals(HOST_PREREQUISITES.map(({name}) => name)))
+      .check(Schema.isMinLength(1))
+      .check(Schema.isMaxLength(4)),
   }),
   // A host that says why it does not serve: what it refuses for good is shown and not retried,
   // what may pass (held by another process) is waited out.
@@ -568,6 +582,27 @@ const playBuild = (platform: Platform, built: readonly GatewayTarget[]) =>
     expect(world.connection()._tag).toBe('Unusable');
   });
 
+const playPrerequisite = (lacking: readonly string[]) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, lacking});
+    yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
+    const state = world.connection();
+    expect(state._tag).toBe('Unusable');
+    if (state._tag !== 'Unusable') return;
+    expect(state.fault.kind).toBe('Refused');
+    expect(state.fault.cause).toBe('host-prerequisite-missing');
+    expect(state.fault.retryable).toBe(false);
+    // It names everything the host lacks, and nothing was copied.
+    for (const name of lacking) expect(state.fault.detail).toContain(name);
+    expect(world.host.state.uploads).toBe(0);
+    const probes = world.host.state.probes;
+    yield* world.elapse(10 * 60_000, 30_000);
+    // Never retried: the host was not probed or dialed again.
+    expect(world.host.state.probes).toBe(probes);
+    expect(world.host.state.connects).toBe(0);
+    expect(world.connection()._tag).toBe('Unusable');
+  });
+
 const REFUSED_CAUSE = {
   [StateRefusal.NETWORK_FILESYSTEM]: 'state-network-filesystem',
   [StateRefusal.UNKNOWN_FILESYSTEM]: 'state-unknown-filesystem',
@@ -599,6 +634,17 @@ const playUnserved = (reason: UnservedReason, stateRefusal: StateRefusal) =>
     yield* world.elapse(10 * 60_000, 30_000);
     expect(world.hellos()).toBe(asked);
   });
+
+it.effect('a host that already holds the program connects though it lacks gzip', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const world = yield* sshHost({...served, lacking: ['gzip'], provisioned: true});
+      // Nothing is installed, so nothing the install needs is required.
+      expect(yield* world.until(() => world.live(), 60_000)).not.toBeNull();
+      expect(world.host.state.uploads).toBe(0);
+    }),
+  ),
+);
 
 /** The window's own feed, whose first frame the host takes many windows to deliver. */
 const playSlowFeed = (spacing: number, count: number) =>
@@ -773,6 +819,8 @@ it.effect.prop(
         switch (failure.kind) {
           case 'build':
             return yield* playBuild(failure.platform, failure.built);
+          case 'prerequisite':
+            return yield* playPrerequisite(failure.lacking);
           case 'unserved':
             return yield* playUnserved(failure.reason, failure.stateRefusal);
           case 'slow':

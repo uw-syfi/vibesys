@@ -13,6 +13,11 @@ import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
 import {COMMAND_BOUND_MS, COPY_STALL_MS} from '../state/gateway-policy.js';
+import {
+  missingPrerequisites,
+  PREREQUISITE_SCRIPT,
+  prerequisiteMessage,
+} from '../state/host-prerequisites.js';
 import {type GatewayTarget, gatewayTarget} from '../state/gateway-target.js';
 import {uploadSchedule} from '../state/upload-pacing.js';
 import {GatewayFailed, GatewayRefused, type LinkFailed, type SpawnFailed} from './errors.js';
@@ -131,15 +136,37 @@ export const provisionGateway = (
 ): Effect.Effect<void, GatewayFailed | GatewayRefused | LinkFailed, GatewayArtifacts> =>
   Effect.gen(function* () {
     const run = (script: string, input?: Uint8Array) => runCommand(link, script, input);
+    /**
+     * Refuse a host that lacks something the install needs, naming it. One check covers the whole
+     * table (`state/host-prerequisites.ts`); a host that has everything passes through.
+     */
+    const requirePrerequisites = Effect.gen(function* () {
+      const missing = missingPrerequisites(yield* run(PREREQUISITE_SCRIPT));
+      if (missing.length > 0)
+        return yield* new GatewayRefused({
+          refusal: DesktopRefusal.HOST_PREREQUISITE_MISSING,
+          message: prerequisiteMessage(missing),
+        });
+    });
     const platform = yield* run('uname -s; uname -m');
     const target = yield* Effect.try({
       try: () => gatewayTarget(platform),
-      catch: cause =>
-        new GatewayRefused({
-          refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
-          message: String(cause instanceof Error ? cause.message : cause),
-        }),
-    });
+      catch: cause => cause,
+    }).pipe(
+      // A platform probe that says nothing usable may be a host without `uname`: say that first.
+      Effect.catch(cause =>
+        requirePrerequisites.pipe(
+          Effect.andThen(
+            Effect.fail(
+              new GatewayRefused({
+                refusal: DesktopRefusal.UNSUPPORTED_PLATFORM,
+                message: String(cause instanceof Error ? cause.message : cause),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
     const artifacts = yield* GatewayArtifacts;
     const bytes = yield* artifacts.read(target);
     const digest = createHash('sha256').update(bytes).digest('hex');
@@ -149,6 +176,9 @@ export const provisionGateway = (
       `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${path}; else shasum -a 256 ${path}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
     const holds = (path: string) => run(`if ${matches(path)}; then printf match; fi`);
     if (!force && (yield* holds(binary)) === 'match') return;
+    // Everything the copy runs is checked before it starts: a host that lacks one of them would
+    // fail the install with an exit code, which reads as a lost link and is redialed for ever.
+    yield* requirePrerequisites;
     const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.${HOST_PROGRAM}-${randomUUID()}"`;
     const packed = yield* Effect.tryPromise({
       try: () => compress(bytes),
@@ -158,7 +188,6 @@ export const provisionGateway = (
     yield* run(
       `umask 077; mkdir -p "$HOME/${GATEWAY_DIRECTORY}" && ` +
         `trap 'rm -f ${temporary}' EXIT HUP INT TERM; ` +
-        `command -v gzip >/dev/null 2>&1 || { printf 'gateway provisioning requires gzip\\n' >&2; exit 1; }; ` +
         `gzip -dc > ${temporary} && ${matches(temporary)} && ` +
         `chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
       packed,

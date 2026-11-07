@@ -11,6 +11,7 @@
 import type {Duplex} from 'node:stream';
 import {gunzipSync} from 'node:zlib';
 import {GATEWAY_CONNECT_SCRIPT} from '../../main/gateway-provision.js';
+import {PREREQUISITE_SCRIPT} from '../../state/host-prerequisites.js';
 import {commandOf} from '../../state/remote-command.js';
 import type {FakeGateway} from './fake-gateway.js';
 import {type FakeSpawner, fakeSpawner, type Started} from './fake-process.js';
@@ -35,6 +36,10 @@ interface SshHostState {
   uploads: number;
   /** The host holds the program. */
   provisioned: boolean;
+  /** Prerequisites the host lacks, as `HOST_PREREQUISITES` names them. */
+  readonly lacking: Set<string>;
+  /** Prerequisite checks the host answered. */
+  preflights: number;
 }
 
 export interface FakeSshHost {
@@ -64,6 +69,8 @@ export function fakeSshHost(peer: FakeGateway, platform: string): FakeSshHost {
     probes: 0,
     uploads: 0,
     provisioned: false,
+    lacking: new Set(),
+    preflights: 0,
   };
   const channels = new Set<Channel>();
 
@@ -92,10 +99,16 @@ export function fakeSshHost(peer: FakeGateway, platform: string): FakeSshHost {
     const {process} = started;
     if (script === 'uname -s; uname -m') {
       state.probes += 1;
-      return void process.end(0, platform);
+      return void process.end(0, state.lacking.has('uname') ? '' : platform);
+    }
+    if (script === PREREQUISITE_SCRIPT) {
+      state.preflights += 1;
+      return void process.end(0, [...state.lacking].map(name => `missing ${name}\n`).join(''));
     }
     if (script === GATEWAY_CONNECT_SCRIPT) return void bridge(started);
     if (script.includes('gzip -dc')) {
+      // A host that lacks a tool the install runs fails it with an exit code, as a real one does.
+      if (state.lacking.size > 0) return void process.end(1, '', 'sh: command not found');
       const chunks: Buffer[] = [];
       process.input.on('data', (chunk: Buffer) => chunks.push(chunk));
       process.input.on('end', () => {
