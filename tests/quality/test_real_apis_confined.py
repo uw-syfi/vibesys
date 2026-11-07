@@ -884,6 +884,9 @@ REAL_API_EDGES: dict[Key, str] = {
     ("libs/vs-sandbox/src/vs_sandbox/host_sandbox.py", "interpreter"): (
         "names the interpreter in the confined command a launcher starts"
     ),
+    ("libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", "interpreter"): (
+        "names its own interpreter in the framework Modal client command its Programs start"
+    ),
     ("libs/vs-sandbox/src/vs_sandbox/slurm_policy.py", "interpreter"): (
         "reads the interpreter's file name to allow it in a Slurm policy; starts nothing"
     ),

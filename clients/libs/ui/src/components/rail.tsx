@@ -1,6 +1,6 @@
 import type {JSX, ReactNode} from 'react';
 import {Icon, type IconName} from './icon.js';
-import type {PageState} from './layout.js';
+import {type PageState, Spacer} from './layout.js';
 import {Text} from './text.js';
 import {WindowFrame} from './window-frame.js';
 
@@ -12,7 +12,8 @@ import {WindowFrame} from './window-frame.js';
  * and the second from the bottom. `label` names the rail for assistive technology. `state` says
  * whether what the rail's own choices rest on has been read (such as where the mark goes), as
  * `data-state` on the rail: the rail is the app's navigation, so it says so for every screen.
- * The `mark` (the app's own button, a `RailItem` with `hideLabel`) stands first, set apart from the
+ * The two groups are held apart by a `Spacer`, so `bottom` stays at the rail's foot at every window
+ * height and, in a window too short for both, the rail scrolls rather than overlap them. The `mark` (the app's own button, a `RailItem` with `hideLabel`) stands first, set apart from the
  * destinations by a line, so it is never read as one of them.
  */
 export function RailFrame(props: {
@@ -32,9 +33,12 @@ export function RailFrame(props: {
             {props.top}
           </div>
           {props.bottom === undefined ? null : (
-            <div className="vs-rail-group" data-end>
-              {props.bottom}
-            </div>
+            <>
+              <Spacer />
+              <div className="vs-rail-group" data-end>
+                {props.bottom}
+              </div>
+            </>
           )}
         </nav>
       }

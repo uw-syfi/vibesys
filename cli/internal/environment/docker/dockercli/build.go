@@ -58,10 +58,19 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	if !asExit(err, &exit) {
 		return unavailable("cannot run %q to build: %v; %s", e.program, err, hint)
 	}
+	image := imageName(spec)
 	if e.shell.Lost(exit.ExitCode()) {
-		return unavailable("the build of the task's image on %s ended with the transport's own exit code %d (a lost connection, or a command that exited with it); the end of the build's output:\n%s", e.shell.Where(), exit.ExitCode(), out.last())
+		return unavailable("the build of %s on %s ended with the transport's own exit code %d (a lost connection, or a command that exited with it); the end of the build's output:\n%s", image, e.shell.Where(), exit.ExitCode(), out.last())
 	}
-	return unavailable("building the task's image failed (exit %d); the end of the build's output:\n%s", exit.ExitCode(), out.last())
+	return unavailable("building %s failed (exit %d); the end of the build's output:\n%s", image, exit.ExitCode(), out.last())
+}
+
+// imageName names the image a build makes for a person: its role in the task, and its tag.
+func imageName(spec docker.BuildSpec) string {
+	if spec.Role == "" {
+		return "the image " + spec.Tag
+	}
+	return fmt.Sprintf("%s (%s)", spec.Role, spec.Tag)
 }
 
 // Save writes the image as a docker archive (docker save) to w, streaming: an image is as large as

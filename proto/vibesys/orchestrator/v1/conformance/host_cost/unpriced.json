@@ -1,0 +1,169 @@
+{
+  "cost": {
+    "sequence": "41",
+    "asOf": "2026-11-01T12:00:00Z",
+    "total": {
+      "inputTokens": "5000",
+      "outputTokens": "40"
+    },
+    "runCount": 1,
+    "turns": 1,
+    "unpricedTurns": 1,
+    "runs": [
+      {
+        "runId": "run-d",
+        "name": "task run-d",
+        "status": "RUN_STATUS_RUNNING",
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "5000",
+          "outputTokens": "40"
+        },
+        "totalTokens": "5040"
+      }
+    ],
+    "roles": [
+      {
+        "role": "AGENT_ROLE_LEAD",
+        "agents": 1,
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "5000",
+          "outputTokens": "40"
+        },
+        "totalTokens": "5040"
+      }
+    ],
+    "models": [
+      {
+        "model": {
+          "harness": "HARNESS_CODEX",
+          "model": "model-x"
+        },
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "5000",
+          "outputTokens": "40"
+        },
+        "totalTokens": "5040"
+      }
+    ],
+    "series": {
+      "start": "2026-11-01T09:00:00Z",
+      "width": "300s",
+      "buckets": [
+        {
+          "start": "2026-11-01T09:00:00Z"
+        },
+        {
+          "start": "2026-11-01T09:05:00Z"
+        },
+        {
+          "start": "2026-11-01T09:10:00Z"
+        },
+        {
+          "start": "2026-11-01T09:15:00Z"
+        },
+        {
+          "start": "2026-11-01T09:20:00Z"
+        },
+        {
+          "start": "2026-11-01T09:25:00Z"
+        },
+        {
+          "start": "2026-11-01T09:30:00Z"
+        },
+        {
+          "start": "2026-11-01T09:35:00Z"
+        },
+        {
+          "start": "2026-11-01T09:40:00Z"
+        },
+        {
+          "start": "2026-11-01T09:45:00Z"
+        },
+        {
+          "start": "2026-11-01T09:50:00Z"
+        },
+        {
+          "start": "2026-11-01T09:55:00Z"
+        },
+        {
+          "start": "2026-11-01T10:00:00Z"
+        },
+        {
+          "start": "2026-11-01T10:05:00Z"
+        },
+        {
+          "start": "2026-11-01T10:10:00Z"
+        },
+        {
+          "start": "2026-11-01T10:15:00Z"
+        },
+        {
+          "start": "2026-11-01T10:20:00Z"
+        },
+        {
+          "start": "2026-11-01T10:25:00Z"
+        },
+        {
+          "start": "2026-11-01T10:30:00Z"
+        },
+        {
+          "start": "2026-11-01T10:35:00Z"
+        },
+        {
+          "start": "2026-11-01T10:40:00Z"
+        },
+        {
+          "start": "2026-11-01T10:45:00Z"
+        },
+        {
+          "start": "2026-11-01T10:50:00Z"
+        },
+        {
+          "start": "2026-11-01T10:55:00Z"
+        },
+        {
+          "start": "2026-11-01T11:00:00Z"
+        },
+        {
+          "start": "2026-11-01T11:05:00Z"
+        },
+        {
+          "start": "2026-11-01T11:10:00Z"
+        },
+        {
+          "start": "2026-11-01T11:15:00Z"
+        },
+        {
+          "start": "2026-11-01T11:20:00Z"
+        },
+        {
+          "start": "2026-11-01T11:25:00Z"
+        },
+        {
+          "start": "2026-11-01T11:30:00Z"
+        },
+        {
+          "start": "2026-11-01T11:35:00Z"
+        },
+        {
+          "start": "2026-11-01T11:40:00Z"
+        },
+        {
+          "start": "2026-11-01T11:45:00Z"
+        },
+        {
+          "start": "2026-11-01T11:50:00Z"
+        },
+        {
+          "start": "2026-11-01T11:55:00Z"
+        }
+      ]
+    }
+  }
+}

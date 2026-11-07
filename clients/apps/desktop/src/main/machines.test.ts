@@ -210,7 +210,7 @@ describe('the options a command can carry', () => {
   });
 });
 
-describe('what the Resources tab does with machines', () => {
+describe('what the Machines page does with machines', () => {
   const roster = () => {
     const calls: string[] = [];
     const fake: Roster = {

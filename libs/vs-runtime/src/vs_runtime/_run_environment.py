@@ -98,8 +98,6 @@ from vs_runtime._stage_marks import stage_mark
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
-    REMOTE_EVALUATOR_GO_MODULES_ROOT,
-    REMOTE_EVALUATOR_TOOLS_ROOT,
     SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     SANDBOX_EVALUATOR_TOOLS_ROOT,
     EvaluatorGoModuleLifecycleHooks,
@@ -108,6 +106,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     evaluator_agent_toolchains,
     prepare_trusted_evaluation_plan,
     remote_evaluator_setup_command,
+    remote_stage_command_paths,
     required_evaluator_go_module_cache_root,
     required_evaluator_tools_root,
 )
@@ -1232,9 +1231,11 @@ class DockerEnvironment(NoCaptureRecovery):
         )
 
 
-#: The Modal client a candidate's ``modal run`` needs inside the editor
-#: container; baked into that environment's agent image.
-_MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = ("modal>=0.66",)
+#: The Modal client baked into the editor container's agent image. The Modal
+#: evaluator helper runs its own commands (logs, stop, container list and exec) on
+#: it, so its floor is the helper's; a candidate's ``modal run`` finds it too when
+#: the project does not install its own.
+_MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = (evaluator_helpers.MODAL_CLIENT_REQUIREMENT,)
 
 MODAL_CONTAINER_WAIT_SECONDS = 1200
 """How long a Modal gate waits for the candidate's container when the operator sets no wait."""
@@ -1509,22 +1510,13 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         evaluator_prefix = f"{shlex.join(evaluator_arguments)} --"
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
         objective_document = materialize_effective_objective(request)
+        # The helper runs each trusted command inside the serving container, from the
+        # directory it stages the command's workspace inputs into, never in this editor.
         evaluation = _prepare_evaluation_plan(
             request,
             requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root="/workspace",
-                python_executable="python3",
-                runtime_package_root=(
-                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
-                ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-                runtime_go_module_cache_root=(
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
-                    if requirements.go_module is not None
-                    else None
-                ),
+            remote_stage_command_paths(
+                request.workspace, requirements, python_executable="python3"
             ),
         )
         with _starting_container(request, sandbox) as output:

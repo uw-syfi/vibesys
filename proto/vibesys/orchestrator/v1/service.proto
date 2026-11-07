@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/cost.proto";
 import "vibesys/orchestrator/v1/events.proto";
@@ -43,6 +44,9 @@ service OrchestratorService {
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
+  // What every run the host holds has cost, live and ended: the whole host cost view, then the whole
+  // view again each time any run's cost changes. The host works it out, so the client sums nothing.
+  rpc WatchHostCost(WatchHostCostRequest) returns (stream WatchHostCostResponse);
 }
 
 message DispatchRequest {
@@ -338,4 +342,16 @@ message WatchRunCostRequest {
 // call, and each later one replaces it: a client keeps the latest and never combines two.
 message WatchRunCostResponse {
   RunCost cost = 1 [(buf.validate.field).required = true];
+}
+
+message WatchHostCostRequest {
+  // The window: absent counts everything the host holds. Present counts the turns that finished at or
+  // after this instant, in the runs that did not end before it, and the cost over time starts at it.
+  google.protobuf.Timestamp since = 1 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+}
+
+// WatchHostCostResponse is the host's cost view. The first one the stream sends is the view as of the
+// call, and each later one replaces it: a client keeps the latest and never combines two.
+message WatchHostCostResponse {
+  HostCost cost = 1 [(buf.validate.field).required = true];
 }

@@ -1,7 +1,7 @@
 /**
  * The window bound to the app's services: the rail, and the screen of the destination it shows.
  * The run streams of every host are followed for as long as the window is open, whichever screen
- * shows, so the Resources tab reads live connections; the navigation and the appearance are the
+ * shows, so the Machines page reads live connections; the navigation and the appearance are the
  * stores the entry built, and a screen's callbacks become the intents those stores take.
  */
 import {useAtomMount, useAtomValue} from '@effect/atom-react';
@@ -11,11 +11,14 @@ import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo, useState} from 'react';
 import type {AppearanceStore, MachineActions, NavigationStore} from '../../core/index.js';
 import {
+  type Destination,
+  type MachineRow,
+  machineRow,
   type NavigationAction,
-  type ResourceRow,
-  resourceRow,
   staleForMs,
 } from '../../state/index.js';
+import {CostOverviewScreen} from '../cost-overview/index.js';
+import {MachinesScreen, useMachineControls} from '../machines/index.js';
 import {nowMs} from '../orchestrator/clock.js';
 import {
   ConnectedApp,
@@ -25,7 +28,6 @@ import {
   NO_ISSUES,
 } from '../orchestrator/connected.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
-import {useMachineControls} from '../settings/add-machine/machine-controls.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {ConnectedCatchUp} from './connected-catch-up.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
@@ -37,12 +39,12 @@ const watchRuns = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
     for (const host of hosts) get(host.session.runs.watch);
   });
 
-/** Each host as the Resources tab shows it. */
-const resourcesOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly ResourceRow[]> =>
+/** Each host as the Machines page shows it. */
+const machinesOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly MachineRow[]> =>
   Atom.make(get => {
     const clock = get(nowMs);
     return hosts.map(({key, label, session}) =>
-      resourceRow({
+      machineRow({
         key,
         label,
         connection: get(session.connection.state),
@@ -70,7 +72,7 @@ export function ConnectedShell(props: {
   useAtomMount(useMemo(() => watchRuns(hosts), [hosts]));
   const current = useAtomValue(navigation.state);
   const look = useAtomValue(appearance.state);
-  const resources = useAtomValue(useMemo(() => resourcesOf(hosts), [hosts]));
+  const machineRows = useAtomValue(useMemo(() => machinesOf(hosts), [hosts]));
   const choose = (next: Appearance): void => dispatch(appearance.choose(next), () => undefined);
   const controls = useMachineControls(props.machines, dispatch);
   const {runs} = current;
@@ -79,6 +81,18 @@ export function ConnectedShell(props: {
     current.destination === 'runs' && runs.screen === 'run' && runs.view === 'catch-up'
       ? runs
       : null;
+  /** The screens of the destinations that have no state of their own to keep. */
+  const pages: Record<Exclude<Destination, 'runs'>, JSX.Element> = {
+    cost: <CostOverviewScreen key="cost" />,
+    machines: (
+      <MachinesScreen
+        key="machines"
+        rows={machineRows}
+        {...(controls === undefined ? {} : {controls})}
+      />
+    ),
+    settings: <SettingsScreen key="settings" appearance={look} choose={choose} />,
+  };
   return (
     <FocusMemory place={placeOf(current)}>
       {note => {
@@ -111,15 +125,7 @@ export function ConnectedShell(props: {
                 setIssues={setIssues}
               />
             ) : (
-              <SettingsScreen
-                key="settings"
-                tab={current.settingsTab}
-                pick={tab => go({type: 'pick-settings-tab', tab})}
-                appearance={look}
-                choose={choose}
-                resources={resources}
-                {...(controls === undefined ? {} : {machines: controls})}
-              />
+              pages[current.destination]
             )}
           </AppShell>
         );

@@ -1,7 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
 import {FLEET_STATES} from '../orchestrator/fleet.js';
-import {SETTINGS_TABS} from '../settings/tabs.js';
 import {
   initialNavigation,
   NAVIGATION_KINDS,
@@ -48,11 +47,9 @@ const generators: {
     type: fc.constant('filter-runs-by-host' as const),
     host: fc.constantFrom('host-a', 'host-b', null),
   }),
+  'open-cost': fc.constant({type: 'open-cost' as const}),
+  'open-machines': fc.constant({type: 'open-machines' as const}),
   'open-settings': fc.constant({type: 'open-settings' as const}),
-  'pick-settings-tab': fc.record({
-    type: fc.constant('pick-settings-tab' as const),
-    tab: fc.constantFrom(...SETTINGS_TABS),
-  }),
   back: fc.constant({type: 'back' as const}),
 };
 
@@ -80,17 +77,37 @@ const FILTER_MOVES: readonly NavigationAction[] = [
   {type: 'filter-runs-by-host', host: 'host-b'},
 ];
 
+/** The rail's destinations other than the runs, each with the intent that opens it. */
+const OTHERS = [
+  {destination: 'cost', open: {type: 'open-cost'}},
+  {destination: 'machines', open: {type: 'open-machines'}},
+  {destination: 'settings', open: {type: 'open-settings'}},
+] as const;
+
 describe('navigation', () => {
   it('starts on the run list', () => {
     expect(initialNavigation).toMatchObject({destination: 'runs', runs: {screen: 'runs'}});
   });
 
-  it('keeps the open run while Settings shows and returns to it', () => {
+  it.each(OTHERS)('keeps the open run while $destination shows and returns to it', other => {
     const open = walk([{type: 'open-run', host: 'host-a', runId: 'run-1'}]);
-    const away = navigationReducer(open, {type: 'open-settings'});
-    expect(away.destination).toBe('settings');
+    const away = navigationReducer(open, other.open);
+    expect(away.destination).toBe(other.destination);
     expect(navigationReducer(away, {type: 'open-runs'})).toEqual(open);
     expect(navigationReducer(away, {type: 'back'})).toEqual(open);
+  });
+
+  it('moves between the other destinations directly, and back leaves each for the runs', () => {
+    fc.assert(
+      fc.property(moves, fc.constantFrom(...OTHERS), fc.constantFrom(...OTHERS), (steps, a, b) => {
+        const first = navigationReducer(walk(steps), a.open);
+        const second = navigationReducer(first, b.open);
+        expect(second.destination).toBe(b.destination);
+        expect(second.runs).toEqual(first.runs);
+        expect(second.fleet).toEqual(first.fleet);
+        expect(navigationReducer(second, {type: 'back'}).destination).toBe('runs');
+      }),
+    );
   });
 
   it('the rail Runs, pressed on the runs, goes to the list from anywhere in them', () => {
@@ -165,24 +182,11 @@ describe('navigation', () => {
     );
   });
 
-  it('the moves of a run screen mean nothing while Settings shows', () => {
+  it('the moves of a run screen mean nothing while another destination shows', () => {
     fc.assert(
-      fc.property(moves, steps => {
-        const settings = navigationReducer(walk(steps), {type: 'open-settings'});
-        for (const move of RUN_MOVES) expect(navigationReducer(settings, move)).toBe(settings);
-      }),
-    );
-  });
-
-  it('a settings tab chosen in Settings stays chosen when the person leaves and returns', () => {
-    fc.assert(
-      fc.property(moves, fc.constantFrom(...SETTINGS_TABS), (steps, tab) => {
-        const there = navigationReducer(walk(steps), {type: 'open-settings'});
-        const chosen = navigationReducer(there, {type: 'pick-settings-tab', tab});
-        const back = navigationReducer(navigationReducer(chosen, {type: 'back'}), {
-          type: 'open-settings',
-        });
-        expect(back.settingsTab).toBe(tab);
+      fc.property(moves, fc.constantFrom(...OTHERS), (steps, other) => {
+        const there = navigationReducer(walk(steps), other.open);
+        for (const move of RUN_MOVES) expect(navigationReducer(there, move)).toBe(there);
       }),
     );
   });

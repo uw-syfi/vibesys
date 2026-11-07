@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import shlex
+import string
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import (
     REMOTE_EVALUATOR_GO_MODULES_ROOT,
@@ -28,6 +31,7 @@ from vs_runtime.api.infrastructure import (
     prepare_trusted_evaluation_plan,
     prepare_trusted_evaluator,
     remote_evaluator_setup_command,
+    remote_stage_command_paths,
     required_evaluator_tools_root,
 )
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
@@ -302,6 +306,83 @@ def test_relative_remote_go_cache_is_resolved_before_exec(tmp_path: Path) -> Non
         "python3",
         "wrapper.py",
     ]
+
+
+_PATH_PART = st.text(alphabet=string.ascii_letters + string.digits + "._-", min_size=1, max_size=8)
+_PROJECT_INPUT = st.lists(
+    _PATH_PART.filter(lambda part: part not in {".", ".."}), min_size=1, max_size=4
+).map("/".join)
+"""A workspace-relative input a task names through ``${PROJECT_ROOT}``."""
+
+
+@pytest.mark.regression
+@example(
+    inputs=[".vibesys/tasks/from-scratch/accuracy_checker/checker.py"],
+    package=False,
+    tools=False,
+    go_module=False,
+)
+@given(
+    inputs=st.lists(_PROJECT_INPUT, min_size=1, max_size=4),
+    package=st.booleans(),
+    tools=st.booleans(),
+    go_module=st.booleans(),
+)
+def test_a_remote_stage_names_every_project_input_inside_the_stage(
+    inputs: list[str], *, package: bool, tools: bool, go_module: bool
+) -> None:
+    """A remote environment's trusted command names only paths inside the stage it runs from.
+
+    Regression for #4095: Modal bound ``${PROJECT_ROOT}`` to the editor's ``/workspace``,
+    which the serving container lacks, so the helper staged none of a task's inputs.
+    Whatever the inputs and evaluator package, each ``${PROJECT_ROOT}`` input becomes the
+    same path relative to the stage, and no argument is absolute.
+    """
+    package_root = Path("/operator/evaluator-package")
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package_root if package else None,
+        toolchains=frozenset({"go"}) if package and go_module else frozenset(),
+        tools={"check-tool": _tool()} if package and tools else {},
+        tools_root=Path("/operator/tools") if package and tools else None,
+        go_module=(
+            EvaluatorGoModule(
+                root=package_root,
+                cache_root=Path("/operator/go-cache"),
+                package_digest="sha256:" + "d" * 64,
+            )
+            if package and go_module
+            else None
+        ),
+    )
+    executable = (
+        next(iter(tool_path_replacements(requirements.tools, Path("/tools"))))
+        if requirements.tools
+        else PYTHON_TOKEN
+    )
+    first, *rest = inputs
+    authored = [executable, f"{PROJECT_ROOT_TOKEN}/{first}"]
+    for item in rest:
+        authored.extend(("--input", f"{PROJECT_ROOT_TOKEN}/{item}"))
+    if package:
+        authored.append(str(package_root / "adapter.py"))
+    authored.append(PROJECT_ROOT_TOKEN)
+
+    prepared = prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(accuracy_command=shlex.join(authored)),
+        requirements,
+        remote_stage_command_paths(
+            Path("/editor/workspace"), requirements, python_executable="python3"
+        ),
+    )
+
+    command = shlex.split(prepared.accuracy_command or "")
+    if requirements.go_module is not None:
+        assert command[3:5] == ["vibesys-offline-go", str(REMOTE_EVALUATOR_GO_MODULES_ROOT)]
+        command = command[5:]
+    assert not [argument for argument in command if argument.startswith("/")]
+    assert command[1] == f"./{first}"
+    assert command[3 : 2 * len(rest) + 2 : 2] == [f"./{item}" for item in rest]
+    assert command[-1] == "."
 
 
 def test_go_module_setup_downloads_before_an_explicit_offline_verification(

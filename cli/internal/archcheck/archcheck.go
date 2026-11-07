@@ -108,7 +108,7 @@ var rules = map[string][]string{
 		"internal/clock", "internal/core", "internal/environment", "internal/environment/apptainer",
 		"internal/environment/docker", "internal/environment/slurm", "internal/remote",
 	},
-	"internal/environment/apptainer/localsif": {"internal/core", "internal/environment/apptainer"},
+	"internal/environment/apptainer/localsif": {"internal/clock", "internal/core", "internal/environment", "internal/environment/apptainer"},
 	"internal/environment/apptainer/clusterfake": {
 		"internal/core", "internal/environment", "internal/environment/apptainer", "internal/environment/docker",
 		"internal/environment/fakeenv",

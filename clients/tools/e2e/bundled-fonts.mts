@@ -6,7 +6,7 @@ import type {CDPSession, Page} from '@playwright/test';
  *
  * A glyph that the font in effect lacks is drawn by whatever font the machine falls back to, so
  * the same screen differs between operating systems (the check mark of a step list drew a pixel
- * off on the CI runner and in the image that makes the baselines). Chromium says which font drew
+ * off on the CI runner). Chromium says which font drew
  * each run of text (`CSS.getPlatformFontsForNode`), so the check asks it instead of reading
  * glyph tables. The bundled families are read from `@font-face` in the library's `fonts.css`.
  */

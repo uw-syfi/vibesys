@@ -32,7 +32,10 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
-  "plugins": ["./tools/lint-rules/no-raw-html-sinks.grit"],
+  "plugins": [
+    "./tools/lint-rules/no-raw-html-sinks.grit",
+    "./tools/lint-rules/no-pixel-snapshots.grit"
+  ],
   "linter": {
     "enabled": true,
     "rules": {

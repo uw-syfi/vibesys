@@ -29,72 +29,108 @@ async function open(page: Page, theme: string): Promise<void> {
   expect(loaded, 'fonts that fell back instead of loading').toEqual([]);
 }
 
-/**
- * Shows one entry and hides the rest while `shoot` runs. Entries stack in one page, and what
- * Chromium draws for an entry depends on where it sits there: a change to the height of any entry
- * above it shifted the antialiasing of a few shapes in later baselines, so a baseline update
- * rewrote screens nobody changed. Alone, an entry always sits at the same place and its
- * baseline depends on its own content only.
- */
-async function alone(page: Page, name: string, shoot: () => Promise<void>): Promise<void> {
-  const setOthers = (display: string) =>
-    page.evaluate(
-      ([keep, value]) => {
-        for (const entry of Array.from(
-          document.querySelectorAll<HTMLElement>('[data-gallery-entry]'),
-        )) {
-          if (entry.dataset['galleryEntry'] !== keep) entry.style.display = value ?? '';
-        }
-        window.scrollTo(0, 0);
-      },
-      [name, display],
-    );
-  await setOthers('none');
-  try {
-    await shoot();
-  } finally {
-    await setOthers('');
-  }
-}
-
 async function entryNames(page: Page): Promise<string[]> {
   return page
     .locator('[data-gallery-entry]')
     .evaluateAll(entries => entries.map(entry => entry.getAttribute('data-gallery-entry') ?? ''));
 }
 
-/**
- * The themes the screenshots and axe run in: Ink only, the Vercel-inspired theme the redesign
- * leads with. The other themes stay in the token table, where the contrast test checks every one.
- */
-const VALIDATED_THEMES = ['ink'];
+/** What a page reports when it is wrong: uncaught exceptions and console errors. */
+function watchErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(`uncaught: ${error.message}`));
+  page.on('console', message => {
+    if (message.type() === 'error') errors.push(`console: ${message.text()}`);
+  });
+  return errors;
+}
 
-test('every component looks as agreed, and the page has no axe violation, in Ink', async ({
+test('every entry draws, without an error or a stray scrollbar, in every theme', async ({page}) => {
+  const errors = watchErrors(page);
+  for (const theme of await themeNames(page)) {
+    await open(page, theme);
+    const names = await entryNames(page);
+    expect(names.length, `${theme}: entries drawn`).toBeGreaterThan(0);
+    expect(new Set(names).size, `${theme}: entry names are unique`).toBe(names.length);
+    const empty = await page.locator('[data-gallery-entry]').evaluateAll(entries =>
+      entries
+        .filter(entry => {
+          const box = entry.getBoundingClientRect();
+          return box.width === 0 || box.height === 0;
+        })
+        .map(entry => entry.getAttribute('data-gallery-entry')),
+    );
+    expect(empty, `${theme}: entries with no size`).toEqual([]);
+    const overflowing = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-gallery-entry] *'))
+        .filter(element => {
+          const overflow = getComputedStyle(element).overflowX;
+          return (
+            (overflow === 'auto' || overflow === 'scroll') &&
+            element.scrollWidth > element.clientWidth + 1
+          );
+        })
+        .map(
+          element =>
+            `${element.closest('[data-gallery-entry]')?.getAttribute('data-gallery-entry')} ${element.className}`,
+        ),
+    );
+    expect(overflowing, `${theme}: horizontally scrolling regions`).toEqual([]);
+  }
+  expect(errors, 'errors the page reported').toEqual([]);
+});
+
+test('the page, an open menu and the open dialog have no axe violation, in every theme', async ({
   page,
 }) => {
-  const themes = await themeNames(page);
-  expect(themes).toEqual(expect.arrayContaining(VALIDATED_THEMES));
-  for (const theme of VALIDATED_THEMES) {
+  const errors = watchErrors(page);
+  for (const theme of await themeNames(page)) {
     await open(page, theme);
     const axe = await new AxeBuilder({page}).analyze();
     expect.soft(axe.violations, `axe violations in ${theme}`).toEqual([]);
-    await expect.soft(page).toHaveScreenshot(`${theme}-Page.png`);
-    for (const name of await entryNames(page)) {
-      if (name === 'Page') continue;
-      await alone(page, name, () =>
-        expect
-          .soft(page.locator(`[data-gallery-entry="${name}"]`))
-          .toHaveScreenshot(`${theme}-${name}.png`),
-      );
-    }
-    await page.getByRole('button', {name: 'primary', exact: true}).focus();
-    await alone(page, 'Button', () =>
-      expect
-        .soft(page.locator('[data-gallery-entry="Button"]'))
-        .toHaveScreenshot(`${theme}-focus-ring.png`),
-    );
-    await screenshotOverlays(page, theme);
-    await screenshotParetoHover(page, theme);
+    await openOverlaysUnderAxe(page, theme);
+  }
+  expect(errors, 'errors the page reported').toEqual([]);
+});
+
+/** The states that only show after a press: an open menu, and the modal dialog. */
+async function openOverlaysUnderAxe(page: Page, theme: string): Promise<void> {
+  await page
+    .locator('[data-gallery-entry="Menu"]')
+    .getByRole('button', {name: 'More actions'})
+    .click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  const menu = await new AxeBuilder({page}).include('[role="menu"]').analyze();
+  expect.soft(menu.violations, `axe violations in ${theme}'s open menu`).toEqual([]);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', {name: 'Open dialog'}).click();
+  const dialog = page.getByRole('dialog');
+  const axe = await new AxeBuilder({page}).include('dialog').analyze();
+  expect.soft(axe.violations, `axe violations in ${theme}'s dialog`).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+}
+
+test('a focused button shows a focus ring that its resting state lacks, in every theme', async ({
+  page,
+}) => {
+  for (const theme of await themeNames(page)) {
+    await open(page, theme);
+    const button = page
+      .locator('[data-gallery-entry="Button"]')
+      .getByRole('button', {name: 'primary', exact: true});
+    const ring = () =>
+      button.evaluate(element => {
+        const style = getComputedStyle(element);
+        return {
+          outline: `${style.outlineStyle} ${style.outlineWidth} ${style.outlineColor}`,
+          shadow: style.boxShadow,
+        };
+      });
+    const resting = await ring();
+    await button.focus();
+    const focused = await ring();
+    expect(focused, `${theme}: focus ring`).not.toEqual(resting);
   }
 });
 
@@ -106,48 +142,13 @@ test('every glyph the gallery draws comes from a bundled font, none from the mac
   expect(foreign, foreignFontMessage(foreign)).toEqual([]);
 });
 
-/** Hovering a point of the Pareto chart names it and gives its values. */
-async function screenshotParetoHover(page: Page, theme: string): Promise<void> {
-  await alone(page, 'ParetoChart', async () => {
-    const chart = page.locator('[data-gallery-entry="ParetoChart"] .vs-pareto').first();
-    await chart.locator('.vs-pareto-point[data-role="frontier"]').nth(2).hover();
-    await expect(chart.locator('.vs-pareto-hover-text')).toBeVisible();
-    const box = await chart.boundingBox();
-    if (box === null) throw new Error('the Pareto chart is not shown');
-    await expect.soft(page).toHaveScreenshot(`${theme}-ParetoChart-hover.png`, {clip: box});
-    await page.mouse.move(0, 0);
-  });
-}
-
-/** The states that only show after a press: an open menu, and the modal dialog. */
-async function screenshotOverlays(page: Page, theme: string): Promise<void> {
-  await alone(page, 'Menu', async () => {
-    await page
-      .locator('[data-gallery-entry="Menu"]')
-      .getByRole('button', {name: 'More actions'})
-      .click();
-    const entry = await page.locator('[data-gallery-entry="Menu"]').boundingBox();
-    const menu = await page.getByRole('menu').boundingBox();
-    if (entry === null || menu === null)
-      throw new Error('the menu entry or its open menu is not shown');
-    const bottom = Math.max(entry.y + entry.height, menu.y + menu.height);
-    await page.mouse.move(0, 0);
-    await expect.soft(page).toHaveScreenshot(`${theme}-Menu-open.png`, {
-      clip: {x: entry.x, y: entry.y, width: entry.width, height: bottom - entry.y},
-    });
-    await page.keyboard.press('Escape');
-  });
-  await alone(page, 'Dialog', async () => {
-    await page.getByRole('button', {name: 'Open dialog'}).click();
-    const dialog = page.getByRole('dialog');
-    const axe = await new AxeBuilder({page}).include('dialog').analyze();
-    expect.soft(axe.violations, `axe violations in ${theme}'s dialog`).toEqual([]);
-    await page.mouse.move(0, 0);
-    await expect.soft(page).toHaveScreenshot(`${theme}-Dialog-open.png`);
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-  });
-}
+test('hovering a point of the Pareto chart names it and gives its values', async ({page}) => {
+  await open(page, 'ink');
+  const chart = page.locator('[data-gallery-entry="ParetoChart"] .vs-pareto').first();
+  await chart.locator('.vs-pareto-point[data-role="frontier"]').nth(2).hover();
+  await expect(chart.locator('.vs-pareto-hover-text')).toBeVisible();
+  await expect(chart.locator('.vs-pareto-hover-text')).not.toHaveText('');
+});
 
 test('a segmented control moves its one tab stop and its choice with the arrow keys', async ({
   page,
@@ -295,6 +296,18 @@ test('a scrubber steps with the arrow keys and goes back to live', async ({page}
   await expect(page.getByRole('button', {name: 'Back to live'})).toHaveCount(0);
 });
 
+/** Waits for the page's finite CSS transitions to end; the runner's timeout only guards a hang. */
+async function settled(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map(animation => animation.finished),
+    ),
+  );
+}
+
 test('disabled buttons keep their appearance when hovered', async ({page}) => {
   await open(page, 'ink');
   const buttons = page
@@ -313,11 +326,10 @@ test('disabled buttons keep their appearance when hovered', async ({page}) => {
         };
       });
     await page.mouse.move(0, 0);
-    // Settle finite CSS transitions deterministically, as the gallery screenshots do.
-    await page.screenshot({animations: 'disabled'});
+    await settled(page);
     const idle = await appearance();
     await button.hover();
-    await page.screenshot({animations: 'disabled'});
+    await settled(page);
     expect(await appearance()).toEqual(idle);
   }
 });
@@ -378,4 +390,57 @@ test('the section navigation of a narrow page has one highlight per item, apart,
       `${theme}: item edge`,
     ).toBeLessThan(0.5);
   }
+});
+
+test('the rail holds Settings at its foot at every window height, never touching the items above', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1100, height: 600});
+  await open(page, 'ink');
+  const entry = page.locator('[data-gallery-entry="RailFrame"]');
+  await entry.scrollIntoViewIfNeeded();
+  const read = (frameHeight: string) =>
+    entry.evaluate((element, height) => {
+      const frame = element.querySelector<HTMLElement>('.vs-window-frame');
+      const rail = element.querySelector<HTMLElement>('.vs-rail');
+      if (frame === null || rail === null) throw new Error('the rail is not drawn');
+      frame.style.height = height;
+      const box = (target: Element) => target.getBoundingClientRect();
+      const named = (name: string) => {
+        const found = Array.from(rail.querySelectorAll('.vs-rail-item')).find(
+          item => item.textContent === name,
+        );
+        if (found === undefined) throw new Error(`the rail has no ${name}`);
+        return box(found);
+      };
+      const style = getComputedStyle(rail);
+      return {
+        names: Array.from(rail.querySelectorAll('.vs-rail-item')).map(item => item.textContent),
+        rail: box(rail).toJSON(),
+        settings: named('Settings').toJSON(),
+        machines: named('Machines').toJSON(),
+        runs: named('Runs').toJSON(),
+        cost: named('Cost').toJSON(),
+        padBottom: Number.parseFloat(style.paddingBottom),
+        gap: Number.parseFloat(
+          getComputedStyle(rail.querySelector('.vs-rail-group') ?? rail).rowGap,
+        ),
+        scrolls: rail.scrollHeight > rail.clientHeight,
+      };
+    }, frameHeight);
+  // A 600 px window: Settings sits on the rail's bottom padding, the top group on its own gap.
+  const tall = await read('100vh');
+  expect(tall.names).toEqual(['', 'Runs', 'Cost', 'Machines', 'Settings']);
+  expect(tall.rail.height).toBeCloseTo(600, 0);
+  expect(tall.rail.bottom - tall.padBottom - tall.settings.bottom).toBeLessThan(0.5);
+  expect(tall.gap).toBeGreaterThanOrEqual(8);
+  // The top group keeps the shared gap between its items.
+  expect(tall.cost.top - tall.runs.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.machines.top - tall.cost.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.settings.top - tall.machines.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.scrolls).toBe(false);
+  // Too short for both groups: they stay a step apart and the rail scrolls, so nothing overlaps.
+  const short = await read('120px');
+  expect(short.settings.top - short.machines.bottom).toBeGreaterThanOrEqual(12 - 0.5);
+  expect(short.scrolls).toBe(true);
 });

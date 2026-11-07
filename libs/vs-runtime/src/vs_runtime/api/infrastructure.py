@@ -333,6 +333,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     prepare_trusted_evaluation_plan,
     prepare_trusted_evaluator,
     remote_evaluator_setup_command,
+    remote_stage_command_paths,
     required_evaluator_go_module_cache_root,
     required_evaluator_tools_root,
 )
@@ -802,6 +803,7 @@ __all__ = [
     "relative_sdk_source",
     "release_all",
     "remote_evaluator_setup_command",
+    "remote_stage_command_paths",
     "require_built_task_image",
     "required_evaluator_go_module_cache_root",
     "required_evaluator_tools_root",

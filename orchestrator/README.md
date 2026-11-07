@@ -518,6 +518,35 @@ the host's clock while the run lives (so a stream sends a fresh view each `daemo
 nothing happens, and the last hour does not stand still) and the run's end once it is over (so a finished
 run's view never changes and is sent once).
 
+### What the host has cost
+
+`WatchHostCost(since?)` streams a `HostCost`: what every run the host holds has cost, live and ended, for
+the one screen that shows the whole host. It is the run view's figures summed by the same code, not a
+second set of rules: the host's `cost.Host` holds one `Ledger` of every counted run's turns, so the split by
+type of agent and by model, the buckets, the rate of the last hour, the unpriced turns and the rule that a
+cost nobody reported is absent are those of `RunCost`, and a run's line in the list is that run's own total.
+The host's total is the sum of what `WatchRunCost` says each run's total is.
+
+- **The list.** `runs` holds the most costly runs, most first, each with its id, name (the run's task, cut
+  to 256 bytes at a character boundary), status, cost, tokens, turns, unpriced turns and cost limit. A run
+  with no priced turn follows the priced ones, in the order of the ids. It holds at most
+  `cost.MaxHostRuns` (32) lines; the runs past it are added up in `other_runs`, which is absent when every
+  run is listed, so a host with any number of runs sends a view as short as the contract promises and
+  `run_count` is the runs listed plus the runs summed. A run that never opened is counted like any other.
+- **The window.** With no `since` the view counts everything the host holds. With one it counts the turns
+  that finished at or after it, in the runs that did not end before it (a run that ended before is not
+  read from the store at all); the series starts at `since`, and an instant after the host's clock is
+  refused with `InvalidArgument`, so a window is always a span of the past. Without a window the series
+  starts with the first run.
+- **The instant.** The view is as of the host's clock while a counted run is live (so the stream sends a
+  fresh one each `daemon.CostRefresh`, as a run's does), and once no run is live, of the latest end among
+  the counted runs, so a host with nothing live sends its last view once and never again.
+- **The stream** reads the turns of the counted runs from the store once when it opens, a window at a time,
+  where nothing commits (as a run's cost stream and the snapshot do), then adds each turn that ends, each
+  agent that appears and each run whose status or end moves, from the events of every run. Like a run's, it
+  sends one whole view for the events of a poll. The lists of models are limited as a run's are
+  (`models_truncated`).
+
 ### Catching up
 
 A viewer presses Catch me up on a run and the host stores a **check-in**: everything that happened in the run

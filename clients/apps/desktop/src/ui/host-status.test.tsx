@@ -4,16 +4,15 @@ import {
   emptyState,
   HOST_STATUS_KINDS,
   type HostStatus,
-  initialAppearance,
   initialNavigation,
   REFUSAL_CAUSES,
 } from '../state/index.js';
 import {installDom, mount} from '../testing/dom/harness.js';
 import {CostScreen} from './cost/index.js';
 import {hostStatusWord} from './host-status-words.js';
+import {MachinesScreen} from './machines/index.js';
 import {COST_WORDS} from './orchestrator/cost-words.js';
 import {FleetScreen} from './orchestrator/fleet-screen.js';
-import {SettingsScreen} from './settings/settings-screen.js';
 
 installDom();
 
@@ -42,15 +41,7 @@ const otherWords = (status: HostStatus): string[] =>
   );
 
 function settings(status: HostStatus) {
-  return mount(
-    <SettingsScreen
-      tab="resources"
-      pick={() => undefined}
-      appearance={initialAppearance('dark')}
-      choose={() => undefined}
-      resources={[{key: 'ssh:host-a', label: 'host-a', status}]}
-    />,
-  );
+  return mount(<MachinesScreen rows={[{key: 'ssh:host-a', label: 'host-a', status}]} />);
 }
 
 function runs(status: HostStatus) {

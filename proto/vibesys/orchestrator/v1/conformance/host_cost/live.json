@@ -1,0 +1,186 @@
+{
+  "cost": {
+    "sequence": "41",
+    "asOf": "2026-11-01T14:00:00Z",
+    "total": {
+      "inputTokens": "10900",
+      "cacheReadTokens": "40000",
+      "outputTokens": "840",
+      "costUsd": 3.75
+    },
+    "runCount": 3,
+    "turns": 4,
+    "unpricedTurns": 1,
+    "runs": [
+      {
+        "runId": "run-b",
+        "name": "task run-b",
+        "status": "RUN_STATUS_RUNNING",
+        "turns": 2,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "9700",
+          "cacheReadTokens": "40000",
+          "outputTokens": "90",
+          "costUsd": 2.5
+        },
+        "totalTokens": "49790"
+      },
+      {
+        "runId": "run-a",
+        "name": "task run-a",
+        "status": "RUN_STATUS_ENDED",
+        "maxCostUsd": 500,
+        "turns": 2,
+        "usage": {
+          "inputTokens": "1200",
+          "outputTokens": "750",
+          "costUsd": 1.25
+        },
+        "totalTokens": "1950"
+      },
+      {
+        "runId": "run-c",
+        "name": "task run-c",
+        "status": "RUN_STATUS_STARTING",
+        "usage": {}
+      }
+    ],
+    "roles": [
+      {
+        "role": "AGENT_ROLE_LEAD",
+        "agents": 3,
+        "turns": 4,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "10900",
+          "cacheReadTokens": "40000",
+          "outputTokens": "840",
+          "costUsd": 3.75
+        },
+        "totalTokens": "51740"
+      }
+    ],
+    "models": [
+      {
+        "model": {
+          "harness": "HARNESS_CODEX",
+          "model": "model-x"
+        },
+        "turns": 2,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "9700",
+          "cacheReadTokens": "40000",
+          "outputTokens": "90",
+          "costUsd": 2.5
+        },
+        "totalTokens": "49790"
+      },
+      {
+        "model": {
+          "harness": "HARNESS_CLAUDE_CODE"
+        },
+        "turns": 2,
+        "usage": {
+          "inputTokens": "1200",
+          "outputTokens": "750",
+          "costUsd": 1.25
+        },
+        "totalTokens": "1950"
+      }
+    ],
+    "series": {
+      "start": "2026-11-01T09:00:00Z",
+      "width": "900s",
+      "buckets": [
+        {
+          "start": "2026-11-01T09:00:00Z"
+        },
+        {
+          "start": "2026-11-01T09:15:00Z"
+        },
+        {
+          "start": "2026-11-01T09:30:00Z",
+          "costUsd": 3.25,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CODEX",
+                "model": "model-x"
+              },
+              "costUsd": 2.5
+            },
+            {
+              "model": {
+                "harness": "HARNESS_CLAUDE_CODE"
+              },
+              "costUsd": 0.75
+            }
+          ]
+        },
+        {
+          "start": "2026-11-01T09:45:00Z"
+        },
+        {
+          "start": "2026-11-01T10:00:00Z",
+          "costUsd": 0.5,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CLAUDE_CODE"
+              },
+              "costUsd": 0.5
+            }
+          ]
+        },
+        {
+          "start": "2026-11-01T10:15:00Z"
+        },
+        {
+          "start": "2026-11-01T10:30:00Z"
+        },
+        {
+          "start": "2026-11-01T10:45:00Z"
+        },
+        {
+          "start": "2026-11-01T11:00:00Z"
+        },
+        {
+          "start": "2026-11-01T11:15:00Z"
+        },
+        {
+          "start": "2026-11-01T11:30:00Z"
+        },
+        {
+          "start": "2026-11-01T11:45:00Z"
+        },
+        {
+          "start": "2026-11-01T12:00:00Z"
+        },
+        {
+          "start": "2026-11-01T12:15:00Z"
+        },
+        {
+          "start": "2026-11-01T12:30:00Z"
+        },
+        {
+          "start": "2026-11-01T12:45:00Z"
+        },
+        {
+          "start": "2026-11-01T13:00:00Z"
+        },
+        {
+          "start": "2026-11-01T13:15:00Z"
+        },
+        {
+          "start": "2026-11-01T13:30:00Z"
+        },
+        {
+          "start": "2026-11-01T13:45:00Z"
+        }
+      ]
+    },
+    "lastHourUsd": 0
+  }
+}

@@ -101,6 +101,7 @@ export {
   Reserve,
   Row,
   SectionLayout,
+  Spacer,
   Split,
   Stack,
 } from './components/layout.js';
