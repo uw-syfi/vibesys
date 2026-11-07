@@ -4,6 +4,7 @@ import type {JSX} from 'react';
 import {
   type CommandProgress,
   type RepositoryChecked,
+  type RepositoryVerdict,
   repositoryVerdict,
 } from '../../state/index.js';
 import {CommandLine} from './command-line.js';
@@ -73,6 +74,36 @@ function LimitFields(props: {
   );
 }
 
+/** The repository path, with the host's refusal of it under the field. */
+function RepositoryField(props: {
+  readonly value: string;
+  readonly verdict: RepositoryVerdict;
+  readonly change: (repository: string) => void;
+}): JSX.Element {
+  const {verdict} = props;
+  return (
+    <Field
+      label="Repository"
+      help="The path of the repository on the host."
+      {...(verdict._tag === 'Invalid' ? {error: verdict.reason} : {})}
+    >
+      <TextInput value={props.value} change={props.change} placeholder="/path/to/repository" mono />
+    </Field>
+  );
+}
+
+/** Why Start cannot be pressed yet and whether that is said aloud, or null: sending, what is missing, the host's word on the path. */
+function startBlock(
+  sending: boolean,
+  missing: string | null,
+  verdict: RepositoryVerdict,
+): {readonly reason: string; readonly quiet: boolean} | null {
+  if (sending) return {reason: 'Sending.', quiet: true};
+  if (missing !== null) return {reason: missing, quiet: false};
+  if (verdict._tag === 'Invalid') return {reason: 'Fix the repository.', quiet: true};
+  return verdict._tag === 'Checking' ? {reason: 'Checking.', quiet: true} : null;
+}
+
 /**
  * Start a run: the host, the repository and task, how many agents at most, the lead's tool, and
  * optional steering. The draft is the caller's, so it stays filled in after a press (a run that was
@@ -103,12 +134,7 @@ export function StartRunForm(props: {
   const model = startModel(draft.model, choices);
   const missing = host === undefined ? 'No host is connected.' : missingFrom(draft, choices);
   const verdict = repositoryVerdict(draft.repository, host?.repositoryChecked);
-  const sending = props.progress?._tag === 'Sending';
-  const checking = missing === null && verdict._tag === 'Checking';
-  const reason = sending
-    ? 'Sending.'
-    : (missing ??
-      (verdict._tag === 'Invalid' ? 'Fix the repository.' : checking ? 'Checking.' : null));
+  const block = startBlock(props.progress?._tag === 'Sending', missing, verdict);
   const askAbout = (repository: string): void => {
     if (host !== undefined) props.checkRepository(host.key, repository);
   };
@@ -127,21 +153,14 @@ export function StartRunForm(props: {
           />
         </Field>
       ) : null}
-      <Field
-        label="Repository"
-        help="The path of the repository on the host."
-        {...(verdict._tag === 'Invalid' ? {error: verdict.reason} : {})}
-      >
-        <TextInput
-          value={draft.repository}
-          change={repository => {
-            set({repository});
-            askAbout(repository);
-          }}
-          placeholder="/path/to/repository"
-          mono
-        />
-      </Field>
+      <RepositoryField
+        value={draft.repository}
+        verdict={verdict}
+        change={repository => {
+          set({repository});
+          askAbout(repository);
+        }}
+      />
       <Field label="Task" help="The task to optimize, as named in the repository.">
         <TextInput value={draft.task} change={task => set({task})} placeholder="task" mono />
       </Field>
@@ -191,10 +210,10 @@ export function StartRunForm(props: {
           label="Start run"
           variant="primary"
           press={() => {
-            if (host !== undefined && reason === null)
+            if (host !== undefined && block === null)
               props.start(host.key, startRunRequest(draft, choices));
           }}
-          {...(reason === null ? {} : {disabledReason: reason, quietReason: sending || checking})}
+          {...(block === null ? {} : {disabledReason: block.reason, quietReason: block.quiet})}
         />
       </Row>
       <CommandLine progress={props.progress} done="Start" retry={props.retry} />

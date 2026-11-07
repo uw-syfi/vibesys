@@ -181,6 +181,20 @@ function openOf(route: Route) {
   };
 }
 
+/** Try again everything of `session` that may be down: the connection, the runs, and what is open. */
+function retryFeeds(
+  dispatch: Dispatch,
+  session: HostSession,
+  agentId: string | null | undefined,
+  runId: string | undefined,
+): void {
+  dispatch(session.connection.retry, () => undefined);
+  dispatch(session.runs.retry, () => undefined);
+  if (agentId !== null && agentId !== undefined)
+    dispatch(session.agents.retry(agentId), () => undefined);
+  if (runId !== undefined) dispatch(session.runHistory.retry(runId), () => undefined);
+}
+
 /**
  * The runs of every host, one open at a time. The run streams are followed by the window (the
  * shell mounts them), and where the person is comes from the shell's navigation.
@@ -277,12 +291,8 @@ export function ConnectedApp(props: {
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;
-        dispatch(session.connection.retry, () => undefined);
-        dispatch(session.runs.retry, () => undefined);
-        if (openHost === host && openAgent !== null && openAgent !== undefined)
-          dispatch(session.agents.retry(openAgent), () => undefined);
-        if (openHost === host && openRun !== undefined)
-          dispatch(session.runHistory.retry(openRun), () => undefined);
+        const open = openHost === host;
+        retryFeeds(dispatch, session, open ? openAgent : undefined, open ? openRun : undefined);
       }}
     />
   );

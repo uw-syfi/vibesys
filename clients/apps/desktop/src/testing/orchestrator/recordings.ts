@@ -277,6 +277,24 @@ function runsSteps(
   return [...steps, ...(live ? [followRuns(daemon, summaries)] : tail)];
 }
 
+/** What a `CheckRepository` call answers: the host's refusal of the path, or none. */
+function checkRepositorySteps(options: DaemonOptions, target: CallTarget): ReadonlyArray<Step> {
+  const {repository} = fromBinary(CheckRepositoryRequestSchema, target.request);
+  const check = options.checkRepository;
+  if (check === 'unserved')
+    return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+  const refusal = check === undefined ? undefined : invokeCallback(() => check(repository));
+  const answer =
+    refusal === undefined
+      ? {}
+      : {refusal: {reason: refusal.reason, notReady: refusal.notReady === true}};
+  return [
+    {
+      frame: toBinary(CheckRepositoryResponseSchema, create(CheckRepositoryResponseSchema, answer)),
+    },
+  ];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -306,26 +324,6 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
     return [{frame: bytes}];
-  };
-
-  const checkRepository = (target: CallTarget): ReadonlyArray<Step> => {
-    const {repository} = fromBinary(CheckRepositoryRequestSchema, target.request);
-    const check = options.checkRepository;
-    if (check === 'unserved')
-      return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
-    const refusal = check === undefined ? undefined : invokeCallback(() => check(repository));
-    return [
-      {
-        frame: toBinary(
-          CheckRepositoryResponseSchema,
-          create(CheckRepositoryResponseSchema, {
-            ...(refusal === undefined
-              ? {}
-              : {refusal: {reason: refusal.reason, notReady: refusal.notReady === true}}),
-          }),
-        ),
-      },
-    ];
   };
 
   const watchAgent = (target: CallTarget): ReadonlyArray<Step> => {
@@ -372,7 +370,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('GetRunHistory'):
           return runHistorySteps(daemon, target, options.historyPageMessages);
         case methodPathOf('CheckRepository'):
-          return checkRepository(target);
+          return checkRepositorySteps(options, target);
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):
