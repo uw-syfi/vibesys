@@ -13,6 +13,10 @@ The 20 requests are dispatched concurrently. The headline metric is the
 This benchmark synthesises prompts as raw token IDs and sends them via
 ``prompt: list[int]`` (vLLM-compatible).
 
+Every request goes to ``--url`` joined with ``--endpoint`` (default
+``/v1/completions``). The URL is composed once, and that one value is what the
+benchmark requests, prints and records in its JSON output.
+
 Usage:
     python benchmark.py --url http://localhost:8000
 """
@@ -115,13 +119,25 @@ async def stream_one_request(
     )
 
 
-async def run_benchmark(args: argparse.Namespace) -> dict:
+async def run_benchmark(
+    args: argparse.Namespace,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    vocab_size: int | None = None,
+) -> dict:
+    """Run the workload against ``args.url`` + ``args.endpoint`` and return the result.
+
+    ``transport`` is the HTTP transport (httpx's network transport when omitted) and
+    ``vocab_size`` bounds the synthetic token IDs (read from the model's tokenizer
+    when omitted). Tests pass an in-memory transport and a fixed size.
+    """
     n_requests = args.num_requests if args.num_requests is not None else args.requests
     if n_requests <= 0:
         raise SystemExit("--num-requests must be > 0")
 
-    print(f"[bench] loading tokenizer for vocab size: {args.model}", file=sys.stderr)
-    vocab_size = _load_tokenizer_vocab(args.model)
+    if vocab_size is None:
+        print(f"[bench] loading tokenizer for vocab size: {args.model}", file=sys.stderr)
+        vocab_size = _load_tokenizer_vocab(args.model)
 
     print(
         f"[bench] building synthetic prompts: shared={args.shared_len} "
@@ -140,11 +156,11 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     prompt_len = len(prompts[0])
     print(f"[bench] prompt length per request: {prompt_len} tokens", file=sys.stderr)
 
-    base_url = args.url.rstrip("/")
+    url = args.url.rstrip("/") + args.endpoint
     max_conn_cap = max(n_requests * 2, 64)
     limits = httpx.Limits(max_connections=max_conn_cap, max_keepalive_connections=max_conn_cap)
 
-    async with httpx.AsyncClient(limits=limits) as client:
+    async with httpx.AsyncClient(limits=limits, transport=transport) as client:
         # Warmup
         if args.warmup > 0:
             warm_shared, warm_uniques = build_token_ids(
@@ -160,7 +176,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 t0 = time.perf_counter()
                 warm = await stream_one_request(
                     client,
-                    base_url,
+                    url,
                     args.model,
                     warm_prompt,
                     max_tokens=min(8, args.max_tokens),
@@ -181,7 +197,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         t_run0 = time.perf_counter()
         results: list[RequestResult] = await asyncio.gather(
             *[
-                stream_one_request(client, base_url, args.model, prompts[i], args.max_tokens, i)
+                stream_one_request(client, url, args.model, prompts[i], args.max_tokens, i)
                 for i in range(n_requests)
             ]
         )
@@ -200,7 +216,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print("=" * 60)
     print("  Prefix-caching benchmark (shared 32k + unique tail)")
     print("=" * 60)
-    print(f"Backend URL:           {base_url}/v1/completions")
+    print(f"Backend URL:           {url}")
     print(f"Requests:              {n_requests} (completed {len(successes)}, errors {len(errors)})")
     print(f"Shared prefix tokens:  {args.shared_len}")
     print(f"Unique tail tokens:    {args.unique_len}")
@@ -239,7 +255,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
 
     result_dict = {
         "config": {
-            "url": f"{base_url}/v1/completions",
+            "url": url,
             "model": args.model,
             "shared_len": args.shared_len,
             "unique_len": args.unique_len,
@@ -268,11 +284,16 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     return result_dict
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Prefix-caching workload benchmark for an OpenAI-compatible server.",
     )
-    p.add_argument("--url", default="http://localhost:8000")
+    p.add_argument("--url", default="http://localhost:8000", help="Server base URL")
+    p.add_argument(
+        "--endpoint",
+        default="/v1/completions",
+        help="Completions path, joined to --url (default: /v1/completions)",
+    )
     p.add_argument("--model", default=DEFAULT_MODEL_ID)
     p.add_argument("--shared-len", type=int, default=32_768)
     p.add_argument("--unique-len", type=int, default=128)
@@ -288,10 +309,15 @@ def main() -> None:
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--prompt-len", type=int, default=None)
     p.add_argument("--temperature", type=float, default=None)
-    p.add_argument("--endpoint", type=str, default=None)
     p.add_argument("--audio-dir", type=str, default=None)
-    args = p.parse_args()
-    asyncio.run(run_benchmark(args))
+    args = p.parse_args(argv)
+    if not args.endpoint.startswith("/"):
+        p.error(f"--endpoint must start with '/', got {args.endpoint!r}")
+    return args
+
+
+def main() -> None:
+    asyncio.run(run_benchmark(parse_args()))
 
 
 if __name__ == "__main__":
