@@ -15,6 +15,7 @@ package cost
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"time"
 
@@ -303,6 +304,31 @@ func (l *Ledger) View(run core.Run, now time.Time) View {
 		v.LastHour = l.lastHour(asOf)
 	}
 	return v
+}
+
+// Spend works out what the turns that ended in [from, until) cost, in total and by type of agent. It is
+// the window a check-in covers: a turn that ended exactly at until is in the next window, so windows
+// that follow one another count every turn once, and the spend of a span is the spend of its halves.
+// A turn is counted when it ended, as View's series counts it.
+func (l *Ledger) Spend(from, until time.Time) core.Spend {
+	roles := map[core.AgentRole]*tally{}
+	var total tally
+	for _, e := range l.entries {
+		if e.end.Before(from) || !e.end.Before(until) {
+			continue
+		}
+		total.add(e.usage)
+		if roles[e.agent.role] == nil {
+			roles[e.agent.role] = &tally{}
+		}
+		roles[e.agent.role].add(e.usage)
+	}
+	out := core.Spend{Turns: total.turns, Unpriced: total.unpriced, Usage: total.usage}
+	for _, role := range slices.Sorted(maps.Keys(roles)) {
+		t := roles[role]
+		out.Roles = append(out.Roles, core.RoleSpend{Role: role, Turns: t.turns, Unpriced: t.unpriced, Usage: t.usage})
+	}
+	return out
 }
 
 func laterOf(a, b time.Time) time.Time {

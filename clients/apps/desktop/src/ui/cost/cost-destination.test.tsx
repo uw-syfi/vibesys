@@ -32,6 +32,7 @@ function hostWith(
     label: 'This machine',
     model: {data: {...base, costs}, agentCursors: {}},
     connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
+    freshness: {status: 'live', lastUpdateMs: null},
     runsFeed: {_tag: 'Live'},
     agentFeeds: {},
     costFeeds: feed === undefined ? {} : {[scenario.runId]: feed},

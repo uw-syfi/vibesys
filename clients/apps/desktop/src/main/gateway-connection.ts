@@ -21,7 +21,8 @@ import * as Option from 'effect/Option';
 import * as Scope from 'effect/Scope';
 import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
-import {afterFailure, connectBudgetMs, DIAL_DEADLINE_MS} from '../state/gateway-policy.js';
+import {afterFailure} from '../state/gateway-policy.js';
+import {afterWindow, LIVENESS_WINDOW_MS} from '../state/liveness.js';
 import {
   failureMessage,
   GatewayFailed,
@@ -38,7 +39,9 @@ export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello
 export interface GatewayDialer {
   /**
    * A duplex to a running gateway; `force` replaces the gateway's artifact first (asked after the
-   * first schema mismatch). Everything it opens ends with the scope.
+   * first schema mismatch). Everything it opens ends with the scope. The connection puts no bound
+   * on a dial as a whole, so a dial bounds each phase itself (`state/gateway-policy.ts`) and
+   * measures a copy by its progress.
    */
   readonly dial: (force: boolean) => Effect.Effect<Duplex, GatewayFailed | LinkFailed, Scope.Scope>;
 }
@@ -142,7 +145,11 @@ type Connected =
 const fatalAuth = (error: DialError): boolean =>
   error._tag === 'LinkFailed' && error.problem === 'auth';
 
-/** Dial until the session is open or the policy gives up. */
+/**
+ * Dial until the session is open or the policy gives up. A dial has no bound of its own: each of
+ * its phases is bounded by what it waits for (`state/gateway-policy.ts`), and the copy of the host
+ * program by its progress, so a slow copy that keeps moving finishes.
+ */
 const connect = (
   dialer: GatewayDialer,
   log: (line: string) => void,
@@ -151,16 +158,9 @@ const connect = (
   Effect.gen(function* () {
     let failures = 0;
     while (true) {
-      const dialed = yield* open(dialer, openSessionWith).pipe(
-        Effect.timeoutOption(`${DIAL_DEADLINE_MS} millis`),
-        Effect.result,
-      );
-      if (dialed._tag === 'Success' && Option.isSome(dialed.success))
-        return {_tag: 'opened', opened: dialed.success.value} as const;
-      const error =
-        dialed._tag === 'Failure'
-          ? dialed.failure
-          : new GatewayFailed({message: 'gateway dial timed out'});
+      const dialed = yield* open(dialer, openSessionWith).pipe(Effect.result);
+      if (dialed._tag === 'Success') return {_tag: 'opened', opened: dialed.success} as const;
+      const error = dialed.failure;
       const reason = failureMessage(error);
       failures += 1;
       const verdict = afterFailure(failures, grpcCodeOf(error));
@@ -169,6 +169,30 @@ const connect = (
       yield* Effect.sleep(`${verdict.afterMs} millis`);
     }
   });
+
+/**
+ * Ends when `session` delivered nothing for two windows in a row. The first silent window ends
+ * with a probe (the handshake again, a request whose reply is bytes), so a quiet link that is
+ * alive keeps answering and one that is dead does not. Bytes arriving at all, however slowly, end
+ * the silence: this never cuts a transfer for being slow.
+ */
+const silent = (session: GatewaySession): Effect.Effect<void> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let seen = yield* session.activity;
+      let quiet = 0;
+      while (true) {
+        yield* Effect.sleep(`${LIVENESS_WINDOW_MS} millis`);
+        const now = yield* session.activity;
+        const step = afterWindow(now !== seen, quiet);
+        seen = now;
+        quiet = step.silent;
+        if (step.action === 'lost') return;
+        // The probe's own failure is not the verdict: only silence is.
+        if (step.action === 'probe') yield* Effect.forkScoped(Effect.ignore(hello(session)));
+      }
+    }),
+  );
 
 const lostError = new GrpcFailed({
   code: GrpcCode.UNAVAILABLE,
@@ -186,23 +210,18 @@ export const makeGatewayConnection = (
     const set = (next: ConnectionState) => SubscriptionRef.set(state, next);
 
     const serve = Effect.gen(function* () {
-      let provisioned = false;
       while (true) {
-        const connected = yield* connect(dialer, log, openSessionWith).pipe(
-          Effect.timeoutOption(`${connectBudgetMs(provisioned)} millis`),
-        );
-        if (Option.isNone(connected))
-          return yield* set({
-            _tag: 'offline',
-            error: new GatewayFailed({message: 'gateway did not connect in time'}),
-          });
-        if (connected.value._tag === 'offline')
-          return yield* set({_tag: 'offline', error: connected.value.error});
-        const {session, scope} = connected.value.opened;
-        provisioned = true;
+        const connected = yield* connect(dialer, log, openSessionWith);
+        if (connected._tag === 'offline')
+          return yield* set({_tag: 'offline', error: connected.error});
+        const {session, scope} = connected.opened;
         yield* set({_tag: 'ready', session});
-        yield* session.lost.pipe(Effect.ensuring(Scope.close(scope, Exit.void)));
-        log('gateway session lost');
+        // Closing the scope ends the session, which fails the calls still on it as UNAVAILABLE.
+        const ended = yield* Effect.raceFirst(
+          Effect.as(session.lost, 'lost'),
+          Effect.as(silent(session), 'silent'),
+        ).pipe(Effect.ensuring(Scope.close(scope, Exit.void)));
+        log(ended === 'silent' ? 'gateway link went silent' : 'gateway session lost');
         yield* set({_tag: 'connecting'});
       }
     });

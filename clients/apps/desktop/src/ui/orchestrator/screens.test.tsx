@@ -141,6 +141,7 @@ describe('the screens', () => {
       connection,
       feed,
       hasData: true,
+      staleForMs: 40_000,
       tryAgain: () => undefined,
     });
     const ready = {_tag: 'Ready', epoch: 1, daemon: undefined as never} as const;
@@ -156,6 +157,10 @@ describe('the screens', () => {
       expect(html(lost)).toContain('out of date');
       expect(html(lost)).toContain('ssh exited');
     }
+    // How long what is shown has been out of date, as the host's freshness reports it.
+    const waiting = note({_tag: 'Waiting', attempt: 1, fault, retryAtMs: 5}, {_tag: 'Live'});
+    expect(html(waiting)).toContain('Stale \u00b7 40 s');
+    expect(html({...waiting, staleForMs: null})).not.toContain('Stale');
     expect(html(note({_tag: 'Incompatible', side: 'daemon-too-old'}, {_tag: 'Opening'}))).toContain(
       'Update VibeSys on that host',
     );

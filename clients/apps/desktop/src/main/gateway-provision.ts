@@ -12,6 +12,7 @@ import {API_SCHEMA_HASH} from '@vibesys/proto';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
+import {COMMAND_BOUND_MS, COPY_STALL_MS} from '../state/gateway-policy.js';
 import {type GatewayTarget, gatewayTarget} from '../state/gateway-target.js';
 import {uploadSchedule} from '../state/upload-pacing.js';
 import {GatewayFailed, type LinkFailed, type SpawnFailed} from './errors.js';
@@ -32,27 +33,39 @@ export class GatewayArtifacts extends Context.Service<
   {readonly read: (target: GatewayTarget) => Effect.Effect<Uint8Array, GatewayFailed>}
 >()('app/GatewayArtifacts') {}
 
-const COMMAND_BOUND = '30 seconds';
-// Cold provisioning transfers a multi-megabyte artifact.
-const UPLOAD_BOUND = '90 seconds';
 const OUTPUT_LIMIT = 8192;
 const STDERR_TAIL = 4096;
 
-/** Write `bytes` to `stdin` at a capped rate, one outstanding write at a time, then end it. */
+/** One write to `stdin`: whether the chunk was accepted (false when the pipe broke). */
+const write = (stdin: Writable, chunk: Uint8Array): Effect.Effect<boolean> =>
+  Effect.callback<boolean>(resume => {
+    stdin.write(chunk, error => resume(Effect.succeed(error === null || error === undefined)));
+  });
+
+/**
+ * Write `bytes` to `stdin` at a capped rate, one outstanding write at a time, then end it. The copy
+ * is measured by progress: each chunk must be accepted within `COPY_STALL_MS`, so a copy of any
+ * length that keeps moving is never cut, and one that stops is, after one stall window. The
+ * pacing wait between chunks is not progress to wait for and is not counted. A broken pipe ends
+ * the copy quietly: the process that closed it says why through its exit.
+ */
 const upload = (stdin: Writable, bytes: Uint8Array): Effect.Effect<void, GatewayFailed> =>
   Effect.gen(function* () {
     for (const step of uploadSchedule(bytes.length)) {
       const chunk = bytes.subarray(step.offset, step.offset + step.length);
       yield* Effect.sleep(`${step.delayMs} millis`);
-      yield* Effect.callback<void, GatewayFailed>(resume => {
-        stdin.write(chunk, error =>
-          resume(
-            error
-              ? Effect.fail(new GatewayFailed({message: `gateway upload failed: ${error.message}`}))
-              : Effect.void,
-          ),
-        );
-      });
+      const accepted = yield* write(stdin, chunk).pipe(
+        Effect.timeoutOrElse({
+          duration: `${COPY_STALL_MS} millis`,
+          orElse: () =>
+            Effect.fail(
+              new GatewayFailed({
+                message: `gateway upload stalled: ${step.offset} of ${bytes.length} bytes sent, none accepted for ${COPY_STALL_MS / 1000} seconds`,
+              }),
+            ),
+        }),
+      );
+      if (!accepted) return;
     }
     yield* Effect.sync(() => stdin.end());
   });
@@ -79,15 +92,15 @@ export const runCommand = (
         stderr = `${stderr}${chunk}`.slice(-STDERR_TAIL);
       });
       process.stdin.on('error', () => {});
-      yield* Effect.forkScoped(
-        Effect.ignore(
-          input === undefined
-            ? Effect.sync(() => process.stdin.end())
-            : upload(process.stdin, input),
-        ),
-      );
-      const code = yield* process.exit.pipe(
-        Effect.timeoutOption(input === undefined ? COMMAND_BOUND : UPLOAD_BOUND),
+      const delivered =
+        input === undefined ? Effect.sync(() => process.stdin.end()) : upload(process.stdin, input);
+      // The command's own bound starts when it has all its input: the copy is bounded by its
+      // progress (`upload`), the remote work after it by `COMMAND_BOUND_MS`. A process that ends
+      // earlier ends the wait, whatever the copy was doing.
+      const bounded = process.exit.pipe(Effect.timeoutOption(`${COMMAND_BOUND_MS} millis`));
+      const code = yield* Effect.raceFirst(
+        Effect.map(process.exit, Option.some),
+        Effect.andThen(delivered, () => bounded),
       );
       if (Option.isNone(code))
         return yield* new GatewayFailed({message: 'gateway command timed out'});

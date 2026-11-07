@@ -1,14 +1,17 @@
+import type {Agent} from '@vibesys/orchestrator-proto';
 import {Page, pageState, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {
-  CommandProgress,
-  CostFeedSnapshot,
-  FeedStatus,
-  HostConnectionState,
-  HostModel,
-  Route,
-  RouteAction,
-  RunView,
+import {
+  type CommandProgress,
+  type CostFeedSnapshot,
+  type FeedStatus,
+  type HostConnectionState,
+  type HostFreshness,
+  type HostModel,
+  type Route,
+  type RouteAction,
+  type RunView,
+  staleForMs,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -34,6 +37,8 @@ export interface HostSnapshot {
   readonly label: string;
   readonly model: HostModel;
   readonly connection: HostConnectionState;
+  /** Whether what is shown of this host is current, and when it last was. */
+  readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
@@ -63,57 +68,38 @@ const OPENING_COST: CostFeedSnapshot = {status: {_tag: 'Opening'}, freshness: 'e
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
-function runsNote(host: HostSnapshot, retry: (host: string) => void): ConnectionNote {
+function runsNote(
+  host: HostSnapshot,
+  retry: (host: string) => void,
+  nowMs: number,
+): ConnectionNote {
   return {
     key: `runs/${host.key}`,
     what: `the runs on ${host.label}`,
     connection: host.connection,
     feed: host.runsFeed,
     hasData: hasData(host),
+    staleForMs: staleForMs(host.freshness, nowMs),
     tryAgain: () => retry(host.key),
   };
 }
 
-/** The runs of every host, and the form that starts one. */
-function RunsPage(props: {
-  readonly hosts: readonly HostSnapshot[];
-  readonly commands: AppCommands;
-  readonly retryHost: (host: string) => void;
-  readonly go: (action: RouteAction) => void;
-}): JSX.Element {
-  const {hosts, commands, go} = props;
-  return (
-    <Page
-      key="runs"
-      width="wide"
-      state={pageState(hosts.length === 0)}
-      header={
-        <Text variant="title">
-          {hosts.some(host => host.connection._tag === 'Unusable')
-            ? 'Runs unavailable'
-            : commands.start?._tag === 'Refused'
-              ? 'Start run refused'
-              : TITLE}
-        </Text>
-      }
-    >
-      <Stack gap="space-4">
-        <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
-        <StartRunForm
-          hosts={hosts.map(({key, label}) => ({key, label}))}
-          progress={commands.start}
-          start={commands.startRun}
-          retry={commands.retryStart}
-          openRun={(host, runId) => go({type: 'open-run', host, runId})}
-        />
-        <RunList
-          unreadHosts={hosts.filter(host => host.runsFeed._tag !== 'Live').map(host => host.label)}
-          hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
-          open={(host, runId) => go({type: 'open-run', host, runId})}
-        />
-      </Stack>
-    </Page>
-  );
+/** The note about one agent's steps on `host`, which share the host's connection. */
+function agentNote(
+  host: HostSnapshot,
+  agent: Agent,
+  names: ReturnType<typeof agentNames>,
+  props: {readonly nowMs: number; readonly retryHost: (host: string) => void},
+): ConnectionNote {
+  return {
+    key: `agent/${agent.id}`,
+    what: `the steps of ${nameOf(names, agent)}`,
+    connection: host.connection,
+    feed: host.agentFeeds[agent.id] ?? {_tag: 'Opening'},
+    hasData: Object.values(host.model.data.items).some(item => item.agentId === agent.id),
+    staleForMs: staleForMs(host.freshness, props.nowMs),
+    tryAgain: () => props.retryHost(host.key),
+  };
 }
 
 /** The orchestrator window: every connected host's runs, and one run open at a time. */
@@ -132,7 +118,42 @@ export function OrchestratorApp(props: {
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
-    return <RunsPage hosts={hosts} commands={commands} retryHost={props.retryHost} go={go} />;
+    return (
+      <Page
+        key="runs"
+        width="wide"
+        state={pageState(hosts.length === 0)}
+        header={
+          <Text variant="title">
+            {hosts.some(host => host.connection._tag === 'Unusable')
+              ? 'Runs unavailable'
+              : commands.start?._tag === 'Refused'
+                ? 'Start run refused'
+                : TITLE}
+          </Text>
+        }
+      >
+        <Stack gap="space-4">
+          <ConnectionBanner
+            notes={hosts.map(host => runsNote(host, props.retryHost, props.nowMs))}
+          />
+          <StartRunForm
+            hosts={hosts.map(({key, label}) => ({key, label}))}
+            progress={commands.start}
+            start={commands.startRun}
+            retry={commands.retryStart}
+            openRun={(host, runId) => go({type: 'open-run', host, runId})}
+          />
+          <RunList
+            unreadHosts={hosts
+              .filter(host => host.runsFeed._tag !== 'Live')
+              .map(host => host.label)}
+            hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
+            open={(host, runId) => go({type: 'open-run', host, runId})}
+          />
+        </Stack>
+      </Page>
+    );
   }
   const host = hosts.find(candidate => candidate.key === route.host);
   if (host === undefined) {
@@ -148,19 +169,8 @@ export function OrchestratorApp(props: {
   const names = agentNames(state, runId);
   const title = `${state.runs[runId]?.task ?? 'Run'}: ${agent === undefined ? RUN_TITLES[route.view] : nameOf(names, agent)}`;
   const notes = [
-    runsNote(host, props.retryHost),
-    ...(agent === undefined
-      ? []
-      : [
-          {
-            key: `agent/${agent.id}`,
-            what: `the steps of ${nameOf(names, agent)}`,
-            connection: host.connection,
-            feed: host.agentFeeds[agent.id] ?? ({_tag: 'Opening'} as const),
-            hasData: Object.values(state.items).some(item => item.agentId === agent.id),
-            tryAgain: () => props.retryHost(host.key),
-          } satisfies ConnectionNote,
-        ]),
+    runsNote(host, props.retryHost, props.nowMs),
+    ...(agent === undefined ? [] : [agentNote(host, agent, names, props)]),
   ];
   return (
     <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>

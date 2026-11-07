@@ -81,6 +81,66 @@ describe('gateway session', () => {
     ),
   );
 
+  it.effect(
+    'ends a call that carries no status as a lost link, which is retried, not refused',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const peer = fakeGateway();
+          const session = yield* openSession(peer.connect());
+          const running = yield* Effect.forkChild(
+            Effect.flip(session.call(SERVE, bytes(), () => {})),
+          );
+          yield* received(peer, 1);
+          peer.calls[0]?.endWithoutStatus();
+          const failure = yield* Fiber.join(running);
+          expect(failure).toBeInstanceOf(GrpcFailed);
+          // UNAVAILABLE (14), the status the client redials; UNKNOWN (2) would be shown as a refusal.
+          expect(failure.code).toBe(14);
+        }),
+      ),
+  );
+
+  it.effect.prop(
+    'ends a call with exactly the status the peer sent, whichever it is',
+    {code: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 16}))},
+    ({code}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const peer = fakeGateway();
+          const session = yield* openSession(peer.connect());
+          const running = yield* Effect.forkChild(
+            Effect.flip(session.call(SERVE, bytes(), () => {})),
+          );
+          yield* received(peer, 1);
+          peer.calls[0]?.end(code, 'said so');
+          expect((yield* Fiber.join(running)).code).toBe(code);
+        }),
+      ),
+    {arbitrary: {runs: 16}},
+  );
+
+  it.effect('counts what the peer sends, a chunk at a time, and nothing while it is silent', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const idle = yield* session.activity;
+        yield* Effect.promise(() => new Promise(resolve => setImmediate(resolve)));
+        expect(yield* session.activity).toBe(idle);
+        const running = yield* Effect.forkChild(session.call(SERVE, bytes(), () => {}));
+        yield* received(peer, 1);
+        const asked = yield* session.activity;
+        peer.calls[0]?.send(bytes(1));
+        while ((yield* session.activity) === asked)
+          yield* Effect.promise(() => new Promise(resolve => setImmediate(resolve)));
+        peer.calls[0]?.end();
+        yield* Fiber.join(running);
+        expect(yield* session.activity).toBeGreaterThan(asked);
+      }),
+    ),
+  );
+
   it.effect('ends a call whose consumer throws with INTERNAL, naming the consumer', () =>
     Effect.scoped(
       Effect.gen(function* () {

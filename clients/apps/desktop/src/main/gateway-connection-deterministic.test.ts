@@ -22,6 +22,11 @@ const hello = toBinary(
 );
 const quiet = () => {};
 const duplex = {} as Duplex;
+/** A session that is never silent: every read of its activity has risen. */
+const livelyActivity = () => {
+  let heard = 0;
+  return Effect.sync(() => ++heard);
+};
 
 it.effect('closes an outstanding dial with its owning scope', () =>
   Effect.gen(function* () {
@@ -65,6 +70,7 @@ it.effect('attaches to a 0.1.0 host and redials after session loss and a long ou
         unary: () => Effect.succeed(hello),
         call: () => Effect.void,
         lost: Deferred.await(lost),
+        activity: livelyActivity(),
       };
       let opened = 0;
       const opener: SessionOpener = () =>
@@ -112,6 +118,7 @@ it.effect.prop(
                   ? Effect.never
                   : Deferred.succeed(callStarted, undefined).pipe(Effect.andThen(Effect.never)),
               lost: gate === undefined ? Effect.never : Deferred.await(gate),
+              activity: livelyActivity(),
             };
           });
         const connection = yield* makeGatewayConnection(dialer, quiet, opener);
