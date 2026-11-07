@@ -491,4 +491,8 @@ type Receipt struct {
 	Allowed []AgentChoice
 	// CheckIn is the check-in a RequestCatchUp made, or the one it found pending for the viewer.
 	CheckIn CheckInID
+	// Model and AllowedModels are set with RefuseModelNotAllowed: the model the policy refused, empty
+	// when the choice named none and none was found for it, and the models the host allows.
+	Model         ModelName
+	AllowedModels []ModelName
 }

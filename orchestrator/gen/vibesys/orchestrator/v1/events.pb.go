@@ -55,6 +55,10 @@ const (
 	// vibesys-viewer-label metadata. A client that goes through the daemon is refused with an error
 	// naming the field before this is ever decided; this is what the decision itself says.
 	Refusal_REFUSAL_NO_VIEWER Refusal = 14
+	// The host's policy forbids the model: it is outside the models the host allows, or no model could be
+	// found for an unpinned choice on a host that allows only some. The receipt's model names it (empty
+	// for an unpinned choice) and its allowed_models lists what the host allows.
+	Refusal_REFUSAL_MODEL_NOT_ALLOWED Refusal = 15
 )
 
 // Enum value maps for Refusal.
@@ -74,6 +78,7 @@ var (
 		12: "REFUSAL_TIME_LIMIT_REACHED",
 		13: "REFUSAL_COST_LIMIT_REACHED",
 		14: "REFUSAL_NO_VIEWER",
+		15: "REFUSAL_MODEL_NOT_ALLOWED",
 	}
 	Refusal_value = map[string]int32{
 		"REFUSAL_UNSPECIFIED":        0,
@@ -90,6 +95,7 @@ var (
 		"REFUSAL_TIME_LIMIT_REACHED": 12,
 		"REFUSAL_COST_LIMIT_REACHED": 13,
 		"REFUSAL_NO_VIEWER":          14,
+		"REFUSAL_MODEL_NOT_ALLOWED":  15,
 	}
 )
 
@@ -1162,7 +1168,13 @@ type Receipt struct {
 	AllowedAgents []*AllowedAgent `protobuf:"bytes,9,rep,name=allowed_agents,json=allowedAgents,proto3" json:"allowed_agents,omitempty"`
 	// The check-in a RequestCatchUp made, or for a press while the viewer's last check-in is being worked
 	// out, that one. The message the lead was asked with, if it was, is message_id.
-	CheckInId     string `protobuf:"bytes,10,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
+	CheckInId string `protobuf:"bytes,10,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
+	// Set with REFUSAL_MODEL_NOT_ALLOWED: the model refused, empty when the choice named none and none
+	// could be found for it.
+	Model string `protobuf:"bytes,11,opt,name=model,proto3" json:"model,omitempty"`
+	// Set with REFUSAL_MODEL_NOT_ALLOWED: the models the host allows, so the caller can ask again. Empty
+	// when the host's policy could not be read, which allows nothing.
+	AllowedModels []string `protobuf:"bytes,12,rep,name=allowed_models,json=allowedModels,proto3" json:"allowed_models,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1260,6 +1272,20 @@ func (x *Receipt) GetCheckInId() string {
 	return ""
 }
 
+func (x *Receipt) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *Receipt) GetAllowedModels() []string {
+	if x != nil {
+		return x.AllowedModels
+	}
+	return nil
+}
+
 var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
@@ -1343,7 +1369,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\vpost_report\x18\x10 \x01(\v2#.vibesys.orchestrator.v1.PostReportH\x00R\n" +
 	"postReport\x12S\n" +
 	"\x10request_catch_up\x18\x11 \x01(\v2'.vibesys.orchestrator.v1.RequestCatchUpH\x00R\x0erequestCatchUpB\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xb1\x03\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\x83\x04\n" +
 	"\aReceipt\x12&\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcommandId\x12D\n" +
@@ -1356,7 +1382,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
 	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents\x12\x1e\n" +
 	"\vcheck_in_id\x18\n" +
-	" \x01(\tR\tcheckInIdJ\x04\b\x02\x10\x03R\x0ecommand_digest*\xb6\x03\n" +
+	" \x01(\tR\tcheckInId\x12\x1e\n" +
+	"\x05model\x18\v \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x05model\x120\n" +
+	"\x0eallowed_models\x18\f \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\rallowedModelsJ\x04\b\x02\x10\x03R\x0ecommand_digest*\xd5\x03\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1372,7 +1400,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\v\x12\x1e\n" +
 	"\x1aREFUSAL_TIME_LIMIT_REACHED\x10\f\x12\x1e\n" +
 	"\x1aREFUSAL_COST_LIMIT_REACHED\x10\r\x12\x15\n" +
-	"\x11REFUSAL_NO_VIEWER\x10\x0e\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x11REFUSAL_NO_VIEWER\x10\x0e\x12\x1d\n" +
+	"\x19REFUSAL_MODEL_NOT_ALLOWED\x10\x0f\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once

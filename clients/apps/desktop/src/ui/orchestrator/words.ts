@@ -9,6 +9,7 @@ import {
   Delivery,
   Harness,
   JobOutcome,
+  type Receipt,
   Refusal,
   Rejection,
   RunStatus,
@@ -119,9 +120,23 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.TIME_LIMIT_REACHED]: 'Time limit reached',
   [Refusal.COST_LIMIT_REACHED]: 'Cost limit reached',
   [Refusal.NO_VIEWER]: 'No viewer named',
+  [Refusal.MODEL_NOT_ALLOWED]: 'Model not allowed',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];
+
+/**
+ * A refusal in the words of its receipt: a model the host does not allow names the model and what the
+ * host allows, and a host whose policy cannot be read says so. Every other refusal is its own word.
+ */
+export function receiptRefusalWord(receipt: Receipt): string {
+  if (receipt.refusal !== Refusal.MODEL_NOT_ALLOWED) return refusalWord(receipt.refusal);
+  if (receipt.allowedModels.length === 0) return 'Host settings unreadable';
+  const allowed = `allowed: ${receipt.allowedModels.join(', ')}`;
+  return receipt.model === ''
+    ? `No allowed model for this tool \u00b7 ${allowed}`
+    : `Model ${receipt.model} not allowed \u00b7 ${allowed}`;
+}
 
 export function formatDuration(totalMs: number): string {
   const seconds = Math.max(0, Math.round(totalMs / 1000));

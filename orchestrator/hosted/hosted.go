@@ -87,7 +87,8 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	}
 	sidecars.Place = layout.State.Place
 	searches := production.SearchFor()
-	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, JobTool: parts.JobToolEndpoint, Parts: parts, Root: o.Root}
+	catalog := &production.SidecarCatalog{Parts: parts, Runner: production.ExecRunner{}, Environ: hostconfig.Environ(o.Config, o.Home, o.Getenv)}
+	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, JobTool: parts.JobToolEndpoint, Parts: parts, Root: o.Root, Models: production.HostModels{Home: o.Home, Catalog: catalog, Log: o.Log}}
 	d, err := production.AwaitHandOver(ctx, o.Root, time.After, func() (*production.Daemon, error) { return production.Open(layout, wiring, o.Log) })
 	if err != nil {
 		var held *production.HeldError
@@ -98,6 +99,9 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator is not served by this process: "+err.Error())
 	}
 	x.d = d
+	// The models each harness runs are asked of the sidecar program once, now, so that the first
+	// start does not wait for it. Nothing depends on the answer being there.
+	go func() { _, _ = catalog.Models(ctx) }()
 	go func() {
 		err := d.Run(ctx)
 		// Done means the state directory's lock is free: a host releases its root's lock after this,

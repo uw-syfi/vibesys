@@ -208,6 +208,10 @@ enum Refusal {
   // vibesys-viewer-label metadata. A client that goes through the daemon is refused with an error
   // naming the field before this is ever decided; this is what the decision itself says.
   REFUSAL_NO_VIEWER = 14;
+  // The host's policy forbids the model: it is outside the models the host allows, or no model could be
+  // found for an unpinned choice on a host that allows only some. The receipt's model names it (empty
+  // for an unpinned choice) and its allowed_models lists what the host allows.
+  REFUSAL_MODEL_NOT_ALLOWED = 15;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.
@@ -230,4 +234,10 @@ message Receipt {
   // The check-in a RequestCatchUp made, or for a press while the viewer's last check-in is being worked
   // out, that one. The message the lead was asked with, if it was, is message_id.
   string check_in_id = 10;
+  // Set with REFUSAL_MODEL_NOT_ALLOWED: the model refused, empty when the choice named none and none
+  // could be found for it.
+  string model = 11 [(buf.validate.field).string.max_bytes = 256];
+  // Set with REFUSAL_MODEL_NOT_ALLOWED: the models the host allows, so the caller can ask again. Empty
+  // when the host's policy could not be read, which allows nothing.
+  repeated string allowed_models = 12 [(buf.validate.field).repeated.max_items = 256];
 }

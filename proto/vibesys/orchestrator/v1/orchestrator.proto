@@ -183,6 +183,8 @@ enum StartFailureReason {
   // The place where the host keeps its sessions is too long for a session to be reached there, so
   // none can start. A shorter root or state location fixes it.
   START_FAILURE_REASON_STATE_LOCATION_TOO_LONG = 9;
+  // The host's model policy forbids the model the session was to run on, so no session was started.
+  START_FAILURE_REASON_MODEL_NOT_ALLOWED = 10;
 }
 
 // ReportKind says what a report is for. A final report says the lead has finished what it was asked
@@ -796,4 +798,26 @@ enum Compatibility {
   COMPATIBILITY_COMPATIBLE = 1;
   COMPATIBILITY_CLIENT_TOO_OLD = 2;
   COMPATIBILITY_DAEMON_TOO_OLD = 3;
+}
+
+// ModelCatalog is which models the host runs agents on: what a client offers when it starts a run. The
+// host works it out and a client chooses from it, so no client names a model of its own.
+message ModelCatalog {
+  // The models the host's policy allows, in its order. Empty when the host has no policy, which allows
+  // every model. A host whose policy could not be read allows none, and says so with `unreadable_policy`.
+  repeated string allowed_models = 1 [(buf.validate.field).repeated.max_items = 256];
+  // Set when the host's policy file could not be read: nothing is allowed until it can.
+  bool unreadable_policy = 2;
+  // The models each harness runs, its default first, as its tool knows them. A harness the host could
+  // not ask is absent.
+  repeated HarnessModels harnesses = 3 [(buf.validate.field).repeated.max_items = 16];
+}
+
+// HarnessModels is the models one harness runs.
+message HarnessModels {
+  Harness harness = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated string models = 2 [(buf.validate.field).repeated.max_items = 256];
 }

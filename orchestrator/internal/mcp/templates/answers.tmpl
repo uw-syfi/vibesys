@@ -121,6 +121,8 @@ the lead stops only with its run: ask the operator to stop the run
 that agent's session is already over or closing: call list_agents to see which agents are live
 {{- else if eq .Refusal "agent_not_allowed" -}}
 the operator did not allow that harness and model for this run. It allows only: {{range $i, $a := .Allowed}}{{if $i}}; {{end}}harness {{$a.Harness}} {{if $a.Model}}with model {{$a.Model}}{{else}}with its default model (leave model out){{end}}{{end}}. Spawn again with one of these, or leave the model out to take the first one on the harness; if none fits, tell the operator
+{{- else if eq .Refusal "model_not_allowed" -}}
+the host does not allow {{if .Model}}the model {{.Model}}{{else}}a model for that agent{{end}}{{if .AllowedModels}}. It allows only: {{range $i, $m := .AllowedModels}}{{if $i}}, {{end}}{{$m}}{{end}}. Spawn again with one of these{{else}}: no model is allowed until the operator fixes the host's settings{{end}}; if none fits, tell the operator
 {{- else if eq .Refusal "repository_in_use" -}}
 another run is working in this repository: only an operator starts runs, so tell the operator
 {{- else if eq .Refusal "time_limit_reached" -}}

@@ -157,6 +157,19 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		r.Run, r.Refusal = busy, RefuseRepositoryInUse
 		return ""
 	}
+	lead, ok := t.resolveChoice(r, b.Lead.Harness, b.Lead.Model)
+	if !ok {
+		return ""
+	}
+	b.Lead.Model = lead
+	allow := make([]AgentChoice, len(b.Allow))
+	for i, c := range b.Allow {
+		if allow[i].Model, ok = t.resolveChoice(r, c.Harness, c.Model); !ok {
+			return ""
+		}
+		allow[i].Harness = c.Harness
+	}
+	b.Allow = allow
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, MaxCostUSD: b.MaxCostUSD, CreatedAt: t.in.At,
@@ -254,6 +267,18 @@ func (t *tx) spawnAgent(c Command, b SpawnAgent, r *Receipt) RunID {
 	case t.liveSubagents(run.ID) >= run.FanoutLimit:
 		r.Run, r.Refusal = run.ID, RefuseFanoutLimit
 		return ""
+	}
+	if t.in.Models.Restricts() {
+		// The host's policy narrows what the run was allowed to use, and an empty model of the run's
+		// allowance (a harness's own default) is no model the policy can name, so it is not among what
+		// is permitted.
+		permitted, ok := resolveSpec(t.in.Models.Permits(run.Allowed), lead.Spec, b.Spec)
+		if !ok {
+			r.Run = run.ID
+			t.refuseModel(r, spec.Model)
+			return ""
+		}
+		spec = permitted
 	}
 	id := AgentID(t.mint("agent"))
 	t.launch(run, Agent{ID: id, Run: run.ID, Parent: run.Lead, Role: b.Role, Spec: spec, PlanNumber: b.PlanNumber})

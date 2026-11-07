@@ -454,6 +454,13 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 			return err
 		}
 	}
+	// The last look before an agent is started, whoever decided it: a session never opens on a model
+	// the host's policy forbids, nor on none when the policy restricts models, which is how a resumed
+	// session of an older run is held to a policy made after it began.
+	if model, ok := d.ModelPolicy().Resolve(l.Spec.Harness, l.Spec.Model); !ok || model != l.Spec.Model {
+		d.Log.Warn("refusing to start a session on a model the host does not allow", "agent", l.Session.Agent, "model", l.Spec.Model)
+		return d.lose(l.Session, fmt.Sprintf("the host does not allow the model %q", l.Spec.Model), core.StartModelNotAllowed)
+	}
 	start := SessionStart{
 		Launch: l, Repository: run.Repository, Task: run.Task, JobTool: run.JobTool,
 		Tools: &pb.ToolServerCredentials{

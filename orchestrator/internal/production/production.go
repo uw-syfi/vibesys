@@ -168,6 +168,9 @@ type Wiring struct {
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
 	// Parts says whether a run can be started now.
 	Parts PartsCheck
+	// Models is the host's model policy. Nil means the host has none, which every test of the daemon
+	// that is not about models leaves.
+	Models daemon.ModelPolicySource
 }
 
 // Daemon is an opened daemon: it holds the state directory's lock and its database, and serves the
@@ -221,7 +224,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log,
+			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Models: wiring.Models,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {

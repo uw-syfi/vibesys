@@ -273,6 +273,9 @@ const (
 	RefuseCostLimitReached Refusal = "cost_limit_reached"
 	// RefuseNoViewer says a catch-up was asked for by a caller with no viewer.
 	RefuseNoViewer Refusal = "no_viewer"
+	// RefuseModelNotAllowed says the host's policy forbids the model of an agent the command would
+	// launch. The receipt names the model and lists the models the host allows.
+	RefuseModelNotAllowed Refusal = "model_not_allowed"
 	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
 	RefuseHandoffNotYours Refusal = "handoff_not_yours"
 )
@@ -293,6 +296,8 @@ const (
 	StartIncompatibleVersions StartFailure = "incompatible_versions"
 	// StartStateLocationTooLong says the place the host keeps sessions in is too long to reach one.
 	StartStateLocationTooLong StartFailure = "state_location_too_long"
+	// StartModelNotAllowed says the host's model policy forbids the model the session was to run on.
+	StartModelNotAllowed StartFailure = "model_not_allowed"
 )
 
 // TimerKind says what a timer is for.

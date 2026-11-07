@@ -1,7 +1,7 @@
 import {Button, Chip, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CommandProgress} from '../../state/index.js';
-import {faultHint, faultText, refusalWord} from './words.js';
+import {faultHint, faultText, receiptRefusalWord} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -25,7 +25,7 @@ function commandWords(progress: CommandProgress, done: string): CommandWords {
       return {label: `${done}: accepted`, tone: 'ok', details: null, canRetry: false};
     case 'Refused':
       return {
-        label: `${done} refused \u00b7 ${refusalWord(progress.receipt.refusal)}`,
+        label: `${done} refused \u00b7 ${receiptRefusalWord(progress.receipt)}`,
         tone: 'err',
         details: null,
         canRetry: false,

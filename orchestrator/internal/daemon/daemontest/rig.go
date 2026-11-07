@@ -35,6 +35,8 @@ type Rig struct {
 	Sidecars *Sidecars
 	Jobs     *jobstest.FakeJobSource
 	Starts   *StartChecks
+	// Models is the host's model policy, which every daemon reads at each start. A new Rig has none.
+	Models *Models
 	// Checkouts is the Fake of the agents' working copies, given to every daemon.
 	Checkouts *Checkouts
 	Hub       *hub.Hub
@@ -78,7 +80,7 @@ func NewRig(tb testing.TB) *Rig {
 	}
 	r := &Rig{
 		Store: store.NewMemory(), Clock: NewClock(), Nonces: &Nonces{}, Sidecars: NewSidecars(),
-		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
+		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Models: &Models{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
 		Log: slog.New(slog.DiscardHandler), Limits: hub.DefaultLimits, Wake: make(chan struct{}, 1),
 	}
 	r.Sidecars.Elapse = r.Bounds.Expire
@@ -115,7 +117,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	}
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Search: r.Search,
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Search: r.Search, Models: r.Models,
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:

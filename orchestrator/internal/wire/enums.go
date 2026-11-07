@@ -136,6 +136,7 @@ var (
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
 		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
+		core.RefuseModelNotAllowed: pb.Refusal_REFUSAL_MODEL_NOT_ALLOWED,
 
 		core.RefuseNoViewer:         pb.Refusal_REFUSAL_NO_VIEWER,
 		core.RefuseTimeLimitReached: pb.Refusal_REFUSAL_TIME_LIMIT_REACHED,
@@ -152,6 +153,7 @@ var (
 		core.StartOther:                 pb.StartFailureReason_START_FAILURE_REASON_OTHER,
 		core.StartIncompatibleVersions:  pb.StartFailureReason_START_FAILURE_REASON_INCOMPATIBLE_VERSIONS,
 		core.StartStateLocationTooLong:  pb.StartFailureReason_START_FAILURE_REASON_STATE_LOCATION_TOO_LONG,
+		core.StartModelNotAllowed:       pb.StartFailureReason_START_FAILURE_REASON_MODEL_NOT_ALLOWED,
 	})
 	reportKinds = newEnum(map[core.ReportKind]pb.ReportKind{
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
