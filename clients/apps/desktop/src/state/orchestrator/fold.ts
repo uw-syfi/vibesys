@@ -36,6 +36,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {checkInsOfSnapshot, withCheckIn} from './check-ins.js';
 import type {CostView} from './cost.js';
+import type {HostCostView, HostCostWindow} from './host-cost.js';
 import type {OrchestratorState, Overlay, Progress} from './state.js';
 
 function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<string, T> {
@@ -417,4 +418,25 @@ export function applyCost(state: OrchestratorState, view: CostView): Orchestrato
     return state;
   }
   return {...state, costs: {...state.costs, [view.runId]: view}};
+}
+
+/**
+ * One whole host cost view replaces the one held for its window: the host sends whole views, never
+ * parts. As with a run's, a view older than the one held does not replace it, and an equal one is the
+ * later arrival, which is the newer. A window is held apart from every other.
+ */
+export function applyHostCost(
+  state: OrchestratorState,
+  window: HostCostWindow,
+  view: HostCostView,
+): OrchestratorState {
+  const held = state.hostCosts[window];
+  if (
+    held !== undefined &&
+    (view.sequence < held.sequence ||
+      (view.sequence === held.sequence && view.asOfMs < held.asOfMs))
+  ) {
+    return state;
+  }
+  return {...state, hostCosts: {...state.hostCosts, [window]: view}};
 }

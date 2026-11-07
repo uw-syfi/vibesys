@@ -19,6 +19,7 @@ import type {
   RoleCost,
   RunCost,
   SpendBucket,
+  SpendSeries,
   Usage,
 } from '@vibesys/orchestrator-proto';
 import type {FeedStatus} from '../feed.js';
@@ -91,11 +92,7 @@ export interface CostView {
   readonly roles: readonly RoleCostView[];
   /** Most costly first; a model with no priced turn comes last. */
   readonly models: readonly ModelCostView[];
-  readonly series: {
-    readonly startMs: number;
-    readonly bucketMs: number;
-    readonly buckets: readonly SpendBucketView[];
-  };
+  readonly series: SpendSeriesView;
   /** What the turns that finished in the hour before `asOfMs` cost; null when none is priced. */
   readonly lastHourUsd: number | null;
   /** The host left a model out of the lists of models, or cut a model's name; every other figure is whole. */
@@ -104,8 +101,11 @@ export interface CostView {
 
 const count = (n: bigint | undefined): number | null => (n === undefined ? null : Number(n));
 
-/** The read's own signal that the message lacks a field the contract requires. */
-class MissingField extends Error {
+/**
+ * The read's own signal that the message lacks a field the contract requires. The readers below are
+ * shared with the host's cost view (`host-cost.ts`), which says its lists in the same terms.
+ */
+export class MissingField extends Error {
   constructor(readonly field: string) {
     super(`${field} is absent`);
   }
@@ -118,13 +118,13 @@ function need<T>(value: T | undefined, field: string): T {
 }
 
 /** An instant, or a duration of the contract, which has the same two fields, in milliseconds. */
-const instantMs = (at: Instant | undefined, field: string): number => {
+export const instantMs = (at: Instant | undefined, field: string): number => {
   const known = ms(need(at, field));
   if (known === null) throw new MissingField(field);
   return known;
 };
 
-function usageView(usage: Usage | undefined, field: string): CostUsage {
+export function usageView(usage: Usage | undefined, field: string): CostUsage {
   const held = need(usage, field);
   return {
     inputTokens: count(held.inputTokens),
@@ -141,7 +141,7 @@ function modelView(model: ModelRef | undefined, field: string): CostModel {
   return {harness: named.harness, model: named.model};
 }
 
-const roleView = (role: RoleCost): RoleCostView => ({
+export const roleView = (role: RoleCost): RoleCostView => ({
   role: role.role,
   agents: role.agents,
   turns: role.turns,
@@ -150,7 +150,7 @@ const roleView = (role: RoleCost): RoleCostView => ({
   totalTokens: Number(role.totalTokens),
 });
 
-const modelCostView = (cost: ModelCost): ModelCostView => ({
+export const modelCostView = (cost: ModelCost): ModelCostView => ({
   model: modelView(cost.model, 'models.model'),
   turns: cost.turns,
   unpricedTurns: cost.unpricedTurns,
@@ -167,6 +167,22 @@ const bucketView = (bucket: SpendBucket): SpendBucketView => ({
   })),
 });
 
+/** The spend over time a view carries: the same series for a run's cost and for the host's. */
+export interface SpendSeriesView {
+  readonly startMs: number;
+  readonly bucketMs: number;
+  readonly buckets: readonly SpendBucketView[];
+}
+
+export function seriesView(series: SpendSeries | undefined): SpendSeriesView {
+  const held = need(series, 'series');
+  return {
+    startMs: instantMs(held.start, 'series.start'),
+    bucketMs: instantMs(held.width, 'series.width'),
+    buckets: held.buckets.map(bucketView),
+  };
+}
+
 /** What reading a message came to: the view a screen shows, or the required field it lacks. */
 export type CostRead =
   | {readonly _tag: 'View'; readonly view: CostView}
@@ -179,7 +195,6 @@ export type CostRead =
  */
 export function readCost(cost: RunCost): CostRead {
   try {
-    const series = need(cost.series, 'series');
     return {
       _tag: 'View',
       view: {
@@ -192,11 +207,7 @@ export function readCost(cost: RunCost): CostRead {
         unpricedTurns: cost.unpricedTurns,
         roles: cost.roles.map(roleView),
         models: cost.models.map(modelCostView),
-        series: {
-          startMs: instantMs(series.start, 'series.start'),
-          bucketMs: instantMs(series.width, 'series.width'),
-          buckets: series.buckets.map(bucketView),
-        },
+        series: seriesView(cost.series),
         lastHourUsd: cost.lastHourUsd ?? null,
         modelsTruncated: cost.modelsTruncated,
       },

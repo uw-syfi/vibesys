@@ -11,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
@@ -181,6 +183,17 @@ func (c *Client) WatchAgent(ctx context.Context, agent string, pageSize uint32, 
 // again each time it changes. A client keeps the last view and combines none.
 func (c *Client) WatchRunCost(ctx context.Context, run string) (grpc.ServerStreamingClient[pb.WatchRunCostResponse], error) {
 	return c.svc.WatchRunCost(ctx, &pb.WatchRunCostRequest{RunId: run})
+}
+
+// WatchHostCost opens the stream of what every run the host holds has cost: its whole cost view, then
+// the whole view again each time any run's cost changes. A client keeps the last view and combines
+// none. The zero since counts everything; otherwise only the turns that finished at or after it.
+func (c *Client) WatchHostCost(ctx context.Context, since time.Time) (grpc.ServerStreamingClient[pb.WatchHostCostResponse], error) {
+	req := &pb.WatchHostCostRequest{}
+	if !since.IsZero() {
+		req.Since = timestamppb.New(since)
+	}
+	return c.svc.WatchHostCost(ctx, req)
 }
 
 // ListItems reads older items of an agent.

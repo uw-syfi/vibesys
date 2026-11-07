@@ -16,6 +16,7 @@ import type {
   Turn,
 } from '@vibesys/orchestrator-proto';
 import type {CostView} from './cost.js';
+import type {HostCostView, HostCostWindow} from './host-cost.js';
 
 /** One piece of progress on a running item, with the sequence it was made at. */
 export interface Progress {
@@ -79,6 +80,8 @@ export interface OrchestratorState {
   readonly searches: Readonly<Record<string, SearchState>>;
   /** The latest cost view of each run whose cost stream a screen has watched, by run id. */
   readonly costs: Readonly<Record<string, CostView>>;
+  /** The latest cost view of the whole host in each window a screen has watched, by window. */
+  readonly hostCosts: Readonly<Partial<Record<HostCostWindow, HostCostView>>>;
   readonly runs: Readonly<Record<string, Run>>;
   /**
    * The summary the host serves of each run it listed, replaced whole by run id: the report that sums
@@ -121,6 +124,7 @@ export const emptyState: OrchestratorState = {
   sequence: 0n,
   searches: {},
   costs: {},
+  hostCosts: {},
   searchRevisions: {},
   runs: {},
   summaries: {},

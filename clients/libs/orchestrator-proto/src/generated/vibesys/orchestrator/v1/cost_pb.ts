@@ -7,7 +7,7 @@ import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Duration, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_duration, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { AgentRole, Harness, Usage } from "./orchestrator_pb.js";
+import type { AgentRole, Harness, RunStatus, Usage } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_orchestrator } from "./orchestrator_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/cost.proto.
  */
 export const file_vibesys_orchestrator_v1_cost: GenFile = /*@__PURE__*/
-  fileDesc("CiJ2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jb3N0LnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSL8BAoHUnVuQ29zdBIXCgZydW5faWQYASABKAlCB7pIBHICEAESEAoIc2VxdWVuY2UYAiABKAQSMQoFYXNfb2YYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESNQoFdG90YWwYBCABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEisKDG1heF9jb3N0X3VzZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEg0KBXR1cm5zGAYgASgNEhYKDnVucHJpY2VkX3R1cm5zGAcgASgNEjoKBXJvbGVzGAggAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUm9sZUNvc3RCCLpIBZIBAhAQEjwKBm1vZGVscxgJIAMoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsQ29zdEIIukgFkgECEEASPAoGc2VyaWVzGAogASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3BlbmRTZXJpZXNCBrpIA8gBARIsCg1sYXN0X2hvdXJfdXNkGAsgASgBQhC6SA0SC0ABKQAAAAAAAAAASAGIAQESGAoQbW9kZWxzX3RydW5jYXRlZBgMIAEoCDplukhiGmAKF3J1bl9jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnNCDwoNX21heF9jb3N0X3VzZEIQCg5fbGFzdF9ob3VyX3VzZCK0AgoIUm9sZUNvc3QSPAoEcm9sZRgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABIOCgZhZ2VudHMYAiABKA0SDQoFdHVybnMYAyABKA0SFgoOdW5wcmljZWRfdHVybnMYBCABKA0SNQoFdXNhZ2UYBSABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEhQKDHRvdGFsX3Rva2VucxgGIAEoBDpmukhjGmEKGHJvbGVfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zImIKCE1vZGVsUmVmEj0KB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEhcKBW1vZGVsGAIgASgJQgi6SAVyAyiAAiKiAgoJTW9kZWxDb3N0EjgKBW1vZGVsGAEgASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTW9kZWxSZWZCBrpIA8gBARINCgV0dXJucxgCIAEoDRIWCg51bnByaWNlZF90dXJucxgDIAEoDRI1CgV1c2FnZRgEIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESFAoMdG90YWxfdG9rZW5zGAUgASgEOme6SGQaYgoZbW9kZWxfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zIroBCgtTcGVuZFNlcmllcxIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI1CgV3aWR0aBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkILukgIyAEBqgECKgASQQoHYnVja2V0cxgDIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNwZW5kQnVja2V0Qgq6SAeSAQQIARBAIqUBCgtTcGVuZEJ1Y2tldBIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIiCghjb3N0X3VzZBgCIAEoAUIQukgNEgtAASkAAAAAAAAAABI/CghieV9tb2RlbBgDIAMoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsU3BlbmRCCLpIBZIBAhBAImoKCk1vZGVsU3BlbmQSOAoFbW9kZWwYASABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Nb2RlbFJlZkIGukgDyAEBEiIKCGNvc3RfdXNkGAIgASgBQhC6SA0SC0ABIQAAAAAAAAAAQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
+  fileDesc("CiJ2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jb3N0LnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSL8BAoHUnVuQ29zdBIXCgZydW5faWQYASABKAlCB7pIBHICEAESEAoIc2VxdWVuY2UYAiABKAQSMQoFYXNfb2YYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESNQoFdG90YWwYBCABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEisKDG1heF9jb3N0X3VzZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEg0KBXR1cm5zGAYgASgNEhYKDnVucHJpY2VkX3R1cm5zGAcgASgNEjoKBXJvbGVzGAggAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUm9sZUNvc3RCCLpIBZIBAhAQEjwKBm1vZGVscxgJIAMoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsQ29zdEIIukgFkgECEEASPAoGc2VyaWVzGAogASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3BlbmRTZXJpZXNCBrpIA8gBARIsCg1sYXN0X2hvdXJfdXNkGAsgASgBQhC6SA0SC0ABKQAAAAAAAAAASAGIAQESGAoQbW9kZWxzX3RydW5jYXRlZBgMIAEoCDplukhiGmAKF3J1bl9jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnNCDwoNX21heF9jb3N0X3VzZEIQCg5fbGFzdF9ob3VyX3VzZCK0AgoIUm9sZUNvc3QSPAoEcm9sZRgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABIOCgZhZ2VudHMYAiABKA0SDQoFdHVybnMYAyABKA0SFgoOdW5wcmljZWRfdHVybnMYBCABKA0SNQoFdXNhZ2UYBSABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEhQKDHRvdGFsX3Rva2VucxgGIAEoBDpmukhjGmEKGHJvbGVfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zImIKCE1vZGVsUmVmEj0KB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEhcKBW1vZGVsGAIgASgJQgi6SAVyAyiAAiKiAgoJTW9kZWxDb3N0EjgKBW1vZGVsGAEgASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTW9kZWxSZWZCBrpIA8gBARINCgV0dXJucxgCIAEoDRIWCg51bnByaWNlZF90dXJucxgDIAEoDRI1CgV1c2FnZRgEIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESFAoMdG90YWxfdG9rZW5zGAUgASgEOme6SGQaYgoZbW9kZWxfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zIroBCgtTcGVuZFNlcmllcxIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI1CgV3aWR0aBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkILukgIyAEBqgECKgASQQoHYnVja2V0cxgDIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNwZW5kQnVja2V0Qgq6SAeSAQQIARBAIqUBCgtTcGVuZEJ1Y2tldBIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIiCghjb3N0X3VzZBgCIAEoAUIQukgNEgtAASkAAAAAAAAAABI/CghieV9tb2RlbBgDIAMoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsU3BlbmRCCLpIBZIBAhBAImoKCk1vZGVsU3BlbmQSOAoFbW9kZWwYASABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Nb2RlbFJlZkIGukgDyAEBEiIKCGNvc3RfdXNkGAIgASgBQhC6SA0SC0ABIQAAAAAAAAAAIvoGCghIb3N0Q29zdBIQCghzZXF1ZW5jZRgBIAEoBBIxCgVhc19vZhgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI1CgV0b3RhbBgDIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESEQoJcnVuX2NvdW50GAQgASgNEg0KBXR1cm5zGAUgASgNEhYKDnVucHJpY2VkX3R1cm5zGAYgASgNEjwKBHJ1bnMYByADKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ib3N0UnVuQ29zdEIIukgFkgECECASPwoKb3RoZXJfcnVucxgIIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk90aGVyUnVuc0Nvc3RIAIgBARI6CgVyb2xlcxgJIAMoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJvbGVDb3N0Qgi6SAWSAQIQEBI8CgZtb2RlbHMYCiADKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Nb2RlbENvc3RCCLpIBZIBAhBAEjwKBnNlcmllcxgLIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNwZW5kU2VyaWVzQga6SAPIAQESLAoNbGFzdF9ob3VyX3VzZBgMIAEoAUIQukgNEgtAASkAAAAAAAAAAEgBiAEBEhgKEG1vZGVsc190cnVuY2F0ZWQYDSABKAg6lwK6SJMCGmEKGGhvc3RfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zGq0BChNob3N0X2Nvc3QucnVuX2NvdW50EjhydW5fY291bnQgaXMgdGhlIHJ1bnMgbGlzdGVkIHBsdXMgdGhlIHJ1bnMgaW4gb3RoZXJfcnVucxpcdGhpcy5ydW5fY291bnQgPT0gdWludChzaXplKHRoaXMucnVucykpICsgKGhhcyh0aGlzLm90aGVyX3J1bnMpID8gdGhpcy5vdGhlcl9ydW5zLnJ1bnMgOiAwdSlCDQoLX290aGVyX3J1bnNCEAoOX2xhc3RfaG91cl91c2QingMKC0hvc3RSdW5Db3N0EhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQARIYCgRuYW1lGAIgASgJQgq6SAdyBRABKIACEj4KBnN0YXR1cxgDIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1blN0YXR1c0IKukgHggEEEAEgABIrCgxtYXhfY29zdF91c2QYBCABKAFCELpIDRILQAEhAAAAAAAAAABIAIgBARINCgV0dXJucxgFIAEoDRIWCg51bnByaWNlZF90dXJucxgGIAEoDRI1CgV1c2FnZRgHIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESFAoMdG90YWxfdG9rZW5zGAggASgEOmq6SGcaZQocaG9zdF9ydW5fY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zQg8KDV9tYXhfY29zdF91c2QiiAIKDU90aGVyUnVuc0Nvc3QSFQoEcnVucxgBIAEoDUIHukgEKgIgABINCgV0dXJucxgCIAEoDRIWCg51bnByaWNlZF90dXJucxgDIAEoDRI1CgV1c2FnZRgEIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESFAoMdG90YWxfdG9rZW5zGAUgASgEOmy6SGkaZwoeb3RoZXJfcnVuc19jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnNCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
 
 /**
  * RunCost is what a run has cost, worked out by the host from the finished turns of its agents. A
@@ -341,4 +341,238 @@ export type ModelSpend = Message<"vibesys.orchestrator.v1.ModelSpend"> & {
  */
 export const ModelSpendSchema: GenMessage<ModelSpend> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_cost, 6);
+
+/**
+ * HostCost is what every run the host holds has cost, live and ended, worked out by the host from the
+ * finished turns of their agents, in the terms RunCost uses: the same turns, the same pricing, the same
+ * unpriced turns and the same lists. A client shows these numbers and computes none of them: no sum,
+ * ranking, split, rate or bucket is left to it. With no `since`, its total is the sum of the totals of
+ * RunCost over the runs it counts.
+ *
+ * A run is counted unless it ended before the request's `since`. A run that never opened (its lead
+ * never ran a turn) is counted like any other, and has cost nothing. A turn is counted when it
+ * finished, and with a `since`, when it finished at or after it. The agents are those of the counted
+ * runs, whether or not they ran a turn in the window.
+ *
+ * It is a whole view: each message replaces the one before it.
+ *
+ * @generated from message vibesys.orchestrator.v1.HostCost
+ */
+export type HostCost = Message<"vibesys.orchestrator.v1.HostCost"> & {
+  /**
+   * The log sequence the view is current to.
+   *
+   * @generated from field: uint64 sequence = 1;
+   */
+  sequence: bigint;
+
+  /**
+   * The instant the view is worked out at: the host's clock while a counted run is live, and once none
+   * is, the latest end among the counted runs, so that the view of a host with nothing live never
+   * changes. It is never before the first bucket's start.
+   *
+   * @generated from field: google.protobuf.Timestamp as_of = 2;
+   */
+  asOf?: Timestamp | undefined;
+
+  /**
+   * What the finished turns of every counted run cost. Its tokens are the tokens by kind. cost_usd is
+   * absent when no turn is priced, never zero.
+   *
+   * @generated from field: vibesys.orchestrator.v1.Usage total = 3;
+   */
+  total?: Usage | undefined;
+
+  /**
+   * How many runs the view counts: those in `runs` and those in `other_runs`.
+   *
+   * @generated from field: uint32 run_count = 4;
+   */
+  runCount: number;
+
+  /**
+   * How many turns have finished, and how many of them are unpriced. An unpriced turn adds its tokens
+   * and itself to every figure and never a dollar, so a cost with an unpriced turn behind it is a
+   * lower bound, as RunCost says.
+   *
+   * @generated from field: uint32 turns = 5;
+   */
+  turns: number;
+
+  /**
+   * @generated from field: uint32 unpriced_turns = 6;
+   */
+  unpricedTurns: number;
+
+  /**
+   * The most costly runs, most costly first, at most 32; a run with no priced turn comes after those,
+   * in the order of the run ids. The runs it leaves out are summed in other_runs.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.HostRunCost runs = 7;
+   */
+  runs: HostRunCost[];
+
+  /**
+   * The runs that are not in `runs`, added up. Absent when every counted run is listed.
+   *
+   * @generated from field: optional vibesys.orchestrator.v1.OtherRunsCost other_runs = 8;
+   */
+  otherRuns?: OtherRunsCost | undefined;
+
+  /**
+   * One entry for each type of agent the counted runs have, most costly first, as RunCost.roles is,
+   * summed over the runs.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.RoleCost roles = 9;
+   */
+  roles: RoleCost[];
+
+  /**
+   * One entry for each model the counted runs' agents ran on, most costly first, as RunCost.models
+   * is, summed over the runs. When more models ran than fit, the first ones are kept and
+   * models_truncated says so.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ModelCost models = 10;
+   */
+  models: ModelCost[];
+
+  /**
+   * The cost over time: from the start of the window (the request's `since`, or the start of the
+   * first counted run) to as_of, in buckets of one width the host picks from the ladder RunCost's
+   * series uses.
+   *
+   * @generated from field: vibesys.orchestrator.v1.SpendSeries series = 11;
+   */
+  series?: SpendSeries | undefined;
+
+  /**
+   * What the turns that finished in the hour before as_of cost, across the counted runs. Absent when
+   * no counted turn is priced.
+   *
+   * @generated from field: optional double last_hour_usd = 12;
+   */
+  lastHourUsd?: number | undefined;
+
+  /**
+   * True when the view leaves something of the models out, exactly as RunCost.models_truncated says.
+   * Every figure that is not a list of models still counts every turn.
+   *
+   * @generated from field: bool models_truncated = 13;
+   */
+  modelsTruncated: boolean;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.HostCost.
+ * Use `create(HostCostSchema)` to create a new message.
+ */
+export const HostCostSchema: GenMessage<HostCost> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_cost, 7);
+
+/**
+ * HostRunCost is what one run has cost, as a line of the host's list of runs by cost.
+ *
+ * @generated from message vibesys.orchestrator.v1.HostRunCost
+ */
+export type HostRunCost = Message<"vibesys.orchestrator.v1.HostRunCost"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * What the run is called: its task, cut to the limit at a character boundary when it is longer.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: vibesys.orchestrator.v1.RunStatus status = 3;
+   */
+  status: RunStatus;
+
+  /**
+   * The most the run may cost, as Run.max_cost_usd. Absent when the run has no cost limit.
+   *
+   * @generated from field: optional double max_cost_usd = 4;
+   */
+  maxCostUsd?: number | undefined;
+
+  /**
+   * The finished turns the window counts of the run, and how many of them are unpriced.
+   *
+   * @generated from field: uint32 turns = 5;
+   */
+  turns: number;
+
+  /**
+   * @generated from field: uint32 unpriced_turns = 6;
+   */
+  unpricedTurns: number;
+
+  /**
+   * Tokens by kind and the cost of the priced turns: absent when none is priced. With no `since` this
+   * is RunCost.total of the run.
+   *
+   * @generated from field: vibesys.orchestrator.v1.Usage usage = 7;
+   */
+  usage?: Usage | undefined;
+
+  /**
+   * All the tokens of the run: the sum of the five kinds in usage, a kind no turn reported counting as
+   * none.
+   *
+   * @generated from field: uint64 total_tokens = 8;
+   */
+  totalTokens: bigint;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.HostRunCost.
+ * Use `create(HostRunCostSchema)` to create a new message.
+ */
+export const HostRunCostSchema: GenMessage<HostRunCost> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_cost, 8);
+
+/**
+ * OtherRunsCost is what the runs HostCost.runs does not list have cost, added up.
+ *
+ * @generated from message vibesys.orchestrator.v1.OtherRunsCost
+ */
+export type OtherRunsCost = Message<"vibesys.orchestrator.v1.OtherRunsCost"> & {
+  /**
+   * How many runs are summed here; at least one, since the message is absent otherwise.
+   *
+   * @generated from field: uint32 runs = 1;
+   */
+  runs: number;
+
+  /**
+   * @generated from field: uint32 turns = 2;
+   */
+  turns: number;
+
+  /**
+   * @generated from field: uint32 unpriced_turns = 3;
+   */
+  unpricedTurns: number;
+
+  /**
+   * @generated from field: vibesys.orchestrator.v1.Usage usage = 4;
+   */
+  usage?: Usage | undefined;
+
+  /**
+   * @generated from field: uint64 total_tokens = 5;
+   */
+  totalTokens: bigint;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.OtherRunsCost.
+ * Use `create(OtherRunsCostSchema)` to create a new message.
+ */
+export const OtherRunsCostSchema: GenMessage<OtherRunsCost> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_cost, 9);
 
