@@ -75,7 +75,7 @@ export interface GanttTick {
   readonly label: string;
 }
 
-/** A time axis the Gantt ticks itself, at round intervals that fit its width, labelled by `label`. */
+/** A time axis the Gantt ticks itself, at even, tidy intervals that fit its width, labelled by `label`. */
 export interface GanttAxis {
   readonly label: (at: number, spanMs: number) => string;
 }
@@ -228,7 +228,7 @@ function AxisRow(props: {
 }): JSX.Element {
   const {view} = props;
   const [measure, width] = useInlineSize();
-  // An axis of round time ticks is drawn to the width it has; explicit ticks are filtered to the view.
+  // An axis of tidy time ticks is drawn to the width it has; explicit ticks are filtered to the view.
   const shown =
     'label' in props.ticks
       ? fittedTimeTicks(view.from, view.to, width, props.ticks.label)

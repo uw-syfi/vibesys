@@ -1,6 +1,6 @@
 /**
- * The ticks of a time axis: moments at round intervals, equally spaced, inside the span. The step is
- * the finest of a ladder of round ones (1, 2, 5, 10, 15 or 30 seconds or minutes, 1, 2, 3, 6 or 12
+ * The ticks of a time axis: moments at even, tidy intervals, equally spaced, inside the span. The step is
+ * the finest of a ladder of tidy ones (1, 2, 5, 10, 15 or 30 seconds or minutes, 1, 2, 3, 6 or 12
  * hours, whole days) that gives at most `most` ticks, and every tick is a multiple of the step, so
  * a minute axis is labelled on whole minutes whatever moment the span starts at. Spans are in
  * milliseconds; hour and day steps are counted from the epoch, not from a local midnight.
@@ -57,8 +57,8 @@ export interface LabelledTick {
 
 /**
  * The ticks of a time axis `width` pixels wide (null when not measured), labelled by `label(at, span)`:
- * the most round ticks whose labels can all be read side by side. Labels are never dropped to make
- * room, which would leave the ones that stay unevenly spaced; fewer, rounder ticks are drawn instead.
+ * the most tidy ticks whose labels can all be read side by side. Labels are never dropped to make
+ * room, which would leave the ones that stay unevenly spaced; fewer, tidier ticks are drawn instead.
  */
 export function fittedTimeTicks(
   from: number,

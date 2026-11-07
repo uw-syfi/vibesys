@@ -20,7 +20,7 @@ function spanOf(next: () => number): readonly [number, number] {
 describe('timeTicks', () => {
   test('are ascending, equally spaced, inside the span and no more than asked, over every span', () => {
     const next = random(3);
-    for (let round = 0; round < 500; round += 1) {
+    for (let trial = 0; trial < 500; trial += 1) {
       const [from, to] = spanOf(next);
       const most = 1 + Math.floor(next() * 14);
       const ticks = timeTicks(from, to, most);
@@ -35,7 +35,7 @@ describe('timeTicks', () => {
       ticks.forEach((at, index) => {
         expect(at).toBe(first + index * step);
       });
-      // Round: a whole number of seconds once the step is a second or more, and the step is a multiple of the epoch's own.
+      // Tidy: a whole number of seconds once the step is a second or more, and the step is a multiple of the epoch's own.
       if (step >= 1000) expect(at0(ticks) % 1000).toBe(0);
     }
   });
@@ -61,7 +61,7 @@ describe('fittedTimeTicks', () => {
 
   test('never drop a label to fit, stay equally spaced and inside the span, at every width', () => {
     const next = random(9);
-    for (let round = 0; round < 400; round += 1) {
+    for (let trial = 0; trial < 400; trial += 1) {
       const [from, to] = spanOf(next);
       const width = 30 + next() * 1500;
       const ticks = fittedTimeTicks(from, to, width, label);
