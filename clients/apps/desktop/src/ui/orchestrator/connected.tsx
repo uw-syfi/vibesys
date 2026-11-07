@@ -16,8 +16,9 @@ import type {
   CostFeedSnapshot,
   CostTarget,
   FeedStatus,
+  FleetPlace,
+  NavigationAction,
   Route,
-  RouteAction,
 } from '../../state/index.js';
 import {costTarget} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
@@ -148,11 +149,12 @@ export function ConnectedApp(props: {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
   readonly route: Route;
-  readonly go: (action: RouteAction) => void;
+  readonly fleet: FleetPlace;
+  readonly go: (action: NavigationAction) => void;
   readonly issues: Issues;
   readonly setIssues: (update: (all: Issues) => Issues) => void;
 }): JSX.Element {
-  const {hosts, dispatch, route, go, issues, setIssues} = props;
+  const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
   const openHost = route.screen === 'run' ? route.host : undefined;
   const openAgent = route.screen === 'run' ? route.agentId : undefined;
   useAtomMount(useMemo(() => watchAgent(hosts, openHost, openAgent), [hosts, openHost, openAgent]));
@@ -177,6 +179,11 @@ export function ConnectedApp(props: {
   );
   const sessionOf = (host: string): HostSession | undefined =>
     hosts.find(candidate => candidate.key === host)?.session;
+  /** Runs what `act` makes on the host's session, if the window has one for it. */
+  const on = (host: string, act: (session: HostSession) => Effect.Effect<void>): void => {
+    const session = sessionOf(host);
+    if (session !== undefined) dispatch(act(session), () => undefined);
+  };
   const issue = (host: string, intent: Intent, kept: (issued: Issued) => void): void => {
     const session = sessionOf(host);
     if (session !== undefined) dispatch(session.commands.submit(intent), id => kept({host, id}));
@@ -201,20 +208,11 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
-    catchUp: (host, runId) => {
-      const session = sessionOf(host);
-      if (session !== undefined) dispatch(session.catchUp.press(runId), () => undefined);
-    },
-    loadEarlier: (host, agentId, before) => {
-      const session = sessionOf(host);
-      if (session !== undefined)
-        dispatch(session.history.loadEarlier(agentId, before), () => undefined);
-    },
-    expand: (host, agentId, ordinal) => {
-      const session = sessionOf(host);
-      if (session !== undefined)
-        dispatch(session.history.expand(agentId, ordinal), () => undefined);
-    },
+    catchUp: (host, runId) => on(host, session => session.catchUp.press(runId)),
+    loadEarlier: (host, agentId, before) =>
+      on(host, session => session.history.loadEarlier(agentId, before)),
+    expand: (host, agentId, ordinal) =>
+      on(host, session => session.history.expand(agentId, ordinal)),
   };
   if (!AsyncResult.isSuccess(clock))
     return (
@@ -228,11 +226,9 @@ export function ConnectedApp(props: {
       nowMs={clock.value}
       commands={commands}
       route={route}
+      fleet={fleet}
       go={go}
-      retryCost={(host, runId) => {
-        const session = sessionOf(host);
-        if (session !== undefined) dispatch(session.costs.retry(runId), () => undefined);
-      }}
+      retryCost={(host, runId) => on(host, session => session.costs.retry(runId))}
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;

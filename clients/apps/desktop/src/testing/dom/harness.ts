@@ -30,7 +30,8 @@ export function installDom(): {readonly window: () => Window} {
   return {window: () => window};
 }
 
-const CONTROLS = 'button, a, [role="tab"], [role="radio"], [role="treeitem"], tr[data-selectable]';
+const CONTROLS =
+  'button, a, [role="tab"], [role="radio"], [role="treeitem"], [role="option"], tr[data-selectable]';
 
 /** What names `element` for a person: its `aria-label`, else its text. */
 const nameOf = (element: Element): string =>

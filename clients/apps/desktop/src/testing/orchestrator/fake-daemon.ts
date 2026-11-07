@@ -178,16 +178,18 @@ export class FakeDaemon {
       checkIns: Object.values(state.checkIns),
       sequence: state.sequence,
       searches:
-        this.scenario.search === true
-          ? [
-              searchFixture(
-                this.scenario.runId,
-                this.scenario.endMs,
-                this.scenario.searchStale ?? false,
-                this.scenario.searchTruncated ?? false,
-              ),
-            ]
-          : [],
+        this.scenario.searches !== undefined
+          ? [...this.scenario.searches]
+          : this.scenario.search === true
+            ? [
+                searchFixture(
+                  this.scenario.runId,
+                  this.scenario.endMs,
+                  this.scenario.searchStale ?? false,
+                  this.scenario.searchTruncated ?? false,
+                ),
+              ]
+            : [],
     });
   }
 

@@ -82,6 +82,7 @@ export function ConnectedShell(props: {
           hosts={hosts}
           dispatch={dispatch}
           route={runs}
+          fleet={current.fleet}
           go={go}
           issues={issues}
           setIssues={setIssues}

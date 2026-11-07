@@ -1,26 +1,29 @@
 import type {Agent} from '@vibesys/orchestrator-proto';
-import {Page, pageState, Stack, Text} from '@vibesys/ui';
+import {Page, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
   type FeedStatus,
+  type FleetHostInput,
+  type FleetPlace,
+  freshnessOf,
   type HostConnectionState,
   type HostFreshness,
   type HostModel,
+  type NavigationAction,
   type Route,
-  type RouteAction,
   type RunView,
   staleForMs,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
+import {FleetScreen} from './fleet-screen.js';
 import {agentNames, nameOf} from './names.js';
-import {RunList} from './run-list.js';
+import {NewRun} from './new-run.js';
 import {RunScreen} from './run-screen.js';
 import type {StartRunRequest} from './start-draft.js';
-import {StartRunForm} from './start-run-form.js';
 
 const TITLE = 'Runs';
 const RUN_TITLES = {
@@ -82,6 +85,15 @@ const OPENING_COST: CostFeedSnapshot = {status: {_tag: 'Opening'}, freshness: 'e
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
+/** A host as the fleet reads it: its runs, how far to trust them, and how long they have been out of date. */
+const fleetInput = (host: HostSnapshot, nowMs: number): FleetHostInput => ({
+  key: host.key,
+  label: host.label,
+  data: host.model.data,
+  freshness: freshnessOf(host.connection, host.runsFeed, hasData(host)),
+  staleForMs: staleForMs(host.freshness, nowMs),
+});
+
 function runsNote(
   host: HostSnapshot,
   retry: (host: string) => void,
@@ -105,7 +117,7 @@ function OpenAgent(props: {
   readonly host: HostSnapshot;
   readonly nowMs: number;
   readonly commands: AppCommands;
-  readonly go: (action: RouteAction) => void;
+  readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {agent, host, commands, go} = props;
   return (
@@ -158,45 +170,29 @@ export function OrchestratorApp(props: {
   readonly retryCost: (host: string, runId: string) => void;
   /** Where the person is; the caller owns it so it can watch what that screen needs. */
   readonly route: Route;
-  readonly go: (action: RouteAction) => void;
+  /** The run list's filters and selected row, which the caller keeps while a run is open. */
+  readonly fleet: FleetPlace;
+  readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
     return (
-      <Page
-        key="runs"
-        width="wide"
-        state={pageState(hosts.length === 0)}
-        header={
-          <Text variant="title">
-            {hosts.some(host => host.connection._tag === 'Unusable')
-              ? 'Runs unavailable'
-              : commands.start?._tag === 'Refused'
-                ? 'Start run refused'
-                : TITLE}
-          </Text>
-        }
-      >
-        <Stack gap="space-4">
-          <ConnectionBanner
-            notes={hosts.map(host => runsNote(host, props.retryHost, props.nowMs))}
-          />
-          <StartRunForm
+      <FleetScreen
+        hosts={hosts.map(host => fleetInput(host, props.nowMs))}
+        place={props.fleet}
+        nowMs={props.nowMs}
+        go={go}
+        retryHost={props.retryHost}
+        newRun={
+          <NewRun
             hosts={hosts.map(({key, label}) => ({key, label}))}
             progress={commands.start}
             start={commands.startRun}
             retry={commands.retryStart}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
-          <RunList
-            unreadHosts={hosts
-              .filter(host => host.runsFeed._tag !== 'Live')
-              .map(host => host.label)}
-            hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
-            open={(host, runId) => go({type: 'open-run', host, runId})}
-          />
-        </Stack>
-      </Page>
+        }
+      />
     );
   }
   const host = hosts.find(candidate => candidate.key === route.host);
