@@ -18,6 +18,7 @@ import {
   SectionLayout,
   SegmentedControl,
   Select,
+  SidebarItem,
   Slider,
   Split,
   Stack,
@@ -340,11 +341,11 @@ export const BASIC_ENTRIES = {
       <SectionLayout
         label="Example sections"
         sections={
-          <Stack gap="space-1">
-            <Text>Appearance</Text>
-            <Text>Machines</Text>
-            <Text>Notifications</Text>
-          </Stack>
+          <>
+            <SidebarItem label="Appearance" active press={() => undefined} />
+            <SidebarItem label="Machines" press={() => undefined} />
+            <SidebarItem label="Notifications" press={() => undefined} />
+          </>
         }
       >
         <Box label="Selected section" />

@@ -23,6 +23,8 @@ const GROUPS = [
   ['navigation.css', '.vs-sidebar-section'],
   ['navigation.css', '.vs-sidebar-group'],
   ['frame.css', '.vs-picklist'],
+  ['base.css', '.vs-section-nav'],
+  ['base.css', '.vs-section-steps'],
 ] as const;
 
 describe('grouped controls', () => {

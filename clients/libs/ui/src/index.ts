@@ -86,7 +86,7 @@ export {
 } from './components/gantt.js';
 export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
-export {type AxisLabel, type PlacedLabel, placeLabels} from './components/label-fit.js';
+export {type AxisLabel, labelsFit, type PlacedLabel, placeLabels} from './components/label-fit.js';
 export {
   type Align,
   Dock,
@@ -206,7 +206,12 @@ export {
 } from './components/text.js';
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {Thread, type ThreadItem} from './components/thread.js';
-export {fittedTimeTicks, type LabelledTick, timeTicks} from './components/time-ticks.js';
+export {
+  fittedTimeTicks,
+  type LabelledTick,
+  timeTicks,
+  type ZoneOffset,
+} from './components/time-ticks.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';

@@ -24,6 +24,31 @@ const dayClock = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+const wallClock = new Intl.DateTimeFormat('en-US', {
+  timeZone: ZONE,
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+});
+
+/** How far Seattle's clock is from UTC at a moment, in milliseconds (negative: behind). */
+export function zoneOffsetMs(atMs: number): number {
+  const part = new Map(wallClock.formatToParts(atMs).map(each => [each.type, Number(each.value)]));
+  const shown = Date.UTC(
+    part.get('year') ?? 1970,
+    (part.get('month') ?? 1) - 1,
+    part.get('day') ?? 1,
+    part.get('hour') ?? 0,
+    part.get('minute') ?? 0,
+    part.get('second') ?? 0,
+  );
+  return shown - Math.floor(atMs / 1000) * 1000;
+}
+
 /** `2:40 AM` in Seattle. */
 export const formatTime = (atMs: number): string => clock.format(atMs);
 

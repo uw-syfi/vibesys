@@ -25,7 +25,7 @@ import {
   toggled,
 } from '../../state/index.js';
 import {agentLabel, groupLabel} from './labels.js';
-import {axisLabel, formatSpan, formatUsd} from './time.js';
+import {axisLabel, formatSpan, formatUsd, zoneOffsetMs} from './time.js';
 
 /** What the bars of the tree say, in the words the page's own chips and column use. */
 const LEGEND: GanttLegend = {
@@ -168,7 +168,7 @@ export function AgentsScreen(props: {
           label="Agents over time"
           from={tree.startMs}
           to={to}
-          axis={{label: axisLabel}}
+          axis={{label: axisLabel, zone: zoneOffsetMs}}
           rows={rows}
           nameLabel="Agent"
           tagLabel="Machine"

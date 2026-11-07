@@ -836,7 +836,7 @@ button.vs-crumb:focus-visible {
   line-height: var(--text-section-line);
   white-space: nowrap;
 }
-.vs-gantt-tick:first-child {
+.vs-gantt-tick:first-child:not([data-centred]) {
   transform: none;
 }
 /* A measured track places each label itself, inside the track and clear of its neighbours. */
