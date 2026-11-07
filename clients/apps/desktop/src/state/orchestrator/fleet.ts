@@ -112,6 +112,8 @@ export interface FleetRow {
    * null when it has not.
    */
   readonly lastReportMs: number | null;
+  /** The host could not serve the run's report: it is missing, not posted by no one. */
+  readonly reportUnavailable: boolean;
 }
 
 /** A host as the filter strip shows it, with its run count under the state filter. */
@@ -158,6 +160,7 @@ function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): F
     budgetUsd: run.maxCostUsd ?? null,
     agentsRunning: summary?.agentsWorking ?? null,
     lastReportMs: ms(summary?.report?.at),
+    reportUnavailable: summary?.reportUnavailable ?? false,
   };
 }
 

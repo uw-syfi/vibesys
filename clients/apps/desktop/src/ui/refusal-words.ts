@@ -1,25 +1,24 @@
 /**
- * What a refusal that no retry changes says, for every screen that shows a host's state: a short
- * label for a status chip, and the longer words for where a sentence has room. The cause and, where
- * the host's type names it, what to change. It lives beside the features, not in one of them,
- * because the run screens, the Runs list and the Resources tab all say it. The refusing side's own
- * words (platform, version, path) follow as Details.
+ * What a refusal that no retry changes is called, for every screen that shows a host's state: the
+ * cause as a label, and, in `causeHint`, the setting that fixes it, for a hover or a Details line,
+ * never a sentence on the screen. It lives beside the features, not in one of them, because the run
+ * screens, the Runs list and the Resources tab all say it. The refusing side's own words (platform,
+ * version, path) follow as Details.
+ *
+ * A label is a few words, one per cause, and none is the word of a link or a feed ("Waiting",
+ * "Unavailable", "Not read yet"), so a host that cannot work is never mistaken for one that has not
+ * answered yet.
  */
 import type {RefusalCause} from '../state/index.js';
 
-/**
- * The cause as a chip says it: a few words, one per cause, none the word of a link or a feed
- * ("Waiting", "Unavailable", "Not read yet"), so a host that cannot work is never mistaken for one
- * that has not answered yet.
- */
-const CAUSE_LABEL: Readonly<Record<RefusalCause, string>> = {
+const CAUSE_WORD: Readonly<Record<RefusalCause, string>> = {
   'method-not-available': 'Call not allowed',
   'invalid-request': 'Invalid request',
   'unsupported-platform': 'Platform unsupported',
   'host-program-missing': 'No host program',
-  'host-prerequisite-missing': 'Host lacks tools',
+  'host-prerequisite-missing': 'Prerequisite missing',
   'state-network-filesystem': 'State on network disk',
-  'state-unknown-filesystem': 'State disk not local',
+  'state-unknown-filesystem': 'State disk unknown',
   'state-refused': 'State refused',
   'config-refused': 'Config unreadable',
   'session-holder-missing': 'Agent runner missing',
@@ -30,10 +29,10 @@ const CAUSE_LABEL: Readonly<Record<RefusalCause, string>> = {
   'job-tool-too-old': 'Job tool too old',
 };
 
-const CAUSE_WORD: Readonly<Record<RefusalCause, string>> = {
+const CAUSE_HINT: Readonly<Record<RefusalCause, string>> = {
   'method-not-available': 'The app does not allow that call.',
   'invalid-request': 'The request is not valid.',
-  'unsupported-platform': 'No host program for this platform.',
+  'unsupported-platform': 'There is no host program for this platform.',
   'host-program-missing': 'This build has no host program for this platform.',
   'host-prerequisite-missing': 'The host lacks something the app needs to install its program.',
   'state-network-filesystem':
@@ -50,6 +49,8 @@ const CAUSE_WORD: Readonly<Record<RefusalCause, string>> = {
   'job-tool-too-old': 'The host’s job tool is older than its tasks need.',
 };
 
-export const causeLabel = (cause: RefusalCause): string => CAUSE_LABEL[cause];
-
+/** The cause as a label: a few words, for a chip or a list. */
 export const causeWord = (cause: RefusalCause): string => CAUSE_WORD[cause];
+
+/** The longer account behind a cause's label, for a hover. */
+export const causeHint = (cause: RefusalCause): string => CAUSE_HINT[cause];

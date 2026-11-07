@@ -142,6 +142,12 @@ export function Page(props: {
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
   /**
+   * The body does not scroll: it is the room between the header and the footer, and one child of it
+   * (a `Conversation` with size `fill`, a log) takes what the others leave and scrolls by itself, so the
+   * page has one scroll, not two. The page still scrolls when the window is too short for the body.
+   */
+  readonly fill?: boolean;
+  /**
    * Whether what the page shows has settled, as `data-state` on the page. Required: a page that
    * reads nothing says `ready`, so no page is silent about it.
    */
@@ -202,7 +208,7 @@ export function Page(props: {
             {header}
           </div>
         )}
-        <div className="vs-page-scroll">
+        <div className="vs-page-scroll" data-fill={props.fill || undefined}>
           <div className="vs-page-body">{props.children}</div>
         </div>
         {props.footer === undefined ? null : <div className="vs-page-footer">{props.footer}</div>}

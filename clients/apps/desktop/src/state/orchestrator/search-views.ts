@@ -10,13 +10,6 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {ms} from './time.js';
 
-/** The official measurement of the current head, or its typed absence. */
-export function resultSoFar(
-  search: SearchState,
-): NonNullable<SearchState['head']>['state'] | undefined {
-  return search.head?.state;
-}
-
 const verdictWords = {
   [VerdictKind.UNSPECIFIED]: 'Not judged',
   [VerdictKind.BETTER]: 'Better',

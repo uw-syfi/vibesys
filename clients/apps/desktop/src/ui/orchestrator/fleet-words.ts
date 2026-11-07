@@ -4,7 +4,7 @@
  * a list that spans days never leaves a reader to guess which clock it is on.
  */
 import type {FleetHostRef, FleetObjective, Freshness} from '../../state/index.js';
-import {causeLabel} from '../refusal-words.js';
+import {causeWord} from '../refusal-words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -88,7 +88,7 @@ export function hostPhrase(
 ): string {
   return host.refusal === null
     ? freshnessPhrase(host.freshness, host.staleForMs)
-    : causeLabel(host.refusal);
+    : causeWord(host.refusal);
 }
 
 /**
@@ -102,7 +102,7 @@ export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 're
   return first !== null &&
     first !== undefined &&
     unread.every(h => h.freshness === 'unavailable' && h.refusal !== null)
-    ? causeLabel(first)
+    ? causeWord(first)
     : 'Not read yet';
 }
 

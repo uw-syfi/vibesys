@@ -428,6 +428,11 @@
   font-weight: var(--text-caption-weight);
   white-space: nowrap;
 }
+/* Chips of one column, alike: each is at least as wide as the longest of the set, whatever its label. */
+.vs-chip[data-even] {
+  min-width: var(--chip-even);
+  justify-content: center;
+}
 /*
  * The hint of a chip, or of a chart's figure (its accessible description), is drawn under it on hover
  * and on keyboard focus.

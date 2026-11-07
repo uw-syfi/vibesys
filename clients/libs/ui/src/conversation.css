@@ -5,13 +5,17 @@
   min-width: 0;
 }
 .vs-conversation[data-size="fill"] {
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  /* Never squeezed out by the rows around it: a short window scrolls its page instead. */
+  min-height: var(--log-sm);
 }
 .vs-conversation-pane {
   box-sizing: border-box;
   height: 75dvh;
   margin: 0 auto;
-  padding: 0 var(--space-4) var(--space-6);
+  padding: 0 0 var(--space-6);
   list-style: none;
   overflow-x: hidden;
   overflow-y: auto;
@@ -19,7 +23,12 @@
   max-width: var(--content-narrow);
 }
 .vs-conversation[data-size="fill"] > .vs-conversation-pane {
-  height: 100%;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  /* As wide as what holds it: its edges are the cards' around it. */
+  max-width: none;
+  width: 100%;
 }
 .vs-conversation-pane:focus-visible {
   outline: var(--focus-ring) solid var(--accent);

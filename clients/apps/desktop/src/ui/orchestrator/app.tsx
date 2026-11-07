@@ -1,5 +1,5 @@
 import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
-import {type Crumb, Page, Text} from '@vibesys/ui';
+import {Chip, type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
 import {
@@ -23,7 +23,7 @@ import {
 import {AgentPage} from '../agents/agent-page.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
 import {CostScreen} from '../cost/index.js';
-import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
+import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
 import {COST_WORDS} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {HistoryStatusWord} from './history-status.js';
@@ -120,7 +120,6 @@ function OpenAgent(props: {
   readonly nowMs: number;
   readonly commands: AppCommands;
   readonly trail: readonly Crumb[];
-  readonly notice: JSX.Element | null;
   /** Where the read of the run's history stands, beside the title. */
   readonly reading: JSX.Element | null;
   readonly go: (action: NavigationAction) => void;
@@ -133,7 +132,6 @@ function OpenAgent(props: {
       agent={agent}
       host={host.label}
       trail={props.trail}
-      notice={props.notice}
       reading={props.reading}
       history={{
         ...host.history,
@@ -233,7 +231,6 @@ function AgentsDestination(props: {
   readonly agent: Agent | undefined;
   /** The trail down to the run. */
   readonly trail: readonly Crumb[];
-  readonly notice: JSX.Element | null;
   /** Where the read of the run's history stands, beside the title. */
   readonly reading: JSX.Element | null;
   readonly commands: AppCommands;
@@ -255,7 +252,6 @@ function AgentsDestination(props: {
       host={host.label}
       nowMs={props.nowMs}
       trail={trail}
-      notice={props.notice}
       reading={props.reading}
       open={agentId => go({type: 'pick-agent', agentId})}
     />
@@ -267,7 +263,6 @@ function AgentsDestination(props: {
       nowMs={props.nowMs}
       commands={props.commands}
       trail={trail}
-      notice={props.notice}
       reading={props.reading}
       go={go}
     />
@@ -295,20 +290,26 @@ function RunDestination(props: {
   const goRuns = (): void => go({type: 'close-run'});
   if (run === undefined) return <MissingRun goRuns={goRuns} />;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
-  const notice = (
-    <ConnectionBanner
-      notes={[
-        runsNote(host, props.retryHost, nowMs),
-        ...(agent === undefined
-          ? []
-          : [
-              agentNote(host, agent, agentNames(state, runId), {nowMs, retryHost: props.retryHost}),
-            ]),
-      ]}
-    />
-  );
   const reading = (
-    <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+    <>
+      <ConnectionStatus
+        notes={[
+          runsNote(host, props.retryHost, nowMs),
+          ...(agent === undefined
+            ? []
+            : [
+                agentNote(host, agent, agentNames(state, runId), {
+                  nowMs,
+                  retryHost: props.retryHost,
+                }),
+              ]),
+        ]}
+      />
+      <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+      {state.summaries[runId]?.reportUnavailable === true ? (
+        <Chip label="Report unavailable" tone="warn" dot />
+      ) : null}
+    </>
   );
   const toRun: readonly Crumb[] = [
     {id: 'runs', label: TITLE, press: goRuns},
@@ -324,7 +325,6 @@ function RunDestination(props: {
         runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
         words={COST_WORDS}
         trail={[...toRun, {id: 'cost', label: 'Cost'}]}
-        notice={notice}
         reading={reading}
         retry={() => props.retryCost(host.key, runId)}
       />
@@ -339,7 +339,6 @@ function RunDestination(props: {
         nowMs={nowMs}
         agent={agent}
         trail={toRun}
-        notice={notice}
         reading={reading}
         commands={commands}
         go={go}
@@ -352,7 +351,6 @@ function RunDestination(props: {
       host={host}
       runId={runId}
       nowMs={nowMs}
-      notice={notice}
       reading={reading}
       commands={commands}
       retryCost={props.retryCost}
@@ -383,7 +381,6 @@ function ReportDestination(props: {
   /** The check-in span the report's ideas open narrowed to; null for the run's own. */
   readonly ideasWindow: IdeaWindow | null;
   readonly nowMs: number;
-  readonly notice: JSX.Element | null;
   /** Where the read of the run's history stands, beside the title. */
   readonly reading: JSX.Element | null;
   readonly commands: AppCommands;
@@ -415,7 +412,7 @@ function ReportDestination(props: {
       openAgents={() => go({type: 'show', view: 'agents'})}
       openCost={() => go({type: 'show', view: 'cost'})}
       names={agentNames(state, runId)}
-      notice={props.notice}
+      notice={null}
       reading={props.reading}
       ideasWindow={props.ideasWindow}
     />

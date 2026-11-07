@@ -6,6 +6,7 @@ import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {
   type GetRunHistoryResponse,
+  GetRunHistoryResponseSchema,
   RunSummarySchema,
   RunsSnapshotSchema,
 } from '@vibesys/orchestrator-proto';
@@ -170,5 +171,32 @@ describe('the summary of a run', () => {
     );
     expect(Object.keys(older.summaries)).toEqual(['b']);
     expect(older.cut).toEqual({truncated: false, runsLeftOut: 0});
+  });
+});
+
+describe('what the host left out of a run history', () => {
+  it('is the counts the first page gave, whatever the pages after it say', () => {
+    fc.assert(
+      fc.property(
+        fc.nat(500),
+        fc.nat(500),
+        fc.nat(500),
+        fc.nat(500),
+        (turns, checkIns, agents, later) => {
+          const first = create(GetRunHistoryResponseSchema, {
+            turnsLeftOutCount: turns,
+            checkInsLeftOutCount: checkIns,
+            agentsLeftOutCount: agents,
+          });
+          const rest = create(GetRunHistoryResponseSchema, {turnsLeftOutCount: later});
+          const state = foldPages(emptyState, 'r', [first, rest]);
+          expect(state.histories['r']).toMatchObject({
+            turnsLeftOut: turns,
+            checkInsLeftOut: checkIns,
+            agentsLeftOut: agents,
+          });
+        },
+      ),
+    );
   });
 });

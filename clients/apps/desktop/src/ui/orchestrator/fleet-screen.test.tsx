@@ -5,6 +5,7 @@ import {
   AgentRole,
   AgentSchema,
   AgentStatus,
+  BoundUnitCheck,
   Direction,
   Harness,
   MessageSchema,
@@ -36,7 +37,7 @@ import {
   SERVING,
   serveSummaries,
 } from '../../testing/orchestrator/index.js';
-import {causeLabel} from '../refusal-words.js';
+import {causeWord} from '../refusal-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {freshnessPhrase} from './fleet-words.js';
 
@@ -144,6 +145,9 @@ function stateOf(
                     ],
                     headValue: run.result.value,
                     bestValue: run.result.value,
+                    // The unit the measurements are counted in, as the host serves it.
+                    measuredUnit: run.result.unit,
+                    unitCheck: BoundUnitCheck.MATCH,
                     ...(run.result.percent === undefined
                       ? {}
                       : {
@@ -326,7 +330,7 @@ describe('the fleet screen', () => {
 
   it('says why a host that refuses for good cannot be read, in a short label of its own, with no banner', () => {
     for (const cause of REFUSAL_CAUSES) {
-      const label = causeLabel(cause);
+      const label = causeWord(cause);
       // Its only host, never read: the label is the host's chip and what the empty list says.
       const only = open([
         {
@@ -794,7 +798,16 @@ describe('the candidates cell of the fleet screen', () => {
     expect(some.screen.text()).toContain('7 older runs not shown');
     some.screen.unmount();
     const none = open([cut(0)]);
-    expect(none.screen.text()).not.toContain('not shown');
+    // Its room is kept, empty and hidden, so the chip never moves what is under it.
+    expect(none.screen.container.querySelector('.vs-reserve [class~="vs-chip"]')).not.toBeNull();
+    expect(none.screen.container.querySelector('.vs-reserve')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    );
+    expect(
+      [...none.screen.container.querySelectorAll('.vs-chip')].filter(
+        chip => chip.closest('.vs-reserve') === null && chip.textContent?.includes('not shown'),
+      ),
+    ).toHaveLength(0);
     none.screen.unmount();
     // Two hosts: the figure is of the hosts shown, and the host filter narrows it.
     const both = open([
@@ -803,5 +816,63 @@ describe('the candidates cell of the fleet screen', () => {
     ]);
     expect(both.screen.text()).toContain('12 older runs not shown');
     both.screen.unmount();
+  });
+
+  it('has the same cells in its filter row whether or not a host has answered late, so the rows below never shift', () => {
+    const bar = (hosts: readonly FleetHostInput[]) => {
+      const opened = open(hosts);
+      const row = opened.screen.container.querySelector('[aria-label="Show"]')?.parentElement;
+      const cells = [...(row?.children ?? [])].map(each => each.tagName);
+      opened.screen.unmount();
+      return cells;
+    };
+    const cut = (runsLeftOut: number): FleetHostInput => ({
+      ...hostA,
+      data: {...hostA.data, cut: {truncated: runsLeftOut > 0, runsLeftOut}},
+    });
+    const quiet = bar([cut(0)]);
+    expect(quiet.length).toBeGreaterThanOrEqual(3);
+    // A count of older runs, and a stale host with its Retry, arrive: no cell is added or removed.
+    expect(bar([cut(7)])).toHaveLength(quiet.length);
+    // The second host answers late, stale or with runs left out: the same cells as when it is live.
+    const both = bar([hostA, {...hostB, freshness: 'live', staleForMs: null}]);
+    expect(
+      bar([hostA, {...hostB, freshness: 'empty', staleForMs: null, data: emptyState}]),
+    ).toHaveLength(both.length);
+    expect(bar([hostA, hostB])).toHaveLength(both.length);
+    expect(
+      bar([
+        hostA,
+        {
+          ...hostB,
+          freshness: 'live',
+          staleForMs: null,
+          data: {...hostB.data, cut: {truncated: true, runsLeftOut: 4}},
+        },
+      ]),
+    ).toHaveLength(both.length);
+  });
+
+  it('says in the status cell, as a chip, that the host could not serve the report, and not that there is none', () => {
+    const held = hostA.data;
+    const summary = held.summaries['a1'];
+    if (summary === undefined) throw new Error('the fixture serves a summary of a1');
+    const unavailable = (flag: boolean): FleetHostInput => ({
+      ...hostA,
+      data: {
+        ...held,
+        summaries: {...held.summaries, a1: {...summary, reportUnavailable: flag}},
+      },
+    });
+    const on = open([unavailable(true)]);
+    const status = cell(rowOf(on.screen, 'queue-rs'), 'status');
+    expect(status.querySelector('.vs-chip[data-tone="warn"]')?.textContent).toBe(
+      'Report unavailable',
+    );
+    expect(status.textContent).not.toContain('No report');
+    on.screen.unmount();
+    const off = open([unavailable(false)]);
+    expect(cell(rowOf(off.screen, 'queue-rs'), 'status').textContent).not.toContain('unavailable');
+    off.screen.unmount();
   });
 });
