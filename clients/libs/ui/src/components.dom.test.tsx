@@ -329,6 +329,29 @@ describe('RailFrame', () => {
   });
 });
 
+describe('RailFrame mark', () => {
+  test('stands first in its own box above the destinations, so it is never read as one of them', async () => {
+    const container = await mount(
+      <RailFrame
+        label="App"
+        state="ready"
+        mark={<RailItem icon="mark" label="Home" hideLabel press={() => undefined} />}
+        top={<RailItem icon="list" label="Runs" active press={() => undefined} />}
+      >
+        <main>Page</main>
+      </RailFrame>,
+    );
+    const group = one(container, '.vs-rail-group');
+    expect([...group.children].map(child => child.className)).toEqual([
+      'vs-rail-mark',
+      'vs-rail-item',
+    ]);
+    expect(one(group, '.vs-rail-mark button').getAttribute('aria-label')).toBe('Home');
+    expect(one(group, '.vs-rail-mark button').getAttribute('aria-current')).toBeNull();
+    expect(group.children[1]?.getAttribute('aria-current')).toBe('page');
+  });
+});
+
 describe('the state a screen says', () => {
   const STATES = ['loading', 'ready'] as const;
 

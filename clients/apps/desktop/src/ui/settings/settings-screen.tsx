@@ -3,6 +3,7 @@ import {
   Chip,
   Grid,
   Page,
+  Reserve,
   Row,
   SectionLayout,
   SegmentedControl,
@@ -13,13 +14,20 @@ import {
   Text,
   ThemeSwatch,
 } from '@vibesys/ui';
-import {APPEARANCE_MODES, type Appearance, type ThemeMode, themesOf} from '@vibesys/ui/tokens';
-import type {JSX} from 'react';
+import {
+  APPEARANCE_MODES,
+  type Appearance,
+  THEMES,
+  type ThemeMode,
+  themesOf,
+} from '@vibesys/ui/tokens';
+import type {JSX, ReactNode} from 'react';
 import {
   type AppearanceState,
   type ResourceRow,
   SETTINGS_TABS,
   type SettingsTab,
+  themeShown,
   withMode,
   withTheme,
 } from '../../state/index.js';
@@ -31,40 +39,72 @@ const THEME_MODES: readonly {readonly mode: ThemeMode; readonly section: string}
   {mode: 'dark', section: 'Dark theme'},
 ];
 
+/**
+ * A group of the appearance: its label, with a status chip beside it, over its controls. The chip's
+ * room is kept while it is not shown, so the controls below never move when it comes and goes.
+ */
+function Group(props: {
+  readonly label: string;
+  readonly chip: ReactNode;
+  readonly shown: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <Stack gap="space-3">
+      <Row gap="space-3">
+        <Text variant="section">{props.label}</Text>
+        {props.shown ? props.chip : <Reserve>{props.chip}</Reserve>}
+      </Row>
+      {props.children}
+    </Stack>
+  );
+}
+
 function AppearanceTab(props: {
   readonly state: AppearanceState;
   readonly choose: (appearance: Appearance) => void;
 }): JSX.Element {
   const {appearance, unsaved} = props.state;
+  const inUse = THEMES[themeShown(props.state)].mode;
   return (
-    <Stack gap="space-5">
-      <Card section="Mode">
-        <Row gap="space-4" wrap>
-          <SegmentedControl
-            label="Mode"
-            options={MODES}
-            value={appearance.mode}
-            change={mode => props.choose(withMode(appearance, mode))}
-          />
-          {unsaved ? <Chip label="Not saved" tone="warn" hint="The last save failed." /> : null}
-        </Row>
-      </Card>
-      {THEME_MODES.map(({mode, section}) => (
-        <Card key={mode} section={section}>
-          <Grid min="swatch-row">
-            {themesOf(mode).map(theme => (
-              <ThemeSwatch
-                key={theme}
-                theme={theme}
-                label={themeWord(theme)}
-                selected={appearance[mode] === theme}
-                press={() => props.choose(withTheme(appearance, theme))}
-              />
-            ))}
-          </Grid>
-        </Card>
-      ))}
-    </Stack>
+    <Card>
+      <Stack gap="space-6">
+        <Group
+          label="Mode"
+          shown={unsaved}
+          chip={<Chip label="Not saved" tone="warn" hint="The last save failed." />}
+        >
+          <Row gap="space-4" wrap>
+            <SegmentedControl
+              label="Mode"
+              options={MODES}
+              value={appearance.mode}
+              change={mode => props.choose(withMode(appearance, mode))}
+            />
+          </Row>
+        </Group>
+        {THEME_MODES.map(({mode, section}) => (
+          <Group
+            key={mode}
+            label={section}
+            shown={mode === inUse}
+            chip={<Chip label="In use" tone="neutral" />}
+          >
+            <Grid min="swatch-row">
+              {themesOf(mode).map(theme => (
+                <ThemeSwatch
+                  key={theme}
+                  theme={theme}
+                  label={themeWord(theme)}
+                  selected={appearance[mode] === theme}
+                  press={() => props.choose(withTheme(appearance, theme))}
+                />
+              ))}
+            </Grid>
+          </Group>
+        ))}
+      </Stack>
+    </Card>
   );
 }
 

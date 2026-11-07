@@ -186,6 +186,32 @@ describe('the settings screen', () => {
     screen.unmount();
   });
 
+  it('says which theme group is in use: the one of the mode the page is in', () => {
+    const inUse = (state: ReturnType<typeof initialAppearance>) => {
+      const screen = mount(
+        <SettingsScreen
+          tab="appearance"
+          pick={() => undefined}
+          appearance={state}
+          choose={() => undefined}
+          resources={resources}
+        />,
+      );
+      const groups = [...screen.container.querySelectorAll('.vs-chip')]
+        .filter(chip => chip.textContent === 'In use' && chip.closest('.vs-reserve') === null)
+        .map(chip => chip.parentElement?.textContent);
+      screen.unmount();
+      return groups;
+    };
+    expect(inUse(initialAppearance('light'))).toEqual(['Light themeIn use']);
+    expect(inUse(initialAppearance('dark'))).toEqual(['Dark themeIn use']);
+    const forcedDark = {
+      ...initialAppearance('light'),
+      appearance: {...defaultAppearance, mode: 'dark' as const},
+    };
+    expect(inUse(forcedDark)).toEqual(['Dark themeIn use']);
+  });
+
   it('offers every mode and every theme of the design system, the saved ones selected', () => {
     const screen = settings({tab: 'appearance'});
     for (const mode of APPEARANCE_MODES) {

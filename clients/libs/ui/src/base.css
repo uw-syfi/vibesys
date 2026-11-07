@@ -281,6 +281,9 @@ body > div:first-child {
   align-items: start;
   gap: var(--space-5);
 }
+.vs-section-nav .vs-sidebar-item[data-active] {
+  border-color: var(--accent);
+}
 .vs-section-nav {
   position: sticky;
   top: 0;
