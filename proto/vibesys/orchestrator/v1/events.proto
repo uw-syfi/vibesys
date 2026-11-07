@@ -4,6 +4,7 @@ package vibesys.orchestrator.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
 
@@ -27,6 +28,9 @@ message RunChange {
     Item item = 13;
     Message message = 14;
     Receipt receipt = 15;
+    // A check-in made, or changed as its facts were worked out or its report was posted. The whole
+    // check-in, so a client replaces by id.
+    CheckIn check_in = 16;
   }
 }
 
@@ -144,6 +148,16 @@ message PostReport {
   Report report = 1 [(buf.validate.field).required = true];
 }
 
+// RequestCatchUp is the press of Catch me up. The host records a check-in for the viewer who pressed
+// it, covering everything since that viewer's last check-in in the run, works its facts out, and on a
+// run that can be asked also asks the lead for a report covering the window. The viewer is not in the
+// body: it is the call's metadata (see Viewer), and a call without it is refused. The receipt answers
+// at once with the check-in's id, and a press while the viewer's last check-in is still being worked
+// out answers with that one. Allowed on a run that is over.
+message RequestCatchUp {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
 // Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
 // from the connection or the agent's session, so that a caller cannot claim to be someone else.
 message Command {
@@ -158,6 +172,7 @@ message Command {
     SendMessage send_message = 14;
     PostHandoff post_handoff = 15;
     PostReport post_report = 16;
+    RequestCatchUp request_catch_up = 17;
   }
 }
 
@@ -188,6 +203,10 @@ enum Refusal {
   REFUSAL_TIME_LIMIT_REACHED = 12;
   // The run reached its cost limit: it starts no new agent.
   REFUSAL_COST_LIMIT_REACHED = 13;
+  // A catch-up was asked for with no viewer: the call carried no vibesys-viewer-id and
+  // vibesys-viewer-label metadata. A client that goes through the daemon is refused with an error
+  // naming the field before this is ever decided; this is what the decision itself says.
+  REFUSAL_NO_VIEWER = 14;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.
@@ -207,4 +226,7 @@ message Receipt {
   uint64 sequence = 8;
   // Set with REFUSAL_AGENT_NOT_ALLOWED: what the run may use, so the caller can ask again.
   repeated AllowedAgent allowed_agents = 9;
+  // The check-in a RequestCatchUp made, or for a press while the viewer's last check-in is being worked
+  // out, that one. The message the lead was asked with, if it was, is message_id.
+  string check_in_id = 10;
 }

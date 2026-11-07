@@ -83,6 +83,9 @@ func (s State) Checkpoint() []Event {
 		r := s.receipts[id]
 		out = append(out, Event{Run: r.Run, Command: r.Command, At: checkpointAt, Body: r})
 	}
+	for _, id := range slices.Sorted(maps.Keys(s.checkIns)) {
+		emit(s.checkIns[id].Run, s.checkIns[id])
+	}
 	for _, told := range slices.SortedFunc(maps.Keys(s.jobs), func(a, b toldJob) int {
 		return cmp.Or(cmp.Compare(a.run, b.run), cmp.Compare(a.job, b.job))
 	}) {
@@ -106,7 +109,7 @@ func (s State) Equal(o State) bool {
 // one written and emptied are the same, and a running turn is its own copy.
 func (s State) canonical() State {
 	out := State{
-		runs: nilIfEmpty(s.runs), messages: nilIfEmpty(s.messages), receipts: nilIfEmpty(s.receipts),
+		runs: nilIfEmpty(s.runs), messages: nilIfEmpty(s.messages), receipts: nilIfEmpty(s.receipts), checkIns: nilIfEmpty(s.checkIns),
 		jobs: nilIfEmpty(s.jobs), agents: nilIfEmpty(maps.Clone(s.agents)),
 	}
 	for id, a := range out.agents {

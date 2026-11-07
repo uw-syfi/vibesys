@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
+import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/cost.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
@@ -79,6 +80,11 @@ message RunsSnapshot {
   // Older run bundles or history were omitted to fit the snapshot byte budget.
   // Search views omitted here follow as individual search responses.
   bool truncated = 7;
+  // The check-ins of those runs, every viewer's, oldest first: the newest 64 of each viewer in each
+  // run (truncated says when older ones were left out). Each is the whole check-in with its frozen
+  // facts, so a client shows a past catch-up without asking for it again; a later change to one comes
+  // as a RunChange.
+  repeated CheckIn check_ins = 8;
 }
 
 message WatchRunsResponse {

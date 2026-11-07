@@ -69,7 +69,7 @@ func (f *costFeed) snapshot(state core.State, last uint64) (*pb.WatchRunCostResp
 	for _, a := range state.Agents(f.run) {
 		f.ledger.Agent(a)
 	}
-	if err := f.s.readTurns(state, f.run, f.ledger); err != nil {
+	if err := f.s.e.readTurns(state, f.run, f.ledger); err != nil {
 		return nil, err
 	}
 	f.over = run.Status.Final()
@@ -81,11 +81,11 @@ func (f *costFeed) snapshot(state core.State, last uint64) (*pb.WatchRunCostResp
 // the two share are added twice, which a ledger counts once. A window that holds nothing past the
 // one before would be asked for forever, which more concurrent turns than a window holds would cause
 // and no run has, so it is an error and not a loop.
-func (s *Service) readTurns(state core.State, run core.RunID, into *cost.Ledger) error {
+func (e *Engine) readTurns(state core.State, run core.RunID, into *cost.Ledger) error {
 	var from time.Time
 	var reached *core.Turn
 	for {
-		window, err := s.e.Store.Turns(run, from, endOfTime, store.MaxWindowTurns)
+		window, err := e.Store.Turns(run, from, endOfTime, store.MaxWindowTurns)
 		if err != nil {
 			return fmt.Errorf("read the turns of %s: %w", run, err)
 		}

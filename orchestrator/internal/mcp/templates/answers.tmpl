@@ -127,6 +127,8 @@ another run is working in this repository: only an operator starts runs, so tell
 the run reached its time limit and starts no new agent: finish with what you have, promote a judged candidate that beats the base if there is one, and post your final report with post_report
 {{- else if eq .Refusal "cost_limit_reached" -}}
 the run reached its cost limit and starts no new agent: finish with what you have, promote a judged candidate that beats the base if there is one, and post your final report with post_report
+{{- else if eq .Refusal "no_viewer" -}}
+a catch-up is for the operator's client, which names who is looking: this is not a tool you have, so do not call it
 {{- else if eq .Refusal "handoff_not_yours" -}}
 your handoff has no body for your role, or has another role's: give it again with the `{{.Role}}` field and no other body
 {{- else -}}

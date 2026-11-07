@@ -202,6 +202,7 @@ export class FakeDaemon {
       sendMessage: true,
       postHandoff: true,
       postReport: true,
+      requestCatchUp: true,
     })
       ? this.#sendMessage(command.id, command.body.value.agentId, command.body.value.text, at)
       : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);

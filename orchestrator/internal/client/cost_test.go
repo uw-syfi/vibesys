@@ -37,6 +37,10 @@ func TestAClientReadsARunsCostOverTheService(t *testing.T) {
 	}
 	defer op.Close()
 
+	// The watch is open before the run starts: a watch opened after would miss the lead's first turn if the
+	// host finished it first, and the test would wait for an event that was already past.
+	feed := watchRuns(ctx, t, op, 0)
+	<-feed.snap
 	receipt, err := op.Dispatch(ctx, &pb.Command{Id: "start-1", Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
 		Repository: "/repo", Task: "task", FanoutLimit: 1, Brief: "begin",
 		Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}, MaxCostUsd: &limit,
@@ -46,8 +50,6 @@ func TestAClientReadsARunsCostOverTheService(t *testing.T) {
 	}
 	run := receipt.GetRunId()
 	state, _ := rig.Daemon.State().Run(core.RunID(run))
-	feed := watchRuns(ctx, t, op, 0)
-	<-feed.snap
 	feed.until("the lead's first turn", turnDone(string(state.Lead), 1))
 
 	stream, err := op.WatchRunCost(ctx, run)

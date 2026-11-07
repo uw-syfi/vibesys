@@ -3706,6 +3706,70 @@ func (x *RunLimitReached) GetGraceSeconds() uint32 {
 	return 0
 }
 
+// CatchUpRequest asks a lead for a report covering a window: a viewer pressed Catch me up, and the
+// window is what happened since that viewer last looked. The lead answers with post_report, kind
+// progress, posted in the turn this message starts, which is how the report is tied to the check-in.
+// It carries the data a template words; the lead decides what the report says.
+type CatchUpRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CheckInId     string                 `protobuf:"bytes,1,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
+	Since         *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=since,proto3" json:"since,omitempty"`
+	Until         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=until,proto3" json:"until,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CatchUpRequest) Reset() {
+	*x = CatchUpRequest{}
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CatchUpRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CatchUpRequest) ProtoMessage() {}
+
+func (x *CatchUpRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CatchUpRequest.ProtoReflect.Descriptor instead.
+func (*CatchUpRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *CatchUpRequest) GetCheckInId() string {
+	if x != nil {
+		return x.CheckInId
+	}
+	return ""
+}
+
+func (x *CatchUpRequest) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *CatchUpRequest) GetUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Until
+	}
+	return nil
+}
+
 type Message struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -3733,6 +3797,7 @@ type Message struct {
 	//	*Message_LeadIdleReminder
 	//	*Message_RunLimitReached
 	//	*Message_ReportDue
+	//	*Message_CatchUpRequest
 	Body          isMessage_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3740,7 +3805,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[31]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3752,7 +3817,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[31]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3765,7 +3830,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{31}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Message) GetId() string {
@@ -3930,6 +3995,15 @@ func (x *Message) GetReportDue() *ReportDue {
 	return nil
 }
 
+func (x *Message) GetCatchUpRequest() *CatchUpRequest {
+	if x != nil {
+		if x, ok := x.Body.(*Message_CatchUpRequest); ok {
+			return x.CatchUpRequest
+		}
+	}
+	return nil
+}
+
 type isMessage_Body interface {
 	isMessage_Body()
 }
@@ -3981,6 +4055,10 @@ type Message_ReportDue struct {
 	ReportDue *ReportDue `protobuf:"bytes,20,opt,name=report_due,json=reportDue,proto3,oneof"`
 }
 
+type Message_CatchUpRequest struct {
+	CatchUpRequest *CatchUpRequest `protobuf:"bytes,21,opt,name=catch_up_request,json=catchUpRequest,proto3,oneof"`
+}
+
 func (*Message_Text) isMessage_Body() {}
 
 func (*Message_Handoff) isMessage_Body() {}
@@ -4003,6 +4081,8 @@ func (*Message_RunLimitReached) isMessage_Body() {}
 
 func (*Message_ReportDue) isMessage_Body() {}
 
+func (*Message_CatchUpRequest) isMessage_Body() {}
+
 type LeadBrief struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	Task        string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
@@ -4015,7 +4095,7 @@ type LeadBrief struct {
 
 func (x *LeadBrief) Reset() {
 	*x = LeadBrief{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[32]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4027,7 +4107,7 @@ func (x *LeadBrief) String() string {
 func (*LeadBrief) ProtoMessage() {}
 
 func (x *LeadBrief) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[32]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4040,7 +4120,7 @@ func (x *LeadBrief) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeadBrief.ProtoReflect.Descriptor instead.
 func (*LeadBrief) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{32}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *LeadBrief) GetTask() string {
@@ -4079,7 +4159,7 @@ type BuildVersions struct {
 
 func (x *BuildVersions) Reset() {
 	*x = BuildVersions{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[33]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4091,7 +4171,7 @@ func (x *BuildVersions) String() string {
 func (*BuildVersions) ProtoMessage() {}
 
 func (x *BuildVersions) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[33]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4104,7 +4184,7 @@ func (x *BuildVersions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildVersions.ProtoReflect.Descriptor instead.
 func (*BuildVersions) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{33}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *BuildVersions) GetBinaryVersion() string {
@@ -4373,7 +4453,11 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\rgrace_seconds\x18\x05 \x01(\rR\fgraceSecondsB\f\n" +
 	"\n" +
 	"_spent_usdB\x0f\n" +
-	"\r_max_cost_usd\"\xd9\b\n" +
+	"\r_max_cost_usd\"\xad\x01\n" +
+	"\x0eCatchUpRequest\x12'\n" +
+	"\vcheck_in_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcheckInId\x128\n" +
+	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x128\n" +
+	"\x05until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05until\"\xae\t\n" +
 	"\aMessage\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\"\n" +
@@ -4397,7 +4481,8 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x12lead_idle_reminder\x18\x12 \x01(\v2).vibesys.orchestrator.v1.LeadIdleReminderH\x00R\x10leadIdleReminder\x12V\n" +
 	"\x11run_limit_reached\x18\x13 \x01(\v2(.vibesys.orchestrator.v1.RunLimitReachedH\x00R\x0frunLimitReached\x12C\n" +
 	"\n" +
-	"report_due\x18\x14 \x01(\v2\".vibesys.orchestrator.v1.ReportDueH\x00R\treportDueB\r\n" +
+	"report_due\x18\x14 \x01(\v2\".vibesys.orchestrator.v1.ReportDueH\x00R\treportDue\x12S\n" +
+	"\x10catch_up_request\x18\x15 \x01(\v2'.vibesys.orchestrator.v1.CatchUpRequestH\x00R\x0ecatchUpRequestB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"g\n" +
 	"\tLeadBrief\x12\x1b\n" +
 	"\x04task\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12!\n" +
@@ -4534,7 +4619,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 17)
-var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(RunStatus)(0),                // 0: vibesys.orchestrator.v1.RunStatus
 	(RunStopReason)(0),            // 1: vibesys.orchestrator.v1.RunStopReason
@@ -4584,44 +4669,45 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*LeadIdleReminder)(nil),      // 45: vibesys.orchestrator.v1.LeadIdleReminder
 	(*ReportDue)(nil),             // 46: vibesys.orchestrator.v1.ReportDue
 	(*RunLimitReached)(nil),       // 47: vibesys.orchestrator.v1.RunLimitReached
-	(*Message)(nil),               // 48: vibesys.orchestrator.v1.Message
-	(*LeadBrief)(nil),             // 49: vibesys.orchestrator.v1.LeadBrief
-	(*BuildVersions)(nil),         // 50: vibesys.orchestrator.v1.BuildVersions
-	(*timestamppb.Timestamp)(nil), // 51: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 52: google.protobuf.Duration
+	(*CatchUpRequest)(nil),        // 48: vibesys.orchestrator.v1.CatchUpRequest
+	(*Message)(nil),               // 49: vibesys.orchestrator.v1.Message
+	(*LeadBrief)(nil),             // 50: vibesys.orchestrator.v1.LeadBrief
+	(*BuildVersions)(nil),         // 51: vibesys.orchestrator.v1.BuildVersions
+	(*timestamppb.Timestamp)(nil), // 52: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 53: google.protobuf.Duration
 }
 var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.Run.status:type_name -> vibesys.orchestrator.v1.RunStatus
-	51, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
-	51, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
+	52, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
+	52, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: vibesys.orchestrator.v1.Run.stop_reason:type_name -> vibesys.orchestrator.v1.RunStopReason
-	51, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
-	51, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
+	52, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
+	52, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
 	22, // 6: vibesys.orchestrator.v1.Run.usage:type_name -> vibesys.orchestrator.v1.Usage
 	19, // 7: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
 	18, // 8: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
 	2,  // 9: vibesys.orchestrator.v1.Run.limit_reached:type_name -> vibesys.orchestrator.v1.RunLimit
-	51, // 10: vibesys.orchestrator.v1.Run.limit_reached_at:type_name -> google.protobuf.Timestamp
-	52, // 11: vibesys.orchestrator.v1.Run.summary_every:type_name -> google.protobuf.Duration
-	51, // 12: vibesys.orchestrator.v1.Run.next_summary_at:type_name -> google.protobuf.Timestamp
+	52, // 10: vibesys.orchestrator.v1.Run.limit_reached_at:type_name -> google.protobuf.Timestamp
+	53, // 11: vibesys.orchestrator.v1.Run.summary_every:type_name -> google.protobuf.Duration
+	52, // 12: vibesys.orchestrator.v1.Run.next_summary_at:type_name -> google.protobuf.Timestamp
 	9,  // 13: vibesys.orchestrator.v1.AllowedAgent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	3,  // 14: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	9,  // 15: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	4,  // 16: vibesys.orchestrator.v1.Agent.status:type_name -> vibesys.orchestrator.v1.AgentStatus
 	21, // 17: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
-	51, // 18: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
-	51, // 19: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
+	52, // 18: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
+	52, // 19: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
 	5,  // 20: vibesys.orchestrator.v1.Agent.stop_stage:type_name -> vibesys.orchestrator.v1.AgentStopStage
 	12, // 21: vibesys.orchestrator.v1.Agent.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
 	22, // 22: vibesys.orchestrator.v1.Agent.usage:type_name -> vibesys.orchestrator.v1.Usage
 	6,  // 23: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
 	7,  // 24: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
 	22, // 25: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
-	51, // 26: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
-	51, // 27: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
+	52, // 26: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
+	52, // 27: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
 	8,  // 28: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
-	51, // 29: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
-	51, // 30: vibesys.orchestrator.v1.Item.started_at:type_name -> google.protobuf.Timestamp
+	52, // 29: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
+	52, // 30: vibesys.orchestrator.v1.Item.started_at:type_name -> google.protobuf.Timestamp
 	25, // 31: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
 	25, // 32: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
 	25, // 33: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
@@ -4644,23 +4730,26 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	14, // 50: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
 	4,  // 51: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
 	2,  // 52: vibesys.orchestrator.v1.RunLimitReached.limit:type_name -> vibesys.orchestrator.v1.RunLimit
-	10, // 53: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	51, // 54: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
-	11, // 55: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
-	33, // 56: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	41, // 57: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
-	42, // 58: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
-	43, // 59: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
-	49, // 60: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
-	44, // 61: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
-	45, // 62: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
-	47, // 63: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
-	46, // 64: vibesys.orchestrator.v1.Message.report_due:type_name -> vibesys.orchestrator.v1.ReportDue
-	65, // [65:65] is the sub-list for method output_type
-	65, // [65:65] is the sub-list for method input_type
-	65, // [65:65] is the sub-list for extension type_name
-	65, // [65:65] is the sub-list for extension extendee
-	0,  // [0:65] is the sub-list for field type_name
+	52, // 53: vibesys.orchestrator.v1.CatchUpRequest.since:type_name -> google.protobuf.Timestamp
+	52, // 54: vibesys.orchestrator.v1.CatchUpRequest.until:type_name -> google.protobuf.Timestamp
+	10, // 55: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	52, // 56: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
+	11, // 57: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
+	33, // 58: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	41, // 59: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
+	42, // 60: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
+	43, // 61: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
+	50, // 62: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
+	44, // 63: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
+	45, // 64: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
+	47, // 65: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
+	46, // 66: vibesys.orchestrator.v1.Message.report_due:type_name -> vibesys.orchestrator.v1.ReportDue
+	48, // 67: vibesys.orchestrator.v1.Message.catch_up_request:type_name -> vibesys.orchestrator.v1.CatchUpRequest
+	68, // [68:68] is the sub-list for method output_type
+	68, // [68:68] is the sub-list for method input_type
+	68, // [68:68] is the sub-list for extension type_name
+	68, // [68:68] is the sub-list for extension extendee
+	0,  // [0:68] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_orchestrator_proto_init() }
@@ -4697,7 +4786,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 		(*WorkerHandoff_NoCandidate)(nil),
 	}
 	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[30].OneofWrappers = []any{}
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[31].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[32].OneofWrappers = []any{
 		(*Message_Text)(nil),
 		(*Message_Handoff)(nil),
 		(*Message_Report)(nil),
@@ -4709,6 +4798,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 		(*Message_LeadIdleReminder)(nil),
 		(*Message_RunLimitReached)(nil),
 		(*Message_ReportDue)(nil),
+		(*Message_CatchUpRequest)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -4716,7 +4806,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc), len(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc)),
 			NumEnums:      17,
-			NumMessages:   34,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
