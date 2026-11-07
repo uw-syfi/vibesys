@@ -33,13 +33,11 @@ import {
   type ObjectiveReport,
   rowObjectives,
 } from '../../state/index.js';
-import {causeWord} from '../refusal-words.js';
+import {HostStatusChip} from '../host-status-chip.js';
+import {hostStatusWord} from '../host-status-words.js';
 import {
   ago,
   dollars,
-  FRESHNESS_WORD,
-  hostPhrase,
-  hostTone,
   percent,
   resultHint,
   resultWords,
@@ -148,25 +146,21 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
       header: 'Host',
       size: 'wide',
       optional: true,
-      hint: row => `${row.host.label}\n${hostPhrase(row.host)}`,
+      hint: row => `${row.host.label}\n${hostStatusWord(row.host.status).label}`,
       cell: row => (
         <CellLines
           main={
             <CellInline nowrap>
               <StatusDot
-                tone={hostTone(row.host)}
-                label={
-                  row.host.refusal === null
-                    ? FRESHNESS_WORD[row.host.freshness].label
-                    : causeWord(row.host.refusal)
-                }
+                tone={hostStatusWord(row.host.status).tone}
+                label={hostStatusWord(row.host.status).label}
               />
               <Text>
                 <MiddleText text={row.host.label} />
               </Text>
             </CellInline>
           }
-          note={row.host.freshness === 'live' ? null : hostPhrase(row.host)}
+          note={row.host.status.kind === 'live' ? null : hostStatusWord(row.host.status).label}
         />
       ),
     },
@@ -292,9 +286,9 @@ function HostFilter(props: {
 }): JSX.Element | null {
   const {hosts} = props;
   const word = (host: FleetHostView): string =>
-    host.freshness === 'live' && host.refusal === null
+    host.status.kind === 'live'
       ? host.label
-      : `${host.label} · ${hostPhrase(host)}`;
+      : `${host.label} · ${hostStatusWord(host.status).label}`;
   if (hosts.length > 1) {
     // One control however many hosts there are: a row of buttons for each host would take a row
     // of its own in a narrow window.
@@ -317,8 +311,8 @@ function HostFilter(props: {
     );
   }
   const [only] = hosts;
-  return only === undefined || (only.freshness === 'live' && only.refusal === null) ? null : (
-    <Chip label={word(only)} tone={hostTone(only)} dot clip />
+  return only === undefined || only.status.kind === 'live' ? null : (
+    <HostStatusChip status={only.status} clip />
   );
 }
 

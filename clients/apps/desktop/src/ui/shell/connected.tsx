@@ -6,10 +6,17 @@
  */
 import {useAtomMount, useAtomValue} from '@effect/atom-react';
 import type {Appearance} from '@vibesys/ui/tokens';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo, useState} from 'react';
 import type {AppearanceStore, NavigationStore} from '../../core/index.js';
-import {type NavigationAction, type ResourceRow, resourceRow} from '../../state/index.js';
+import {
+  type NavigationAction,
+  type ResourceRow,
+  resourceRow,
+  staleForMs,
+} from '../../state/index.js';
+import {nowMs} from '../orchestrator/clock.js';
 import {
   ConnectedApp,
   type ConnectedHost,
@@ -31,17 +38,21 @@ const watchRuns = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
 
 /** Each host as the Resources tab shows it. */
 const resourcesOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly ResourceRow[]> =>
-  Atom.make(get =>
-    hosts.map(({key, label, session}) =>
+  Atom.make(get => {
+    const clock = get(nowMs);
+    return hosts.map(({key, label, session}) =>
       resourceRow({
         key,
         label,
         connection: get(session.connection.state),
         runsFeed: get(session.runs.status),
         hasData: get(session.model).data.sequence > 0n,
+        staleForMs: AsyncResult.isSuccess(clock)
+          ? staleForMs(get(session.connection.freshness), clock.value)
+          : null,
       }),
-    ),
-  );
+    );
+  });
 
 export function ConnectedShell(props: {
   readonly hosts: readonly ConnectedHost[];

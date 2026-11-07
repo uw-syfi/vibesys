@@ -5,7 +5,7 @@ import type {
   CommandProgress,
   CostFeedSnapshot,
   CostView,
-  Freshness,
+  HostStatus,
   IdeaWindow,
   RunReport,
 } from '../../../state/index.js';
@@ -30,10 +30,8 @@ export function ReportScreen(props: {
   readonly report: RunReport;
   readonly host: string;
   readonly nowMs: number;
-  /** How current the run stream is; the header says so when it is not. */
-  readonly freshness: Freshness;
-  /** How long what is shown has been out of date; null while it is current. */
-  readonly staleForMs: number | null;
+  /** The host's one status; the header says so when it is not live. */
+  readonly status: HostStatus;
   /** The run's cost, as the host last sent it, and how its stream is going. */
   readonly cost: CostView | undefined;
   readonly costFeed: CostFeedSnapshot;
@@ -85,13 +83,7 @@ export function ReportScreen(props: {
       title={report.header.name}
       meta={
         <>
-          <ReportMeta
-            report={report}
-            host={props.host}
-            freshness={props.freshness}
-            nowMs={props.nowMs}
-            staleForMs={props.staleForMs}
-          />
+          <ReportMeta report={report} host={props.host} status={props.status} nowMs={props.nowMs} />
           {props.reading}
         </>
       }

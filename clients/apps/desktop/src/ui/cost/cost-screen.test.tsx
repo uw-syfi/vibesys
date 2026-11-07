@@ -13,7 +13,7 @@ import {
 import * as Effect from 'effect/Effect';
 import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
-import type {CostView, FeedStatus, Freshness} from '../../state/index.js';
+import type {CostView, FeedStatus, Freshness, HostStatusKind} from '../../state/index.js';
 import {costViewArb} from '../../testing/orchestrator/cost-arbitrary.js';
 import {
   ENDED_RUN,
@@ -28,6 +28,14 @@ import {CostScreen} from './cost-screen.js';
 import {formatCount} from './words.js';
 
 const LIVE: FeedStatus = {_tag: 'Live'};
+/** The host status a feed freshness is shown as. */
+const HOST_KIND: Readonly<Record<Freshness, HostStatusKind>> = {
+  live: 'live',
+  'catching-up': 'catching-up',
+  stale: 'stale',
+  empty: 'waiting',
+  unavailable: 'unavailable',
+};
 /** Names of the protocol that must never reach a person. */
 const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|undefined|NaN|\[object/;
 
@@ -43,8 +51,8 @@ function screen(
   return renderToStaticMarkup(
     <CostScreen
       view={view}
-      freshness={options.freshness ?? 'live'}
-      status={options.status ?? LIVE}
+      status={{kind: HOST_KIND[options.freshness ?? 'live'], cause: null, staleForMs: null}}
+      feed={options.status ?? LIVE}
       runOver={options.runOver ?? false}
       words={COST_WORDS}
       trail={[]}
@@ -124,8 +132,7 @@ describe('the Cost screen over served views', () => {
     expect(html).not.toContain('vs-bar-rows');
   });
 
-  it('marks the view of an ended run final, and a running one live', () => {
-    expect(textOf(screen(ENDED_RUN, {runOver: true}))).toContain('Final');
+  it('says Live of a running run on a live host, and nothing of an ended one', () => {
     expect(textOf(screen(ENDED_RUN, {runOver: true}))).not.toContain('Live');
     expect(textOf(screen(PRICED_AND_UNPRICED))).toContain('Live');
     expect(textOf(screen(ENDED_RUN, {runOver: true}))).not.toContain('≥');
@@ -155,7 +162,7 @@ describe('the Cost screen over served views', () => {
     const words: readonly (readonly [Freshness, string])[] = [
       ['catching-up', 'Catching up'],
       ['stale', 'Stale'],
-      ['empty', 'Loading'],
+      ['empty', 'Waiting'],
       ['unavailable', 'Unavailable'],
     ];
     for (const [freshness, word] of words) {

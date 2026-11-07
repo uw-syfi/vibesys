@@ -24,7 +24,8 @@ import {
   type CostFeedSnapshot,
   type CostView,
   emptyState,
-  type Freshness,
+  HOST_STATUS_KINDS,
+  type HostStatusKind,
   type IdeaWindow,
   type OrchestratorState,
   objectiveReports,
@@ -107,7 +108,10 @@ function stateOf(world: World): OrchestratorState {
   return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
 
-function render(world: World, options: {freshness?: Freshness; costFeed?: CostFeedSnapshot} = {}) {
+function render(
+  world: World,
+  options: {status?: HostStatusKind; costFeed?: CostFeedSnapshot} = {},
+) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
   const state = stateOf(world);
   const nowMs = world.live === false ? END + 60_000 : NOW;
@@ -119,8 +123,11 @@ function render(world: World, options: {freshness?: Freshness; costFeed?: CostFe
       host="host-a"
       ideasWindow={world.window ?? null}
       nowMs={nowMs}
-      freshness={options.freshness ?? 'live'}
-      staleForMs={options.freshness === undefined || options.freshness === 'live' ? null : 90_000}
+      status={{
+        kind: options.status ?? 'live',
+        cause: null,
+        staleForMs: options.status === 'stale' ? 90_000 : null,
+      }}
       cost={state.costs[RUN]}
       costFeed={options.costFeed ?? {status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}
@@ -510,27 +517,24 @@ describe('the report with a different amount of data', () => {
 describe('what the header says about freshness', () => {
   it('says nothing while the data is current, and says when it is not', () => {
     const live = render({});
-    expect(live.screen.text()).not.toMatch(/Stale|Catching up|Unavailable|Connecting/);
+    expect(live.screen.text()).not.toMatch(/Stale|Catching up|Unavailable|Connecting|Waiting/);
     live.screen.unmount();
     fc.assert(
-      fc.property(
-        fc.constantFrom('catching-up', 'stale', 'empty', 'unavailable') as fc.Arbitrary<Freshness>,
-        freshness => {
-          const {screen} = render({}, {freshness});
-          expect(screen.text()).toMatch(/Stale|Catching up|Unavailable|Connecting/);
-          screen.unmount();
-        },
-      ),
+      fc.property(fc.constantFrom(...HOST_STATUS_KINDS.filter(kind => kind !== 'live')), status => {
+        const {screen} = render({}, {status});
+        expect(screen.text()).toMatch(
+          /Stale|Catching up|Unavailable|Connecting|Waiting|Unreachable|Incompatible|Refused/,
+        );
+        screen.unmount();
+      }),
       {numRuns: 8},
     );
   });
 
-  it('says how long the data has been stale, in the chip\u2019s hint', () => {
-    const {screen} = render({}, {freshness: 'stale'});
-    const chip = [...screen.container.querySelectorAll('.vs-chip')].find(
-      each => each.textContent === 'Stale',
-    );
-    expect(chip?.getAttribute('aria-description')).toContain('Last current 1m ago');
+  it('says how long the data has been stale, in the chip itself', () => {
+    const {screen} = render({}, {status: 'stale'});
+    const chips = [...screen.container.querySelectorAll('.vs-chip')].map(each => each.textContent);
+    expect(chips).toContain('Stale 1m');
     screen.unmount();
   });
 

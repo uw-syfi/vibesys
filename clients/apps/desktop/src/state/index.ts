@@ -61,6 +61,14 @@ export {
 } from './host-prerequisites.js';
 export {type HostRefusal, partRefusalOf, readinessOf, refusalOf} from './host-refusal.js';
 export {
+  HOST_STATUS_KINDS,
+  type HostStatus,
+  type HostStatusInput,
+  type HostStatusKind,
+  hostStatusOf,
+  hostStatusRank,
+} from './host-status.js';
+export {
   type CheckInRead,
   type Facts,
   readCheckIn,
@@ -184,7 +192,6 @@ export {
   withTheme,
 } from './settings/appearance.js';
 export {
-  type ResourceConnection,
   type ResourceHost,
   type ResourceRow,
   resourceRow,

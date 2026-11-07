@@ -2,12 +2,12 @@ import {describe, expect, it} from '@effect/vitest';
 import {isRetryable, Refused} from '../core/errors.js';
 import {faultOf} from '../core/fault.js';
 import {REFUSAL_CAUSES} from '../state/index.js';
-import {FRESHNESS_WORD} from './orchestrator/fleet-words.js';
+import {HOST_STATUS_LABELS} from './host-status-words.js';
 import {causeHint, causeWord} from './refusal-words.js';
 
 /** Words a status chip already uses for a link or a feed, which no refusal may be taken for. */
 const LINK_WORDS = [
-  ...Object.values(FRESHNESS_WORD).map(word => word.label),
+  ...HOST_STATUS_LABELS.filter(label => label !== 'Refused'),
   'Not read yet',
   'No runs',
   'Reconnecting',

@@ -13,8 +13,8 @@ import {
   type RunSummary,
   type SearchState,
 } from '@vibesys/orchestrator-proto';
-import type {RefusalCause} from '../fault.js';
 import type {Freshness} from '../freshness.js';
+import type {HostStatus} from '../host-status.js';
 import {type ObjectiveReport, objectiveReports} from './report/objectives.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
@@ -44,10 +44,8 @@ export interface FleetHostInput {
   readonly label: string;
   readonly data: OrchestratorState;
   readonly freshness: Freshness;
-  /** How long what is shown of the host has been out of date, when the service layer knows. */
-  readonly staleForMs: number | null;
-  /** Why no run can be started on the host and no retry changes it, when the host said. */
-  readonly refusal?: RefusalCause | null | undefined;
+  /** The one status the host has on every screen. */
+  readonly status: HostStatus;
 }
 
 /** A host as a row names it. */
@@ -55,8 +53,7 @@ export interface FleetHostRef {
   readonly key: string;
   readonly label: string;
   readonly freshness: Freshness;
-  readonly staleForMs: number | null;
-  readonly refusal: RefusalCause | null;
+  readonly status: HostStatus;
 }
 
 /**
@@ -174,8 +171,7 @@ export function fleetRows(hosts: readonly FleetHostInput[]): readonly FleetRow[]
       key: host.key,
       label: host.label,
       freshness: host.freshness,
-      staleForMs: host.staleForMs,
-      refusal: host.refusal ?? null,
+      status: host.status,
     };
     return Object.values(host.data.runs)
       .filter(run => !run.neverOpened)
@@ -212,8 +208,7 @@ export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter)
       key: host.key,
       label: host.label,
       freshness: host.freshness,
-      staleForMs: host.staleForMs,
-      refusal: host.refusal ?? null,
+      status: host.status,
       runs: byState.filter(row => row.host.key === host.key).length,
       runsLeftOut: host.data.cut.runsLeftOut,
     })),
