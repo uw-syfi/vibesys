@@ -14,11 +14,13 @@ import * as Effect from 'effect/Effect';
 import {costViewOf, type FeedStatus} from '../state/index.js';
 import {
   FakeDaemon,
+  faultsOn,
   generateScenario,
   type HostHarness,
   hostHarness,
   methodPathOf,
 } from '../testing/orchestrator/index.js';
+import {RpcStatus} from './errors.js';
 
 const scenario = generateScenario({seed: 7, subagents: 2, live: false});
 const RUN = scenario.runId;
@@ -119,6 +121,49 @@ describe('a run cost stream', () => {
       yield* h.elapse(1);
       expect(costCalls(h)).toHaveLength(2);
       expect((yield* h.model).data.costs[RUN]?.total.costUsd).toBe(3);
+    }),
+  );
+
+  it.effect('a host without the method fails the cost stream alone and leaves the link up', () =>
+    Effect.gen(function* () {
+      const daemon = new FakeDaemon(scenario);
+      const h = yield* hostHarness(daemon, {
+        wrap: base => ({
+          respond: (target, nth) =>
+            target.method === methodPathOf('WatchRunCost')
+              ? [{end: {message: 'no such method', status: RpcStatus.UNIMPLEMENTED}}]
+              : base.respond(target, nth),
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      h.mount(h.session.costs.watch(RUN));
+      yield* h.elapse(30);
+      expect(yield* h.read(h.session.costs.status(RUN))).toMatchObject({
+        _tag: 'Failed',
+        fault: {kind: 'Unimplemented', retryable: false},
+      });
+      expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('unavailable');
+      expect((yield* h.model).data.costs[RUN]).toBeUndefined();
+      // The rest of the app is unaffected: the run stream is live, and the cost stream is not retried.
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      expect(yield* h.read(h.session.runs.freshness)).toBe('live');
+      expect(costCalls(h)).toHaveLength(1);
+    }),
+  );
+
+  it.effect('opens the stream again after the link drops and then holds the host view', () =>
+    Effect.gen(function* () {
+      const daemon = new FakeDaemon(scenario);
+      daemon.publishCost(hostCost(7));
+      const h = yield* hostHarness(daemon, {
+        // The first stream loses the link before its view arrives; the second is whole.
+        wrap: faultsOn('WatchRunCost', {dropAfter: [0], duplicate: []}),
+      });
+      h.mount(h.session.costs.watch(RUN));
+      yield* h.elapse(60);
+      expect(costCalls(h).length).toBeGreaterThan(1);
+      expect((yield* h.model).data.costs[RUN]?.total.costUsd).toBe(7);
+      expect(yield* h.read(h.session.costs.freshness(RUN))).toBe('live');
     }),
   );
 });

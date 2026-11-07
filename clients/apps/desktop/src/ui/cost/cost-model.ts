@@ -109,7 +109,9 @@ function bucketTitle(
 
 function chartOf(view: CostView, slots: ReadonlyMap<string, number>): SpendChart | null {
   const {buckets, startMs, bucketMs} = view.series;
-  if (buckets.length === 0) return null;
+  // A bucket has a model's spend only where a turn was priced: with none anywhere there is no
+  // spend to draw, and an axis would make up a scale for it.
+  if (buckets.every(bucket => bucket.byModel.length === 0)) return null;
   const slot = (model: CostModel): number => slots.get(modelKey(model)) ?? 0;
   const bars = buckets.map(
     (bucket): StackedBar => ({
