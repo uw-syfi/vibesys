@@ -119,6 +119,9 @@
   text-align: right;
 }
 .vs-bar-rows thead th {
+  /* The bar column's hidden header is positioned: without a positioned parent it escapes every
+     scroller around the table and, below the fold, makes the whole window scroll. */
+  position: relative;
   height: var(--control-sm);
   color: var(--muted);
   font-family: var(--text-caption-family);

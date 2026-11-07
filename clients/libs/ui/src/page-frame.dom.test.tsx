@@ -116,6 +116,35 @@ describe('Page with a title', () => {
   });
 });
 
+describe('a button with words', () => {
+  test('keeps its padding when it is also given a name, and only an icon alone is a square', async () => {
+    const container = await mount(
+      <>
+        <Button text="Stop run" label="Stop run" press={() => undefined} />
+        <Button text="Agents" press={() => undefined} />
+        <Button icon="plus" label="New" press={() => undefined} />
+      </>,
+    );
+    const [named, plain, icon] = container.querySelectorAll('.vs-button');
+    expect(named?.hasAttribute('data-icon-only')).toBe(false);
+    expect(plain?.hasAttribute('data-icon-only')).toBe(false);
+    expect(icon?.hasAttribute('data-icon-only')).toBe(true);
+    // The square is for what is marked, not for whatever carries an aria-label.
+    expect(css('inputs.css')).toMatch(/\.vs-button\[data-icon-only\] \{\s*padding: 0/);
+    expect(css('inputs.css')).not.toMatch(/\.vs-button\[aria-label\]/);
+  });
+});
+
+describe('a table whose header is hidden for a reader', () => {
+  test('the hidden header has a positioned parent, or it escapes the page and scrolls the window', async () => {
+    // `position: absolute` with no positioned ancestor up to the app's own region: the span sits at
+    // its place in the flow, below the fold of the page's scroller, and the window grows a scrollbar.
+    expect(css('surfaces.css')).toMatch(/\.vs-table-hidden-header \{\s*position: absolute/);
+    expect(css('bars.css')).toMatch(/\.vs-bar-rows thead th \{[^}]*position: relative/);
+    expect(css('surfaces.css')).toMatch(/\.vs-table th \{\s*position: sticky/);
+  });
+});
+
 describe('Card with an action', () => {
   test('sets the link at the end of the heading line, and leaves a card without one as it was', async () => {
     const container = await mount(
@@ -163,7 +192,7 @@ describe('tiles and charts on one set of tracks', () => {
     const frame = css('frame.css');
     const chart = /\.vs-chart-columns \{[^}]*gap: var\(--space-6\)[^}]*minmax\(var\(--chart-min\)/s;
     const tiles =
-      /\.vs-tiles\[data-track="chart"\] \{[^}]*minmax\(min\(100%, var\(--chart-min\)\), 1fr\)[^}]*gap: var\(--space-6\)/s;
+      /\.vs-tiles\[data-track="chart"\] \{[^}]*repeat\(auto-fit, minmax\(min\(100%, var\(--chart-min\)\), 1fr\)\)[^}]*gap: var\(--space-6\)/s;
     expect(frame).toMatch(chart);
     expect(frame).toMatch(tiles);
   });

@@ -1890,9 +1890,9 @@ button.vs-dotlegend-item:focus-visible {
   grid-template-columns: 1fr;
   width: var(--tile-width);
 }
-/* The tracks of `ChartColumns`: a tile is a chart's width, a lone tile does not stretch past its track. */
+/* The tracks of `ChartColumns`, exactly: a tile is a chart's width, and a lone tile fills the row as a lone chart does. */
 .vs-tiles[data-track="chart"] {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--chart-min)), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--chart-min)), 1fr));
   gap: var(--space-6);
   width: 100%;
 }

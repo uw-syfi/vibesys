@@ -90,7 +90,7 @@ export function AgentPage(props: {
           <Chip label={status.label} tone={status.tone} dot />
           <Chip label={props.host} mono clip />
           <Chip label={harnessWord(agent.harness)} />
-          <Chip label={agent.model} mono clip />
+          {agent.model === '' ? null : <Chip label={agent.model} mono clip />}
         </>
       }
     >
