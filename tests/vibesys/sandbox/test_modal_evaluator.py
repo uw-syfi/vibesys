@@ -12,6 +12,7 @@ import sys
 import tarfile
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
@@ -34,6 +35,7 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
     ProgramResult,
     _build_stage_archive,
     _decode_setup_command,
+    _Deployment,
     _execute_colocated,
     _execute_reused_candidate,
     _healthy_now,
@@ -109,6 +111,20 @@ class ScriptedHealth:
         return self.status
 
 
+_DEPLOY_BEGAN = datetime(2026, 11, 7, 20, 59, tzinfo=UTC).timestamp()
+"""The fake host's wall clock, in seconds since the epoch, when each deploy here starts."""
+_DEPLOY_SECONDS = 43.0
+"""How long ``_run_public_evaluator``'s ``modal deploy`` takes on that clock."""
+
+
+def _modal_start_time(seconds_after_deploy_began: float) -> str:
+    """A container's start as ``modal container list --json`` prints it: local offset, seconds."""
+    started = datetime.fromtimestamp(
+        _DEPLOY_BEGAN + seconds_after_deploy_began, timezone(timedelta(hours=-8))
+    )
+    return started.isoformat(sep=" ", timespec="seconds")
+
+
 @dataclass
 class _Host:
     """A fake evaluator host and the records a test reads back."""
@@ -116,6 +132,7 @@ class _Host:
     programs: ScriptedPrograms
     health: ScriptedHealth
     clock: AdvancingClock
+    wall_clock: ManualClock
     warmed: list[str]
 
     @property
@@ -123,6 +140,7 @@ class _Host:
         """The host the evaluator runs on."""
         return ModalHost(
             clock=self.clock,
+            wall_clock=self.wall_clock,
             programs=self.programs,
             health=self.health,
             keep_warm=lambda base_url: self.warmed.append(base_url) or nullcontext(),
@@ -134,11 +152,13 @@ def _fake_host(
     *,
     health: ScriptedHealth | None = None,
     clock: AdvancingClock | None = None,
+    wall_clock: ManualClock | None = None,
 ) -> _Host:
     return _Host(
         programs=ScriptedPrograms(answer),
         health=ScriptedHealth() if health is None else health,
         clock=AdvancingClock() if clock is None else clock,
+        wall_clock=ManualClock(_DEPLOY_BEGAN) if wall_clock is None else wall_clock,
         warmed=[],
     )
 
@@ -146,6 +166,7 @@ def _fake_host(
 class _EvaluatorOptions(TypedDict, total=False):
     evaluator_package_root: Path | None
     setup_command: list[str] | None
+    deploy_stdout: str
     container_listing: SimpleNamespace | None
     exec_stdout: str
     health: ScriptedHealth
@@ -155,6 +176,23 @@ _DEPLOY_STDOUT = (
     "Web Function URL: https://workspace--candidate.modal.run\n"
     "View Deployment: https://modal.com/apps/workspace/main/deployed/candidate-app\n"
 )
+
+
+_FRESH_DEPLOYMENT = _Deployment(
+    "https://workspace--candidate.modal.run",
+    "candidate-app",
+    started_since=modal_evaluator.started_since_deploy(_DEPLOY_BEGAN, _DEPLOY_STDOUT),
+)
+"""What a deploy at ``_DEPLOY_BEGAN`` that printed ``_DEPLOY_STDOUT`` hands the colocated run."""
+_REUSED_DEPLOYMENT = _Deployment(
+    "https://workspace--candidate.modal.run", "candidate-app", started_since=None
+)
+"""A leased deployment: no deploy ran, so any container of the app runs it."""
+
+
+def _listing(*entries: dict[str, str]) -> SimpleNamespace:
+    """A successful ``modal container list --json`` of ``entries``."""
+    return SimpleNamespace(returncode=0, stdout=json.dumps(list(entries)), stderr="")
 
 
 @pytest.fixture(autouse=True)
@@ -224,16 +262,21 @@ def _run_public_evaluator(
     container_listing = options.get("container_listing")
     exec_stdout = options.get("exec_stdout", "__VIBESYS_EXEC_RC__=0\n")
     calls: list[list[str]] = []
+    wall_clock = ManualClock(_DEPLOY_BEGAN)
 
     def run(command: list[str]) -> SimpleNamespace:
         calls.append(command)
         if command[3] == "deploy":
-            return SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
+            wall_clock.advance(_DEPLOY_SECONDS)
+            stdout = options.get("deploy_stdout", _DEPLOY_STDOUT)
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
         if command[3:5] == ["container", "list"]:
-            return container_listing or SimpleNamespace(
-                returncode=0,
-                stdout=json.dumps([{"app_name": "candidate-app", "container_id": "ta-123"}]),
-                stderr="",
+            return container_listing or _listing(
+                {
+                    "app_name": "candidate-app",
+                    "container_id": "ta-123",
+                    "start_time": _modal_start_time(_DEPLOY_SECONDS + 5),
+                }
             )
         return SimpleNamespace(
             returncode=0,
@@ -249,7 +292,7 @@ def _run_public_evaluator(
             str(evaluator_package_root) if evaluator_package_root is not None else None
         ),
         setup_command=setup_command,
-        host=_fake_host(run, health=options.get("health")).host,
+        host=_fake_host(run, health=options.get("health"), wall_clock=wall_clock).host,
     )
     return result, calls
 
@@ -556,6 +599,7 @@ def test_setup_command_encoding_round_trips_opaque_argv(
     host = options.pop("host")
     assert isinstance(host, ModalHost)
     assert isinstance(host.clock, modal_evaluator.MonotonicWaits)
+    assert isinstance(host.wall_clock, modal_evaluator.SystemWallClock)
     assert [(argv, options)] == [
         (
             (["true"],),
@@ -798,12 +842,13 @@ def test_evaluator_selects_matching_snake_case_container(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "main.py").write_text("app = object()\n")
+    started = _modal_start_time(_DEPLOY_SECONDS + 5)
     listing = SimpleNamespace(
         returncode=0,
         stdout=json.dumps(
             [
-                {"container_id": "ta-other", "app_name": "other-app"},
-                {"container_id": "ta-123", "app_name": "candidate-app"},
+                {"container_id": "ta-other", "app_name": "other-app", "start_time": started},
+                {"container_id": "ta-123", "app_name": "candidate-app", "start_time": started},
             ]
         ),
         stderr="",
@@ -824,9 +869,12 @@ def test_evaluator_selects_matching_title_case_container(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "main.py").write_text("app = object()\n")
+    started = _modal_start_time(_DEPLOY_SECONDS + 5)
     listing = SimpleNamespace(
         returncode=0,
-        stdout=json.dumps([{"Container ID": "ta-123", "App Name": "candidate-app"}]),
+        stdout=json.dumps(
+            [{"Container ID": "ta-123", "App Name": "candidate-app", "Start Time": started}]
+        ),
         stderr="",
     )
 
@@ -837,6 +885,89 @@ def test_evaluator_selects_matching_title_case_container(
     exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
     assert result == 0
     assert exec_command[5] == "ta-123"
+
+
+def _container(container_id: str, start_time: str) -> dict[str, str]:
+    """A container of the candidate's app as Modal 1.4 lists it (newer clients use snake_case)."""
+    return {
+        "Container ID": container_id,
+        "App ID": "ap-candidate",
+        "App Name": "candidate-app",
+        "Start Time": start_time,
+    }
+
+
+@pytest.mark.regression
+def test_after_a_deploy_the_gate_runs_in_the_new_versions_container_not_an_older_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for #4097: the first container listed can predate the deploy and run old code.
+
+    The new version's container started while ``modal deploy`` still ran, so only a floor read
+    before the deploy accepts it.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+    listing = _listing(
+        _container("ta-old", _modal_start_time(-301)),
+        _container("ta-new", _modal_start_time(10)),
+    )
+
+    result, calls = _run_public_evaluator(
+        workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
+    )
+
+    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    assert result == 0
+    assert exec_command[5] == "ta-new"
+
+
+@pytest.mark.regression
+def test_after_a_deploy_an_older_or_unstarted_container_is_never_measured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression for #4097: with only those listed, the gate fails and names them."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+    listing = _listing(
+        _container("ta-old", _modal_start_time(-301)), _container("ta-pending", "Pending")
+    )
+
+    result, calls = _run_public_evaluator(
+        workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
+    )
+
+    assert result == 1
+    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    err = capsys.readouterr().err
+    assert "no running container found for Modal app candidate-app" in err
+    assert "no listed container started since this deploy began" in err
+    assert "ta-old" in err
+    assert "ta-pending" in err
+
+
+def test_a_deploy_that_changed_nothing_keeps_measuring_the_running_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+    skipped = f"✓ Deployment skipped: no changes detected! ⏭️\n{_DEPLOY_STDOUT}"
+
+    result, calls = _run_public_evaluator(
+        workspace,
+        ["python", "main.py"],
+        tmp_path,
+        monkeypatch,
+        deploy_stdout=skipped,
+        container_listing=_listing(_container("ta-running", _modal_start_time(-301))),
+    )
+
+    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    assert result == 0
+    assert exec_command[5] == "ta-running"
 
 
 def test_evaluator_reports_container_list_cli_error(
@@ -1293,7 +1424,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
-        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        deployment=_FRESH_DEPLOYMENT,
         host=host,
         setup_command=None,
         evaluator_package_root=None,
@@ -1332,6 +1463,7 @@ def test_a_missing_container_is_given_up_on_at_the_discovery_deadline_of_the_giv
     with pytest.raises(TimeoutError):
         modal_evaluator.find_app_container(
             "candidate-app",
+            started_since=None,
             workspace="/workspace",
             base_url="https://workspace--candidate.modal.run",
             timeout_seconds=timeout,
@@ -1368,7 +1500,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
     colocated.assert_called_once_with(
         ["python", ".vibesys-evaluator-package/adapter.py"],
         workspace="/workspace",
-        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        deployment=_FRESH_DEPLOYMENT,
         host=host,
         setup_command=("installer", "--locked"),
         evaluator_package_root=str(package.resolve()),
@@ -1401,6 +1533,7 @@ def test_main_decodes_setup_command_and_forwards_package(monkeypatch: pytest.Mon
     host = options.pop("host")
     assert isinstance(host, ModalHost)
     assert isinstance(host.clock, modal_evaluator.MonotonicWaits)
+    assert isinstance(host.wall_clock, modal_evaluator.SystemWallClock)
     assert (args, options) == (
         (["python", ".vibesys-evaluator-package/adapter.py"],),
         {
@@ -1492,7 +1625,7 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
-        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        deployment=_REUSED_DEPLOYMENT,
         host=host,
         setup_command=None,
         evaluator_package_root=None,
@@ -1852,7 +1985,7 @@ def test_evaluator_relays_exec_stderr(
     result = _execute_colocated(
         ["python", "main.py"],
         workspace=str(workspace),
-        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        deployment=_REUSED_DEPLOYMENT,
         host=fake.host,
     )
 

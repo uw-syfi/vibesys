@@ -165,6 +165,7 @@ def test_find_app_container_keeps_to_its_deadline(
     try:
         found = find_app_container(
             APP,
+            started_since=None,
             workspace="/workspace",
             base_url=URL,
             timeout_seconds=timeout,

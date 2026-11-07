@@ -41,6 +41,7 @@ import urllib.request
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
@@ -154,6 +155,20 @@ class _DeploymentLease:
     candidate_revision: str
     base_url: str
     app_identifier: str | None = None
+
+
+@dataclass(frozen=True)
+class _Deployment:
+    """The deployed candidate a trusted command runs in.
+
+    ``started_since`` is the earliest start, in seconds since the epoch, a container of the app
+    may have to run the deployed version: set after a deploy that published a new version, None
+    when every container of the app runs it (a reused lease, or a deploy that changed nothing).
+    """
+
+    base_url: str
+    app_identifier: str
+    started_since: float | None
 
 
 def _normalized_setup_command(command: Sequence[str]) -> tuple[str, ...]:
@@ -312,9 +327,14 @@ KeepWarm = Callable[[str], AbstractContextManager[object]]
 
 @dataclass(frozen=True)
 class ModalHost:
-    """The effects the evaluator performs on its host; ``main`` alone builds the real ones."""
+    """The effects the evaluator performs on its host; ``main`` alone builds the real ones.
+
+    ``clock`` times and paces the waits; ``wall_clock`` dates a deploy against the start times
+    Modal stamps on containers.
+    """
 
     clock: WaitClock
+    wall_clock: WallClock
     programs: Programs
     health: HealthProbe
     keep_warm: KeepWarm
@@ -379,6 +399,26 @@ class MonotonicWaits:
     def sleep(self, seconds: float) -> None:
         """Sleep for real."""
         time.sleep(seconds)
+
+
+class WallClock(Protocol):
+    """The calendar time Modal stamps container starts in; ``vs_sim``'s clocks fit it."""
+
+    def now(self) -> float:
+        """Seconds since the epoch; unlike a ``WaitClock``'s, it steps when the host's time is set."""
+        ...
+
+
+class SystemWallClock:
+    """The operating system's calendar clock, for ``main`` alone.
+
+    This helper runs as one stdlib-only file in the run environment, where ``vs_sim``'s
+    ``SystemClock`` is not importable; everything below ``main`` takes its wall clock.
+    """
+
+    def now(self) -> float:
+        """Seconds since the epoch."""
+        return time.time()
 
 
 def _urllib_health_status(health_url: str, timeout_seconds: float) -> int:
@@ -658,14 +698,19 @@ def _build_stage_archive(
 # --- The Modal lifecycle translator ------------------------------------------
 #
 # This helper is mounted into the runtime as one stdlib-only file, so its
-# translator lives here rather than in a sibling module. Modal reports three raw
-# things: the ``modal container list`` entries, the exit-code marker line the
-# bootstrap script prints, and the HTTP status of ``/health``. These functions
-# are the only place that text is interpreted; everything else reads a life.
+# translator lives here rather than in a sibling module. Modal reports four raw
+# things: the ``modal container list`` entries, whether ``modal deploy`` published
+# a new version, the exit-code marker line the bootstrap script prints, and the
+# HTTP status of ``/health``. These functions are the only place that text is
+# interpreted; everything else reads a life.
 #
 # * No guessing. A listing that cannot be read, a marker that is not a plain
 #   exit code, or no marker at all is ``...Unknown(raw)``; it is never a running
 #   container and never an exit code of zero.
+# * The deployed version only. After a deploy that published a new version, a
+#   container of the app counts only if Modal stamps it as started since the
+#   deploy began. One started earlier, or with no start time that names an
+#   instant, may run the previous version: it is passed over, never chosen.
 # * Forward only (containers). Starting < Running; a reading that would move
 #   backwards, or an unreadable one, never replaces a known life.
 # * The exec reading is one terminal reading, not a series. The trusted script
@@ -718,7 +763,13 @@ def exit_status_of(life: ExecLife, modal_returncode: int) -> int:
 
 @dataclass(frozen=True)
 class ContainerStarting:
-    """The app has no listed container yet."""
+    """The app has no listed container that runs the deployed version yet.
+
+    ``passed_over`` names each listed container of the app that may run an earlier version,
+    with the start time Modal printed for it.
+    """
+
+    passed_over: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -752,10 +803,57 @@ class ListingFailed:
     reason: str
 
 
-def container_reading(raw: ContainerListing | ListingFailed, app_identifier: str) -> ContainerLife:
-    """What one listing says on its own. Total."""
+# What ``modal deploy`` prints, after ``_compact_rich_output``, when it published nothing new
+# ("Deployment skipped: no changes detected!").
+_MODAL_DEPLOY_SKIPPED = "Deploymentskipped:nochangesdetected"
+# How long before a fresh deploy began (on this host's clock) a container may have started and
+# still count as the new version's. A new version's container cannot start before its deploy
+# began, so this covers only error in the comparison: Modal prints start times truncated to
+# whole seconds, and this host's clock may run ahead of Modal's by NTP-level skew. It also bounds
+# the mistake the other way: a previous version's container is taken only if it started within
+# this margin before the deploy.
+_CONTAINER_START_SKEW_SECONDS = 5.0
+
+
+def started_since_deploy(began: float, output: str) -> float | None:
+    """The earliest start a container may have to run what ``modal deploy`` published. Total.
+
+    ``began`` is this host's wall clock, in seconds since the epoch, just before the deploy ran.
+    None when the deploy ``output`` says it changed nothing: the running version is then the
+    candidate, so any container of the app runs it.
+    """
+    if _MODAL_DEPLOY_SKIPPED in _compact_rich_output(output):
+        return None
+    return began - _CONTAINER_START_SKEW_SECONDS
+
+
+def _start_seconds(start: object) -> float | None:
+    """The instant a listed ``Start Time`` names, in seconds since the epoch, or None.
+
+    Modal prints an aware time as ``2026-11-07 12:54:41-08:00`` (its local offset, whole
+    seconds), or ``Pending`` before the container starts. A time without an offset names no
+    instant: its zone is unknown.
+    """
+    if not isinstance(start, str):
+        return None
+    try:
+        started = datetime.fromisoformat(start)
+    except ValueError:
+        return None
+    return None if started.utcoffset() is None else started.timestamp()
+
+
+def container_reading(
+    raw: ContainerListing | ListingFailed, app_identifier: str, *, started_since: float | None
+) -> ContainerLife:
+    """What one listing says on its own. Total.
+
+    With ``started_since`` (seconds since the epoch), a container of the app runs the deployed
+    version only if Modal stamps it as started at or after that; any other is passed over.
+    """
     if isinstance(raw, ListingFailed):
         return ContainerUnknown(raw=raw.reason)
+    passed_over: list[str] = []
     for entry in raw.entries:
         if not isinstance(entry, dict):
             continue
@@ -763,9 +861,14 @@ def container_reading(raw: ContainerListing | ListingFailed, app_identifier: str
         # snake_case ("app_name"), older clients title case ("App Name").
         name = entry.get("app_name") or entry.get("App Name")
         container_id = entry.get("container_id") or entry.get("Container ID")
-        if name == app_identifier and container_id:
+        if name != app_identifier or not container_id:
+            continue
+        start = entry.get("start_time") or entry.get("Start Time")
+        started = _start_seconds(start)
+        if started_since is None or (started is not None and started >= started_since):
             return ContainerRunning(str(container_id))
-    return ContainerStarting()
+        passed_over.append(f"{container_id} (start time {start!r})")
+    return ContainerStarting(passed_over=tuple(passed_over))
 
 
 def advance_container(prev: ContainerLife, seen: ContainerLife) -> ContainerLife:
@@ -778,10 +881,16 @@ def advance_container(prev: ContainerLife, seen: ContainerLife) -> ContainerLife
 
 
 def observe_container(
-    prev: ContainerLife, raw: ContainerListing | ListingFailed, app_identifier: str
+    prev: ContainerLife,
+    raw: ContainerListing | ListingFailed,
+    app_identifier: str,
+    *,
+    started_since: float | None,
 ) -> ContainerLife:
     """Fold one listing into *prev*. Total, pure, and forward only."""
-    return advance_container(prev, container_reading(raw, app_identifier))
+    return advance_container(
+        prev, container_reading(raw, app_identifier, started_since=started_since)
+    )
 
 
 def health_ready(http_status: int) -> bool:
@@ -789,11 +898,12 @@ def health_ready(http_status: int) -> bool:
     return http_status == _HTTP_OK_STATUS
 
 
-def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; the app, where to list it, the bound, and the three effects the wait performs.
+def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; the app and the earliest start its container may have, where to list it, the bound, and the three effects the wait performs.
     # > The clock, listing and warm-up are the loop's effects; bundling them into one
     # > object would add a type to this stdlib-only helper that only its tests construct.
     app_identifier: str,
     *,
+    started_since: float | None,
     workspace: str,
     base_url: str,
     timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
@@ -801,9 +911,10 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     list_containers: Callable[[str], ContainerListing | ListingFailed],
     warm: Callable[[str], object],
 ) -> str:
-    """Return the id of a running container for the deployed app.
+    """Return the id of a running container of the deployed app that runs the deployed version.
 
-    Health probes double as warm-up: if the app scaled to zero between
+    With ``started_since``, that is a container Modal stamps as started at or after it (see
+    ``container_reading``). Health probes double as warm-up: if the app scaled to zero between
     readiness and discovery, probing the public endpoint starts a container.
     Gives up once ``timeout_seconds`` pass on ``clock``, after a last listing at that
     deadline; no pause runs past it.
@@ -813,9 +924,20 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     last_error = "no container listed"
     while True:
         listing = list_containers(workspace)
-        reading = container_reading(listing, app_identifier)
+        reading = container_reading(listing, app_identifier, started_since=started_since)
         if isinstance(reading, ContainerUnknown):
             last_error = reading.raw or last_error
+        elif (
+            isinstance(reading, ContainerStarting)
+            and reading.passed_over
+            and started_since is not None
+        ):
+            accepted = datetime.fromtimestamp(started_since, UTC).isoformat(" ", "seconds")
+            last_error = (
+                "no listed container started since this deploy began "
+                f"(accepting starts from {accepted} by this host's clock): "
+                + ", ".join(reading.passed_over)
+            )
         life = advance_container(life, reading)
         if isinstance(life, ContainerRunning):
             return life.container_id
@@ -1000,13 +1122,13 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
     command: Sequence[str],
     *,
     workspace: str,
-    deployment: tuple[str, str],
+    deployment: _Deployment,
     host: ModalHost,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
-    """Run the trusted command inside the app's serving container."""
-    base_url, app_identifier = deployment
+    """Run the trusted command inside a serving container of the deployed version."""
+    base_url, app_identifier = deployment.base_url, deployment.app_identifier
     plan = _plan_command_transfer(command, workspace)
     archive = _build_stage_archive(
         workspace,
@@ -1020,6 +1142,7 @@ def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; th
     ] or [""]
     container_id = find_app_container(
         app_identifier,
+        started_since=deployment.started_since,
         workspace=workspace,
         base_url=base_url,
         clock=host.clock,
@@ -1128,7 +1251,8 @@ def _execute_reused_candidate(
         return _execute_colocated(
             command,
             workspace=workspace,
-            deployment=(lease.base_url, lease.app_identifier),
+            # No deploy runs here, so no container of the app is older than the leased version.
+            deployment=_Deployment(lease.base_url, lease.app_identifier, started_since=None),
             host=host,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
@@ -1143,13 +1267,14 @@ def _execute_reused_candidate(
 
 def _deploy_and_wait_for_health(
     *, workspace: str, entrypoint: str, readiness_timeout_seconds: float, host: ModalHost
-) -> tuple[str, str] | int:
+) -> _Deployment | int:
     try:
         deployment_path = _deployment_path(workspace, entrypoint)
     except (FileNotFoundError, ValueError) as exc:
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000220 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
 
+    deploy_began = host.wall_clock.now()
     deploy = host.programs.run(
         _modal_cli("deploy", str(deployment_path)), cwd=workspace, timeout=None
     )
@@ -1182,7 +1307,7 @@ def _deploy_and_wait_for_health(
             )
             _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
         return 1
-    return base_url, app_identifier
+    return _Deployment(base_url, app_identifier, started_since_deploy(deploy_began, deploy_output))
 
 
 def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913]; This phase shares the validated argv/path/setup values across fresh and reused deployments; another request wrapper would duplicate run_evaluator's CLI options.
@@ -1214,7 +1339,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
     )
     if isinstance(deployed, int):
         return deployed
-    base_url, app_identifier = deployed
+    base_url, app_identifier = deployed.base_url, deployed.app_identifier
 
     if candidate_revision:
         _write_deployment_lease(candidate_revision, base_url, app_identifier)
@@ -1265,6 +1390,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         command,
         host=ModalHost(
             clock=MonotonicWaits(),
+            wall_clock=SystemWallClock(),
             programs=_SubprocessPrograms(),
             health=_urllib_health_status,
             keep_warm=partial(_ThreadKeepWarm, health=_urllib_health_status),
