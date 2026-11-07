@@ -1,8 +1,11 @@
 /**
- * React screens (`dom` runtime): the window (its rail, the runs and the settings) and the data it
+ * React screens (`dom` runtime): the window (its rail, the runs, the cost, the machines and the settings) and the data it
  * takes. They read plain snapshots and call plain callbacks; the renderer entry binds the callbacks
  * to the app's atoms.
  */
+
+export {CostOverviewScreen} from './cost-overview/index.js';
+export {MachinesScreen} from './machines/index.js';
 export {
   type AppCommands,
   type HostSnapshot,

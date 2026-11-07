@@ -39,6 +39,7 @@ import {
   Screen,
   SearchBox,
   ShareBar,
+  Spacer,
   Sparkline,
   Stack,
   StackedArea,
@@ -1014,6 +1015,15 @@ export const FRAME_ENTRIES = {
         </Reserve>
         <Text variant="code">The figure under it does not move when the line arrives.</Text>
       </Stack>
+    ),
+  },
+  Spacer: {
+    render: () => (
+      <Row>
+        <Text variant="code">Start</Text>
+        <Spacer />
+        <Text variant="code">Pushed to the end of its row</Text>
+      </Row>
     ),
   },
   DotLegend: {render: () => <FilterDemo />},

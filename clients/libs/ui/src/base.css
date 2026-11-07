@@ -290,6 +290,10 @@ body > div:first-child {
   flex: none;
   width: var(--column-figure);
 }
+.vs-spacer {
+  /* Grows into the free room along the container's axis, and never below one step. */
+  flex: 1 0 var(--space-4);
+}
 .vs-reserve {
   display: flex;
   flex-direction: column;

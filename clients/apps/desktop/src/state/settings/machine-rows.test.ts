@@ -5,7 +5,7 @@ import fc from 'fast-check';
 import type {HostConnectionState} from '../connection.js';
 import type {FeedStatus} from '../feed.js';
 import {hostStatusOf} from '../host-status.js';
-import {resourceRow} from './resources.js';
+import {machineRow} from './machine-rows.js';
 
 const fault = {kind: 'TransportFailed', detail: 'link lost', retryable: true} as const;
 
@@ -33,7 +33,7 @@ describe('a resource row', () => {
         fc.boolean(),
         fc.option(fc.nat(), {nil: null}),
         (connection, runsFeed, hasData, staleForMs) => {
-          const row = resourceRow({
+          const row = machineRow({
             key: 'ssh:host-a',
             label: 'host-a',
             connection,
@@ -59,7 +59,7 @@ describe('a host that refuses for good', () => {
     cause: 'state-network-filesystem',
   } as const;
   const row = (connection: HostConnectionState) =>
-    resourceRow({
+    machineRow({
       key: 'ssh:host-a',
       label: 'host-a',
       connection,

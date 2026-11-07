@@ -238,6 +238,15 @@ export function Dock(props: {
   );
 }
 
+/**
+ * The free room of the `Row` or `Stack` it sits in, taken whole, so what follows it is pushed to
+ * that container's end. It never shrinks below a `space-4` step, so when the container is too short
+ * for what is on either side, they stay apart and the container scrolls instead of overlapping them.
+ */
+export function Spacer(): JSX.Element {
+  return <div className="vs-spacer" aria-hidden="true" />;
+}
+
 /** Children in a column, `gap` apart. */
 export function Stack(props: FlexProps): JSX.Element {
   return <Flex {...props} direction="column" gap={props.gap ?? 'space-4'} />;

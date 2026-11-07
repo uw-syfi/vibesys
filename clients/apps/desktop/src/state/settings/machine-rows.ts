@@ -1,9 +1,9 @@
-/** What the Resources tab shows of each host the app is connected to, as plain facts. */
+/** What the Machines page shows of each host the app is connected to, as plain facts. */
 import type {HostConnectionState} from '../connection.js';
 import type {FeedStatus} from '../feed.js';
 import {type HostStatus, hostStatusOf} from '../host-status.js';
 
-export interface ResourceRow {
+export interface MachineRow {
   /** The `HostKey`: stable, and what a route names. */
   readonly key: string;
   /** What the host is called on screen. */
@@ -13,7 +13,7 @@ export interface ResourceRow {
 }
 
 /** What a host's row is built from. */
-export interface ResourceHost {
+export interface MachineHost {
   readonly key: string;
   readonly label: string;
   readonly connection: HostConnectionState;
@@ -25,7 +25,7 @@ export interface ResourceHost {
   readonly staleForMs: number | null;
 }
 
-export const resourceRow = (host: ResourceHost): ResourceRow => ({
+export const machineRow = (host: MachineHost): MachineRow => ({
   key: host.key,
   label: host.label,
   status: hostStatusOf({

@@ -10,14 +10,16 @@ import {
   emptyState,
   initialAppearance,
   initialNavigation,
+  type MachineRow,
   NAVIGATION_KINDS,
   type NavigationAction,
   type NavigationKind,
   navigationReducer,
-  type ResourceRow,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {CostOverviewScreen} from '../cost-overview/index.js';
+import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
@@ -51,7 +53,7 @@ const quiet: HostSnapshot = {
   runHistory: {_tag: 'Idle'},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},
 };
-const resources: readonly ResourceRow[] = [
+const machines: readonly MachineRow[] = [
   {key: 'local', label: 'This machine', status: {kind: 'live', cause: null, staleForMs: null}},
   {
     key: 'ssh:long',
@@ -59,6 +61,8 @@ const resources: readonly ResourceRow[] = [
     status: {kind: 'stale', cause: null, staleForMs: 3 * 60_000},
   },
 ];
+/** The rail's destinations, in the order it lists them. */
+const RAIL_ORDER = ['Runs', 'Cost', 'Machines', 'Settings'];
 const idle: CommandProgress | undefined = undefined;
 
 /** What the run is called on the list and in every trail. */
@@ -109,14 +113,12 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
                 fleet={navigation.fleet}
                 go={go}
               />
+            ) : navigation.destination === 'cost' ? (
+              <CostOverviewScreen />
+            ) : navigation.destination === 'machines' ? (
+              <MachinesScreen rows={machines} />
             ) : (
-              <SettingsScreen
-                tab={navigation.settingsTab}
-                pick={tab => go({type: 'pick-settings-tab', tab})}
-                appearance={initialAppearance('light')}
-                choose={() => undefined}
-                resources={resources}
-              />
+              <SettingsScreen appearance={initialAppearance('light')} choose={() => undefined} />
             )}
           </AppShell>
         );
@@ -139,26 +141,55 @@ const open = () => {
 };
 
 describe('the window shell', () => {
-  it('has a rail with the app mark, Runs and Settings labelled under their icons, Runs current at first', () => {
+  it('has a rail with the app mark, then Runs, Cost and Machines, and Settings last at its foot', () => {
     const {screen} = open();
     expect(screen.control('Runs').getAttribute('aria-current')).toBe('page');
-    expect(screen.control('Settings').getAttribute('aria-current')).toBeNull();
+    for (const name of ['Cost', 'Machines', 'Settings']) {
+      expect(screen.control(name).getAttribute('aria-current')).toBeNull();
+    }
     expect(screen.control('VibeSys')).toBeDefined();
     // Each destination says its name under its icon; the app's mark is the icon alone.
-    for (const name of ['Runs', 'Settings']) expect(screen.control(name).textContent).toBe(name);
+    for (const name of RAIL_ORDER) expect(screen.control(name).textContent).toBe(name);
     expect(screen.control('VibeSys').textContent).toBe('');
+    const rail = screen.container.querySelector('nav[aria-label="Main"]');
+    const named = [...(rail?.querySelectorAll('button') ?? [])].map(
+      button => button.getAttribute('aria-label') ?? button.textContent,
+    );
+    expect(named).toEqual(['VibeSys', ...RAIL_ORDER]);
+    // Settings alone is in the foot group, after the spacer that holds it at the rail's end.
+    const foot = rail?.querySelector('.vs-rail-group[data-end]');
+    expect([...(foot?.querySelectorAll('button') ?? [])].map(button => button.textContent)).toEqual(
+      ['Settings'],
+    );
+    expect(foot?.previousElementSibling?.classList.contains('vs-spacer')).toBe(true);
     screen.unmount();
   });
 
-  it('switches between the runs and the settings with the rail, in both directions', () => {
+  it.each([
+    'Cost',
+    'Machines',
+    'Settings',
+  ])('switches between the runs and %s with the rail, in both directions', name => {
     const {screen} = open();
-    screen.press(screen.control('Settings'));
-    expect(screen.control('Settings').getAttribute('aria-current')).toBe('page');
+    screen.press(screen.control(name));
+    expect(screen.control(name).getAttribute('aria-current')).toBe('page');
     expect(screen.control('Runs').getAttribute('aria-current')).toBeNull();
-    expect(screen.text()).toContain('Appearance');
+    expect(screen.container.querySelector('h1')?.textContent).toBe(name);
     screen.press(screen.control('Runs'));
     expect(screen.control('Runs').getAttribute('aria-current')).toBe('page');
-    expect(screen.text()).not.toContain('Appearance');
+    expect(screen.control(name).getAttribute('aria-current')).toBeNull();
+    expect(screen.container.querySelector('h1')?.textContent).not.toBe(name);
+    screen.unmount();
+  });
+
+  it('shows the Cost page as its name alone, and Settings as the appearance alone', () => {
+    const {screen} = open();
+    screen.press(screen.control('Cost'));
+    expect(screen.container.querySelector('main')?.textContent).toBe('Cost');
+    screen.press(screen.control('Settings'));
+    expect(screen.text()).toContain('Light theme');
+    expect(screen.text()).not.toContain('Resources');
+    expect(screen.container.querySelector('nav[aria-label="Settings sections"]')).toBeNull();
     screen.unmount();
   });
 
@@ -257,8 +288,9 @@ describe('the window shell', () => {
     screen.press(
       screen.controls('Runs').find(control => control.classList.contains('vs-crumb')) ?? row(),
     );
+    screen.press(screen.control('Cost'));
+    screen.press(screen.control('Machines'));
     screen.press(screen.control('Settings'));
-    screen.press(screen.control('Resources'));
     screen.press(screen.control('Runs'));
     // The list's own controls: its state filter and, with two hosts, its host filter.
     screen.press(
@@ -281,37 +313,12 @@ describe('the window shell', () => {
 });
 
 describe('the settings screen', () => {
-  const settings = (overrides: {readonly tab: 'appearance' | 'resources'}) =>
-    mount(
-      <SettingsScreen
-        tab={overrides.tab}
-        pick={() => undefined}
-        appearance={initialAppearance('dark')}
-        choose={() => undefined}
-        resources={resources}
-      />,
-    );
-
-  it('lists only tabs with content: Appearance and Resources', () => {
-    const screen = settings({tab: 'appearance'});
-    const tabs = [
-      ...screen.container.querySelectorAll('nav[aria-label="Settings sections"] button'),
-    ];
-    expect(tabs.map(tab => tab.textContent)).toEqual(['Appearance', 'Resources']);
-    screen.unmount();
-  });
+  const settings = () =>
+    mount(<SettingsScreen appearance={initialAppearance('dark')} choose={() => undefined} />);
 
   it('says which theme group is in use: the one of the mode the page is in', () => {
     const inUse = (state: ReturnType<typeof initialAppearance>) => {
-      const screen = mount(
-        <SettingsScreen
-          tab="appearance"
-          pick={() => undefined}
-          appearance={state}
-          choose={() => undefined}
-          resources={resources}
-        />,
-      );
+      const screen = mount(<SettingsScreen appearance={state} choose={() => undefined} />);
       const groups = [...screen.container.querySelectorAll('.vs-chip')]
         .filter(chip => chip.textContent === 'In use' && chip.closest('.vs-reserve') === null)
         .map(chip => chip.parentElement?.textContent);
@@ -328,7 +335,7 @@ describe('the settings screen', () => {
   });
 
   it('offers every mode and every theme of the design system, the saved ones selected', () => {
-    const screen = settings({tab: 'appearance'});
+    const screen = settings();
     for (const mode of APPEARANCE_MODES) {
       const label = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
       expect(screen.container.querySelectorAll(`label[data-label="${label}"]`).length).toBe(1);
@@ -344,12 +351,14 @@ describe('the settings screen', () => {
     expect(defaultAppearance.light).toBe('paper');
     screen.unmount();
   });
+});
 
+describe('the machines page', () => {
   it('shows each host with its connection and how fresh it is, a long name cut short with the whole on hover', () => {
-    const screen = settings({tab: 'resources'});
+    const screen = mount(<MachinesScreen rows={machines} />);
     const names = [...screen.container.querySelectorAll<HTMLElement>('td[data-clip]')];
-    expect(names.map(cell => cell.textContent)).toEqual(resources.map(row => row.label));
-    expect(names.map(cell => cell.getAttribute('title'))).toEqual(resources.map(row => row.label));
+    expect(names.map(cell => cell.textContent)).toEqual(machines.map(row => row.label));
+    expect(names.map(cell => cell.getAttribute('title'))).toEqual(machines.map(row => row.label));
     expect(screen.text()).toContain('Live');
     expect(screen.text()).toContain('Stale 3m');
     expect(screen.text()).not.toContain('Freshness');
@@ -357,15 +366,7 @@ describe('the settings screen', () => {
   });
 
   it('shows an empty list as a table with no rows, not as an error', () => {
-    const screen = mount(
-      <SettingsScreen
-        tab="resources"
-        pick={() => undefined}
-        appearance={initialAppearance('dark')}
-        choose={() => undefined}
-        resources={[]}
-      />,
-    );
+    const screen = mount(<MachinesScreen rows={[]} />);
     expect(screen.container.querySelectorAll('tbody tr').length).toBe(0);
     screen.unmount();
   });
