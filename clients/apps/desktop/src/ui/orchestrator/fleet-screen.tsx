@@ -83,13 +83,21 @@ const whenHint = (row: FleetRow, nowMs: number): string => {
     : `Last report ${ago(nowMs - row.lastReportMs)}, ${seattle(row.lastReportMs)}`;
 };
 
-function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
+/** The columns that name a run and say how it stands, and where it is. */
+function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
   return [
     {
       key: 'name',
       header: 'Run',
       size: 'fill',
-      hint: row => `${row.name}\n${row.repository}`,
+      hint: row =>
+        [
+          row.name,
+          row.repository,
+          row.startedMs === null ? '' : `Started ${seattle(row.startedMs)}`,
+        ]
+          .filter(line => line !== '')
+          .join('\n'),
       cell: row => (
         <CellLines
           main={<Text variant="body-strong">{row.name}</Text>}
@@ -144,6 +152,12 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
         />
       ),
     },
+  ];
+}
+
+/** The columns of figures: the best results, the agents working and the cost. */
+function figureColumns(): readonly ListColumn<FleetRow>[] {
+  return [
     {
       key: 'best',
       header: 'Best',
@@ -184,6 +198,11 @@ function columns(nowMs: number): readonly ListColumn<FleetRow>[] {
     },
   ];
 }
+
+const columns = (nowMs: number): readonly ListColumn<FleetRow>[] => [
+  ...identityColumns(nowMs),
+  ...figureColumns(),
+];
 
 const describe = (row: FleetRow, nowMs: number): string =>
   [
