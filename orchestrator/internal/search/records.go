@@ -2,6 +2,7 @@ package search
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 // This file reads a view's facts out as plain records, so that what works on the job log (the window
 // facts of a check-in) never speaks the job service's contract. Like Cap, it reads the uncapped view.
 
-// Measurement is one measure result of a job a run submitted: when it was recorded, the candidate it
-// measured, and the value of each objective it scores.
+// Measurement is one measure result of a job a run submitted: when it happened, the candidate it
+// measured, and the value of each objective it reports.
 type Measurement struct {
 	Job    core.JobID
 	Commit core.Commit
@@ -27,70 +28,27 @@ type Value struct {
 	Metric    string
 	Direction core.Direction
 	Number    float64
+	// Best says the value is better than every earlier measurement's of the metric, in its direction,
+	// the earliest of equal values keeping it: the best so far steps here. It is the mark the series
+	// of Trajectory carries, from the same projection.
+	Best bool
 }
 
-// Measurements are the measure results of the jobs the run submitted, once for each job, in the
-// order of the view. A job counts as the run's when the run is among its submitters, as Cap decides
-// it. A result that is no measurement, whose job is not the run's, or that names no time for itself
-// or its job is left out: it cannot be placed in a window. An objective that names no direction has
-// no value, because "better" would be a guess.
+// Measurements are the run's measure results, once for each job, oldest first (by time, then job),
+// as the one projection of them says (measurements): the same results, times, directions and best
+// marks the view's trajectory draws, so what a check-in freezes is what the report shows. A result
+// that is no measurement, whose job is not the run's, or that cannot be placed in time is left out.
+// Each measurement's values are by metric name.
 func (v View) Measurements(run core.RunID) []Measurement {
-	jobs := map[string]*cli.Job{}
-	for _, f := range v.Facts {
-		if j := f.GetJob(); j != nil && submittedBy(j, string(run)) {
-			jobs[j.GetId()] = j
-		}
-	}
 	var out []Measurement
-	seen := map[string]bool{}
-	for _, f := range v.Facts {
-		r := f.GetResult()
-		job, ok := jobs[r.GetJobId()]
-		m := r.GetMeasure()
-		if !ok || m == nil || seen[r.GetJobId()] {
-			continue
+	for _, m := range measurements(v.Facts, string(run)) {
+		values := make([]Value, 0, len(m.values))
+		for _, name := range slices.Sorted(maps.Keys(m.values)) {
+			x := m.values[name]
+			values = append(values, Value{Metric: name, Direction: directions[x.direction], Number: x.value, Best: x.best})
 		}
-		var at time.Time
-		switch {
-		case r.GetRecordedAt() != nil:
-			at = r.GetRecordedAt().AsTime()
-		case job.GetFinishedAt() != nil:
-			at = job.GetFinishedAt().AsTime()
-		default:
-			continue
-		}
-		seen[r.GetJobId()] = true
-		out = append(out, Measurement{Job: core.JobID(r.GetJobId()), Commit: core.Commit(r.GetCommit()), At: at, Values: valuesOf(m)})
+		out = append(out, Measurement{Job: core.JobID(m.jobID), Commit: core.Commit(m.commit), At: m.at, Values: values})
 	}
-	return out
-}
-
-// valuesOf reads the value of each objective a measurement scores. A task with one objective has the
-// scored metric's value. A task with several has each objective's: the scored metric's own value, and
-// for each other the headline of the observation of its name, which is absent when it has no values.
-func valuesOf(m *cli.MeasureResult) []Value {
-	var out []Value
-	add := func(name string, d cli.Direction, number float64) {
-		if dir, ok := directions[d]; ok && name != "" {
-			out = append(out, Value{Metric: name, Direction: dir, Number: number})
-		}
-	}
-	scored := m.GetMetric().GetName()
-	if metrics := m.GetObjectives().GetMetrics(); len(metrics) > 1 {
-		for _, metric := range metrics {
-			if metric.GetName() == scored {
-				add(scored, metric.GetDirection(), m.GetValue())
-				continue
-			}
-			for _, o := range m.GetObservations() {
-				if o.GetName() == metric.GetName() && o.Value != nil {
-					add(metric.GetName(), metric.GetDirection(), o.GetValue())
-				}
-			}
-		}
-		return out
-	}
-	add(scored, m.GetMetric().GetDirection(), m.GetValue())
 	return out
 }
 

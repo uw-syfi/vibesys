@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -30,8 +31,9 @@ const ours core.RunID = "r1"
 
 // world is a generated task and run. The generator draws from the contract and not from what the code
 // leans on: records arrive in any order, a result may have no time or no job, a job may belong to
-// another run or to nobody, a direction may be unnamed, ids may repeat as a stream repeats them, and a
-// plan may be edited before it was made.
+// another run or to nobody, a direction may be unnamed or change in the course of the run, a result may
+// observe an objective only a bound makes one (declared by the run, by a person or by another run), ids
+// may repeat as a stream repeats them, and a plan may be edited before it was made.
 type world struct {
 	view     search.View
 	agents   []core.Agent
@@ -72,7 +74,18 @@ func generate(seed uint64) world {
 		if r.IntN(5) == 0 {
 			continue // a job with no result
 		}
-		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: resultOf(r, id)}})
+		result := resultOf(r, id)
+		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: result}})
+		if r.IntN(5) == 0 {
+			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: proto.Clone(result).(*cli.Result)}}) // a stream repeats it
+		}
+	}
+	for seq := range r.IntN(4) {
+		origin := &cli.RecordOrigin{RunId: pick(r, "r1", "", "r2"), At: timestamppb.New(t0)}
+		facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Bound{Bound: &cli.ObjectiveBound{
+			Seq: uint64(seq + 1), Origin: origin, Objective: pick(r, "mem", "lat"), Value: 5, Unit: "u", Note: "derived",
+			Direction: pick(r, cli.Direction_DIRECTION_MAXIMIZE, cli.Direction_DIRECTION_MINIMIZE),
+		}}})
 	}
 	facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: resultOf(r, "orphan")}})
 	for range r.IntN(8) {
@@ -123,6 +136,10 @@ func resultOf(r *rand.Rand, job string) *cli.Result {
 		}
 	default:
 		m.Metric = &cli.Metric{Name: pick(r, "tput", "lat", "acc"), Direction: pick(r, cli.Direction_DIRECTION_MAXIMIZE, cli.Direction_DIRECTION_MINIMIZE, cli.Direction_DIRECTION_MAXIMIZE, cli.Direction_DIRECTION_UNSPECIFIED)}
+		if r.IntN(2) == 0 {
+			v := float64(r.IntN(64)) / 4
+			m.Observations = []*cli.Observation{{Name: "mem", Value: &v}}
+		}
 	}
 	return &cli.Result{JobId: job, Commit: "c-" + job, RecordedAt: stamp(r, 8), Outcome: &cli.Result_Measure{Measure: m}}
 }
@@ -340,6 +357,75 @@ func TestFactsDoNotDependOnTheOrderOrRepeatsOfTheRecords(t *testing.T) {
 		first, second := w.facts(rng(seed+1000), a, c), w.facts(rng(seed+2000), a, c)
 		if !reflect.DeepEqual(first, second) {
 			t.Fatalf("seed %d: two orders of the same records give different facts:\n%+v\n%+v", seed, first, second)
+		}
+	}
+}
+
+// charted is a point of a series the run's state serves, as the report draws it.
+type charted struct {
+	at          time.Time
+	value       float64
+	job, commit string
+}
+
+// bestIn is where the best of a series stood before t, written from its points alone: the best value
+// among those dated before t, the earliest of equal values keeping it. It is nil when none is.
+func bestIn(points []charted, direction cli.Direction, t time.Time) *charted {
+	var best *charted
+	for i, p := range points {
+		if p.at.Before(t) && (best == nil || (direction == cli.Direction_DIRECTION_MAXIMIZE && p.value > best.value) || (direction == cli.Direction_DIRECTION_MINIMIZE && p.value < best.value)) {
+			best = &points[i]
+		}
+	}
+	return best
+}
+
+func sameBest(got *core.Best, want *charted) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return got.Value == want.value && string(got.Job) == want.job && string(got.Commit) == want.commit && got.At.Equal(want.at)
+}
+
+// What a check-in freezes is what the report shows: at the start and at the end of any window, the best of
+// each objective is the best of the series the run's state serves for it, with the candidate that made
+// it, and no objective is in one and not the other. They read the same measurements.
+func TestACheckInsBestsAreTheReportsBests(t *testing.T) {
+	for seed := range uint64(seeds) {
+		w, r := generate(seed), rng(seed)
+		series, _, _ := search.Trajectory(w.view.Facts, string(ours))
+		a, b, _ := three(r)
+		moves := map[string]core.ObjectiveMove{}
+		for _, m := range window.Facts(w.input(r, at(a), at(b))).Objectives {
+			moves[m.Metric] = m
+		}
+		inReport := map[string]bool{}
+		for _, s := range series {
+			inReport[s.Objective] = true
+			var points []charted
+			for _, p := range s.Points {
+				points = append(points, charted{at: p.At.AsTime(), value: p.Value, job: p.JobId, commit: p.Commit})
+			}
+			end, start := bestIn(points, s.Direction, at(b)), bestIn(points, s.Direction, at(a))
+			move, listed := moves[s.Objective]
+			if end == nil {
+				if listed {
+					t.Fatalf("seed %d: %s has nothing before %v in the report but a best in the check-in: %+v", seed, s.Objective, at(b), move)
+				}
+				continue
+			}
+			wantDirection := core.Maximize
+			if s.Direction == cli.Direction_DIRECTION_MINIMIZE {
+				wantDirection = core.Minimize
+			}
+			if !listed || move.Direction != wantDirection || !sameBest(move.End, end) || !sameBest(move.Start, start) {
+				t.Fatalf("seed %d: %s over [%d, %d) is %+v in the check-in; the report's points %v say end %v start %v", seed, s.Objective, a, b, move, points, end, start)
+			}
+		}
+		for name := range moves {
+			if !inReport[name] {
+				t.Fatalf("seed %d: %s is in the check-in and not in the report", seed, name)
+			}
 		}
 	}
 }
