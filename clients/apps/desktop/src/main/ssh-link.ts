@@ -41,6 +41,8 @@ export interface SshLinkOptions {
   readonly controlPath: string;
   /** Where the master's pid is kept; a link made without one keeps it for its own life. */
   readonly master?: MasterCell;
+  /** Flags every ssh command of this link takes before its own (`-p`, `-J`, `-i`, `-F`): the control commands must name the same host the master did. */
+  readonly extraArgs?: readonly string[];
 }
 
 /** One host's ssh link. */
@@ -315,6 +317,7 @@ export const makeSshLink = Effect.fn('SshLink.make')(function* (options: SshLink
   const {alias} = options;
   const cell: MasterCell = options.master ?? {pid: undefined};
   const common = [
+    ...(options.extraArgs ?? []),
     '-o',
     `ControlPath=${options.controlPath}`,
     '-o',

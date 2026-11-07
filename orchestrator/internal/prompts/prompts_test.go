@@ -225,7 +225,6 @@ func bodies(r *rand.Rand, rec records) []core.Message {
 		envelope(core.Report{
 			Kind: reportKinds[r.IntN(len(reportKinds))], Sequence: r.Uint32(), Headline: text(r, "headline:", 4),
 			Changed: optional(r, "changed:"), InFlight: optional(r, "flight:"), Decisions: optional(r, "decisions:"),
-			OpenForUser: optional(r, "user:"),
 		}),
 		envelope(core.JobFinished{
 			Job: core.JobID(text(r, "job:", 3)), Outcome: outcomes[r.IntN(len(outcomes))],
@@ -334,7 +333,7 @@ func fieldsOf(m core.Message, rec records) []string {
 		}
 		return fields
 	case core.Report:
-		return []string{string(m.From), b.Headline, b.Changed, b.InFlight, b.Decisions, b.OpenForUser}
+		return []string{string(m.From), b.Headline, b.Changed, b.InFlight, b.Decisions}
 	case core.JobFinished:
 		return []string{string(b.Job), b.Detail}
 	case core.SubagentSettled:
@@ -410,7 +409,7 @@ func TestAnOptionalFieldIsSaidExactlyWhenItIsSet(t *testing.T) {
 				}
 			case core.Report:
 				for label, value := range map[string]string{
-					"\nChanged: ": b.Changed, "\nIn flight: ": b.InFlight, "\nDecisions: ": b.Decisions, "\nOpen for the user: ": b.OpenForUser,
+					"\nChanged: ": b.Changed, "\nIn flight: ": b.InFlight, "\nDecisions: ": b.Decisions,
 				} {
 					if said(label) != (value != "") {
 						t.Fatalf("%q with value %q, rendered %q", label, value, got)

@@ -88,7 +88,6 @@ function stateOf(world: World): OrchestratorState {
           atMs: REPORT_AT,
           headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
           changed: 'Fused expert dispatch landed.',
-          openForUser: 'Should quantization stay paused?',
         });
   const options: MeasuredOptions = {
     seed,
@@ -216,16 +215,6 @@ describe('the report as a page of the run', () => {
       new Set(['quiet']),
     );
     expect(new Set(links.map(link => link.getAttribute('data-size')))).toEqual(new Set(['sm']));
-    screen.unmount();
-  });
-
-  it('sets what the lead needs from the person apart, in the warning tone', () => {
-    const {screen} = render({});
-    const ask = [...screen.container.querySelectorAll('.vs-chip')].find(
-      chip => chip.textContent === 'Needs you',
-    );
-    expect(ask?.getAttribute('data-tone')).toBe('warn');
-    expect(ask?.parentElement?.textContent).toContain('Should quantization stay paused?');
     screen.unmount();
   });
 
@@ -381,7 +370,6 @@ describe('the report of a run with two objectives and a declared bound', () => {
     expect(summary).toContain('Throughput is 2.3 times the baseline');
     expect(summary).toContain('Updated 23m ago');
     expect(summary).toContain('Fused expert dispatch landed.');
-    expect(summary).toContain('Needs you');
     screen.unmount();
   });
 

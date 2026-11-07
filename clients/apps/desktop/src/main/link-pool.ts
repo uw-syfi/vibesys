@@ -34,6 +34,8 @@ interface Entry {
 export const makeLinkPool = (
   controlPath: string,
   log: (line: string) => void,
+  /** The ssh flags a host needs beyond its alias (a saved port, jump host or identity), asked at each new link. */
+  sshArgsFor: (alias: string) => Effect.Effect<readonly string[]> = () => Effect.succeed([]),
 ): Effect.Effect<LinkPool, never, ProcessSpawner | Scope.Scope> =>
   Effect.gen(function* () {
     const spawner = yield* ProcessSpawner;
@@ -100,9 +102,13 @@ export const makeLinkPool = (
         yield* retryUnreleased(alias);
         let entry = entries.get(alias);
         if (entry === undefined) {
-          const link = yield* makeSshLink({alias, controlPath, master: masterOf(alias)}).pipe(
-            Effect.provideService(ProcessSpawner, spawner),
-          );
+          const extraArgs = yield* sshArgsFor(alias);
+          const link = yield* makeSshLink({
+            alias,
+            controlPath,
+            master: masterOf(alias),
+            extraArgs,
+          }).pipe(Effect.provideService(ProcessSpawner, spawner));
           entry = {link, users: 0};
           entries.set(alias, entry);
         }

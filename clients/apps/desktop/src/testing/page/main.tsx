@@ -173,7 +173,6 @@ const scenario = query.has('report')
       atMs: base.endMs - 20 * 60_000,
       headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
       changed: 'Fused expert dispatch landed.',
-      openForUser: 'Should quantization stay paused?',
     })
   : base;
 const measured = query.get('measured');

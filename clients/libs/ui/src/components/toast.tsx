@@ -5,8 +5,8 @@ import {withoutPaths} from './paths.js';
 import {StatusDot} from './status.js';
 import {Text} from './text.js';
 
-/** How a toast reads: `warn` is something to know, `err` something that failed. */
-export type ToastTone = 'warn' | 'err';
+/** How a toast reads: `neutral` is something that happened, `warn` something to know, `err` something that failed. */
+export type ToastTone = 'neutral' | 'warn' | 'err';
 
 /** One toast of a stack: what the stack's owner holds for it. */
 export interface ToastItem {
@@ -17,9 +17,11 @@ export interface ToastItem {
   /** The longer account behind the title, shown when the toast is open. */
   readonly detail?: string;
   readonly open: boolean;
+  /** The label of the one thing the toast offers to do (`Undo`); pressing it calls the stack's `act`. */
+  readonly action?: string;
 }
 
-const TONE_WORDS: Record<ToastTone, string> = {warn: 'Warning', err: 'Error'};
+const TONE_WORDS: Record<ToastTone, string> = {neutral: 'Note', warn: 'Warning', err: 'Error'};
 
 /**
  * A small notification that stays until it is dismissed: a tone dot, a short title, and a dismiss
@@ -35,6 +37,8 @@ export function Toast(props: {
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
   readonly dismiss: () => void;
+  /** The offered action's label and what pressing it does. */
+  readonly action?: {readonly label: string; readonly press: () => void};
 }): JSX.Element {
   return (
     <div
@@ -54,6 +58,9 @@ export function Toast(props: {
         ) : null}
       </div>
       <div className="vs-toast-controls">
+        {props.action === undefined ? null : (
+          <Button variant="quiet" size="sm" text={props.action.label} press={props.action.press} />
+        )}
         {props.detail === undefined ? null : (
           <DetailsToggle open={props.open} toggle={props.toggle} />
         )}
@@ -75,7 +82,10 @@ export function ToastStack(props: {
   readonly toasts: readonly ToastItem[];
   readonly toggle: (id: string, open: boolean) => void;
   readonly dismiss: (id: string) => void;
+  /** Called with the id of a toast whose `action` was pressed. */
+  readonly act?: (id: string) => void;
 }): JSX.Element {
+  const {act} = props;
   return (
     <section className="vs-toast-stack" aria-label={props.label} aria-live="polite">
       {props.toasts.map(toast => (
@@ -87,6 +97,9 @@ export function ToastStack(props: {
           open={toast.open}
           toggle={open => props.toggle(toast.id, open)}
           dismiss={() => props.dismiss(toast.id)}
+          {...(toast.action === undefined || act === undefined
+            ? {}
+            : {action: {label: toast.action, press: () => act(toast.id)}})}
         />
       ))}
     </section>

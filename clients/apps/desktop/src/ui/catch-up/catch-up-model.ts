@@ -149,7 +149,6 @@ const PARTS = [
   {label: 'Changed', of: (report: Report) => report.changed},
   {label: 'In flight', of: (report: Report) => report.inFlight},
   {label: 'Decisions', of: (report: Report) => report.decisions},
-  {label: 'Needs you', of: (report: Report) => report.openForUser},
 ] as const;
 
 /** A report as its headline and the parts the lead filled in. */

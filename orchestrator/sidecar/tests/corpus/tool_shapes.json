@@ -188,8 +188,7 @@
    "headline": "h",
    "changed": "c",
    "decisions": "d",
-   "in_flight": "i",
-   "open_for_user": "o"
+   "in_flight": "i"
   },
   "case": "other"
  },

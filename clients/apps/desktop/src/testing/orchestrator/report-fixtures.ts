@@ -449,7 +449,6 @@ export function withReport(
     readonly changed?: string;
     readonly inFlight?: string;
     readonly decisions?: string;
-    readonly openForUser?: string;
   },
 ): Scenario {
   const {atMs, sequence, kind, ...words} = report;
@@ -466,7 +465,6 @@ export function withReport(
         changed: '',
         inFlight: '',
         decisions: '',
-        openForUser: '',
         ...words,
       },
     },

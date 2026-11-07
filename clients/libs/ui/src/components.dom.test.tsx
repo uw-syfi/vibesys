@@ -171,6 +171,30 @@ const COMPLETIONS: readonly Completion[] = [
 ];
 
 describe('PathInput', () => {
+  test('hands a pick to its owner, and Enter and Escape that no completion uses', async () => {
+    const events: string[] = [];
+    const container = await mount(
+      <Field label="Machine">
+        <PathInput
+          value=""
+          change={() => events.push('change')}
+          completions={COMPLETIONS}
+          pick={completion => events.push(`pick ${completion.value}`)}
+          submit={() => events.push('submit')}
+          escape={() => events.push('escape')}
+        />
+      </Field>,
+    );
+    const input = one(container, 'input') as HTMLInputElement;
+    await press(input, 'ArrowDown');
+    await press(input, 'Enter');
+    await press(input, 'Escape');
+    await press(input, 'Escape');
+    await press(input, 'Enter');
+    // The first Escape closed the list of completions; the second had none left to close.
+    expect(events).toEqual(['pick /srv/alpha', 'escape', 'submit']);
+  });
+
   test('arrows highlight a completion, Enter takes it, Esc hides the list', async () => {
     const container = await mount(<ControlledPath completions={COMPLETIONS} />);
     const input = one(container, 'input') as HTMLInputElement;

@@ -203,6 +203,41 @@ func TestAMetricKeyChoosesTheScoredObjective(t *testing.T) {
 	}
 }
 
+// A manifest names its scored metric once: a top-level metric beside [benchmark.result] names the
+// field the result file is scored on, or the manifest is refused naming both, as the product's
+// reader refuses it. Every pairing of the two, in either schema, is tried.
+func TestATopLevelMetricBesideAResultFileMustNameItsField(t *testing.T) {
+	fields := []string{"ops_per_sec", "latency_ms"}
+	both := objectives + "\n[[objective]]\nname = \"latency_ms\"\ndirection = \"min\"\n"
+	for _, version := range []string{"0.1", "0.2"} {
+		for _, top := range append([]string{""}, fields...) {
+			for _, field := range fields {
+				manifest := strings.Replace(jsonManifest, `metric = "ops_per_sec"`, fmt.Sprintf("metric = %q", field), 1)
+				head := fmt.Sprintf("version = %q\n", version)
+				if top != "" {
+					head += fmt.Sprintf("metric = %q\n", top)
+				}
+				manifest = strings.Replace(manifest, "version = \"0.1\"\n", head, 1)
+				got, err := task.Parse("t", []byte(manifest), []byte(both))
+				if top == "" || top == field {
+					if err != nil || got.Metric.Name != field {
+						t.Errorf("%s, metric %q, result field %q: %+v, %v; want it scored on %q", version, top, field, got.Metric, err, field)
+					}
+					continue
+				}
+				if err == nil {
+					t.Errorf("%s, metric %q, result field %q: accepted and scored on %q", version, top, field, got.Metric.Name)
+					continue
+				}
+				f := failureOf(t, err)
+				if f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, fmt.Sprintf("metric %q", top)) || !strings.Contains(f.Message, fmt.Sprintf("[benchmark.result] metric %q", field)) {
+					t.Errorf("%s, metric %q, result field %q: %q (%s), want invalid input naming both", version, top, field, f.Message, f.Kind)
+				}
+			}
+		}
+	}
+}
+
 func TestADockerfileIsNoted(t *testing.T) {
 	files := taskFiles("t", jsonManifest, objectives)
 	files[".vibesys/tasks/t/Dockerfile"] = "FROM scratch"

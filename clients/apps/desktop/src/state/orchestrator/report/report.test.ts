@@ -338,14 +338,14 @@ describe('the lead summary', () => {
       'r',
       report('a', 'r', 1, 1, {
         changed: 'c',
-        openForUser: 'o',
+        decisions: 'o',
         kind: ReportKind.FINAL,
       }),
     );
     const summary = summaryReport(state, 'r');
     expect(summary?.fields).toEqual([
       {field: 'changed', text: 'c'},
-      {field: 'openForUser', text: 'o'},
+      {field: 'decisions', text: 'o'},
     ]);
     expect(summary?.final).toBe(true);
     expect(summary?.atMs).toBe(1000);

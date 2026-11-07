@@ -126,7 +126,37 @@ function createViewerPreload(ipc: PreferencesInvoker): ViewerPreloadBridge {
   };
 }
 
+/** The channel main serves for machines; it must equal `MACHINES_CHANNEL` in `core/machines/machines-codec.ts`, which a test holds. */
+const MACHINES_PRELOAD_CHANNEL = 'vibesys:machines';
+
+/** What the preload exposes for machines; `MachinesBridge` in `core/machines/machines-codec.ts` is the page's view of it. */
+interface MachinesPreloadBridge {
+  call(
+    request: Uint8Array,
+    done: (reply: Uint8Array) => void,
+    failed: (error: string) => void,
+  ): void;
+}
+
+/** Each call ends in exactly one callback: the reply is bytes, or it is a failure. */
+function createMachinesPreload(ipc: PreferencesInvoker): MachinesPreloadBridge {
+  const text = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  return {
+    call(request, done, failed) {
+      ipc.invoke(MACHINES_PRELOAD_CHANNEL, request).then(
+        reply =>
+          reply instanceof Uint8Array
+            ? done(reply)
+            : failed('the machines reply must be protobuf bytes'),
+        error => failed(text(error)),
+      );
+    },
+  };
+}
+
 module.exports = {
+  createMachinesPreload,
+  MACHINES_PRELOAD_CHANNEL,
   createGatewayPreload,
   GATEWAY_PRELOAD_CHANNEL,
   createPreferencesPreload,
@@ -142,6 +172,10 @@ if (process.type === 'renderer') {
   electron.contextBridge.exposeInMainWorld(
     'vibesysPreferences',
     createPreferencesPreload(electron.ipcRenderer),
+  );
+  electron.contextBridge.exposeInMainWorld(
+    'vibesysMachines',
+    createMachinesPreload(electron.ipcRenderer),
   );
   electron.contextBridge.exposeInMainWorld(
     'vibesysViewer',

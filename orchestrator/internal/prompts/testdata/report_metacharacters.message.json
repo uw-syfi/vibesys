@@ -8,8 +8,7 @@
     "decisions": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
     "headline": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
     "inFlight": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "kind": "REPORT_KIND_FINAL",
-    "openForUser": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``"
+    "kind": "REPORT_KIND_FINAL"
   },
   "runId": "r1",
   "toAgentId": "agent-a"
