@@ -51,7 +51,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	// costs nothing.
 	link, err := core.NewPlanLink(req.Plan, req.NoPlan)
 	if err == nil {
-		err = link.Check(req.Spec.Settings.Kind())
+		err = link.Check(req.Spec.Settings.Kind(), req.Context.Run)
 	}
 	if err != nil {
 		return core.SubmitOutcome{}, err

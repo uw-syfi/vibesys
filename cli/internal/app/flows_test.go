@@ -38,7 +38,8 @@ func flowSpec(settings core.Settings) core.JobSpec {
 
 func submitFlow(t *testing.T, a *app.App, settings core.Settings, noCache bool) core.SubmitOutcome {
 	t.Helper()
-	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: flowSpec(settings), NoCache: noCache})
+	spec := flowSpec(settings)
+	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec, NoCache: noCache, NoPlan: noPlan(spec)})
 	if err != nil {
 		t.Fatalf("Submit(%s): %v", settings.Kind(), err)
 	}
@@ -325,7 +326,7 @@ func TestSubmissionsTheDaemonCannotKeyAreRefusedNotQueued(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: c.spec})
+			_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: c.spec, NoPlan: noPlan(c.spec)})
 			var f *core.Failure
 			if !errors.As(err, &f) || f.Kind != c.want {
 				t.Fatalf("Submit = %v, want %s", err, c.want)
@@ -343,7 +344,7 @@ func TestADaemonWithoutTasksRefusesCheckAndMeasure(t *testing.T) {
 	w.tasks = nil
 	a := w.newApp()
 	for _, settings := range []core.Settings{core.CheckSettings{}, core.MeasureSettings{Samples: 3}} {
-		_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: flowSpec(settings)})
+		_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: flowSpec(settings), NoPlan: settings.Kind() == core.JobMeasure})
 		var f *core.Failure
 		if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
 			t.Errorf("Submit(%s) = %v, want unavailable", settings.Kind(), err)
@@ -553,7 +554,8 @@ func TestAJobsKeyIsMadeOfItsKindCommitTaskVersionEnvironmentSettingsAndSchema(t 
 		}
 		w.tasks.Put(string(call.Scope.Repository()), v.commit, tasktest.Scripted("task", v.check, scores))
 		a := w.newApp()
-		out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: v.commit, Settings: v.settings}})
+		spec := core.JobSpec{Commit: v.commit, Settings: v.settings}
+		out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec, NoPlan: noPlan(spec)})
 		if err != nil {
 			t.Fatalf("%s: %v", v.name, err)
 		}
@@ -656,7 +658,8 @@ func TestACandidateThatChangesTheTaskIsRefusedAndNamesThePaths(t *testing.T) {
 				w.tasks.Put(repo, candidate(1), withFiles(c.edit))
 				a := w.newApp()
 
-				_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: candidate(1), Settings: settings}})
+				spec := core.JobSpec{Commit: candidate(1), Settings: settings}
+				_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec, NoPlan: noPlan(spec)})
 				if len(c.refused) == 0 {
 					if err != nil {
 						t.Fatalf("Submit = %v, want accepted", err)

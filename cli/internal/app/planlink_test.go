@@ -36,14 +36,17 @@ type planLinkAnswer struct {
 }
 
 // answerOf is the table, written out from the rules and not from the code under test: the two flags
-// together are refused first, then --no-plan on anything but a measure job, then a plan that is not
-// there. Everything else is accepted.
+// together are refused first, then --no-plan on anything but a measure job, then a measure from a
+// run that says nothing, then a plan that is not there. Everything else is accepted, a person's
+// measure with no flag included.
 func answerOf(c planLinkCase) planLinkAnswer {
 	switch {
 	case c.plan && c.noPlan:
 		return planLinkAnswer{true, core.FailureInvalidInput, []string{"--plan", "--no-plan"}}
 	case c.noPlan && c.kind != core.JobMeasure:
 		return planLinkAnswer{true, core.FailureInvalidInput, []string{"--no-plan"}}
+	case c.kind == core.JobMeasure && c.inRun && !c.plan && !c.noPlan:
+		return planLinkAnswer{true, core.FailureInvalidInput, []string{"--plan", "--no-plan"}}
 	case c.plan && !c.exists:
 		return planLinkAnswer{true, core.FailureNotFound, []string{"--plan"}}
 	}
@@ -131,6 +134,9 @@ func TestPlanLinkExamples(t *testing.T) {
 		{"a measure from a run linked to its plan", planLinkCase{kind: core.JobMeasure, inRun: true, plan: true, exists: true}, "", nil},
 		{"a baseline measure that says it tests no plan", planLinkCase{kind: core.JobMeasure, inRun: true, noPlan: true}, "", nil},
 		{"a person measuring at a terminal", planLinkCase{kind: core.JobMeasure}, "", nil},
+		{"a measure from a run that says nothing", planLinkCase{kind: core.JobMeasure, inRun: true}, core.FailureInvalidInput, []string{"--plan", "--no-plan"}},
+		{"a check from a run that says nothing", planLinkCase{kind: core.JobCheck, inRun: true}, "", nil},
+		{"a command from a run that says nothing", planLinkCase{kind: core.JobCommand, inRun: true}, "", nil},
 		{"both flags", planLinkCase{kind: core.JobMeasure, inRun: true, plan: true, exists: true, noPlan: true}, core.FailureInvalidInput, []string{"--plan", "--no-plan"}},
 		{"a plan that is not there", planLinkCase{kind: core.JobMeasure, inRun: true, plan: true}, core.FailureNotFound, []string{"--plan"}},
 		{"no plan on a check", planLinkCase{kind: core.JobCheck, inRun: true, noPlan: true}, core.FailureInvalidInput, []string{"--no-plan"}},

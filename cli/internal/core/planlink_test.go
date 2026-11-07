@@ -48,23 +48,43 @@ func TestPlanLinkSaysExactlyWhatTheCallerSaid(t *testing.T) {
 	}
 }
 
-// Only a measure job says it tests no plan, and any job may name a plan or say nothing.
-func TestOnlyAMeasureJobSaysItTestsNoPlan(t *testing.T) {
+// Over every kind of job, caller and statement, a submission is refused exactly when it says
+// --no-plan on a job that is not a measure, or says nothing on a measure from a run, and the
+// refusal names the flags the caller should have given.
+func TestAPlanLinkIsCheckedAgainstTheKindOfJobAndTheCaller(t *testing.T) {
 	kinds := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand}
 	for _, kind := range kinds {
-		for _, plan := range []core.PlanNumber{0, 4} {
-			for _, noPlan := range []bool{false, true} {
-				link, err := core.NewPlanLink(plan, noPlan)
-				if err != nil {
-					continue // both statements: refused before a kind matters
-				}
-				err = link.Check(kind)
-				refused := noPlan && kind != core.JobMeasure
-				switch f := failureOf(err); {
-				case refused && (f == nil || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "--no-plan")):
-					t.Errorf("%s job, plan %d, no-plan %v: err = %v, want invalid input naming --no-plan", kind, plan, noPlan, err)
-				case !refused && err != nil:
-					t.Errorf("%s job, plan %d, no-plan %v: err = %v, want accepted", kind, plan, noPlan, err)
+		for _, run := range []core.RunID{"", "run-1"} {
+			for _, plan := range []core.PlanNumber{0, 4} {
+				for _, noPlan := range []bool{false, true} {
+					link, err := core.NewPlanLink(plan, noPlan)
+					if err != nil {
+						continue // both statements: refused before a kind matters
+					}
+					err = link.Check(kind, run)
+					var names []string
+					switch {
+					case noPlan && kind != core.JobMeasure:
+						names = []string{"--no-plan"}
+					case kind == core.JobMeasure && run != "" && plan == 0 && !noPlan:
+						names = []string{"--plan", "--no-plan"}
+					}
+					f := failureOf(err)
+					if names == nil {
+						if err != nil {
+							t.Errorf("%s job, run %q, plan %d, no-plan %v: err = %v, want accepted", kind, run, plan, noPlan, err)
+						}
+						continue
+					}
+					if f == nil || f.Kind != core.FailureInvalidInput {
+						t.Errorf("%s job, run %q, plan %d, no-plan %v: err = %v, want invalid input", kind, run, plan, noPlan, err)
+						continue
+					}
+					for _, name := range names {
+						if !strings.Contains(f.Message, name) {
+							t.Errorf("%s job, run %q, plan %d, no-plan %v: %q does not name %s", kind, run, plan, noPlan, f.Message, name)
+						}
+					}
 				}
 			}
 		}

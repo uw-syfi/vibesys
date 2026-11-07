@@ -28,15 +28,23 @@ func (l PlanLink) Plan() PlanNumber { return l.plan }
 // Said reports whether the caller named a plan or said there is none.
 func (l PlanLink) Said() bool { return l.plan != 0 || l.none }
 
-// Check says whether a job of the kind may be submitted with the link, and the error is a *Failure
-// of kind FailureInvalidInput that names the flag at fault. Whether the plan exists is the store's
-// to say, so it stays atomic with the write.
+// Check says whether a job of the kind may be submitted with the link by a caller in the run, and
+// the error is a *Failure of kind FailureInvalidInput that names the flags the caller should give.
+// A caller outside a run, a person at a terminal, has an empty run id. Whether the plan exists is
+// the store's to say, so it stays atomic with the write.
 //
 //   - Only a measure job takes --no-plan: a check or command job is linked to a plan or to none
 //     without saying so.
-func (l PlanLink) Check(kind JobKind) error {
-	if l.none && kind != JobMeasure {
+//   - A measure job submitted from a run says what it tests, a plan or none. Every point on the
+//     run's chart is a measure job, and one that said nothing could not be placed beside its idea.
+//     A person at a terminal is not asked.
+func (l PlanLink) Check(kind JobKind, run RunID) error {
+	switch {
+	case l.none && kind != JobMeasure:
 		return failf(FailureInvalidInput, "--no-plan: only a measure job says it tests no plan; a %s job takes --plan N or neither", kind)
+	case kind == JobMeasure && run != "" && !l.Said():
+		return failf(FailureInvalidInput,
+			"--plan or --no-plan: a measure job from a run says what it tests; give --plan N for the plan it tries, or --no-plan for the baseline or a re-measure of the head")
 	}
 	return nil
 }
