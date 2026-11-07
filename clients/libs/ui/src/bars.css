@@ -1,0 +1,182 @@
+/*
+ * Charts of bars and the rows that carry bars: the value axis and labelled bars of the stacked bars
+ * (`StackedBars`, whose base styles are in `frame.css`), and `BarRows`. Every value is a token
+ * variable from `tokens.css`.
+ */
+
+/* --- stacked bars with a value axis and labelled bars ------------------------------------------ */
+
+.vs-bars-plot {
+  position: relative;
+}
+.vs-bars-bar {
+  position: relative;
+}
+/* A segment that changes height eases to the new one: a figure that moves is seen moving. */
+.vs-bars-segment {
+  transition: height var(--duration-base) var(--easing);
+}
+.vs-bars-scale {
+  position: relative;
+}
+/* A chart with a value axis or labelled bars: the axis figures in a column of their own, and the
+   plot, the labels and the two ends of the axis all in the column beside it, so they share its
+   edges. */
+.vs-bars[data-scaled] {
+  display: grid;
+  grid-template-columns: var(--bars-scale-chars, 0) minmax(0, 1fr);
+  column-gap: 0;
+  row-gap: var(--space-1);
+}
+.vs-bars[data-axis] {
+  column-gap: var(--space-3);
+}
+.vs-bars[data-scaled] > .vs-bars-scale {
+  grid-column: 1;
+  grid-row: 1;
+}
+.vs-bars[data-scaled] > :not(.vs-bars-scale) {
+  grid-column: 2;
+}
+.vs-bars-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vs-bars-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: var(--hairline);
+  background: var(--line);
+}
+.vs-bars-marks {
+  position: relative;
+  height: var(--text-small-line);
+}
+.vs-bars-mark {
+  position: absolute;
+  left: var(--mark-at);
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A measured row places each label itself, inside the row and clear of its neighbours. */
+.vs-bars-mark[data-placed] {
+  left: var(--mark-left);
+  transform: none;
+}
+
+/* --- bar rows: a name, a bar and figures on one grid ------------------------------------------- */
+
+.vs-bar-rows-box {
+  min-width: 0;
+}
+.vs-bar-rows {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.vs-bar-rows-name-col {
+  width: 38%;
+}
+.vs-bar-rows col[style] {
+  width: var(--col-width);
+}
+.vs-bar-rows[data-bar="off"] .vs-bar-rows-bar-col,
+.vs-bar-rows[data-bar="off"] [data-role="bar"] {
+  display: none;
+}
+.vs-bar-rows th,
+.vs-bar-rows td {
+  padding: 0 0 0 var(--space-4);
+  text-align: left;
+  vertical-align: middle;
+  font-weight: inherit;
+}
+.vs-bar-rows th:first-child,
+.vs-bar-rows td:first-child {
+  padding-left: 0;
+}
+.vs-bar-rows [data-align="end"] {
+  text-align: right;
+}
+.vs-bar-rows thead th {
+  height: var(--control-sm);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  font-weight: var(--text-caption-weight);
+  white-space: nowrap;
+}
+.vs-bar-rows tbody tr {
+  height: var(--row);
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-bar-rows td:not([data-role="bar"]) {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.vs-bar-rows td[data-strong] {
+  color: var(--text);
+}
+.vs-bar-rows td[data-missing] {
+  color: var(--muted);
+}
+.vs-bar-rows-name {
+  overflow: hidden;
+}
+.vs-bar-rows-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-bar-rows-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-bar-rows-label[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  font-weight: var(--text-code-weight);
+}
+.vs-bar-rows-lead > .vs-text {
+  flex: none;
+}
+.vs-bar-rows-track {
+  display: block;
+  height: var(--dot);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+.vs-bar-rows-fill {
+  display: block;
+  width: var(--bar-share);
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--seg-color, var(--accent));
+  transition: width var(--duration-base) var(--easing);
+}

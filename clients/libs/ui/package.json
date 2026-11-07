@@ -50,6 +50,7 @@
     "src/fonts.css",
     "src/components.css",
     "src/frame.css",
+    "src/bars.css",
     "src/controls.css",
     "src/navigation.css",
     "src/rail.css",

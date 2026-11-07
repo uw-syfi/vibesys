@@ -8,6 +8,7 @@ import {createRoot} from 'react-dom/client';
 import {
   ActionPanel,
   AppFrame,
+  BarRows,
   BrandMark,
   Button,
   Chart,
@@ -1087,6 +1088,113 @@ describe('StackedBars', () => {
       <StackedBars label="Usage" unit="tokens" bars={[bar('a', [0])]} />,
     );
     expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
+  });
+});
+
+describe('StackedBars with an axis', () => {
+  const bar = (id: string, parts: readonly number[]) => ({
+    id,
+    title: id,
+    total: parts.reduce((sum, part) => sum + part, 0),
+    segments: parts.map((value, index) => ({key: `${id}-${index}`, series: index, value})),
+  });
+
+  test('draws the bars to the top of a tidy value axis and labels the bars it is given', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Spend"
+        unit="dollars"
+        bars={[bar('a', [30, 15]), bar('b', [20])]}
+        valueFormat={value => `$${value}`}
+        marks={[
+          {at: 0, text: '0 h'},
+          {at: 1, text: '1 h'},
+        ]}
+      />,
+    );
+    const heights = [...container.querySelectorAll<HTMLElement>('.vs-bars-bar')].map(each =>
+      [...each.querySelectorAll<HTMLElement>('.vs-bars-segment')].map(segment =>
+        Math.round(Number.parseFloat(segment.style.height)),
+      ),
+    );
+    // The tallest bar holds 45 and the axis ends at 60: the bars are drawn to 60, not to 45.
+    expect(heights).toEqual([[50, 25], [33]]);
+    // Zero is the baseline and has no figure of its own.
+    expect([...container.querySelectorAll('.vs-bars-tick')].map(each => each.textContent)).toEqual([
+      '$20',
+      '$40',
+      '$60',
+    ]);
+    expect(container.querySelectorAll('.vs-bars-line')).toHaveLength(3);
+    expect([...container.querySelectorAll('.vs-bars-mark')].map(each => each.textContent)).toEqual([
+      '0 h',
+      '1 h',
+    ]);
+  });
+
+  test('a chart with nothing spent has an axis and bars of no height', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Spend"
+        unit="dollars"
+        bars={[bar('a', [0])]}
+        valueFormat={value => `$${value}`}
+      />,
+    );
+    expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
+  });
+});
+
+describe('BarRows', () => {
+  const columns = [{header: 'Turns'}, {header: 'Cost', strong: true}];
+  const rows = [
+    {key: 'a', name: 'builder', series: 1, value: 200, figures: ['774', '$200']},
+    {key: 'b', name: 'planner', series: 2, value: 50, figures: ['148', '$50']},
+    {key: 'c', name: 'profiler', value: null, note: 'No price', figures: ['41', null]},
+  ];
+  const mountRows = () =>
+    mount(
+      <BarRows label="By type" nameHeader="Type" barLabel="Share" columns={columns} rows={rows} />,
+    );
+
+  test('draws each bar as wide as its row is of the largest, and none for no value', async () => {
+    const container = await mountRows();
+    const shares = [...container.querySelectorAll<HTMLElement>('.vs-bar-rows-track')].map(each =>
+      each.style.getPropertyValue('--bar-share'),
+    );
+    expect(shares).toEqual(['100.0%', '25.0%', '0.0%']);
+  });
+
+  test('writes a figure the host did not report as a dash, never as zero', async () => {
+    const container = await mountRows();
+    const cells = [...container.querySelectorAll('tbody tr:last-child td:not([data-role])')];
+    expect(cells.map(each => each.textContent)).toEqual(['41', '—']);
+    expect(cells.at(-1)?.hasAttribute('data-missing')).toBe(true);
+    expect(container.textContent).toContain('No price');
+  });
+
+  test('names the columns and each row, with the whole name on hover', async () => {
+    const container = await mountRows();
+    expect([...container.querySelectorAll('thead th')].map(each => each.textContent)).toEqual([
+      'Type',
+      'Share',
+      'Turns',
+      'Cost',
+    ]);
+    expect(
+      [...container.querySelectorAll('.vs-bar-rows-label')].map(each => each.getAttribute('title')),
+    ).toEqual(['builder', 'planner', 'profiler']);
+    expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('By type');
+  });
+
+  test('gives the figure columns the same room whenever the same figures are drawn', async () => {
+    const widths = async () =>
+      [...(await mountRows()).querySelectorAll<HTMLElement>('col[style]')].map(each =>
+        each.style.getPropertyValue('--col-width'),
+      );
+    const first = await widths();
+    expect(first).toHaveLength(2);
+    expect(await widths()).toEqual(first);
   });
 });
 
