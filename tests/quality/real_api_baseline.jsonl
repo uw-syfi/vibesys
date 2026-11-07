@@ -61,8 +61,6 @@
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "interpreter", "count": 8}
 {"path": "tests/vibesys/loops/test_rocprof_remote_bridge.py", "rule": "threading", "count": 2}
 {"path": "tests/vibesys/loops/test_torch_inject_state_machine.py", "rule": "signal", "count": 1}
-{"path": "tests/quality/test_check_file_length.py", "rule": "subprocess", "count": 1}
-{"path": "tests/quality/test_check_file_length.py", "rule": "interpreter", "count": 1}
 {"path": "tests/quality/test_smoke_dynamic_loop_script.py", "rule": "subprocess", "count": 2}
 {"path": "tests/support/__init__.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-sandbox/tests/test_accelerator_discovery.py", "rule": "real_impl", "count": 3}
@@ -139,6 +137,7 @@
 {"path": "tests/quality/test_check_stale_revert.py", "rule": "real_impl", "count": 1}
 {"path": "tests/quality/test_contract_sot.py", "rule": "real_impl", "count": 1}
 {"path": "tests/quality/test_purity.py", "rule": "real_impl", "count": 1}
+{"path": "tests/quality/test_repo_files.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/core_host_world.py", "rule": "real_impl", "count": 5}
 {"path": "tests/support/docker_environment.py", "rule": "real_impl", "count": 2}
 {"path": "tests/support/executor_cases.py", "rule": "real_impl", "count": 4}

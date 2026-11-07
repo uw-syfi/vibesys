@@ -22,10 +22,11 @@ def test_discovery_excludes_generated_build_copies(tmp_path: Path) -> None:
     generated.parent.mkdir(parents=True)
     generated.write_text("value = 1\n", encoding="utf-8")
 
-    files, error = discover_ruff_files(tmp_path)
+    files, error = discover_ruff_files(tmp_path, names=("src/sample.py", "build/lib/sample.py"))
 
     assert error is None
     assert files == [source.resolve()]
+    assert generated.resolve() not in files
 
 
 def test_accepts_a_suppression_with_a_colocated_reason(tmp_path: Path) -> None:
@@ -131,12 +132,15 @@ def test_all_submodules_are_excluded_from_waiver_discovery(tmp_path: Path) -> No
     (tmp_path / "pyproject.toml").write_text(
         (root / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
+    names: list[str] = []
     for section in config.sections():
-        source = tmp_path / config[section]["path"] / "submodule_probe.py"
+        relative = f"{config[section]['path']}/submodule_probe.py"
+        source = tmp_path / relative
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("", encoding="utf-8")
+        names.append(relative)
 
-    files, error = discover_ruff_files(tmp_path)
+    files, error = discover_ruff_files(tmp_path, names=names)
 
     assert error is None
     assert not files, (

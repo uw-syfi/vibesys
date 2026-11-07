@@ -99,6 +99,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.check_doc_links import iter_code_spans, iter_markdown_files, run_git
+from scripts.repo_files import tracked_paths
 
 # Docs whose citations are swept and gated. One entry per doc, so opting a doc
 # in is a reviewed decision rather than a repo-wide sweep nobody asked for.
@@ -172,12 +173,6 @@ def extract_citations(source: Path, text: str) -> list[Citation]:
             )
         )
     return citations
-
-
-def tracked_paths(repo_root: Path) -> tuple[str, ...]:
-    """Every repo-relative path `git ls-files` reports for ``repo_root``."""
-    listing = run_git(["git", "-C", str(repo_root), "ls-files", "-z"])
-    return tuple(filter(None, listing.split("\0")))
 
 
 def matching_paths(cited: str, tracked: tuple[str, ...]) -> list[str]:
