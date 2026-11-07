@@ -31,11 +31,14 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | You need | Run |
 | --- | --- |
 | The correctness check on a commit | `vibesys-cli submit check <sha>` |
-| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5` |
+| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5 --plan <n>` |
 | Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
 
-Each prints a job id and returns at once. Useful flags: `--plan <n>` links the job to your plan,
-`--note "<text>"` says why you ran it (notes are for readers; they change no result), and
+Each prints a job id and returns at once. A measure says what it tests: `--plan <n>` links it to
+your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the
+baseline and a re-measure of the head do. A measure from a run that gives neither is refused,
+naming both flags; give both and it is refused too. `--plan` also links a check or a command job.
+Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops.
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
@@ -85,10 +88,10 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
   `--json` has as `comparison.verdict.kind` (`VERDICT_KIND_BETTER`, `VERDICT_KIND_WORSE`,
   `VERDICT_KIND_WITHIN_NOISE`, `VERDICT_KIND_INCONCLUSIVE` or `VERDICT_KIND_TRADEOFF`). Only `better` is a gain. `worse` and `within_noise` are
   not. On `inconclusive`, add samples within your brief's budget, unless the line says `not comparable`: the two commits were measured under different task versions or metrics, which more samples cannot fix, so report it. Never compute a verdict yourself.
-- Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
+- Samples add up: `submit measure <sha> --samples 8 --plan <n>` runs only the missing ones. Identical readings
   on both sides stay inconclusive however many you add.
 - `vibesys-cli result --json` has the number to report for the result branch, in
   `current.result.measure.value`: the head's latest checked measurement, the one a promotion rests
   on included. It exits 1 when there is none (`none.reason` says why); for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`,
-  `vibesys-cli submit measure <head SHA>` gives it one.
+  `vibesys-cli submit measure <head SHA> --no-plan` gives it one.
 - Tell the reader the base, the sample counts and the environment from the output, never from memory.

@@ -74,9 +74,14 @@ func asAgent(t *testing.T, operator map[string]string, endpoint core.JobToolEndp
 	return hostEnv(env)
 }
 
+// agentCommand is the command an agent of a run runs against the daemon: a measure of the baseline,
+// which says it tests no plan, as vibesysd requires of a measure from a run. The world's tools read
+// none of its words; they stand for any command that needs a daemon.
+var agentCommand = []string{"submit", "measure", "HEAD", "--no-plan"}
+
 // runAgentCommand is an agent's command: exit status, and what it says on failure.
 func runAgentCommand(ctx context.Context, w *jobToolWorld, tool string, env []string) (bool, string) {
-	_, stderr, err := w.Run(ctx, tool, []string{"submit", "measure"}, env)
+	_, stderr, err := w.Run(ctx, tool, agentCommand, env)
 	return err == nil, string(stderr)
 }
 
@@ -473,7 +478,7 @@ func runJobToolHistory(t *testing.T, seed uint64) {
 				if d := w.Daemon(endpoint.RuntimeDirectory); d != nil {
 					d.Jobs = 0
 				}
-				if _, _, err := w.Run(ctx, plainTool, []string{"submit", "measure"}, asAgent(t, s.operator, endpoint)); err != nil && w.Places(endpoint.RuntimeDirectory) != "" {
+				if _, _, err := w.Run(ctx, plainTool, agentCommand, asAgent(t, s.operator, endpoint)); err != nil && w.Places(endpoint.RuntimeDirectory) != "" {
 					s.fatalf("a healed world refused an agent: %v", err)
 				}
 			default:

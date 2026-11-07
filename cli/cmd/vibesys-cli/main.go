@@ -98,7 +98,7 @@ const usage = `usage: vibesys-cli <command> [flags]
 
 commands:
   submit check <commit> [flags]                  queue the task's check and print the job
-  submit measure <commit> [--samples n] [--recheck] [flags]
+  submit measure <commit> [--samples n] [--recheck] [--plan n | --no-plan] [flags]
                                                  queue the task's benchmark and print the job
   submit command <commit> [--wrap prefix] [flags] -- <argv...>
                                                  queue a command and print the job

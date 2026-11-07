@@ -53,17 +53,26 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    the current result sits under it. A part's headroom is real only below that ceiling. When your
    ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
    `bound declare` and say how you derived it; the earlier one stays in the history.
-3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
-   --body-file -` with a stub body (one line of mechanism) and `--gain-bound <share>`, the most
-   the idea could gain as a share of the headline (see step 5); note the number it prints. Before
-   investing in details, list the plans again: if a sibling already claimed the same mechanism,
-   pick another idea and change yours with `plan edit <n> --title ... --body-file -`.
+3. **Claim early.** As soon as you chose an idea, put it in a workstream, the line of work its
+   mechanism belongs to (`vibesys-cli workstream list`, such as "KV cache layout"): join the one
+   that fits, or start one with a short name, `vibesys-cli workstream start "<name>"`, which
+   returns the open workstream of that title if one exists, so two planners naming the same line
+   get one number. Then run `vibesys-cli plan create --title "<claim>" --body-file -
+   --workstream <n>` with a stub body (one line of mechanism) and `--gain-bound <share>`, the
+   most the idea could gain as a share of the headline (see step 5); note the number it prints.
+   Before investing in details, list the plans again: if a sibling already claimed the same
+   mechanism, pick another idea and change yours with `plan edit <n> --title ... --body-file -`
+   (`--workstream <n>` moves it to another line of work).
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
    you rely on exists and fits this hardware. Check the idea against the rules in `OBJECTIVE.md`.
 5. Write the proposal as the plan's body, as in [proposal.md](references/proposal.md): one claim
    that can succeed or fail alone, the arithmetic, the files touched, and the smallest first step
    that reaches a measurable commit in one worker pass. Leave the status `open`. Decisions and
-   results are the lead's comments, not yours.
+   results are the lead's comments, not yours. Your plan is the record of this idea: the worker
+   links every measurement of it with `--plan <n>`, so each number on the run's chart is read
+   against your claim. Write the claim so a measurement can show it true or false: name the
+   metric, the direction and the amount in the title, never a topic ("faster decode" says
+   nothing; "fusing the norm into the QKV GEMM cuts p50 decode latency by 5 to 8%" does).
 6. **State the bound.** The lead decides whether to go on or to stop from the bounds of the plans
    that are still open or parked, and a tool reads them, so state yours as a number and not only
    in prose: the most the idea could gain, as a share of the headline, from the arithmetic of

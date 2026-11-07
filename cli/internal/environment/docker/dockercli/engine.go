@@ -161,31 +161,41 @@ type result struct {
 }
 
 // call runs the docker program to its end, bounded, and returns what it said. It fails when the
-// program cannot be run at all; a program that ran and failed is a result with a code.
+// program cannot be run at all; a program that ran and failed is a result with a code. A call that
+// does not reach the engine's machine is made again as remote.Reconnect says, within the bound.
 func (e *Engine) call(ctx context.Context, verb string, args ...string) (result, error) {
 	bounded, done := e.bound(ctx)
 	defer done()
+	res, err := remote.Reconnect(bounded, e.timers, func() (result, bool, error) { return e.callOnce(bounded, verb, args) })
+	if bounded.Err() != nil {
+		return result{}, e.ended(ctx, bounded, verb)
+	}
+	return res, err
+}
+
+// callOnce makes one attempt of call, and reports whether it did not reach the engine's machine.
+func (e *Engine) callOnce(bounded context.Context, verb string, args []string) (result, bool, error) {
 	cmd := e.command(bounded, nil, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	if bounded.Err() != nil {
-		return result{}, e.ended(ctx, bounded, verb)
+		return result{}, false, bounded.Err()
 	}
 	res := result{stdout: out.String(), stderr: errb.String()}
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
 	case errors.As(err, &exit) && e.shell.Lost(exit.ExitCode()):
-		return result{}, unavailable("cannot reach %s to run docker %s: %s", e.shell.Where(), verb, clip(strings.TrimSpace(errb.String())))
+		return result{}, remote.Unreached(e.shell, err, errb.String()), unavailable("cannot reach %s to run docker %s: %s", e.shell.Where(), verb, clip(strings.TrimSpace(errb.String())))
 	case errors.As(err, &exit):
 		res.code = exit.ExitCode()
 	case errors.Is(err, exec.ErrNotFound):
-		return result{}, unavailable("the %q program was not found (%v); install Docker, or run with --env host", e.program, err)
+		return result{}, false, unavailable("the %q program was not found (%v); install Docker, or run with --env host", e.program, err)
 	default:
-		return result{}, unavailable("cannot run %q: %v; %s", e.program, err, hint)
+		return result{}, false, unavailable("cannot run %q: %v; %s", e.program, err, hint)
 	}
-	return res, nil
+	return res, false, nil
 }
 
 // failed turns a docker command that exited non-zero into the error of the call.

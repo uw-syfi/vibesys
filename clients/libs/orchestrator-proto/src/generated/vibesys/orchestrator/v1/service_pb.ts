@@ -259,7 +259,8 @@ export type RunSummary = Message<"vibesys.orchestrator.v1.RunSummary"> & {
 
   /**
    * The head's value on each objective, in the order of the task's metrics, then the objectives that
-   * have a declared bound and no measurement.
+   * have a declared bound and no measurement. The head is the candidate the run last promoted, which is
+   * not the best the run measured on every objective: that is ObjectiveBounds.best_value.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveHead objectives = 6;
    */
@@ -303,7 +304,8 @@ export const RoleAgentsSchema: GenMessage<RoleAgents> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_service, 7);
 
 /**
- * ObjectiveHead is the run's head on one objective.
+ * ObjectiveHead is the run's head on one objective: the candidate the run last promoted, and not the
+ * best the run measured on it.
  *
  * @generated from message vibesys.orchestrator.v1.ObjectiveHead
  */

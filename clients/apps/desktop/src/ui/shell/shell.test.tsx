@@ -2,7 +2,7 @@ import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
 import {APPEARANCE_MODES, themesOf} from '@vibesys/ui/tokens';
-import {type JSX, useReducer} from 'react';
+import {act, type JSX, useReducer} from 'react';
 import {
   applyChange,
   type CommandProgress,
@@ -198,11 +198,16 @@ describe('the window shell', () => {
     screen.press(screen.control('Resources'));
     screen.press(screen.control('Runs'));
     // The list's own controls: its state filter and, with two hosts, its host filter.
-    for (const value of ['live', 'ssh:other'])
-      screen.press(
-        screen.container.querySelector<HTMLElement>(`input[type="radio"][value="${value}"]`) ??
-          row(),
-      );
+    screen.press(
+      screen.container.querySelector<HTMLElement>('input[type="radio"][value="live"]') ?? row(),
+    );
+    const hosts = screen.container.querySelector('select');
+    if (hosts === null) throw new Error('the list has no host control');
+    const View = hosts.ownerDocument.defaultView as unknown as {Event: typeof Event};
+    act(() => {
+      hosts.value = 'ssh:other';
+      hosts.dispatchEvent(new View.Event('change', {bubbles: true}));
+    });
     expect(sent()).toEqual(new Set(NAVIGATION_KINDS.filter(kind => kind !== 'back')));
     screen.unmount();
   });

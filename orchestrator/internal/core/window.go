@@ -25,14 +25,6 @@ const (
 	Minimize Direction = "minimize"
 )
 
-// Better says a is a better value than b for an objective that improves in d.
-func (d Direction) Better(a, b float64) bool {
-	if d == Minimize {
-		return a < b
-	}
-	return a > b
-}
-
 // Spend is what the turns that ended inside a window cost.
 type Spend struct {
 	// Turns counts the finished turns, and Unpriced those of them that reported tokens and no cost.

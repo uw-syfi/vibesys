@@ -56,17 +56,7 @@ func (k Kubectl) run(ctx context.Context, stdin string, args ...string) (string,
 	argv = append(argv, args...)
 	bounded, done := remote.Bounded(ctx, k.Timers, CallTimeout)
 	defer done()
-	var in *strings.Reader
-	if stdin != "" {
-		in = strings.NewReader(stdin)
-	}
-	var out string
-	var err error
-	if in != nil {
-		out, err = remote.Output(bounded, k.Shell, argv, in)
-	} else {
-		out, err = remote.Output(bounded, k.Shell, argv, nil)
-	}
+	out, err := remote.Output(bounded, k.Timers, k.Shell, argv, stdin)
 	switch {
 	case err == nil:
 		return out, nil

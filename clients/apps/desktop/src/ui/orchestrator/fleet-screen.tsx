@@ -2,14 +2,18 @@ import {
   Button,
   CellInline,
   CellLines,
+  CellSparkline,
   Chip,
   ColumnList,
   EmptyState,
+  Field,
   type ListColumn,
+  MiddleText,
   Page,
   pageState,
   Row,
   SegmentedControl,
+  Select,
   Stack,
   StatusDot,
   Text,
@@ -25,6 +29,8 @@ import {
   type FleetState,
   fleetView,
   type NavigationAction,
+  type ObjectiveReport,
+  rowObjectives,
 } from '../../state/index.js';
 import {
   ago,
@@ -130,7 +136,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
     {
       key: 'host',
       header: 'Host',
-      size: 'medium',
+      size: 'wide',
       optional: true,
       hint: row => `${row.host.label}\n${freshnessPhrase(row.host.freshness, row.host.staleForMs)}`,
       cell: row => (
@@ -141,7 +147,9 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
                 tone={FRESHNESS_WORD[row.host.freshness].tone}
                 label={FRESHNESS_WORD[row.host.freshness].label}
               />
-              <Text>{row.host.label}</Text>
+              <Text>
+                <MiddleText text={row.host.label} />
+              </Text>
             </CellInline>
           }
           note={
@@ -155,14 +163,46 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
   ];
 }
 
-/** The columns of figures: the best results, the agents working and the cost. */
-function figureColumns(): readonly ListColumn<FleetRow>[] {
+/**
+ * The first measured objective as a small trend: every candidate as a faint dot and the points the
+ * host marked as setting a best as the line over them, with how many more objectives were measured.
+ * A run with no series (nothing measured yet, or a host that serves none) has an empty cell.
+ */
+function trendCell(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNode {
+  const [first] = measured;
+  if (first === undefined) return null;
+  const [start] = first.points;
+  const end = first.points.at(-1);
+  if (start === undefined || end === undefined) return null;
+  return (
+    <CellSparkline
+      label={`${first.name}: every measured candidate and the best so far`}
+      points={first.points.map(point => ({x: point.atMs, y: point.value}))}
+      steps={first.bestPath.map(point => ({x: point.atMs, y: point.value}))}
+      from={start.atMs}
+      to={end.atMs}
+      tone={row.live ? 'accent' : 'muted'}
+      more={measured.length - 1}
+    />
+  );
+}
+
+/** The columns of figures: the measured history, the best results, the agents working and the cost. */
+function figureColumns(
+  objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+): readonly ListColumn<FleetRow>[] {
   return [
+    {
+      key: 'trend',
+      header: 'Candidates',
+      size: 'wide',
+      optional: true,
+      cell: row => trendCell(row, objectivesOf(row)),
+    },
     {
       key: 'best',
       header: 'Best',
       size: 'wide',
-      narrow: 'medium',
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);
@@ -201,10 +241,10 @@ function figureColumns(): readonly ListColumn<FleetRow>[] {
   ];
 }
 
-const columns = (nowMs: number): readonly ListColumn<FleetRow>[] => [
-  ...identityColumns(nowMs),
-  ...figureColumns(),
-];
+const columns = (
+  nowMs: number,
+  objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+): readonly ListColumn<FleetRow>[] => [...identityColumns(nowMs), ...figureColumns(objectivesOf)];
 
 const describe = (row: FleetRow, nowMs: number): string =>
   [
@@ -241,34 +281,34 @@ function HostFilter(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element | null {
   const {hosts} = props;
+  const word = (host: FleetHostView): string =>
+    host.freshness === 'live'
+      ? host.label
+      : `${host.label} · ${freshnessPhrase(host.freshness, host.staleForMs)}`;
   if (hosts.length > 1) {
+    // One control however many hosts there are: a row of buttons for each host would take a row
+    // of its own in a narrow window.
     return (
-      <SegmentedControl
-        label="Host"
-        value={props.host ?? ALL_HOSTS}
-        options={[
-          {value: ALL_HOSTS, label: 'All hosts'},
-          ...hosts.map(host => ({
-            value: host.key,
-            label:
-              host.freshness === 'live'
-                ? host.label
-                : `${host.label} · ${freshnessPhrase(host.freshness, host.staleForMs)}`,
-          })),
-        ]}
-        change={host =>
-          props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})
-        }
-      />
+      <Field label="Host" hideLabel>
+        <Select
+          labelInside
+          capped
+          size="sm"
+          value={props.host ?? ALL_HOSTS}
+          options={[
+            {value: ALL_HOSTS, label: 'All hosts'},
+            ...hosts.map(host => ({value: host.key, label: word(host)})),
+          ]}
+          change={host =>
+            props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})
+          }
+        />
+      </Field>
     );
   }
   const [only] = hosts;
   return only === undefined || only.freshness === 'live' ? null : (
-    <Chip
-      label={`${only.label} · ${freshnessPhrase(only.freshness, only.staleForMs)}`}
-      tone={FRESHNESS_WORD[only.freshness].tone}
-      dot
-    />
+    <Chip label={word(only)} tone={FRESHNESS_WORD[only.freshness].tone} dot clip />
   );
 }
 
@@ -307,6 +347,7 @@ export function FleetScreen(props: {
   const filter: FleetFilter = {state: place.state, host: place.host};
   const view = fleetView(props.hosts, filter);
   const rows = [...view.live, ...view.history];
+  const objectivesOf = rowObjectives(props.hosts);
   const unread = view.hosts.some(
     host => host.freshness === 'empty' || host.freshness === 'unavailable',
   );
@@ -321,7 +362,7 @@ export function FleetScreen(props: {
   const list = (label: string, shown: readonly FleetRow[]): JSX.Element => (
     <ColumnList
       label={label}
-      columns={columns(nowMs)}
+      columns={columns(nowMs, objectivesOf)}
       rows={shown}
       rowKey={row => row.key}
       lines={2}
@@ -341,7 +382,7 @@ export function FleetScreen(props: {
           <Text as="h1" variant="title">
             Runs
           </Text>
-          {props.newRun}
+          {rows.length === 0 && !unread ? null : props.newRun}
         </Row>
       }
     >
@@ -370,7 +411,13 @@ export function FleetScreen(props: {
         </Row>
         {rows.length === 0 ? (
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
-          <EmptyState title={unread ? 'Not read yet' : 'No runs'} />
+          <EmptyState
+            title={unread ? 'Not read yet' : 'No runs'}
+            align="start"
+            // The header's own New run is the one a screen with rows has; this one is the way out of
+            // having none.
+            {...(unread ? {} : {action: props.newRun})}
+          />
         ) : (
           <>
             {view.live.length === 0 ? null : (

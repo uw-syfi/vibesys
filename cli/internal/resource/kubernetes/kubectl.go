@@ -29,7 +29,7 @@ func (k Kubectl) Identify(ctx context.Context, kubeconfig string) (Identity, err
 	defer done()
 	run := func(args ...string) (string, error) {
 		argv := append([]string{"kubectl", "--kubeconfig", kubeconfig}, args...)
-		out, err := remote.Output(bounded, k.Shell, argv, nil)
+		out, err := remote.Output(bounded, k.Timers, k.Shell, argv, "")
 		switch {
 		case err == nil:
 			return out, nil

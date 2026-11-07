@@ -467,7 +467,8 @@ type RunSummary struct {
 	// The same by type of agent, in the order of the role enum; a type with no agent is left out.
 	Roles []*RoleAgents `protobuf:"bytes,5,rep,name=roles,proto3" json:"roles,omitempty"`
 	// The head's value on each objective, in the order of the task's metrics, then the objectives that
-	// have a declared bound and no measurement.
+	// have a declared bound and no measurement. The head is the candidate the run last promoted, which is
+	// not the best the run measured on every objective: that is ObjectiveBounds.best_value.
 	Objectives    []*ObjectiveHead `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -606,7 +607,8 @@ func (x *RoleAgents) GetWorking() uint32 {
 	return 0
 }
 
-// ObjectiveHead is the run's head on one objective.
+// ObjectiveHead is the run's head on one objective: the candidate the run last promoted, and not the
+// best the run measured on it.
 type ObjectiveHead struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`

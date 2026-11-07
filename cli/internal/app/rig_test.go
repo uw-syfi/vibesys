@@ -155,6 +155,11 @@ func ctxFor(t *testing.T) context.Context {
 	return ctx
 }
 
+// noPlan is what a test whose subject is not plans says about the plan of a job it submits. The
+// tests call as a run, and a measure from a run must say what it tests, so each of these tests says
+// none; a check or a command job takes no such statement.
+func noPlan(spec core.JobSpec) bool { return spec.Settings.Kind() == core.JobMeasure }
+
 func command(script ...string) core.JobSpec {
 	return core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: script}}
 }

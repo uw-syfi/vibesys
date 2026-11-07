@@ -34,7 +34,7 @@ const user = `"$(id -un)"`
 func (c CLI) run(ctx context.Context, script string, args ...string) (string, error) {
 	bounded, done := remote.Bounded(ctx, c.Timers, CallTimeout)
 	defer done()
-	return remote.Output(bounded, c.Shell, append([]string{"sh", "-c", script, "vs-slurm"}, args...), nil)
+	return remote.Output(bounded, c.Timers, c.Shell, append([]string{"sh", "-c", script, "vs-slurm"}, args...), "")
 }
 
 // Jobs implements Scheduler.

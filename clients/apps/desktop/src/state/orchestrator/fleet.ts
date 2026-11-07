@@ -11,8 +11,10 @@ import {
   type Run,
   RunStatus,
   type RunSummary,
+  type SearchState,
 } from '@vibesys/orchestrator-proto';
 import type {Freshness} from '../freshness.js';
+import {type ObjectiveReport, objectiveReports} from './report/objectives.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
 
@@ -202,5 +204,36 @@ export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter)
       runs: byState.filter(row => row.host.key === host.key).length,
       runsLeftOut: host.data.cut.runsLeftOut,
     })),
+  };
+}
+
+/**
+ * The objectives of a run that have a measurement, each with every candidate and the points the
+ * host marked as setting a best: what a row draws of the run's history. Nothing is worked out here;
+ * a host that serves no series (an older host) gives none, and the row draws nothing for it.
+ */
+export function measuredObjectives(
+  search: SearchState | undefined,
+  heads: readonly ObjectiveHead[],
+): readonly ObjectiveReport[] {
+  return search === undefined
+    ? []
+    : objectiveReports(search, heads).filter(objective => objective.points.length > 0);
+}
+
+/**
+ * How to read the measured objectives of a row from the hosts the fleet was made of. The reading is
+ * done per row asked for, so the rows a list does not draw cost nothing.
+ */
+export function rowObjectives(
+  hosts: readonly FleetHostInput[],
+): (row: FleetRow) => readonly ObjectiveReport[] {
+  const byHost = new Map(hosts.map(host => [host.key, host.data] as const));
+  return row => {
+    const data = byHost.get(row.host.key);
+    return measuredObjectives(
+      data?.searches[row.runId],
+      data?.summaries[row.runId]?.objectives ?? [],
+    );
   };
 }
