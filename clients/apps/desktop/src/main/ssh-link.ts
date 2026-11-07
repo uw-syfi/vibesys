@@ -176,9 +176,17 @@ interface Controlled {
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
+  /** The command could be started at all. */
+  readonly started: boolean;
 }
 
-const unanswered: Controlled = {confirmed: false, code: null, stdout: '', stderr: ''};
+const unanswered: Controlled = {
+  confirmed: false,
+  code: null,
+  stdout: '',
+  stderr: '',
+  started: true,
+};
 
 /** A command that must be seen to end: killed after `bound`, then given one more. */
 const control = (
@@ -193,10 +201,13 @@ const control = (
       );
       const done = yield* Effect.timeoutOption(finish(process), bound);
       return Option.isSome(done)
-        ? ({confirmed: true, ...done.value} satisfies Controlled)
-        : ({...unanswered, confirmed: (yield* retire(process)) === 'confirmed'} satisfies Controlled);
+        ? ({confirmed: true, started: true, ...done.value} satisfies Controlled)
+        : ({
+            ...unanswered,
+            confirmed: (yield* retire(process)) === 'confirmed',
+          } satisfies Controlled);
     }),
-  ).pipe(Effect.catchTag('SpawnFailed', () => Effect.succeed(unanswered)));
+  ).pipe(Effect.catchTag('SpawnFailed', () => Effect.succeed({...unanswered, started: false})));
 
 /** The pid ssh's `-O check` reports on stderr: `Master running (pid=1234)`. */
 const MASTER_PID = /\(pid=(\d+)\)/;
@@ -256,6 +267,7 @@ const bringUp = (
 ): Effect.Effect<void, LinkFailed> =>
   Effect.gen(function* () {
     const check = yield* control(ssh, ['-O', 'check', '--', alias], CHECK_BOUND);
+    if (!check.started) return yield* Effect.fail(linkDown('could not start ssh'));
     if (check.code === 0) {
       cell.pid = pidOf(check.stderr) ?? cell.pid;
       return;

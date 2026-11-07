@@ -14,7 +14,8 @@ import {
   RunStatus,
   type ToolCall,
 } from '@vibesys/orchestrator-proto';
-import type {FaultKind} from '../../state/index.js';
+import type {Fault, FaultKind} from '../../state/index.js';
+import {causeWord} from '../refusal-words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -163,8 +164,14 @@ export function faultWord(kind: FaultKind): string {
       return 'The VibeSys on that host is too old for this app. Update it there.';
     case 'Rejected':
       return 'The host refused the request.';
+    case 'Refused':
+      return 'The request was refused.';
   }
 }
+
+/** What a person is told of a fault: its cause when it is a typed refusal, else the kind's words. */
+export const faultText = (fault: Fault): string =>
+  fault.cause === undefined ? faultWord(fault.kind) : causeWord(fault.cause);
 
 /** What a person is told of one tool call: its name, and what it was asked as text. */
 export interface CallWords {

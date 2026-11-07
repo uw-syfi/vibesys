@@ -1,5 +1,6 @@
 /** What the Resources tab shows of each host the app is connected to, as plain facts. */
 import type {HostConnectionState} from '../connection.js';
+import type {RefusalCause} from '../fault.js';
 import type {FeedStatus} from '../feed.js';
 import {type Freshness, freshnessOf} from '../freshness.js';
 
@@ -10,6 +11,7 @@ export type ResourceConnection =
   | 'connected'
   | 'reconnecting'
   | 'incompatible'
+  | 'refused'
   | 'unreachable';
 
 export interface ResourceRow {
@@ -18,6 +20,8 @@ export interface ResourceRow {
   /** What the host is called on screen. */
   readonly label: string;
   readonly connection: ResourceConnection;
+  /** Why the host refuses for good, when `connection` is `refused`: what to change, not a retry. */
+  readonly cause: RefusalCause | null;
   readonly freshness: Freshness;
 }
 
@@ -45,7 +49,7 @@ function connectionOf(state: HostConnectionState): ResourceConnection {
     case 'Incompatible':
       return 'incompatible';
     case 'Unusable':
-      return 'unreachable';
+      return state.fault.kind === 'Refused' ? 'refused' : 'unreachable';
   }
 }
 
@@ -53,5 +57,9 @@ export const resourceRow = (host: ResourceHost): ResourceRow => ({
   key: host.key,
   label: host.label,
   connection: connectionOf(host.connection),
+  cause:
+    host.connection._tag === 'Unusable' && host.connection.fault.cause !== undefined
+      ? host.connection.fault.cause
+      : null,
   freshness: freshnessOf(host.connection, host.runsFeed, host.hasData),
 });

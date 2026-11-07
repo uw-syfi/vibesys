@@ -1,6 +1,6 @@
 /** `GatewayTransport` over the preload's gateway bridge: one MessagePort per call. */
 
-import type {DesktopLinkProblem} from '@vibesys/proto';
+import type {DesktopLinkProblem, DesktopRefusal} from '@vibesys/proto';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -62,12 +62,14 @@ const openCall = (
     message: string,
     status?: number,
     linkProblem?: DesktopLinkProblem,
+    refusal?: DesktopRefusal,
   ): Terminal => ({
     kind: 'failed',
     end: new CallEnded({
       message,
       ...(status === undefined ? {} : {status}),
       ...(linkProblem === undefined ? {} : {linkProblem}),
+      ...(refusal === undefined ? {} : {refusal}),
     }),
   });
   /** Act on one decoded reply: a frame, or the end. */
@@ -77,12 +79,13 @@ const openCall = (
         if (!frame(body.value)) release();
         break;
       case 'end': {
-        const {error, status, linkProblem} = body.value;
+        const {error, status, linkProblem, refusal} = body.value;
         const clean =
           error === undefined &&
           linkProblem === undefined &&
+          refusal === undefined &&
           (status === undefined || status === 0);
-        end(clean ? {kind: 'closed'} : failed(error ?? '', status, linkProblem));
+        end(clean ? {kind: 'closed'} : failed(error ?? '', status, linkProblem, refusal));
         break;
       }
       case undefined:

@@ -69,24 +69,35 @@ export const makeLinkPool = (
         yield* Deferred.done(done, exit);
       });
 
-    const lease: LinkPool['lease'] = alias =>
+    /** Wait for any earlier release of the host to finish, whether it did or not. */
+    const afterRetiring = (alias: string) =>
       Effect.gen(function* () {
-        // Wait for any earlier release of this host to finish, whether it did or not.
         for (
           let barrier = retiring.get(alias);
           barrier !== undefined;
           barrier = retiring.get(alias)
         )
           yield* Effect.exit(Deferred.await(barrier));
+      });
+
+    /**
+     * The last release of the host was not confirmed: try it again. A master that still cannot be
+     * ended refuses this lease with the reason, and the next lease tries once more.
+     */
+    const retryUnreleased = (alias: string) =>
+      Effect.gen(function* () {
+        const unreleased = stuck.get(alias);
+        if (unreleased === undefined) return;
+        yield* unreleased.release;
+        stuck.delete(alias);
+      });
+
+    const lease: LinkPool['lease'] = alias =>
+      Effect.gen(function* () {
+        yield* afterRetiring(alias);
         if (closed)
           return yield* new LinkFailed({problem: 'link', message: 'the link pool was released'});
-        const unreleased = stuck.get(alias);
-        if (unreleased !== undefined) {
-          // The last release was not confirmed: try it again; a master that still cannot be ended
-          // refuses this lease with the reason, and the next lease tries once more.
-          yield* unreleased.release;
-          stuck.delete(alias);
-        }
+        yield* retryUnreleased(alias);
         let entry = entries.get(alias);
         if (entry === undefined) {
           const link = yield* makeSshLink({alias, controlPath, master: masterOf(alias)}).pipe(

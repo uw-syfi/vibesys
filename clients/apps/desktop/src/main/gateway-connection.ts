@@ -26,7 +26,7 @@ import {afterWindow, LIVENESS_WINDOW_MS} from '../state/liveness.js';
 import {
   failureMessage,
   GatewayFailed,
-  GatewayRefused,
+  type GatewayRefused,
   GrpcCode,
   GrpcFailed,
   grpcCodeOf,

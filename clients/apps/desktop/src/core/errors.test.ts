@@ -1,4 +1,5 @@
 import {expect, it} from '@effect/vitest';
+import {DesktopRefusal} from '@vibesys/proto';
 import * as Schema from 'effect/Schema';
 import {
   type AppError,
@@ -85,3 +86,27 @@ it('a bad frame names the response type it could not read', () => {
   const error = fromEnd(endOf('bad frame', RpcStatus.DATA_LOSS), 'pkg.Reply');
   expect(error._tag === 'InvalidMessage' && error.type).toBe('pkg.Reply');
 });
+
+const APP_REFUSALS = [
+  DesktopRefusal.METHOD_NOT_AVAILABLE,
+  DesktopRefusal.INVALID_REQUEST,
+  DesktopRefusal.UNSUPPORTED_PLATFORM,
+  DesktopRefusal.HOST_PROGRAM_MISSING,
+] as const;
+
+it.prop(
+  'an end the app refused is a refusal with its cause and its words, never retried, whatever else the end says',
+  {
+    refusal: Schema.Literals(APP_REFUSALS),
+    message: Schema.NonEmptyString,
+    code: status,
+  },
+  ({refusal, message, code}) => {
+    const error = fromEnd(
+      new CallEnded({message, refusal, ...(code === undefined ? {} : {status: code})}),
+    );
+    expect(error._tag).toBe('Refused');
+    expect(isRetryable(error)).toBe(false);
+    if (error._tag === 'Refused') expect(error.detail).toBe(message);
+  },
+);

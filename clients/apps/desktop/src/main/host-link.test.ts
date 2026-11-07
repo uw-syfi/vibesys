@@ -13,11 +13,21 @@ import {
   BuildVersionsSchema,
   Compatibility,
   HelloResponseSchema,
+  HostControlService,
+  IdentifyResponseSchema,
+  ListItemsRequestSchema,
+  ListItemsResponseSchema,
   OrchestratorService,
+  ReleaseRelation,
   RunsSnapshotSchema,
+  StateRefusal,
+  UnservedReason,
   WatchRunsResponseSchema,
 } from '@vibesys/orchestrator-proto';
+import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import type * as Fiber from 'effect/Fiber';
 import * as Layer from 'effect/Layer';
 import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
 import * as Schema from 'effect/Schema';
@@ -26,14 +36,20 @@ import {makeHostSession} from '../core/host-session.js';
 import {Ids} from '../core/ids.js';
 import {defaultReconnect} from '../core/reconnect.js';
 import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
-import {COPY_STALL_MS} from '../state/gateway-policy.js';
+import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
+import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
 import {type HostConnectionState, hostKey} from '../state/index.js';
 import {SILENCE_BOUND_MS} from '../state/liveness.js';
-import {fakeGateway} from '../testing/main/fake-gateway.js';
+import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
+import {fakeLocalHost} from '../testing/main/fake-local-host.js';
+import {fakeSshHost} from '../testing/main/fake-ssh-host.js';
 import {portedBridge} from '../testing/main/ported-calls.js';
-import {GatewayFailed} from './errors.js';
-import {makeGatewayCalls} from './gateway-calls.js';
+import {GatewayFailed, GatewayRefused} from './errors.js';
+import {type GatewayCalls, makeGatewayCalls} from './gateway-calls.js';
 import type {GatewayDialer} from './gateway-connection.js';
+import {makeGatewayDialers} from './gateway-dialers.js';
+import {GatewayArtifacts} from './gateway-provision.js';
+import {makeLinkPool} from './link-pool.js';
 
 const HOST = hostKey({kind: 'ssh', alias: 'host-a'});
 const method = (name: string) => `/${OrchestratorService.typeName}/${name}`;
@@ -126,12 +142,22 @@ const remoteHost = (copy: Copy, behaviour: Peer) =>
           ),
         ),
     };
-    const services = yield* Effect.context<never>();
-    const runWith = Effect.runPromiseExitWith(services);
     const calls = yield* makeGatewayCalls(
       () => dialer,
       () => {},
     );
+    const seen = yield* windowOver(calls, peer, true);
+    return {...seen, peer, dials};
+  });
+
+/**
+ * A window on `calls`: the real host session over the port bridge, with its run feed mounted when
+ * `feed`, and the helpers a test drives the virtual clock and reads the connection with.
+ */
+const windowOver = (calls: GatewayCalls, peer: FakeGateway, feed: boolean) =>
+  Effect.gen(function* () {
+    const services = yield* Effect.context<never>();
+    const runWith = Effect.runPromiseExitWith(services);
     const bridge = portedBridge(calls, (effect, signal) => runWith(effect, {signal}));
     const transport = GatewayTransportLive.pipe(
       Layer.provide(Layer.succeed(GatewayPorts, {bridge})),
@@ -141,7 +167,7 @@ const remoteHost = (copy: Copy, behaviour: Peer) =>
       Effect.provide(Ids.layer),
     );
     const registry = AtomRegistry.make();
-    registry.mount(session.runs.watch);
+    if (feed) registry.mount(session.runs.watch);
     // Each world ends with its run: a feed left mounted would keep redialing a closed host on the
     // clock the next world shares.
     yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
@@ -169,7 +195,7 @@ const remoteHost = (copy: Copy, behaviour: Peer) =>
       return state._tag === 'Ready' ? state.epoch : -1;
     };
     const hellos = () => peer.calls.filter(call => call.method === HELLO).length;
-    return {peer, dials, connection, live, elapse, until, epoch, hellos};
+    return {connection, live, elapse, until, epoch, hellos};
   });
 
 const second = Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 120}));
@@ -321,4 +347,442 @@ it.effect.prop(
       }),
     ),
   {arbitrary: {runs: 10}},
+);
+
+// The class property: how a remote host fails, and what the app owes whoever is looking.
+//
+// Every world below is the whole real stack over in-memory processes: the link pool, the ssh link
+// with its master, provisioning, the dialers, the calls and sessions, and a window on top. The host
+// is a fake ssh host (`fake-ssh-host.ts`) whose master can freeze and whose build can be a dev
+// build that holds fewer host programs than the host's platform needs.
+
+const ALL_TARGETS = GATEWAY_TARGETS;
+const PLATFORM = {
+  'linux-amd64': 'Linux\nx86_64\n',
+  'linux-arm64': 'Linux\naarch64\n',
+  'darwin-arm64': 'Darwin\narm64\n',
+  unsupported: 'Linux\nriscv64\n',
+} as const;
+type Platform = keyof typeof PLATFORM;
+
+const HOST_PROGRAM_BYTES = new TextEncoder().encode('host-program');
+const LIST_ITEMS = method('ListItems');
+const IDENTIFY = `/${HostControlService.typeName}/${HostControlService.method.identify.name}`;
+const listRequest = toBinary(
+  ListItemsRequestSchema,
+  create(ListItemsRequestSchema, {agentId: 'agent-1', beforeOrdinal: 1, pageSize: 10}),
+);
+/** A reply of a few hundred bytes, which a slow link delivers in as many chunks as a test says. */
+const listReply = toBinary(
+  ListItemsResponseSchema,
+  create(ListItemsResponseSchema, {
+    page: {
+      elisions: Array.from({length: 300}, (_, index) => ({ordinal: index + 1, bodyBytes: 1n})),
+    },
+  }),
+);
+
+/** What the host says about why it does not serve the orchestrator. */
+interface Unserving {
+  readonly reason: UnservedReason;
+  readonly stateRefusal: StateRefusal;
+}
+
+interface SshOptions {
+  readonly platform: Platform;
+  /** The host programs the app's own build holds: a dev build may hold fewer than all. */
+  readonly built: readonly GatewayTarget[];
+  readonly unserving?: Unserving;
+  /**
+   * The window's run feed: not mounted, mounted and answered at once, or mounted with its first
+   * frame held back for the test to deliver.
+   */
+  readonly feed: 'off' | 'answered' | 'held';
+}
+
+/** A remote host over ssh as the real main process reaches it. */
+const sshHost = (options: SshOptions) =>
+  Effect.gen(function* () {
+    const peer = fakeGateway();
+    const host = fakeSshHost(peer, PLATFORM[options.platform]);
+    const pending: FakeCall[] = [];
+    const {unserving} = options;
+    const identity = toBinary(
+      IdentifyResponseSchema,
+      create(IdentifyResponseSchema, {
+        release: 'dev',
+        relation: ReleaseRelation.UNKNOWN,
+        startedAt: {seconds: 1n, nanos: 0},
+        orchestrator:
+          unserving === undefined
+            ? {case: 'serving', value: {}}
+            : {
+                case: 'unserved',
+                value: {
+                  reason: unserving.reason,
+                  stateRefusal: unserving.stateRefusal,
+                  detail: 'the state directory is refused',
+                },
+              },
+      }),
+    );
+    peer.onCall = call => {
+      if (call.method === IDENTIFY) {
+        call.send(identity);
+        return call.end();
+      }
+      if (unserving !== undefined && call.method.startsWith(`/${OrchestratorService.typeName}/`))
+        return call.end(14, 'the orchestrator is not served by this process');
+      if (call.method === HELLO) {
+        call.send(helloReply);
+        return call.end();
+      }
+      // A feed's own stream is answered at once; anything else a test asks for waits for it.
+      if (call.method === WATCH_RUNS && options.feed === 'answered')
+        return call.send(snapshotReply);
+      pending.push(call);
+    };
+    const built = Layer.succeed(GatewayArtifacts, {
+      read: target =>
+        options.built.includes(target)
+          ? Effect.succeed(HOST_PROGRAM_BYTES)
+          : Effect.fail(
+              new GatewayRefused({
+                refusal: DesktopRefusal.HOST_PROGRAM_MISSING,
+                message: `this build has no host program for ${target} (API ${API_SCHEMA_HASH.slice(0, 16)})`,
+              }),
+            ),
+    });
+    const dialers = yield* Effect.gen(function* () {
+      const pool = yield* makeLinkPool('/tmp/vsd-1/%C', () => {});
+      return yield* makeGatewayDialers(pool, () => {});
+    }).pipe(Effect.provide(Layer.mergeAll(host.spawner.layer, fakeLocalHost().layer, built)));
+    const calls = yield* makeGatewayCalls(dialers, () => {});
+    const seen = yield* windowOver(calls, peer, options.feed !== 'off');
+    return {...seen, calls, peer, host, pending};
+  });
+type SshWorld = Effect.Success<ReturnType<typeof sshHost>>;
+
+/** The time a host may take to be redialed after its master froze: noticing, tearing down, redialing. */
+const FROZEN_BOUND_MS = SILENCE_BOUND_MS + 15_000 + defaultReconnect.capMs + 10_000;
+const LINGER_SECONDS = CONNECTION_LINGER_MS / 1000;
+
+const pieces = Schema.Int.check(Schema.isBetween({minimum: 2, maximum: 8}));
+/** Gaps shorter than the stall window: every window of a progressing reply hears something. */
+const gap = Schema.Int.check(Schema.isBetween({minimum: 1, maximum: REPLY_STALL_MS / 1000 - 1}));
+
+const failure = Schema.Union([
+  // A build that holds the host's program connects at once; one that does not refuses, naming the
+  // platform and the version, and is never retried.
+  Schema.Struct({
+    kind: Schema.Literal('build'),
+    platform: Schema.Literals([...ALL_TARGETS, 'unsupported']),
+    built: Schema.Array(Schema.Literals(ALL_TARGETS)).check(Schema.isMaxLength(3)),
+  }),
+  // A host that says why it does not serve: what it refuses for good is shown and not retried,
+  // what may pass (held by another process) is waited out.
+  Schema.Struct({
+    kind: Schema.Literal('unserved'),
+    reason: Schema.Literals([
+      UnservedReason.STATE_REFUSED,
+      UnservedReason.CONFIG_REFUSED,
+      UnservedReason.HELD_ELSEWHERE,
+      UnservedReason.HOLDER_GONE,
+    ]),
+    stateRefusal: Schema.Literals([
+      StateRefusal.UNSPECIFIED,
+      StateRefusal.NETWORK_FILESYSTEM,
+      StateRefusal.UNKNOWN_FILESYSTEM,
+    ]),
+  }),
+  // A reply, or a stream's first frame, that takes many windows to arrive but keeps arriving is
+  // never cut; one that stops is cut within two windows of its last bytes.
+  Schema.Struct({
+    kind: Schema.Literal('slow'),
+    // A call's reply, a stream's first frame, or the window's own feed's first frame.
+    mode: Schema.Literals(['unary', 'stream', 'feed']),
+    gap,
+    pieces,
+    stopAfter: Schema.Union([
+      Schema.Undefined,
+      Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 7})),
+    ]),
+  }),
+  // Calls that follow each other within the linger share one dial; a master is not left behind.
+  Schema.Struct({
+    kind: Schema.Literal('linger'),
+    gaps: Schema.Array(
+      Schema.Int.check(Schema.isBetween({minimum: 0, maximum: LINGER_SECONDS - 2})),
+    )
+      .check(Schema.isMinLength(1))
+      .check(Schema.isMaxLength(5)),
+  }),
+  // A master that freezes is killed by its pid and redialed within a bound, every time.
+  Schema.Struct({
+    kind: Schema.Literal('frozen'),
+    quiet: Schema.Int.check(Schema.isBetween({minimum: 0, maximum: 30})),
+    times: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 2})),
+  }),
+]);
+
+/** One unary call to the host, whose answer the test delivers. */
+const listItems = (world: SshWorld) =>
+  Effect.gen(function* () {
+    const running = yield* Effect.forkChild(
+      Effect.result(world.calls.unary(HOST, LIST_ITEMS, listRequest)),
+    );
+    yield* world.until(() => world.pending.length > 0, 60_000);
+    return {running, call: world.pending.shift()};
+  });
+
+const served: SshOptions = {platform: 'linux-amd64', built: ALL_TARGETS, feed: 'answered'};
+
+const playBuild = (platform: Platform, built: readonly GatewayTarget[]) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({platform, built, feed: 'answered'});
+    const target = platform === 'unsupported' ? undefined : platform;
+    if (target !== undefined && built.includes(target)) {
+      expect(yield* world.until(() => world.live(), 60_000)).not.toBeNull();
+      // One connect is one dial: the handshake and the feed share the connection.
+      expect(world.host.state.connects).toBe(1);
+      expect(world.host.state.masters).toBe(1);
+      expect(world.host.state.uploads).toBe(1);
+      return;
+    }
+    yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
+    const state = world.connection();
+    expect(state._tag).toBe('Unusable');
+    if (state._tag !== 'Unusable') return;
+    expect(state.fault.kind).toBe('Refused');
+    expect(state.fault.cause).toBe(
+      target === undefined ? 'unsupported-platform' : 'host-program-missing',
+    );
+    // It names the platform, and for a build that lacks the program, the version.
+    expect(state.fault.detail).toContain(target ?? 'riscv64');
+    if (target !== undefined) expect(state.fault.detail).toContain(API_SCHEMA_HASH.slice(0, 16));
+    const probes = world.host.state.probes;
+    yield* world.elapse(10 * 60_000, 30_000);
+    // Never retried: nothing probed the host or dialed it again.
+    expect(world.host.state.probes).toBe(probes);
+    expect(world.host.state.connects).toBe(0);
+    expect(world.connection()._tag).toBe('Unusable');
+  });
+
+const REFUSED_CAUSE = {
+  [StateRefusal.NETWORK_FILESYSTEM]: 'state-network-filesystem',
+  [StateRefusal.UNKNOWN_FILESYSTEM]: 'state-unknown-filesystem',
+  [StateRefusal.UNSPECIFIED]: 'state-refused',
+} as const;
+
+const playUnserved = (reason: UnservedReason, stateRefusal: StateRefusal) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, unserving: {reason, stateRefusal}});
+    const forGood =
+      reason === UnservedReason.STATE_REFUSED || reason === UnservedReason.CONFIG_REFUSED;
+    if (!forGood) {
+      // Held by another process: waited out, asked again, never shown as a refusal.
+      yield* world.elapse(60_000, 1000);
+      expect(world.connection()._tag).not.toBe('Unusable');
+      expect(world.hellos()).toBeGreaterThan(1);
+      return;
+    }
+    yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
+    const state = world.connection();
+    expect(state._tag).toBe('Unusable');
+    if (state._tag !== 'Unusable') return;
+    expect(state.fault.kind).toBe('Refused');
+    expect(state.fault.cause).toBe(
+      reason === UnservedReason.CONFIG_REFUSED ? 'config-refused' : REFUSED_CAUSE[stateRefusal],
+    );
+    expect(state.fault.retryable).toBe(false);
+    const asked = world.hellos();
+    yield* world.elapse(10 * 60_000, 30_000);
+    expect(world.hellos()).toBe(asked);
+  });
+
+/** The window's own feed, whose first frame the host takes many windows to deliver. */
+const playSlowFeed = (spacing: number, count: number) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, feed: 'held'});
+    yield* world.until(() => world.pending.some(call => call.method === WATCH_RUNS), 60_000);
+    const epoch = world.epoch();
+    const sending = world.pending.shift()?.trickle(snapshotReply, count);
+    for (let chunk = 1; chunk <= (sending?.parts ?? count); chunk += 1) {
+      yield* world.elapse(spacing * 1000, 1000);
+      sending?.next();
+      // Whatever it has taken so far, the first frame is on its way: the connection is not redialed.
+      expect(world.epoch()).toBe(epoch);
+    }
+    expect(yield* world.until(() => world.live(), 5000)).not.toBeNull();
+    expect(world.epoch()).toBe(epoch);
+  });
+
+/** A call the test follows: what it runs as, and what it has heard. */
+interface Followed {
+  readonly world: SshWorld;
+  readonly running: Fiber.Fiber<unknown>;
+  readonly heard: Uint8Array[];
+  readonly call: FakeCall | undefined;
+}
+
+/** Whether `running` ended in success with its own failure value, or is still going (undefined). */
+const outcomeOf = (running: Fiber.Fiber<unknown>) => {
+  const done = running.pollUnsafe();
+  return done !== undefined && Exit.isSuccess(done) ? done.value : undefined;
+};
+
+/** Deliver `body` in chunks `spacing` seconds apart; a call that is cut short stops after `cut`. */
+const deliver = (
+  followed: Followed,
+  body: Uint8Array,
+  spacing: number,
+  count: number,
+  stopAfter: number | undefined,
+) =>
+  Effect.gen(function* () {
+    const {world, running, call} = followed;
+    const sending = call?.trickle(body, count);
+    const parts = sending?.parts ?? count;
+    // A message is cut short only if a part of it is still to come.
+    const cut = stopAfter !== undefined && stopAfter < parts ? stopAfter : undefined;
+    for (let chunk = 1; chunk <= parts; chunk += 1) {
+      // The silence of a call that stops starts with its last chunk, so nothing waits before it.
+      if (cut !== undefined && chunk > cut) break;
+      yield* world.elapse(spacing * 1000, 1000);
+      sending?.next();
+      // Every chunk is progress: whatever the total so far, the call is not cut.
+      expect(running.pollUnsafe()).toBeUndefined();
+    }
+    return cut !== undefined;
+  });
+
+/** The reply came whole: a call answers, a stream is not cut for being quiet after its first frame. */
+const expectWhole = (followed: Followed, stream: boolean) =>
+  Effect.gen(function* () {
+    const {world, running, heard, call} = followed;
+    yield* world.elapse(1000, 250);
+    if (stream) {
+      expect(heard).toHaveLength(1);
+      yield* world.elapse(2 * REPLY_STALL_MS, 1000);
+      expect(running.pollUnsafe()).toBeUndefined();
+      return;
+    }
+    call?.end();
+    yield* world.elapse(1000, 250);
+    expect(outcomeOf(running)).toMatchObject({_tag: 'Success'});
+  });
+
+/** The reply stopped: not cut before a window has passed in silence, and cut within two windows. */
+const expectCut = (followed: Followed) =>
+  Effect.gen(function* () {
+    const {world, running} = followed;
+    yield* world.elapse(REPLY_STALL_MS - 1000, 1000);
+    expect(running.pollUnsafe()).toBeUndefined();
+    yield* world.elapse(REPLY_STALL_MS + 2000, 1000);
+    expect(outcomeOf(running)).toMatchObject({
+      _tag: 'Failure',
+      failure: {_tag: 'GrpcFailed', code: 4},
+    });
+  });
+
+/** A reply that arrives in `count` chunks `spacing` seconds apart, stopping after `stopAfter` when given. */
+const playSlow = (
+  mode: 'unary' | 'stream' | 'feed',
+  spacing: number,
+  count: number,
+  stopAfter: number | undefined,
+) =>
+  Effect.gen(function* () {
+    if (mode === 'feed') return yield* playSlowFeed(spacing, count);
+    const stream = mode === 'stream';
+    const world = yield* sshHost({...served, feed: 'off'});
+    const heard: Uint8Array[] = [];
+    const running = yield* Effect.forkChild(
+      Effect.result(
+        stream
+          ? world.calls.stream(HOST, WATCH_RUNS, new Uint8Array(0), bytes => heard.push(bytes))
+          : world.calls.unary(HOST, LIST_ITEMS, listRequest),
+      ),
+    );
+    yield* world.until(() => world.pending.length > 0, 60_000);
+    const followed: Followed = {world, running, heard, call: world.pending.shift()};
+    const cut = yield* deliver(
+      followed,
+      stream ? snapshotReply : listReply,
+      spacing,
+      count,
+      stopAfter,
+    );
+    yield* cut ? expectCut(followed) : expectWhole(followed, stream);
+  });
+
+const playLinger = (gaps: readonly number[]) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, feed: 'off'});
+    const answer = Effect.gen(function* () {
+      const {running, call} = yield* listItems(world);
+      call?.send(listReply);
+      call?.end();
+      yield* world.elapse(500, 250);
+      expect(running.pollUnsafe()).toBeDefined();
+    });
+    yield* answer;
+    for (const seconds of gaps) {
+      yield* world.elapse(seconds * 1000, 250);
+      yield* answer;
+    }
+    // Calls within the linger shared the one dial, and the one master.
+    expect(world.host.state.connects).toBe(1);
+    expect(world.host.state.masters).toBe(1);
+    // Past it, the connection is closed and the master with it; the next call dials anew.
+    yield* world.elapse(CONNECTION_LINGER_MS + 2000, 500);
+    expect(world.host.state.masterUp).toBe(false);
+    yield* answer;
+    expect(world.host.state.connects).toBe(2);
+  });
+
+const playFrozen = (quiet: number, times: number) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost(served);
+    expect(yield* world.until(() => world.live(), 60_000)).not.toBeNull();
+    for (let round = 1; round <= times; round += 1) {
+      yield* world.elapse(quiet * 1000, 1000);
+      const before = world.epoch();
+      const frozenPid = world.host.state.pid;
+      const masters = world.host.state.masters;
+      world.host.freeze();
+      // Noticed within the silence bound; redialed on a fresh master within the frozen bound.
+      expect(
+        yield* world.until(() => world.epoch() !== before, SILENCE_BOUND_MS + NOTICE_SLACK_MS),
+      ).not.toBeNull();
+      expect(
+        yield* world.until(() => world.live() && world.epoch() > before, FROZEN_BOUND_MS),
+      ).not.toBeNull();
+      expect(world.host.state.kills).toContain(frozenPid);
+      expect(world.host.state.frozen).toBe(false);
+      expect(world.host.state.masters).toBe(masters + 1);
+    }
+  });
+
+it.effect.prop(
+  'a remote host fails in any of its ways, and every failure is told apart: refusals name their cause and are not retried, progressing replies are not cut, one connect is one dial, a frozen master is redialed',
+  {failure},
+  ({failure}) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        switch (failure.kind) {
+          case 'build':
+            return yield* playBuild(failure.platform, failure.built);
+          case 'unserved':
+            return yield* playUnserved(failure.reason, failure.stateRefusal);
+          case 'slow':
+            return yield* playSlow(failure.mode, failure.gap, failure.pieces, failure.stopAfter);
+          case 'linger':
+            return yield* playLinger(failure.gaps);
+          case 'frozen':
+            return yield* playFrozen(failure.quiet, failure.times);
+        }
+      }),
+    ),
+  {arbitrary: {runs: 20}},
 );

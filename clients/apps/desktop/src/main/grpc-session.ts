@@ -16,7 +16,7 @@ import {callStatus} from '../state/grpc-status.js';
 import {GrpcCode, GrpcFailed} from './errors.js';
 
 /** How long a call is watched for progress: to its end, or until its first reply message. */
-export type Watch = 'to-end' | 'to-first-reply';
+type Watch = 'to-end' | 'to-first-reply';
 
 export interface GatewaySession {
   /**

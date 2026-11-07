@@ -8,7 +8,7 @@
  * payload is checked against the generated schemas before it is forwarded and again before it is
  * handed on.
  */
-import {OrchestratorService} from '@vibesys/orchestrator-proto';
+import {HostControlService, OrchestratorService} from '@vibesys/orchestrator-proto';
 import {DesktopRefusal, HostService, validateServicePayload} from '@vibesys/proto';
 import type * as Duration from 'effect/Duration';
 import * as Effect from 'effect/Effect';
@@ -33,12 +33,16 @@ import {
 } from './gateway-connection.js';
 
 /** The services a payload is checked against. */
-const SERVICES = [HostService, OrchestratorService];
+const SERVICES = [HostService, OrchestratorService, HostControlService];
 
-/** The methods the window may call: the handshake, and every orchestrator method. */
+/**
+ * The methods the window may call: the handshake, every orchestrator method, and the host's
+ * `Identify`, which says why a host does not serve. Never `Stop`: the app does not end hosts.
+ */
 const ALLOWED: ReadonlySet<string> = new Set([
   HELLO_METHOD,
   ...OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
+  `/${HostControlService.typeName}/${HostControlService.method.identify.name}`,
 ]);
 
 export type CallError = GrpcFailed | GatewayFailed | GatewayRefused | LinkFailed;

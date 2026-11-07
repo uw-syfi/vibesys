@@ -31,6 +31,7 @@ import {
 } from '../state/index.js';
 import {type AppError, InvalidMessage, isRetryable} from './errors.js';
 import {faultOf} from './fault.js';
+import type {WhyUnserved} from './host-control.js';
 import type {OrchestratorClient} from './orchestrator-client.js';
 import {CLIENT_BUILD} from './protocol.js';
 import {
@@ -79,6 +80,8 @@ interface OpenEpoch {
 interface Wiring {
   readonly client: OrchestratorClient;
   readonly policy: ReconnectPolicy;
+  /** What the host says it refuses, asked after an UNAVAILABLE handshake. */
+  readonly whyUnserved: WhyUnserved;
   readonly state: SubscriptionRef.SubscriptionRef<HostConnectionState>;
   /** The Clock time the host last said anything, or null. */
   readonly lastHeard: SubscriptionRef.SubscriptionRef<number | null>;
@@ -111,8 +114,15 @@ const afterFailure = (w: Wiring, error: AppError, failures: number) =>
     );
   });
 
+/**
+ * A handshake the host answered UNAVAILABLE may be a host that refuses for good (its state
+ * directory is on a network disk), which UNAVAILABLE does not say: the host is asked, and says.
+ */
 const failedHello = (w: Wiring, error: AppError, failures: number) =>
-  afterFailure(w, error, failuresAfter(w.policy, failures, null));
+  Effect.gen(function* () {
+    const refused = error._tag === 'Unavailable' ? yield* w.whyUnserved : undefined;
+    return yield* afterFailure(w, refused ?? error, failuresAfter(w.policy, failures, null));
+  });
 
 /** One pass of the loop: dial, then stay until the connection is lost. Answers the next count. */
 const connectOnce = (w: Wiring, failures: number, epoch: number) =>
@@ -164,11 +174,13 @@ const dialForever = (w: Wiring) =>
 export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
   client: OrchestratorClient,
   policy: ReconnectPolicy = defaultReconnect,
+  whyUnserved: WhyUnserved = Effect.succeed(undefined),
 ) {
   const scope = yield* Effect.scope;
   const w: Wiring = {
     client,
     policy,
+    whyUnserved,
     state: yield* SubscriptionRef.make<HostConnectionState>(idleConnection),
     lastHeard: yield* SubscriptionRef.make<number | null>(null),
     current: yield* Ref.make<OpenEpoch | null>(null),

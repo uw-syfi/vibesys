@@ -73,23 +73,30 @@ describe('link pool', () => {
     }),
   );
 
-  it.effect('refuses a host whose link could not be confirmed released', () =>
-    Effect.gen(function* () {
-      const {lines, make} = poolOver({hold: true, kill: 'ignores'});
-      const poolScope = yield* Scope.make();
-      const pool = yield* make.pipe(Effect.provideService(Scope.Scope, poolScope));
-      const first = yield* Scope.make();
-      yield* pool.lease('host-a').pipe(Effect.provideService(Scope.Scope, first));
-      yield* joinDriving(yield* Effect.forkChild(Scope.close(first, Exit.void)), '1 second');
-      const second = yield* Scope.make();
-      const refused = yield* Effect.flip(
-        pool.lease('host-a').pipe(Effect.provideService(Scope.Scope, second)),
-      );
-      expect(refused.message).toContain('could not confirm teardown');
-      expect(lines).toEqual(['could not retire host-a']);
-      // Another host is unaffected.
-      yield* pool.lease('host-b').pipe(Effect.provideService(Scope.Scope, second));
-    }),
+  it.effect(
+    'refuses a lease while its host cannot be confirmed released, and serves it once it can',
+    () =>
+      Effect.gen(function* () {
+        const {lines, mode, make} = poolOver({hold: true, kill: 'ignores'});
+        const poolScope = yield* Scope.make();
+        const pool = yield* make.pipe(Effect.provideService(Scope.Scope, poolScope));
+        const first = yield* Scope.make();
+        yield* pool.lease('host-a').pipe(Effect.provideService(Scope.Scope, first));
+        yield* joinDriving(yield* Effect.forkChild(Scope.close(first, Exit.void)), '1 second');
+        const second = yield* Scope.make();
+        const lease = pool.lease('host-a').pipe(Effect.provideService(Scope.Scope, second));
+        // The next lease tries the release again, and while it still cannot be confirmed it is refused
+        // with the reason, so that nothing runs two masters on one control path.
+        const refused = yield* joinDriving(yield* Effect.forkChild(Effect.flip(lease)), '1 second');
+        expect(refused.message).toContain('could not confirm teardown');
+        expect(lines).toEqual(['could not retire host-a']);
+        // Another host is unaffected.
+        yield* pool.lease('host-b').pipe(Effect.provideService(Scope.Scope, second));
+        // Not for good: once the master answers, the host is served again.
+        mode.hold = false;
+        const served = yield* joinDriving(yield* Effect.forkChild(lease), '1 second');
+        expect(served.alias).toBe('host-a');
+      }),
   );
 
   it.effect('releases the links still held when the pool closes, and refuses new leases', () =>

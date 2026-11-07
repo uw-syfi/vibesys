@@ -1,7 +1,7 @@
 import {Button, Chip, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CommandProgress} from '../../state/index.js';
-import {faultWord, refusalWord} from './words.js';
+import {faultText, refusalWord} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -30,14 +30,14 @@ function commandWords(progress: CommandProgress, done: string): CommandWords {
       };
     case 'Unconfirmed':
       return {
-        label: `${done}: not confirmed. ${faultWord(progress.fault.kind)} It may still have gone through.`,
+        label: `${done}: not confirmed. ${faultText(progress.fault)} It may still have gone through.`,
         tone: 'warn',
         details: progress.fault.detail,
         canRetry: true,
       };
     case 'Failed':
       return {
-        label: `${done}: not done. ${faultWord(progress.fault.kind)}`,
+        label: `${done}: not done. ${faultText(progress.fault)}`,
         tone: 'err',
         details: progress.fault.detail,
         canRetry: progress.fault.retryable,

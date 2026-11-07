@@ -22,6 +22,7 @@ const detailOf = (error: AppError): string => {
     case 'InvalidMessage':
       return `${error.type}: ${error.detail}`;
     case 'Rejected':
+    case 'Refused':
       return error.detail;
   }
 };
@@ -31,4 +32,5 @@ export const faultOf = (error: AppError): Fault => ({
   kind: error._tag,
   detail: detailOf(error),
   retryable: isRetryable(error),
+  ...(error._tag === 'Refused' ? {cause: error.cause} : {}),
 });
