@@ -3,45 +3,39 @@
 package e2e
 
 import (
-	"context"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
-// awaitLeadDeliveries observes the typed mailbox, rather than waiting for a
-// period of silence or inferring a wake from prompt text. This fixture submits
-// two baseline jobs, four worker jobs, and two post-promotion jobs.
+// awaitLeadDeliveries reads the typed mailbox of the run's snapshot, rather than waiting for a
+// period of silence or inferring a wake from prompt text, until every message to the lead is
+// consumed. The run ends by itself once the lead has reported, so the snapshot is read as `run get`
+// serves it, which holds the messages of a run that is over. This fixture submits two baseline jobs,
+// four worker jobs, and two post-promotion jobs. The bound only guards against a delivery that never
+// comes.
 func (r *rig) awaitLeadDeliveries(lead string) {
 	r.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
-	defer cancel()
-	connection := r.dial(ctx)
-	defer connection.Close()
-	stream, err := pb.NewOrchestratorServiceClient(connection).WatchRuns(ctx, &pb.WatchRunsRequest{})
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	messages := map[string]*pb.Message{}
+	deadline := time.Now().Add(bound)
 	for {
-		frame, err := stream.Recv()
-		if err != nil {
-			r.t.Fatalf("waiting for all lead deliveries: %v", err)
+		var snapshot pb.RunsSnapshot
+		if err := protojson.Unmarshal([]byte(r.client("run", "get", "--json")), &snapshot); err != nil {
+			r.t.Fatal(err)
 		}
-		snap, event, _ := hosted.DecodeWatchRuns(frame)
-		if snap != nil {
-			clear(messages)
-			for _, m := range snap.Messages {
-				messages[m.Id] = m
-			}
-		}
-		if m := event.GetMessage(); m != nil {
+		messages := map[string]*pb.Message{}
+		for _, m := range snapshot.GetMessages() {
 			messages[m.Id] = m
 		}
 		if leadDeliveriesComplete(r.t, messages, lead) {
 			return
 		}
+		if time.Now().After(deadline) {
+			r.t.Fatalf("waiting for all lead deliveries: %d messages after %s", len(messages), bound)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

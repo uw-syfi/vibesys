@@ -262,6 +262,24 @@ func (r *rig) sidecarPids() []int {
 	return pids
 }
 
+// awaitRecordedProcesses returns the sidecar and agent process-group pids the run's sessions have
+// recorded once there are some of each. A run that ends by itself takes its sessions down, so the test
+// reads them while they live; the bound only guards against a session that never records.
+func (r *rig) awaitRecordedProcesses() (sidecars, groups []int) {
+	r.t.Helper()
+	deadline := time.Now().Add(bound)
+	for {
+		sidecars, groups = r.sidecarPids(), r.pgids()
+		if len(sidecars) > 0 && len(groups) > 0 {
+			return sidecars, groups
+		}
+		if time.Now().After(deadline) {
+			r.t.Fatalf("a run recorded %d sidecars and %d agent process groups after %s", len(sidecars), len(groups), bound)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func (r *rig) killSidecars() {
 	if r.t.Failed() && os.Getenv("E2E_KEEP") != "" {
 		return
