@@ -31,6 +31,7 @@ export {
   runsCursor,
 } from './host-model.js';
 export {
+  type CostFeedSnapshot,
   type CostModel,
   type CostUsage,
   type CostView,
@@ -81,12 +82,11 @@ export {
   type TimelineRow,
   type TreeNode,
   timeline,
-  type UsageReport,
-  type UsageTotals,
   unbrokenFrom,
-  usageOf,
 } from './orchestrator/views.js';
 export {
+  type CostTarget,
+  costTarget,
   initialRoute,
   type Route,
   type RouteAction,

@@ -18,7 +18,15 @@ import {
   type SpendBucket,
   type Usage,
 } from '@vibesys/orchestrator-proto';
+import type {FeedStatus} from '../feed.js';
+import type {Freshness} from '../freshness.js';
 import {type Instant, ms} from './time.js';
+
+/** How a run's cost stream stands, for the screen that reads what it delivers. */
+export interface CostFeedSnapshot {
+  readonly status: FeedStatus;
+  readonly freshness: Freshness;
+}
 
 /** Tokens by kind and the cost of the priced turns; a field no turn reported is null, never zero. */
 export interface CostUsage {

@@ -44,3 +44,20 @@ export function routeReducer(route: Route, action: RouteAction): Route {
       return route.screen === 'run' ? {...route, agentId: null} : route;
   }
 }
+
+/** The run whose cost stream a screen needs open. */
+export interface CostTarget {
+  readonly host: string;
+  readonly runId: string;
+}
+
+/**
+ * Which run's cost stream to keep open: the run whose Cost view is showing, and none while any
+ * other view, the run list or an agent opened over the views is. The stream costs the host work
+ * and the view is only read where it is shown, so nothing else follows it.
+ */
+export function costTarget(route: Route): CostTarget | null {
+  return route.screen === 'run' && route.view === 'cost' && route.agentId === null
+    ? {host: route.host, runId: route.runId}
+    : null;
+}

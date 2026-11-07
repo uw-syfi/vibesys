@@ -2,6 +2,7 @@ import {Page, pageState, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {
   CommandProgress,
+  CostFeedSnapshot,
   FeedStatus,
   HostConnectionState,
   HostModel,
@@ -37,6 +38,8 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
+  /** How each run's cost stream stands while its Cost view is showing, by run id. */
+  readonly costFeeds: Readonly<Record<string, CostFeedSnapshot>>;
 }
 
 /** What the person has asked for, how it is going, and the ways to ask for more. */
@@ -54,6 +57,9 @@ export interface AppCommands {
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
 }
+
+/** A cost stream that has not answered yet. */
+const OPENING_COST: CostFeedSnapshot = {status: {_tag: 'Opening'}, freshness: 'empty'};
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
@@ -76,6 +82,8 @@ export function OrchestratorApp(props: {
   readonly commands: AppCommands;
   /** The person pressed Retry on a host's connection or feed. */
   readonly retryHost: (host: string) => void;
+  /** The person pressed Retry on a run's cost stream. */
+  readonly retryCost: (host: string, runId: string) => void;
   /** Where the person is; the caller owns it so it can watch what that screen needs. */
   readonly route: Route;
   readonly go: (action: RouteAction) => void;
@@ -154,6 +162,8 @@ export function OrchestratorApp(props: {
           runId={runId}
           nowMs={props.nowMs}
           view={route.view}
+          costFeed={host.costFeeds[runId] ?? OPENING_COST}
+          retryCost={() => props.retryCost(host.key, runId)}
           agentId={route.agentId}
           stopProgress={commands.stop[runId]}
           stop={() => commands.stopRun(host.key, runId)}

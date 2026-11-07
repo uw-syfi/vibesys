@@ -139,15 +139,6 @@ export function formatDuration(totalMs: number): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-/** A count of tokens in thousands (`12.3k`), or `Not reported` where the tool said nothing. */
-export function formatTokens(count: number | null): string {
-  if (count === null) return 'Not reported';
-  return count < 1000 ? String(count) : `${(count / 1000).toFixed(1)}k`;
-}
-
-export const formatCost = (usd: number | null): string =>
-  usd === null ? 'Not reported' : `$${usd.toFixed(2)}`;
-
 export function formatClock(atMs: number): string {
   return new Date(atMs).toISOString().slice(11, 16);
 }

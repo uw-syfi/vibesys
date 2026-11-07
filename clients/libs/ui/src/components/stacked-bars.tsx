@@ -90,6 +90,8 @@ export function StackedBars(props: {
   readonly to?: string;
   readonly valueFormat?: (value: number) => string;
   readonly marks?: readonly BarMark[];
+  /** The plot's height: the default, or `tall` for a chart that is the point of its screen. */
+  readonly size?: 'tall';
 }): JSX.Element {
   const tallest = Math.max(0, ...props.bars.map(bar => bar.total));
   const format = props.valueFormat;
@@ -106,6 +108,7 @@ export function StackedBars(props: {
       className="vs-bars"
       data-scaled={scale !== null || props.marks !== undefined || undefined}
       data-axis={scale !== null || undefined}
+      data-size={props.size}
       style={figure}
     >
       {scale === null ? null : (

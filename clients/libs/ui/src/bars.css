@@ -19,6 +19,9 @@
 .vs-bars-scale {
   position: relative;
 }
+.vs-bars[data-size="tall"] .vs-bars-plot {
+  height: calc(var(--space-8) * 4);
+}
 /* A chart with a value axis or labelled bars: the axis figures in a column of their own, and the
    plot, the labels and the two ends of the axis all in the column beside it, so they share its
    edges. */
