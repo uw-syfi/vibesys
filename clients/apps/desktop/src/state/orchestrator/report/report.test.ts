@@ -62,13 +62,14 @@ describe('the objectives of a report', () => {
     );
   });
 
-  it('show the head value and the percent of the bound exactly as served, whatever they are', () => {
+  it('show the head value and the percents of the bound exactly as served, whatever they are', () => {
     fc.assert(
       fc.property(
         fc.double({min: 1e-3, max: 1e9, noNaN: true}),
         fc.double({min: 1e-3, max: 1e9, noNaN: true}),
         fc.double({min: 1e-3, max: 1e4, noNaN: true}),
-        (bound, headValue, percentOfBound) => {
+        fc.double({min: 1e-3, max: 1e4, noNaN: true}),
+        (bound, headValue, percentOfBound, bestPercentOfBound) => {
           const [report] = objectiveReports(
             create(SearchStateSchema, {
               series: [
@@ -85,12 +86,14 @@ describe('the objectives of a report', () => {
                   versions: [{seq: 1n, value: bound, unit: 'tok/s', note: 'n', objective: 'tok_s'}],
                   headValue,
                   percentOfBound,
+                  bestPercentOfBound,
                 },
               ],
             }),
           );
           expect(report?.headValue).toBe(headValue);
           expect(report?.percentOfBound).toBe(percentOfBound);
+          expect(report?.bestPercentOfBound).toBe(bestPercentOfBound);
           expect(report?.unit).toBe('tok/s');
           expect(report?.bound?.current.value).toBe(bound);
         },
@@ -123,6 +126,7 @@ describe('the objectives of a report', () => {
     const [report] = objectiveReports(search);
     expect(report?.headValue).toBe(7);
     expect(report?.percentOfBound).toBeUndefined();
+    expect(report?.bestPercentOfBound).toBeUndefined();
     expect(report?.bound).toBeUndefined();
     expect(report?.unit).toBeNull();
   });

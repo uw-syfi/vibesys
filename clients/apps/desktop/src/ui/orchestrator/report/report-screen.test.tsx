@@ -28,6 +28,7 @@ import {
   withReport,
 } from '../../../testing/orchestrator/index.js';
 import {RunScreen} from '../run-screen.js';
+import {formatExact, formatFigure, withUnit} from './format.js';
 
 installDom();
 
@@ -170,15 +171,61 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
-  it('gives each objective a tile with the percent of the bound exactly as the host sent it', () => {
+  it('gives each objective a tile with the best’s percent of the bound exactly as the host sent it', () => {
     const {screen} = render({});
     const sent = stateOf({}).searches[RUN]?.bounds ?? [];
     expect(sent).toHaveLength(2);
     const tiles = [...screen.container.querySelectorAll('.vs-tile')].map(tile => tile.textContent);
     for (const bound of sent) {
       const tile = tiles.find(text => text?.includes(bound.objective));
-      expect(tile).toContain(`${Math.round(bound.percentOfBound ?? Number.NaN)}% of bound`);
+      expect(tile).toContain(`${Math.round(bound.bestPercentOfBound ?? Number.NaN)}% of bound`);
     }
+    screen.unmount();
+  });
+
+  it('shows one number for an objective’s best in the header, its tile and its chart, whatever the head scored', () => {
+    const {screen} = render({});
+    const search = stateOf({}).searches[RUN];
+    const objectives = search?.series ?? [];
+    expect(objectives).toHaveLength(2);
+    let headDiffers = 0;
+    for (const series of objectives) {
+      const bound = search?.bounds.find(entry => entry.objective === series.objective);
+      const unit = bound?.versions.at(-1)?.unit ?? null;
+      const best = series.points.filter(point => point.bestSoFar).at(-1)?.value ?? Number.NaN;
+      const figure = formatFigure(best);
+      // The header says it in the hover of its figure, the tile and the chart panel in their text.
+      const headerFigure = screen.container.querySelector(
+        `[title="${withUnit(formatExact(best), unit)}"]`,
+      );
+      expect(headerFigure).not.toBeNull();
+      // Beside the figure, the header gives the best's share of the bound, not the head's.
+      const share = Math.round(bound?.bestPercentOfBound ?? Number.NaN);
+      expect(headerFigure?.parentElement?.textContent).toContain(`${share}% of bound`);
+      const headShare = Math.round(bound?.percentOfBound ?? Number.NaN);
+      if (headShare !== share) {
+        expect(headerFigure?.parentElement?.textContent).not.toContain(`${headShare}% of bound`);
+      }
+      const tile = [...screen.container.querySelectorAll('.vs-tile')].find(each =>
+        each.textContent?.includes(series.objective),
+      );
+      expect(tile?.textContent).toContain(figure);
+      const panel = [...screen.container.querySelectorAll('.vs-chart-panel')].find(each =>
+        each.textContent?.includes(series.objective),
+      );
+      expect(panel?.textContent).toContain(figure);
+      // The head is the best of the first objective only: on the other it scored something else, and
+      // that is not what any of the three says.
+      const head = bound?.headValue;
+      if (head !== undefined && formatFigure(head) !== figure) {
+        headDiffers += 1;
+        expect(tile?.textContent).not.toContain(formatFigure(head));
+        expect(
+          screen.container.querySelector(`[title="${withUnit(formatExact(head), unit)}"]`),
+        ).toBeNull();
+      }
+    }
+    expect(headDiffers).toBeGreaterThan(0);
     screen.unmount();
   });
 
