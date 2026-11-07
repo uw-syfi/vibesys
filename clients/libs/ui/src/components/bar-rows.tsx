@@ -12,8 +12,22 @@ export interface BarColumn {
   readonly strong?: boolean;
 }
 
-/** One row: a name, a bar and a figure for each column. */
-export interface BarRow {
+/** A tuple of `N` of `T`; the open list when `N` is not a literal. */
+type TupleOf<T, N extends number, Built extends readonly T[] = readonly []> = number extends N
+  ? readonly T[]
+  : Built['length'] extends N
+    ? Built
+    : TupleOf<T, N, readonly [T, ...Built]>;
+
+/**
+ * The figures of one row of a table with `N` columns: exactly one for each, as it is written; null
+ * is a figure that was not reported. A row built for another number of columns does not type-check
+ * against the table it is given to, so a header can never stand over another column's figure.
+ */
+export type BarFigures<N extends number = number> = TupleOf<string | null, N>;
+
+/** One row of a table with `N` figure columns: a name, a bar and a figure for each column. */
+export interface BarRow<N extends number = number> {
   readonly key: string;
   /** What the row is, cut with an ellipsis when the column is narrow; its whole text is the hover. */
   readonly name: string;
@@ -25,8 +39,8 @@ export interface BarRow {
   readonly note?: string;
   /** What the bar measures, drawn as wide as its share of the largest value of the rows; null draws no bar. */
   readonly value: number | null;
-  /** One figure for each column, as it is written; null is a figure that was not reported. */
-  readonly figures: readonly (string | null)[];
+  /** One figure for each column. */
+  readonly figures: BarFigures<N>;
 }
 
 /** The room of a glyph of the figure face and of the header face, in pixels. */
@@ -47,6 +61,15 @@ function widthOf(column: BarColumn, at: number, rows: readonly BarRow[]): number
   );
 }
 
+interface BarRowsProps<Columns extends readonly BarColumn[]> {
+  readonly label: string;
+  readonly nameHeader: string;
+  readonly barLabel: string;
+  readonly columns: Columns;
+  /** One figure per column in every row: a row of another width is a type error. */
+  readonly rows: readonly BarRow<Columns['length']>[];
+}
+
 /**
  * Rows of a name, a bar and figures, every row on one grid: the bars start and end at the same
  * place, and each figure column is as wide as its widest figure and header and right-aligned in
@@ -55,13 +78,10 @@ function widthOf(column: BarColumn, at: number, rows: readonly BarRow[]): number
  * draws no bar. A row's `note` follows its name, and drops under it when the name leaves no room. When the width cannot hold a readable name, bar and figures, the bars give way
  * first. `label` names the table; `barLabel` names the bar column for assistive technology.
  */
-export function BarRows(props: {
-  readonly label: string;
-  readonly nameHeader: string;
-  readonly barLabel: string;
-  readonly columns: readonly BarColumn[];
-  readonly rows: readonly BarRow[];
-}): JSX.Element {
+export function BarRows<const Columns extends readonly BarColumn[]>(
+  props: BarRowsProps<Columns>,
+): JSX.Element;
+export function BarRows(props: BarRowsProps<readonly BarColumn[]>): JSX.Element {
   const [measure, width] = useInlineSize();
   const widths = props.columns.map((column, at) => widthOf(column, at, props.rows));
   const figures = widths.reduce((sum, each) => sum + each, 0);

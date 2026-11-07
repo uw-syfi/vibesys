@@ -55,6 +55,9 @@ type Rig struct {
 	// Search is the job log every daemon is given, read at each Restart: the one the host has read of
 	// each run's task. Nil is a host that reads none.
 	Search *search.Store
+	// JobLog is how every daemon reads a live run's job log afresh, read at each Restart. Nil is a host with
+	// no such read, which works a check-in's facts out from Search.
+	JobLog daemon.JobLog
 	// JobSource overrides the default Fake for integrated deterministic tests.
 	JobSource jobs.JobSource
 	// NewHost makes the launcher each new daemon is given, for a test of the real start protocol.
@@ -120,7 +123,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: host, Checkouts: r.Checkouts, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
+		Sidecars: host, Checkouts: r.Checkouts, Jobs: gatedJobs{r}, JobLog: r.JobLog, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

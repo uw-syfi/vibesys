@@ -228,6 +228,12 @@ export function measuredSearch(
       const value = (version: number): number =>
         version === 1 && options.revisedBound === true ? bound * 0.9 : bound;
       const headValue = head?.values[at];
+      const values = candidates.map(candidate => candidate.values[at] ?? 0);
+      const bestValue = values.reduce<number | undefined>(
+        (best, value) =>
+          best === undefined || beats(objective.direction, value, best) ? value : best,
+        undefined,
+      );
       return [
         {
           objective: objective.name,
@@ -247,6 +253,9 @@ export function measuredSearch(
                 headValue,
                 percentOfBound: percentOf(objective.direction, bound, headValue),
               }),
+          ...(bestValue === undefined
+            ? {}
+            : {bestValue, bestPercentOfBound: percentOf(objective.direction, bound, bestValue)}),
         },
       ];
     }),

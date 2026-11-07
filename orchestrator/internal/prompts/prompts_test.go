@@ -34,6 +34,35 @@ func goldenCases(t *testing.T) []string {
 	return paths
 }
 
+// records is the check-ins a catch-up request is worded from.
+type records map[core.CheckInID]core.CheckIn
+
+func (r records) CheckIn(id core.CheckInID) (core.CheckIn, bool) {
+	c, ok := r[id]
+	return c, ok
+}
+
+// readRecords reads the check-in a golden case's request is for, from <name>.checkin.json, when it has one.
+func readRecords(t *testing.T, name string) records {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name+".checkin.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c pb.CheckIn
+	if err := protojson.Unmarshal(data, &c); err != nil {
+		t.Fatalf("%s check-in: %v", name, err)
+	}
+	check, err := wire.CheckInFromMessage(&c)
+	if err != nil {
+		t.Fatalf("%s check-in: %v", name, err)
+	}
+	return records{check.ID: check}
+}
+
 func readCase(t *testing.T, path string) (*pb.Message, core.Message) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -60,7 +89,7 @@ func TestEveryGoldenRendersToTheBytesThePythonRendererWrote(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := prompts.Render(message)
+			got, err := prompts.RenderWith(message, readRecords(t, name))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +184,7 @@ func optional(r *rand.Rand, tag string) string {
 
 // bodies draws one message of each body kind, with the fields the contract requires set to
 // something, and the optional ones sometimes empty.
-func bodies(r *rand.Rand) []core.Message {
+func bodies(r *rand.Rand, rec records) []core.Message {
 	reportKinds := []core.ReportKind{core.ReportProgress, core.ReportFinal}
 	outcomes := []core.JobState{core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost}
 	statuses := []core.AgentStatus{
@@ -214,8 +243,42 @@ func bodies(r *rand.Rand) []core.Message {
 			Idle: time.Duration(r.Uint32()) * time.Second, Subagents: r.Uint32(), Workers: r.Uint32(), Judges: r.Uint32(),
 		}),
 		envelope(core.ReportDue{Every: time.Duration(r.Uint32()) * time.Second, Reports: r.Uint32()}),
-		envelope(core.CatchUpRequest{CheckIn: "c1", Since: since, Until: since.Add(time.Duration(r.Uint32()) * time.Second)}),
+		envelope(catchUp(r, rec, since)),
 	}
+}
+
+// catchUp draws a request for a report and the ready check-in it is worded from, which it puts in rec.
+func catchUp(r *rand.Rand, rec records, since time.Time) core.CatchUpRequest {
+	until := since.Add(time.Duration(r.Uint32()) * time.Second)
+	best := func(tag string) *core.Best {
+		return &core.Best{Value: r.NormFloat64() * 1000, Job: core.JobID(text(r, tag+"job:", 3)), Commit: core.Commit(text(r, tag+"commit:", 3)), At: since}
+	}
+	facts := core.WindowFacts{
+		Spend:         core.Spend{Turns: r.Uint32N(50)},
+		AgentsStarted: r.Uint32N(9), AgentsEnded: r.Uint32N(9), JobsMeasured: r.Uint32N(99),
+	}
+	facts.Spend.Unpriced = r.Uint32N(facts.Spend.Turns + 1)
+	if r.IntN(2) == 0 {
+		facts.Spend.Usage.CostUSD = spent(r)
+	}
+	for i := range r.IntN(3) {
+		move := core.ObjectiveMove{Metric: text(r, fmt.Sprint("metric", i, ":"), 3), Direction: []core.Direction{core.Maximize, core.Minimize}[r.IntN(2)], End: best(fmt.Sprint("end", i))}
+		if r.IntN(2) == 0 {
+			move.Start = best(fmt.Sprint("start", i))
+		}
+		facts.Objectives = append(facts.Objectives, move)
+	}
+	for i := range r.IntN(4) {
+		facts.PlansCreated = append(facts.PlansCreated, uint32(1+i))
+	}
+	for i := range r.IntN(3) {
+		facts.PlansChanged = append(facts.PlansChanged, uint32(10+i))
+	}
+	for i := range r.IntN(3) {
+		facts.Reports = append(facts.Reports, core.MessageID(fmt.Sprint("report", i)))
+	}
+	rec["c1"] = core.CheckIn{ID: "c1", Run: "r1", Since: since, At: until, Outcome: core.CheckInReady{Facts: facts}}
+	return core.CatchUpRequest{CheckIn: "c1", Since: since, Until: until}
 }
 
 // spent is a cost so far, absent about a third of the time.
@@ -236,8 +299,17 @@ func handoff(r *rand.Rand, body core.HandoffBody) core.Handoff {
 }
 
 // fieldsOf lists the strings a message's body holds, which its prompt carries or leaves out.
-func fieldsOf(m core.Message) []string {
+func fieldsOf(m core.Message, rec records) []string {
 	switch b := m.Body.(type) {
+	case core.CatchUpRequest:
+		var fields []string
+		for _, o := range rec[b.CheckIn].Outcome.(core.CheckInReady).Facts.Objectives {
+			fields = append(fields, o.Metric, string(o.End.Job), string(o.End.Commit))
+			if o.Start != nil {
+				fields = append(fields, string(o.Start.Job), string(o.Start.Commit))
+			}
+		}
+		return fields
 	case core.Text:
 		return []string{b.Text}
 	case core.Brief:
@@ -278,8 +350,9 @@ var artifacts = []string{"<no value>", "<nil>", "%!", "{{", "}}", "{%", "%}", "{
 func TestEveryBodyRendersWordsWithNoTemplateArtifactsWhateverItsFieldsHold(t *testing.T) {
 	r := rand.New(rand.NewPCG(3, 9))
 	for range 2000 {
-		for _, m := range bodies(r) {
-			got, err := prompts.Render(m)
+		rec := records{}
+		for _, m := range bodies(r, rec) {
+			got, err := prompts.RenderWith(m, rec)
 			name := fmt.Sprintf("%T", m.Body)
 			if err != nil {
 				t.Fatalf("%s %+v: %v", name, m.Body, err)
@@ -289,7 +362,7 @@ func TestEveryBodyRendersWordsWithNoTemplateArtifactsWhateverItsFieldsHold(t *te
 			}
 			// Take the fields out; what is left is the words the templates say.
 			rest := got
-			for _, field := range fieldsOf(m) {
+			for _, field := range fieldsOf(m, rec) {
 				if field = strings.TrimSpace(field); field != "" {
 					rest = strings.ReplaceAll(rest, field, "\x00")
 				}
@@ -299,7 +372,7 @@ func TestEveryBodyRendersWordsWithNoTemplateArtifactsWhateverItsFieldsHold(t *te
 					t.Fatalf("%s %+v: rendered %q, whose own words hold %q", name, m.Body, got, bad)
 				}
 			}
-			for _, field := range fieldsOf(m) {
+			for _, field := range fieldsOf(m, rec) {
 				if field = strings.TrimSpace(field); !strings.Contains(got, field) {
 					t.Fatalf("%s %+v: rendered %q, which lost the field %q", name, m.Body, got, field)
 				}
@@ -314,8 +387,9 @@ func TestEveryBodyRendersWordsWithNoTemplateArtifactsWhateverItsFieldsHold(t *te
 func TestAnOptionalFieldIsSaidExactlyWhenItIsSet(t *testing.T) {
 	r := rand.New(rand.NewPCG(5, 6))
 	for range 2000 {
-		for _, m := range bodies(r) {
-			got, err := prompts.Render(m)
+		rec := records{}
+		for _, m := range bodies(r, rec) {
+			got, err := prompts.RenderWith(m, rec)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -361,13 +435,14 @@ func TestAnOptionalFieldIsSaidExactlyWhenItIsSet(t *testing.T) {
 func TestRenderingIsPure(t *testing.T) {
 	r := rand.New(rand.NewPCG(7, 8))
 	for range 500 {
-		for _, m := range bodies(r) {
+		rec := records{}
+		for _, m := range bodies(r, rec) {
 			before := m
-			first, err := prompts.Render(m)
+			first, err := prompts.RenderWith(m, rec)
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := prompts.Render(m)
+			second, err := prompts.RenderWith(m, rec)
 			if err != nil || first != second {
 				t.Fatalf("%+v rendered %q then %q (%v)", m.Body, first, second, err)
 			}
@@ -379,7 +454,7 @@ func TestRenderingIsPure(t *testing.T) {
 			other.ID, other.Run, other.To = "m2", "r2", "agent-b"
 			other.Delivery, other.Rejection, other.Attempts = core.DeliverySteered, core.RejectAgentGone, 3
 			other.At = time.Unix(99, 0).UTC()
-			if again, err := prompts.Render(other); err != nil || again != first {
+			if again, err := prompts.RenderWith(other, rec); err != nil || again != first {
 				t.Fatalf("%+v rendered %q with another envelope (%v), but %q with its own", m.Body, again, err, first)
 			}
 		}
@@ -391,7 +466,8 @@ func TestRenderingIsPure(t *testing.T) {
 func TestAMessageRendersTheSameAfterTheRoundTripThroughItsStoredForm(t *testing.T) {
 	r := rand.New(rand.NewPCG(11, 12))
 	for range 500 {
-		for _, m := range bodies(r) {
+		rec := records{}
+		for _, m := range bodies(r, rec) {
 			if idle, ok := m.Body.(core.LeadIdleReminder); ok {
 				idle.Idle += time.Duration(r.IntN(1000)) * time.Millisecond
 				m.Body = idle
@@ -400,7 +476,7 @@ func TestAMessageRendersTheSameAfterTheRoundTripThroughItsStoredForm(t *testing.
 				due.Every += time.Duration(r.IntN(1000)) * time.Millisecond
 				m.Body = due
 			}
-			want, err := prompts.Render(m)
+			want, err := prompts.RenderWith(m, rec)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -408,7 +484,7 @@ func TestAMessageRendersTheSameAfterTheRoundTripThroughItsStoredForm(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, err := prompts.Render(back); err != nil || got != want {
+			if got, err := prompts.RenderWith(back, rec); err != nil || got != want {
 				t.Fatalf("%+v rendered %q, and %q after a round trip (%v)", m.Body, want, got, err)
 			}
 		}
@@ -514,6 +590,61 @@ func TestTheReportRequestNamesTheIntervalAndWhetherItIsTheFirstReport(t *testing
 		}
 		if first := strings.Contains(got, "you have posted none yet"); first != (body.Reports == 0) {
 			t.Fatalf("%+v rendered %q, which says it is a first report: %t", body, got, first)
+		}
+	}
+}
+
+// A request for a catch-up report states the check-in's frozen facts as they are, so the lead recomputes
+// nothing, and shows times as Seattle's, never UTC, whatever zone the request's times are in.
+func TestACatchUpRequestStatesTheFrozenFactsInSeattleTime(t *testing.T) {
+	r := rand.New(rand.NewPCG(19, 20))
+	seattle, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2000 {
+		rec := records{}
+		since := time.Date(2026, time.Month(1+r.IntN(12)), 1+r.IntN(28), r.IntN(24), r.IntN(60), 0, 0, time.UTC)
+		body := catchUp(r, rec, since)
+		facts := rec["c1"].Outcome.(core.CheckInReady).Facts
+		got, err := prompts.RenderWith(core.Message{ID: "m1", Body: body}, rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			since.In(seattle).Format("2006-01-02 15:04 MST"), body.Until.In(seattle).Format("2006-01-02 15:04 MST"),
+			fmt.Sprintf("Turns finished: %d", facts.Spend.Turns), fmt.Sprintf("%d started, %d ended", facts.AgentsStarted, facts.AgentsEnded),
+			fmt.Sprintf("Measurements recorded: %d", facts.JobsMeasured), fmt.Sprintf("Reports you posted in it: %d", len(facts.Reports)),
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%+v rendered %q without %q", facts, got, want)
+			}
+		}
+		if strings.Contains(got, "UTC") {
+			t.Fatalf("rendered %q, which shows UTC", got)
+		}
+		if cost := facts.Spend.Usage.CostUSD; (cost != nil) != strings.Contains(got, ", costing $") {
+			t.Fatalf("cost %v, rendered %q", cost, got)
+		}
+		for _, o := range facts.Objectives {
+			if !strings.Contains(got, fmt.Sprintf("%g at the end (job %s, commit %s)", o.End.Value, o.End.Job, o.End.Commit)) {
+				t.Fatalf("objective %+v missing from %q", o, got)
+			}
+		}
+	}
+}
+
+// The words are made of the check-in's facts, so a request with none to read has no words: that is an
+// error and not a prompt that tells the lead to work them out itself.
+func TestACatchUpRequestWithNoFactsHasNoWords(t *testing.T) {
+	m := core.Message{ID: "m1", Body: core.CatchUpRequest{CheckIn: "c1"}}
+	for name, rec := range map[string]prompts.Records{
+		"no records": nil, "no such check-in": records{},
+		"a check-in still pending": records{"c1": {ID: "c1", Outcome: core.CheckInPending{}}},
+		"a check-in that failed":   records{"c1": {ID: "c1", Outcome: core.CheckInFailed{Detail: "x"}}},
+	} {
+		if got, err := prompts.RenderWith(m, rec); !errors.Is(err, prompts.ErrNoFacts) {
+			t.Errorf("%s: rendered %q (%v), want ErrNoFacts", name, got, err)
 		}
 	}
 }

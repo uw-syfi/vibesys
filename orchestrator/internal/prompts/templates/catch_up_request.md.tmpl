@@ -1,3 +1,18 @@
-The operator pressed Catch me up. They have seen nothing of this run since {{.Since.Format "2006-01-02 15:04"}} UTC, and want to know what happened in the {{if lt .Seconds 120}}{{.Seconds}} seconds{{else}}{{.Minutes}} minutes{{end}} up to {{.Until.Format "2006-01-02 15:04"}} UTC.
+The operator pressed Catch me up. They have seen nothing of this run since {{.Since}}, and want to know what happened in the {{if lt .Seconds 120}}{{.Seconds}} seconds{{else}}{{.Minutes}} minutes{{end}} up to {{.Until}} (Seattle time).
 
-Post a report now with `post_report`, kind `progress`, written as the `vibesys:report-progress` skill says, and post it in this turn: it is tied to this request by the turn it is in, so one you posted earlier does not answer it. It covers that span and not the whole run: what changed in it, the best result for each objective at the end of it against where it stood at the start, what you decided on your own, what is running now and what needs the operator. Take every number from the records, not from memory. Start no new work for it, and do not give a final report: the run goes on.
+The host worked these figures out from its records of that span and froze them, and the operator sees the same ones. State them as they are and do not recompute them:
+- Turns finished: {{.Facts.Turns}}{{if .Facts.HasCost}}, costing ${{printf "%.2f" .Facts.CostUSD}}{{end}}{{if .Facts.Unpriced}} ({{.Facts.Unpriced}} reported no price and are not in that cost){{end}}.
+- Agents: {{.Facts.AgentsStarted}} started, {{.Facts.AgentsEnded}} ended.
+- Measurements recorded: {{.Facts.JobsMeasured}}.
+{{- range .Facts.Objectives}}
+- Best {{.Metric}} ({{.Direction}}): {{if .HasStart}}{{printf "%g" .Start.Value}} at the start (job {{.Start.Job}}, commit {{.Start.Commit}}){{else}}nothing measured before it{{end}}, {{printf "%g" .End.Value}} at the end (job {{.End.Job}}, commit {{.End.Commit}}).
+{{- end}}
+{{- if .Facts.PlansCreated}}
+- Plans created: {{range $i, $n := .Facts.PlansCreated}}{{if $i}}, {{end}}{{$n}}{{end}}.
+{{- end}}
+{{- if .Facts.PlansChanged}}
+- Plans changed: {{range $i, $n := .Facts.PlansChanged}}{{if $i}}, {{end}}{{$n}}{{end}}.
+{{- end}}
+- Reports you posted in it: {{.Facts.Reports}}.
+
+Post a report now with `post_report`, kind `progress`, written as the `vibesys:report-progress` skill says, and post it in this turn: it is tied to this request by the turn it is in, so one you posted earlier does not answer it. It covers that span and not the whole run: what changed in it and what those figures mean, what you decided on your own, what is running now and what needs the operator. Take any number beyond those figures from the records, not from memory. Start no new work for it, and do not give a final report: the run goes on.

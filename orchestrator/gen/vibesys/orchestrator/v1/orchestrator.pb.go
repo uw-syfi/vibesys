@@ -3709,7 +3709,7 @@ func (x *RunLimitReached) GetGraceSeconds() uint32 {
 // CatchUpRequest asks a lead for a report covering a window: a viewer pressed Catch me up, and the
 // window is what happened since that viewer last looked. The lead answers with post_report, kind
 // progress, posted in the turn this message starts, which is how the report is tied to the check-in.
-// It carries the data a template words; the lead decides what the report says.
+// It names the check-in, whose frozen facts the template words; the lead decides what the report says.
 type CatchUpRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CheckInId     string                 `protobuf:"bytes,1,opt,name=check_in_id,json=checkInId,proto3" json:"check_in_id,omitempty"`
