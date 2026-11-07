@@ -16,7 +16,7 @@ import * as Scope from 'effect/Scope';
 import {app, BrowserWindow, ipcMain, session, type WebContents} from 'electron';
 import {hostKey} from '../state/host.js';
 import {controlDirectory} from './control-directory.js';
-import {nodeReadFile, nodeWriteFile} from './files.js';
+import {nodeFileLock, nodeReadFile, nodeSweepStaged, nodeWriteFile} from './files.js';
 import {installGatewayIpc, type RunCall} from './gateway.js';
 import {NodeGatewayArtifacts} from './gateway-artifacts.js';
 import {makeGatewayCalls} from './gateway-calls.js';
@@ -24,11 +24,17 @@ import {makeGatewayDialers} from './gateway-dialers.js';
 import {makeLinkPool} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
-import {installPreferencesIpc, makePreferencesStore, type PreferencesStore} from './preferences.js';
+import {
+  installPreferencesIpc,
+  makePreferencesStore,
+  type PreferencesStore,
+  preferencesPath,
+} from './preferences.js';
 import {NodeProcessSpawner} from './process.js';
 import {quit} from './quit.js';
 import {savedHosts} from './saved-hosts.js';
 import {installViewerIpc, makeViewerStore} from './viewer.js';
+import {chromeCss, windowChrome, windowChromeOptions} from './window-chrome.js';
 import {trackWindow} from './window-lifetime.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
 
@@ -123,6 +129,7 @@ function openWindow(hosts: readonly string[]): BrowserWindow {
     height: 860,
     title: 'VibeSys',
     show: false,
+    ...windowChromeOptions(process.platform),
     webPreferences: {
       preload: PRELOAD,
       sandbox: true,
@@ -130,6 +137,18 @@ function openWindow(hosts: readonly string[]): BrowserWindow {
       nodeIntegration: false,
     },
   });
+  // The page keeps clear of what the window's own controls cover; full screen hides them.
+  let inserted: string | undefined;
+  const tell = async (): Promise<void> => {
+    const key = await window.webContents.insertCSS(
+      chromeCss(windowChrome(process.platform, window.isFullScreen())),
+    );
+    if (inserted !== undefined) await window.webContents.removeInsertedCSS(inserted);
+    inserted = key;
+  };
+  window.webContents.on('did-finish-load', () => void tell());
+  window.on('enter-full-screen', () => void tell());
+  window.on('leave-full-screen', () => void tell());
   window.once('ready-to-show', () => window.show());
   void window.loadURL(windowUrl(UI_DIRECTORY, hosts));
   return window;
@@ -141,9 +160,17 @@ async function start(): Promise<void> {
   const asked = hostsFromArgv(process.argv);
   await app.whenReady();
   lockDownSession();
+  // A save the process died in the middle of left its staging file behind: sweep the old ones.
+  await Effect.runPromise(
+    nodeSweepStaged(preferencesPath(app.getPath('userData'))).pipe(
+      Effect.catch(cause =>
+        Effect.sync(() => log(`could not sweep stale preference files: ${cause.message}`)),
+      ),
+    ),
+  );
   const preferences = makePreferencesStore(
     app.getPath('userData'),
-    {read: nodeReadFile, write: nodeWriteFile},
+    {read: nodeReadFile, write: nodeWriteFile, lock: nodeFileLock},
     log,
   );
   const {calls, saved, viewer} = await wire(app.getPath('userData'), preferences);

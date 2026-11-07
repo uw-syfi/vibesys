@@ -278,7 +278,7 @@ button.vs-crumb:focus-visible {
 .vs-picklist {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--group-gap);
   container-type: inline-size;
 }
 /* A narrow list gives the bar's width back to the names: the figure still says the same. */
@@ -635,7 +635,7 @@ button.vs-crumb:focus-visible {
   padding: var(--space-3) var(--space-3);
 }
 .vs-screen[data-density="compact"] .vs-picklist {
-  gap: 0;
+  gap: var(--group-gap);
 }
 .vs-screen[data-density="compact"] .vs-pickrow {
   min-height: var(--row-dense);
@@ -1019,6 +1019,12 @@ button.vs-crumb:focus-visible {
   gap: var(--space-1);
   min-height: 0;
   container-type: inline-size;
+  /*
+   * A row's own inset (its padding and the selection's left edge) goes out into the page gutter, so
+   * the text of the header and of every row shares the left edge of the page's title and cards; only
+   * the row's highlight reaches past it.
+   */
+  margin-inline: calc(-1 * (var(--space-3) + var(--focus-ring))) calc(-1 * (var(--space-3) + var(--hairline)));
 }
 .vs-columnlist-head,
 .vs-columnlist-row {
@@ -1028,7 +1034,7 @@ button.vs-crumb:focus-visible {
   column-gap: var(--space-3);
 }
 .vs-columnlist-head {
-  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  padding: 0 calc(var(--space-3) + var(--hairline)) var(--space-1) calc(var(--space-3) + var(--focus-ring));
   border-bottom: var(--hairline) solid var(--line);
   color: var(--muted);
   font-family: var(--text-caption-family);

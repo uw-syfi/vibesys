@@ -140,7 +140,7 @@ describe('the catch-up page of a live run', () => {
         const asked: IdeaWindow[] = [];
         const screen = mount(page({rows, goIdeas: window => asked.push(window)}));
         screen.press(screen.control('Show ideas of this window'));
-        expect(asked).toEqual([{fromMs: rows[0]?.sinceMs, toMs: rows[0]?.atMs}]);
+        expect(asked).toEqual([{plans: [31, 32, 26]}]);
         screen.unmount();
       }),
   );

@@ -35,30 +35,26 @@ const row = fc
     }),
   );
 const rows = fc.array(row, {maxLength: 25});
-const window = fc
-  .tuple(fc.integer({min: 0, max: 1000}), fc.integer({min: 0, max: 1000}))
-  .map(([a, b]) => ({fromMs: Math.min(a, b), toMs: Math.max(a, b)}));
+const window = fc.array(fc.integer({min: 1, max: 500}), {maxLength: 30}).map(plans => ({plans}));
 
 describe('the display filters of the ideas table', () => {
-  it('"since check-in" keeps exactly the ideas created or changed inside the window, in order', () => {
+  it('"check-in" keeps exactly the ideas whose plan the host counted for the window, in order', () => {
     fc.assert(
       fc.property(rows, window, (all, span) => {
         const kept = ideasInWindow(all, span);
-        const inside = (at: number | null): boolean =>
-          at !== null && at > span.fromMs && at <= span.toMs;
-        expect(kept).toEqual(all.filter(idea => inside(idea.createdMs) || inside(idea.updatedMs)));
+        expect(kept).toEqual(all.filter(idea => span.plans.includes(idea.planNumber)));
       }),
     );
   });
 
-  it('a wider window never shows fewer ideas, and a window of no length shows none', () => {
+  it('a window that counts more plans never shows fewer ideas, and one that counts none shows none', () => {
     fc.assert(
-      fc.property(rows, window, fc.nat(100), fc.nat(100), (all, span, before, after) => {
-        const wider = {fromMs: span.fromMs - before, toMs: span.toMs + after};
+      fc.property(rows, window, window, (all, span, more) => {
+        const wider = {plans: [...span.plans, ...more.plans]};
         const narrow = new Set(ideasInWindow(all, span));
         const wide = new Set(ideasInWindow(all, wider));
         for (const idea of narrow) expect(wide.has(idea)).toBe(true);
-        expect(ideasInWindow(all, {fromMs: span.fromMs, toMs: span.fromMs})).toEqual([]);
+        expect(ideasInWindow(all, {plans: []})).toEqual([]);
       }),
     );
   });

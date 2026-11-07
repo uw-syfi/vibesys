@@ -12,6 +12,7 @@ import {
   Direction,
   ObjectiveStandingSchema,
   oneofIs,
+  ReceiptSchema,
   ReportKind,
   SearchStateSchema,
 } from '@vibesys/orchestrator-proto';
@@ -21,6 +22,7 @@ import {
   applyChange,
   applyCost,
   applySearch,
+  type CommandProgress,
   type CostFeedSnapshot,
   type CostView,
   emptyState,
@@ -107,7 +109,14 @@ function stateOf(world: World): OrchestratorState {
   return serveSummaries(cost === null ? state : applyCost(state, cost));
 }
 
-function render(world: World, options: {freshness?: Freshness; costFeed?: CostFeedSnapshot} = {}) {
+function render(
+  world: World,
+  options: {
+    freshness?: Freshness;
+    costFeed?: CostFeedSnapshot;
+    stopProgress?: CommandProgress;
+  } = {},
+) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
   const state = stateOf(world);
   const nowMs = world.live === false ? END + 60_000 : NOW;
@@ -124,7 +133,7 @@ function render(world: World, options: {freshness?: Freshness; costFeed?: CostFe
       cost={state.costs[RUN]}
       costFeed={options.costFeed ?? {status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}
-      stopProgress={undefined}
+      stopProgress={options.stopProgress}
       stop={() => {
         probe.stops += 1;
       }}
@@ -138,7 +147,6 @@ function render(world: World, options: {freshness?: Freshness; costFeed?: CostFe
       openAgents={() => probe.shown.push('agents')}
       openCost={() => probe.shown.push('cost')}
       names={agentNames(state, RUN)}
-      notice={null}
       reading={null}
     />,
   );
@@ -469,6 +477,16 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
+  it('shows the outcome of a Stop while the run lives and drops it once the run is over', () => {
+    const accepted: CommandProgress = {_tag: 'Accepted', receipt: create(ReceiptSchema, {})};
+    const live = render({}, {stopProgress: accepted});
+    expect(live.screen.text()).toContain('Stop: accepted');
+    live.screen.unmount();
+    const over = render({live: false}, {stopProgress: accepted});
+    expect(over.screen.text()).not.toContain('Stop: accepted');
+    over.screen.unmount();
+  });
+
   it('shows a dash for a cost no turn priced, and says the others are floors', () => {
     const none = render({cost: NO_PRICE});
     expect(cardText(none.screen.container, 'Spend')).toContain('\u2014');
@@ -666,12 +684,11 @@ describe('the ideas and workstreams of the report', () => {
 
   it('opens narrowed to the check-in window it is given, and still shows every idea on All', () => {
     const served = stateOf({ideas: 12}).searches[RUN];
-    const times = (served?.plans ?? []).map(plan => Number(plan.createdAt?.seconds ?? 0n) * 1000);
-    const from = [...times].sort((a, b) => a - b)[4] ?? 0;
-    const to = Math.max(...times);
-    const {screen} = render({ideas: 12, window: {fromMs: from, toMs: to}});
-    const inside = times.filter(at => at > from && at <= to).length;
-    expect(rowsOf(screen.container, 'Idea list')).toHaveLength(inside);
+    // The check-in counted these plans, whatever the plans' own times say.
+    const counted = (served?.plans ?? []).map(plan => plan.number).filter((_, at) => at % 3 === 0);
+    const {screen} = render({ideas: 12, window: {plans: counted}});
+    expect(rowsOf(screen.container, 'Idea list')).toHaveLength(counted.length);
+    expect(screen.text()).toContain(`Check-in ${counted.length}`);
     choose(screen.container, 'All 12');
     expect(rowsOf(screen.container, 'Idea list')).toHaveLength(12);
     screen.unmount();

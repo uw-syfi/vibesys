@@ -100,7 +100,7 @@
 .vs-segmented {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--group-gap);
   /* As wide as its segments wherever it sits, so it is the same box in a wide pane and a narrow one. */
   width: fit-content;
   max-width: 100%;
