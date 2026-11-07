@@ -283,12 +283,12 @@ returns for a final report, at once with the one the run already has however lat
 `--until progress` for any report, counting those posted after the wait began (an ended run counts the one it
 has). `--after N` counts only reports numbered above N, for either. A run is stalled when its lead is idle
 and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
-orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
+orchestrator reminds the lead after 10 idle minutes (at most 3 times per run); a run that still stands still
+10 minutes after the third reminder ends with the stop reason `stalled`. A lead that has given a final report and
 has started no new work since (spawned an agent, started a job, posted a progress report) is finished, not
-stalled: it is not reminded, and `run get` says so. A question put to it, which it answers in text, is not new
-work, so it stays finished. A wait for a report on a stalled run goes on to its timeout, which names the stall;
-one on a finished lead (`--after N` with N its final report) goes on to its timeout too, and the timeout says
-the lead's report is final, so the answer is in its reply (`run attach`).
+stalled: it is not reminded, and the run ends on its own, with the stop reason `finished`, as soon as the
+lead rests and no agent, job or message is outstanding. A wait for a report on a stalled run goes on to its
+timeout, which names the stall; a wait on an ended run returns at once.
 
 The orchestrator also asks the lead for a progress report about once an hour, so that a client can show a
 summary of the run with its age (the time of the latest report). `--summary-every 30m` sets the interval:

@@ -39,6 +39,9 @@ func (s State) Violations() []string {
 		if stalled := s.stalled(run); stalled != !run.StalledSince.IsZero() {
 			bad("run %s is %s with stalled since %v, but its stall is %t", run.ID, run.Status, run.StalledSince, stalled)
 		}
+		if s.finished(run) {
+			bad("run %s gave its final report, rests with nothing to do and is still running", run.ID)
+		}
 		if len(run.Kept) > 0 && !run.Status.Final() {
 			bad("run %s is %s and already keeps checkouts %v", run.ID, run.Status, run.Kept)
 		}

@@ -149,24 +149,32 @@ func TestAStalledLeadIsRemindedOnceAndWakes(t *testing.T) {
 	}
 }
 
-// A lead that ignores every reminder is left alone after the third, and the stall stays visible.
-func TestALeadIsRemindedAtMostThreeTimesInARun(t *testing.T) {
+// A lead that ignores every reminder is reminded no more after the third, and the run ends, for having
+// stalled, once it has stood still as long again.
+func TestALeadIsRemindedAtMostThreeTimesAndTheRunThenEnds(t *testing.T) {
 	w, run, leadID, timer := stalledRun(t)
 	for i := 1; i <= core.MaxLeadReminders; i++ {
 		w.fire(timer)
 		w.endTurn(leadID, core.TurnCompleted)
 		var ok bool
-		if timer, ok = w.leadTimer(); ok != (i < core.MaxLeadReminders) {
-			t.Fatalf("after reminder %d a timer was armed: %t", i, ok)
+		if timer, ok = w.leadTimer(); !ok {
+			t.Fatalf("after reminder %d no timer was armed", i)
 		}
 	}
 	got := w.runOf(run)
 	if got.LeadReminders != core.MaxLeadReminders || got.StalledSince.IsZero() || got.Status != core.RunRunning {
 		t.Fatalf("after the last reminder: %+v", got)
 	}
-	w.fire(core.ArmTimer{Kind: core.TimerLeadIdle, Run: run, FireAt: got.StalledSince.Add(core.LeadIdleAfter)})
-	if len(w.events) != 0 {
-		t.Fatalf("a fourth reminder recorded %v", w.events)
+	w.fire(timer)
+	if w.sent(core.LeadIdleReminder{Idle: core.LeadIdleAfter}) != core.MaxLeadReminders {
+		t.Fatalf("a fourth reminder was sent: %v", w.bodies())
+	}
+	if got := w.runOf(run); got.Status != core.RunStopping || got.StopReason != core.StopStalled {
+		t.Fatalf("a stall no reminder moved left the run %+v", got)
+	}
+	w.fact(leadID, core.SessionClosed{})
+	if got := w.runOf(run); got.Status != core.RunEnded || got.StopReason != core.StopStalled || got.EndedAt.IsZero() {
+		t.Fatalf("after the lead's session closed: %+v", got)
 	}
 }
 
@@ -246,79 +254,68 @@ func TestASubagentThatHandedOffIsNeverReminded(t *testing.T) {
 	}
 }
 
-// Reports are numbered within their run, in the order they are recorded, and carry their kind.
-func TestALeadThatGaveItsFinalReportIsFinishedNotStalled(t *testing.T) {
+// A lead that gives its final report is finished, not stalled, and the run ends on its own once the lead
+// rests: it needs no stop from anyone, and the outcome is the run's having finished.
+func TestARunEndsWhenItsLeadGivesAFinalReportAndRests(t *testing.T) {
 	w, run, leadID := started(t, 1, steers)
 	w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
 	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
+	if got := w.runOf(run); got.Status != core.RunRunning || !got.FinalReported || !got.StalledSince.IsZero() {
+		t.Fatalf("while the lead still holds its turn: %+v", got)
+	}
 	w.endTurn(leadID, core.TurnCompleted)
-	got := w.runOf(run)
-	if !got.FinalReported || !got.StalledSince.IsZero() {
+	if got := w.runOf(run); got.Status != core.RunStopping || got.StopReason != core.StopFinished || !got.StalledSince.IsZero() {
 		t.Fatalf("after a final report and a rest: %+v", got)
 	}
 	if _, armed := w.leadTimer(); armed {
 		t.Fatal("a timer was armed to remind a lead that has finished")
 	}
+	w.fact(leadID, core.SessionClosed{})
+	if got := w.runOf(run); got.Status != core.RunEnded || got.StopReason != core.StopFinished || got.EndedAt.IsZero() {
+		t.Fatalf("after the lead's session closed: %+v", got)
+	}
+}
 
-	// New work puts the lead back to the usual rule: here, an agent it starts.
+// The run does not end while the lead's final report leaves work going: a subagent working, a job running.
+// It ends when the last of that rests.
+func TestARunWithAFinalReportWaitsForWorkThatIsStillGoing(t *testing.T) {
+	w, run, leadID := started(t, 1, steers)
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "go"})
+	worker := w.spawn(run, leadID, steers)
+	w.step(core.JobsRunning{Run: run, Count: 1})
+	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
+	w.endTurn(leadID, core.TurnCompleted)
+	if got := w.runOf(run); got.Status != core.RunRunning || !got.FinalReported {
+		t.Fatalf("with a job and a worker going: %+v", got)
+	}
+	w.step(core.JobsRunning{Run: run, Count: 0})
+	if got := w.runOf(run); got.Status != core.RunRunning {
+		t.Fatalf("with a worker going: %+v", got)
+	}
+	w.command(core.AgentCaller{Agent: worker}, core.PostHandoff{Handoff: done()})
+	w.endTurn(worker, core.TurnCompleted)
+	w.fact(worker, core.SessionClosed{})
+	// The lead hears of the worker's end and answers in text, which is not new work.
+	if _, running := w.s.ActiveTurn(leadID); running {
+		w.endTurn(leadID, core.TurnCompleted)
+	}
+	if got := w.runOf(run); got.Status != core.RunStopping || got.StopReason != core.StopFinished {
+		t.Fatalf("after the last work rested: %+v", got)
+	}
+}
+
+// New work in the turn of the final report puts the lead back to the usual rule: an agent it starts.
+func TestNewWorkAfterAFinalReportKeepsTheRunGoing(t *testing.T) {
+	w, run, leadID := started(t, 1, steers)
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
+	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
 	w.command(core.AgentCaller{Agent: leadID}, core.SpawnAgent{Run: run, Role: core.RoleWorker, Brief: "one more thing"})
 	if got := w.runOf(run); got.FinalReported {
 		t.Fatalf("still finished while it starts new work: %+v", got)
 	}
-}
-
-// A question put to a lead that has finished is not new work: it answers in text, and the run is not
-// stalled, reminded or put back to work by it, however often it is asked.
-func TestALeadThatAnswersAQuestionAfterItsFinalReportHasNotStalled(t *testing.T) {
-	for _, caps := range []core.Capabilities{steers, noSteer} {
-		w, run, leadID := started(t, 1, caps)
-		w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
-		w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
-		w.endTurn(leadID, core.TurnCompleted)
-		for range 3 {
-			w.command(operator, core.SendMessage{Agent: leadID, Text: "which commit?"})
-			if got := w.runOf(run); !got.FinalReported || !got.StalledSince.IsZero() {
-				t.Fatalf("%+v: while it answers: %+v", caps, got)
-			}
-			w.endTurn(leadID, core.TurnCompleted)
-			got := w.runOf(run)
-			if !got.FinalReported || !got.StalledSince.IsZero() || got.LeadReminders != 0 {
-				t.Fatalf("%+v: after the lead answered in text: %+v", caps, got)
-			}
-			if _, armed := w.leadTimer(); armed {
-				t.Fatalf("%+v: a reminder was armed for a lead that only answered", caps)
-			}
-		}
-	}
-}
-
-// Each kind of new work after a final report ends the lead's having finished: an agent started, a job
-// started, a progress report. Nothing else does.
-func TestOnlyNewWorkEndsALeadHavingFinished(t *testing.T) {
-	work := map[string]func(w *script, run core.RunID, lead core.AgentID){
-		"spawn": func(w *script, run core.RunID, lead core.AgentID) {
-			w.command(core.AgentCaller{Agent: lead}, core.SpawnAgent{Run: run, Role: core.RolePlanner, Brief: "b"})
-		},
-		"job": func(w *script, run core.RunID, _ core.AgentID) { w.step(core.JobsRunning{Run: run, Count: 1}) },
-		"progress": func(w *script, run core.RunID, lead core.AgentID) {
-			w.command(core.AgentCaller{Agent: lead}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "more"}})
-		},
-	}
-	for name, doWork := range work {
-		w, run, leadID := started(t, 2, steers)
-		w.command(operator, core.SendMessage{Agent: leadID, Text: "finish"})
-		w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
-		w.endTurn(leadID, core.TurnCompleted)
-		w.command(operator, core.SendMessage{Agent: leadID, Text: "question"})
-		w.endTurn(leadID, core.TurnCompleted)
-		w.step(core.JobsRunning{Run: run, Count: 0})
-		if !w.runOf(run).FinalReported {
-			t.Fatalf("%s: a question ended the lead having finished", name)
-		}
-		doWork(w, run, leadID)
-		if w.runOf(run).FinalReported {
-			t.Fatalf("%s: new work left the lead having finished", name)
-		}
+	w.endTurn(leadID, core.TurnCompleted)
+	if got := w.runOf(run); got.Status != core.RunRunning {
+		t.Fatalf("a lead with a worker going ended the run: %+v", got)
 	}
 }
 
@@ -329,7 +326,7 @@ func TestAProgressReportAfterAFinalOneReturnsTheRunToTheNormalRule(t *testing.T)
 	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
 	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "more"}})
 	w.endTurn(leadID, core.TurnCompleted)
-	if got := w.runOf(run); got.FinalReported || got.StalledSince.IsZero() {
+	if got := w.runOf(run); got.Status != core.RunRunning || got.FinalReported || got.StalledSince.IsZero() {
 		t.Fatalf("a progress report after a final one: %+v", got)
 	}
 }

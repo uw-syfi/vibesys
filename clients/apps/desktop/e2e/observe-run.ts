@@ -2,14 +2,14 @@
  * The UI half of the desktop path end to end test (`gateway/e2e/desktop_path_test.go`).
  *
  * That test starts the real daemon and a scripted world (a lead, two workers and a judge on a toy
- * task, no model), runs it to the lead's report, then runs this with `VIBESYS_E2E_WORLD` naming
+ * task, no model), runs it to the lead's final report, which ends the run by itself, then runs this with `VIBESYS_E2E_WORLD` naming
  * what the daemon reported. This launches the built Electron app with its HOME set to the
  * daemon's, so the app's local gateway is the running one, and checks what a person sees, by
- * role and accessible name: the run listed and running, its report with the lead's summary, the
- * harness on every agent row, the lead's report. It presses Catch me up twice and sees the window's
- * figures and the report (the lead has finished, so the host does not ask it for another), presses
- * Stop and sees the run end, and catches up once more on the run that is over. The test then checks
- * the daemon's side of Stop and that no process of the app is left.
+ * role and accessible name: the run listed in the history as finished, with no Stop, its report with
+ * the lead's summary, the harness on every agent row, the lead's report. Opening Catch me up makes no
+ * check-in; New check-in makes one and shows the window's figures and the report (the lead has
+ * finished, so the host does not ask it for another). The test then checks that no process of the
+ * app is left.
  *
  * Every wait is an expectation with a bound that only guards against a hang; nothing sleeps.
  */
@@ -166,19 +166,19 @@ async function checkTheStartFormNamesTheModelAndBoundsTheRun(page: Page): Promis
 }
 
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
-  // A running run is in the list of live runs; a row is named by its run (the task) and says the
-  // rest, its state first, in its description.
-  const live = page.getByRole('listbox', {name: 'Live runs'});
-  const row = live.getByRole('option', {name: new RegExp(`^${world.task}\\b`)});
+  // The lead's final report ended the run, so it is in the run history; a row is named by its run
+  // (the task) and says the rest, its state first, in its description.
+  const history = page.getByRole('listbox', {name: 'Run history'});
+  const row = history.getByRole('option', {name: new RegExp(`^${world.task}\\b`)});
   await expect(row).toBeVisible();
-  await expect(row).toContainText('Running');
+  await expect(row).toContainText('Finished');
   await seen(page, '1-runs');
   await checkTheStartFormNamesTheModelAndBoundsTheRun(page);
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
   await seen(page, '2-report');
   // Stop is offered only while a run runs.
-  await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
 
 /**
@@ -279,12 +279,21 @@ async function checkTheLeadsReportIsShown(page: Page, world: World): Promise<voi
 const checkIns = (page: Page) => page.getByRole('listbox', {name: 'Check-ins'}).getByRole('option');
 
 /**
- * Press Catch me up on the live run. Its lead has given its final report, so the host cannot ask
+ * Open Catch me up on the run, then press New check-in. Its lead has given its final report, so the host cannot ask
  * it for another: the window's facts are the daemon's own count of the run's agents, and the
  * report is the one posted inside the window. A second press makes a second window, which is empty.
  */
 async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<void> {
+  // Opening the page only reads: it makes no check-in, and opening it again makes none.
   await page.getByRole('button', {name: 'Catch me up'}).click();
+  await expect(checkIns(page)).toHaveCount(0);
+  await page
+    .getByRole('navigation', {name: 'Where you are'})
+    .getByRole('button', {name: world.task})
+    .click();
+  await page.getByRole('button', {name: 'Catch me up'}).click();
+  await expect(checkIns(page)).toHaveCount(0);
+  await page.getByRole('button', {name: 'New check-in'}).click();
   await expect(checkIns(page)).toHaveCount(1);
   await seen(page, '6-catch-up');
   await expect(page.getByRole('region', {name: 'Agents', exact: true})).toContainText(
@@ -299,15 +308,7 @@ async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<
     .getByRole('navigation', {name: 'Where you are'})
     .getByRole('button', {name: world.task})
     .click();
-  await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
-}
-
-/** A run that is over can be caught up on too: a third check-in, with no lead to write for it. */
-async function pressCatchUpOnTheEndedRun(page: Page): Promise<void> {
-  // Catch me up is in the header of the run's report, which Stop left on screen.
-  await page.getByRole('button', {name: 'Catch me up'}).click();
-  await expect(checkIns(page)).toHaveCount(3);
-  await expect(page.getByText('Writing…')).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
 
 /** Settings is the other destination of the rail; its title is where the run pages' are. */
@@ -318,19 +319,6 @@ async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
   // Every destination has its title where every other has it, left and top.
   const places = new Set(titles.map(each => `${each.left},${each.top}`));
   expect(places.size, JSON.stringify(titles)).toBe(1);
-}
-
-async function pressStopAndSeeTheRunEnd(page: Page): Promise<void> {
-  await page.getByRole('button', {name: 'Stop run'}).click();
-  // The outcome line is shown only while the run lives and dropped once it is over, and the
-  // scripted run ends the moment the Stop is accepted: the press has an answer when the line
-  // reads accepted or the run is already over, and the run is over once it reads Finished.
-  const finished = page.getByText('Finished', {exact: true});
-  await expect(
-    page.getByRole('status', {name: 'Stop: outcome'}).or(finished).first(),
-  ).toBeVisible();
-  await expect(finished).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
 
 /**
@@ -367,7 +355,7 @@ async function quit(app: ElectronApplication): Promise<void> {
   }
 }
 
-test('the app lists the scripted run, shows each agent’s harness and the report, catches the viewer up, and Stop ends the run', async () => {
+test('the app lists the scripted run, shows each agent’s harness and the report, catches the viewer up on a run its final report ended', async () => {
   const world = readWorld();
   const userData = await mkdtemp(join(tmpdir(), 'vsd-ui-'));
   let app: ElectronApplication | undefined;
@@ -381,8 +369,6 @@ test('the app lists the scripted run, shows each agent’s harness and the repor
     await checkTheReportShowsTheLeadsSummary(page, world);
     await checkEveryAgentShowsItsHarness(page, world);
     await checkTheLeadsReportIsShown(page, world);
-    await pressStopAndSeeTheRunEnd(page);
-    await pressCatchUpOnTheEndedRun(page);
     await checkSettingsTitleIsInTheSamePlace(page);
   } catch (error) {
     // What the screen showed, by role and name, says more than the failed expectation does.

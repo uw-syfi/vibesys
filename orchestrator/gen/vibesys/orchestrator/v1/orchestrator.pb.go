@@ -98,6 +98,11 @@ const (
 	RunStopReason_RUN_STOP_REASON_LEAD_GONE RunStopReason = 3
 	// The run's cost limit was reached: see RUN_STOP_REASON_TIME_LIMIT. Ends the run as ENDED.
 	RunStopReason_RUN_STOP_REASON_COST_LIMIT RunStopReason = 4
+	// The lead gave its final report and the run's work came to rest. Ends the run as ENDED.
+	RunStopReason_RUN_STOP_REASON_FINISHED RunStopReason = 5
+	// The run stood still, its lead was reminded as many times as it is, and it went on standing still.
+	// Ends the run as ENDED.
+	RunStopReason_RUN_STOP_REASON_STALLED RunStopReason = 6
 )
 
 // Enum value maps for RunStopReason.
@@ -108,6 +113,8 @@ var (
 		2: "RUN_STOP_REASON_TIME_LIMIT",
 		3: "RUN_STOP_REASON_LEAD_GONE",
 		4: "RUN_STOP_REASON_COST_LIMIT",
+		5: "RUN_STOP_REASON_FINISHED",
+		6: "RUN_STOP_REASON_STALLED",
 	}
 	RunStopReason_value = map[string]int32{
 		"RUN_STOP_REASON_UNSPECIFIED": 0,
@@ -115,6 +122,8 @@ var (
 		"RUN_STOP_REASON_TIME_LIMIT":  2,
 		"RUN_STOP_REASON_LEAD_GONE":   3,
 		"RUN_STOP_REASON_COST_LIMIT":  4,
+		"RUN_STOP_REASON_FINISHED":    5,
+		"RUN_STOP_REASON_STALLED":     6,
 	}
 )
 
@@ -4704,13 +4713,15 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x12RUN_STATUS_RUNNING\x10\x02\x12\x17\n" +
 	"\x13RUN_STATUS_STOPPING\x10\x03\x12\x14\n" +
 	"\x10RUN_STATUS_ENDED\x10\x04\x12\x15\n" +
-	"\x11RUN_STATUS_FAILED\x10\x05*\xad\x01\n" +
+	"\x11RUN_STATUS_FAILED\x10\x05*\xe8\x01\n" +
 	"\rRunStopReason\x12\x1f\n" +
 	"\x1bRUN_STOP_REASON_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18RUN_STOP_REASON_OPERATOR\x10\x01\x12\x1e\n" +
 	"\x1aRUN_STOP_REASON_TIME_LIMIT\x10\x02\x12\x1d\n" +
 	"\x19RUN_STOP_REASON_LEAD_GONE\x10\x03\x12\x1e\n" +
-	"\x1aRUN_STOP_REASON_COST_LIMIT\x10\x04*M\n" +
+	"\x1aRUN_STOP_REASON_COST_LIMIT\x10\x04\x12\x1c\n" +
+	"\x18RUN_STOP_REASON_FINISHED\x10\x05\x12\x1b\n" +
+	"\x17RUN_STOP_REASON_STALLED\x10\x06*M\n" +
 	"\bRunLimit\x12\x19\n" +
 	"\x15RUN_LIMIT_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eRUN_LIMIT_TIME\x10\x01\x12\x12\n" +

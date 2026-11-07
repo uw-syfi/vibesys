@@ -260,6 +260,12 @@ none_live() {
 leftover_pattern() { echo "($scripted|$(physical "$scripted"))/e2e/scripted_sidecar|($home|$(physical "$home"))/releases/[^ ]*/bin/vibesys-host mcp"; }
 no_leftovers() { [ -z "$(pgrep -f "$(leftover_pattern)" || true)" ]; }
 
+# record_run_pids: add the pids the run's sessions recorded to watched; true once there are some.
+record_run_pids() {
+  watched="$(printf '%s\n%s\n' "$watched" "$(run_pids)" | sort -u | tr '\n' ' ')"
+  [ -n "${watched// /}" ]
+}
+
 # run_pids: the sidecar and process-group pids the run's sessions recorded in their SessionProcesses.
 run_pids() {
   "$home/current/sidecar/.venv/bin/python" - "$state"/sessions/*/*/processes.pb <<'PY' || true
@@ -362,7 +368,7 @@ phase_product() {
   grep -q 'the root is --root when given' $scratch/rootrule.err || die "the refusal does not print the rule: $(cat $scratch/rootrule.err)"
   [ ! -e "$HOME/elsewhere" ] || die "a refused VIBESYS_HOME was created"
 
-  check "a run with scripted agents: start, leave, check, stop"
+  check "a run with scripted agents: start, leave, check; its final report ends it"
   # The host's configuration names the session holder: the scripted one, run by the release's own
   # Python. The host, client, vibesys-cli and marketplace are the release's. The scripted agents call
   # vibesys-cli by name, so a directory holding only that link is on the host's tool path.
@@ -370,6 +376,9 @@ phase_product() {
 
   local run
   run="$(start_run)"
+  # The run ends by itself once the lead has reported, so what the sessions recorded is read while they live.
+  watched=""
+  until_true 30 record_run_pids || die "a run has no recorded sidecar"
 
   vibesys-client run wait --until report --timeout 80s | tee $scratch/wait.out
   grep -q "final report 1:" $scratch/wait.out || die "wait --until report did not show the report"
@@ -387,8 +396,28 @@ EOF
   vibesys-client run list | tee $scratch/list.out
   grep -q "$run" $scratch/list.out || grep -q "${run:0:8}" $scratch/list.out || die "run list does not show the run"
 
-  watched="$(run_pids)"
-  [ -n "$watched" ] || die "a run with a report has no recorded sidecar"
+  vibesys-client run wait "$run" --until ended --timeout 80s
+  snapshot_says "[(r['status'], r.get('stopReason')) for r in snapshot['runs']] == [('RUN_STATUS_ENDED', 'RUN_STOP_REASON_FINISHED')]" || die "a final report did not end the run as finished"
+  until_true 30 none_live || die "processes of the run are still running"
+  until_true 30 no_leftovers || die "a sidecar or tool server is left: $(pgrep -af "$(leftover_pattern)")"
+
+  check "after the run has ended, the installer's next steps still answer, about that run"
+  vibesys-client run get | tee /tmp/ended-get.out
+  grep -q "$run" /tmp/ended-get.out || die "run get with no RUN does not show the run that ended"
+  vibesys-client run stop --yes | tee /tmp/ended-stop.out
+  grep -q "already" /tmp/ended-stop.out || die "run stop does not say the run has already ended"
+  vibesys-client run stop "$run" --yes >/dev/null || die "run stop of a named run that has ended failed"
+  vibesys-client run attach >/tmp/ended-attach.out 2>/tmp/ended-attach.err || die "run attach does not replay the run that ended: $(cat /tmp/ended-attach.err)"
+  grep -q "$run" /tmp/ended-attach.err || die "run attach does not say which run it replays"
+  [ -s /tmp/ended-attach.out ] || die "run attach replayed nothing"
+
+  check "a live run: scripted agents that only reply"
+  stop_host
+  configure_scripted_holder reply stand-in
+  run="$(start_run)"
+  until_true 60 completed_turns 1 || die "the lead never completed a turn"
+  watched=""
+  until_true 30 record_run_pids || die "a live run has no recorded sidecar"
   ! none_live || die "the run's recorded processes are not running"
 
   check "host status answers through a symlinked home, and the installer's stop is refused with a live run"
@@ -407,16 +436,6 @@ EOF
   vibesys-client run wait "$run" --until ended --timeout 80s
   until_true 30 none_live || die "processes of the run are still running"
   until_true 30 no_leftovers || die "a sidecar or tool server is left: $(pgrep -af "$(leftover_pattern)")"
-
-  check "after the run has ended, the installer's next steps still answer, about that run"
-  vibesys-client run get | tee /tmp/ended-get.out
-  grep -q "$run" /tmp/ended-get.out || die "run get with no RUN does not show the run that ended"
-  vibesys-client run stop --yes | tee /tmp/ended-stop.out
-  grep -q "already" /tmp/ended-stop.out || die "run stop does not say the run has already ended"
-  vibesys-client run stop "$run" --yes >/dev/null || die "run stop of a named run that has ended failed"
-  vibesys-client run attach >/tmp/ended-attach.out 2>/tmp/ended-attach.err || die "run attach does not replay the run that ended: $(cat /tmp/ended-attach.err)"
-  grep -q "$run" /tmp/ended-attach.err || die "run attach does not say which run it replays"
-  [ -s /tmp/ended-attach.out ] || die "run attach replayed nothing"
 
   check "a configuration that does not read leaves the host usable, and is named, and --clear repairs it"
   host_answers || die "the idle host is not running"

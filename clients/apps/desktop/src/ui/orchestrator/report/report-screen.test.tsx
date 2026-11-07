@@ -9,6 +9,7 @@ import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
   BoundUnitCheck,
+  CommandSchema,
   Direction,
   ObjectiveStandingSchema,
   oneofIs,
@@ -141,7 +142,7 @@ function render(
         probe.stops += 1;
       }}
       retryStop={() => undefined}
-      catchUp={() => {
+      openCatchUp={() => {
         probe.catchUps += 1;
       }}
       goRuns={() => {
@@ -234,7 +235,7 @@ describe('the report as a page of the run', () => {
 });
 
 describe('the header of a report', () => {
-  it('has Catch me up beside Stop while the run lives, and the press goes to the run', () => {
+  it('has Catch me up beside Stop while the run lives, and the press opens its page', () => {
     const {screen, probe} = render({});
     screen.press(screen.control('Catch me up'));
     expect(probe.catchUps).toBe(1);
@@ -477,6 +478,24 @@ describe('the report with a different amount of data', () => {
     const over = render({live: false}, {stopProgress: accepted});
     expect(over.screen.text()).not.toContain('Stop: accepted');
     over.screen.unmount();
+  });
+
+  it('shows no line for a Stop, whatever its outcome, once the run is over', () => {
+    const receipt = create(ReceiptSchema, {});
+    const command = create(CommandSchema, {});
+    const fault = {kind: 'Unavailable', detail: 'gone', retryable: true} as const;
+    const outcomes: readonly CommandProgress[] = [
+      {_tag: 'Sending', command},
+      {_tag: 'Accepted', receipt},
+      {_tag: 'Refused', receipt},
+      {_tag: 'Unconfirmed', command, fault},
+      {_tag: 'Failed', command, fault},
+    ];
+    for (const progress of outcomes) {
+      const over = render({live: false}, {stopProgress: progress});
+      expect(over.screen.text()).not.toContain('Stop:');
+      over.screen.unmount();
+    }
   });
 
   it('shows a dash for a cost no turn priced, and says the others are floors', () => {

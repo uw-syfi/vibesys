@@ -88,7 +88,6 @@ function app(
         retryStop: () => undefined,
         sendMessage: () => undefined,
         retrySend: () => undefined,
-        catchUp: () => undefined,
         loadEarlier: () => undefined,
         expand: () => undefined,
       }}

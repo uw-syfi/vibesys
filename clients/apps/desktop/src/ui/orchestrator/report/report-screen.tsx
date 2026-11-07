@@ -39,8 +39,8 @@ export function ReportScreen(props: {
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
-  /** Press Catch me up on the run and open its page. */
-  readonly catchUp: () => void;
+  /** Open the run's Catch me up page; opening it makes no check-in. */
+  readonly openCatchUp: () => void;
   readonly goRuns: () => void;
   readonly openAgents: () => void;
   readonly openCost: () => void;
@@ -90,7 +90,7 @@ export function ReportScreen(props: {
           stoppable={isStoppable(report.header.status)}
           stopProgress={props.stopProgress}
           stop={props.stop}
-          catchUp={props.catchUp}
+          openCatchUp={props.openCatchUp}
         />
       }
     >

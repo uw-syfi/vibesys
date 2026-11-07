@@ -3,53 +3,51 @@
 package e2e
 
 import (
-	"context"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
-// awaitLeadDeliveries observes the typed mailbox, rather than waiting for a
-// period of silence or inferring a wake from prompt text. This fixture submits
-// two baseline jobs, four worker jobs, and two post-promotion jobs.
-func (r *rig) awaitLeadDeliveries(lead string) {
+// minJobNotices is how many job-completion notices must have woken the lead: the two baseline jobs and
+// the four workers' jobs finish before the lead's last turn. The two jobs after the promotion are
+// awaited by the lead itself, and the run ends the moment it has reported: a job that finishes after a
+// finished run's report wakes nobody, so those notices may not come. The fixture submits eight jobs.
+const (
+	minJobNotices = 6
+	maxJobNotices = 8
+)
+
+// awaitLeadDeliveries waits until the run is over, then reads the typed mailbox of its snapshot as
+// `run get` serves it (it holds the messages of a run that is over) and returns how many job notices
+// woke the lead. Every message to the lead must have been consumed: the run ends only when nothing is in
+// transit, so a message that is not consumed was lost. The bound only guards against a run that never ends.
+func (r *rig) awaitLeadDeliveries(run, lead string) (jobNotices int) {
 	r.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
-	defer cancel()
-	connection := r.dial(ctx)
-	defer connection.Close()
-	stream, err := pb.NewOrchestratorServiceClient(connection).WatchRuns(ctx, &pb.WatchRunsRequest{})
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	messages := map[string]*pb.Message{}
+	deadline := time.Now().Add(bound)
 	for {
-		frame, err := stream.Recv()
-		if err != nil {
-			r.t.Fatalf("waiting for all lead deliveries: %v", err)
+		var snapshot pb.RunsSnapshot
+		if err := protojson.Unmarshal([]byte(r.client("run", "get", run, "--json")), &snapshot); err != nil {
+			r.t.Fatal(err)
 		}
-		snap, event, _ := hosted.DecodeWatchRuns(frame)
-		if snap != nil {
-			clear(messages)
-			for _, m := range snap.Messages {
-				messages[m.Id] = m
-			}
+		if len(snapshot.GetRuns()) == 1 && snapshot.GetRuns()[0].GetStatus() == pb.RunStatus_RUN_STATUS_ENDED {
+			return leadDeliveries(r.t, snapshot.GetMessages(), lead)
 		}
-		if m := event.GetMessage(); m != nil {
-			messages[m.Id] = m
+		if time.Now().After(deadline) {
+			r.t.Fatalf("the run was not over after %s", bound)
 		}
-		if leadDeliveriesComplete(r.t, messages, lead) {
-			return
-		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func leadDeliveriesComplete(t *testing.T, messages map[string]*pb.Message, lead string) bool {
+// leadDeliveries checks what woke the lead: one brief, three handoffs, and between minJobNotices and
+// maxJobNotices job notices, each job at most once, all consumed. It returns the number of job notices.
+func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
 	t.Helper()
 	briefs, handoffs := 0, 0
 	jobs := map[string]bool{}
-	consumed := true
 	for _, m := range messages {
 		if m.ToAgentId != lead {
 			continue
@@ -67,10 +65,12 @@ func leadDeliveriesComplete(t *testing.T, messages map[string]*pb.Message, lead 
 		default:
 			t.Fatalf("unexpected lead wake: %T", m.Body)
 		}
-		consumed = consumed && m.Delivery == pb.Delivery_DELIVERY_CONSUMED
+		if m.Delivery != pb.Delivery_DELIVERY_CONSUMED {
+			t.Errorf("a message to the lead (%T) is %s after the run ended, want consumed", m.Body, m.Delivery)
+		}
 	}
-	if briefs > 1 || handoffs > 3 || len(jobs) > 8 {
-		t.Fatalf("unexpected lead wakes: %d briefs, %d handoffs, %d jobs", briefs, handoffs, len(jobs))
+	if briefs != 1 || handoffs != 3 || len(jobs) < minJobNotices || len(jobs) > maxJobNotices {
+		t.Errorf("lead wakes: %d briefs, %d handoffs, %d job notices; want 1, 3 and %d to %d", briefs, handoffs, len(jobs), minJobNotices, maxJobNotices)
 	}
-	return briefs == 1 && handoffs == 3 && len(jobs) == 8 && consumed
+	return len(jobs)
 }

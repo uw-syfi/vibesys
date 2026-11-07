@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -245,9 +246,8 @@ type uiAgent struct {
 
 // observeUI is the hook for the UI observer (the Playwright spec of the desktop app, run by
 // desktop_ui_test.go when VIBESYS_E2E_DESKTOP_UI=1). When set, the test calls it once the lead has
-// reported and before the operator's Stop: the observer attaches to the running world, asserts
-// what the Run screen shows against it, presses Stop in the UI instead of the test doing it, and
-// returns. Nil when the opt-in is not set, and then the test presses Stop itself.
+// reported and the run has ended by itself: the observer attaches to the world, asserts what the
+// screens show against it, and returns. Nil when the opt-in is not set.
 var observeUI func(t *testing.T, world uiWorld)
 
 func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
@@ -264,7 +264,17 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	}
 	w := newWorld()
 	w.last = started.Sequence - 1
-	r.observe("the lead's report", w, func() bool { return w.report() != "" })
+	// The run ends by itself once the lead has reported, so the agent process groups its sessions
+	// recorded are read while they live.
+	var pgids []int
+	r.observe("the lead's report", w, func() bool {
+		for _, pgid := range r.pgids() {
+			if !slices.Contains(pgids, pgid) {
+				pgids = append(pgids, pgid)
+			}
+		}
+		return w.report() != ""
+	})
 
 	// The lead and two or more subagents ran, on both harnesses, and the lead's own harness is
 	// not the only one.
@@ -325,11 +335,9 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 	}
 
-	// One brief, three handoffs, and exactly eight job-completion notices wake
-	// the lead. Wait for typed delivery acknowledgments before counting files;
-	// the report itself may arrive before the last job notice was delivered.
-	r.awaitLeadDeliveries(lead.ID)
-	const expectedPrompts = 1 + 3 + 8
+	// One brief, three handoffs, and the job-completion notices that came before the run ended wake the
+	// lead (see minJobNotices). Read the typed deliveries once the run is over, then count the files.
+	expectedPrompts := 1 + 3 + r.awaitLeadDeliveries(started.RunID, lead.ID)
 	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
 		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
 	}
@@ -396,28 +404,24 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		})
 	}
 
-	// Stop ends the run: every agent ended, and the agent process groups the sidecars recorded
+	// The final report ends the run: every agent ended, and the agent process groups the sidecars recorded
 	// are gone. A sidecar whose session closed stays up for a while so the daemon can read the
 	// close, then exits by itself (vs_sidecar.main.LINGER_SECONDS), so it is not asserted dead;
 	// what is asserted is that none of them still holds an agent. The jobs vibesys-cli ran for the
 	// scripted agents were all awaited by them, so none is left queued or running.
-	pgids := r.pgids()
-	if observeUI == nil {
-		r.client("run", "stop", started.RunID, "--yes")
-	}
 	r.observe("the run ended", w, func() bool { return w.run.Status == "RUN_STATUS_ENDED" })
 	for _, a := range w.agents {
 		if a.Status != "AGENT_STATUS_ENDED" {
-			t.Errorf("agent %s (%s) is %s after Stop", a.ID, a.Role, a.Status)
+			t.Errorf("agent %s (%s) is %s after the run ended", a.ID, a.Role, a.Status)
 		}
 	}
 	for _, pgid := range pgids {
 		if running(pgid) {
-			t.Errorf("agent process group %d still runs after Stop", pgid)
+			t.Errorf("agent process group %d still runs after the run ended", pgid)
 		}
 	}
 	if left := r.pgids(); len(left) != 0 {
-		t.Errorf("sidecars still record agent process groups after Stop: %v", left)
+		t.Errorf("sidecars still record agent process groups after the run ended: %v", left)
 	}
 	// A watch from the start of the run ends in the state the live feed reached.
 	replay := newWorld()
@@ -440,7 +444,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	}
 	for _, j := range jobs.Jobs {
 		if j.State != "JOB_STATE_SUCCEEDED" {
-			t.Errorf("job %s is %s after Stop, want succeeded", j.ID, j.State)
+			t.Errorf("job %s is %s after the run ended, want succeeded", j.ID, j.State)
 		}
 	}
 }

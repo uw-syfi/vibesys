@@ -190,6 +190,8 @@ func TestAFinalReportAfterALimitStopsTheRunAtOnce(t *testing.T) {
 // A lead that had finished before the limit has nothing to be told: the run stops.
 func TestALeadThatHadFinishedIsNotToldAboutALimit(t *testing.T) {
 	w, run, leadID, timer := limitedRun(t, time.Hour, 0)
+	// The lead gives its final report in a turn, and the limit is reached before the turn ends.
+	w.command(operator, core.SendMessage{Agent: leadID, Text: "wrap up"})
 	w.command(core.AgentCaller{Agent: leadID}, core.PostReport{Report: core.Report{Kind: core.ReportFinal, Headline: "done"}})
 	w.fire(timer)
 	if got := w.runOf(run); got.Status != core.RunStopping || got.StopReason != core.StopTimeLimit {

@@ -60,8 +60,6 @@ const resources: readonly ResourceRow[] = [
   },
 ];
 const idle: CommandProgress | undefined = undefined;
-/** Every press of Catch me up the window sent, as `host/run`. */
-const caughtUp: string[] = [];
 
 /** What the run is called on the list and in every trail. */
 const TASK = host.model.data.runs[scenario.runId]?.task ?? '';
@@ -102,7 +100,6 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
                   retryStop: () => undefined,
                   sendMessage: () => undefined,
                   retrySend: () => undefined,
-                  catchUp: (host, runId) => caughtUp.push(`${host}/${runId}`),
                   loadEarlier: () => undefined,
                   expand: () => undefined,
                 }}
@@ -136,7 +133,6 @@ const firstRun = (screen: ReturnType<typeof mount>): HTMLElement => {
 };
 
 const open = () => {
-  caughtUp.length = 0;
   const log: NavigationAction[] = [];
   const screen = mount(<Window log={log} />);
   return {log, screen};
@@ -188,12 +184,10 @@ describe('the window shell', () => {
     screen.unmount();
   });
 
-  it('presses Catch me up on the open run and opens its page, from the run header', () => {
+  it('opens the Catch me up page from the run header and sends no press of its own', () => {
     const {screen, log} = open();
     screen.press(firstRun(screen));
     screen.press(screen.control('Catch me up'));
-    expect(caughtUp).toHaveLength(1);
-    expect(caughtUp[0]).toMatch(/^local\/run-/);
     expect(log.at(-1)).toEqual({type: 'show', view: 'catch-up'});
     screen.unmount();
   });

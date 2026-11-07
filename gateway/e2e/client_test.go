@@ -11,7 +11,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// A person or an agent can start a run, leave it, come back to check on it, and stop it, with
+// A person or an agent can start a run, leave it, come back to check on it, and see it end, with
 // nothing but vibesys-client: every verb here is the real binary against the real gateway, and the
 // scripted agents run a toy task to a report. Nothing of the run is left once it has ended.
 func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
@@ -25,6 +25,8 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 	if started.RunID == "" {
 		t.Fatalf("run start printed no run: %+v", started)
 	}
+	// The run ends by itself once the lead has reported, so what its sessions recorded is read while they live.
+	sidecars, groups := r.awaitReportRecordingProcesses(started.RunID)
 	if out := r.client("run", "wait", started.RunID, "--until", "report", "--timeout", "80s"); !strings.Contains(out, "final report 1:") {
 		t.Errorf("wait --until report printed %q", out)
 	}
@@ -41,12 +43,22 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 		t.Errorf("get --json after the report: want one run, its agents and its report, got %v", &snapshot)
 	}
 
-	sidecars, groups := r.sidecarPids(), r.pgids()
+	// What was recorded while the run lived must name a sidecar, or the check below that none is left
+	// would pass with nothing to look at. An agent's process group is a group led by a child of the
+	// sidecar, and the scripted agents start none that lasts, so the groups are checked only for what
+	// was seen.
 	if len(sidecars) == 0 {
-		t.Fatal("a run with a report has no sidecar")
+		t.Fatalf("the run's sessions recorded no sidecar while it lived\nserve log:\n%s", r.serveLog())
 	}
-	r.client("run", "stop", started.RunID, "--yes")
+	// Nobody stops the run: its final report did.
 	r.client("run", "wait", started.RunID, "--until", "ended", "--timeout", "80s")
+	var ended pb.RunsSnapshot
+	if err := protojson.Unmarshal([]byte(r.client("run", "get", started.RunID, "--json")), &ended); err != nil {
+		t.Fatal(err)
+	}
+	if got := ended.GetRuns()[0]; got.GetStatus() != pb.RunStatus_RUN_STATUS_ENDED || got.GetStopReason() != pb.RunStopReason_RUN_STOP_REASON_FINISHED {
+		t.Errorf("a final report left the run %s, stopped for %s; want ended, finished", got.GetStatus(), got.GetStopReason())
+	}
 
 	for _, pid := range untilNoneRunning(func() []int {
 		var left []int

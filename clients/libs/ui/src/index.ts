@@ -75,6 +75,7 @@ export {Fact, FactLine} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
+  type GanttAxis,
   type GanttFold,
   type GanttLegend,
   type GanttMark,
@@ -205,6 +206,7 @@ export {
 } from './components/text.js';
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {Thread, type ThreadItem} from './components/thread.js';
+export {fittedTimeTicks, type LabelledTick, timeTicks} from './components/time-ticks.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';

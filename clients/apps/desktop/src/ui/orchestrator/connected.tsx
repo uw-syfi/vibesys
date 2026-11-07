@@ -251,7 +251,6 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
-    catchUp: (host, runId) => on(host, session => session.catchUp.press(runId)),
     loadEarlier: (host, agentId, before) =>
       on(host, session => session.history.loadEarlier(agentId, before)),
     expand: (host, agentId, ordinal) =>
