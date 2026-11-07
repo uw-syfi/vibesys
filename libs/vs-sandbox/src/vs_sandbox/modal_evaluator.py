@@ -55,6 +55,9 @@ _MODAL_DEPLOYMENT = re.compile(
     r"https://modal\.com/apps/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/deployed/"
     r"([a-zA-Z0-9_.-]+)"
 )
+#: The project-relative file ``modal deploy`` deploys when the run declares no entrypoint. The
+#: run environment reads it to tell agents which file must define the ``modal.App`` named ``app``.
+DEFAULT_MODAL_ENTRYPOINT = "main.py"
 _CANDIDATE_REVISION_ENV = "VIBESYS_CANDIDATE_REVISION"
 _RELEASE_DEPLOYMENT_ENV = "VIBESYS_RELEASE_MODAL_DEPLOYMENT"
 _MAX_DIAGNOSTIC_CHARS = 20_000
@@ -1041,7 +1044,7 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
     *,
     host: ModalHost,
     workspace: str = "/workspace",
-    entrypoint: str = "main.py",
+    entrypoint: str = DEFAULT_MODAL_ENTRYPOINT,
     readiness_timeout_seconds: float = 90,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
@@ -1227,7 +1230,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", default="/workspace")
-    parser.add_argument("--entrypoint", default="main.py")
+    parser.add_argument("--entrypoint", default=DEFAULT_MODAL_ENTRYPOINT)
     parser.add_argument("--readiness-timeout-seconds", type=float, default=90)
     parser.add_argument("--setup-command-base64", type=_setup_command_argument)
     parser.add_argument("--evaluator-package-root")

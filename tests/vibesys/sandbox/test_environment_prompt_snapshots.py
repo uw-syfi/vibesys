@@ -56,6 +56,7 @@ _MODAL_RUNTIME_NOTES_CASES = {
     "cold_start": {
         "gpu": "H100",
         "app_name": "run-9f2a3b",
+        "entrypoint": "main.py",
         "seeded_workspace_paths": (),
         "reference_path": "reference",
         "history_root": None,
@@ -63,6 +64,7 @@ _MODAL_RUNTIME_NOTES_CASES = {
     "with_seeded_checkouts_and_history": {
         "gpu": "A100-80GB",
         "app_name": "run-c71de0",
+        "entrypoint": "serving/modal_app.py",
         "seeded_workspace_paths": ("reference", "draft"),
         "reference_path": "reference",
         "history_root": Path("/opt/vibesys-history"),
@@ -122,6 +124,7 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
             {
                 "gpu": "H100",
                 "app_name": "run-9f2a3b",
+                "entrypoint": "main.py",
                 "seeded_workspace_paths": ("reference",),
                 "reference_path": "reference",
                 "history_root": Path("/opt/vibesys-history"),

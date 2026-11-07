@@ -197,6 +197,7 @@ def representative_context() -> dict[str, object]:
         "domain_orchestrator",
         "domain_profiler",
         "domain_single_agent",
+        "entrypoint",
         "environment_notes",
         "error",
         "evidence",
@@ -963,7 +964,7 @@ def container_context(
 ) -> tuple[dict[str, object], DockerSandbox, tuple[HostResource, ...]]:
     """Prove environment pointers map to explicit readable sandbox grants."""
     facts = ModalEnvironmentFacts(
-        gpu="fixture-gpu", app_name="fixture-app", reference_path="reference"
+        gpu="fixture-gpu", app_name="fixture-app", reference_path="reference", entrypoint="main.py"
     )
     runtime = workspace.parent / "runtime.md"
     runtime.write_text("Runtime environment contract.")
@@ -989,6 +990,7 @@ def container_context(
         "gpu": facts.gpu,
         "app_name": facts.app_name,
         "reference_path": facts.reference_path,
+        "entrypoint": facts.entrypoint,
     }
     return context, sandbox, resources
 

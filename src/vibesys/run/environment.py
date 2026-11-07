@@ -122,6 +122,7 @@ def open_run_environment(
                 template_dir=_TEMPLATE_DIR,
                 gpu=facts.gpu,
                 app_name=facts.app_name,
+                entrypoint=facts.entrypoint,
                 seeded_workspace_paths=request.seeded_workspace_paths,
                 reference_path=facts.reference_path,
                 history_root=request.git_history_root,
