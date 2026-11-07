@@ -34,10 +34,14 @@ export interface Overlay {
   readonly pieces: readonly Progress[];
 }
 
-/** The stream skipped events: the client must read again from a snapshot. */
+/**
+ * The client must read again from a snapshot: the stream skipped events (it expected `expected` and
+ * got `got`), or the host's log ends before `expected` (`got` is null: the host lost the tail of its
+ * log, or its state was reset).
+ */
 export interface Gap {
   readonly expected: bigint;
-  readonly got: bigint;
+  readonly got: bigint | null;
 }
 
 /**

@@ -4,5 +4,8 @@ import type {Fault} from './fault.js';
 export type FeedStatus =
   | {readonly _tag: 'Opening'}
   | {readonly _tag: 'Live'}
-  | {readonly _tag: 'Restarting'; readonly why: 'gap' | 'fell-behind' | 'reconnect'}
+  | {
+      readonly _tag: 'Restarting';
+      readonly why: 'gap' | 'fell-behind' | 'ahead-of-log' | 'reconnect';
+    }
   | {readonly _tag: 'Failed'; readonly fault: Fault};

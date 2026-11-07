@@ -1,13 +1,15 @@
 /**
  * One agent's stream: its newest items, then its live progress, while a screen watches it. The
  * cursor of an agent's stream is valid only within one mount: the first open of a mount reads the
- * newest page, a reopen while mounted resumes after what was applied.
+ * newest page, a reopen while mounted resumes after what was applied, unless the host's log no longer
+ * reaches it (then the reopen reads the newest page again).
  */
 import * as Effect from 'effect/Effect';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
+import {rewindAgentStream} from '../state/host-model.js';
 import {
   applyHostFrame,
   type FeedStatus,
@@ -44,6 +46,7 @@ const agentSpec = ({client}: HostParts, agentId: string): FeedSpec<HostFrame> =>
       .pipe(Stream.map(frame => ({from: 'agent', agentId, frame}) as const)),
   apply: applyHostFrame,
   gapped: () => false,
+  rewind: model => rewindAgentStream(model, agentId),
 });
 
 export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostParts) {

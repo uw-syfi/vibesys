@@ -118,6 +118,14 @@ export class Rejected extends Data.TaggedError('Rejected')<{
 }> {}
 
 /**
+ * Whether the host refused a stream because it asked to continue after a sequence the host's log has
+ * not reached (status 11, the daemon's `ErrAheadOfLog`): the host lost the tail of its log or its
+ * state was reset. The same cursor is refused again; the stream must start from the beginning.
+ */
+export const isAheadOfLog = (error: AppError): boolean =>
+  error._tag === 'Rejected' && error.status === RpcStatus.OUT_OF_RANGE;
+
+/**
  * The app or the host refused for a reason that no retry and no redial changes: a platform with no
  * host program, a state directory on a network disk. `cause` is the type the screens name the fix
  * by; `detail` is the refusing side's own words (platform, version, path).
