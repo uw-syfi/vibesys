@@ -26,6 +26,8 @@ import {
   makeHostSession,
   makeNavigation,
   preferencesOver,
+  Viewer,
+  viewerOver,
 } from '../../core/index.js';
 import type {CostView} from '../../state/index.js';
 import {hostsOfAddress} from '../../ui/address.js';
@@ -43,11 +45,12 @@ import {
   NO_TURNS,
   PRICED_AND_UNPRICED,
 } from '../orchestrator/cost-views.js';
-import {FakeDaemon, generateScenario, methodPathOf} from '../orchestrator/index.js';
+import {FAKE_VIEWER, FakeDaemon, generateScenario, methodPathOf} from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
 import {makeFakeTransport} from '../transport/index.js';
+import {makeFakeViewerBridge} from '../viewer/fakes.js';
 
 const DEFAULT_SCENARIO = '5-4-live';
 const THIS_MACHINE = {key: 'local', label: 'This machine'} as const;
@@ -123,6 +126,7 @@ Effect.runFork(
     const scope = yield* Scope.make();
     const appearance = yield* makeAppearance().pipe(Scope.provide(scope));
     const navigation = yield* makeNavigation().pipe(Scope.provide(scope));
+    const viewer = (yield* (yield* Viewer).whoami).id;
     const hosts: ConnectedHost[] = [];
     for (const {key, label} of shown) {
       const session = yield* makeHostSession(key).pipe(Scope.provide(scope));
@@ -134,6 +138,7 @@ Effect.runFork(
           hosts={hosts}
           navigation={navigation}
           appearance={appearance}
+          viewerId={viewer}
           dispatch={(effect, then) => {
             Effect.runFork(Effect.map(effect, then));
           }}
@@ -147,6 +152,7 @@ Effect.runFork(
         fake.layer,
         Ids.layer,
         preferencesOver(preferences.bridge),
+        viewerOver(makeFakeViewerBridge({viewer: FAKE_VIEWER}).bridge),
         SystemAppearanceFromWindow,
         ThemeDocumentLive,
         KeyPressesFromWindow,

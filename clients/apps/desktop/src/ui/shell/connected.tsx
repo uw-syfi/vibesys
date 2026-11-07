@@ -17,7 +17,9 @@ import {
   type Issues,
   NO_ISSUES,
 } from '../orchestrator/connected.js';
+import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
+import {ConnectedCatchUp} from './connected-catch-up.js';
 import {AppShell} from './shell.js';
 
 /** The run streams of every host, followed while this is mounted. */
@@ -45,8 +47,10 @@ export function ConnectedShell(props: {
   readonly dispatch: Dispatch;
   readonly navigation: NavigationStore;
   readonly appearance: AppearanceStore;
+  /** The id of this install as the hosts know it (`core/viewer`); null when the main process did not say. */
+  readonly viewerId: string | null;
 }): JSX.Element {
-  const {hosts, dispatch, navigation, appearance} = props;
+  const {hosts, dispatch, navigation, appearance, viewerId} = props;
   const [issues, setIssues] = useState<Issues>(NO_ISSUES);
   useAtomMount(useMemo(() => watchRuns(hosts), [hosts]));
   const current = useAtomValue(navigation.state);
@@ -54,14 +58,30 @@ export function ConnectedShell(props: {
   const resources = useAtomValue(useMemo(() => resourcesOf(hosts), [hosts]));
   const go = (action: NavigationAction): void => dispatch(navigation.go(action), () => undefined);
   const choose = (next: Appearance): void => dispatch(appearance.choose(next), () => undefined);
+  const {runs} = current;
+  /** The run whose catch-up page shows, when it does: it has a screen of its own over the run's views. */
+  const catchUp =
+    current.destination === 'runs' && runs.screen === 'run' && runs.view === 'catch-up'
+      ? runs
+      : null;
   return (
     <AppShell destination={current.destination} go={go}>
-      {current.destination === 'runs' ? (
+      {catchUp !== null ? (
+        <ConnectedCatchUp
+          key="catch-up"
+          hosts={hosts}
+          route={catchUp}
+          go={go}
+          dispatch={dispatch}
+          viewerId={viewerId}
+          words={{role: roleWord, fault: faultWord}}
+        />
+      ) : current.destination === 'runs' ? (
         <ConnectedApp
           key="runs"
           hosts={hosts}
           dispatch={dispatch}
-          route={current.runs}
+          route={runs}
           go={go}
           issues={issues}
           setIssues={setIssues}

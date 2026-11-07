@@ -46,6 +46,8 @@ const resources: readonly ResourceRow[] = [
   },
 ];
 const idle: CommandProgress | undefined = undefined;
+/** Every press of Catch me up the window sent, as `host/run`. */
+const caughtUp: string[] = [];
 
 /** The window as the entry composes it, over the navigation fold, recording every intent sent. */
 function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
@@ -70,6 +72,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
             retryStop: () => undefined,
             sendMessage: () => undefined,
             retrySend: () => undefined,
+            catchUp: (host, runId) => caughtUp.push(`${host}/${runId}`),
             loadEarlier: () => undefined,
             expand: () => undefined,
           }}
@@ -92,6 +95,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
 }
 
 const open = () => {
+  caughtUp.length = 0;
   const log: NavigationAction[] = [];
   const screen = mount(<Window log={log} />);
   return {log, screen};
@@ -143,6 +147,18 @@ describe('the window shell', () => {
     screen.press(crumb);
     expect(log.map(action => action.type)).toEqual(['open-run', 'close-run']);
     expect(screen.container.querySelectorAll('tr[data-selectable]').length).toBeGreaterThan(0);
+    screen.unmount();
+  });
+
+  it('presses Catch me up on the open run and opens its page, from the run header', () => {
+    const {screen, log} = open();
+    const [row] = screen.container.querySelectorAll<HTMLElement>('tr[data-selectable]');
+    if (row === undefined) throw new Error('no run listed');
+    screen.press(row);
+    screen.press(screen.control('Catch me up'));
+    expect(caughtUp).toHaveLength(1);
+    expect(caughtUp[0]).toMatch(/^local\/run-/);
+    expect(log.at(-1)).toEqual({type: 'show', view: 'catch-up'});
     screen.unmount();
   });
 

@@ -87,6 +87,8 @@ export function RunScreen(props: {
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
+  /** Press Catch me up on this run and open its page. */
+  readonly catchUp: () => void;
   readonly goRuns: () => void;
   readonly show: (view: RunView) => void;
   readonly pick: (agentId: string) => void;
@@ -140,6 +142,7 @@ export function RunScreen(props: {
         />
         <Chip label={status.label} tone={status.tone} dot />
         <Chip label={props.host} mono />
+        <Button text="Catch me up" variant="secondary" size="sm" press={props.catchUp} />
         {stoppable ? (
           <Button
             text="Stop run"

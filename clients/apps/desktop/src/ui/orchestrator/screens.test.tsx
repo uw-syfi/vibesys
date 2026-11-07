@@ -70,6 +70,7 @@ function screen(
       stopProgress={stopProgress}
       stop={() => undefined}
       retryStop={() => undefined}
+      catchUp={() => undefined}
       goRuns={() => undefined}
       show={() => undefined}
       pick={() => undefined}

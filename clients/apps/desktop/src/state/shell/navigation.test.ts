@@ -22,7 +22,12 @@ const generators: {
   'close-run': fc.constant({type: 'close-run' as const}),
   show: fc.record({
     type: fc.constant('show' as const),
-    view: fc.constantFrom('timeline' as const, 'cost' as const, 'handoffs' as const),
+    view: fc.constantFrom(
+      'timeline' as const,
+      'cost' as const,
+      'handoffs' as const,
+      'catch-up' as const,
+    ),
   }),
   'pick-agent': fc.record({
     type: fc.constant('pick-agent' as const),

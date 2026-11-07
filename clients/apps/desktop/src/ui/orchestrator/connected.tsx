@@ -201,6 +201,10 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
+    catchUp: (host, runId) => {
+      const session = sessionOf(host);
+      if (session !== undefined) dispatch(session.catchUp.press(runId), () => undefined);
+    },
     loadEarlier: (host, agentId, before) => {
       const session = sessionOf(host);
       if (session !== undefined)

@@ -29,6 +29,7 @@ const RUN_TITLES = {
   cost: 'Cost',
   handoffs: 'Handoffs and reports',
   ideas: 'Ideas',
+  'catch-up': 'Catch me up',
 } satisfies Record<RunView, string>;
 
 /** Everything the screens know about one host at this moment. */
@@ -68,6 +69,8 @@ export interface AppCommands {
   readonly retryStop: (runId: string) => void;
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
+  /** Press Catch me up on a run: the host stores a check-in for this viewer. */
+  readonly catchUp: (host: string, runId: string) => void;
   /** Read the page of items of an agent before ordinal `before`. */
   readonly loadEarlier: (host: string, agentId: string, before: number) => void;
   /** Read the item at `ordinal` of an agent whole. */
@@ -229,6 +232,10 @@ export function OrchestratorApp(props: {
           stopProgress={commands.stop[runId]}
           stop={() => commands.stopRun(host.key, runId)}
           retryStop={() => commands.retryStop(runId)}
+          catchUp={() => {
+            commands.catchUp(host.key, runId);
+            go({type: 'show', view: 'catch-up'});
+          }}
           goRuns={() => go({type: 'close-run'})}
           show={view => go({type: 'show', view})}
           pick={agentId => go({type: 'pick-agent', agentId})}
