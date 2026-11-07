@@ -18,10 +18,9 @@ import {makeHostConnection} from './connection.js';
 import {RpcStatus, Unavailable} from './errors.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 
-/** The status kind (which has one word) of a host with this link and nothing read from it (or something already on screen). */
+/** The status kind, which has one word, of a host with this link, with or without data on screen. */
 const word = (connection: HostConnectionState, hasData: boolean): string =>
-  hostStatusWord(hostStatusOf({connection, feed: {_tag: 'Opening'}, hasData, staleForMs: null}))
-    .label;
+  hostStatusOf({connection, feed: {_tag: 'Opening'}, hasData, staleForMs: null}).kind;
 
 /** A link in the loop's own retrying: the wait between attempts, or a dial after a failure. */
 const retrying = (state: HostConnectionState): boolean =>
