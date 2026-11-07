@@ -25,14 +25,12 @@ export function AppShell(props: {
           <RailItem
             icon="list"
             label="Runs"
-            hideLabel
             active={destination === 'runs'}
             press={() => go({type: 'open-runs'})}
           />
           <RailItem
             icon="sliders"
             label="Settings"
-            hideLabel
             active={destination === 'settings'}
             press={() => go({type: 'open-settings'})}
           />

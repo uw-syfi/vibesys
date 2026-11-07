@@ -139,14 +139,14 @@ const open = () => {
 };
 
 describe('the window shell', () => {
-  it('has a rail with the app mark, Runs and Settings, icon only, Runs current at first', () => {
+  it('has a rail with the app mark, Runs and Settings labelled under their icons, Runs current at first', () => {
     const {screen} = open();
     expect(screen.control('Runs').getAttribute('aria-current')).toBe('page');
     expect(screen.control('Settings').getAttribute('aria-current')).toBeNull();
     expect(screen.control('VibeSys')).toBeDefined();
-    // Icon only: the buttons carry no visible words.
-    for (const name of ['Runs', 'Settings', 'VibeSys'])
-      expect(screen.control(name).textContent).toBe('');
+    // Each destination says its name under its icon; the app's mark is the icon alone.
+    for (const name of ['Runs', 'Settings']) expect(screen.control(name).textContent).toBe(name);
+    expect(screen.control('VibeSys').textContent).toBe('');
     screen.unmount();
   });
 

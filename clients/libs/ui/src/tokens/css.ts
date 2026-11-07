@@ -1,4 +1,4 @@
-import {CHIP_FILL_MIX, LOG_ERR_MIX} from './contrast.js';
+import {CHIP_FILL_MIX, LOG_ERR_MIX, RAIL_MIX} from './contrast.js';
 import {
   ELEVATION,
   FONT_STACKS,
@@ -32,7 +32,14 @@ export const LEGACY_ALIASES: Readonly<Record<string, string>> = {
 
 const TONES = ['accent', 'ok', 'warn', 'err'] as const;
 /** How much of a role is mixed into its surface: selection, chip fill, chip border, banner fill. */
-const MIX = {selection: 14, fill: CHIP_FILL_MIX.share, border: 35, banner: 8};
+const MIX = {
+  selection: 14,
+  railHover: 8,
+  railSelected: 16,
+  fill: CHIP_FILL_MIX.share,
+  border: 35,
+  banner: 8,
+};
 
 const HEADER = `/*
  * GENERATED, do not edit. Change the tables in src/tokens/ (or the primitives' styles in
@@ -89,6 +96,9 @@ function scaleDeclarations(): string[] {
 function derivedDeclarations(): string[] {
   return [
     `--selection: ${mix('accent', MIX.selection, 'bg')};`,
+    // A rail item sits on the rail's own ground (`--panel-2`): hover and selection are tints of the accent over it.
+    `--rail-hover: ${mix('accent', RAIL_MIX.hover, RAIL_MIX.into)};`,
+    `--rail-selected: ${mix('accent', RAIL_MIX.selected, RAIL_MIX.into)};`,
     `--log-err: ${mix(LOG_ERR_MIX.role, LOG_ERR_MIX.share, LOG_ERR_MIX.into)};`,
     ...TONES.flatMap(tone => [
       `--chip-${tone}-bg: ${mix(tone, MIX.fill, CHIP_FILL_MIX.into)};`,
