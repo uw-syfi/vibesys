@@ -1,5 +1,5 @@
 /**
- * What the Resources tab does with machines, over the `Machines` role and the window's `Roster`: a
+ * What the Machines page does with machines, over the `Machines` role and the window's `Roster`: a
  * save also opens the host's session (so its row appears and it connects), a removal also ends it,
  * and a failure is an outcome the screen shows next to the input, never a defect.
  */

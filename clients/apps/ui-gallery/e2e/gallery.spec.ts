@@ -379,3 +379,56 @@ test('the section navigation of a narrow page has one highlight per item, apart,
     ).toBeLessThan(0.5);
   }
 });
+
+test('the rail holds Settings at its foot at every window height, never touching the items above', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1100, height: 600});
+  await open(page, 'ink');
+  const entry = page.locator('[data-gallery-entry="RailFrame"]');
+  await entry.scrollIntoViewIfNeeded();
+  const read = (frameHeight: string) =>
+    entry.evaluate((element, height) => {
+      const frame = element.querySelector<HTMLElement>('.vs-window-frame');
+      const rail = element.querySelector<HTMLElement>('.vs-rail');
+      if (frame === null || rail === null) throw new Error('the rail is not drawn');
+      frame.style.height = height;
+      const box = (target: Element) => target.getBoundingClientRect();
+      const named = (name: string) => {
+        const found = Array.from(rail.querySelectorAll('.vs-rail-item')).find(
+          item => item.textContent === name,
+        );
+        if (found === undefined) throw new Error(`the rail has no ${name}`);
+        return box(found);
+      };
+      const style = getComputedStyle(rail);
+      return {
+        names: Array.from(rail.querySelectorAll('.vs-rail-item')).map(item => item.textContent),
+        rail: box(rail).toJSON(),
+        settings: named('Settings').toJSON(),
+        machines: named('Machines').toJSON(),
+        runs: named('Runs').toJSON(),
+        cost: named('Cost').toJSON(),
+        padBottom: Number.parseFloat(style.paddingBottom),
+        gap: Number.parseFloat(
+          getComputedStyle(rail.querySelector('.vs-rail-group') ?? rail).rowGap,
+        ),
+        scrolls: rail.scrollHeight > rail.clientHeight,
+      };
+    }, frameHeight);
+  // A 600 px window: Settings sits on the rail's bottom padding, the top group on its own gap.
+  const tall = await read('100vh');
+  expect(tall.names).toEqual(['', 'Runs', 'Cost', 'Machines', 'Settings']);
+  expect(tall.rail.height).toBeCloseTo(600, 0);
+  expect(tall.rail.bottom - tall.padBottom - tall.settings.bottom).toBeLessThan(0.5);
+  expect(tall.gap).toBeGreaterThanOrEqual(8);
+  // The top group keeps the shared gap between its items.
+  expect(tall.cost.top - tall.runs.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.machines.top - tall.cost.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.settings.top - tall.machines.bottom).toBeGreaterThanOrEqual(tall.gap - 0.5);
+  expect(tall.scrolls).toBe(false);
+  // Too short for both groups: they stay a step apart and the rail scrolls, so nothing overlaps.
+  const short = await read('120px');
+  expect(short.settings.top - short.machines.bottom).toBeGreaterThanOrEqual(12 - 0.5);
+  expect(short.scrolls).toBe(true);
+});

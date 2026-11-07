@@ -24,6 +24,8 @@ import {installDom, mount} from '../../testing/dom/harness.js';
 import {PRICED_AND_UNPRICED} from '../../testing/orchestrator/cost-views.js';
 import {generateScenario, measuredSearch, SERVING} from '../../testing/orchestrator/index.js';
 import {CatchUpScreen} from '../catch-up/index.js';
+import {CostOverviewScreen} from '../cost-overview/index.js';
+import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
@@ -165,15 +167,9 @@ describe('the pages of a run and the pages of the window', () => {
     );
   });
 
-  it('Settings and Catch me up are in the same frame, with the same heading row', () => {
+  it('Settings, Machines, Cost and Catch me up are in the same frame, with the same heading row', () => {
     const settings = mount(
-      <SettingsScreen
-        tab="appearance"
-        pick={() => undefined}
-        appearance={initialAppearance('light')}
-        choose={() => undefined}
-        resources={[]}
-      />,
+      <SettingsScreen appearance={initialAppearance('light')} choose={() => undefined} />,
     );
     expect(frameOf(settings.container)).toMatchObject({
       pages: 1,
@@ -183,6 +179,20 @@ describe('the pages of a run and the pages of the window', () => {
       title: 'Settings',
     });
     settings.unmount();
+    for (const [name, page] of [
+      ['Machines', <MachinesScreen key="m" rows={[]} />],
+      ['Cost', <CostOverviewScreen key="c" />],
+    ] as const) {
+      const screen = mount(page);
+      expect(frameOf(screen.container), name).toMatchObject({
+        pages: 1,
+        width: 'wide',
+        trailThenTitle: true,
+        headings: 1,
+        title: name,
+      });
+      screen.unmount();
+    }
     const catchUp = mount(
       <CatchUpScreen
         run="a-run"

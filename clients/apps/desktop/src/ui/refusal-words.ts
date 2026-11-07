@@ -2,7 +2,7 @@
  * What a refusal that no retry changes is called, for every screen that shows a host's state: the
  * cause as a label, and, in `causeHint`, the setting that fixes it, for a hover or a Details line,
  * never a sentence on the screen. It lives beside the features, not in one of them, because the run
- * screens, the Runs list and the Resources tab all say it. The refusing side's own words (platform,
+ * screens, the Runs list and the Machines page all say it. The refusing side's own words (platform,
  * version, path) follow as Details.
  *
  * A label is a few words, one per cause, and none is the word of a link or a feed ("Waiting",

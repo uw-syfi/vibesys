@@ -3,14 +3,13 @@ import * as Effect from 'effect/Effect';
 import {act, type JSX} from 'react';
 import type {MachineActions, MachineUndo} from '../../../core/index.js';
 import {
-  initialAppearance,
+  type MachineRow,
   matchAliases,
-  type ResourceRow,
   SshCommandError,
   targetFromInput,
 } from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
-import {SettingsScreen} from '../settings-screen.js';
+import {MachinesScreen} from '../machines-screen.js';
 import {type MachineDispatch as Dispatch, useMachineControls} from './machine-controls.js';
 
 const dom = installDom().window;
@@ -66,7 +65,7 @@ function queue() {
   return {dispatch, flush};
 }
 
-const rows = (keys: readonly string[]): ResourceRow[] =>
+const rows = (keys: readonly string[]): MachineRow[] =>
   keys.map(key => ({
     key,
     label: key === 'local' ? 'This Mac' : key.slice(4),
@@ -80,13 +79,9 @@ function Screen(props: {
 }): JSX.Element {
   const machines = useMachineControls(props.actions, props.dispatch);
   return (
-    <SettingsScreen
-      tab="resources"
-      pick={() => undefined}
-      appearance={initialAppearance('light')}
-      choose={() => undefined}
-      resources={rows(props.hosts)}
-      {...(machines === undefined ? {} : {machines})}
+    <MachinesScreen
+      rows={rows(props.hosts)}
+      {...(machines === undefined ? {} : {controls: machines})}
     />
   );
 }
