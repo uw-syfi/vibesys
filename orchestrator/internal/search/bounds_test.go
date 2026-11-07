@@ -47,9 +47,8 @@ func headOf(metric string, direction cli.Direction, value float64, others map[st
 
 func project(t *testing.T, facts ...*cli.TaskFact) *pb.SearchState {
 	t.Helper()
-	s := search.Cap(search.Fold(facts), &pb.SearchState{RunId: "r"})
-	s.Revision = 1
-	s.Health = &pb.SearchHealth{State: &pb.SearchHealth_LiveSince{LiveSince: &timestamppb.Timestamp{Seconds: 1}}}
+	// Identity and health are set before the cap, as the daemon sets them: the byte budget counts them.
+	s := search.Cap(search.Fold(facts), &pb.SearchState{RunId: "r", Revision: 1, Health: &pb.SearchHealth{State: &pb.SearchHealth_LiveSince{LiveSince: &timestamppb.Timestamp{Seconds: 1}}}})
 	if err := protovalidate.Validate(s); err != nil {
 		t.Fatalf("the projected state breaks its own rules: %v", err)
 	}
