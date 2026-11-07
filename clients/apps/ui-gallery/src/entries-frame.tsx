@@ -25,6 +25,7 @@ import {
   Meter,
   MetricTile,
   MetricTiles,
+  MiddleText,
   Narrative,
   NewBelow,
   Pane,
@@ -348,6 +349,36 @@ const TREND_COLUMNS: readonly ListColumn<Trend>[] = [
     ),
   },
 ];
+
+const CUT_NAMES: readonly string[] = ['node-b-a-vega-cluster-1', 'node-b-a-vega-cluster-2'];
+
+const CUT_COLUMNS: readonly ListColumn<string>[] = [
+  {key: 'name', header: 'Machine', size: 'fill', cell: row => <Text>{row}</Text>},
+  {
+    key: 'cut',
+    header: 'Cut',
+    size: 'short',
+    cell: row => (
+      <Text>
+        <MiddleText text={row} />
+      </Text>
+    ),
+  },
+];
+
+function MiddleTextDemo(): JSX.Element {
+  return (
+    <Card>
+      <ColumnList
+        label="Names"
+        columns={CUT_COLUMNS}
+        rows={CUT_NAMES}
+        rowKey={row => row}
+        select={noop}
+      />
+    </Card>
+  );
+}
 
 function CellSparklineDemo(): JSX.Element {
   return (
@@ -784,6 +815,7 @@ export const FRAME_ENTRIES = {
     ),
   },
   CellSparkline: {render: () => <CellSparklineDemo />},
+  MiddleText: {render: () => <MiddleTextDemo />},
   CellMark: {
     render: () => (
       <Text tone="muted">

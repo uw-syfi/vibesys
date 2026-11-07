@@ -6,11 +6,14 @@ import {
   Chip,
   ColumnList,
   EmptyState,
+  Field,
   type ListColumn,
+  MiddleText,
   Page,
   pageState,
   Row,
   SegmentedControl,
+  Select,
   Stack,
   StatusDot,
   Text,
@@ -133,7 +136,7 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
     {
       key: 'host',
       header: 'Host',
-      size: 'medium',
+      size: 'wide',
       optional: true,
       hint: row => `${row.host.label}\n${freshnessPhrase(row.host.freshness, row.host.staleForMs)}`,
       cell: row => (
@@ -144,7 +147,9 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
                 tone={FRESHNESS_WORD[row.host.freshness].tone}
                 label={FRESHNESS_WORD[row.host.freshness].label}
               />
-              <Text>{row.host.label}</Text>
+              <Text>
+                <MiddleText text={row.host.label} />
+              </Text>
             </CellInline>
           }
           note={
@@ -198,7 +203,6 @@ function figureColumns(
       key: 'best',
       header: 'Best',
       size: 'wide',
-      narrow: 'medium',
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);
@@ -275,34 +279,34 @@ function HostFilter(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element | null {
   const {hosts} = props;
+  const word = (host: FleetHostView): string =>
+    host.freshness === 'live'
+      ? host.label
+      : `${host.label} · ${freshnessPhrase(host.freshness, host.staleForMs)}`;
   if (hosts.length > 1) {
+    // One control however many hosts there are: a row of buttons for each host would take a row
+    // of its own in a narrow window.
     return (
-      <SegmentedControl
-        label="Host"
-        value={props.host ?? ALL_HOSTS}
-        options={[
-          {value: ALL_HOSTS, label: 'All hosts'},
-          ...hosts.map(host => ({
-            value: host.key,
-            label:
-              host.freshness === 'live'
-                ? host.label
-                : `${host.label} · ${freshnessPhrase(host.freshness, host.staleForMs)}`,
-          })),
-        ]}
-        change={host =>
-          props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})
-        }
-      />
+      <Field label="Host" hideLabel>
+        <Select
+          labelInside
+          capped
+          size="sm"
+          value={props.host ?? ALL_HOSTS}
+          options={[
+            {value: ALL_HOSTS, label: 'All hosts'},
+            ...hosts.map(host => ({value: host.key, label: word(host)})),
+          ]}
+          change={host =>
+            props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})
+          }
+        />
+      </Field>
     );
   }
   const [only] = hosts;
   return only === undefined || only.freshness === 'live' ? null : (
-    <Chip
-      label={`${only.label} · ${freshnessPhrase(only.freshness, only.staleForMs)}`}
-      tone={FRESHNESS_WORD[only.freshness].tone}
-      dot
-    />
+    <Chip label={word(only)} tone={FRESHNESS_WORD[only.freshness].tone} dot clip />
   );
 }
 
@@ -362,7 +366,7 @@ export function FleetScreen(props: {
           <Text as="h1" variant="title">
             Runs
           </Text>
-          {props.newRun}
+          {rows.length === 0 && !unread ? null : props.newRun}
         </Row>
       }
     >
@@ -390,7 +394,13 @@ export function FleetScreen(props: {
         </Row>
         {rows.length === 0 ? (
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
-          <EmptyState title={unread ? 'Not read yet' : 'No runs'} />
+          <EmptyState
+            title={unread ? 'Not read yet' : 'No runs'}
+            align="start"
+            // The header's own New run is the one a screen with rows has; this one is the way out of
+            // having none.
+            {...(unread ? {} : {action: props.newRun})}
+          />
         ) : (
           <>
             {view.live.length === 0 ? null : (

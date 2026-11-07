@@ -237,6 +237,9 @@
   display: block;
   color: var(--muted);
 }
+.vs-select[data-capped] {
+  max-width: var(--column-field);
+}
 .vs-select .vs-input {
   appearance: none;
   padding-right: var(--space-7);

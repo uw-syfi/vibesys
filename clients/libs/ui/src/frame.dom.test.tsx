@@ -18,6 +18,7 @@ import {
   Meter,
   MetricTile,
   MetricTiles,
+  MiddleText,
   Narrative,
   NewBelow,
   Pane,
@@ -1561,6 +1562,22 @@ describe('a sparkline', () => {
     const slots = all(container, '.vs-columnlist-spark-more');
     expect(slots.map(slot => slot.textContent)).toEqual(['+2', '', '']);
     expect(all(container, 'svg.vs-spark')).toHaveLength(3);
+  });
+});
+
+describe('a middle-cut name', () => {
+  test('keeps the whole name as its text and its hover, and the last characters apart so they stay', async () => {
+    const {container} = await mount(
+      <>
+        <MiddleText text="host-b-a-vega-cluster-1" />
+        <MiddleText text="ab" />
+      </>,
+    );
+    const [long, short] = all(container, '.vs-middle');
+    expect(long?.textContent).toBe('host-b-a-vega-cluster-1');
+    expect(long?.getAttribute('title')).toBe('host-b-a-vega-cluster-1');
+    expect(long?.querySelector('.vs-middle-tail')?.textContent).toBe('luster-1');
+    expect(short?.textContent).toBe('ab');
   });
 });
 

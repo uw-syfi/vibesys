@@ -1164,6 +1164,7 @@ button.vs-crumb:focus-visible {
 }
 .vs-columnlist-cell {
   min-width: 0;
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -17,7 +17,7 @@ import {
   SearchStateSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {type JSX, useReducer} from 'react';
+import {act, type JSX, useReducer} from 'react';
 import {
   applySnapshot,
   emptyState,
@@ -35,6 +35,7 @@ import {
   SERVING,
 } from '../../testing/orchestrator/index.js';
 import {FleetScreen} from './fleet-screen.js';
+import {freshnessPhrase} from './fleet-words.js';
 
 installDom();
 
@@ -293,8 +294,8 @@ describe('the fleet screen', () => {
     expect(cell(row, 'host').textContent).toContain('gpu-cluster-1');
     expect(cell(row, 'host').textContent).toContain('Stale 14m');
     expect(
-      screen.container.querySelector('label[data-label="gpu-cluster-1 · Stale 14m"]'),
-    ).not.toBeNull();
+      [...screen.container.querySelectorAll('option')].map(option => option.textContent),
+    ).toContain('gpu-cluster-1 · Stale 14m');
     expect(screen.controls('Retry')).toHaveLength(1);
     expect(screen.container.querySelector('[role="alert"], .vs-banner')).toBeNull();
     screen.unmount();
@@ -316,6 +317,60 @@ describe('the fleet screen', () => {
     screen.unmount();
   });
 
+  it('says No runs at the start of the line, with the one New run button inside it', () => {
+    const log: NavigationAction[] = [];
+    const screen = mount(
+      <FleetScreen
+        hosts={[
+          {key: 'local', label: 'This Mac', freshness: 'live', staleForMs: null, data: emptyState},
+        ]}
+        place={initialNavigation.fleet}
+        nowMs={NOW}
+        go={action => log.push(action)}
+        retryHost={noop}
+        newRun={<button type="button">New run</button>}
+      />,
+    );
+    const empty = screen.container.querySelector('.vs-empty');
+    expect(empty?.getAttribute('data-align')).toBe('start');
+    expect(empty?.textContent).toContain('New run');
+    expect(screen.controls('New run')).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('cuts a host name in its middle, so hosts that share a prefix still tell apart', () => {
+    const names = ['host-b-a-vega-cluster-1', 'host-b-a-vega-cluster-2'];
+    const {screen} = open(
+      names.map((label, index) => ({
+        key: `h${index}`,
+        label,
+        freshness: 'live' as const,
+        staleForMs: null,
+        data: stateOf([live(`x${index}`, `run ${index}`)]),
+      })),
+    );
+    const tails = rows(screen).map(
+      row => cell(row, 'host').querySelector('.vs-middle-tail')?.textContent,
+    );
+    expect(tails.sort()).toEqual(['luster-1', 'luster-2']);
+    for (const row of rows(screen))
+      expect(names).toContain(cell(row, 'host').querySelector('.vs-middle')?.getAttribute('title'));
+    screen.unmount();
+  });
+
+  it('never says a host is stale for 0 seconds, and says the age once it is worth saying', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 0, max: 30 * 24 * HOUR}), ageMs => {
+        const phrase = freshnessPhrase('stale', ageMs);
+        expect(phrase).not.toMatch(/\b0s\b/);
+        expect(phrase === 'Stale').toBe(ageMs < 10_000);
+      }),
+      {seed: 31},
+    );
+    expect(freshnessPhrase('stale', null)).toBe('Stale');
+    expect(freshnessPhrase('live', 5 * HOUR)).toBe('Live');
+  });
+
   it('sends the state filter and the host filter as intents, and shows what they leave', () => {
     const {screen, log} = open([hostA, hostB]);
     const radio = (value: string): HTMLElement => {
@@ -331,12 +386,21 @@ describe('the fleet screen', () => {
       expect.stringContaining('Tokenizer'),
     ]);
     screen.press(radio('all'));
-    screen.press(radio('ssh:gpu-cluster-1'));
+    const hostSelect = screen.container.querySelector('select');
+    if (hostSelect === null) throw new Error('no host control');
+    const View = hostSelect.ownerDocument.defaultView as unknown as {Event: typeof Event};
+    const chooseHost = (value: string): void => {
+      act(() => {
+        hostSelect.value = value;
+        hostSelect.dispatchEvent(new View.Event('change', {bubbles: true}));
+      });
+    };
+    chooseHost('ssh:gpu-cluster-1');
     expect(log.at(-1)).toEqual({type: 'filter-runs-by-host', host: 'ssh:gpu-cluster-1'});
     expect(rows(screen).map(row => cell(row, 'name').textContent)).toEqual([
       expect.stringContaining('KV cache kernel'),
     ]);
-    screen.press(radio(''));
+    chooseHost('');
     expect(log.at(-1)).toEqual({type: 'filter-runs-by-host', host: null});
     expect(rows(screen)).toHaveLength(3);
     screen.unmount();

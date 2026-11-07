@@ -59,10 +59,18 @@ export const FRESHNESS_WORD: Readonly<Record<Freshness, {label: string; tone: To
   unavailable: {label: 'Unavailable', tone: 'err'},
 };
 
-/** A host's freshness as one phrase: `Stale 14m` when its age is known, `Stale` when not. */
+/** A host stale for less than this has no age worth saying: it has only just lost its link. */
+const AGE_WORTH_SAYING_MS = 10 * SECOND;
+
+/**
+ * A host's freshness as one phrase: `Stale 14m` once its age is worth saying, `Stale` before that
+ * and when it is not known (never `Stale 0s`).
+ */
 export function freshnessPhrase(freshness: Freshness, staleForMs: number | null): string {
   const {label} = FRESHNESS_WORD[freshness];
-  return freshness === 'stale' && staleForMs !== null ? `${label} ${span(staleForMs)}` : label;
+  return freshness === 'stale' && staleForMs !== null && staleForMs >= AGE_WORTH_SAYING_MS
+    ? `${label} ${span(staleForMs)}`
+    : label;
 }
 
 /**

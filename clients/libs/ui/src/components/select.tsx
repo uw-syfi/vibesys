@@ -49,6 +49,8 @@ export function Select<T extends string>(props: {
    * still names the control, and the inside copy is not read twice.
    */
   readonly labelInside?: boolean;
+  /** The control is at most a field wide, whatever its longest option is (a toolbar control). */
+  readonly capped?: boolean;
 }): JSX.Element {
   const wiring = useFieldWiring('Select');
   const {options, change} = props;
@@ -56,6 +58,7 @@ export function Select<T extends string>(props: {
     <span
       className="vs-select"
       data-size={props.size}
+      data-capped={props.capped === true || undefined}
       data-label-inside={props.labelInside === true || undefined}
     >
       {props.labelInside === true ? (
