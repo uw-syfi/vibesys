@@ -4,7 +4,7 @@ import type {
   ModelCatalog,
 } from '@vibesys/orchestrator-proto';
 import {Button, Field, PathInput, Row, Select, Stack, TextInput} from '@vibesys/ui';
-import type {JSX} from 'react';
+import {type JSX, useState} from 'react';
 import {
   type CommandProgress,
   completionsOf,
@@ -21,15 +21,17 @@ import {
 import {CommandLine} from './command-line.js';
 import {SetUpButton} from './setup/set-up-button.js';
 import {
+  checkDraft,
   DEFAULT_FANOUT,
+  type DraftCheck,
+  type DraftProblem,
   FANOUT_CHOICES,
   LEAD_CHOICES,
   LEADS,
   type LeadChoice,
-  missingFrom,
+  type ProblemField,
   type StartDraft,
   type StartRunRequest,
-  startRunRequest,
   TIME_LIMITS,
 } from './start-draft.js';
 import {type ModelChoices, modelChoices, NO_CATALOG, startModel} from './start-models.js';
@@ -74,10 +76,58 @@ export interface StartExample {
   readonly start: (host: string, request: StartRunRequest) => void;
 }
 
+/** A field's error as the Field takes it: the message, or nothing when the field shows none. */
+type FieldError = {readonly error?: string};
+type ErrorAt = (field: ProblemField) => FieldError;
+
+/** How the line under Start names the field whose error is drawn under it. */
+const FIELD_WORDS: Readonly<Record<ProblemField, string>> = {
+  repository: 'repository',
+  task: 'task',
+  model: 'model',
+  costLimit: 'cost limit',
+};
+
+/**
+ * Whether a problem is drawn under its field. A model the host refuses and a cost that does not read
+ * show at once; a required field left empty shows once it was typed in (or holds only spaces), so a
+ * form just opened is not all errors. Before then, the line under Start says what is missing.
+ */
+function shownAtField(problem: DraftProblem, draft: StartDraft, typed: ReadonlySet<string>) {
+  const {field} = problem;
+  return field === 'model' || field === 'costLimit' || typed.has(field) || draft[field] !== '';
+}
+
+/** The problems drawn under their fields, and each field's error as its Field takes it. */
+function fieldErrors(check: DraftCheck, draft: StartDraft, typed: ReadonlySet<string>) {
+  const shown =
+    check._tag === 'Ready'
+      ? []
+      : check.problems.filter(problem => shownAtField(problem, draft, typed));
+  const errorAt: ErrorAt = field => {
+    const message = shown.find(problem => problem.field === field)?.message;
+    return message === undefined ? {} : {error: message};
+  };
+  return {shown, errorAt};
+}
+
+/** What the draft lacks, or null: no host, or the first problem, pointed to when drawn at its field. */
+function startReason(
+  host: StartHost | undefined,
+  check: DraftCheck,
+  shown: readonly DraftProblem[],
+): string | null {
+  if (host === undefined) return 'No host is connected.';
+  if (check._tag === 'Ready') return null;
+  const [first] = check.problems;
+  return shown.includes(first) ? `Check the ${FIELD_WORDS[first.field]}.` : first.message;
+}
+
 /** The run's bounds: how long it may take and what it may cost, each none unless set. */
 function LimitFields(props: {
   readonly draft: StartDraft;
   readonly set: (change: Partial<StartDraft>) => void;
+  readonly errorAt: ErrorAt;
 }): JSX.Element {
   const {draft, set} = props;
   return (
@@ -94,7 +144,7 @@ function LimitFields(props: {
           }
         />
       </Field>
-      <Field label="Cost limit ($)">
+      <Field label="Cost limit ($)" {...props.errorAt('costLimit')}>
         <TextInput
           value={draft.costLimit}
           change={costLimit => set({costLimit})}
@@ -118,12 +168,14 @@ function tasksLine(verdict: RepositoryVerdict): string | undefined {
 }
 
 /**
- * The repository path, completed from the host's folders as it is typed, with the host's answer
- * about it in a line of its own under the field: its refusal, or the tasks it holds. The line keeps
- * its place when empty, so what appears there moves nothing.
+ * The repository path, completed from the host's folders as it is typed, with its problem under the
+ * field: the draft's own (left empty once typed in) first, else the host's answer about the path (its
+ * refusal, or the tasks it holds). None of the three ever meet, as an empty path has no verdict and a
+ * refused path holds no tasks.
  */
 function RepositoryField(props: {
   readonly value: string;
+  readonly problem: FieldError;
   readonly verdict: RepositoryVerdict;
   readonly completions: readonly PathCompletion[];
   readonly midName: boolean;
@@ -132,12 +184,13 @@ function RepositoryField(props: {
 }): JSX.Element {
   const {verdict} = props;
   const tasks = tasksLine(verdict);
+  const refused = verdict._tag === 'Invalid' ? {error: verdict.reason} : {};
   return (
     <Field
       label="Repository"
       reserveLine
-      {...(verdict._tag === 'Invalid' ? {error: verdict.reason} : {})}
       {...(tasks === undefined ? {} : {help: tasks})}
+      {...(props.problem.error === undefined ? refused : props.problem)}
     >
       <PathInput
         value={props.value}
@@ -198,6 +251,7 @@ function AgentFields(props: {
   readonly set: (change: Partial<StartDraft>) => void;
   readonly choices: ModelChoices;
   readonly model: string;
+  readonly errorAt: ErrorAt;
 }): JSX.Element {
   const {draft, set, choices, model} = props;
   return (
@@ -225,7 +279,7 @@ function AgentFields(props: {
           change={(choice: LeadChoice) => set({lead: choice, model: ''})}
         />
       </Field>
-      <Field label="Model">
+      <Field label="Model" {...props.errorAt('model')}>
         <Select
           value={model}
           options={modelOptions(choices)}
@@ -242,6 +296,7 @@ function RepositoryTarget(props: {
   readonly host: StartHost | undefined;
   readonly draft: StartDraft;
   readonly set: (change: Partial<StartDraft>) => void;
+  readonly errorAt: ErrorAt;
   readonly verdict: RepositoryVerdict;
   readonly path: ReturnType<typeof pathCompletion>;
   readonly askAbout: (repository: string) => void;
@@ -252,6 +307,7 @@ function RepositoryTarget(props: {
     <>
       <RepositoryField
         value={draft.repository}
+        problem={props.errorAt('repository')}
         verdict={props.verdict}
         completions={path.completions}
         midName={path.midName}
@@ -264,7 +320,11 @@ function RepositoryTarget(props: {
           if (host !== undefined) path.list(host.key, draft.repository, true);
         }}
       />
-      <Field label="Task" help="The task to optimize, as named in the repository.">
+      <Field
+        label="Task"
+        help="The task to optimize, as named in the repository."
+        {...props.errorAt('task')}
+      >
         <TextInput value={draft.task} change={task => set({task})} placeholder="task" mono />
       </Field>
       {props.placeField}
@@ -307,23 +367,23 @@ export function StartRunForm(props: {
   readonly setUp?: (host: string, request: StartRunRequest) => void;
 }): JSX.Element {
   const {draft, example} = props;
+  // The fields typed in since the form was opened, so an emptied one can say it needs filling.
+  const [typed, setTyped] = useState<ReadonlySet<string>>(() => new Set());
   const host = props.hosts.find(candidate => candidate.key === props.chosen) ?? props.hosts[0];
-  const set = (change: Partial<StartDraft>): void => props.setDraft({...draft, ...change});
+  const set = (change: Partial<StartDraft>): void => {
+    setTyped(before => new Set([...before, ...Object.keys(change)]));
+    props.setDraft({...draft, ...change});
+  };
   const choices = host === undefined ? NO_CATALOG : modelChoices(host.models, LEADS[draft.lead]);
   const model = startModel(draft.model, choices);
-  const missing =
-    host === undefined
-      ? 'No host is connected.'
-      : missingFrom(draft, choices, example === undefined ? 'repository' : 'example');
+  const check = checkDraft(draft, choices, example === undefined ? 'repository' : 'example');
+  const {shown, errorAt} = fieldErrors(check, draft, typed);
   const verdict =
     example === undefined
       ? repositoryVerdict(draft.repository, host?.repositoryChecked)
       : ({_tag: 'Empty'} as const);
-  const block = startBlock(
-    props.progress?._tag === 'Sending',
-    missing ?? example?.blocked ?? null,
-    verdict,
-  );
+  const missing = startReason(host, check, shown) ?? example?.blocked ?? null;
+  const block = startBlock(props.progress?._tag === 'Sending', missing, verdict);
   const askAbout = (repository: string): void => {
     if (host !== undefined) props.checkRepository(host.key, repository);
   };
@@ -349,6 +409,7 @@ export function StartRunForm(props: {
           host={host}
           draft={draft}
           set={set}
+          errorAt={errorAt}
           verdict={verdict}
           path={path}
           askAbout={askAbout}
@@ -357,8 +418,8 @@ export function StartRunForm(props: {
       ) : (
         example.picker
       )}
-      <AgentFields draft={draft} set={set} choices={choices} model={model} />
-      <LimitFields draft={draft} set={set} />
+      <AgentFields draft={draft} set={set} choices={choices} model={model} errorAt={errorAt} />
+      <LimitFields draft={draft} set={set} errorAt={errorAt} />
       <Field label="Steering (optional)" help="Anything the lead should know or prefer.">
         <TextInput
           value={draft.steering}
@@ -373,8 +434,8 @@ export function StartRunForm(props: {
           label="Start run"
           variant="primary"
           press={() => {
-            if (host === undefined || block !== null) return;
-            (example?.start ?? props.start)(host.key, startRunRequest(draft, choices));
+            if (host === undefined || block !== null || check._tag !== 'Ready') return;
+            (example?.start ?? props.start)(host.key, check.request);
           }}
           {...(block === null ? {} : {disabledReason: block.reason, quietReason: block.quiet})}
         />

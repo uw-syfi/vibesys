@@ -152,6 +152,22 @@ function choose(select: HTMLSelectElement, value: string): void {
   });
 }
 
+/** The text a control is described by that has the tone `tone`, or null when there is none. */
+function describedAs(control: HTMLElement, tone: string | null): string | null {
+  const ids = (control.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean);
+  const said = ids
+    .map(id => control.ownerDocument.getElementById(id))
+    .find(each => each !== null && each.getAttribute('data-tone') === tone);
+  return said?.textContent ?? null;
+}
+
+/** What the form says is wrong under a control's field, or null when it says nothing. */
+const errorUnder = (control: HTMLElement): string | null => describedAs(control, 'err');
+
+/** Why Start cannot be pressed, as it says under the button. */
+const startReason = (screen: Screen): string | null =>
+  describedAs(screen.control('Start run'), null);
+
 const optionsOf = (select: HTMLSelectElement): string[] =>
   [...select.options].map(option => option.value);
 
@@ -297,7 +313,10 @@ describe('the Start run form’s model control', () => {
     );
     screen.press(start);
     expect(started).toEqual([]);
-    expect(screen.text()).toContain('No allowed model runs on this tool.');
+    const model = fieldOf<HTMLSelectElement>(screen, 'Model');
+    expect(model.getAttribute('aria-invalid')).toBe('true');
+    expect(errorUnder(model)).toBe('No allowed model runs on this tool.');
+    expect(startReason(screen)).toBe('Check the model.');
     screen.unmount();
   });
 
@@ -341,6 +360,53 @@ describe('the Start run form’s limits', () => {
     screen.press(screen.control('Start run'));
     expect(started).toEqual([]);
     expect(screen.text()).toContain('cost limit');
+    screen.unmount();
+  });
+
+  it('refuse a cost written in another notation, and say so under the cost field', () => {
+    for (const notation of ['0x10', '1e3', '0b11', '0o7']) {
+      const {screen, started} = ready();
+      const cost = fieldOf<HTMLInputElement>(screen, 'Cost limit ($)');
+      type(cost, notation);
+      screen.press(screen.control('Start run'));
+      expect(started).toEqual([]);
+      expect(cost.getAttribute('aria-invalid')).toBe('true');
+      expect(errorUnder(cost)).toBe('The cost limit is a number of dollars, such as 25 or 12.50.');
+      expect(startReason(screen)).toBe('Check the cost limit.');
+      screen.unmount();
+    }
+  });
+
+  it('read a cost written with the dollar sign the label shows', () => {
+    const {screen, started} = ready();
+    type(fieldOf<HTMLInputElement>(screen, 'Cost limit ($)'), '$25');
+    screen.press(screen.control('Start run'));
+    expect(started[0]?.request.maxCostUsd).toBe(25);
+    screen.unmount();
+  });
+});
+
+describe('the Start run form’s required fields', () => {
+  it('say under Start what is missing, and under the field once it was typed in and emptied', () => {
+    const {screen} = open();
+    openRepository(screen);
+    const repo = repository(screen);
+    expect(repo.getAttribute('aria-invalid')).toBeNull();
+    expect(startReason(screen)).toBe('Name the repository to optimize.');
+
+    type(repo, '/work/decode-service');
+    type(repo, '');
+    expect(repo.getAttribute('aria-invalid')).toBe('true');
+    expect(errorUnder(repo)).toBe('Name the repository to optimize.');
+    expect(startReason(screen)).toBe('Check the repository.');
+
+    type(repo, '/work/decode-service');
+    expect(errorUnder(repo)).toBeNull();
+    expect(startReason(screen)).toBe('Name the task to run.');
+    const task = fieldOf<HTMLInputElement>(screen, 'Task');
+    type(task, '   ');
+    expect(errorUnder(task)).toBe('Name the task to run.');
+    expect(startReason(screen)).toBe('Check the task.');
     screen.unmount();
   });
 });

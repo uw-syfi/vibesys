@@ -75,34 +75,36 @@ export interface StartRunRequest {
   readonly evalPlace: string;
 }
 
-/** The cost limit as a number, null for none and NaN for text that is not a positive amount. */
-function costOf(typed: string): number | null {
+/**
+ * Dollars as a person writes them: digits with an optional decimal point, `$` before them allowed (the
+ * field's label names the unit). No exponent, no other base, and no commas: a comma is a thousands
+ * separator in one place and the decimal point in another, so `1,000` is refused rather than guessed.
+ */
+const DOLLARS = /^(-?)\s*\$?\s*(\d+(?:\.\d*)?|\.\d+)$/;
+
+/** The cost limit typed: none when empty, else the dollars it reads as, or why it reads as none. */
+function readCost(typed: string): {readonly usd: number | null} | {readonly wrong: string} {
   const text = typed.trim();
-  if (text === '') return null;
-  const amount = Number(text);
-  return Number.isFinite(amount) && amount > 0 ? amount : Number.NaN;
-}
-
-/** Why the draft cannot be started yet, or null when it can. */
-export function missingFrom(
-  draft: StartDraft,
-  models: ModelChoices,
-  /** `example`: the repository and task come from the catalogue entry, not from the fields. */
-  source: 'repository' | 'example' = 'repository',
-): string | null {
-  if (source === 'repository') {
-    if (draft.repository.trim() === '') return 'Name the repository to optimize.';
-    if (draft.task.trim() === '') return 'Name the task to run.';
+  if (text === '') return {usd: null};
+  const found = DOLLARS.exec(text);
+  if (found === null) {
+    return {
+      wrong: text.includes(',')
+        ? 'The cost limit is written without commas, such as 1000 or 12.50.'
+        : 'The cost limit is a number of dollars, such as 25 or 12.50.',
+    };
   }
-  if (models.blocked !== null) return models.blocked;
-  if (Number.isNaN(costOf(draft.costLimit)))
-    return 'The cost limit is a positive number of dollars.';
-  return null;
+  const usd = Number(found[2]);
+  if (found[1] === '-' || usd === 0) {
+    return {wrong: 'The cost limit must be more than zero. Leave it empty for no limit.'};
+  }
+  return Number.isFinite(usd) ? {usd} : {wrong: 'The cost limit is too large.'};
 }
 
-/** The command for a draft that `missingFrom` accepts; surrounding spaces in a field are dropped. */
+/** The command for a draft, regardless of whether it may be sent; surrounding spaces are dropped. */
 export function startRunRequest(draft: StartDraft, models: ModelChoices): StartRunRequest {
   const steering = draft.steering.trim();
+  const cost = readCost(draft.costLimit);
   return {
     repository: draft.repository.trim(),
     task: draft.task.trim(),
@@ -110,7 +112,63 @@ export function startRunRequest(draft: StartDraft, models: ModelChoices): StartR
     lead: {harness: LEADS[draft.lead], model: startModel(draft.model, models)},
     brief: steering === '' ? NO_STEERING : steering,
     maxTimeSeconds: draft.timeLimit === null ? null : draft.timeLimit * 60,
-    maxCostUsd: costOf(draft.costLimit),
+    maxCostUsd: 'usd' in cost ? cost.usd : null,
     evalPlace: draft.evalPlace,
   };
+}
+
+/** The fields of the form that can hold something a start cannot take. */
+export type ProblemField = 'repository' | 'task' | 'model' | 'costLimit';
+
+/** What keeps a draft from starting, and the field it is about. */
+export interface DraftProblem {
+  readonly field: ProblemField;
+  readonly message: string;
+}
+
+/**
+ * A draft read whole: the command it starts, or what keeps it from starting, in the form's order. No
+ * command is made from a draft with a problem, so a field that reads as nothing is never sent as none.
+ */
+export type DraftCheck =
+  | {readonly _tag: 'Ready'; readonly request: StartRunRequest}
+  | {readonly _tag: 'NotReady'; readonly problems: readonly [DraftProblem, ...DraftProblem[]]};
+
+/**
+ * Reads the draft for the host's model choices; surrounding spaces in a field are dropped.
+ * `example`: the repository and task come from the catalogue entry, not from the fields, so neither
+ * is checked here.
+ */
+export function checkDraft(
+  draft: StartDraft,
+  models: ModelChoices,
+  source: 'repository' | 'example' = 'repository',
+): DraftCheck {
+  const cost = readCost(draft.costLimit);
+  const problems = [
+    source === 'repository' && draft.repository.trim() === ''
+      ? {field: 'repository', message: 'Name the repository to optimize.'}
+      : null,
+    source === 'repository' && draft.task.trim() === ''
+      ? {field: 'task', message: 'Name the task to run.'}
+      : null,
+    models.blocked === null ? null : {field: 'model', message: models.blocked},
+    'wrong' in cost ? {field: 'costLimit', message: cost.wrong} : null,
+  ].filter((problem): problem is DraftProblem => problem !== null);
+  const [first, ...rest] = problems;
+  if (first !== undefined) return {_tag: 'NotReady', problems: [first, ...rest]};
+  return {_tag: 'Ready', request: startRunRequest(draft, models)};
+}
+
+/**
+ * Why the draft cannot be started yet, or null when it can: `checkDraft`'s first problem, by message
+ * rather than by field, for a caller that names the field no other way (the setup chat's own button).
+ */
+export function missingFrom(
+  draft: StartDraft,
+  models: ModelChoices,
+  source: 'repository' | 'example' = 'repository',
+): string | null {
+  const check = checkDraft(draft, models, source);
+  return check._tag === 'Ready' ? null : check.problems[0].message;
 }
