@@ -76,8 +76,10 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 		printJSON(d, st)
 		return exitOK
 	}
-	fmt.Fprintf(d.stdout, "running\tpid %d\tversion %s\tqueued %d\trunning %d\n",
-		st.GetPid(), st.GetVersions().GetBinaryVersion(), st.GetQueuedJobs(), st.GetRunningJobs())
+	// Every count of the daemon's work is on the first line, the submissions it has not answered
+	// included: one may be building an image for hours before its job exists.
+	fmt.Fprintf(d.stdout, "running\tpid %d\tversion %s\tqueued %d\trunning %d\tsubmitting %d\n",
+		st.GetPid(), st.GetVersions().GetBinaryVersion(), st.GetQueuedJobs(), st.GetRunningJobs(), st.GetSubmittingJobs())
 	// A sandbox daemon says so, and every daemon names the sandbox daemons that run beside the one
 	// that holds the machine, so none runs unseen.
 	if st.GetSandbox() {
@@ -188,8 +190,12 @@ func daemonStop(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
+// daemonRestart replaces the daemon. Its jobs keep running under their supervisors, but a
+// submission it has not answered starts over on the next daemon, so it is refused while there is
+// one, unless --force.
 func daemonRestart(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("daemon restart", d)
+	force := fs.Bool("force", false, "restart even while the daemon has submissions in progress, which start over")
 	if _, err := parse(fs, args); err != nil {
 		return parseFailed(d, fs, err)
 	}
@@ -197,7 +203,7 @@ func daemonRestart(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	cl, err := client.Restart(ctx, opts)
+	cl, err := client.Restart(ctx, opts, *force)
 	if err != nil {
 		return fail(d, c.json, err)
 	}

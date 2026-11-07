@@ -546,6 +546,10 @@ func TestDaemonStatusStopRestart(t *testing.T) {
 	if r.code != exitOK || !strings.HasPrefix(r.stdout, "running\t") {
 		t.Fatalf("status = %+v", r)
 	}
+	// The first line counts all of the daemon's work, the submissions it has not answered included.
+	if first, _, _ := strings.Cut(r.stdout, "\n"); !strings.HasSuffix(first, "\tsubmitting 0") {
+		t.Errorf("status first line = %q, want it to end with the submissions in progress", first)
+	}
 	// What a job inherits: every name, and a value only where it is safe to show.
 	wantLines := "checkouts\t/scratch\nenv\tAWS_SECRET\nenv\tPATH=/usr/bin\nenv\tTMPDIR=/scratch\nenv\tVIBESYS_API_TOKEN\nenv\tVIBESYS_SPARK_HOST=host-a\n"
 	if _, rest, _ := strings.Cut(r.stdout, "\n"); rest != wantLines {

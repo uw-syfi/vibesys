@@ -34,7 +34,13 @@ func invalid(format string, args ...any) *core.Failure {
 // command job has no key. A docker job of either is refused unless a placement gives what its task
 // needs (placeFlow), and records those needs, so that the scheduler starts it on any placement that
 // gives them.
+//
+// Status counts the submission from its start until it is answered, keying included.
 func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome, error) {
+	// Counted until it is answered, past the moment its job is queued, so that Status never shows a
+	// submission in neither count.
+	a.submitting.Add(1)
+	defer a.submitting.Add(-1)
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
 	}

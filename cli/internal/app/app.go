@@ -37,6 +37,9 @@ type App struct {
 	inbox       chan message
 	view        atomic.Pointer[view]
 	generations storeGenerations
+	// submitting counts the submissions that Submit has taken and not answered: keying one can
+	// build and convert its image for hours before its job exists, and a restart ends that work.
+	submitting atomic.Int64
 	// leases are the leases the jobs hold. The loop keeps and lets go of them.
 	leases leaseBook
 
@@ -438,18 +441,23 @@ func failureOf(err error) core.Failure {
 }
 
 // Status is what the daemon reports about its work: its counts, the leases its jobs hold, and the
-// leases jobs that run already could not take.
+// leases jobs that run already could not take. Submitting is the submissions not answered yet, which
+// have no job, or one that Queued may count too.
 type Status struct {
-	StartedAt time.Time
-	Queued    int
-	Running   int
-	Leases    []HeldLease
-	Conflicts []LeaseConflict
+	StartedAt  time.Time
+	Submitting int
+	Queued     int
+	Running    int
+	Leases     []HeldLease
+	Conflicts  []LeaseConflict
 }
 
 // Status returns the machine's counts and leases.
 func (a *App) Status() Status {
 	v := a.view.Load()
 	held, conflicts := a.leases.snapshot(v.tasks)
-	return Status{StartedAt: a.startedAt, Queued: v.queued, Running: v.running, Leases: held, Conflicts: conflicts}
+	return Status{
+		StartedAt: a.startedAt, Submitting: int(a.submitting.Load()), Queued: v.queued, Running: v.running,
+		Leases: held, Conflicts: conflicts,
+	}
 }

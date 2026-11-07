@@ -96,7 +96,15 @@ func SameBuild(clientBuild string, daemon *cliv1.BuildVersions) bool {
 
 // DecideDaemon applies core.DecideDaemon to the daemon's handshake versions and its status.
 func DecideDaemon(clientBuild string, daemon *cliv1.BuildVersions, st *cliv1.StatusResponse) DaemonDecision {
-	return core.DecideDaemon(clientBuild, daemon.GetBinaryVersion(), st.GetQueuedJobs()+st.GetRunningJobs())
+	return core.DecideDaemon(clientBuild, daemon.GetBinaryVersion(), LiveWork(st))
+}
+
+// LiveWork is everything a daemon's status says it is doing that a restart would touch: the
+// submissions it has not answered, whose keying a restart starts over, and its queued and running
+// jobs. It is the one count of a daemon's work; a reader that sums some of them instead misses a
+// submission that builds its image for hours before its job exists.
+func LiveWork(st *cliv1.StatusResponse) uint32 {
+	return st.GetSubmittingJobs() + st.GetQueuedJobs() + st.GetRunningJobs()
 }
 
 // OtherBuildFailure is the refusal of a daemon of another build that has jobs. It names both
@@ -110,8 +118,8 @@ func OtherBuildFailure(clientBuild string, st *cliv1.StatusResponse) error {
 	}
 	return &core.Failure{Kind: core.FailureDaemonOtherBuild, Message: fmt.Sprintf(
 		"a vibesys-cli daemon of another build already runs for you: this vibesys-cli is build %s, the daemon "+
-			"(pid %d) is build %s. The daemon has %d queued and %d running job(s), so it was not replaced and was "+
+			"(pid %d) is build %s. The daemon has %d submission(s) in progress and %d queued and %d running job(s), so it was not replaced and was "+
 			"not used. Wait for the jobs to finish and run the command again, or run `vibesys-cli daemon restart` "+
 			"to replace it now; its running jobs keep running under their own supervisors",
-		name(clientBuild), st.GetPid(), name(st.GetVersions().GetBinaryVersion()), st.GetQueuedJobs(), st.GetRunningJobs())}
+		name(clientBuild), st.GetPid(), name(st.GetVersions().GetBinaryVersion()), st.GetSubmittingJobs(), st.GetQueuedJobs(), st.GetRunningJobs())}
 }

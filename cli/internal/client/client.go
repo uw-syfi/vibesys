@@ -270,8 +270,12 @@ func awaitExit(ctx context.Context, opts Options, bound time.Duration) error {
 }
 
 // Restart stops the daemon if one runs, waits until it is gone, and starts a new one. Jobs that
-// run are not affected: the new daemon finds their supervisors.
-func Restart(ctx context.Context, opts Options) (*Client, error) {
+// run are not affected: the new daemon finds their supervisors. A submission the daemon has not
+// answered is: its client sends it again to the new daemon, which keys it over, and for a docker
+// job that can mean building and converting its image again, for hours. So Restart refuses, with a
+// conflict failure that names them, while the daemon has such submissions, unless force is set. It
+// asks under the right to start, so no client of another build replaces the daemon meanwhile.
+func Restart(ctx context.Context, opts Options, force bool) (*Client, error) {
 	opts = opts.withDefaults()
 	if opts.Starter == nil {
 		return nil, errors.New("restarting the daemon needs a way to start one")
@@ -286,6 +290,11 @@ func Restart(ctx context.Context, opts Options) (*Client, error) {
 	switch {
 	case err == nil:
 		defer c.Close()
+		if !force {
+			if err := c.refuseSubmissions(ctx); err != nil {
+				return nil, err
+			}
+		}
 		if err := c.stopAndWait(ctx); err != nil {
 			return nil, err
 		}
@@ -296,6 +305,22 @@ func Restart(ctx context.Context, opts Options) (*Client, error) {
 		return nil, err
 	}
 	return Dial(ctx, opts)
+}
+
+// refuseSubmissions fails when the daemon has submissions it has not answered, which a restart would
+// start over. A daemon whose status cannot be read is not restarted unread either.
+func (c *Client) refuseSubmissions(ctx context.Context) error {
+	st, err := c.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("reading the daemon's status before restarting it (--force restarts it unread): %w", err)
+	}
+	if n := st.GetSubmittingJobs(); n > 0 {
+		return wire.Conflict(fmt.Sprintf(
+			"the daemon (pid %d) has %d submission(s) in progress, such as an image build or conversion for a "+
+				"check or measure, and a restart would start them over; wait until `daemon status` shows "+
+				"submitting 0, or restart with --force", st.GetPid(), n))
+	}
+	return nil
 }
 
 // dial connects and says Hello. It fails with ErrNoDaemon when the socket does not answer.
