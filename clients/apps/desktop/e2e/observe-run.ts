@@ -58,7 +58,6 @@ const WORLD_KEYS = ['home', 'runId', 'task', 'report', 'agents'];
 const shown = (text: string): string =>
   text.replace(/\b[0-9a-f]{40}\b/g, commit => commit.slice(0, 8));
 
-
 function readWorld(env: NodeJS.ProcessEnv = process.env): World {
   const raw = env['VIBESYS_E2E_WORLD'];
   if (raw === undefined || raw === '') {
