@@ -588,7 +588,7 @@ strip_git = false
     assert not (tmp_path / "copy").exists()
 
 
-def _provisionable_examples() -> list[pytest.ParameterSet]:
+def _provisionable_examples() -> list[object]:
     """Each registered example with a path source outside it, and a task needing no Git source."""
     params = []
     for entry in load_registry().example:
