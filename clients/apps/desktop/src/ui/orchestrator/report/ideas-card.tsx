@@ -26,7 +26,7 @@ const VERDICT_TONES = {
   open: 'warn',
   kept: 'ok',
   rejected: 'neutral',
-  parked: 'neutral',
+  parked: 'live',
 } as const satisfies Record<Verdict, StatusTone>;
 
 /** What a hover says of an idea's gains: every objective, with the values behind the ratio. */
@@ -125,7 +125,7 @@ export function IdeasCard(props: {
       : [{value: 'window' as const, label: counted('Check-in', inScope.window)}]),
   ];
   const verdicts = [
-    {value: 'any' as const, label: counted('Any', scoped)},
+    {value: 'any' as const, label: counted('All verdicts', scoped)},
     ...present.map(each => ({
       value: each,
       label: counted(VERDICT_WORDS[each], ideasOfVerdict(scoped, each)),

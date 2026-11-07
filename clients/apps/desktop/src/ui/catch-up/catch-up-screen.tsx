@@ -180,7 +180,7 @@ function TileCards(props: {readonly tiles: Tiles; readonly showIdeas: () => void
             <Stat label="Created" value={tiles.ideas.created} />
             <Stat label="Changed" value={tiles.ideas.changed} />
             <Button
-              text="Show"
+              text="Show ideas"
               label="Show ideas of this window"
               variant="quiet"
               size="sm"
