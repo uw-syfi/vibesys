@@ -81,7 +81,7 @@ export function AgentPage(props: {
   const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
   // The lead is at the top of the tree: a place of one level says what the title says.
   const place = agentPlace(state, agent.id);
-  const turnsLeftOut = state.histories[agent.runId]?.turnsLeftOut === true;
+  const turnsLeftOut = state.histories[agent.runId]?.turnsLeftOut ?? 0;
   return (
     <Page
       key={`agent-${agent.id}`}
@@ -96,7 +96,9 @@ export function AgentPage(props: {
           <Chip label={props.host} mono clip />
           <Chip label={harnessWord(agent.harness)} />
           {agent.model === '' ? null : <Chip label={agent.model} mono clip />}
-          {turnsLeftOut ? <Chip label="Older turns not shown" tone="warn" dot /> : null}
+          {turnsLeftOut === 0 ? null : (
+            <Chip label={`${turnsLeftOut} turns not shown`} tone="warn" dot />
+          )}
           {props.reading}
         </>
       }

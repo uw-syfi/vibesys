@@ -129,7 +129,13 @@ function identityColumns(nowMs: number): readonly ListColumn<FleetRow>[] {
         return (
           <CellLines
             main={<Chip label={word.label} tone={word.tone} dot />}
-            note={whenLine(row, nowMs)}
+            note={
+              row.reportUnavailable ? (
+                <Chip label="Report unavailable" tone="warn" />
+              ) : (
+                whenLine(row, nowMs)
+              )
+            }
           />
         );
       },

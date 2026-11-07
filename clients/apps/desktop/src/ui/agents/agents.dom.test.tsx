@@ -136,14 +136,20 @@ describe('an agent page', () => {
     }
   });
 
-  it('says in its header that older turns are not shown only when the host left them out', () => {
+  it('says in its header that older turns are not shown with the count the host gave, and only when it left some out', () => {
     const agent = Object.values(state.agents)[0];
     if (agent === undefined) throw new Error('the run has agents');
-    const read = (turnsLeftOut: boolean) => ({
+    const read = (turnsLeftOut: number) => ({
       ...state,
       histories: {
         ...state.histories,
-        [agent.runId]: {sequence: 1n, complete: true, turnsLeftOut, checkInsLeftOut: false},
+        [agent.runId]: {
+          sequence: 1n,
+          complete: true,
+          turnsLeftOut,
+          checkInsLeftOut: 0,
+          agentsLeftOut: 0,
+        },
       },
     });
     const shown = (held: OrchestratorState) => {
@@ -171,8 +177,8 @@ describe('an agent page', () => {
       screen.unmount();
       return text;
     };
-    expect(shown(read(true))).toContain('Older turns not shown');
-    expect(shown(read(false))).not.toContain('not shown');
+    expect(shown(read(12))).toContain('12 turns not shown');
+    expect(shown(read(0))).not.toContain('not shown');
     expect(shown(state)).not.toContain('not shown');
   });
 

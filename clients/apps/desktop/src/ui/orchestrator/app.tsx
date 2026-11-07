@@ -336,6 +336,9 @@ function RunDestination(props: {
         ]}
       />
       <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+      {state.summaries[runId]?.reportUnavailable === true ? (
+        <Chip label="Report unavailable" tone="warn" dot />
+      ) : null}
     </>
   );
   const toRun: readonly Crumb[] = [

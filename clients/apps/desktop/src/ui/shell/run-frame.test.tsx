@@ -6,7 +6,7 @@
  */
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
+import {BuildVersionsSchema, RunSummarySchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {JSX} from 'react';
 import {
@@ -257,6 +257,38 @@ describe('the pages of a run and the pages of the window', () => {
       expect(steps.slice(0, -1).every(step => step.tagName === 'BUTTON')).toBe(true);
       expect(steps.at(-1)?.getAttribute('aria-current')).toBe('location');
       screen.unmount();
+    }
+  });
+
+  it('says in the words under the title of every page of a run when the host could not serve its report', () => {
+    const {scenario, state} = world(3, 2, true);
+    const nowMs = scenario.endMs + 60_000;
+    const flagged = (flag: boolean): OrchestratorState => ({
+      ...state,
+      summaries: {
+        ...state.summaries,
+        [scenario.runId]: create(RunSummarySchema, {
+          runId: scenario.runId,
+          reportUnavailable: flag,
+        }),
+      },
+    });
+    for (const view of ['report', 'cost', 'agents'] as const) {
+      const route: Route = {
+        screen: 'run',
+        host: 'local',
+        runId: scenario.runId,
+        view,
+        agentId: null,
+      };
+      const on = mount(app(flagged(true), nowMs, route));
+      expect(on.container.querySelector('.vs-page-meta')?.textContent, view).toContain(
+        'Report unavailable',
+      );
+      on.unmount();
+      const off = mount(app(flagged(false), nowMs, route));
+      expect(off.container.textContent, view).not.toContain('Report unavailable');
+      off.unmount();
     }
   });
 });

@@ -786,4 +786,27 @@ describe('the candidates cell of the fleet screen', () => {
       ]),
     ).toHaveLength(both.length);
   });
+
+  it('says in the status cell, as a chip, that the host could not serve the report, and not that there is none', () => {
+    const held = hostA.data;
+    const summary = held.summaries['a1'];
+    if (summary === undefined) throw new Error('the fixture serves a summary of a1');
+    const unavailable = (flag: boolean): FleetHostInput => ({
+      ...hostA,
+      data: {
+        ...held,
+        summaries: {...held.summaries, a1: {...summary, reportUnavailable: flag}},
+      },
+    });
+    const on = open([unavailable(true)]);
+    const status = cell(rowOf(on.screen, 'queue-rs'), 'status');
+    expect(status.querySelector('.vs-chip[data-tone="warn"]')?.textContent).toBe(
+      'Report unavailable',
+    );
+    expect(status.textContent).not.toContain('No report');
+    on.screen.unmount();
+    const off = open([unavailable(false)]);
+    expect(cell(rowOf(off.screen, 'queue-rs'), 'status').textContent).not.toContain('unavailable');
+    off.screen.unmount();
+  });
 });
