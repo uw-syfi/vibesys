@@ -154,6 +154,8 @@ type NewPlan struct {
 	Title     string
 	Body      string
 	GainBound *GainBound
+	// Workstream is the workstream the plan joins, 0 for none. It is one the task has.
+	Workstream WorkstreamNumber
 	// Origin is who makes the plan and when, which is its creation time.
 	Origin RecordOrigin
 }
@@ -166,6 +168,9 @@ type PlanEdit struct {
 	// GainBound replaces the plan's bound. A bound is replaced and never cleared.
 	GainBound *GainBound
 	Comment   *PlanComment
+	// Workstream moves the plan to a workstream the task has. A plan's workstream is moved and never
+	// cleared.
+	Workstream *WorkstreamNumber
 	// Origin is who makes the edit and when, which is the plan's new update time, and the origin of
 	// the transition when the edit sets a status the plan does not have.
 	Origin RecordOrigin

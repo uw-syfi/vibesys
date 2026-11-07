@@ -1,0 +1,46 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/record.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// WorkstreamStatus is where a line of work stands. Agents choose it: the CLI enforces no workflow
+// between statuses, and a closed workstream still takes plans.
+enum WorkstreamStatus {
+  WORKSTREAM_STATUS_UNSPECIFIED = 0;
+  WORKSTREAM_STATUS_ACTIVE = 1;
+  WORKSTREAM_STATUS_PAUSED = 2;
+  WORKSTREAM_STATUS_CLOSED = 3;
+}
+
+// Workstream is a line of work an agent started and named, such as "KV cache layout". Plans join it
+// through Plan.workstream. What it holds is what the agent stated: how many plans it has, and what
+// they gained, is derived by whoever reads the plans, and never stored here.
+//
+// No two workstreams that are not closed have the same title once case and runs of white space are
+// ignored, so starting a workstream of a name that is in use finds that one instead of making
+// another.
+message Workstream {
+  // The place among the task's workstreams, 1 for the first. vibesysd assigns it and never reuses it.
+  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
+  // One line of text, at most 80 characters, with its white space already collapsed to single spaces
+  // and none at either end: how the agent wrote it, not the form two titles are compared in.
+  string title = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+  WorkstreamStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The agent's one-line state of the line, such as "paused: accuracy gate". It is for people to read
+  // and the CLI does nothing with it. Empty until the agent states one.
+  string note = 4 [(buf.validate.field).string.max_len = 280];
+  // Who started it, and when. vibesysd fills it in as it does for a plan.
+  RecordOrigin origin = 5 [(buf.validate.field).required = true];
+  // When the workstream last changed: its start, or the last edit that changed something.
+  google.protobuf.Timestamp updated_at = 6 [(buf.validate.field).required = true];
+}

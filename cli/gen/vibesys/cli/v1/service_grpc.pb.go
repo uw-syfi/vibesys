@@ -43,6 +43,9 @@ const (
 	DaemonService_EditPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/EditPlan"
 	DaemonService_CommentPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/CommentPlan"
 	DaemonService_ClosePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/ClosePlan"
+	DaemonService_StartWorkstream_FullMethodName  = "/vibesys.cli.v1.DaemonService/StartWorkstream"
+	DaemonService_ListWorkstreams_FullMethodName  = "/vibesys.cli.v1.DaemonService/ListWorkstreams"
+	DaemonService_EditWorkstream_FullMethodName   = "/vibesys.cli.v1.DaemonService/EditWorkstream"
 	DaemonService_DeclareBound_FullMethodName     = "/vibesys.cli.v1.DaemonService/DeclareBound"
 	DaemonService_ListBounds_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListBounds"
 )
@@ -106,6 +109,14 @@ type DaemonServiceClient interface {
 	EditPlan(ctx context.Context, in *EditPlanRequest, opts ...grpc.CallOption) (*EditPlanResponse, error)
 	CommentPlan(ctx context.Context, in *CommentPlanRequest, opts ...grpc.CallOption) (*CommentPlanResponse, error)
 	ClosePlan(ctx context.Context, in *ClosePlanRequest, opts ...grpc.CallOption) (*ClosePlanResponse, error)
+	// StartWorkstream starts a workstream with the title, or returns the one that is not closed and has
+	// the same title once case and runs of white space are ignored, so planners that start the same
+	// line of work at once get one number.
+	StartWorkstream(ctx context.Context, in *StartWorkstreamRequest, opts ...grpc.CallOption) (*StartWorkstreamResponse, error)
+	// ListWorkstreams lists the task's workstreams by number.
+	ListWorkstreams(ctx context.Context, in *ListWorkstreamsRequest, opts ...grpc.CallOption) (*ListWorkstreamsResponse, error)
+	// EditWorkstream changes a workstream's title, status or note.
+	EditWorkstream(ctx context.Context, in *EditWorkstreamRequest, opts ...grpc.CallOption) (*EditWorkstreamResponse, error)
 	// DeclareBound records the performance bound an agent states for an objective of the task, as a
 	// new version that supersedes the bound standing for it. Nothing is overwritten.
 	DeclareBound(ctx context.Context, in *DeclareBoundRequest, opts ...grpc.CallOption) (*DeclareBoundResponse, error)
@@ -397,6 +408,36 @@ func (c *daemonServiceClient) ClosePlan(ctx context.Context, in *ClosePlanReques
 	return out, nil
 }
 
+func (c *daemonServiceClient) StartWorkstream(ctx context.Context, in *StartWorkstreamRequest, opts ...grpc.CallOption) (*StartWorkstreamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartWorkstreamResponse)
+	err := c.cc.Invoke(ctx, DaemonService_StartWorkstream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListWorkstreams(ctx context.Context, in *ListWorkstreamsRequest, opts ...grpc.CallOption) (*ListWorkstreamsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkstreamsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListWorkstreams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) EditWorkstream(ctx context.Context, in *EditWorkstreamRequest, opts ...grpc.CallOption) (*EditWorkstreamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EditWorkstreamResponse)
+	err := c.cc.Invoke(ctx, DaemonService_EditWorkstream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) DeclareBound(ctx context.Context, in *DeclareBoundRequest, opts ...grpc.CallOption) (*DeclareBoundResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeclareBoundResponse)
@@ -476,6 +517,14 @@ type DaemonServiceServer interface {
 	EditPlan(context.Context, *EditPlanRequest) (*EditPlanResponse, error)
 	CommentPlan(context.Context, *CommentPlanRequest) (*CommentPlanResponse, error)
 	ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error)
+	// StartWorkstream starts a workstream with the title, or returns the one that is not closed and has
+	// the same title once case and runs of white space are ignored, so planners that start the same
+	// line of work at once get one number.
+	StartWorkstream(context.Context, *StartWorkstreamRequest) (*StartWorkstreamResponse, error)
+	// ListWorkstreams lists the task's workstreams by number.
+	ListWorkstreams(context.Context, *ListWorkstreamsRequest) (*ListWorkstreamsResponse, error)
+	// EditWorkstream changes a workstream's title, status or note.
+	EditWorkstream(context.Context, *EditWorkstreamRequest) (*EditWorkstreamResponse, error)
 	// DeclareBound records the performance bound an agent states for an objective of the task, as a
 	// new version that supersedes the bound standing for it. Nothing is overwritten.
 	DeclareBound(context.Context, *DeclareBoundRequest) (*DeclareBoundResponse, error)
@@ -562,6 +611,15 @@ func (UnimplementedDaemonServiceServer) CommentPlan(context.Context, *CommentPla
 }
 func (UnimplementedDaemonServiceServer) ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClosePlan not implemented")
+}
+func (UnimplementedDaemonServiceServer) StartWorkstream(context.Context, *StartWorkstreamRequest) (*StartWorkstreamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartWorkstream not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListWorkstreams(context.Context, *ListWorkstreamsRequest) (*ListWorkstreamsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListWorkstreams not implemented")
+}
+func (UnimplementedDaemonServiceServer) EditWorkstream(context.Context, *EditWorkstreamRequest) (*EditWorkstreamResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EditWorkstream not implemented")
 }
 func (UnimplementedDaemonServiceServer) DeclareBound(context.Context, *DeclareBoundRequest) (*DeclareBoundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeclareBound not implemented")
@@ -994,6 +1052,60 @@ func _DaemonService_ClosePlan_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_StartWorkstream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartWorkstreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).StartWorkstream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_StartWorkstream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).StartWorkstream(ctx, req.(*StartWorkstreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListWorkstreams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkstreamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListWorkstreams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListWorkstreams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListWorkstreams(ctx, req.(*ListWorkstreamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_EditWorkstream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditWorkstreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).EditWorkstream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_EditWorkstream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).EditWorkstream(ctx, req.(*EditWorkstreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_DeclareBound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeclareBoundRequest)
 	if err := dec(in); err != nil {
@@ -1116,6 +1228,18 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClosePlan",
 			Handler:    _DaemonService_ClosePlan_Handler,
+		},
+		{
+			MethodName: "StartWorkstream",
+			Handler:    _DaemonService_StartWorkstream_Handler,
+		},
+		{
+			MethodName: "ListWorkstreams",
+			Handler:    _DaemonService_ListWorkstreams_Handler,
+		},
+		{
+			MethodName: "EditWorkstream",
+			Handler:    _DaemonService_EditWorkstream_Handler,
 		},
 		{
 			MethodName: "DeclareBound",

@@ -21,7 +21,7 @@ func (s *Server) CreatePlan(ctx context.Context, req *cliv1.CreatePlanRequest) (
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody(), bound)
+	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody(), bound, core.WorkstreamNumber(req.GetWorkstream()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -70,7 +70,7 @@ func (s *Server) EditPlan(ctx context.Context, req *cliv1.EditPlanRequest) (*cli
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	change := app.PlanChange{Title: req.Title, Body: req.Body, GainBound: bound}
+	change := app.PlanChange{Title: req.Title, Body: req.Body, GainBound: bound, Workstream: core.WorkstreamNumber(req.GetWorkstream())}
 	if req.Status != nil {
 		status, err := wire.ToPlanStatus("status", req.GetStatus())
 		if err != nil {

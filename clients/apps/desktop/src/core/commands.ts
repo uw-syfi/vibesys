@@ -20,7 +20,7 @@ import {COMMAND_DEADLINE} from './policy.js';
 /** What the user asked for: the body of a command, without an id. */
 export type Intent = Extract<
   Command['body'],
-  {readonly case: 'startRun' | 'stopRun' | 'sendMessage'}
+  {readonly case: 'startRun' | 'stopRun' | 'sendMessage' | 'requestCatchUp'}
 >;
 
 export interface Commands {
@@ -36,6 +36,8 @@ export interface Commands {
   readonly retry: (commandId: string) => Effect.Effect<void>;
   /** Where a command stands; `undefined` for an id this session never issued. */
   readonly progress: (commandId: string) => Atom.Atom<CommandProgress | undefined>;
+  /** Where a command stands at this moment, as `progress` would say it. */
+  readonly now: (commandId: string) => Effect.Effect<CommandProgress | undefined>;
 }
 
 type Entries = Readonly<Record<string, CommandProgress>>;
@@ -133,6 +135,12 @@ export const makeCommands = Effect.fn('Commands.make')(function* (parts: HostPar
     }),
   );
 
-  const commands: Commands = {submit, retry, progress};
+  const now = Effect.fn('Commands.now')(function* (commandId: string) {
+    const held = (yield* SubscriptionRef.get(entries))[commandId];
+    const {receipts} = (yield* SubscriptionRef.get(parts.store.ref)).data;
+    return held === undefined ? undefined : settle(held, receipts);
+  });
+
+  const commands: Commands = {submit, retry, progress, now};
   return commands;
 });

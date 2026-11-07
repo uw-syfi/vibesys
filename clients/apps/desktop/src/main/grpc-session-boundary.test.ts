@@ -25,6 +25,47 @@ const received = (peer: ReturnType<typeof fakeGateway>, count: number) =>
   });
 
 describe('gateway session', () => {
+  it.effect.prop(
+    'puts the metadata it was opened with on every call, the handshake and a stream included',
+    {
+      id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,32}$/)),
+      label: Schema.String.check(Schema.isPattern(/^[!-~]([ -~]{0,30}[!-~])?$/)),
+    },
+    ({id, label}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const peer = fakeGateway();
+          const session = yield* openSession(peer.connect(), {
+            'vibesys-viewer-id': id,
+            'vibesys-viewer-label': label,
+          });
+          yield* session.unary(HELLO, new Uint8Array(0));
+          const running = yield* Effect.forkChild(session.call(SERVE, bytes(1), () => {}));
+          yield* received(peer, 1);
+          peer.calls[0]?.end();
+          yield* Fiber.join(running);
+          expect(peer.headers).toHaveLength(2);
+          for (const headers of peer.headers) {
+            expect(headers['vibesys-viewer-id']).toBe(id);
+            expect(headers['vibesys-viewer-label']).toBe(label);
+          }
+        }),
+      ),
+    {arbitrary: {runs: 20}},
+  );
+
+  it.effect('carries no metadata when it was opened with none', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        yield* session.unary(HELLO, new Uint8Array(0));
+        expect(peer.headers[0]?.['vibesys-viewer-id']).toBeUndefined();
+        expect(peer.headers[0]?.['vibesys-viewer-label']).toBeUndefined();
+      }),
+    ),
+  );
+
   it.effect("answers a unary call with the peer's one message", () =>
     Effect.scoped(
       Effect.gen(function* () {

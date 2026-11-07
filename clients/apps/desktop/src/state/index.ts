@@ -6,6 +6,13 @@
  * data that any test calls directly.
  */
 export * from './agents/index.js';
+export {
+  CATCH_UP_REFUSALS,
+  type CatchUpPress,
+  type CatchUpRefusal,
+  catchUpRefusalOf,
+  pressOf,
+} from './catch-up.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
   type HostConnectionState,
@@ -46,6 +53,13 @@ export {
   runsCursor,
 } from './host-model.js';
 export {type HostRefusal, refusalOf} from './host-refusal.js';
+export {
+  type CheckInRead,
+  type Facts,
+  readCheckIn,
+  rewind,
+  type Summary,
+} from './orchestrator/check-ins.js';
 export {
   type CostFeedSnapshot,
   type CostModel,
@@ -179,3 +193,10 @@ export {
   type NavigationKind,
   navigationReducer,
 } from './shell/navigation.js';
+export {
+  labelFromName,
+  VIEWER_ID_KEY,
+  VIEWER_LABEL_KEY,
+  type Viewer,
+  viewerMetadata,
+} from './viewer.js';

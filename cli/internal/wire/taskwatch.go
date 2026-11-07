@@ -66,6 +66,8 @@ func TaskFact(f core.Fact) (*cliv1.TaskFact, bool) {
 		out.Fact = &cliv1.TaskFact_Promotion{Promotion: &cliv1.PromotionRecord{Seq: v.Seq, Promotion: Promotion(v.Promotion)}}
 	case core.Plan:
 		out.Fact = &cliv1.TaskFact_Plan{Plan: Plan(v)}
+	case core.Workstream:
+		out.Fact = &cliv1.TaskFact_Workstream{Workstream: Workstream(v)}
 	case core.Bound:
 		out.Fact = &cliv1.TaskFact_Bound{Bound: Bound(v)}
 	case core.CurrentResult, core.NoCurrentResult:

@@ -31,6 +31,7 @@ import {
   HELLO_METHOD,
   makeGatewayConnection,
 } from './gateway-connection.js';
+import {type CallMetadata, openSession} from './grpc-session.js';
 
 /** The services a payload is checked against. */
 const SERVICES = [HostService, OrchestratorService, HostControlService];
@@ -150,9 +151,14 @@ const streamCall =
       ),
     );
 
+/**
+ * The calls of the window over one connection per host. `metadata` is what every call of a new
+ * connection carries (who is calling, `state/viewer.ts`), asked for when the connection is made.
+ */
 export const makeGatewayCalls = (
   dialerFor: (host: HostKey) => GatewayDialer,
   log: (host: HostKey, line: string) => void,
+  metadata: Effect.Effect<CallMetadata> = Effect.succeed({}),
 ): Effect.Effect<GatewayCalls, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
@@ -172,8 +178,11 @@ export const makeGatewayCalls = (
         }
         if (entry === undefined) {
           const scope = yield* Scope.make();
-          const connection = yield* makeGatewayConnection(dialerFor(host), line =>
-            log(host, line),
+          const carried = yield* metadata;
+          const connection = yield* makeGatewayConnection(
+            dialerFor(host),
+            line => log(host, line),
+            duplex => openSession(duplex, carried),
           ).pipe(Effect.provideService(Scope.Scope, scope));
           entry = {connection, scope, users: 0, idles: 0};
           entries.set(host, entry);

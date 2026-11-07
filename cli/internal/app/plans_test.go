@@ -77,7 +77,7 @@ func TestOnlyANewPlanMakesAStoreForATaskWithNone(t *testing.T) {
 	if known, err := w.stores.Known(ctx); err != nil || len(known) != 0 {
 		t.Fatalf("known stores = %v, %v; the refused calls must not have made one", known, err)
 	}
-	if p, err := a.CreatePlan(ctx, call, "title", "body", nil); err != nil || p.Number != 1 {
+	if p, err := a.CreatePlan(ctx, call, "title", "body", nil, 0); err != nil || p.Number != 1 {
 		t.Fatalf("first plan on a task with no store = %+v, %v; want number 1", p, err)
 	}
 	if known, err := w.stores.Known(ctx); err != nil || len(known) != 1 {
@@ -93,7 +93,7 @@ func TestAPlanIsCreatedOpenAndNumberedInOrder(t *testing.T) {
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
 	for i := 1; i <= 3; i++ {
-		p, err := a.CreatePlan(ctx, call, "title", "# body\n", nil)
+		p, err := a.CreatePlan(ctx, call, "title", "# body\n", nil, 0)
 		if err != nil || p.Number != core.PlanNumber(i) || p.Status != core.PlanOpen || p.Body != "# body\n" {
 			t.Fatalf("plan %d = %+v, %v", i, p, err)
 		}
@@ -113,7 +113,7 @@ func TestPlansFollowAModelUnderRandomCalls(t *testing.T) {
 		for step := 0; step < 60; step++ {
 			switch op := rnd.IntN(5); {
 			case op == 0 || len(model) == 0:
-				p, err := a.CreatePlan(ctx, call, "t", "b", nil)
+				p, err := a.CreatePlan(ctx, call, "t", "b", nil, 0)
 				if err != nil {
 					t.Fatalf("seed %d: CreatePlan: %v", seed, err)
 				}
@@ -178,9 +178,9 @@ func TestPlansFollowAModelUnderRandomCalls(t *testing.T) {
 func TestPlansFilterByStatusAndText(t *testing.T) {
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
-	one, _ := a.CreatePlan(ctx, call, "batch the reads", "use io_uring", nil)
-	two, _ := a.CreatePlan(ctx, call, "shard the index", "split by key", nil)
-	three, _ := a.CreatePlan(ctx, call, "inline hot path", "batch nothing", nil)
+	one, _ := a.CreatePlan(ctx, call, "batch the reads", "use io_uring", nil, 0)
+	two, _ := a.CreatePlan(ctx, call, "shard the index", "split by key", nil, 0)
+	three, _ := a.CreatePlan(ctx, call, "inline hot path", "batch nothing", nil, 0)
 	if _, err := a.ClosePlan(ctx, call, two.Number, core.PlanWon, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -221,22 +221,22 @@ func TestPlansFilterByStatusAndText(t *testing.T) {
 func TestARefusedPlanCallChangesNothing(t *testing.T) {
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
-	p, _ := a.CreatePlan(ctx, call, "title", "body", nil)
+	p, _ := a.CreatePlan(ctx, call, "title", "body", nil, 0)
 	empty, long, bad := "", strings.Repeat("t", core.MaxPlanTitleBytes+1), "ok\xff"
 	multi := "two\nlines"
 	stuck := core.PlanStatus("stuck")
 
-	_, err := a.CreatePlan(ctx, call, empty, "b", nil)
+	_, err := a.CreatePlan(ctx, call, empty, "b", nil, 0)
 	wantInvalid(t, "an empty title", err)
-	_, err = a.CreatePlan(ctx, call, "   ", "b", nil)
+	_, err = a.CreatePlan(ctx, call, "   ", "b", nil, 0)
 	wantInvalid(t, "a blank title", err)
-	_, err = a.CreatePlan(ctx, call, multi, "b", nil)
+	_, err = a.CreatePlan(ctx, call, multi, "b", nil, 0)
 	wantInvalid(t, "a two-line title", err)
-	_, err = a.CreatePlan(ctx, call, long, "b", nil)
+	_, err = a.CreatePlan(ctx, call, long, "b", nil, 0)
 	wantInvalid(t, "a long title", err)
-	_, err = a.CreatePlan(ctx, call, "t", bad, nil)
+	_, err = a.CreatePlan(ctx, call, "t", bad, nil, 0)
 	wantInvalid(t, "a body that is not UTF-8", err)
-	_, err = a.CreatePlan(ctx, call, "t", strings.Repeat("b", core.MaxPlanBodyBytes+1), nil)
+	_, err = a.CreatePlan(ctx, call, "t", strings.Repeat("b", core.MaxPlanBodyBytes+1), nil, 0)
 	wantInvalid(t, "a long body", err)
 
 	_, err = a.EditPlan(ctx, call, p.Number, app.PlanChange{})
@@ -285,10 +285,10 @@ func TestPlansBelongToATask(t *testing.T) {
 	other := call
 	other.Scope = scopeAt("/repo", "other")
 	taskWithAJob(t, a, other)
-	if _, err := a.CreatePlan(ctx, call, "mine", "", nil); err != nil {
+	if _, err := a.CreatePlan(ctx, call, "mine", "", nil, 0); err != nil {
 		t.Fatal(err)
 	}
-	p, err := a.CreatePlan(ctx, other, "theirs", "", nil)
+	p, err := a.CreatePlan(ctx, other, "theirs", "", nil, 0)
 	if err != nil || p.Number != 1 {
 		t.Fatalf("plan of another task = %+v, %v; want its own number 1", p, err)
 	}
@@ -303,8 +303,8 @@ func TestAPlanViewListsTheJobsLinkedToIt(t *testing.T) {
 	a := w.newApp()
 	taskWithAJob(t, a, call)
 	ctx := ctxFor(t)
-	p1, _ := a.CreatePlan(ctx, call, "first", "", nil)
-	p2, _ := a.CreatePlan(ctx, call, "second", "", nil)
+	p1, _ := a.CreatePlan(ctx, call, "first", "", nil, 0)
+	p2, _ := a.CreatePlan(ctx, call, "second", "", nil, 0)
 
 	link := func(plan core.PlanNumber, script ...string) core.Job {
 		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: command(script...), Plan: plan})
@@ -350,7 +350,7 @@ func TestPlansSurviveARestart(t *testing.T) {
 	a := w.newApp()
 	taskWithAJob(t, a, call)
 	ctx := ctxFor(t)
-	p, _ := a.CreatePlan(ctx, call, "kept", "body", nil)
+	p, _ := a.CreatePlan(ctx, call, "kept", "body", nil, 0)
 	if _, err := a.CommentPlan(ctx, call, p.Number, "noted"); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestPlansSurviveARestart(t *testing.T) {
 	if err != nil || v.Plan.Title != "kept" || len(v.Plan.Comments) != 1 {
 		t.Fatalf("view after restart = %+v, %v", v, err)
 	}
-	next, err := b.CreatePlan(ctx, call, "next", "", nil)
+	next, err := b.CreatePlan(ctx, call, "next", "", nil, 0)
 	if err != nil || next.Number != 2 {
 		t.Fatalf("next plan = %+v, %v; want number 2", next, err)
 	}

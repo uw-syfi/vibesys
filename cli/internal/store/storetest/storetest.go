@@ -41,6 +41,7 @@ func Run(t *testing.T, newStore New) {
 		{"frontier", testFrontier},
 		{"plans", testPlans},
 		{"plan history", testPlanHistory},
+		{"workstreams", testWorkstreams},
 		{"bounds", testBounds},
 		{"events", testEvents},
 		{"logs", testLogs},
@@ -268,14 +269,15 @@ func wantKind(t *testing.T, what string, err error, kind core.FailureKind) {
 
 // state is everything observable through the interface.
 type state struct {
-	Jobs       []core.Job
-	Results    []core.Result
-	Promotions []core.Promotion
-	Frontier   core.Frontier
-	Plans      []core.Plan
-	Bounds     []core.Bound
-	Events     map[core.RunID][]core.Event
-	Logs       map[core.JobID][]byte
+	Jobs        []core.Job
+	Results     []core.Result
+	Promotions  []core.Promotion
+	Frontier    core.Frontier
+	Plans       []core.Plan
+	Workstreams []core.Workstream
+	Bounds      []core.Bound
+	Events      map[core.RunID][]core.Event
+	Logs        map[core.JobID][]byte
 }
 
 // snapshot reads the whole store, including the events of the runs and the logs of the jobs it
@@ -299,6 +301,9 @@ func snapshot(t *testing.T, s store.Store, runs ...core.RunID) state {
 	}
 	if st.Plans, err = s.Plans(ctx, core.PlanFilter{}); err != nil {
 		t.Fatalf("Plans: %v", err)
+	}
+	if st.Workstreams, err = s.Workstreams(ctx, core.WorkstreamFilter{}); err != nil {
+		t.Fatalf("Workstreams: %v", err)
 	}
 	if st.Bounds, err = s.Bounds(ctx); err != nil {
 		t.Fatalf("Bounds: %v", err)
@@ -328,7 +333,7 @@ func unchanged(t *testing.T, what string, s store.Store, before state, runs ...c
 	}
 }
 
-// Observe reads everything a Store shows: its jobs, results, promotions, frontier and plans, the logs of its
+// Observe reads everything a Store shows: its jobs, results, promotions, frontier, plans, workstreams and bounds, the logs of its
 // jobs, and the events of the runs listed. Two Observations are equal exactly when a caller
 // could not tell the stores apart, which is how a test compares a store with itself after a
 // restart or a crash. Compare them with reflect.DeepEqual.

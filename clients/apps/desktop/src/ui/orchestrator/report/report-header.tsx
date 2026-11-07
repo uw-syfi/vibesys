@@ -56,7 +56,8 @@ function BestLine(props: {readonly objectives: readonly ObjectiveReport[]}): JSX
 
 /**
  * The top of the report: where the run is (its name, state, host, how long it has run and when it
- * began, in Seattle time), what is best so far on each objective, and the Stop that ends it. The
+ * began, in Seattle time), what is best so far on each objective, the Catch me up that opens what
+ * changed since the viewer last looked, and the Stop that ends the run. The
  * state chip is the run's own; a second chip says when what is shown is not current.
  */
 export function ReportHeader(props: {
@@ -69,6 +70,8 @@ export function ReportHeader(props: {
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   readonly retryStop: () => void;
+  /** Press Catch me up on the run and open its page. */
+  readonly catchUp: () => void;
   readonly goRuns: () => void;
 }): JSX.Element {
   const {header, objectives} = props.report;
@@ -117,18 +120,21 @@ export function ReportHeader(props: {
             </Text>
           </Row>
         </Stack>
-        {props.stoppable ? (
-          <Button
-            text="Stop run"
-            label="Stop run"
-            variant="danger"
-            size="sm"
-            press={props.stop}
-            {...(props.stopProgress?._tag === 'Sending'
-              ? {disabledReason: 'Stopping.', quietReason: true}
-              : {})}
-          />
-        ) : null}
+        <Row gap="space-3" wrap>
+          <Button text="Catch me up" variant="secondary" size="sm" press={props.catchUp} />
+          {props.stoppable ? (
+            <Button
+              text="Stop run"
+              label="Stop run"
+              variant="danger"
+              size="sm"
+              press={props.stop}
+              {...(props.stopProgress?._tag === 'Sending'
+                ? {disabledReason: 'Stopping.', quietReason: true}
+                : {})}
+            />
+          ) : null}
+        </Row>
       </Row>
       <CommandLine progress={props.stopProgress} done="Stop" retry={props.retryStop} />
     </Stack>

@@ -7,6 +7,10 @@ import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   AgentStatus,
+  CatchUpRequestSchema,
+  type CheckIn,
+  CheckInSchema,
+  CheckInState,
   type Command,
   Delivery,
   ElisionSchema,
@@ -21,14 +25,20 @@ import {
   ReceiptSchema,
   Refusal,
   Rejection,
+  ReportKind,
+  ReportSchema,
   type RunChange,
   RunChangeSchema,
   type RunCost,
+  RunStatus,
   type RunsSnapshot,
   RunsSnapshotSchema,
+  ViewerSchema,
+  type WindowFacts,
 } from '@vibesys/orchestrator-proto';
 import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
+import {ms} from '../../state/orchestrator/time.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
@@ -68,6 +78,31 @@ function elided(item: Item): {readonly item: Item; readonly bytes: number | null
 
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
 
+/** Every kind of command, so a command is read through `oneofIs` for the one kind it is. */
+const COMMAND_KINDS = {
+  startRun: true,
+  stopRun: true,
+  spawnAgent: true,
+  stopAgent: true,
+  sendMessage: true,
+  postHandoff: true,
+  postReport: true,
+  requestCatchUp: true,
+} as const;
+
+/** The install of the app that calls: what the main process stamps on every call as metadata. */
+export interface FakeViewer {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** The viewer a fake daemon's calls are made as, unless a test says otherwise (`null` is none). */
+export const FAKE_VIEWER: FakeViewer = {id: 'install-ana', label: 'ana'};
+
+/** What the host says to a call that needs a viewer and names none. */
+export const NO_VIEWER_REFUSAL =
+  "the call's vibesys-viewer-id metadata is missing: a catch-up is recorded for a viewer, so the call names one with this field and vibesys-viewer-label";
+
 export class FakeDaemon {
   readonly #log: RunChange[];
   #visible: number;
@@ -78,6 +113,8 @@ export class FakeDaemon {
   constructor(
     readonly scenario: Scenario,
     visible: number = scenario.changes.length,
+    /** Who the calls are made as; `null` makes calls with no viewer, which a catch-up refuses. */
+    readonly viewer: FakeViewer | null = FAKE_VIEWER,
   ) {
     this.#log = [...scenario.changes];
     this.#visible = visible;
@@ -138,6 +175,7 @@ export class FakeDaemon {
       agents: Object.values(state.agents),
       turns: Object.values(state.turns),
       messages: Object.values(state.messages),
+      checkIns: Object.values(state.checkIns),
       sequence: state.sequence,
       searches:
         this.scenario.searches !== undefined
@@ -191,25 +229,174 @@ export class FakeDaemon {
     return this.#items(agentId).find(item => item.ordinal === ordinal);
   }
 
-  /** Carry out a command: the same id answers with the same receipt. */
-  dispatch(command: Command): Receipt {
+  /**
+   * What the host says to a call outright, before it decides the command: set for a catch-up from a
+   * client that names no viewer, which the real host refuses with `InvalidArgument`.
+   */
+  callRefusal(command: Command): string | undefined {
+    return oneofIs(command.body, 'requestCatchUp', COMMAND_KINDS) && this.viewer === null
+      ? NO_VIEWER_REFUSAL
+      : undefined;
+  }
+
+  /**
+   * Carry out a command: the same id answers with the same receipt. `at` is the host's clock for
+   * the command, which a fixture sets to place a check-in's window; the log's own clock by default.
+   */
+  dispatch(command: Command, at: number = this.#now()): Receipt {
     const seen = this.#receipts.get(command.id);
     if (seen !== undefined) return seen;
-    const at = Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
-    const receipt = oneofIs(command.body, 'sendMessage', {
-      startRun: true,
-      stopRun: true,
-      spawnAgent: true,
-      stopAgent: true,
-      sendMessage: true,
-      postHandoff: true,
-      postReport: true,
-      requestCatchUp: true,
-    })
-      ? this.#sendMessage(command.id, command.body.value.agentId, command.body.value.text, at)
-      : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
+    const {body} = command;
+    const receipt = oneofIs(body, 'sendMessage', COMMAND_KINDS)
+      ? this.#sendMessage(command.id, body.value.agentId, body.value.text, at)
+      : oneofIs(body, 'requestCatchUp', COMMAND_KINDS)
+        ? this.#catchUp(command.id, body.value.runId, at)
+        : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
     this.#receipts.set(command.id, receipt);
     return receipt;
+  }
+
+  /** The fake clock: one second for each fact the log holds, from a fixed start. */
+  #now(): number {
+    return Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
+  }
+
+  /** `viewer`'s check-ins in `runId`, the newest first (by the end of the window, then the start). */
+  #checkInsOf(runId: string, viewerId: string): CheckIn[] {
+    return Object.values(this.#state(this.#visible).checkIns)
+      .filter(checkIn => checkIn.runId === runId && checkIn.viewer?.id === viewerId)
+      .sort(
+        (a, b) =>
+          (ms(b.at) ?? 0) - (ms(a.at) ?? 0) ||
+          (ms(b.since) ?? 0) - (ms(a.since) ?? 0) ||
+          b.id.localeCompare(a.id),
+      );
+  }
+
+  /**
+   * A press of Catch me up as the host decides it. A press while the viewer's newest check-in is
+   * still being worked out answers with that one. Otherwise the check-in is pending, its window
+   * starts where the viewer's last one that did not fail ended (the run's start for a first one)
+   * and ends at the press or, for a run that is over, where the run ended; a live run whose lead
+   * can still be asked is sent a request, which is not yet delivered. The facts are not worked out
+   * here: a test settles the check-in (`settleCheckIn`) with the facts it wants served.
+   */
+  #catchUp(commandId: string, runId: string, atMs: number): Receipt {
+    const state = this.#state(this.#visible);
+    const run = state.runs[runId];
+    if (run === undefined) return this.#refuse(commandId, Refusal.RUN_NOT_FOUND, '', atMs);
+    if (this.viewer === null) return this.#refuse(commandId, Refusal.NO_VIEWER, '', atMs);
+    const mine = this.#checkInsOf(runId, this.viewer.id);
+    const answer = (checkIn: CheckIn): Receipt => {
+      const receipt = create(ReceiptSchema, {
+        commandId,
+        runId,
+        checkInId: checkIn.id,
+        messageId: checkIn.askMessageId,
+        sequence: BigInt(this.#log.length + 1),
+      });
+      this.#append(atMs, {case: 'receipt', value: receipt});
+      return receipt;
+    };
+    const newest = mine[0];
+    if (newest?.state === CheckInState.PENDING) return answer(newest);
+    const since =
+      ms(mine.find(checkIn => checkIn.state !== CheckInState.FAILED)?.at) ??
+      ms(run.createdAt) ??
+      atMs;
+    const over = run.status === RunStatus.ENDED || run.status === RunStatus.FAILED;
+    const at = Math.max(since, over ? (ms(run.endedAt) ?? atMs) : atMs);
+    const id = `check-in-${this.#log.length + 1}`;
+    const asked = run.status === RunStatus.RUNNING && !run.finalReported;
+    const ask = asked ? `ask-${id}` : '';
+    if (asked) {
+      this.#append(atMs, {
+        case: 'message',
+        value: create(MessageSchema, {
+          id: ask,
+          runId,
+          toAgentId: run.leadAgentId,
+          delivery: Delivery.QUEUED,
+          at: timestampFromMs(atMs),
+          body: {
+            case: 'catchUpRequest',
+            value: create(CatchUpRequestSchema, {
+              checkInId: id,
+              since: timestampFromMs(since),
+              until: timestampFromMs(at),
+            }),
+          },
+        }),
+      });
+    }
+    const checkIn = create(CheckInSchema, {
+      id,
+      runId,
+      viewer: create(ViewerSchema, this.viewer),
+      since: timestampFromMs(since),
+      at: timestampFromMs(at),
+      state: CheckInState.PENDING,
+      askMessageId: ask,
+    });
+    this.#append(atMs, {case: 'checkIn', value: checkIn});
+    return answer(checkIn);
+  }
+
+  #checkIn(id: string): CheckIn {
+    const held = this.#state(this.#visible).checkIns[id];
+    if (held === undefined) throw new Error(`the fake host has no check-in ${id}`);
+    return held;
+  }
+
+  /** The host has worked out the facts of a check-in: it is ready with them, for good. */
+  settleCheckIn(id: string, facts: WindowFacts): void {
+    const held = this.#checkIn(id);
+    if (held.state !== CheckInState.PENDING) return;
+    this.#append(this.#now(), {
+      case: 'checkIn',
+      value: create(CheckInSchema, {...held, state: CheckInState.READY, facts}),
+    });
+  }
+
+  /** The host could not work out the facts of a check-in: it failed with the reason. */
+  failCheckIn(id: string, failure: string): void {
+    const held = this.#checkIn(id);
+    if (held.state !== CheckInState.PENDING) return;
+    this.#append(this.#now(), {
+      case: 'checkIn',
+      value: create(CheckInSchema, {...held, state: CheckInState.FAILED, failure}),
+    });
+  }
+
+  /** The lead answers the request that came with a check-in: its report is posted and linked. */
+  postReport(id: string, headline: string, changed = ''): void {
+    const held = this.#checkIn(id);
+    const ask = this.#state(this.#visible).messages[held.askMessageId];
+    if (ask === undefined) throw new Error(`check-in ${id} did not ask the lead`);
+    const at = this.#now();
+    const report = `report-${id}`;
+    this.#append(at, {
+      case: 'message',
+      value: create(MessageSchema, {...ask, delivery: Delivery.CONSUMED}),
+    });
+    this.#append(at, {
+      case: 'message',
+      value: create(MessageSchema, {
+        id: report,
+        runId: held.runId,
+        fromAgentId: ask.toAgentId,
+        delivery: Delivery.CONSUMED,
+        at: timestampFromMs(at),
+        body: {
+          case: 'report',
+          value: create(ReportSchema, {headline, changed, kind: ReportKind.PROGRESS, sequence: 1}),
+        },
+      }),
+    });
+    this.#append(at, {
+      case: 'checkIn',
+      value: create(CheckInSchema, {...held, reportMessageId: report}),
+    });
   }
 
   /**
@@ -219,7 +406,7 @@ export class FakeDaemon {
   reject(messageId: string, rejection: Rejection = Rejection.AGENT_GONE): void {
     const message = this.#state(this.#visible).messages[messageId];
     if (message === undefined) return;
-    const at = Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
+    const at = this.#now();
     this.#append(at, {
       case: 'message',
       value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
