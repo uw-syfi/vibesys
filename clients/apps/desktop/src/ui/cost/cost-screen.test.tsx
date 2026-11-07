@@ -25,6 +25,7 @@ import {
 import {FakeDaemon, generateScenario, hostHarness} from '../../testing/orchestrator/index.js';
 import {COST_WORDS} from '../orchestrator/cost-words.js';
 import {CostScreen} from './cost-screen.js';
+import {formatCount} from './words.js';
 
 const LIVE: FeedStatus = {_tag: 'Live'};
 /** Names of the protocol that must never reach a person. */
@@ -46,6 +47,9 @@ function screen(
       status={options.status ?? LIVE}
       runOver={options.runOver ?? false}
       words={COST_WORDS}
+      trail={[]}
+      notice={null}
+      reading={null}
       retry={options.retry ?? (() => undefined)}
     />,
   );
@@ -66,8 +70,8 @@ describe('the Cost screen over served views', () => {
     expect(text).toContain('of $500');
     expect(text).toContain('$14/h');
     expect(text).toContain('1,433');
-    // Unpriced turns are a count, with no price made up for them.
-    expect(text).toMatch(/Unpriced turns\s*41/);
+    // Unpriced turns are a count beside the floor that explains it, with no price made up for them.
+    expect(text).toMatch(/≥ \$318[\s\S]*41 unpriced/);
     // By agent type, with agent counts and turns, never one row per agent.
     for (const word of ['Worker', '×17', '774', '$205', 'Lead', '12 unpriced', 'Profiler']) {
       expect(text).toContain(word);
@@ -126,6 +130,26 @@ describe('the Cost screen over served views', () => {
     expect(textOf(screen(ENDED_RUN, {runOver: true}))).not.toContain('Live');
     expect(textOf(screen(PRICED_AND_UNPRICED))).toContain('Live');
     expect(textOf(screen(ENDED_RUN, {runOver: true}))).not.toContain('≥');
+  });
+
+  it('shows the spend rate of the last hour only while the run is spending', () => {
+    for (const view of [PRICED_AND_UNPRICED, ENDED_RUN]) {
+      expect(textOf(screen(view))).toContain('Last hour');
+      expect(textOf(screen(view, {runOver: true}))).not.toContain('Last hour');
+      expect(textOf(screen(view, {runOver: true}))).not.toContain('/h');
+    }
+  });
+
+  it('says why a figure is a floor, and only then', () => {
+    fc.assert(
+      fc.property(costViewArb, view => {
+        const text = textOf(screen(view));
+        const floor = view.total.costUsd !== null && view.unpricedTurns > 0;
+        expect(text.includes('≥')).toBe(floor);
+        if (floor) expect(text).toContain(`${formatCount(view.unpricedTurns)} unpriced`);
+      }),
+      {numRuns: 40},
+    );
   });
 
   it('says how current the view is in its header, whichever way the stream stands', () => {
@@ -253,7 +277,7 @@ describe('the Cost screen over the stream', () => {
       expect(text).toContain('Live');
       expect(text).toContain('123.4k');
       expect(text).toContain('7.7M');
-      expect(text).toMatch(/Unpriced turns\s*1/);
+      expect(text).toMatch(/≥ \$12\.50[\s\S]*1 unpriced/);
     }),
   );
 });

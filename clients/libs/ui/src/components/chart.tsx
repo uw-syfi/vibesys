@@ -877,11 +877,18 @@ export function ChartColumns(props: {
   readonly children: ReactNode;
   /** At most this many to a row, equally wide whatever the room; the rest wrap below. */
   readonly across?: number;
+  /** `start`: each is as tall as its own content, not as the tallest beside it (cards, not charts). */
+  readonly align?: 'start';
 }): JSX.Element {
   const style: StyleWithVars | undefined =
     props.across === undefined ? undefined : {'--across': props.across};
   return (
-    <div className="vs-chart-columns" data-across={props.across} style={style}>
+    <div
+      className="vs-chart-columns"
+      data-across={props.across}
+      data-align={props.align}
+      style={style}
+    >
       {props.children}
     </div>
   );

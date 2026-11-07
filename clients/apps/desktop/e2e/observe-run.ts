@@ -104,6 +104,35 @@ function expectedAgents(world: World, role: string, harness: string): number {
   return world.agents.filter(agent => agent.role === role && agent.harness === harness).length;
 }
 
+/** Where the page's title was on each destination the walk visited: the frame keeps it in one place. */
+const titles: {readonly name: string; readonly left: number; readonly top: number}[] = [];
+
+/**
+ * Record where the title is on the destination now on screen, and, with `VIBESYS_E2E_SHOTS` set to a
+ * folder, capture the app's window (the window alone, never the screen) there.
+ */
+async function seen(page: Page, name: string): Promise<void> {
+  const heading = page.getByRole('heading', {level: 1});
+  await expect(heading).toHaveCount(1);
+  await expect(heading).toBeVisible();
+  // A page eases in: read the title once the finite animations are over (a looping one, such as a
+  // live bar's pulse, never ends and moves nothing).
+  // (A string, because this file is compiled without the DOM's types: it runs in the window.)
+  await page.evaluate(
+    'Promise.all(document.getAnimations().filter(each => each.effect?.getComputedTiming().iterations !== Infinity).map(each => each.finished.catch(() => undefined)))',
+  );
+  const box = await heading.boundingBox();
+  expect(box, `the title of ${name} is drawn`).not.toBeNull();
+  titles.push({
+    name,
+    left: Math.round(box?.x ?? Number.NaN),
+    top: Math.round(box?.y ?? Number.NaN),
+  });
+  const folder = process.env['VIBESYS_E2E_SHOTS'];
+  if (folder !== undefined && folder !== '')
+    await page.screenshot({path: join(folder, `${name}.png`)});
+}
+
 async function launch(world: World, userData: string): Promise<ElectronApplication> {
   return electron.launch({
     args: [fileURLToPath(new URL('..', import.meta.url)), ...runtimeArgs()],
@@ -120,8 +149,10 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   const row = live.getByRole('option', {name: new RegExp(`^${world.task}\\b`)});
   await expect(row).toBeVisible();
   await expect(row).toContainText('Running');
+  await seen(page, '1-runs');
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
+  await seen(page, '2-report');
   // Stop is offered only while a run runs.
   await expect(page.getByRole('button', {name: 'Stop run'})).toBeVisible();
 }
@@ -129,31 +160,69 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
 /** A run opens on its report, which carries the lead's latest report as the run's summary. */
 async function checkTheReportShowsTheLeadsSummary(page: Page, world: World): Promise<void> {
   await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
-  // The report shows no agent's turns: the agents have a screen of their own, one press away.
-  await expect(page.getByRole('tree', {name: 'Agents in this run'})).toHaveCount(0);
+  // The report shows no agent's turns and no list of agents: the agents have a page of their own,
+  // one press away.
+  await expect(page.getByRole('tree')).toHaveCount(0);
+  await expect(page.getByRole('heading', {level: 1})).toContainText(world.task);
+  // The cost is a page of its own, and Escape returns to the link that opened it.
+  await page.getByRole('button', {name: 'Open cost'}).click();
+  await expect(page.getByRole('heading', {level: 1})).toHaveText('Cost');
+  await seen(page, '3-cost');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', {level: 1})).toContainText(world.task);
+  await expect(page.getByRole('button', {name: 'Open cost'})).toBeFocused();
   await page.getByRole('button', {name: 'Open agents'}).click();
+  await expect(page.getByRole('heading', {level: 1})).toHaveText('Agents');
+  await seen(page, '4-agents');
 }
 
+/**
+ * The Agents page lists every agent of the run as a row; each opens its own page, whose title is
+ * the agent's name and whose header says its harness. The rows are counted by role and harness
+ * against the daemon's report, so a missing, a wrong and an extra label fail, and Escape from an
+ * agent's page returns to the Agents page with the focus on the row that was opened.
+ */
 async function checkEveryAgentShowsItsHarness(page: Page, world: World): Promise<void> {
-  const tree = page.getByRole('tree', {name: 'Agents in this run'});
-  await expect(tree.getByRole('treeitem')).toHaveCount(world.agents.length);
-  // A row reads: its state, the agent's name ("Worker 2"), its harness. Each role is counted
-  // by each harness against the daemon's report, so a missing, a wrong and an extra label fail.
-  for (const [role, roleWord] of Object.entries(ROLE_WORD)) {
-    for (const [harness, harnessWord] of Object.entries(HARNESS_WORD)) {
-      const rows = tree.getByRole('treeitem', {
-        name: new RegExp(`\\b${roleWord}\\b.*\\b${harnessWord}$`),
-      });
-      await expect(rows, `${roleWord} rows on ${harnessWord}`).toHaveCount(
-        expectedAgents(world, role, harness),
-      );
+  const rows = page.getByRole('listbox', {name: 'Agents over time'}).getByRole('option');
+  await expect(rows).toHaveCount(world.agents.length);
+  const title = page.getByRole('heading', {level: 1});
+  const counted = new Map<string, number>();
+  for (let at = 0; at < world.agents.length; at += 1) {
+    await rows.nth(at).click();
+    await expect(title).not.toHaveText('Agents');
+    if (at === 0) await seen(page, '5-agent');
+    const name = (await title.textContent()) ?? '';
+    const role = Object.entries(ROLE_WORD).find(([, word]) => name.startsWith(word.toLowerCase()));
+    expect(role, `the page of ${name} names a role`).toBeDefined();
+    let harness: string | undefined;
+    for (const [id, word] of Object.entries(HARNESS_WORD)) {
+      const chip = page.locator('.vs-page-header').getByText(word, {exact: true});
+      if ((await chip.count()) > 0) harness = id;
+    }
+    expect(harness, `the page of ${name} says its harness`).toBeDefined();
+    const key = `${role?.[0]}|${harness}`;
+    counted.set(key, (counted.get(key) ?? 0) + 1);
+    await page.keyboard.press('Escape');
+    await expect(title).toHaveText('Agents');
+    await expect(rows.nth(at)).toBeFocused();
+  }
+  for (const role of Object.keys(ROLE_WORD)) {
+    for (const harness of Object.keys(HARNESS_WORD)) {
+      expect(
+        counted.get(`${role}|${harness}`) ?? 0,
+        `${ROLE_WORD[role]} agents on ${harness}`,
+      ).toBe(expectedAgents(world, role, harness));
     }
   }
 }
 
+/** The lead's report is the run's summary on its report page, which the run's name in the trail leads back to. */
 async function checkTheLeadsReportIsShown(page: Page, world: World): Promise<void> {
-  await page.getByRole('tab', {name: 'Handoffs and reports'}).click();
-  await expect(page.getByRole('region', {name: 'Final report'})).toContainText(world.report);
+  await page
+    .getByRole('navigation', {name: 'Where you are'})
+    .getByRole('button', {name: world.task})
+    .click();
+  await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
 }
 
 /** The check-ins listed on the catch-up page, newest first. */
@@ -167,12 +236,13 @@ const checkIns = (page: Page) => page.getByRole('listbox', {name: 'Check-ins'}).
 async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<void> {
   await page.getByRole('button', {name: 'Catch me up'}).click();
   await expect(checkIns(page)).toHaveCount(1);
+  await seen(page, '6-catch-up');
   await expect(page.getByRole('region', {name: 'Agents', exact: true})).toContainText(
     new RegExp(`Started\\s*${world.agents.length}(?!\\d)`),
   );
   await expect(page.getByRole('region', {name: 'Lead summary'})).toContainText(world.report);
   await expect(page.getByText('Writing…')).toHaveCount(0);
-  await page.getByRole('button', {name: 'Catch me up'}).click();
+  await page.getByRole('button', {name: 'New check-in'}).click();
   await expect(checkIns(page)).toHaveCount(2);
   // The run is where it was left: its page is one step back.
   await page
@@ -183,15 +253,21 @@ async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<
 }
 
 /** A run that is over can be caught up on too: a third check-in, with no lead to write for it. */
-async function pressCatchUpOnTheEndedRun(page: Page, world: World): Promise<void> {
-  // Catch me up is in the header of the run's report, which the run's name leads back to.
-  await page
-    .getByRole('navigation', {name: 'Where you are'})
-    .getByRole('button', {name: world.task})
-    .click();
+async function pressCatchUpOnTheEndedRun(page: Page): Promise<void> {
+  // Catch me up is in the header of the run's report, which Stop left on screen.
   await page.getByRole('button', {name: 'Catch me up'}).click();
   await expect(checkIns(page)).toHaveCount(3);
   await expect(page.getByText('Writing…')).toHaveCount(0);
+}
+
+/** Settings is the other destination of the rail; its title is where the run pages' are. */
+async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
+  await page.getByRole('button', {name: 'Settings'}).click();
+  await expect(page.getByRole('heading', {level: 1})).toHaveText('Settings');
+  await seen(page, '7-settings');
+  // Every destination has its title where every other has it, left and top.
+  const places = new Set(titles.map(each => `${each.left},${each.top}`));
+  expect(places.size, JSON.stringify(titles)).toBe(1);
 }
 
 async function pressStopAndSeeTheRunEnd(page: Page): Promise<void> {
@@ -250,7 +326,8 @@ test('the app lists the scripted run, shows each agent’s harness and the repor
     await checkEveryAgentShowsItsHarness(page, world);
     await checkTheLeadsReportIsShown(page, world);
     await pressStopAndSeeTheRunEnd(page);
-    await pressCatchUpOnTheEndedRun(page, world);
+    await pressCatchUpOnTheEndedRun(page);
+    await checkSettingsTitleIsInTheSamePlace(page);
   } catch (error) {
     // What the screen showed, by role and name, says more than the failed expectation does.
     const shown = await page

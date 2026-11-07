@@ -58,6 +58,7 @@ export function Button(props: ButtonProps): JSX.Element {
     'data-variant': props.variant ?? 'secondary',
     'data-size': props.size ?? 'md',
     'data-full': props.full === true || undefined,
+    'data-icon-only': props.text === undefined || undefined,
     'aria-label': props.label,
     title: props.hint,
   };

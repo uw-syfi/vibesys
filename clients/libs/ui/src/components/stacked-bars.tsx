@@ -105,7 +105,10 @@ export function StackedBars(props: {
   const labels = format === undefined ? [] : steps.map(tick => ({tick, text: format(tick, step)}));
   const widest = Math.max(0, ...labels.map(label => label.text.length));
   const share = (value: number): string => `${((value / (top === 0 ? 1 : top)) * 100).toFixed(2)}%`;
-  const figure: StyleWithVars = {'--bars-scale-chars': `${widest}ch`};
+  const figure: StyleWithVars = {
+    '--bars-scale-chars': `${widest}ch`,
+    '--bars-count': Math.max(1, props.bars.length),
+  };
   return (
     <figure
       className="vs-bars"

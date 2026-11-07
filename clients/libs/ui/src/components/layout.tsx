@@ -1,5 +1,15 @@
-import {type CSSProperties, type JSX, type ReactNode, useId, useState} from 'react';
+import {
+  type CSSProperties,
+  createContext,
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useId,
+  useState,
+} from 'react';
 import type {SpaceToken} from '../tokens/index.js';
+import {Breadcrumb, type Crumb} from './breadcrumb.js';
 import {Icon} from './icon.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
@@ -11,6 +21,17 @@ export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
  * page, so a test or a script waits for a state, not for a duration.
  */
 export type PageState = 'loading' | 'ready';
+
+/**
+ * What the window does when a page is drawn: called with the page's `<main>` once, as it arrives.
+ * The window that holds the pages provides it (where the focus goes when a screen opens or is left),
+ * so a page is a plain component that knows nothing of how the window moves the focus. With none
+ * provided, nothing happens.
+ */
+const PageArrival = createContext<(page: HTMLElement) => void>(() => undefined);
+
+/** The context a window provides its arrival through: `pageArrival.Provider` around its pages. */
+export const pageArrival = PageArrival;
 
 /** `loading` while `awaiting`, else `ready`: the one place the two words are chosen. */
 export function pageState(awaiting: boolean): PageState {
@@ -42,9 +63,10 @@ interface FlexProps {
   /**
    * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
    * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
-   * row leaves it less than a readable width.
+   * row leaves it less than a readable width; or a column of text to be read (`reading`), as wide as
+   * a page of text reads well and centred in what holds it.
    */
-  readonly width?: 'figure' | 'chart';
+  readonly width?: 'figure' | 'chart' | 'reading';
   readonly children: ReactNode;
 }
 
@@ -95,6 +117,13 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
  * its bottom edge while more lies below. A header or footer is for a page whose body can outgrow
  * the window. The header is also the page's header row for the window's toasts, which sit just
  * below it: put the title row and its actions there, not in the body.
+ *
+ * A page with a header opens on a trail band, the room of the breadcrumb that says where the reader
+ * is, kept empty when the page has no `trail`, so that the title sits at the same place on every page
+ * of the window and no page's title moves when the reader goes into one and back out. The header is
+ * either the caller's own node or, with `title`, the page's own title row: the `<h1>` (which takes
+ * the focus when a screen is opened, so a reader hears what changed) with the page's `actions`
+ * beside it, and `meta` (its state and what it is about) under it.
  */
 export function Page(props: {
   readonly width?: PageWidth;
@@ -102,6 +131,14 @@ export function Page(props: {
   readonly sideAction?: boolean;
   /** What stays in view above a body that scrolls. */
   readonly header?: ReactNode;
+  /** The page's title as its `<h1>`, with `actions` and `meta`: the header, when it is not given whole. */
+  readonly title?: string;
+  /** The page's actions, in one group beside its title. */
+  readonly actions?: ReactNode;
+  /** What the page is about, in one row under its title: its state, what it is on. */
+  readonly meta?: ReactNode;
+  /** Where the reader is, over the title: each level but the last a way back to it. */
+  readonly trail?: readonly Crumb[];
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
   /**
@@ -112,9 +149,34 @@ export function Page(props: {
   readonly children: ReactNode;
 }): JSX.Element {
   const width = props.width ?? 'content';
-  if (props.header === undefined && props.footer === undefined) {
+  const {title} = props;
+  const arrival = useContext(PageArrival);
+  // This callback changes only with the window's arrival, so it fires once as the page is drawn.
+  const arrived = useCallback(
+    (page: HTMLElement | null) => {
+      if (page !== null) arrival(page);
+    },
+    [arrival],
+  );
+  const header =
+    title === undefined ? (
+      props.header
+    ) : (
+      <>
+        <div className="vs-page-title-row">
+          <h1 className="vs-page-title" tabIndex={-1} title={title}>
+            {title}
+          </h1>
+          {props.actions === undefined ? null : (
+            <div className="vs-page-actions">{props.actions}</div>
+          )}
+        </div>
+        {props.meta === undefined ? null : <div className="vs-page-meta">{props.meta}</div>}
+      </>
+    );
+  if (header === undefined && props.footer === undefined) {
     return (
-      <main className="vs-page" data-state={props.state}>
+      <main className="vs-page" data-state={props.state} ref={arrived}>
         <div className="vs-page-content" data-width={width}>
           {props.children}
         </div>
@@ -124,12 +186,22 @@ export function Page(props: {
   return (
     <main
       className="vs-page"
+      ref={arrived}
       data-fixed-header=""
       data-side-action={props.sideAction || undefined}
       data-state={props.state}
     >
       <div className="vs-page-content" data-width={width}>
-        {props.header === undefined ? null : <div className="vs-page-header">{props.header}</div>}
+        {header === undefined ? null : (
+          <div className="vs-page-header">
+            <div className="vs-page-trail">
+              {props.trail === undefined ? null : (
+                <Breadcrumb label="Where you are" items={props.trail} />
+              )}
+            </div>
+            {header}
+          </div>
+        )}
         <div className="vs-page-scroll">
           <div className="vs-page-body">{props.children}</div>
         </div>
@@ -180,6 +252,12 @@ export function Split(props: {
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
   readonly asideFirst?: boolean;
+  /**
+   * The aside is at the start (the left) when the two sit side by side, yet the main column still
+   * comes first in reading order and, when narrow, on screen: what the page is about before the list
+   * it was picked from.
+   */
+  readonly asideAtStart?: boolean;
   /** The aside stays in view beside a long main column, and scrolls on its own when it is taller than a thread. */
   readonly asideSticky?: boolean;
 }): JSX.Element {
@@ -190,7 +268,11 @@ export function Split(props: {
     </div>
   );
   return (
-    <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
+    <div
+      className="vs-split"
+      data-aside-at-start={props.asideAtStart === true || undefined}
+      style={gapStyle(props.gap ?? 'space-5')}
+    >
       {props.asideFirst === true ? aside : main}
       {props.asideFirst === true ? main : aside}
     </div>

@@ -20,6 +20,7 @@ import {
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {ConnectedCatchUp} from './connected-catch-up.js';
+import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
 
 /** The run streams of every host, followed while this is mounted. */
@@ -56,7 +57,6 @@ export function ConnectedShell(props: {
   const current = useAtomValue(navigation.state);
   const look = useAtomValue(appearance.state);
   const resources = useAtomValue(useMemo(() => resourcesOf(hosts), [hosts]));
-  const go = (action: NavigationAction): void => dispatch(navigation.go(action), () => undefined);
   const choose = (next: Appearance): void => dispatch(appearance.choose(next), () => undefined);
   const {runs} = current;
   /** The run whose catch-up page shows, when it does: it has a screen of its own over the run's views. */
@@ -65,38 +65,49 @@ export function ConnectedShell(props: {
       ? runs
       : null;
   return (
-    <AppShell destination={current.destination} go={go}>
-      {catchUp !== null ? (
-        <ConnectedCatchUp
-          key="catch-up"
-          hosts={hosts}
-          route={catchUp}
-          go={go}
-          dispatch={dispatch}
-          viewerId={viewerId}
-          words={{role: roleWord, fault: faultWord}}
-        />
-      ) : current.destination === 'runs' ? (
-        <ConnectedApp
-          key="runs"
-          hosts={hosts}
-          dispatch={dispatch}
-          route={runs}
-          fleet={current.fleet}
-          go={go}
-          issues={issues}
-          setIssues={setIssues}
-        />
-      ) : (
-        <SettingsScreen
-          key="settings"
-          tab={current.settingsTab}
-          pick={tab => go({type: 'pick-settings-tab', tab})}
-          appearance={look}
-          choose={choose}
-          resources={resources}
-        />
-      )}
-    </AppShell>
+    <FocusMemory place={placeOf(current)}>
+      {note => {
+        const go = (action: NavigationAction): void => {
+          // What opens a page keeps the control that opened it, so Escape finds the focus there again.
+          note(action);
+          dispatch(navigation.go(action), () => undefined);
+        };
+        return (
+          <AppShell destination={current.destination} go={go}>
+            {catchUp !== null ? (
+              <ConnectedCatchUp
+                key="catch-up"
+                hosts={hosts}
+                route={catchUp}
+                go={go}
+                dispatch={dispatch}
+                viewerId={viewerId}
+                words={{role: roleWord, fault: faultWord}}
+              />
+            ) : current.destination === 'runs' ? (
+              <ConnectedApp
+                key="runs"
+                hosts={hosts}
+                dispatch={dispatch}
+                route={runs}
+                fleet={current.fleet}
+                go={go}
+                issues={issues}
+                setIssues={setIssues}
+              />
+            ) : (
+              <SettingsScreen
+                key="settings"
+                tab={current.settingsTab}
+                pick={tab => go({type: 'pick-settings-tab', tab})}
+                appearance={look}
+                choose={choose}
+                resources={resources}
+              />
+            )}
+          </AppShell>
+        );
+      }}
+    </FocusMemory>
   );
 }

@@ -57,11 +57,24 @@ describe('the keyboard of the window', () => {
         field.type = 'text';
         const radio = document.createElement('input');
         radio.type = 'radio';
-        document.body.append(field, radio);
+        // A list of rows on a page (the runs, the agents' bars) has no use for Escape: it goes back
+        // from a row, which is where the focus returns to when a screen is left.
+        const list = document.createElement('div');
+        list.setAttribute('role', 'listbox');
+        const row = document.createElement('div');
+        row.setAttribute('role', 'option');
+        list.append(row);
+        // An open menu keeps it, to close itself.
+        const menu = document.createElement('div');
+        menu.setAttribute('role', 'menu');
+        const item = document.createElement('button');
+        menu.append(item);
+        document.body.append(field, radio, list, menu);
         yield* settle;
         yield* store.go({type: 'open-settings'});
         // A text field keeps Escape, a press without Alt is not back, and a handled press is not either.
         keydown(field, {key: 'Escape'});
+        keydown(item, {key: 'Escape'});
         keydown(document.body, {key: 'ArrowLeft'});
         keydown(document.body, {key: 'Enter'});
         document.body.addEventListener('keydown', event => event.preventDefault(), {once: true});
@@ -69,6 +82,10 @@ describe('the keyboard of the window', () => {
         expect(yield* destination).toBe('settings');
         // A radio, which the settings use, does not: Escape and Alt+Left mean back there.
         keydown(radio, {key: 'Escape'});
+        expect(yield* destination).toBe('runs');
+        yield* store.go({type: 'open-settings'});
+        // Nor does a row of a list: the focus is on one when a screen is left and Escape must work.
+        keydown(row, {key: 'Escape'});
         expect(yield* destination).toBe('runs');
         yield* store.go({type: 'open-settings'});
         keydown(document.body, {key: 'ArrowLeft', altKey: true});

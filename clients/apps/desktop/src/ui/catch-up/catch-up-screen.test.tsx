@@ -113,6 +113,34 @@ describe('the catch-up page of a live run', () => {
     }),
   );
 
+  it.effect('reads the window before the list of check-ins it came from, at any width', () =>
+    Effect.gen(function* () {
+      const rows = yield* afterwards(new FakeDaemon(live), live.runId, (daemon, press) =>
+        Effect.gen(function* () {
+          const id = yield* press();
+          daemon.settleCheckIn(id, busyFacts(0));
+        }),
+      );
+      const screen = mount(page({rows}));
+      const split = screen.container.querySelector('.vs-split');
+      // The window is first in the page's order, so a narrow window stacks it above the list; side
+      // by side the list is still at the left, as it was.
+      expect(split?.firstElementChild?.classList.contains('vs-split-main')).toBe(true);
+      expect(split?.lastElementChild?.classList.contains('vs-split-aside')).toBe(true);
+      expect(split?.hasAttribute('data-aside-at-start')).toBe(true);
+      screen.unmount();
+    }),
+  );
+
+  it('starts a new check-in from a button that says so, led by the page and its title', () => {
+    const screen = mount(page({rows: []}));
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Catch me up');
+    const buttons = [...screen.container.querySelectorAll('.vs-page-actions .vs-button')];
+    expect(buttons.map(button => button.textContent)).toEqual(['New check-in']);
+    expect(buttons[0]?.getAttribute('data-variant')).toBe('primary');
+    screen.unmount();
+  });
+
   it.effect('shows the lead summary as Markdown, and no Writing…, once it is linked', () =>
     Effect.gen(function* () {
       const rows = yield* afterwards(new FakeDaemon(live), live.runId, (daemon, press) =>
@@ -182,7 +210,7 @@ describe('the catch-up page of a run that is over', () => {
 });
 
 describe('the catch-up page with no check-in', () => {
-  it('says there is none, and still offers Catch me up', () => {
+  it('says there is none, and still offers a new check-in', () => {
     let pressed = 0;
     const screen = mount(
       page({
@@ -193,7 +221,7 @@ describe('the catch-up page with no check-in', () => {
       }),
     );
     expect(screen.text()).toContain('No check-ins yet');
-    screen.press(screen.control('Catch me up'));
+    screen.press(screen.control('New check-in'));
     expect(pressed).toBe(1);
     screen.unmount();
   });
@@ -206,7 +234,7 @@ describe('the press of Catch me up on the page', () => {
   it('is disabled while it is on its way', () => {
     const screen = press({_tag: 'Pressing'});
     expect(screen.text()).toContain('Sending');
-    expect(screen.control('Catch me up').getAttribute('aria-disabled')).toBe('true');
+    expect(screen.control('New check-in').getAttribute('aria-disabled')).toBe('true');
     screen.unmount();
   });
 

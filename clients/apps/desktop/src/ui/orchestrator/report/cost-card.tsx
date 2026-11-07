@@ -24,24 +24,29 @@ function FeedProblem(props: {
 }
 
 /**
- * What the run has cost, as the host worked it out, in brief: the spend against its cap and the last
- * hour (the Cost screen's own card), and the split by type of agent. Every figure is the host's, said
- * in words by the Cost feature; a price no turn reported is a dash and a floor says so. The cost
- * stream is followed while the report shows; one that cannot be read says so here, beside the figures
- * it last delivered. The link opens the Cost screen.
+ * What the run has cost, as the host worked it out, in brief: the spend against its cap (the Cost
+ * screen's own card), and the split by type of agent. Every figure is the host's, said in words by
+ * the Cost feature; a price no turn reported is a dash and a floor says so. The cost stream is
+ * followed while the report shows; one that cannot be read says so here, beside the figures it last
+ * delivered. The link in the heading opens the Cost screen.
  */
 export function CostCard(props: {
   readonly cost: CostView | undefined;
   readonly feed: CostFeedSnapshot;
+  /** The run has ended: it shows no rate of spending. */
+  readonly runOver: boolean;
   readonly retry: () => void;
   readonly open: () => void;
 }): JSX.Element {
   const {cost, feed} = props;
   const model = cost === undefined ? undefined : costScreenModel(cost, COST_WORDS);
+  const details = (
+    <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
+  );
   return (
     <Stack gap="space-5">
       {model === undefined ? (
-        <Card section="Cost">
+        <Card section="Cost" action={details}>
           <Stack gap="space-3">
             {feed.status._tag === 'Failed' ? null : <Text tone="muted">Reading cost</Text>}
             <FeedProblem feed={feed} retry={props.retry} />
@@ -49,7 +54,7 @@ export function CostCard(props: {
         </Card>
       ) : (
         <>
-          <SpendCard spend={model.spend} />
+          <SpendCard spend={model.spend} runOver={props.runOver} action={details} />
           {model.empty ? null : (
             <Card section="By agent type">
               <BarRows
@@ -64,9 +69,6 @@ export function CostCard(props: {
           <FeedProblem feed={feed} retry={props.retry} />
         </>
       )}
-      <Row gap="space-3" justify="end">
-        <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
-      </Row>
     </Stack>
   );
 }

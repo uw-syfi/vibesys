@@ -25,6 +25,21 @@
 .vs-card[data-flush] .vs-card-title {
   padding: var(--space-4) var(--space-5);
 }
+/* A heading with its link: the link at the end of the heading's line, the pair as tall as a small control
+   so the heading's baseline is the same in every card whatever the link is. */
+.vs-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--control-sm);
+  /* The link's own height is not the card's: the heading keeps the card's usual distance from its top. */
+  margin-block: calc(-1 * var(--space-2));
+}
+.vs-card[data-flush] .vs-card-head {
+  margin-block: 0;
+  padding-inline-end: var(--space-4);
+}
 
 /* --- toast ------------------------------------------------------------------------------------- */
 

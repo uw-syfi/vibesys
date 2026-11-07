@@ -2,14 +2,18 @@ import {
   BarRows,
   Button,
   Card,
+  ChartColumns,
   Chip,
+  type Crumb,
+  Page,
+  pageState,
   Row,
   Stack,
   StackedBars,
   SwatchLegend,
   Text,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import type {CostView, FeedStatus, Freshness} from '../../state/index.js';
 import {
   type CostScreenModel,
@@ -23,7 +27,7 @@ import {type CostWords, formatAxisUsd} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
-/** The word and tone of the header status: how far to trust the figures on the screen. */
+/** The word and tone of the status beside the title: how far to trust the figures on the screen. */
 function statusOf(freshness: Freshness, runOver: boolean): {label: string; tone: Tone} {
   switch (freshness) {
     case 'live':
@@ -39,35 +43,22 @@ function statusOf(freshness: Freshness, runOver: boolean): {label: string; tone:
   }
 }
 
-/** The header of the screen: its status, and, beside it, what went wrong with the figures. */
-function Header(props: {
-  readonly freshness: Freshness;
+/** What went wrong with the figures, with the way to try again when there is one. */
+function Problem(props: {
   readonly status: FeedStatus;
-  readonly runOver: boolean;
   readonly words: CostWords;
   readonly retry: () => void;
-}): JSX.Element {
-  const {label, tone} = statusOf(props.freshness, props.runOver);
+}): JSX.Element | null {
   const failed = props.status._tag === 'Failed' ? props.status.fault : null;
+  if (failed === null) return null;
   return (
     <Row gap="space-3" wrap>
-      <Chip label={label} tone={tone} dot />
-      {failed === null ? null : (
-        <Row gap="space-3" wrap>
-          <Text tone="warn" variant="small">
-            {props.words.fault(failed.kind)}
-          </Text>
-          {failed.retryable ? (
-            <Button
-              text="Retry"
-              label="Retry cost"
-              variant="secondary"
-              size="sm"
-              press={props.retry}
-            />
-          ) : null}
-        </Row>
-      )}
+      <Text tone="warn" variant="small">
+        {props.words.fault(failed.kind)}
+      </Text>
+      {failed.retryable ? (
+        <Button text="Retry" label="Retry cost" variant="secondary" size="sm" press={props.retry} />
+      ) : null}
     </Row>
   );
 }
@@ -106,38 +97,35 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
           rows={model.types}
         />
       </Card>
-      <Row gap="space-4" align="start" wrap>
-        <Stack gap="space-4" width="chart">
-          <Card section="By model">
-            <BarRows
-              label="Cost by model"
-              nameHeader="Model"
-              barLabel="Share of the largest cost"
-              columns={MODEL_COLUMNS}
-              rows={model.models}
-            />
-          </Card>
-        </Stack>
-        <Stack gap="space-4" width="chart">
-          <Card section="Tokens by kind">
-            <BarRows
-              label="Tokens by kind"
-              nameHeader="Kind"
-              barLabel="Share of the largest count"
-              columns={KIND_COLUMNS}
-              rows={model.kinds}
-            />
-          </Card>
-        </Stack>
-      </Row>
+      <ChartColumns align="start">
+        <Card section="By model">
+          <BarRows
+            label="Cost by model"
+            nameHeader="Model"
+            barLabel="Share of the largest cost"
+            columns={MODEL_COLUMNS}
+            rows={model.models}
+          />
+        </Card>
+        <Card section="Tokens by kind">
+          <BarRows
+            label="Tokens by kind"
+            nameHeader="Kind"
+            barLabel="Share of the largest count"
+            columns={KIND_COLUMNS}
+            rows={model.kinds}
+          />
+        </Card>
+      </ChartColumns>
     </>
   );
 }
 
 /**
- * One run's cost, as the host served it: what it has cost against its cap, the spend over time by
- * model, and its split by agent type, by model and by kind of token. The screen computes none of
- * it. With no view yet it shows only its status, and with a stream the host cannot serve, why.
+ * One run's cost, as the host served it, as a page of the run: what it has cost against its cap,
+ * the spend over time by model, and its split by agent type, by model and by kind of token. The
+ * screen computes none of it. With no view yet it shows only its status, and with a stream the host
+ * cannot serve, why. The status sits in the title row's meta, where every run page puts its own.
  */
 export function CostScreen(props: {
   readonly view: CostView | undefined;
@@ -147,31 +135,45 @@ export function CostScreen(props: {
   readonly runOver: boolean;
   /** The words of the run's own vocabulary: a type of agent, a harness, a fault, a moment. */
   readonly words: CostWords;
+  /** Where the reader is: the levels above this screen. */
+  readonly trail: readonly Crumb[];
+  /** The state of every connection that is not working, above the figures. */
+  readonly notice: ReactNode;
+  /** Where the read of the run's history stands, beside the status. */
+  readonly reading: ReactNode;
   readonly retry: () => void;
 }): JSX.Element {
-  const header = (
-    <Header
-      freshness={props.freshness}
-      status={props.status}
-      runOver={props.runOver}
-      words={props.words}
-      retry={props.retry}
-    />
-  );
-  if (props.view === undefined) return header;
-  const model = costScreenModel(props.view, props.words);
+  const {label, tone} = statusOf(props.freshness, props.runOver);
+  const model = props.view === undefined ? undefined : costScreenModel(props.view, props.words);
   return (
-    <Stack gap="space-4">
-      {header}
-      <SpendCard spend={model.spend} />
-      {model.empty ? (
-        <Text tone="muted">No turns yet.</Text>
-      ) : (
+    <Page
+      key="cost"
+      width="wide"
+      state={pageState(props.view === undefined && props.freshness === 'empty')}
+      trail={props.trail}
+      title="Cost"
+      meta={
         <>
-          {model.chart === null ? null : <SpendOverTime chart={model.chart} />}
-          <Splits model={model} />
+          <Chip label={label} tone={tone} dot />
+          {props.reading}
+        </>
+      }
+    >
+      {props.notice}
+      <Problem status={props.status} words={props.words} retry={props.retry} />
+      {model === undefined ? null : (
+        <>
+          <SpendCard spend={model.spend} runOver={props.runOver} />
+          {model.empty ? (
+            <Text tone="muted">No turns yet.</Text>
+          ) : (
+            <>
+              {model.chart === null ? null : <SpendOverTime chart={model.chart} />}
+              <Splits model={model} />
+            </>
+          )}
         </>
       )}
-    </Stack>
+    </Page>
   );
 }

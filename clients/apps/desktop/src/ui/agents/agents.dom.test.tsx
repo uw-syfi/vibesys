@@ -3,9 +3,11 @@
  * a folded thought and a call, and ask for the body a page left out.
  */
 import {describe, expect, it} from '@effect/vitest';
+import type {Agent} from '@vibesys/orchestrator-proto';
 import {applyChange, emptyState, itemIs, type OrchestratorState} from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {AgentPage} from './agent-page.js';
 import {AgentTranscript, type HistoryAccess} from './agent-transcript.js';
 import {AgentsScreen} from './agents-screen.js';
 
@@ -29,10 +31,27 @@ describe('the agents screen', () => {
         runId={scenario.runId}
         host="host-a"
         nowMs={scenario.endMs}
-        selected={null}
+        trail={[]}
+        notice={null}
+        reading={null}
         open={id => opened.push(id)}
       />,
     );
+
+  it('is a page with a key to its bars: running, done, failed, a result returned, the machine, folded', () => {
+    const screen = view();
+    const key = screen.container.querySelector('ul[aria-label="Key to the bars"]');
+    expect([...(key?.querySelectorAll('li') ?? [])].map(item => item.textContent)).toEqual([
+      'Running',
+      'Done',
+      'Failed',
+      'Result returned',
+      ' Machine',
+      'Folded',
+    ]);
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Agents');
+    screen.unmount();
+  });
 
   it('shows the big group of workers as one folded row, and a press on it unfolds the agents', () => {
     const screen = view();
@@ -69,6 +88,63 @@ describe('the agents screen', () => {
     expect(opened).toHaveLength(1);
     expect(planner.getAttribute('aria-label')).toMatch(/folded$/);
     screen.unmount();
+  });
+});
+
+describe('an agent page', () => {
+  const page = (agent: Agent) =>
+    mount(
+      <AgentPage
+        state={state}
+        nowMs={scenario.endMs}
+        agent={agent}
+        host="host-a"
+        trail={[{id: 'runs', label: 'Runs'}]}
+        notice={null}
+        reading={null}
+        sendProgress={undefined}
+        history={{
+          earlier: {_tag: 'Idle'},
+          wholes: {},
+          loadEarlier: () => undefined,
+          expand: () => undefined,
+        }}
+        send={() => undefined}
+        retrySend={() => undefined}
+        open={() => undefined}
+      />,
+    );
+
+  it('reads as a centred column: where the agent sits and ran, its conversation, then the box to write in', () => {
+    for (const agent of Object.values(state.agents).slice(0, 6)) {
+      const screen = page(agent);
+      const column = screen.container.querySelector('[data-width="reading"]');
+      expect(column).not.toBeNull();
+      // Placement, then the conversation, then the message box, all inside the one column.
+      const sections = [...(column?.children ?? [])].map(each => each.textContent ?? '');
+      const placement = sections.findIndex(text => text.startsWith('Placement'));
+      const box = sections.findIndex(text => text.startsWith('Message'));
+      expect(placement).toBeGreaterThanOrEqual(0);
+      expect(box).toBeGreaterThan(placement);
+      expect(column?.querySelector('.vs-conversation')).not.toBeNull();
+      expect(column?.textContent).toContain('host-a');
+      screen.unmount();
+    }
+  });
+
+  it('names its place in the spawn tree only when it has one: the lead is at the top', () => {
+    const lead = Object.values(state.agents).find(agent => agent.parentAgentId === '');
+    const child = Object.values(state.agents).find(agent => agent.parentAgentId !== '');
+    if (lead === undefined || child === undefined) throw new Error('the run has a lead and agents');
+    const place = (screen: ReturnType<typeof mount>) =>
+      screen.container.querySelector('nav[aria-label="Place in the spawn tree"]');
+    const top = page(lead);
+    expect(place(top)).toBeNull();
+    expect(top.container.querySelector('h1')?.textContent).toBe('lead');
+    top.unmount();
+    const below = page(child);
+    expect(place(below)?.querySelectorAll('li').length).toBeGreaterThan(1);
+    below.unmount();
   });
 });
 

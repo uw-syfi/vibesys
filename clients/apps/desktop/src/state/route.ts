@@ -1,8 +1,9 @@
 /**
- * Where the user is: the run list, or one run with an agent picked and one of its views. A plain
- * reducer, so every move is a value and a test can walk any sequence of them.
+ * Where the user is: the run list, or one page of one run: its report, its agents, one agent's
+ * transcript (the agents view with an agent open), its cost or its catch-up. A plain reducer, so
+ * every move is a value and a test can walk any sequence of them.
  */
-export type RunView = 'report' | 'timeline' | 'agents' | 'cost' | 'handoffs' | 'ideas' | 'catch-up';
+export type RunView = 'report' | 'agents' | 'cost' | 'catch-up';
 
 export type Route =
   | {readonly screen: 'runs'}
@@ -11,7 +12,7 @@ export type Route =
       readonly host: string;
       readonly runId: string;
       readonly view: RunView;
-      /** The agent whose turns are open beside the run, or null. */
+      /** The agent whose transcript is the page, under the agents view; null on every other page. */
       readonly agentId: string | null;
     };
 
@@ -37,9 +38,11 @@ export function routeReducer(route: Route, action: RouteAction): Route {
     case 'close-run':
       return initialRoute;
     case 'show':
-      return route.screen === 'run' ? {...route, view: action.view} : route;
+      // A page of the run replaces the one before it, an agent's transcript too.
+      return route.screen === 'run' ? {...route, view: action.view, agentId: null} : route;
     case 'pick-agent':
-      return route.screen === 'run' ? {...route, agentId: action.agentId} : route;
+      // An agent is under the agents view: closing it lands there.
+      return route.screen === 'run' ? {...route, view: 'agents', agentId: action.agentId} : route;
     case 'close-agent':
       return route.screen === 'run' ? {...route, agentId: null} : route;
   }

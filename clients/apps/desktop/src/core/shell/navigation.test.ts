@@ -56,22 +56,26 @@ describe('the navigation of the window', () => {
     }),
   );
 
-  itQuiet('back from an agent, then the run, ends on the list and stays there', () =>
-    Effect.gen(function* () {
-      const {store, keys, read} = yield* open;
-      yield* store.go({type: 'open-run', host: 'host-a', runId: 'run-1'});
-      yield* store.go({type: 'pick-agent', agentId: 'a'});
-      yield* keys.press(plain);
-      expect((yield* read).runs).toMatchObject({screen: 'run', agentId: null});
-      yield* keys.press(plain);
-      expect((yield* read).runs).toEqual({screen: 'runs'});
-      yield* keys.press(plain);
-      // The list is as it was, except that it remembers the row the run was opened from.
-      expect(yield* read).toEqual({
-        ...initialNavigation,
-        fleet: {...initialNavigation.fleet, selected: 'host-a/run-1'},
-      });
-    }),
+  itQuiet(
+    'back from an agent, then the agents, then the run, ends on the list and stays there',
+    () =>
+      Effect.gen(function* () {
+        const {store, keys, read} = yield* open;
+        yield* store.go({type: 'open-run', host: 'host-a', runId: 'run-1'});
+        yield* store.go({type: 'pick-agent', agentId: 'a'});
+        yield* keys.press(plain);
+        expect((yield* read).runs).toMatchObject({screen: 'run', view: 'agents', agentId: null});
+        yield* keys.press(plain);
+        expect((yield* read).runs).toMatchObject({screen: 'run', view: 'report', agentId: null});
+        yield* keys.press(plain);
+        expect((yield* read).runs).toEqual({screen: 'runs'});
+        yield* keys.press(plain);
+        // The list is as it was, except that it remembers the row the run was opened from.
+        expect(yield* read).toEqual({
+          ...initialNavigation,
+          fleet: {...initialNavigation.fleet, selected: 'host-a/run-1'},
+        });
+      }),
   );
 
   itQuiet(

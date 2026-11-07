@@ -47,22 +47,25 @@ describe('Seattle time', () => {
 });
 
 describe('ages and spans', () => {
-  it('name an age in its largest whole unit and never in the future', () => {
+  it('name an age as the span in the Runs list says it, and never in the future', () => {
     fc.assert(
       fc.property(fc.integer({min: -10_000, max: 1e10}), age => {
         const text = formatAge(age);
-        expect(text).toMatch(/^\d+ (s|min|h|d) ago$/);
-        if (age <= 0) expect(text).toBe('0 s ago');
+        expect(text).toMatch(/^(\d+d \d+h|\d+h \d+m|\d+m|\d+s) ago$/);
+        // One formatter: an age is its span with `ago`, wherever a screen writes either.
+        expect(text).toBe(`${formatElapsed(age)} ago`);
+        if (age <= 0) expect(text).toBe('0s ago');
       }),
       {seed: 32},
     );
-    expect(formatAge(23 * 60_000 + 5000)).toBe('23 min ago');
-    expect(formatAge(3 * HOUR + 59 * 60_000)).toBe('3 h ago');
+    expect(formatAge(23 * 60_000 + 5000)).toBe('23m ago');
+    expect(formatAge(3 * HOUR + 59 * 60_000)).toBe('3h 59m ago');
+    expect(formatAge(((5 * 24 + 19) * 60 * 60 + 30) * 1000)).toBe('5d 19h ago');
   });
 
   it('write an elapsed time in its two largest units, and grow with the time', () => {
     expect(formatElapsed(((2 * 24 + 6) * 60 * 60 + 30) * 1000)).toBe('2d 6h');
-    expect(formatElapsed(42 * 60_000 + 10_000)).toBe('42m 10s');
+    expect(formatElapsed(42 * 60_000 + 10_000)).toBe('42m');
     expect(formatElapsed(-5)).toBe('0s');
     fc.assert(
       fc.property(fc.integer({min: 0, max: 1e9}), fc.integer({min: 0, max: 1e9}), (a, b) => {

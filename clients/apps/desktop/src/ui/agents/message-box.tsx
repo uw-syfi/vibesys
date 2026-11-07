@@ -1,21 +1,9 @@
 import {type Agent, Delivery, type Message, type Receipt} from '@vibesys/orchestrator-proto';
-import {Breadcrumb, Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
+import {Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import type {CommandProgress} from '../../state/index.js';
+import {type CommandProgress, messageIs, ms} from '../../state/index.js';
+import {CommandLine} from '../orchestrator/command-line.js';
 import {
-  agentNames,
-  agentPlace,
-  messageIs,
-  messagesOf,
-  ms,
-  type OrchestratorState,
-} from '../../state/index.js';
-import {AgentTranscript, type HistoryAccess} from '../agents/agent-transcript.js';
-import {agentLabel} from '../agents/labels.js';
-import {formatUsd} from '../agents/time.js';
-import {CommandLine} from './command-line.js';
-import {
-  agentWord,
   deliveryWord,
   formatClock,
   harnessWord,
@@ -23,7 +11,7 @@ import {
   rejectionWord,
   roleWord,
   type Word,
-} from './words.js';
+} from '../orchestrator/words.js';
 
 /** What this agent's tool lets a message do, in one sentence. */
 function capabilityLine(agent: Agent): string {
@@ -98,7 +86,8 @@ function SentMessages(props: {
   );
 }
 
-function MessageBox(props: {
+/** The box a person writes to one agent in, and what became of each message they sent it. */
+export function MessageBox(props: {
   readonly nowMs: number;
   readonly agent: Agent;
   /** What the last press of Send came to, or undefined before any. */
@@ -147,74 +136,5 @@ function MessageBox(props: {
         <SentMessages pendingAtMs={sentAtMs} sent={props.sent} progress={progress} />
       </Stack>
     </Card>
-  );
-}
-
-/** One agent: where it is in the tree, who it is, its session as a conversation, and a message box. */
-export function AgentPanel(props: {
-  readonly state: OrchestratorState;
-  readonly nowMs: number;
-  readonly agent: Agent;
-  /** What the machine the run is on is called. */
-  readonly host: string;
-  /** What the last press of Send to this agent came to, or undefined before any. */
-  readonly sendProgress: CommandProgress | undefined;
-  readonly history: HistoryAccess;
-  readonly send: (text: string) => void;
-  readonly retrySend: () => void;
-  /** Opens another agent of the run. */
-  readonly open: (agentId: string) => void;
-  readonly close: () => void;
-}): JSX.Element {
-  const {state, agent} = props;
-  const names = agentNames(state, agent.runId);
-  const name = names.get(agent.id);
-  const label = name === undefined ? 'An agent' : agentLabel(name);
-  const status = agentWord(agent.status);
-  const cost = formatUsd(agent.usage?.costUsd ?? null);
-  const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
-  const place = agentPlace(state, agent.id);
-  return (
-    <Stack gap="space-4">
-      <Row gap="space-3" justify="between">
-        <Breadcrumb
-          label="Place in the spawn tree"
-          items={place.map(crumb => ({
-            id: crumb.agentId,
-            label: agentLabel(crumb.name),
-            ...(crumb.agentId === agent.id ? {} : {press: () => props.open(crumb.agentId)}),
-          }))}
-        />
-        <Button text="Close agent view" variant="quiet" size="sm" press={props.close} />
-      </Row>
-      <Row gap="space-3" wrap>
-        <Text variant="heading">{label}</Text>
-        <Chip label={status.label} tone={status.tone} dot />
-        <Chip label={props.host} mono />
-        <Chip label={harnessWord(agent.harness)} />
-        <Chip label={agent.model} mono />
-        {cost === '' ? null : (
-          <Text variant="small" tone="muted">{`${cost} · ${turns} turns`}</Text>
-        )}
-      </Row>
-      <AgentTranscript
-        state={state}
-        agentId={agent.id}
-        host={props.host}
-        nowMs={props.nowMs}
-        history={props.history}
-        open={props.open}
-      />
-      <MessageBox
-        nowMs={props.nowMs}
-        agent={agent}
-        progress={props.sendProgress}
-        sent={messagesOf(state, agent.id).filter(
-          message => message.fromAgentId === '' && messageIs(message, 'text'),
-        )}
-        send={props.send}
-        retry={props.retrySend}
-      />
-    </Stack>
   );
 }

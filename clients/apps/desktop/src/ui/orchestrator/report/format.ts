@@ -69,27 +69,12 @@ export function seattleOffsetMs(atMs: number): number {
 export const axisMoment = (atMs: number, spanMs: number): string =>
   spanMs < 1.5 * DAY ? seattleClock(atMs) : seattleMoment(atMs);
 
-/** How long ago, in the largest whole unit: `12 s ago`, `23 min ago`, `3 h ago`, `2 d ago`. */
-export function formatAge(ageMs: number): string {
-  const age = Math.max(0, ageMs);
-  if (age < MINUTE) return `${Math.floor(age / SECOND)} s ago`;
-  if (age < HOUR) return `${Math.floor(age / MINUTE)} min ago`;
-  if (age < DAY) return `${Math.floor(age / HOUR)} h ago`;
-  return `${Math.floor(age / DAY)} d ago`;
-}
-
-/** A span of time in its two largest units: `2d 6h`, `5h 12m`, `42m 10s`, `12s`. */
-export function formatElapsed(spanMs: number): string {
-  const span = Math.max(0, Math.floor(spanMs / SECOND));
-  const days = Math.floor(span / 86_400);
-  const hours = Math.floor((span % 86_400) / 3600);
-  const minutes = Math.floor((span % 3600) / 60);
-  const seconds = span % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
+/**
+ * How long ago (`3s ago`, `52m ago`, `5d 19h ago`) and how long (`2d 6h`, `5h 20m`, `18m`, `42s`):
+ * the Runs list's own words, so one span reads the same on every screen and a screen never says
+ * `5 d ago` where another says `5d 19h`.
+ */
+export {ago as formatAge, span as formatElapsed} from '../fleet-words.js';
 
 const EXACT = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 6});
 

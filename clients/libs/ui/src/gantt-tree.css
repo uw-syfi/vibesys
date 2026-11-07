@@ -54,6 +54,66 @@
   padding: 0;
   border-color: transparent;
 }
+/* The key to the bars: each sample is drawn with the shades the bars themselves use. */
+.vs-gantt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  list-style: none;
+}
+.vs-gantt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-gantt-legend-bar {
+  position: relative;
+  display: block;
+  width: var(--space-5);
+  height: var(--space-4);
+  border-radius: var(--radius-sm);
+  border-right: var(--focus-ring) solid var(--muted);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.vs-gantt-legend-bar[data-stacked] {
+  overflow: visible;
+  box-shadow:
+    0 var(--space-2) 0 calc(var(--hairline) * -1) var(--line),
+    0 var(--space-3) 0 calc(var(--space-1) * -1) var(--panel-2);
+}
+.vs-gantt-legend-bar[data-outcome="err"] {
+  border-right-color: var(--err);
+}
+.vs-gantt-legend-bar[data-outcome="live"] {
+  border-right-color: var(--accent);
+}
+.vs-gantt-legend-fill {
+  position: absolute;
+  inset: 0;
+}
+.vs-gantt-legend-fill[data-kind="solid"] {
+  background: var(--accent);
+}
+.vs-gantt-legend-fill[data-kind="grey"] {
+  background: var(--muted);
+}
+.vs-gantt-legend-fill[data-kind="err"] {
+  background: var(--err);
+}
+.vs-gantt-legend-mark {
+  display: block;
+  width: var(--focus-ring);
+  height: var(--space-5);
+  background: var(--text);
+}
+.vs-gantt-legend-tag {
+  flex: none;
+}
+
 /* Where something came back: a thin line across the bar. */
 .vs-gantt-mark {
   position: absolute;

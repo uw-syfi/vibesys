@@ -13,6 +13,11 @@ export function MetricTiles(props: {
   readonly label: string;
   readonly count: number;
   readonly stacked?: boolean;
+  /**
+   * `chart`: the tiles stand on the same tracks as `ChartColumns` (a tile is as wide as a chart and
+   * the gap is a chart's), so tiles above charts share their edges.
+   */
+  readonly track?: 'chart';
   readonly children: ReactNode;
 }): JSX.Element {
   const style: StyleWithVars = {'--tile-count': String(Math.max(1, props.count))};
@@ -21,6 +26,7 @@ export function MetricTiles(props: {
       className="vs-tiles"
       aria-label={props.label}
       data-stacked={props.stacked === true || undefined}
+      data-track={props.track}
       style={style}
     >
       {props.children}
