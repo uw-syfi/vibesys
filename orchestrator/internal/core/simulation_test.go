@@ -131,7 +131,9 @@ func (w *sim) decide(body core.InputBody) {
 	w.t.Helper()
 	w.inputs++
 	w.nonce++
-	w.now = w.now.Add(time.Duration(1+w.r.IntN(5)) * time.Second)
+	// An input arrives at any instant the daemon's clock reads, not on a whole second, so a duration
+	// the core works out from it meets the wire's whole seconds on the way to the log.
+	w.now = w.now.Add(time.Duration(1+w.r.IntN(5))*time.Second + time.Duration(w.r.IntN(1000))*time.Millisecond)
 	// The job tool the shell answers with changes between starts, as it does between daemon starts; a
 	// run keeps the one in force when it started.
 	if command, ok := body.(core.Command); ok {
