@@ -39,7 +39,7 @@ import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
 import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
 import {HOST_PREREQUISITES} from '../state/host-prerequisites.js';
-import {type HostConnectionState, hostKey} from '../state/index.js';
+import {type HostConnectionState, hostKey, hostStatusOf} from '../state/index.js';
 import {LIVENESS_WINDOW_MS, SILENCE_BOUND_MS} from '../state/liveness.js';
 import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
@@ -196,7 +196,8 @@ const windowOver = (calls: GatewayCalls, peer: FakeGateway, feed: boolean) =>
       return state._tag === 'Ready' ? state.epoch : -1;
     };
     const hellos = () => peer.calls.filter(call => call.method === HELLO).length;
-    return {connection, live, elapse, until, epoch, hellos};
+    const feedStatus = () => registry.get(session.runs.status);
+    return {connection, live, feedStatus, elapse, until, epoch, hellos};
   });
 
 const second = Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 120}));
@@ -269,6 +270,34 @@ it.effect('notices a link that hangs within the silence bound, and recovers on i
       ).not.toBeNull();
     }),
   ),
+);
+
+it.effect(
+  'shows a host whose link stops delivering bytes as no longer live within the silence bound',
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* fresh({kind: 'copy', seconds: 1});
+        expect(yield* world.until(() => world.live(), 60_000)).not.toBeNull();
+        const word = () =>
+          hostStatusOf({
+            connection: world.connection(),
+            feed: world.feedStatus(),
+            hasData: true,
+            staleForMs: null,
+          }).kind;
+        expect(word()).toBe('live');
+        yield* inflict(world, 'hang');
+        // The word a screen shows leaves Live within the bound, and is Stale or Catching up, never
+        // Live and never a word for a host that was not reached.
+        const left = yield* world.until(
+          () => word() !== 'live',
+          SILENCE_BOUND_MS + NOTICE_SLACK_MS,
+        );
+        expect(left).not.toBeNull();
+        expect(['stale', 'catching-up']).toContain(word());
+      }),
+    ),
 );
 
 it.effect.prop(

@@ -12,10 +12,13 @@ import type {FeedStatus} from './feed.js';
  * - `live`: connected and the feed delivers.
  * - `catching-up`: connected, the feed is opening or restarting, earlier data is on screen.
  * - `waiting`: nothing read yet, and nothing wrong yet (not asked, or the feed is opening).
- * - `connecting`: the first dial is in flight, nothing read yet.
+ * - `connecting`: the first dial is in flight, nothing read yet, and no attempt has failed.
  * - `stale`: data is on screen that may be out of date (the link is down, or the feed failed).
  * - `unavailable`: the link is up but the feed failed, and nothing was ever read.
- * - `unreachable`: the host did not answer and will not be dialed again until the user retries.
+ * - `unreachable`: no attempt has reached the host and nothing was read from it. Once the first
+ *   attempt has failed this is the one word for the host, whether the next dial is in flight, the
+ *   wait before it, or retrying stopped until the user asks: the retries go on in the background
+ *   and never change the word.
  * - `incompatible`: the app and the host cannot talk.
  * - `refused`: the host cannot work for a reason no retry changes; `cause` says which when known.
  */
@@ -87,10 +90,14 @@ function kindOf(input: HostStatusInput): HostStatusKind {
     case 'Incompatible':
       return 'incompatible';
     case 'Idle':
-    case 'Waiting':
       return hasData ? 'stale' : 'waiting';
+    // Between attempts, or dialing again after a failure (`attempt` counts the failures so far): a
+    // retry tick is not a change of the host, so both read the same.
+    case 'Waiting':
+      return hasData ? 'stale' : 'unreachable';
     case 'Connecting':
-      return hasData ? 'stale' : 'connecting';
+      if (hasData) return 'stale';
+      return connection.attempt > 0 ? 'unreachable' : 'connecting';
     case 'Ready':
       return connection.blocked === undefined ? readyKind(feed, hasData) : 'refused';
   }

@@ -87,7 +87,7 @@ describe('the connection status', () => {
           />,
         );
         expect(html).toContain('aria-description="');
-        expect(html).toContain(faultWord(each.kind));
+        expect(html).toContain('Stale');
       }),
     );
   });

@@ -1,12 +1,14 @@
-import {Button, Chip, Row} from '@vibesys/ui';
+import {Button, Chip, Row, type StatusTone} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   type Fault,
   type FeedStatus,
-  freshnessOf,
   type HostConnectionState,
+  type HostStatusKind,
+  hostStatusOf,
 } from '../../state/index.js';
-import {faultHint, faultText, formatDuration} from './words.js';
+import {hostStatusWord} from '../host-status-words.js';
+import {faultHint} from './words.js';
 
 /** One thing about a connection a person should know, with the way to try again. */
 export interface ConnectionNote {
@@ -22,16 +24,12 @@ export interface ConnectionNote {
   readonly tryAgain: () => void;
 }
 
-type Tone = 'live' | 'warn';
-
-/** One chip of the connection's state: a label, and the account behind it for a hover. */
+/** One chip of a host's status: its one word, and the account behind it for a hover. */
 interface Say {
   readonly label: string;
-  readonly tone: Tone;
+  readonly tone: StatusTone;
   /** The account behind the label, never a line of the screen: its context, the fault's advice, its details. */
   readonly hint: string;
-  /** How long what is shown has been out of date, when that is worth saying. */
-  readonly stale?: string;
   readonly canRetry: boolean;
 }
 
@@ -40,52 +38,56 @@ const hintOf = (fault: Fault, context: string): string =>
     .filter(part => part !== '')
     .join(' ');
 
-/** What the connection says as a chip, or null when it is working and nothing needs saying. */
+/** The fault behind a status: the link's own, else the feed's. */
+function faultBehind({connection, feed}: ConnectionNote): Fault | null {
+  if (connection._tag === 'Unusable' || connection._tag === 'Waiting') return connection.fault;
+  if (connection._tag === 'Ready' && feed._tag === 'Failed') return feed.fault;
+  return null;
+}
+
+/** The statuses a press of Retry can change: the host is not delivering and will not unaided. */
+const RETRYABLE: ReadonlySet<HostStatusKind> = new Set([
+  'stale',
+  'unavailable',
+  'unreachable',
+  'incompatible',
+  'refused',
+]);
+
+/**
+ * What the host's one status (`hostStatusOf`, the same word every other screen shows) says as a
+ * chip, or null when it is working and nothing needs saying. This derives nothing of its own: the
+ * word, its tone and its age are the status's; the note only adds the account behind them.
+ */
 function sayAbout(note: ConnectionNote): Say | null {
   const {connection, feed, hasData, what} = note;
+  const status = hostStatusOf({connection, feed, hasData, staleForMs: note.staleForMs});
+  if (status.kind === 'live') return null;
+  const {label, tone, hint} = hostStatusWord(status);
   const reading = hasData ? 'What is shown may be out of date.' : `Nothing read from ${what} yet.`;
-  if (connection._tag === 'Incompatible') {
-    const fix =
-      connection.side === 'client-too-old' ? 'Update this app.' : 'Update VibeSys on that host.';
-    return {
-      label: 'Incompatible',
-      tone: 'warn',
-      hint: `This app and the VibeSys on the host cannot work together. ${fix}`,
-      canRetry: true,
-    };
-  }
-  if (connection._tag === 'Unusable') {
-    return {
-      label: faultText(connection.fault),
-      tone: 'warn',
-      hint: hintOf(connection.fault, `Automatic retries stopped. ${reading}`),
-      canRetry: true,
-    };
-  }
-  if (connection._tag === 'Waiting') {
-    return {
-      label: faultText(connection.fault),
-      tone: 'warn',
-      hint: hintOf(connection.fault, `${reading} Trying again.`),
-      ...(note.staleForMs === null || !hasData ? {} : {stale: formatDuration(note.staleForMs)}),
-      canRetry: true,
-    };
-  }
-  if (feed._tag === 'Failed' && connection._tag === 'Ready') {
-    return {
-      label: faultText(feed.fault),
-      tone: 'warn',
-      hint: hintOf(feed.fault, reading),
-      canRetry: true,
-    };
-  }
-  if (freshnessOf(connection, feed, hasData) === 'live') return null;
+  const fault = faultBehind(note);
+  const context =
+    status.kind === 'catching-up'
+      ? `Catching up with ${what}.`
+      : status.kind === 'connecting' || status.kind === 'waiting'
+        ? `Connecting to read ${what}.`
+        : status.kind === 'incompatible'
+          ? incompatibleHint(connection)
+          : reading;
   return {
-    label: hasData ? 'Catching up' : 'Connecting',
-    tone: 'live',
-    hint: hasData ? `Catching up with ${what}.` : `Connecting to read ${what}.`,
-    canRetry: false,
+    label,
+    tone,
+    hint: hint ?? (fault === null ? context : hintOf(fault, context)),
+    canRetry: RETRYABLE.has(status.kind),
   };
+}
+
+function incompatibleHint(connection: HostConnectionState): string {
+  const fix =
+    connection._tag === 'Incompatible' && connection.side === 'client-too-old'
+      ? 'Update this app.'
+      : 'Update VibeSys on that host.';
+  return `This app and the VibeSys on the host cannot work together. ${fix}`;
 }
 
 /**
@@ -112,7 +114,6 @@ export function ConnectionStatus(props: {
         {shown.map(({note, say}) => (
           <Row key={note.key} gap="space-2">
             <Chip label={say.label} tone={say.tone} dot hint={say.hint} />
-            {say.stale === undefined ? null : <Chip label={`Stale ${say.stale}`} />}
           </Row>
         ))}
         {retry === undefined ? null : (

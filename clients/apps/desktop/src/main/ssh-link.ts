@@ -6,6 +6,11 @@
  * brought up non-interactively too: a host that wants a password or a new host key fails as `auth`
  * with ssh's own words, and the user fixes it in their terminal.
  *
+ * A channel's bytes never pass through its own `ssh` process: OpenSSH's mux client hands its
+ * stdin and stdout descriptors to the master, which does the I/O on them. Stopping a channel's
+ * process (SIGSTOP) therefore freezes nothing the app reads, and the link stays live; only a master
+ * that stops carrying bytes is a dead link, and the liveness monitor (`state/liveness.ts`) ends it.
+ *
  * The master carries `ServerAliveInterval`, so a half-open link ends instead of hanging, and
  * `ControlPersist=30m`, so a master an app crash left behind ends on its own.
  *
