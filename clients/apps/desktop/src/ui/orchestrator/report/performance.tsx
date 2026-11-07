@@ -28,6 +28,7 @@ import {
   valueTicks,
 } from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
+import {nameOf} from '../names.js';
 import {
   axisMoment,
   clip,
@@ -76,7 +77,7 @@ function boundReference(
   const bound = objective.bound?.current;
   if (bound === undefined) return undefined;
   const who = [
-    names.get(bound.agent) ?? bound.agent,
+    bound.agent === '' ? '' : nameOf(names, bound.agent),
     bound.atMs === null ? '' : seattleMoment(bound.atMs),
   ]
     .filter(part => part !== '')

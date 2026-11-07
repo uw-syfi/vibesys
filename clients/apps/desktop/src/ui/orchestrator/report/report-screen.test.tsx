@@ -20,9 +20,9 @@ import fc from 'fast-check';
 import {act} from 'react';
 import {
   applyChange,
-  type CommandProgress,
   applyCost,
   applySearch,
+  type CommandProgress,
   type CostFeedSnapshot,
   type CostView,
   emptyState,
@@ -111,7 +111,11 @@ function stateOf(world: World): OrchestratorState {
 
 function render(
   world: World,
-  options: {freshness?: Freshness; costFeed?: CostFeedSnapshot; stopProgress?: CommandProgress} = {},
+  options: {
+    freshness?: Freshness;
+    costFeed?: CostFeedSnapshot;
+    stopProgress?: CommandProgress;
+  } = {},
 ) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
   const state = stateOf(world);

@@ -1,7 +1,7 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {resultWords} from './orchestrator/fleet-words.js';
 import {formatFigure} from './figures.js';
+import {resultWords} from './orchestrator/fleet-words.js';
 
 describe('a measured value', () => {
   it('reads the same on the Runs list as in the report, for any value', () => {

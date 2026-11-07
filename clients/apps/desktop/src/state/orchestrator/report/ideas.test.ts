@@ -35,9 +35,7 @@ const row = fc
     }),
   );
 const rows = fc.array(row, {maxLength: 25});
-const window = fc
-  .array(fc.integer({min: 1, max: 500}), {maxLength: 30})
-  .map(plans => ({plans}));
+const window = fc.array(fc.integer({min: 1, max: 500}), {maxLength: 30}).map(plans => ({plans}));
 
 describe('the display filters of the ideas table', () => {
   it('"check-in" keeps exactly the ideas whose plan the host counted for the window, in order', () => {
