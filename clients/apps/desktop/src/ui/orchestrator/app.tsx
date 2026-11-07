@@ -1,3 +1,4 @@
+import type {Agent} from '@vibesys/orchestrator-proto';
 import {Page, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
@@ -7,10 +8,12 @@ import {
   type FleetPlace,
   freshnessOf,
   type HostConnectionState,
+  type HostFreshness,
   type HostModel,
   type NavigationAction,
   type Route,
   type RunView,
+  staleForMs,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -36,6 +39,8 @@ export interface HostSnapshot {
   readonly label: string;
   readonly model: HostModel;
   readonly connection: HostConnectionState;
+  /** Whether what is shown of this host is current, and when it last was. */
+  readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
   /** The status of each agent's stream the screen has open, by agent id. */
@@ -60,23 +65,46 @@ export interface AppCommands {
 
 const hasData = (host: HostSnapshot): boolean => host.model.data.sequence > 0n;
 
-/** A host as the fleet reads it: its runs, and how far to trust them. */
-const fleetInput = (host: HostSnapshot): FleetHostInput => ({
+/** A host as the fleet reads it: its runs, how far to trust them, and how long they have been out of date. */
+const fleetInput = (host: HostSnapshot, nowMs: number): FleetHostInput => ({
   key: host.key,
   label: host.label,
   data: host.model.data,
   freshness: freshnessOf(host.connection, host.runsFeed, hasData(host)),
-  staleForMs: null,
+  staleForMs: staleForMs(host.freshness, nowMs),
 });
 
-function runsNote(host: HostSnapshot, retry: (host: string) => void): ConnectionNote {
+function runsNote(
+  host: HostSnapshot,
+  retry: (host: string) => void,
+  nowMs: number,
+): ConnectionNote {
   return {
     key: `runs/${host.key}`,
     what: `the runs on ${host.label}`,
     connection: host.connection,
     feed: host.runsFeed,
     hasData: hasData(host),
+    staleForMs: staleForMs(host.freshness, nowMs),
     tryAgain: () => retry(host.key),
+  };
+}
+
+/** The note about one agent's steps on `host`, which share the host's connection. */
+function agentNote(
+  host: HostSnapshot,
+  agent: Agent,
+  names: ReturnType<typeof agentNames>,
+  props: {readonly nowMs: number; readonly retryHost: (host: string) => void},
+): ConnectionNote {
+  return {
+    key: `agent/${agent.id}`,
+    what: `the steps of ${nameOf(names, agent)}`,
+    connection: host.connection,
+    feed: host.agentFeeds[agent.id] ?? {_tag: 'Opening'},
+    hasData: Object.values(host.model.data.items).some(item => item.agentId === agent.id),
+    staleForMs: staleForMs(host.freshness, props.nowMs),
+    tryAgain: () => props.retryHost(host.key),
   };
 }
 
@@ -98,7 +126,7 @@ export function OrchestratorApp(props: {
   if (route.screen === 'runs') {
     return (
       <FleetScreen
-        hosts={hosts.map(fleetInput)}
+        hosts={hosts.map(host => fleetInput(host, props.nowMs))}
         place={props.fleet}
         nowMs={props.nowMs}
         go={go}
@@ -129,19 +157,8 @@ export function OrchestratorApp(props: {
   const names = agentNames(state, runId);
   const title = `${state.runs[runId]?.task ?? 'Run'}: ${agent === undefined ? RUN_TITLES[route.view] : nameOf(names, agent)}`;
   const notes = [
-    runsNote(host, props.retryHost),
-    ...(agent === undefined
-      ? []
-      : [
-          {
-            key: `agent/${agent.id}`,
-            what: `the steps of ${nameOf(names, agent)}`,
-            connection: host.connection,
-            feed: host.agentFeeds[agent.id] ?? ({_tag: 'Opening'} as const),
-            hasData: Object.values(state.items).some(item => item.agentId === agent.id),
-            tryAgain: () => props.retryHost(host.key),
-          } satisfies ConnectionNote,
-        ]),
+    runsNote(host, props.retryHost, props.nowMs),
+    ...(agent === undefined ? [] : [agentNote(host, agent, names, props)]),
   ];
   return (
     <Page key="run" width="fill" state="ready" header={<Text variant="title">{title}</Text>}>

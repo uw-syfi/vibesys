@@ -72,6 +72,8 @@ const pass = <F>(ports: FeedPorts, spec: FeedSpec<F>, firstOpen: boolean) =>
     const result = yield* spec.open(opened, firstOpen).pipe(
       Stream.mapEffect(frame =>
         Effect.gen(function* () {
+          // A frame is the host speaking: the host's freshness is as of now, whatever it says.
+          yield* ports.connection.heard;
           const model = yield* SubscriptionRef.updateAndGet(ports.model, m => spec.apply(m, frame));
           const gapped = spec.gapped(model);
           if (!gapped) inOrder += 1;

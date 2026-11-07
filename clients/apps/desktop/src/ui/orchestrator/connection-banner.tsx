@@ -6,7 +6,7 @@ import {
   freshnessOf,
   type HostConnectionState,
 } from '../../state/index.js';
-import {faultWord} from './words.js';
+import {faultWord, formatDuration} from './words.js';
 
 /** One thing about a connection a person should know, with the way to try again. */
 export interface ConnectionNote {
@@ -17,6 +17,8 @@ export interface ConnectionNote {
   readonly feed: FeedStatus;
   /** The screen already shows something read earlier, so the note says it may be out of date. */
   readonly hasData: boolean;
+  /** How long what is shown has been out of date, from the host's freshness; null while live. */
+  readonly staleForMs: number | null;
   readonly tryAgain: () => void;
 }
 
@@ -26,6 +28,8 @@ interface Say {
   readonly tone: 'muted' | 'warn';
   readonly fault: Fault | null;
   readonly canRetry: boolean;
+  /** How long what is shown has been out of date, when that is worth saying. */
+  readonly staleForMs?: number | null;
 }
 
 /** What to tell the person, or null when the connection is working and nothing needs saying. */
@@ -60,6 +64,7 @@ function sayAbout(note: ConnectionNote): Say | null {
       tone: 'warn',
       fault: connection.fault,
       canRetry: true,
+      staleForMs: note.staleForMs,
     };
   }
   const freshness = freshnessOf(connection, feed, hasData);
@@ -78,6 +83,7 @@ function sayAbout(note: ConnectionNote): Say | null {
     tone: 'muted',
     fault: null,
     canRetry: false,
+    staleForMs: note.staleForMs,
   };
 }
 
@@ -99,6 +105,12 @@ export function ConnectionBanner(props: {
         <Stack key={note.key} gap="space-2" align="start">
           <Text tone={say.tone}>{say.text}</Text>
           {say.context === undefined ? null : <Text variant="small">{say.context}</Text>}
+          {say.staleForMs === undefined || say.staleForMs === null ? null : (
+            <Text
+              tone="muted"
+              variant="small"
+            >{`Stale \u00b7 ${formatDuration(say.staleForMs)}`}</Text>
+          )}
           <Row gap="space-3" wrap>
             {say.fault === null ? null : (
               <Text tone="muted" variant="small">{`Details: ${say.fault.detail}`}</Text>

@@ -15,6 +15,7 @@ import * as Option from 'effect/Option';
 import * as Ref from 'effect/Ref';
 import type * as Scope from 'effect/Scope';
 import * as Semaphore from 'effect/Semaphore';
+import {ESTABLISH_BOUND_MS} from '../state/gateway-policy.js';
 import {remoteCommand} from '../state/remote-command.js';
 import {LinkFailed, type SpawnFailed} from './errors.js';
 import {ProcessSpawner, retire, type SpawnedProcess, spawnScoped} from './process.js';
@@ -196,7 +197,17 @@ export const makeSshLink = Effect.fn('SshLink.make')(function* (options: SshLink
       ? Effect.fail(releasedError)
       : attempts.withPermit(
           Effect.raceFirst(
-            bringUp(ssh, alias),
+            bringUp(ssh, alias).pipe(
+              Effect.timeoutOrElse({
+                duration: `${ESTABLISH_BOUND_MS} millis`,
+                orElse: () =>
+                  Effect.fail(
+                    linkDown(
+                      `bringing the connection to ${alias} up took longer than ${ESTABLISH_BOUND_MS / 1000} seconds`,
+                    ),
+                  ),
+              }),
+            ),
             Effect.andThen(
               Deferred.await(abandoned),
               Effect.fail(linkDown('the connection attempt was abandoned')),

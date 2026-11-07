@@ -30,6 +30,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | --- | --- | --- |
 | `internal/core` | State, `Decide`, the role table. No I/O, clock or randomness | Nothing of this module |
 | `internal/cost` | What a run has cost, worked out from its finished turns: the `Ledger` and its `View`. No I/O, clock or randomness | `core` |
+| `internal/window` | What happened in a run between two times (`Facts`): spend by type of agent, agents started and ended, measurements, the best of each objective at both ends, plans touched, reports posted. A check-in freezes it. No I/O, clock or randomness | `core`, `cost`, `search` |
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
 | `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `cost`, `gen` |
