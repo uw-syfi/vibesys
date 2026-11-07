@@ -99,14 +99,8 @@ function servedStandings(search: SearchState | undefined): ObjectiveStanding[] {
       return create(ObjectiveStandingSchema, {
         name,
         headValue: bound?.headValue === undefined ? value : finite(bound.headValue),
-        // The server serves the unit the measurements record. A search a screen test wrote by hand predates
-        // units and names only the bound's, so this Fake falls back to it until those tests state the
-        // measured unit (the screens' tests are item P's).
-        unit:
-          bound?.measuredUnit ||
-          search.series.find(each => each.objective === name)?.unit ||
-          bound?.versions.at(-1)?.unit ||
-          '',
+        // The server serves the unit the measurements record, and none when they record none.
+        unit: bound?.measuredUnit || search.series.find(each => each.objective === name)?.unit || '',
         boundUnit: bound?.versions.at(-1)?.unit ?? '',
         boundUnitCheck: bound?.unitCheck ?? BoundUnitCheck.UNSPECIFIED,
         headPercentOfBound: finite(bound?.percentOfBound),

@@ -5,6 +5,7 @@ import {
   AgentRole,
   AgentSchema,
   AgentStatus,
+  BoundUnitCheck,
   Direction,
   Harness,
   MessageSchema,
@@ -142,6 +143,9 @@ function stateOf(
                     ],
                     headValue: run.result.value,
                     bestValue: run.result.value,
+                    // The unit the measurements are counted in, as the host serves it.
+                    measuredUnit: run.result.unit,
+                    unitCheck: BoundUnitCheck.MATCH,
                     ...(run.result.percent === undefined
                       ? {}
                       : {
