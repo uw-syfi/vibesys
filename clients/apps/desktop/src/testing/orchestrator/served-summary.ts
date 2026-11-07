@@ -100,7 +100,8 @@ function servedStandings(search: SearchState | undefined): ObjectiveStanding[] {
         name,
         headValue: bound?.headValue === undefined ? value : finite(bound.headValue),
         // The server serves the unit the measurements record, and none when they record none.
-        unit: bound?.measuredUnit || search.series.find(each => each.objective === name)?.unit || '',
+        unit:
+          bound?.measuredUnit || search.series.find(each => each.objective === name)?.unit || '',
         boundUnit: bound?.versions.at(-1)?.unit ?? '',
         boundUnitCheck: bound?.unitCheck ?? BoundUnitCheck.UNSPECIFIED,
         headPercentOfBound: finite(bound?.percentOfBound),
