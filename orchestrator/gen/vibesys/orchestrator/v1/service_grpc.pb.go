@@ -28,6 +28,7 @@ const (
 	OrchestratorService_GetRunHistory_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
 	OrchestratorService_WatchRunCost_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
 	OrchestratorService_CheckRepository_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/CheckRepository"
+	OrchestratorService_WatchHostCost_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -61,6 +62,9 @@ type OrchestratorServiceClient interface {
 	// tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
 	// client can ask while its operator is still filling in the rest.
 	CheckRepository(ctx context.Context, in *CheckRepositoryRequest, opts ...grpc.CallOption) (*CheckRepositoryResponse, error)
+	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
+	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
+	WatchHostCost(ctx context.Context, in *WatchHostCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchHostCostResponse], error)
 }
 
 type orchestratorServiceClient struct {
@@ -188,6 +192,25 @@ func (c *orchestratorServiceClient) CheckRepository(ctx context.Context, in *Che
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) WatchHostCost(ctx context.Context, in *WatchHostCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchHostCostResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &OrchestratorService_ServiceDesc.Streams[3], OrchestratorService_WatchHostCost_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchHostCostRequest, WatchHostCostResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OrchestratorService_WatchHostCostClient = grpc.ServerStreamingClient[WatchHostCostResponse]
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -219,6 +242,9 @@ type OrchestratorServiceServer interface {
 	// tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
 	// client can ask while its operator is still filling in the rest.
 	CheckRepository(context.Context, *CheckRepositoryRequest) (*CheckRepositoryResponse, error)
+	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
+	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
+	WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -255,6 +281,9 @@ func (UnimplementedOrchestratorServiceServer) WatchRunCost(*WatchRunCostRequest,
 }
 func (UnimplementedOrchestratorServiceServer) CheckRepository(context.Context, *CheckRepositoryRequest) (*CheckRepositoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckRepository not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error {
+	return status.Error(codes.Unimplemented, "method WatchHostCost not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -418,6 +447,17 @@ func _OrchestratorService_CheckRepository_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_WatchHostCost_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchHostCostRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(OrchestratorServiceServer).WatchHostCost(m, &grpc.GenericServerStream[WatchHostCostRequest, WatchHostCostResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OrchestratorService_WatchHostCostServer = grpc.ServerStreamingServer[WatchHostCostResponse]
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -464,6 +504,11 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WatchRunCost",
 			Handler:       _OrchestratorService_WatchRunCost_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WatchHostCost",
+			Handler:       _OrchestratorService_WatchHostCost_Handler,
 			ServerStreams: true,
 		},
 	},

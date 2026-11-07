@@ -38,6 +38,7 @@ export {
   Unimplemented,
 } from './errors.js';
 export {faultOf} from './fault.js';
+export {type HostCostFeed, makeHostCostFeed} from './host-cost-feed.js';
 export {type HostSession, makeHostSession} from './host-session.js';
 export {Ids} from './ids.js';
 export {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';

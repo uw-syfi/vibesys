@@ -45,10 +45,18 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock
 
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
+_PROJECT_MODAL = [_UV_EXECUTABLE, "run", "--quiet", "modal"]
+"""The program that runs the candidate project's Modal CLI, before the CLI's arguments."""
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
+
+
+def _modal_arguments(argv: list[str]) -> list[str]:
+    """The Modal CLI arguments of one recorded run, after the program that runs the CLI."""
+    return argv[argv.index("modal") + 1 :]
 
 
 class AdvancingClock:
@@ -268,11 +276,11 @@ def _run_public_evaluator(
 
     def run(command: list[str]) -> SimpleNamespace:
         calls.append(command)
-        if command[3] == "deploy":
+        if _modal_arguments(command)[0] == "deploy":
             wall_clock.advance(_DEPLOY_SECONDS)
             stdout = options.get("deploy_stdout", _DEPLOY_STDOUT)
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
-        if command[3:5] == ["container", "list"]:
+        if _modal_arguments(command)[:2] == ["container", "list"]:
             return container_listing or _listing(
                 {
                     "app_name": "candidate-app",
@@ -305,8 +313,10 @@ def _run_public_evaluator(
 
 
 def _staged_archive(calls: list[list[str]]) -> tarfile.TarFile:
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
-    payload = base64.b64decode("".join(exec_command[11:]))
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
+    payload = base64.b64decode("".join(_modal_arguments(exec_command)[8:]))
     return tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz")
 
 
@@ -554,7 +564,7 @@ def test_extract_modal_web_url_handles_rich_line_wrapping() -> None:
     """
 
     assert (
-        modal_evaluator.extract_modal_web_url(output)
+        modal_evaluator.extract_modal_web_url(ProgramResult(0, output, ""))
         == "https://workspace--vibesys-long-endpoint.modal.run"
     )
 
@@ -568,14 +578,16 @@ def test_extract_modal_web_url_handles_deploy_tree_wrapping() -> None:
     """
 
     assert (
-        modal_evaluator.extract_modal_web_url(output)
+        modal_evaluator.extract_modal_web_url(ProgramResult(0, output, ""))
         == "https://vibeserve--vibesys-long-candidate-f51b76.modal.run"
     )
 
 
 def test_extract_modal_web_url_requires_endpoint() -> None:
     with pytest.raises(ValueError, match="did not print"):
-        modal_evaluator.extract_modal_web_url("App deployed without a web function")
+        modal_evaluator.extract_modal_web_url(
+            ProgramResult(0, "App deployed without a web function", "")
+        )
 
 
 def test_extract_modal_app_identifier_handles_rich_line_wrapping() -> None:
@@ -585,7 +597,10 @@ def test_extract_modal_app_identifier_handles_rich_line_wrapping() -> None:
     │ candidate
     """
 
-    assert modal_evaluator.extract_modal_app_identifier(output) == "vibesys-long-candidate"
+    assert (
+        modal_evaluator.extract_modal_app_identifier(ProgramResult(0, output, ""))
+        == "vibesys-long-candidate"
+    )
 
 
 def test_setup_command_encoding_round_trips_opaque_argv(
@@ -670,8 +685,10 @@ def test_evaluator_stages_inputs_and_relays_outputs(
     assert ".vibesys/tasks/demo/benchmark/benchmark.py" in names
     assert ".vibesys/tasks/demo/requirements.txt" in names
     assert "main.py" in names
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
-    assert str(outputs_parent / "result.json") in exec_command[9]
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
+    assert str(outputs_parent / "result.json") in _modal_arguments(exec_command)[6]
 
 
 def test_evaluator_does_not_stage_escaping_symlinks(
@@ -826,7 +843,7 @@ def test_evaluator_rejects_workspace_collision_with_framework_paths(
 
     result, calls = _run_public_evaluator(workspace, ["python", reserved], tmp_path, monkeypatch)
     assert result == 1
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
 
 
 def test_evaluator_rejects_oversized_inputs(
@@ -841,7 +858,7 @@ def test_evaluator_rejects_oversized_inputs(
     result, calls = _run_public_evaluator(workspace, ["python", "blob.bin"], tmp_path, monkeypatch)
 
     assert result == 1
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
 
 
 def test_evaluator_selects_matching_snake_case_container(
@@ -866,9 +883,11 @@ def test_evaluator_selects_matching_snake_case_container(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
 
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
     assert result == 0
-    assert exec_command[5] == "ta-123"
+    assert _modal_arguments(exec_command)[2] == "ta-123"
 
 
 def test_evaluator_selects_matching_title_case_container(
@@ -890,9 +909,11 @@ def test_evaluator_selects_matching_title_case_container(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
 
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
     assert result == 0
-    assert exec_command[5] == "ta-123"
+    assert _modal_arguments(exec_command)[2] == "ta-123"
 
 
 def _container(container_id: str, start_time: str) -> dict[str, str]:
@@ -926,9 +947,11 @@ def test_after_a_deploy_the_gate_runs_in_the_new_versions_container_not_an_older
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
 
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
     assert result == 0
-    assert exec_command[5] == "ta-new"
+    assert _modal_arguments(exec_command)[2] == "ta-new"
 
 
 @pytest.mark.regression
@@ -948,7 +971,7 @@ def test_after_a_deploy_an_older_or_unstarted_container_is_never_measured(
     )
 
     assert result == 1
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
     err = capsys.readouterr().err
     assert "no running container found for Modal app candidate-app" in err
     assert "no listed container started since this deploy began" in err
@@ -973,9 +996,11 @@ def test_a_deploy_that_changed_nothing_keeps_measuring_the_running_container(
         container_listing=_listing(_container("ta-running", _modal_start_time(-301))),
     )
 
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
     assert result == 0
-    assert exec_command[5] == "ta-running"
+    assert _modal_arguments(exec_command)[2] == "ta-running"
 
 
 def test_evaluator_reports_container_list_cli_error(
@@ -992,7 +1017,7 @@ def test_evaluator_reports_container_list_cli_error(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
     assert result == 1
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
     err = capsys.readouterr().err
     assert "container list exited 2: token expired" in err
     assert "capacity" not in err, "a listing that failed says nothing about capacity"
@@ -1018,7 +1043,7 @@ def test_evaluator_reports_missing_running_container(
     )
     assert result == 1
     assert len(health.urls) >= 2
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
     assert "no running container found" in capsys.readouterr().err
 
 
@@ -1053,7 +1078,7 @@ def test_container_discovery_waits_as_long_as_its_caller_bounds_it(
 
     assert result == 1
     assert clock.now() == bound
-    assert not any(call[3:5] == ["container", "exec"] for call in calls)
+    assert not any(_modal_arguments(call)[:2] == ["container", "exec"] for call in calls)
     err = capsys.readouterr().err
     assert (
         f"no running container found for Modal app candidate-app: none started within {bound:g} s; "
@@ -1101,7 +1126,7 @@ def test_a_readiness_timeout_says_whether_the_app_had_a_running_container(
     deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
 
     def run(argv: list[str]) -> SimpleNamespace:
-        return listing if argv[3:5] == ["container", "list"] else deploy
+        return listing if _modal_arguments(argv)[:2] == ["container", "list"] else deploy
 
     fake = _fake_host(run, health=ScriptedHealth(error=OSError("timed out")))
 
@@ -1115,7 +1140,7 @@ def test_a_readiness_timeout_says_whether_the_app_had_a_running_container(
     assert ("capacity" in err) == capacity
     assert (
         ProgramCall(
-            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )
@@ -1197,8 +1222,10 @@ def test_evaluator_bootstrap_runs_command_verbatim_and_relays_outputs(
         monkeypatch,
     )
     assert result == 0
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
-    script = exec_command[9]
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
+    script = _modal_arguments(exec_command)[6]
 
     assert "uv run python bench.py" in script
     assert str(result_path) in script
@@ -1252,8 +1279,10 @@ def test_evaluator_bootstrap_runs_setup_before_evaluator_and_quotes_argv(
         setup_command=["installer", "argument with spaces", "; touch nope"],
     )
     assert result == 0
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
-    script = exec_command[9]
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
+    script = _modal_arguments(exec_command)[6]
 
     setup = "installer 'argument with spaces' '; touch nope'"
     assert setup in script
@@ -1286,9 +1315,11 @@ def test_bootstrap_script_maps_setup_failure_to_distinct_exit(
     )
 
     assert result_code == 0
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
-    script = exec_command[9]
-    encoded = "".join(exec_command[11:])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
+    script = _modal_arguments(exec_command)[6]
+    encoded = "".join(_modal_arguments(exec_command)[8:])
     monkeypatch.undo()
     result = run_test_command(
         ["sh", "-c", script, "vibesys-eval", encoded],
@@ -1400,13 +1431,21 @@ def test_the_bootstrap_installs_uv_with_pip_else_runs_the_images_uv(
     image_uv.parent.mkdir()
     _write_executable(image_uv, "#!/bin/sh\necho 'uv from the image'\n")
     _result, calls = _run_public_evaluator(workspace, ["uv", "--version"], tmp_path, monkeypatch)
-    exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_command = next(
+        call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"]
+    )
     path = _bootstrap_path(
         tmp_path, pip_works=pip_works, image_uv=image_uv if image_has_uv else None
     )
 
     result = run_test_command(
-        ["sh", "-c", exec_command[9], "vibesys-eval", "".join(exec_command[11:])],
+        [
+            "sh",
+            "-c",
+            _modal_arguments(exec_command)[6],
+            "vibesys-eval",
+            "".join(_modal_arguments(exec_command)[8:]),
+        ],
         capture_output=True,
         check=False,
         env={"PATH": path},
@@ -1442,11 +1481,11 @@ def test_evaluator_execs_in_container_and_returns_sentinel_rc(
         exec_stdout="__VIBESYS_EXEC_RC__=3\n",
     )
 
-    exec_argv = next(call for call in calls if call[3:5] == ["container", "exec"])
+    exec_argv = next(call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"])
     assert result == 3
-    assert exec_argv[:6] == [_UV_EXECUTABLE, "run", "modal", "container", "exec", "ta-123"]
-    assert exec_argv[6:9] == ["--", "sh", "-c"]
-    assert "python checker.py" in exec_argv[9]
+    assert exec_argv[: len(_PROJECT_MODAL)] == _PROJECT_MODAL
+    assert _modal_arguments(exec_argv)[:6] == ["container", "exec", "ta-123", "--", "sh", "-c"]
+    assert "python checker.py" in _modal_arguments(exec_argv)[6]
 
 
 def test_evaluator_stages_package_and_includes_setup(
@@ -1470,8 +1509,8 @@ def test_evaluator_stages_package_and_includes_setup(
     )
 
     assert result == 0
-    exec_argv = next(call for call in calls if call[3:5] == ["container", "exec"])
-    assert "sh -c 'echo prepared'" in exec_argv[9]
+    exec_argv = next(call for call in calls if _modal_arguments(call)[:2] == ["container", "exec"])
+    assert "sh -c 'echo prepared'" in _modal_arguments(exec_argv)[6]
     with _staged_archive(calls) as archive:
         assert ".vibesys-evaluator-package/adapter.py" in archive.getnames()
 
@@ -1537,7 +1576,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     assert result == 0
     assert fake.programs.calls == [
         ProgramCall(
-            [_UV_EXECUTABLE, "run", "modal", "deploy", "/workspace/main.py"],
+            [*_PROJECT_MODAL, "deploy", "/workspace/main.py"],
             cwd="/workspace",
             timeout=None,
         ),
@@ -1712,9 +1751,7 @@ def test_run_evaluator_deploys_custom_entrypoint(monkeypatch: pytest.MonkeyPatch
     assert result == 0
     assert fake.programs.calls[0] == ProgramCall(
         [
-            _UV_EXECUTABLE,
-            "run",
-            "modal",
+            *_PROJECT_MODAL,
             "deploy",
             "/workspace/examples/deployment/service.py",
         ],
@@ -1788,7 +1825,7 @@ def test_run_evaluator_redeploys_when_lease_lacks_app_identifier(
     )
 
     assert result == 0
-    assert run.call_args_list[0].args[0][:4] == [_UV_EXECUTABLE, "run", "modal", "deploy"]
+    assert run.call_args_list[0].args[0][:5] == [*_PROJECT_MODAL, "deploy"]
     colocated.assert_called_once()
 
 
@@ -1820,7 +1857,7 @@ def test_run_evaluator_releases_reused_deployment_after_final_gate(
 
     assert result == 0
     assert fake.programs.calls[-1] == ProgramCall(
-        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+        [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1847,7 +1884,7 @@ def test_run_evaluator_releases_new_deployment_after_final_gate(
 
     assert result == 0
     assert fake.programs.calls[-1] == ProgramCall(
-        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+        [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1882,7 +1919,7 @@ def test_run_evaluator_stops_mismatched_leased_app_before_redeploy(
 
     assert result == 0
     assert fake.programs.calls[0] == ProgramCall(
-        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "old-app", "--yes"],
+        [*_PROJECT_MODAL, "app", "stop", "old-app", "--yes"],
         cwd="/workspace",
         timeout=60,
     )
@@ -1927,7 +1964,7 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
     logs = SimpleNamespace(returncode=0, stdout="RuntimeError: CUDA toolkit mismatch", stderr="")
 
     def run(command: list[str]) -> SimpleNamespace:
-        return logs if command[3:5] == ["app", "logs"] else deploy
+        return logs if _modal_arguments(command)[:2] == ["app", "logs"] else deploy
 
     fake = _fake_host(run, health=ScriptedHealth(status=503))
 
@@ -1937,13 +1974,15 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
 
     assert result == 1
     logs_fetched = [
-        call.argv[5] for call in fake.programs.calls if call.argv[3:5] == ["app", "logs"]
+        _modal_arguments(call.argv)[2]
+        for call in fake.programs.calls
+        if _modal_arguments(call.argv)[:2] == ["app", "logs"]
     ]
     assert logs_fetched == ["candidate-app"]
     assert "RuntimeError: CUDA toolkit mismatch" in capsys.readouterr().err
     assert (
         ProgramCall(
-            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )
@@ -2105,7 +2144,7 @@ def test_evaluator_relays_exec_stderr(
     (workspace / "main.py").write_text("app = object()\n")
 
     def run(command: list[str]) -> SimpleNamespace:
-        if command[3:5] == ["container", "list"]:
+        if _modal_arguments(command)[:2] == ["container", "list"]:
             listing = [{"app_name": "candidate-app", "container_id": "ta-123"}]
             return SimpleNamespace(returncode=0, stdout=json.dumps(listing), stderr="")
         return SimpleNamespace(returncode=0, stdout="__VIBESYS_EXEC_RC__=0\n", stderr="warn\n")
@@ -2162,7 +2201,7 @@ def test_reused_deployment_setup_failure_is_reported_and_released(
     assert "Modal evaluator setup failed: bad setup" in err
     assert fake.programs.calls == [
         ProgramCall(
-            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            [*_PROJECT_MODAL, "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             timeout=60,
         )

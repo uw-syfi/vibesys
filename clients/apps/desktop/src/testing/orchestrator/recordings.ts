@@ -5,6 +5,7 @@
  * applied but whose reply was lost) are `DaemonOptions`.
  */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {timestampMs} from '@bufbuild/protobuf/wkt';
 import {
   BuildVersionsSchema,
   CheckRepositoryRequestSchema,
@@ -31,6 +32,8 @@ import {
   SnapshotDetail,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
+  WatchHostCostRequestSchema,
+  WatchHostCostResponseSchema,
   WatchRunCostRequestSchema,
   WatchRunCostResponseSchema,
   WatchRunsRequestSchema,
@@ -181,6 +184,21 @@ function costSteps(
     return [{end: {message: `no run ${runId}`, status: RpcStatus.NOT_FOUND}}];
   }
   const frame = toBinary(WatchRunCostResponseSchema, create(WatchRunCostResponseSchema, {cost}));
+  return [{frame}, ...tail];
+}
+
+/** The one view of the host's cost the host would send when a stream opens, and then the stream. */
+function hostCostSteps(
+  daemon: FakeDaemon,
+  target: CallTarget,
+  tail: ReadonlyArray<Step>,
+): ReadonlyArray<Step> {
+  const {since} = fromBinary(WatchHostCostRequestSchema, target.request);
+  const cost = daemon.hostCostOf(since === undefined ? null : timestampMs(since));
+  if (cost === undefined) {
+    return [{end: {message: 'no host cost view for this window', status: RpcStatus.NOT_FOUND}}];
+  }
+  const frame = toBinary(WatchHostCostResponseSchema, create(WatchHostCostResponseSchema, {cost}));
   return [{frame}, ...tail];
 }
 
@@ -377,6 +395,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return watchAgent(target);
         case methodPathOf('WatchRunCost'):
           return costSteps(daemon, target, tail);
+        case methodPathOf('WatchHostCost'):
+          return hostCostSteps(daemon, target, tail);
         default:
           return [
             {end: {message: `unknown method ${target.method}`, status: RpcStatus.UNIMPLEMENTED}},

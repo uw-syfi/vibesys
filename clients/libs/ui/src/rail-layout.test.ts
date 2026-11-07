@@ -18,7 +18,7 @@ const px = (name: string): number => {
 };
 
 /** The rail's items are labelled, so the rail must be as wide as its longest label needs. */
-const LABELS = ['Runs', 'Settings'];
+const LABELS = ['Runs', 'Cost', 'Machines', 'Settings'];
 /** The widest an average caption glyph at medium weight is, in px. */
 const GLYPH_PX = 6;
 
@@ -27,6 +27,14 @@ describe('the rail', () => {
     const longest = Math.max(...LABELS.map(label => label.length)) * GLYPH_PX;
     const side = px('space-1');
     expect(px('rail') - 2 * side - 2).toBeGreaterThanOrEqual(longest);
+  });
+
+  test('holds its foot group at the end with a spacer, and scrolls rather than squeeze or overlap', () => {
+    expect(declarations('rail.css', '.vs-rail')).toContain('overflow-y: auto;');
+    expect(declarations('rail.css', '.vs-rail')).not.toContain('justify-content');
+    expect(declarations('rail.css', '.vs-rail-group')).toContain('flex: none;');
+    // The spacer grows into the free room and never shrinks below one step.
+    expect(declarations('base.css', '.vs-spacer')).toContain('flex: 1 0 var(--space-4);');
   });
 
   test('never wraps a label', () => {

@@ -76,13 +76,24 @@ func (f *costFeed) snapshot(state core.State, last uint64) (*pb.WatchRunCostResp
 	return f.view(run, last), nil
 }
 
-// readTurns adds every turn of a run to a ledger, a window at a time. A window holds the turns that
-// overlap it, so each follows from the start of the last turn of the one before, and the few turns
-// the two share are added twice, which a ledger counts once. A window that holds nothing past the
-// one before would be asked for forever, which more concurrent turns than a window holds would cause
-// and no run has, so it is an error and not a loop.
-func (e *Engine) readTurns(state core.State, run core.RunID, into *cost.Ledger) error {
-	var from time.Time
+// turnSink is what the turns of a run are read into: a run's Ledger, or a Host that counts the turns of
+// many runs.
+type turnSink interface {
+	Agent(core.Agent) bool
+	Add(core.Turn, core.Agent)
+}
+
+// readTurns adds every turn of a run to a sink.
+func (e *Engine) readTurns(state core.State, run core.RunID, into turnSink) error {
+	return e.readTurnsAfter(state, run, time.Time{}, into)
+}
+
+// readTurnsAfter adds the turns of a run that ended after from to a sink, a window at a time; the zero
+// time reads them all. A window holds the turns that overlap it, so each follows from the start of the
+// last turn of the one before, and the few turns the two share are added twice, which a ledger counts
+// once. A window that holds nothing past the one before would be asked for forever, which more
+// concurrent turns than a window holds would cause and no run has, so it is an error and not a loop.
+func (e *Engine) readTurnsAfter(state core.State, run core.RunID, from time.Time, into turnSink) error {
 	var reached *core.Turn
 	for {
 		window, err := e.Store.Turns(run, from, endOfTime, store.MaxWindowTurns)

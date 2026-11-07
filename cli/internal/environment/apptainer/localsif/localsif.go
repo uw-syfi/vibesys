@@ -4,7 +4,7 @@
 // found on PATH, builds a SIF of a docker archive in a directory of its own under the operator's
 // local scratch directory, with APPTAINER_TMPDIR and APPTAINER_CACHEDIR there too, renames the SIF
 // into the scratch directory's sif directory, where it is kept, and removes its own directory when
-// it ends.
+// it ends. A build is one process group, which ends whole: no process of it outlives Build.
 package localsif
 
 import (
@@ -21,28 +21,36 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 )
 
 // Program is the apptainer program's name, looked up on PATH.
 const Program = "apptainer"
 
-// stopGrace is how long a cancelled build has to remove its directory after SIGTERM before its
-// processes are killed.
-const stopGrace = 30 * time.Second
-
 // tailBytes bounds the end of a failed build's output that its error carries.
 const tailBytes = 4 << 10
 
 // Converter runs the machine's apptainer program. Create it with New.
-type Converter struct{ program string }
+type Converter struct {
+	program string
+	timers  clock.Timers
+	// grace is how long a cancelled build has after SIGTERM before every process of it is killed.
+	grace time.Duration
+}
 
 var _ apptainer.Converter = (*Converter)(nil)
 
 // New finds the apptainer program in the directories of pathList, the daemon's PATH, as the shell
-// would, or says to install it.
-func New(pathList string) (*Converter, error) {
+// would, or says to install it. timers measure grace: how long a cancelled build has to end after
+// SIGTERM before every process of it is killed, the operator's stop_grace_seconds, or
+// environment.DefaultGrace when it is zero.
+func New(pathList string, timers clock.Timers, grace time.Duration) (*Converter, error) {
+	if grace <= 0 {
+		grace = environment.DefaultGrace
+	}
 	for _, dir := range filepath.SplitList(pathList) {
 		if !filepath.IsAbs(dir) {
 			// A relative directory would be the daemon's working directory's, which is no one's choice.
@@ -50,7 +58,7 @@ func New(pathList string) (*Converter, error) {
 		}
 		path := filepath.Join(dir, Program)
 		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
-			return &Converter{program: path}, nil
+			return &Converter{program: path, timers: timers, grace: grace}, nil
 		}
 	}
 	return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
@@ -116,25 +124,31 @@ func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, erro
 // keptDir is the directory under the scratch directory that keeps the SIFs.
 const keptDir = "sif"
 
+// workPrefix starts the name of a build's own directory under the scratch directory.
+const workPrefix = "vibesys-sif."
+
 // buildScript builds the SIF of the docker archive on its standard input with the apptainer
-// program $2, in a directory of its own under $1, and renames it to $1/sif/$3 once it is whole;
-// apptainer's own output goes to standard error. The directory is removed when the script ends,
-// however it ends but killed outright; what a killed build left is removed by a later one after a
-// day, and so is a kept SIF.
+// program $2, in its own directory $4 under $1, and renames it to $1/sif/$3 once it is whole;
+// apptainer's own output goes to standard error. Build removes the directory once every process
+// of the build has ended; what a build of a process that died left is removed by a later one after
+// a day, and so is a kept SIF. On SIGTERM the shell waits for apptainer to end before it exits, so
+// that the end of the group's leader is the end of the build.
 const buildScript = `set -eu
 find "$1" -maxdepth 1 -name 'vibesys-sif.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
 mkdir -p "$1/sif"
 find "$1/sif" -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null || true
-d=$(mktemp -d "$1/vibesys-sif.XXXXXX")
-trap 'rm -rf "$d"' EXIT
+d="$4"
 trap 'exit 1' HUP INT TERM
 mkdir "$d/tmp" "$d/cache"
 cat > "$d/image.tar"
 APPTAINER_TMPDIR="$d/tmp" APPTAINER_CACHEDIR="$d/cache" "$2" build --force "$d/image.sif" "docker-archive:$d/image.tar" >&2
 mv -f "$d/image.sif" "$1/sif/$3"`
 
-// Build implements apptainer.Converter. A cancelled build is sent SIGTERM, every process of it,
-// so that it removes its directory, and is killed after stopGrace.
+// Build implements apptainer.Converter. The build runs as a process group of its own. A cancelled
+// build is sent SIGTERM, every process of it, and once its leader has ended, or the grace is over,
+// whatever is left of the group is killed; a build that ended by itself has what it left of the
+// group killed too. Build returns only then, and removes the build's directory, so a conversion cut
+// short by its bound leaves no apptainer or mksquashfs writing to the scratch directory.
 func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, name string) error {
 	if err := checkName(name); err != nil {
 		return err
@@ -142,14 +156,42 @@ func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, na
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return unavailable("cannot make the scratch directory %s: %v", dir, err)
 	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", buildScript, "vs-sif", dir, c.program, name)
+	work, err := os.MkdirTemp(dir, workPrefix)
+	if err != nil {
+		return unavailable("cannot make the build's directory in %s: %v", dir, err)
+	}
+	// Deferred first, so it runs last: after every process of the build has been killed.
+	defer func() { _ = os.RemoveAll(work) }()
+	cmd := exec.Command("/bin/sh", "-c", buildScript, "vs-sif", dir, c.program, name, work)
 	cmd.Stdin = archive
 	errs := &tail{}
 	cmd.Stdout, cmd.Stderr = errs, errs
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
-	cmd.WaitDelay = stopGrace
-	err := cmd.Run()
+	// Bounds the wait for the output and the archive's copy once the leader has ended: a process
+	// that left the group may hold the output open.
+	cmd.WaitDelay = c.grace
+	if err := cmd.Start(); err != nil {
+		return unavailable("cannot start %s: %v", c.program, err)
+	}
+	// The leader's process id is the group's, since it leads a group of its own.
+	pgid := cmd.Process.Pid
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	// The group no longer existing is the usual answer to a signal, for a build that ended.
+	defer func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) }()
+	select {
+	case err = <-exited:
+	case <-ctx.Done():
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
+		grace, stop := c.timers.Timeout(ctx, c.grace)
+		select {
+		case err = <-exited:
+		case <-grace:
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			err = <-exited
+		}
+		stop()
+	}
 	if err == nil {
 		return nil
 	}

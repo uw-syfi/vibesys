@@ -1,11 +1,5 @@
 /** What the settings screen says. Each closed set is named here, so a value added to one cannot reach the screen unnamed. */
 import type {AppearanceMode, ThemeName} from '@vibesys/ui/tokens';
-import type {SettingsTab} from '../../state/index.js';
-
-export const TAB_WORD: Readonly<Record<SettingsTab, string>> = {
-  appearance: 'Appearance',
-  resources: 'Resources',
-};
 
 export const MODE_WORD: Readonly<Record<AppearanceMode, string>> = {
   system: 'System',
