@@ -254,13 +254,25 @@ def _exclusive_evaluation() -> Generator[None]:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def extract_modal_web_url(output: str) -> str:
-    """Return the last Modal web endpoint printed by ``modal deploy``."""
+def _deploy_summary(deploy: ProgramResult) -> str:
+    """The deploy summary ``modal deploy`` printed, with Rich's layout removed.
+
+    Every Modal client renders that summary (the object tree with each web endpoint,
+    then the ``View Deployment`` URL as its last line) on standard output, so only that
+    stream is read. Removing the layout joins each line onto the one before it, which
+    undoes Rich's wrapping but cannot tell a wrapped continuation from another line: a
+    line from a second stream, such as ``uv run``'s ``Using CPython 3.12.3 interpreter
+    at: ...`` on standard error, would be glued onto the app name.
+    """
+    return _compact_rich_output(deploy.stdout)
+
+
+def extract_modal_web_url(deploy: ProgramResult) -> str:
+    """Return the last Modal web endpoint ``modal deploy`` printed in its summary."""
     # Rich may wrap a long endpoint between ``moda`` and ``l.run``. Removing
     # terminal layout is safe before matching because Modal hostnames contain
     # neither whitespace nor box-drawing characters.
-    compact = _compact_rich_output(output)
-    matches = _MODAL_WEB_URL.findall(compact)
+    matches = _MODAL_WEB_URL.findall(_deploy_summary(deploy))
     if not matches:
         message = "modal deploy did not print a *.modal.run web endpoint"
         raise ValueError(message)
@@ -275,10 +287,9 @@ def _modal_health_url(base_url: str) -> str:
     return f"{base_url}/health"
 
 
-def extract_modal_app_identifier(output: str) -> str:
-    """Return the deployed Modal app name printed by ``modal deploy``."""
-    compact = _compact_rich_output(output)
-    matches = _MODAL_DEPLOYMENT.findall(compact)
+def extract_modal_app_identifier(deploy: ProgramResult) -> str:
+    """Return the deployed Modal app name ``modal deploy`` printed in its summary."""
+    matches = _MODAL_DEPLOYMENT.findall(_deploy_summary(deploy))
     if not matches:
         message = "modal deploy did not print a deployment URL"
         raise ValueError(message)
@@ -348,8 +359,12 @@ class ModalHost:
 
 
 def _modal_cli(*arguments: str) -> tuple[str, ...]:
-    """The argv that runs the project's Modal CLI with ``arguments``."""
-    return (shutil.which("uv") or "uv", "run", "modal", *arguments)
+    """The argv that runs the project's Modal CLI with ``arguments``.
+
+    ``--quiet`` keeps uv's own progress lines (``Using CPython ... interpreter at``,
+    ``Installed N packages``) out of every command's output; uv still prints its errors.
+    """
+    return (shutil.which("uv") or "uv", "run", "--quiet", "modal", *arguments)
 
 
 def recent_modal_logs(app_identifier: str, *, workspace: str, programs: Programs) -> str:
@@ -826,8 +841,9 @@ def started_since_deploy(began: float, output: str) -> float | None:
     """The earliest start a container may have to run what ``modal deploy`` published. Total.
 
     ``began`` is this host's wall clock, in seconds since the epoch, just before the deploy ran.
-    None when the deploy ``output`` says it changed nothing: the running version is then the
-    candidate, so any container of the app runs it.
+    None when ``output``, what the deploy printed on standard output (Modal's own summary, see
+    ``_deploy_summary``), says it changed nothing: the running version is then the candidate,
+    so any container of the app runs it.
     """
     if _MODAL_DEPLOY_SKIPPED in _compact_rich_output(output):
         return None
@@ -1336,8 +1352,8 @@ def _deploy_and_wait_for_health(
 
     app_identifier: str | None = None
     try:
-        base_url = extract_modal_web_url(deploy_output)
-        app_identifier = extract_modal_app_identifier(deploy_output)
+        base_url = extract_modal_web_url(deploy)
+        app_identifier = extract_modal_app_identifier(deploy)
         wait_for_health(
             base_url,
             timeout_seconds=readiness_timeout_seconds,
@@ -1348,12 +1364,12 @@ def _deploy_and_wait_for_health(
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000222 [T201]; setup failure diagnostics are reported to the invoking CLI.
         if app_identifier is None:
             with suppress(ValueError):
-                app_identifier = extract_modal_app_identifier(deploy_output)
+                app_identifier = extract_modal_app_identifier(deploy)
         if app_identifier is not None:
             if isinstance(exc, TimeoutError):
                 _report_unready_container(
                     _Deployment(
-                        base_url, app_identifier, started_since_deploy(deploy_began, deploy_output)
+                        base_url, app_identifier, started_since_deploy(deploy_began, deploy.stdout)
                     ),
                     workspace=workspace,
                     waited_seconds=readiness_timeout_seconds,
@@ -1366,7 +1382,7 @@ def _deploy_and_wait_for_health(
             )
             _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
         return 1
-    return _Deployment(base_url, app_identifier, started_since_deploy(deploy_began, deploy_output))
+    return _Deployment(base_url, app_identifier, started_since_deploy(deploy_began, deploy.stdout))
 
 
 def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913]; This phase shares the validated argv/path/setup values across fresh and reused deployments; another request wrapper would duplicate run_evaluator's CLI options.
