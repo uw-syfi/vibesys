@@ -44,6 +44,9 @@ type SavedResult struct {
 // PutPlan stores a plan, new or replaced.
 type PutPlan struct{ Plan core.Plan }
 
+// PutWorkstream stores a workstream, new or replaced.
+type PutWorkstream struct{ Workstream core.Workstream }
+
 // AddPromotion appends a promotion. Seq is its position in the record, from 1.
 type AddPromotion struct {
 	Seq       uint64
@@ -66,13 +69,14 @@ type AddLog struct {
 	Data   []byte
 }
 
-func (PutJob) change()       {}
-func (PutPlan) change()      {}
-func (AddPromotion) change() {}
-func (AddBound) change()     {}
-func (SetFrontier) change()  {}
-func (AddEvent) change()     {}
-func (AddLog) change()       {}
+func (PutJob) change()        {}
+func (PutPlan) change()       {}
+func (PutWorkstream) change() {}
+func (AddPromotion) change()  {}
+func (AddBound) change()      {}
+func (SetFrontier) change()   {}
+func (AddEvent) change()      {}
+func (AddLog) change()        {}
 
 // Snapshot is the state a Ledger is rebuilt from: everything durable except the bodies of events
 // and logs, which a Ledger only counts.
@@ -81,6 +85,8 @@ type Snapshot struct {
 	Results    []SavedResult
 	Plans      []core.Plan
 	Promotions []core.Promotion
+	// Workstreams are the task's workstreams, in the order of their numbers.
+	Workstreams []core.Workstream
 	// Bounds is the log of declared bounds, in the order of its places.
 	Bounds []core.Bound
 	// Frontier is the frontier at its last revision, the zero Frontier when it never changed.
@@ -93,18 +99,19 @@ type Snapshot struct {
 
 // Ledger is the state of one store. It is not safe for concurrent use.
 type Ledger struct {
-	rules      store.Rules
-	jobs       []core.Job // job number n is jobs[n-1]
-	jobIndex   map[core.JobID]int
-	byKey      map[core.JobKey][]int // indexes into jobs, ascending
-	results    []SavedResult         // by Seq
-	resultOf   map[core.JobID]int    // index into results
-	plans      []core.Plan           // plan number n is plans[n-1]
-	promotions []core.Promotion
-	bounds     []core.Bound // the bound at place n is bounds[n-1]
-	frontier   core.Frontier
-	events     map[core.RunID]uint64
-	logs       map[core.JobID]uint64
+	rules       store.Rules
+	jobs        []core.Job // job number n is jobs[n-1]
+	jobIndex    map[core.JobID]int
+	byKey       map[core.JobKey][]int // indexes into jobs, ascending
+	results     []SavedResult         // by Seq
+	resultOf    map[core.JobID]int    // index into results
+	plans       []core.Plan           // plan number n is plans[n-1]
+	workstreams []core.Workstream     // workstream number n is workstreams[n-1]
+	promotions  []core.Promotion
+	bounds      []core.Bound // the bound at place n is bounds[n-1]
+	frontier    core.Frontier
+	events      map[core.RunID]uint64
+	logs        map[core.JobID]uint64
 }
 
 // New returns an empty Ledger that applies the rules. A nil rules.Reuse accepts any saved result
@@ -398,6 +405,9 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 	if err := np.Origin.Check("plan.origin"); err != nil {
 		return nil, none, err
 	}
+	if np.Workstream != 0 && !l.hasWorkstream(np.Workstream) {
+		return nil, none, noWorkstream(np.Workstream)
+	}
 	origin := np.Origin
 	plan := core.Plan{
 		Number:      core.PlanNumber(len(l.plans) + 1),
@@ -407,6 +417,7 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 		CreatedAt:   origin.At,
 		UpdatedAt:   origin.At,
 		GainBound:   np.GainBound,
+		Workstream:  np.Workstream,
 		Origin:      &origin,
 		Transitions: []core.PlanTransition{{Status: core.PlanOpen, Origin: origin}},
 	}
@@ -430,6 +441,9 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if edit.Status != nil && !edit.Status.Valid() {
 		return nil, none, invalid("edit.Status", fmt.Sprintf("%q is not a plan status", *edit.Status))
 	}
+	if edit.Workstream != nil && !l.hasWorkstream(*edit.Workstream) {
+		return nil, none, noWorkstream(*edit.Workstream)
+	}
 	plan := Copy(l.plans[number-1])
 	if edit.Title != nil {
 		plan.Title = *edit.Title
@@ -443,6 +457,9 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	}
 	if edit.GainBound != nil {
 		plan.GainBound = edit.GainBound
+	}
+	if edit.Workstream != nil {
+		plan.Workstream = *edit.Workstream
 	}
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)
@@ -494,6 +511,13 @@ func (l *Ledger) Apply(c Change) {
 		} else {
 			l.plans[plan.Number-1] = plan
 		}
+	case PutWorkstream:
+		w := Copy(c.Workstream)
+		if int(w.Number) > len(l.workstreams) {
+			l.workstreams = append(l.workstreams, w)
+		} else {
+			l.workstreams[w.Number-1] = w
+		}
 	case AddPromotion:
 		l.promotions = append(l.promotions, Copy(c.Promotion))
 	case AddBound:
@@ -529,6 +553,16 @@ func (l *Ledger) putJob(job core.Job) {
 }
 
 func (l *Ledger) hasPlan(n core.PlanNumber) bool { return n >= 1 && int(n) <= len(l.plans) }
+
+func (l *Ledger) hasWorkstream(n core.WorkstreamNumber) bool {
+	return n >= 1 && int(n) <= len(l.workstreams)
+}
+
+// noWorkstream is the refusal of a number that names no workstream of the task. It names the flag
+// that gave the number, which is the only way an agent gives one.
+func noWorkstream(n core.WorkstreamNumber) error {
+	return notFound("--workstream %d: this task has no workstream %d; workstream list shows the ones it has", n, n)
+}
 
 // Job returns one job.
 func (l *Ledger) Job(id core.JobID) (core.Job, error) {
@@ -606,6 +640,83 @@ func (l *Ledger) Plans(f core.PlanFilter) []core.Plan {
 			continue
 		}
 		out = append(out, Copy(plan))
+	}
+	return out
+}
+
+// StartWorkstream decides starting a workstream: the one that is not closed and has the title is
+// returned, with nothing to change, and otherwise a new active workstream has the next number. The
+// choice is made here, on the ledger as it is, so two starts of one title cannot both make one.
+func (l *Ledger) StartWorkstream(nw core.NewWorkstream) (Change, core.StartedWorkstream, error) {
+	var none core.StartedWorkstream
+	nw, err := Hold("workstream", nw)
+	if err != nil {
+		return nil, none, err
+	}
+	if err := nw.Check(); err != nil {
+		return nil, none, err
+	}
+	for _, w := range l.workstreams {
+		if w.Named(nw.Title) {
+			return nil, core.StartedWorkstream{Workstream: Copy(w)}, nil
+		}
+	}
+	w := core.Workstream{
+		Number: core.WorkstreamNumber(len(l.workstreams) + 1), Title: nw.Title, Status: core.WorkstreamActive,
+		Origin: nw.Origin, UpdatedAt: nw.Origin.At,
+	}
+	return PutWorkstream{Workstream: w}, core.StartedWorkstream{Workstream: Copy(w), Created: true}, nil
+}
+
+// EditWorkstream decides an edit as one change. An edit that leaves the workstream as it is yields
+// no Change, so its update time says when it last changed. An edit that would give a workstream that
+// is not closed the title of another is refused as a conflict.
+func (l *Ledger) EditWorkstream(number core.WorkstreamNumber, edit core.WorkstreamEdit) (Change, core.Workstream, error) {
+	var none core.Workstream
+	edit, err := Hold("edit", edit)
+	if err != nil {
+		return nil, none, err
+	}
+	if !l.hasWorkstream(number) {
+		return nil, none, notFound("workstream %d", number)
+	}
+	if edit.At.IsZero() {
+		return nil, none, invalid("edit.At", "an edit has the time it was made")
+	}
+	old := l.workstreams[number-1]
+	w := Copy(old)
+	if edit.Title != nil {
+		w.Title = *edit.Title
+	}
+	if edit.Status != nil {
+		w.Status = *edit.Status
+	}
+	if edit.Note != nil {
+		w.Note = *edit.Note
+	}
+	if err := w.Check(); err != nil {
+		return nil, none, err
+	}
+	if w.Title == old.Title && w.Status == old.Status && w.Note == old.Note {
+		return nil, Copy(old), nil
+	}
+	for _, other := range l.workstreams {
+		if other.Number != number && other.Named(w.Title) && w.Status != core.WorkstreamClosed {
+			return nil, none, conflict("workstream %d is already called %q (workstream %d); a title is in use by one workstream that is not closed", other.Number, other.Title, other.Number)
+		}
+	}
+	w.UpdatedAt = edit.At
+	return PutWorkstream{Workstream: w}, Copy(w), nil
+}
+
+// Workstreams returns the workstreams matching the filter, by number.
+func (l *Ledger) Workstreams(f core.WorkstreamFilter) []core.Workstream {
+	var out []core.Workstream
+	for _, w := range l.workstreams {
+		if len(f.Statuses) > 0 && !slices.Contains(f.Statuses, w.Status) {
+			continue
+		}
+		out = append(out, Copy(w))
 	}
 	return out
 }

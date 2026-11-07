@@ -200,6 +200,21 @@ func (e *Engine) EditPlan(ctx context.Context, number core.PlanNumber, edit core
 	return write(e, ctx, func(l *Ledger) (Change, core.Plan, error) { return l.EditPlan(number, edit) })
 }
 
+// StartWorkstream implements store.WorkstreamStore.
+func (e *Engine) StartWorkstream(ctx context.Context, w core.NewWorkstream) (core.StartedWorkstream, error) {
+	return write(e, ctx, func(l *Ledger) (Change, core.StartedWorkstream, error) { return l.StartWorkstream(w) })
+}
+
+// Workstreams implements store.WorkstreamStore.
+func (e *Engine) Workstreams(ctx context.Context, filter core.WorkstreamFilter) ([]core.Workstream, error) {
+	return read(e, ctx, func(l *Ledger) ([]core.Workstream, error) { return l.Workstreams(filter), nil })
+}
+
+// EditWorkstream implements store.WorkstreamStore.
+func (e *Engine) EditWorkstream(ctx context.Context, number core.WorkstreamNumber, edit core.WorkstreamEdit) (core.Workstream, error) {
+	return write(e, ctx, func(l *Ledger) (Change, core.Workstream, error) { return l.EditWorkstream(number, edit) })
+}
+
 // DeclareBound implements store.BoundStore.
 func (e *Engine) DeclareBound(ctx context.Context, bound core.NewBound) (core.Bound, error) {
 	return write(e, ctx, func(l *Ledger) (Change, core.Bound, error) { return l.DeclareBound(bound) })
@@ -258,6 +273,7 @@ func (e *Engine) ReadLog(ctx context.Context, id core.JobID, offset uint64, max 
 func (e *Engine) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
 	return read(e, ctx, func(l *Ledger) (store.TaskSnapshot, error) {
 		return store.TaskSnapshot{Revision: e.revision, Jobs: l.Jobs(core.JobFilter{}),
-			Results: l.Results(core.ResultFilter{}), Promotions: l.Promotions(), Plans: l.Plans(core.PlanFilter{}), Bounds: l.Bounds()}, nil
+			Results: l.Results(core.ResultFilter{}), Promotions: l.Promotions(), Plans: l.Plans(core.PlanFilter{}),
+			Workstreams: l.Workstreams(core.WorkstreamFilter{}), Bounds: l.Bounds()}, nil
 	})
 }

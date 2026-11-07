@@ -236,14 +236,32 @@ func FuzzDecodePlan(f *testing.F) {
 		&cliv1.Plan{Number: 2, Status: cliv1.PlanStatus_PLAN_STATUS_WON, Comments: []*cliv1.PlanComment{{Text: "c", Agent: "a"}}},
 		&cliv1.Plan{Status: 99},
 		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_PARKED, GainBound: &cliv1.PlanGainBound{Share: 0.05, RelativeTo: cliv1.PlanGainReference_PLAN_GAIN_REFERENCE_HEADLINE}},
+		&cliv1.Plan{
+			Number: 4, Status: cliv1.PlanStatus_PLAN_STATUS_WON, Workstream: 2,
+			Origin: &cliv1.RecordOrigin{RunId: "run-1", Agent: "lead", At: timestamppb.New(time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC))},
+			Transitions: []*cliv1.PlanTransition{
+				{Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Origin: &cliv1.RecordOrigin{At: timestamppb.New(time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC))}},
+				{Status: 99, Origin: &cliv1.RecordOrigin{Agent: "a"}},
+			},
+		},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
 		decode(t, data, message)
+		// A plan is refused exactly when its status, the status of one of its transitions, or its
+		// gain bound is one that is refused alone.
 		_, statusErr := wire.ToPlanStatus("status", message.GetStatus())
+		for _, tr := range message.GetTransitions() {
+			if _, err := wire.ToPlanStatus("transition", tr.GetStatus()); err != nil {
+				statusErr = err
+			}
+		}
+		if _, err := wire.ToGainBound("gain_bound", message.GetGainBound()); err != nil {
+			statusErr = err
+		}
 		first, err := wire.ToPlan(message)
 		if (err != nil) != (statusErr != nil) {
-			t.Fatalf("a plan with status %s: ToPlan error %v, ToPlanStatus error %v; they must agree", message.GetStatus(), err, statusErr)
+			t.Fatalf("a plan with status %s: ToPlan error %v, error of its parts %v; they must agree", message.GetStatus(), err, statusErr)
 		}
 		if err != nil {
 			return
@@ -292,6 +310,67 @@ func FuzzDecodeBound(f *testing.F) {
 		}
 		if !reflect.DeepEqual(again, first) {
 			t.Fatalf("a decoded bound changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+func FuzzDecodeWorkstream(f *testing.F) {
+	at := timestamppb.New(time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC))
+	valid := &cliv1.Workstream{
+		Number: 2, Title: "KV cache layout", Status: cliv1.WorkstreamStatus_WORKSTREAM_STATUS_PAUSED, Note: "paused: accuracy gate",
+		Origin: &cliv1.RecordOrigin{RunId: "run-1", Agent: "lead", At: at}, UpdatedAt: at,
+	}
+	seedMessages(f, &cliv1.Workstream{}, valid,
+		&cliv1.Workstream{Number: 1, Title: "x", Status: 99},
+		&cliv1.Workstream{Number: 1, Title: "  padded  ", Status: cliv1.WorkstreamStatus_WORKSTREAM_STATUS_ACTIVE},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.Workstream{}
+		decode(t, data, message)
+		_, statusErr := wire.ToWorkstreamStatus("status", message.GetStatus())
+		first, err := wire.ToWorkstream("workstream", message)
+		if (err != nil) != (statusErr != nil) {
+			t.Fatalf("a workstream with status %s: ToWorkstream error %v, ToWorkstreamStatus error %v; they must agree", message.GetStatus(), err, statusErr)
+		}
+		if err != nil {
+			if !strings.Contains(err.Error(), "workstream.status") {
+				t.Fatalf("the refusal %q does not name the field", err)
+			}
+			return
+		}
+		if !first.Status.Valid() {
+			t.Fatalf("a decoded workstream has the status %q, which is not a status", first.Status)
+		}
+		again, err := wire.ToWorkstream("workstream", wire.Workstream(first))
+		if err != nil {
+			t.Fatalf("a decoded workstream %+v is refused once encoded again: %v", first, err)
+		}
+		if !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded workstream changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+func FuzzDecodeWorkstreamFilter(f *testing.F) {
+	seedMessages(f,
+		&cliv1.ListWorkstreamsRequest{},
+		&cliv1.ListWorkstreamsRequest{Statuses: []cliv1.WorkstreamStatus{cliv1.WorkstreamStatus_WORKSTREAM_STATUS_ACTIVE, cliv1.WorkstreamStatus_WORKSTREAM_STATUS_CLOSED}},
+		&cliv1.ListWorkstreamsRequest{Statuses: []cliv1.WorkstreamStatus{99, -1, 0}},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.ListWorkstreamsRequest{}
+		decode(t, data, message)
+		filter, err := wire.ToWorkstreamFilter(message)
+		if err != nil {
+			return
+		}
+		if len(filter.Statuses) != len(message.GetStatuses()) {
+			t.Fatalf("a decoded filter has %d statuses for %d sent", len(filter.Statuses), len(message.GetStatuses()))
+		}
+		for _, s := range filter.Statuses {
+			if !s.Valid() {
+				t.Fatalf("a decoded filter has the status %q, which is not a status", s)
+			}
 		}
 	})
 }

@@ -235,6 +235,59 @@ func (x *PlanFile) GetPlan() *Plan {
 	return nil
 }
 
+// WorkstreamFile is workstreams/<number>.json: one workstream, replaced whole on each change.
+type WorkstreamFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Format        int32                  `protobuf:"varint,1,opt,name=format,proto3" json:"format,omitempty"`
+	Workstream    *Workstream            `protobuf:"bytes,2,opt,name=workstream,proto3" json:"workstream,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkstreamFile) Reset() {
+	*x = WorkstreamFile{}
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkstreamFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkstreamFile) ProtoMessage() {}
+
+func (x *WorkstreamFile) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkstreamFile.ProtoReflect.Descriptor instead.
+func (*WorkstreamFile) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WorkstreamFile) GetFormat() int32 {
+	if x != nil {
+		return x.Format
+	}
+	return 0
+}
+
+func (x *WorkstreamFile) GetWorkstream() *Workstream {
+	if x != nil {
+		return x.Workstream
+	}
+	return nil
+}
+
 // PromotionFile is promotions/<n>.json: the nth promotion.
 type PromotionFile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -247,7 +300,7 @@ type PromotionFile struct {
 
 func (x *PromotionFile) Reset() {
 	*x = PromotionFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +312,7 @@ func (x *PromotionFile) String() string {
 func (*PromotionFile) ProtoMessage() {}
 
 func (x *PromotionFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +325,7 @@ func (x *PromotionFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PromotionFile.ProtoReflect.Descriptor instead.
 func (*PromotionFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PromotionFile) GetFormat() int32 {
@@ -309,7 +362,7 @@ type BoundFile struct {
 
 func (x *BoundFile) Reset() {
 	*x = BoundFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +374,7 @@ func (x *BoundFile) String() string {
 func (*BoundFile) ProtoMessage() {}
 
 func (x *BoundFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +387,7 @@ func (x *BoundFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoundFile.ProtoReflect.Descriptor instead.
 func (*BoundFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BoundFile) GetFormat() int32 {
@@ -364,7 +417,7 @@ type FrontierFile struct {
 
 func (x *FrontierFile) Reset() {
 	*x = FrontierFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +429,7 @@ func (x *FrontierFile) String() string {
 func (*FrontierFile) ProtoMessage() {}
 
 func (x *FrontierFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +442,7 @@ func (x *FrontierFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrontierFile.ProtoReflect.Descriptor instead.
 func (*FrontierFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *FrontierFile) GetFormat() int32 {
@@ -424,7 +477,7 @@ type EventFile struct {
 
 func (x *EventFile) Reset() {
 	*x = EventFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +489,7 @@ func (x *EventFile) String() string {
 func (*EventFile) ProtoMessage() {}
 
 func (x *EventFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +502,7 @@ func (x *EventFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventFile.ProtoReflect.Descriptor instead.
 func (*EventFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *EventFile) GetFormat() int32 {
@@ -484,7 +537,7 @@ type OwnerFile struct {
 
 func (x *OwnerFile) Reset() {
 	*x = OwnerFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -496,7 +549,7 @@ func (x *OwnerFile) String() string {
 func (*OwnerFile) ProtoMessage() {}
 
 func (x *OwnerFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -509,7 +562,7 @@ func (x *OwnerFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OwnerFile.ProtoReflect.Descriptor instead.
 func (*OwnerFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OwnerFile) GetFormat() int32 {
@@ -566,7 +619,7 @@ type TaskFile struct {
 
 func (x *TaskFile) Reset() {
 	*x = TaskFile{}
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +631,7 @@ func (x *TaskFile) String() string {
 func (*TaskFile) ProtoMessage() {}
 
 func (x *TaskFile) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_store_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_store_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +644,7 @@ func (x *TaskFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFile.ProtoReflect.Descriptor instead.
 func (*TaskFile) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_store_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TaskFile) GetFormat() int32 {
@@ -619,7 +672,7 @@ var File_vibesys_cli_v1_store_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_store_proto_rawDesc = "" +
 	"\n" +
-	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\"-\n" +
+	"\x1avibesys/cli/v1/store.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1avibesys/cli/v1/event.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1fvibesys/cli/v1/workstream.proto\"-\n" +
 	"\n" +
 	"FormatFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\"Y\n" +
@@ -633,7 +686,12 @@ const file_vibesys_cli_v1_store_proto_rawDesc = "" +
 	"\x06result\x18\x03 \x01(\v2\x16.vibesys.cli.v1.ResultB\x06\xbaH\x03\xc8\x01\x01R\x06result\"]\n" +
 	"\bPlanFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x120\n" +
-	"\x04plan\x18\x02 \x01(\v2\x14.vibesys.cli.v1.PlanB\x06\xbaH\x03\xc8\x01\x01R\x04plan\"\x8c\x01\n" +
+	"\x04plan\x18\x02 \x01(\v2\x14.vibesys.cli.v1.PlanB\x06\xbaH\x03\xc8\x01\x01R\x04plan\"u\n" +
+	"\x0eWorkstreamFile\x12\x1f\n" +
+	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12B\n" +
+	"\n" +
+	"workstream\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.WorkstreamB\x06\xbaH\x03\xc8\x01\x01R\n" +
+	"workstream\"\x8c\x01\n" +
 	"\rPromotionFile\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x19\n" +
 	"\x03seq\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12?\n" +
@@ -676,39 +734,42 @@ func file_vibesys_cli_v1_store_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_store_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_vibesys_cli_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_vibesys_cli_v1_store_proto_goTypes = []any{
 	(*FormatFile)(nil),     // 0: vibesys.cli.v1.FormatFile
 	(*JobFile)(nil),        // 1: vibesys.cli.v1.JobFile
 	(*ResultFile)(nil),     // 2: vibesys.cli.v1.ResultFile
 	(*PlanFile)(nil),       // 3: vibesys.cli.v1.PlanFile
-	(*PromotionFile)(nil),  // 4: vibesys.cli.v1.PromotionFile
-	(*BoundFile)(nil),      // 5: vibesys.cli.v1.BoundFile
-	(*FrontierFile)(nil),   // 6: vibesys.cli.v1.FrontierFile
-	(*EventFile)(nil),      // 7: vibesys.cli.v1.EventFile
-	(*OwnerFile)(nil),      // 8: vibesys.cli.v1.OwnerFile
-	(*TaskFile)(nil),       // 9: vibesys.cli.v1.TaskFile
-	(*Job)(nil),            // 10: vibesys.cli.v1.Job
-	(*Result)(nil),         // 11: vibesys.cli.v1.Result
-	(*Plan)(nil),           // 12: vibesys.cli.v1.Plan
-	(*Promotion)(nil),      // 13: vibesys.cli.v1.Promotion
-	(*ObjectiveBound)(nil), // 14: vibesys.cli.v1.ObjectiveBound
-	(*FrontierMember)(nil), // 15: vibesys.cli.v1.FrontierMember
-	(*Event)(nil),          // 16: vibesys.cli.v1.Event
+	(*WorkstreamFile)(nil), // 4: vibesys.cli.v1.WorkstreamFile
+	(*PromotionFile)(nil),  // 5: vibesys.cli.v1.PromotionFile
+	(*BoundFile)(nil),      // 6: vibesys.cli.v1.BoundFile
+	(*FrontierFile)(nil),   // 7: vibesys.cli.v1.FrontierFile
+	(*EventFile)(nil),      // 8: vibesys.cli.v1.EventFile
+	(*OwnerFile)(nil),      // 9: vibesys.cli.v1.OwnerFile
+	(*TaskFile)(nil),       // 10: vibesys.cli.v1.TaskFile
+	(*Job)(nil),            // 11: vibesys.cli.v1.Job
+	(*Result)(nil),         // 12: vibesys.cli.v1.Result
+	(*Plan)(nil),           // 13: vibesys.cli.v1.Plan
+	(*Workstream)(nil),     // 14: vibesys.cli.v1.Workstream
+	(*Promotion)(nil),      // 15: vibesys.cli.v1.Promotion
+	(*ObjectiveBound)(nil), // 16: vibesys.cli.v1.ObjectiveBound
+	(*FrontierMember)(nil), // 17: vibesys.cli.v1.FrontierMember
+	(*Event)(nil),          // 18: vibesys.cli.v1.Event
 }
 var file_vibesys_cli_v1_store_proto_depIdxs = []int32{
-	10, // 0: vibesys.cli.v1.JobFile.job:type_name -> vibesys.cli.v1.Job
-	11, // 1: vibesys.cli.v1.ResultFile.result:type_name -> vibesys.cli.v1.Result
-	12, // 2: vibesys.cli.v1.PlanFile.plan:type_name -> vibesys.cli.v1.Plan
-	13, // 3: vibesys.cli.v1.PromotionFile.promotion:type_name -> vibesys.cli.v1.Promotion
-	14, // 4: vibesys.cli.v1.BoundFile.bound:type_name -> vibesys.cli.v1.ObjectiveBound
-	15, // 5: vibesys.cli.v1.FrontierFile.members:type_name -> vibesys.cli.v1.FrontierMember
-	16, // 6: vibesys.cli.v1.EventFile.event:type_name -> vibesys.cli.v1.Event
-	7,  // [7:7] is the sub-list for method output_type
-	7,  // [7:7] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	11, // 0: vibesys.cli.v1.JobFile.job:type_name -> vibesys.cli.v1.Job
+	12, // 1: vibesys.cli.v1.ResultFile.result:type_name -> vibesys.cli.v1.Result
+	13, // 2: vibesys.cli.v1.PlanFile.plan:type_name -> vibesys.cli.v1.Plan
+	14, // 3: vibesys.cli.v1.WorkstreamFile.workstream:type_name -> vibesys.cli.v1.Workstream
+	15, // 4: vibesys.cli.v1.PromotionFile.promotion:type_name -> vibesys.cli.v1.Promotion
+	16, // 5: vibesys.cli.v1.BoundFile.bound:type_name -> vibesys.cli.v1.ObjectiveBound
+	17, // 6: vibesys.cli.v1.FrontierFile.members:type_name -> vibesys.cli.v1.FrontierMember
+	18, // 7: vibesys.cli.v1.EventFile.event:type_name -> vibesys.cli.v1.Event
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_store_proto_init() }
@@ -723,13 +784,14 @@ func file_vibesys_cli_v1_store_proto_init() {
 	file_vibesys_cli_v1_plan_proto_init()
 	file_vibesys_cli_v1_promote_proto_init()
 	file_vibesys_cli_v1_result_proto_init()
+	file_vibesys_cli_v1_workstream_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_store_proto_rawDesc), len(file_vibesys_cli_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

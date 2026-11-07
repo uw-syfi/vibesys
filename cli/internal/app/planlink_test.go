@@ -61,7 +61,7 @@ func submitting(t *testing.T, c planLinkCase) (core.Job, error) {
 		caller.Run = ""
 	}
 	ctx := ctxFor(t)
-	existing, err := a.CreatePlan(ctx, caller, "an idea", "body", nil)
+	existing, err := a.CreatePlan(ctx, caller, "an idea", "body", nil, 0)
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}

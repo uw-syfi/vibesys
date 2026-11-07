@@ -214,11 +214,15 @@ func printPlan(d deps, asJSON bool, resp planResponse) {
 }
 
 // describePlan is the one line a plan takes: its number first, as a job's id is, so a caller can
-// read it back, then its status and its title, and its gain bound when it states one.
+// read it back, then its status and its title, and its gain bound and its workstream when it has
+// them.
 func describePlan(p *cliv1.Plan) string {
 	line := fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
 	if p.GetGainBound() != nil {
 		line += "\t" + describeGainBound(p.GetGainBound())
+	}
+	if p.GetWorkstream() != 0 {
+		line += fmt.Sprintf("\tworkstream %d", p.GetWorkstream())
 	}
 	return line
 }
@@ -229,6 +233,7 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	title := fs.String("title", "", "the plan's title, one line")
 	body := addTextFlag(fs, "body", "the plan's body, in markdown")
 	gain := addGainBoundFlags(fs, "the most the plan could gain")
+	workstream := addWorkstreamFlag(fs, "the workstream the plan joins")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -247,12 +252,16 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
+	joins, err := workstream.read()
+	if err != nil {
+		return fail(d, c.json, err)
+	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	defer cl.Close()
-	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: callCtx, Title: *title, Body: text, GainBound: bound})
+	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: callCtx, Title: *title, Body: text, GainBound: bound, Workstream: joins})
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -326,6 +335,15 @@ func renderPlanView(v *cliv1.PlanView) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", describePlan(p))
 	fmt.Fprintf(&b, "created %s, updated %s\n", clockText(p.GetCreatedAt().AsTime()), clockText(p.GetUpdatedAt().AsTime()))
+	if p.GetOrigin() != nil {
+		fmt.Fprintf(&b, "made by %s\n", originName(p.GetOrigin()))
+	}
+	if ts := p.GetTransitions(); len(ts) > 0 {
+		fmt.Fprintf(&b, "statuses:\n")
+		for _, t := range ts {
+			fmt.Fprintf(&b, "  %s, %s, %s\n", planStatusName(t.GetStatus()), clockText(t.GetOrigin().GetAt().AsTime()), originName(t.GetOrigin()))
+		}
+	}
 	if p.GetBody() != "" {
 		fmt.Fprintf(&b, "\n%s\n", strings.TrimRight(p.GetBody(), "\n"))
 	}
@@ -362,6 +380,7 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	fs.Var(&status, "status", "a new status ("+planStatusChoices()+")")
 	body := addTextFlag(fs, "body", "a new body, in markdown")
 	gain := addGainBoundFlags(fs, "a new bound on the most the plan could gain, replacing the old one")
+	workstream := addWorkstreamFlag(fs, "move the plan to this workstream")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -391,8 +410,11 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 		return fail(d, c.json, err)
 	}
 	req.GainBound = bound
-	if req.Title == nil && req.Body == nil && req.Status == nil && req.GainBound == nil {
-		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status or --gain-bound"))
+	if req.Workstream, err = workstream.read(); err != nil {
+		return fail(d, c.json, err)
+	}
+	if req.Title == nil && req.Body == nil && req.Status == nil && req.GainBound == nil && req.Workstream == 0 {
+		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status, --gain-bound or --workstream"))
 	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {

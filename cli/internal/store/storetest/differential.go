@@ -129,7 +129,7 @@ func (d *driver) text() string {
 func (d *driver) step(step int) {
 	g, ctx := d.g, context.Background()
 	jobs := d.jobs()
-	switch op := g.pick(18); {
+	switch op := g.pick(20); {
 	case op < 4:
 		sub := core.Submission{Spec: g.spec(), Key: core.JobKey(fmt.Sprintf("k%d", g.pick(5))), NoCache: g.pick(6) == 0, At: d.instant()}
 		sub.Spec.Commit = commit(g.pick(3))
@@ -164,6 +164,9 @@ func (d *driver) step(step int) {
 		d.do(step, "RecordPromotion", func(s store.Store) (any, error) { return nil, s.RecordPromotion(ctx, core.AssumeApproved(p)) })
 	case op == 10:
 		np := core.NewPlan{Title: d.text(), Body: g.text(), Origin: d.origin()}
+		if g.pick(2) == 0 {
+			np.Workstream = core.WorkstreamNumber(g.pick(4))
+		}
 		d.do(step, "CreatePlan", func(s store.Store) (any, error) { return s.CreatePlan(ctx, np) })
 	case op == 11:
 		number, edit := d.planNumber(), core.PlanEdit{Origin: d.origin()}
@@ -178,6 +181,9 @@ func (d *driver) step(step int) {
 		}
 		if g.pick(2) == 0 {
 			edit.Comment = &core.PlanComment{Text: g.text(), At: d.instant(), Agent: g.text()}
+		}
+		if g.pick(3) == 0 {
+			edit.Workstream = ptr(core.WorkstreamNumber(g.pick(4)))
 		}
 		d.do(step, "EditPlan", func(s store.Store) (any, error) { return s.EditPlan(ctx, number, edit) })
 	case op == 12:
@@ -209,6 +215,25 @@ func (d *driver) step(step int) {
 			admission = core.FrontierAdmission{}
 		}
 		d.do(step, "UpdateFrontier", func(s store.Store) (any, error) { return s.UpdateFrontier(ctx, admission) })
+	case op == 16:
+		title := []string{"KV cache", "kv  cache", "Batching", "batching", d.text()}[g.pick(5)]
+		if g.pick(3) != 0 {
+			title = core.NormalizeWorkstreamTitle(title)
+		}
+		nw := core.NewWorkstream{Title: title, Origin: d.origin()}
+		d.do(step, "StartWorkstream", func(s store.Store) (any, error) { return s.StartWorkstream(ctx, nw) })
+	case op == 17:
+		number, edit := core.WorkstreamNumber(g.pick(5)), core.WorkstreamEdit{At: d.instant()}
+		if g.pick(2) == 0 {
+			edit.Title = ptr(core.NormalizeWorkstreamTitle([]string{"KV cache", "Batching", "batching ", d.text()}[g.pick(4)]))
+		}
+		if g.pick(2) == 0 {
+			edit.Status = ptr([]core.WorkstreamStatus{core.WorkstreamActive, core.WorkstreamPaused, core.WorkstreamClosed, "bogus"}[g.pick(4)])
+		}
+		if g.pick(2) == 0 {
+			edit.Note = ptr(g.text())
+		}
+		d.do(step, "EditWorkstream", func(s store.Store) (any, error) { return s.EditWorkstream(ctx, number, edit) })
 	case op == 15:
 		nb := core.NewBound{
 			Origin:    core.RecordOrigin{Run: core.RunID(g.text()), Agent: g.text(), At: d.instant()},
@@ -273,6 +298,7 @@ func (d *driver) read(step int, jobs []core.Job) {
 		d.do(step, "Promotions", func(s store.Store) (any, error) { return s.Promotions(ctx) })
 		d.do(step, "Frontier", func(s store.Store) (any, error) { return s.Frontier(ctx) })
 		d.do(step, "Bounds", func(s store.Store) (any, error) { return s.Bounds(ctx) })
+		d.do(step, "Workstreams", func(s store.Store) (any, error) { return s.Workstreams(ctx, core.WorkstreamFilter{}) })
 	case 4:
 		n := d.planNumber()
 		d.do(step, "Plan", func(s store.Store) (any, error) { return s.Plan(ctx, n) })
