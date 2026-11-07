@@ -122,8 +122,9 @@ describe('reading an item whole', () => {
       const daemon = new FakeDaemon(scenario);
       const {h, id} = yield* opened(daemon);
       yield* h.session.history.expand(id, 99_999);
-      const status = yield* h.read(h.session.history.whole(id, 99_999));
-      expect(status._tag).toBe('Failed');
+      const wholes = yield* h.read(h.session.history.wholes(id));
+      expect(wholes[99_999]?._tag).toBe('Failed');
+      expect(Object.keys(wholes)).toEqual(['99999']);
     }),
   );
 });

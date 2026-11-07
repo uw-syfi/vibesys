@@ -1,132 +1,28 @@
 import {
   type Agent,
   Delivery,
-  ItemStatus,
   type Message,
   oneofIs,
   type Receipt,
-  type ToolCall,
-  TurnTrigger,
 } from '@vibesys/orchestrator-proto';
-import {
-  Button,
-  Card,
-  Chip,
-  EmptyState,
-  Field,
-  KeyValue,
-  Row,
-  Stack,
-  Text,
-  TextInput,
-  Thread,
-  type ThreadItem,
-} from '@vibesys/ui';
+import {Breadcrumb, Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {CommandProgress} from '../../state/index.js';
-import {
-  agentThread,
-  messagesOf,
-  ms,
-  type OrchestratorState,
-  type ThreadItem as ShownItem,
-  type ThreadTurn,
-} from '../../state/index.js';
+import {agentNames, agentPlace, messagesOf, ms, type OrchestratorState} from '../../state/index.js';
+import {AgentTranscript, type HistoryAccess} from '../agents/agent-transcript.js';
+import {agentLabel} from '../agents/labels.js';
+import {formatUsd} from '../agents/time.js';
 import {CommandLine} from './command-line.js';
 import {
   agentWord,
   deliveryWord,
-  describeCall,
   formatClock,
-  formatDuration,
   harnessWord,
   refusalWord,
   rejectionWord,
   roleWord,
-  turnWord,
   type Word,
 } from './words.js';
-
-const TRIGGER: Readonly<Record<TurnTrigger, string>> = {
-  [TurnTrigger.UNSPECIFIED]: 'Started',
-  [TurnTrigger.BRIEF]: 'Started by its assignment',
-  [TurnTrigger.OPERATOR]: 'Started by your message',
-  [TurnTrigger.HANDOFF]: 'Started by a handoff',
-  [TurnTrigger.JOB_FINISHED]: 'Woken by a finished job',
-  [TurnTrigger.SCHEDULE]: 'Started on a schedule',
-  [TurnTrigger.MESSAGE]: 'Started by a message from another agent',
-  [TurnTrigger.SUBAGENT_SETTLED]: 'Woken because its helpers finished',
-  [TurnTrigger.REMINDER]: 'Reminded of what it still owes',
-};
-
-function toolItem(shown: ShownItem, call: ToolCall): ThreadItem {
-  const {item} = shown;
-  const running = item.status === ItemStatus.RUNNING;
-  const {name, asked} = describeCall(call);
-  return {
-    kind: 'tool',
-    id: item.id,
-    name,
-    state: running ? 'pending' : call.isError ? 'failed' : 'ok',
-    summary: (asked ?? '').split('\n')[0]?.slice(0, 80) ?? '',
-    input: asked,
-    output: shown.output === '' ? null : shown.output,
-    ...(running ? {meta: 'In progress'} : {}),
-  };
-}
-
-/** Who a written item is from. The message's own label already says what kind it is. */
-function speaker(kind: 'prompt' | 'reasoning' | 'assistant', name: string) {
-  return kind === 'prompt'
-    ? ({author: `Given to ${name}`, variant: 'prompt'} as const)
-    : kind === 'reasoning'
-      ? ({author: name, variant: 'reasoning'} as const)
-      : ({author: name, variant: 'reply'} as const);
-}
-
-function threadItem(shown: ShownItem, name: string): ThreadItem {
-  const {item} = shown;
-  const body = item.body;
-  if (oneofIs(body, 'tool', {assistant: true, reasoning: true, prompt: true, tool: true}))
-    return toolItem(shown, body.value);
-  return {
-    kind: 'message',
-    id: item.id,
-    ...speaker(
-      oneofIs(body, 'prompt', {assistant: true, reasoning: true, prompt: true}) ||
-        oneofIs(body, 'reasoning', {assistant: true, reasoning: true})
-        ? body.case
-        : 'assistant',
-      name,
-    ),
-    text: shown.text,
-    ...(item.status === ItemStatus.RUNNING ? {notice: 'In progress'} : {}),
-    startOpen: true,
-  };
-}
-
-function turnItems(turn: ThreadTurn, name: string): ThreadItem[] {
-  const head: ThreadItem[] = [];
-  if (turn.missingBefore) {
-    head.push({
-      kind: 'heading',
-      id: `gap-${turn.turnId}`,
-      title: 'Earlier steps are not shown',
-      detail: 'Only the most recent steps of this agent are loaded.',
-    });
-  }
-  if (turn.turn !== null) {
-    const ran =
-      (ms(turn.turn.endedAt) ?? ms(turn.turn.startedAt) ?? 0) - (ms(turn.turn.startedAt) ?? 0);
-    head.push({
-      kind: 'heading',
-      id: `turn-${turn.turnId}`,
-      title: `Turn ${turn.turn.ordinal}: ${TRIGGER[turn.turn.trigger]}`,
-      detail: `${turnWord(turn.turn.status)}, ${formatDuration(ran)}`,
-    });
-  }
-  return [...head, ...turn.items.map(shown => threadItem(shown, name))];
-}
 
 /** What this agent's tool lets a message do, in one sentence. */
 function capabilityLine(agent: Agent): string {
@@ -268,38 +164,53 @@ function MessageBox(props: {
   );
 }
 
-/** One agent: who it is, every turn it has taken (past and live in one list), and a message box. */
+/** One agent: where it is in the tree, who it is, its session as a conversation, and a message box. */
 export function AgentPanel(props: {
   readonly state: OrchestratorState;
   readonly nowMs: number;
   readonly agent: Agent;
-  readonly name: string;
+  /** What the machine the run is on is called. */
+  readonly host: string;
   /** What the last press of Send to this agent came to, or undefined before any. */
   readonly sendProgress: CommandProgress | undefined;
+  readonly history: HistoryAccess;
   readonly send: (text: string) => void;
   readonly retrySend: () => void;
+  /** Opens another agent of the run. */
+  readonly open: (agentId: string) => void;
   readonly close: () => void;
 }): JSX.Element {
   const {state, agent} = props;
-  const turns = agentThread(state, agent.id);
+  const names = agentNames(state, agent.runId);
+  const name = names.get(agent.id);
+  const label = name === undefined ? 'An agent' : agentLabel(name);
   const status = agentWord(agent.status);
+  const cost = formatUsd(agent.usage?.costUsd ?? null);
+  const turns = Object.values(state.turns).filter(turn => turn.agentId === agent.id).length;
+  const place = agentPlace(state, agent.id);
   return (
     <Stack gap="space-4">
       <Row gap="space-3" justify="between">
-        <Row gap="space-3">
-          <Text variant="heading">{props.name}</Text>
-          <Chip label={status.label} tone={status.tone} dot />
-          <Chip label={harnessWord(agent.harness)} />
-          <Chip label={agent.model} mono />
-        </Row>
+        <Breadcrumb
+          label="Place in the spawn tree"
+          items={place.map(crumb => ({
+            id: crumb.agentId,
+            label: agentLabel(crumb.name),
+            ...(crumb.agentId === agent.id ? {} : {press: () => props.open(crumb.agentId)}),
+          }))}
+        />
         <Button text="Close agent view" variant="quiet" size="sm" press={props.close} />
       </Row>
-      <KeyValue
-        items={[
-          {key: 'Tool', value: harnessWord(agent.harness)},
-          {key: 'Effort', value: agent.reasoningEffort === '' ? 'Default' : agent.reasoningEffort},
-        ]}
-      />
+      <Row gap="space-3" wrap>
+        <Text variant="heading">{label}</Text>
+        <Chip label={status.label} tone={status.tone} dot />
+        <Chip label={props.host} mono />
+        <Chip label={harnessWord(agent.harness)} />
+        <Chip label={agent.model} mono />
+        {cost === '' ? null : (
+          <Text variant="small" tone="muted">{`${cost} · ${turns} turns`}</Text>
+        )}
+      </Row>
       <MessageBox
         nowMs={props.nowMs}
         agent={agent}
@@ -323,14 +234,14 @@ export function AgentPanel(props: {
         send={props.send}
         retry={props.retrySend}
       />
-      {turns.length === 0 ? (
-        <EmptyState title="Nothing yet" body="This agent has not taken a turn yet." />
-      ) : (
-        <Thread
-          label={`${props.name}, turn by turn`}
-          items={turns.flatMap(turn => turnItems(turn, props.name))}
-        />
-      )}
+      <AgentTranscript
+        state={state}
+        agentId={agent.id}
+        host={props.host}
+        nowMs={props.nowMs}
+        history={props.history}
+        open={props.open}
+      />
     </Stack>
   );
 }

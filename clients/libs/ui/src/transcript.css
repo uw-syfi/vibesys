@@ -1,0 +1,119 @@
+/* A conversation read top to bottom: one left edge, one measure, folded detail. Imported by components.css. */
+
+.vs-transcript {
+  position: relative;
+  min-width: 0;
+}
+.vs-transcript[data-size="fill"] {
+  height: 100%;
+}
+.vs-transcript-pane {
+  box-sizing: border-box;
+  height: 75dvh;
+  margin: 0 auto;
+  padding: 0 var(--space-4) var(--space-6);
+  list-style: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* The measure: rows never run wider than a page of text reads well, and share its left edge. */
+  max-width: var(--content-narrow);
+}
+.vs-transcript[data-size="fill"] > .vs-transcript-pane {
+  height: 100%;
+}
+.vs-transcript-pane:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-transcript-row {
+  min-width: 0;
+  padding: var(--space-3) 0;
+}
+.vs-transcript-gap {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-transcript-earlier {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) 0;
+}
+.vs-transcript-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
+/* The rule between two turns: a line, a label, a line. Figures keep one width. */
+.vs-transcript-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+.vs-transcript-rule::before,
+.vs-transcript-rule::after {
+  content: "";
+  flex: 1;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-transcript-trail {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* What started the turn: at the end of the line, with who sent it above. */
+.vs-transcript-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-transcript-from {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+}
+.vs-transcript-bubble > .vs-chat-message {
+  width: 100%;
+}
+
+/* A row that leads to another conversation. */
+.vs-transcript-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--muted);
+}
+.vs-transcript-link .vs-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-transcript-link .vs-transcript-trail {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+
+/* Motion: a row that arrives at the end draws in; a body that opens draws in too. */
+.vs-transcript-row[data-entering] {
+  animation: vs-enter var(--duration-fast) var(--easing);
+}
+.vs-collapsible-body {
+  animation: vs-enter var(--duration-fast) var(--easing);
+}

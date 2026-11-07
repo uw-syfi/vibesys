@@ -20,6 +20,7 @@ export {
   toggled,
 } from './spawn-tree.js';
 export {
+  agentPlace,
   type Crumb,
   type Entry,
   type Party,

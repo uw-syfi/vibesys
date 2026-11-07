@@ -118,6 +118,29 @@ function deliverPending(
   wanted.then(row);
 }
 
+/**
+ * When rows arrived before the one that was first, moves the scroll down by their height so the rows
+ * the reader sees stay where they were. A list that follows its end or is held at a row stays put.
+ */
+function keepAfterPrepend(
+  element: HTMLElement,
+  firstKey: {current: string | null},
+  count: number,
+  keyOf: (index: number) => string,
+  offsets: readonly number[],
+  placed: boolean,
+): void {
+  const now = count > 0 ? keyOf(0) : null;
+  const before = firstKey.current;
+  firstKey.current = now;
+  if (before === null || now === null || before === now || placed) return;
+  for (let index = 1; index < count; index++) {
+    if (keyOf(index) !== before) continue;
+    element.scrollTop += offsets[index] ?? 0;
+    return;
+  }
+}
+
 /** The scroll position that shows the row from `start` to `end` with the least movement from `top`. */
 function scrollFor(start: number, end: number | undefined, top: number, height: number): number {
   const stop = end ?? start;
@@ -211,13 +234,19 @@ export function useWindowed(options: {
    * its end, which can cut the row above by any amount.
    */
   readonly startAt?: number;
+  /**
+   * Rows may arrive before the first one (older history). A reader who is not at the end then keeps
+   * what they were looking at where it was, instead of the list shifting under them.
+   */
+  readonly anchor?: boolean;
 }): Windowed {
-  const {count, keyOf, estimate, follow, toEnd, startAt} = options;
+  const {count, keyOf, estimate, follow, toEnd, startAt, anchor} = options;
   const held = useRef(startAt !== undefined && startAt >= 0 && startAt < count);
   const following = useRef(follow && !held.current);
   const scrolledToEnd = useRef(toEnd);
   const kept = useRef<number | null>(null);
   const pane = useRef<HTMLElement | null>(null);
+  const firstKey = useRef<string | null>(null);
   // Where the list last put itself at its end: a reader above that has left it, even before the
   // scroll event that says so arrives.
   const placed = useRef(0);
@@ -246,6 +275,9 @@ export function useWindowed(options: {
   const scroller = (element: HTMLElement | null): void => {
     pane.current = element;
     if (element === null) return;
+    if (anchor === true) {
+      keepAfterPrepend(element, firstKey, count, keyOf, offsets, following.current || held.current);
+    }
     if (element.clientHeight > 0 && element.clientHeight !== view.height) {
       setView({top: view.top, height: element.clientHeight});
     }

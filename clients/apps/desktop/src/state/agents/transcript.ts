@@ -76,7 +76,7 @@ export type Entry =
       readonly kind: 'tool';
       readonly key: string;
       readonly ordinal: number;
-      readonly call: ToolCall['call'];
+      readonly call: ToolCall;
       readonly state: 'running' | 'ok' | 'failed';
       /** How long it took (so far, while it runs); null when the host did not say when it began. */
       readonly spanMs: number | null;
@@ -158,6 +158,12 @@ function crumbsOf(
   }));
 }
 
+/** Where an agent is in the tree, from the lead down to itself. */
+export function agentPlace(state: OrchestratorState, agentId: string): Crumb[] {
+  const agent = state.agents[agentId];
+  return agent === undefined ? [] : crumbsOf(state, agent, agentNames(state, agent.runId));
+}
+
 /** An item's words: what is stored and any progress laid over it. */
 function wordsOf(state: OrchestratorState, item: Item): {text: string; output: string} {
   const overlay = state.overlays[item.id];
@@ -190,7 +196,7 @@ function toolEntry(state: OrchestratorState, item: Item, call: ToolCall, nowMs: 
     kind: 'tool',
     key: `item:${item.id}`,
     ordinal: item.ordinal,
-    call: call.call,
+    call,
     state: live ? 'running' : call.isError || item.status === ItemStatus.FAILED ? 'failed' : 'ok',
     spanMs: spanOf(item, nowMs),
     output: call.output + (state.overlays[item.id]?.commandOutput ?? ''),
@@ -414,7 +420,7 @@ export function transcript(
   const span = STATE[agent.status];
   return {
     agentId,
-    crumbs: crumbsOf(state, agent, agentNames(state, agent.runId)),
+    crumbs: agentPlace(state, agentId),
     state: span === 'live' ? 'running' : span,
     costUsd: agent.usage?.costUsd ?? null,
     turns: turns.length,

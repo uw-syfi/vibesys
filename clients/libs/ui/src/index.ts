@@ -189,6 +189,12 @@ export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';
+export {
+  Transcript,
+  type TranscriptAuthor,
+  type TranscriptEarlier,
+  type TranscriptItem,
+} from './components/transcript.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
 export {TurnResult} from './components/turn-result.js';
 export {WindowFrame} from './components/window-frame.js';

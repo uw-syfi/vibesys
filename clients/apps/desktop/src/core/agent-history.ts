@@ -31,8 +31,8 @@ export interface AgentHistory {
   readonly expand: (agentId: string, ordinal: number) => Effect.Effect<void>;
   /** Where reading earlier items of the agent stands. */
   readonly earlier: (agentId: string) => Atom.Atom<HistoryStatus>;
-  /** Where reading the item at `ordinal` of the agent whole stands. */
-  readonly whole: (agentId: string, ordinal: number) => Atom.Atom<HistoryStatus>;
+  /** Where reading each item of the agent whole stands, by ordinal; an item never asked for is not there. */
+  readonly wholes: (agentId: string) => Atom.Atom<Readonly<Record<number, HistoryStatus>>>;
 }
 
 type Statuses = Readonly<Record<string, HistoryStatus>>;
@@ -111,7 +111,16 @@ export const makeAgentHistory = Effect.fn('AgentHistory.make')(function* (parts:
     loadEarlier,
     expand,
     earlier: agentId => byKey(earlierKey(agentId)),
-    whole: (agentId, ordinal) => byKey(wholeKey(agentId, ordinal)),
+    wholes: Atom.family((agentId: string) =>
+      Atom.make(get => {
+        const prefix = wholeKey(agentId, 0).slice(0, -1);
+        return Object.fromEntries(
+          Object.entries(get(statusesAtom)).flatMap(([key, status]) =>
+            key.startsWith(prefix) ? [[Number(key.slice(prefix.length)), status] as const] : [],
+          ),
+        );
+      }),
+    ),
   };
   return history;
 });

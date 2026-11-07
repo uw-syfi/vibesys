@@ -480,6 +480,7 @@ function richSteps(builder: Builder, agent: Agent): Step[] {
       status: ItemStatus.FAILED,
     }),
     builder.step(agent, 'tool', 'true', {output: '', exit: 0}),
+    builder.step(agent, 'tool', '', {output: '', exit: 0}),
     builder.step(
       agent,
       'assistant',
