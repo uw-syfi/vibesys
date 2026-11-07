@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import platform
 import stat
 import sys
 import urllib.error
@@ -84,6 +85,22 @@ def fetch_bun(
     return output
 
 
+def host_target(system: str | None = None, machine: str | None = None) -> str:
+    """Name the TARGETS key for a host (this machine by default)."""
+    system = (system or platform.system()).lower()
+    machine = (machine or platform.machine()).lower()
+    key = {
+        ("darwin", "arm64"): "macos-arm64",
+        ("linux", "x86_64"): "linux-x86_64",
+        ("linux", "amd64"): "linux-x86_64",
+        ("linux", "aarch64"): "linux-aarch64",
+        ("linux", "arm64"): "linux-aarch64",
+    }.get((system, machine))
+    if key is None:
+        raise BunFetchError.unsupported_target(f"{system}-{machine}")
+    return key
+
+
 def _download(url: str) -> bytes:
     with urllib.request.build_opener().open(url, timeout=120) as response:
         return response.read()
@@ -95,7 +112,11 @@ def _fail(message: str) -> Never:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, choices=sorted(TARGETS))
+    parser.add_argument(
+        "--target",
+        choices=sorted(TARGETS),
+        help="archive to fetch (default: the one for this machine)",
+    )
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args()
 
@@ -104,7 +125,7 @@ def main() -> int:
     """Fetch the selected target runtime with concise diagnostics."""
     args = _parse_args()
     try:
-        executable = fetch_bun(args.target, args.output)
+        executable = fetch_bun(args.target or host_target(), args.output)
     except BunFetchError as exc:
         print(f"Bun fetch failed: {exc}", file=sys.stderr)
         return 1

@@ -70,6 +70,30 @@ func gatePlanCheck(root string, g graph) func() error {
 	}
 }
 
+// adoptPinnedPrograms makes this process resolve each exactly pinned program (Bun) to its pinned
+// copy when PATH has another version first but the pinned one is in a repository or cache
+// directory, so the gate and the tests run what CI runs without the shell being configured. A
+// program with no pinned copy anywhere is left for the check that needs it to report, and the
+// doctor says how to fetch it.
+func adoptPinnedPrograms(root, configPath string, out io.Writer) {
+	cfg, err := doctor.ReadConfig(policyDirectory(root, configPath))
+	if err != nil {
+		return
+	}
+	usePinnedPrograms(cfg, root, doctor.OSHost{Root: root}, os.Getenv, os.Setenv, out)
+}
+
+// usePinnedPrograms is adoptPinnedPrograms over a Host and the environment's accessors.
+func usePinnedPrograms(cfg doctor.Config, root string, host doctor.Host, get func(string) string, set func(string, string) error, out io.Writer) {
+	for _, e := range doctor.PinnedProgramExports(cfg, root, host) {
+		if err := set(e.Name, e.Apply(get(e.Name))); err != nil {
+			fmt.Fprintf(out, "repoctl: cannot set %s: %v\n", e.Name, err)
+			continue
+		}
+		fmt.Fprintf(out, "repoctl: %s is first on %s for this run: it holds the pinned program that %s does not resolve to (repoctl doctor --env puts it first in your shell)\n", e.Value, e.Name, e.Name)
+	}
+}
+
 // gateSetupHint is what a refused push adds: the names of the failing setup checks, when there
 // are any, and the command that fixes them. It is empty when the machine is in order or the
 // repository has no doctor policy.

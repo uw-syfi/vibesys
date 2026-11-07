@@ -79,6 +79,16 @@ type ProgramConfig struct {
 	Fix []string `toml:"fix"`
 	// Hint tells the reader how to install the program when there is no Fix.
 	Hint string `toml:"hint"`
+	// CacheDirectories are per-user directories (outside the repository) that hold a fetched
+	// copy of a pinned program. `$NAME` is the environment variable NAME and `{version}` is the
+	// pinned version; an entry whose variable is unset is skipped. Every resolved directory is
+	// searched for a copy, and Fetch installs into the first one. Needs a pin.
+	CacheDirectories []string `toml:"cache_directories"`
+	// Fetch is a repository-relative command that downloads and verifies the pinned copy into
+	// `{cache}`, the directory chosen from CacheDirectories (`--fix` runs it when no copy of
+	// the pinned version exists on PATH or in a cache). Its executable must be named as the
+	// program is, inside `{cache}`.
+	Fetch []string `toml:"fetch"`
 }
 
 // PinConfig names a version recorded in a repository file: Pattern's first capture group.
@@ -195,6 +205,9 @@ func (c Config) validate() error {
 				return err
 			}
 		}
+		if err := p.validateFetch(key); err != nil {
+			return err
+		}
 	}
 	for i, in := range c.Installs {
 		key := fmt.Sprintf("installs[%d]", i)
@@ -235,6 +248,44 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func (p ProgramConfig) validateFetch(key string) error {
+	if len(p.CacheDirectories) == 0 && len(p.Fetch) == 0 {
+		return nil
+	}
+	if p.MinimumFrom == nil && p.ExactFrom == nil {
+		return fmt.Errorf("%s: cache_directories and fetch need a version pin (minimum_from or exact_from)", key)
+	}
+	if len(p.CacheDirectories) == 0 || len(p.Fetch) == 0 {
+		return fmt.Errorf("%s: cache_directories and fetch go together", key)
+	}
+	for _, d := range p.CacheDirectories {
+		if !strings.HasPrefix(d, "/") && !strings.HasPrefix(d, "$") {
+			return fmt.Errorf("%s.cache_directories entry %q must be an absolute path or start with a $VARIABLE", key, d)
+		}
+	}
+	if !strings.Contains(strings.Join(p.Fetch, "\x00"), cachePlaceholder) {
+		return fmt.Errorf("%s.fetch must name %s, the directory it installs into", key, cachePlaceholder)
+	}
+	return nil
+}
+
+// cachePlaceholder stands for the chosen cache directory in a Fetch command.
+const cachePlaceholder = "{cache}"
+
+// versionPlaceholder stands for the pinned version in a cache directory.
+const versionPlaceholder = "{version}"
+
+// cacheVariables returns the environment variables the cache directories read.
+func (p ProgramConfig) cacheVariables() []string {
+	var names []string
+	for _, c := range p.CacheDirectories {
+		for _, m := range variableReference.FindAllStringSubmatch(c, -1) {
+			names = append(names, m[1])
+		}
+	}
+	return names
 }
 
 func (p PinConfig) validate(key string) error {
