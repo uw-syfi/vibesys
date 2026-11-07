@@ -167,6 +167,7 @@ const APP_REFUSAL: Readonly<
   [DesktopRefusal.INVALID_REQUEST]: 'invalid-request',
   [DesktopRefusal.UNSUPPORTED_PLATFORM]: 'unsupported-platform',
   [DesktopRefusal.HOST_PROGRAM_MISSING]: 'host-program-missing',
+  [DesktopRefusal.HOST_PREREQUISITE_MISSING]: 'host-prerequisite-missing',
 };
 
 const detailOf = (end: CallEnded): string =>

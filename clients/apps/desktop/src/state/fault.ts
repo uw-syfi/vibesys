@@ -23,8 +23,9 @@ export type FaultKind = (typeof FAULT_KINDS)[number];
 
 /**
  * Why a host or the app refused for good: no retry changes it, so the screens say which cause and
- * what to change. The first four are the app's own refusals (a method, a request, a platform no
- * host program is built for, a build that holds none for it); the rest are the host's, typed from
+ * what to change. The first five are the app's own refusals (a method, a request, a platform no
+ * host program is built for, a build that holds none for it, a host that lacks what installing it
+ * needs); the rest are the host's, typed from
  * what it says about why it does not serve.
  */
 export const REFUSAL_CAUSES = [
@@ -32,6 +33,7 @@ export const REFUSAL_CAUSES = [
   'invalid-request',
   'unsupported-platform',
   'host-program-missing',
+  'host-prerequisite-missing',
   'state-network-filesystem',
   'state-unknown-filesystem',
   'state-refused',

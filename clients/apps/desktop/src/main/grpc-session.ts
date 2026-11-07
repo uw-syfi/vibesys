@@ -13,18 +13,25 @@ import type * as Scope from 'effect/Scope';
 import {REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {decodeFrames, encodeFrame, isFault} from '../state/grpc-frames.js';
 import {callStatus} from '../state/grpc-status.js';
-import {GrpcCode, GrpcFailed} from './errors.js';
+import {GatewayFailed, GrpcCode, GrpcFailed} from './errors.js';
 
 /** How long a call is watched for progress: to its end, or until its first reply message. */
 type Watch = 'to-end' | 'to-first-reply';
+
+/**
+ * How a call fails: `GrpcFailed` is the host's own answer (a status it sent); `GatewayFailed` is
+ * the link's: the session or stream was cut, or answered with no status. The two are kept apart
+ * because only a host that answered can be asked why, and a lost link is redialed.
+ */
+export type CallFailed = GrpcFailed | GatewayFailed;
 
 export interface GatewaySession {
   /**
    * One call: send `bytes`, hand each reply message to `receive` in order, end with the status.
    * `receive` throwing ends the call with INTERNAL. Interrupting the call resets its stream. With
    * `watch`, the call fails with DEADLINE_EXCEEDED once a whole `REPLY_STALL_MS` window passes with
-   * nothing heard on it (headers, a chunk of a message, the end): bytes that keep arriving, however
-   * slowly, are progress and never cut it. Without `watch` it is bounded by the session's liveness
+   * no byte heard on the link (a frame, a chunk of one, a connection-level frame): bytes that keep
+   * arriving, however slowly, are progress and never cut it. Without `watch` it is bounded by the session's liveness
    * alone, as a quiet feed must be.
    */
   readonly call: (
@@ -32,18 +39,27 @@ export interface GatewaySession {
     bytes: Uint8Array,
     receive: (message: Uint8Array) => void,
     watch?: Watch,
-  ) => Effect.Effect<void, GrpcFailed>;
+  ) => Effect.Effect<void, CallFailed>;
   /** A call with exactly one reply, watched to its end. */
-  readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, GrpcFailed>;
+  readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, CallFailed>;
   /** Completes when the session ended: the peer closed it, said goaway, or the scope closed. */
   readonly lost: Effect.Effect<void>;
   /**
-   * How many times the peer has sent something on any call (headers, a chunk of a message, the
-   * end) since the session opened. It only rises, so two reads that differ prove the link
-   * delivered bytes between them; a message that trickles in over a slow link rises with every
-   * chunk, which is how a slow transfer is told from a dead link.
+   * How many chunks the link has delivered since the session opened, counted on the duplex itself
+   * so a connection-level frame (SETTINGS, PING) and the middle of a frame count as much as a call
+   * event. It only rises, so two reads that differ prove the link delivered bytes between them; a
+   * link that trickles bytes rises with every chunk, which is how a slow link is told from a dead
+   * one.
    */
   readonly activity: Effect.Effect<number>;
+  /**
+   * A unary call that asks the link whether it is alive, for the liveness monitor. Its reply is
+   * bytes, so it counts as `activity`, but it proves nothing about any other call: the bytes
+   * heard while it is outstanding are not progress for the calls that are watched, or a call the
+   * host never answers would be kept alive by the probes that ask about it. It is not watched
+   * itself: whether the link answers is the monitor's verdict.
+   */
+  readonly probe: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, CallFailed>;
 }
 
 const METHOD = /^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/;
@@ -51,8 +67,7 @@ const METHOD = /^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/;
 type Stream = ReturnType<ClientHttp2Session['request']>;
 type Receive = (message: Uint8Array) => void;
 
-const unavailable = (message: string): GrpcFailed =>
-  new GrpcFailed({code: GrpcCode.UNAVAILABLE, message});
+const cut = (message: string): GatewayFailed => new GatewayFailed({message});
 
 /** The metadata every call of a session carries: gRPC metadata is HTTP/2 headers, in lowercase. */
 export type CallMetadata = Readonly<Record<string, string>>;
@@ -63,7 +78,7 @@ const startStream = (
   method: string,
   frame: Uint8Array,
   metadata: CallMetadata,
-): Stream | GrpcFailed => {
+): Stream | CallFailed => {
   if (!METHOD.test(method))
     return new GrpcFailed({code: GrpcCode.INTERNAL, message: `invalid gRPC method: ${method}`});
   try {
@@ -77,7 +92,7 @@ const startStream = (
     stream.end(frame);
     return stream;
   } catch (cause) {
-    return unavailable(`gateway session closed: ${String(cause)}`);
+    return cut(`gateway session closed: ${String(cause)}`);
   }
 };
 
@@ -88,21 +103,19 @@ const startStream = (
 const watchStream = (
   stream: Stream,
   receive: Receive,
-  finish: (error?: GrpcFailed) => void,
+  finish: (error?: CallFailed) => void,
   settled: () => boolean,
   receiveLimit: number,
-  heard: () => void,
 ): void => {
   let rest: Uint8Array = new Uint8Array(0);
   let status: string | undefined;
   let detail = '';
   const headers = (value: IncomingHttpHeaders): void => {
-    heard();
     if (value['grpc-status'] !== undefined) status = String(value['grpc-status']);
     if (value['grpc-message'] !== undefined) detail = String(value['grpc-message']);
     const http = value[':status'];
     if (http !== undefined && String(http) !== '200')
-      finish(unavailable(`gRPC HTTP status ${String(http)}`));
+      finish(cut(`gRPC HTTP status ${String(http)}`));
   };
   const deliver = (messages: readonly Uint8Array[]): void => {
     for (const message of messages) {
@@ -125,9 +138,8 @@ const watchStream = (
   };
   stream.on('response', headers);
   stream.on('trailers', headers);
-  stream.on('error', error => finish(unavailable(error.message)));
+  stream.on('error', error => finish(cut(error.message)));
   stream.on('data', (chunk: Buffer) => {
-    heard();
     if (settled()) return;
     const decoded = decodeFrames(rest, chunk, receiveLimit);
     if (isFault(decoded)) return finish(new GrpcFailed(decoded));
@@ -135,42 +147,46 @@ const watchStream = (
     deliver(decoded.messages);
   });
   stream.on('end', () => {
-    // A stream that ends with no status was cut, not answered: `callStatus` makes it UNAVAILABLE,
-    // which the client redials, rather than a status of the host's own, which it would not.
+    // A stream that ends with no status was cut, not answered: it is the link's failure, which
+    // the client redials, rather than a status of the host's own.
     if (rest.byteLength !== 0)
       return finish(new GrpcFailed({code: GrpcCode.DATA_LOSS, message: 'truncated gRPC message'}));
     const failure = callStatus(status, detail);
-    finish(failure === undefined ? undefined : new GrpcFailed(failure));
+    if (failure === undefined) return finish(undefined);
+    finish(
+      failure.answered ? new GrpcFailed(failure) : new GatewayFailed({message: failure.message}),
+    );
   });
-  stream.on('close', () => finish(unavailable('gRPC connection closed')));
+  stream.on('close', () => finish(cut('gRPC connection closed')));
 };
 
-/** What one call has heard and delivered, which its watch reads. */
+/** What one call has delivered, which its watch reads. */
 interface Tally {
-  heard: number;
   replied: boolean;
 }
 
-/** What a call needs of its session: the connection, what the peer was heard to send, and the metadata of every call. */
+/** What a call needs of its session: the connection, what the link was heard to deliver, and the metadata of every call. */
 interface Line {
   readonly http2: ClientHttp2Session;
-  readonly heard: () => void;
+  /** How many chunks the link has delivered that count as progress for a watched call. */
+  readonly progress: () => number;
   readonly metadata: CallMetadata;
 }
 
 /** The send of one call over `line`; its progress is counted in `tally`. */
 const startCall = (
-  {http2, heard, metadata}: Line,
+  {http2, metadata}: Line,
   tally: Tally,
   method: string,
   bytes: Uint8Array,
   receive: Receive,
-): Effect.Effect<void, GrpcFailed> =>
-  Effect.callback<void, GrpcFailed>(resume => {
+): Effect.Effect<void, CallFailed> =>
+  Effect.callback<void, CallFailed>(resume => {
     const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
     if (isFault(frame)) return resume(Effect.fail(new GrpcFailed(frame)));
     const stream = startStream(http2, method, frame, metadata);
-    if (stream instanceof GrpcFailed) return resume(Effect.fail(stream));
+    if (stream instanceof GrpcFailed || stream instanceof GatewayFailed)
+      return resume(Effect.fail(stream));
     let settled = false;
     watchStream(
       stream,
@@ -191,10 +207,6 @@ const startCall = (
       method.startsWith(`/${OrchestratorService.typeName}/`)
         ? ORCHESTRATOR_MAX_MESSAGE_BYTES
         : HOST_API_MAX_MESSAGE_BYTES,
-      () => {
-        tally.heard += 1;
-        heard();
-      },
     );
     return Effect.sync(() => {
       if (settled) return;
@@ -204,16 +216,20 @@ const startCall = (
   });
 
 /**
- * Fails when a whole window passes with nothing heard on the call. Never ends otherwise: it is
- * raced against the call, and a watch `to-first-reply` stops watching once the first reply came.
+ * Fails when a whole window passes with no byte heard on the link. Bytes are counted on the
+ * duplex, not at the call's own events: an HTTP/2 frame only becomes an event once it is whole, so
+ * a link slower than a frame per window would read as silent while it delivers. Calls share the
+ * link, so its bytes are the progress of every call on it, except what a probe heard
+ * (`GatewaySession.probe`). Never ends otherwise: it is raced
+ * against the call, and a watch `to-first-reply` stops watching once the first reply came.
  */
-const stalled = (tally: Tally, watch: Watch): Effect.Effect<never, GrpcFailed> =>
+const stalled = (line: Line, tally: Tally, watch: Watch): Effect.Effect<never, CallFailed> =>
   Effect.gen(function* () {
     while (true) {
-      const before = tally.heard;
+      const before = line.progress();
       yield* Effect.sleep(`${REPLY_STALL_MS} millis`);
       if (watch === 'to-first-reply' && tally.replied) return yield* Effect.never;
-      if (tally.heard === before)
+      if (line.progress() === before)
         return yield* new GrpcFailed({
           code: GrpcCode.DEADLINE_EXCEEDED,
           message: `gRPC deadline exceeded: nothing heard for ${REPLY_STALL_MS / 1000} seconds`,
@@ -226,14 +242,14 @@ const callOver =
   (line: Line): GatewaySession['call'] =>
   (method, bytes, receive, watch) =>
     Effect.suspend(() => {
-      const tally: Tally = {heard: 0, replied: false};
+      const tally: Tally = {replied: false};
       const run = startCall(line, tally, method, bytes, receive);
-      return watch === undefined ? run : Effect.raceFirst(run, stalled(tally, watch));
+      return watch === undefined ? run : Effect.raceFirst(run, stalled(line, tally, watch));
     });
 
-/** A call with exactly one reply, watched to its end. */
+/** A call with exactly one reply, watched to its end unless `watch` is `none`. */
 const unaryOver =
-  (call: GatewaySession['call']): GatewaySession['unary'] =>
+  (call: GatewaySession['call'], watch: Watch | 'none' = 'to-end'): GatewaySession['unary'] =>
   (method, bytes) =>
     Effect.suspend(() => {
       let reply: Uint8Array | undefined;
@@ -244,7 +260,7 @@ const unaryOver =
           if (reply !== undefined) throw new Error('unary returned multiple messages');
           reply = message;
         },
-        'to-end',
+        watch === 'none' ? undefined : watch,
       ).pipe(
         Effect.flatMap(() =>
           reply === undefined
@@ -266,6 +282,9 @@ export const openSession = (
 ): Effect.Effect<GatewaySession, never, Scope.Scope> =>
   Effect.gen(function* () {
     const lost = Deferred.makeUnsafe<void>();
+    let heard = 0;
+    let progress = 0;
+    let probes = 0;
     const markLost = (): void => {
       Deferred.doneUnsafe(lost, Exit.void);
     };
@@ -276,6 +295,11 @@ export const openSession = (
         session.on('error', () => {});
         session.once('close', markLost);
         session.once('goaway', markLost);
+        // Counted here, on the link, before the session parses anything: see `activity`.
+        duplex.on('data', () => {
+          heard += 1;
+          if (probes === 0) progress += 1;
+        });
         return session;
       }),
       session =>
@@ -284,17 +308,22 @@ export const openSession = (
           markLost();
         }),
     );
-    let heard = 0;
-    const call = callOver({
-      http2,
-      heard: () => {
-        heard += 1;
-      },
-      metadata,
-    });
+    const call = callOver({http2, progress: () => progress, metadata});
+    const probeCall = unaryOver(call, 'none');
     return {
       call,
       unary: unaryOver(call),
+      probe: (method, bytes) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => {
+            probes += 1;
+          }),
+          () => probeCall(method, bytes),
+          () =>
+            Effect.sync(() => {
+              probes -= 1;
+            }),
+        ),
       lost: Deferred.await(lost),
       activity: Effect.sync(() => heard),
     } satisfies GatewaySession;

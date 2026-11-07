@@ -11,6 +11,7 @@ const CAUSE_WORD: Readonly<Record<RefusalCause, string>> = {
   'invalid-request': 'The request is not valid.',
   'unsupported-platform': 'No host program for this platform.',
   'host-program-missing': 'This build has no host program for this platform.',
+  'host-prerequisite-missing': 'The host lacks something the app needs to install its program.',
   'state-network-filesystem':
     'The host\u2019s state directory is on a network disk. Set a state directory on a local disk.',
   'state-unknown-filesystem':

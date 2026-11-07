@@ -137,6 +137,9 @@ const (
 	DesktopRefusal_DESKTOP_REFUSAL_HOST_PROGRAM_MISSING DesktopRefusal = 3
 	// The request breaks its schema, so it can never be answered as sent.
 	DesktopRefusal_DESKTOP_REFUSAL_INVALID_REQUEST DesktopRefusal = 4
+	// The host lacks something installing the host program needs (a tool, or a writable home
+	// directory), so no retry installs it; the end's `error` names what is missing.
+	DesktopRefusal_DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING DesktopRefusal = 5
 )
 
 // Enum value maps for DesktopRefusal.
@@ -147,13 +150,15 @@ var (
 		2: "DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM",
 		3: "DESKTOP_REFUSAL_HOST_PROGRAM_MISSING",
 		4: "DESKTOP_REFUSAL_INVALID_REQUEST",
+		5: "DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING",
 	}
 	DesktopRefusal_value = map[string]int32{
-		"DESKTOP_REFUSAL_UNSPECIFIED":          0,
-		"DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE": 1,
-		"DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM": 2,
-		"DESKTOP_REFUSAL_HOST_PROGRAM_MISSING": 3,
-		"DESKTOP_REFUSAL_INVALID_REQUEST":      4,
+		"DESKTOP_REFUSAL_UNSPECIFIED":               0,
+		"DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE":      1,
+		"DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM":      2,
+		"DESKTOP_REFUSAL_HOST_PROGRAM_MISSING":      3,
+		"DESKTOP_REFUSAL_INVALID_REQUEST":           4,
+		"DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING": 5,
 	}
 )
 
@@ -444,13 +449,14 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	" DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n" +
 	"\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n" +
-	"\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03*\xd4\x01\n" +
+	"\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03*\x83\x02\n" +
 	"\x0eDesktopRefusal\x12\x1f\n" +
 	"\x1bDESKTOP_REFUSAL_UNSPECIFIED\x10\x00\x12(\n" +
 	"$DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE\x10\x01\x12(\n" +
 	"$DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM\x10\x02\x12(\n" +
 	"$DESKTOP_REFUSAL_HOST_PROGRAM_MISSING\x10\x03\x12#\n" +
-	"\x1fDESKTOP_REFUSAL_INVALID_REQUEST\x10\x04BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
+	"\x1fDESKTOP_REFUSAL_INVALID_REQUEST\x10\x04\x12-\n" +
+	")DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING\x10\x05BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
 
 var (
 	file_vibesys_desktop_v1_gateway_proto_rawDescOnce sync.Once
