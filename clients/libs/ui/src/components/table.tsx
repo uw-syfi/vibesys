@@ -18,6 +18,11 @@ export interface TableColumn<Row> {
    * cell is centred on the text of its row.
    */
   readonly control?: boolean;
+  /**
+   * A cell of text a person chose (a name), cut short with an ellipsis where the column is at its
+   * widest instead of widening the table. `clip` returns the whole text, which the pointer shows.
+   */
+  readonly clip?: (row: Row) => string;
 }
 
 /** Whether `event` came from a control inside its row, which acts alone and does not pick the row. */
@@ -120,6 +125,8 @@ export function Table<Row>(props: {
                     data-wide={column.wide === true || undefined}
                     data-lead={column.lead === true || undefined}
                     data-control={column.control === true || undefined}
+                    data-clip={column.clip !== undefined || undefined}
+                    title={column.clip?.(row)}
                   >
                     {at === 0 && props.fold !== undefined ? (
                       <span className="vs-table-lead">

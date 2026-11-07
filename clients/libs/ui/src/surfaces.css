@@ -323,6 +323,12 @@
 .vs-table td[data-lead] {
   min-width: calc(var(--space-8) * 3);
 }
+.vs-table td[data-clip] {
+  max-width: calc(var(--space-8) * 6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .vs-table-lead {
   display: flex;
   align-items: center;
@@ -373,6 +379,9 @@
   font-size: var(--text-body-size);
   line-height: var(--text-body-line);
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--easing),
+    color var(--duration-fast) var(--easing);
 }
 .vs-tab:hover {
   color: var(--text);

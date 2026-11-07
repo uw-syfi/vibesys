@@ -162,6 +162,35 @@ describe('renderTokensCss', () => {
     }
   });
 
+  test('keeps every motion duration between instant and a quarter second, in order of what moves', () => {
+    const {instant, fast, base, slow} = MOTION.duration;
+    expect(instant).toBe(0);
+    expect([fast, base, slow].every(ms => ms >= 100 && ms <= 250)).toBe(true);
+    expect(fast).toBeLessThan(base);
+    expect(base).toBeLessThan(slow);
+    for (const [token, ms] of Object.entries(MOTION.duration)) {
+      expect(css).toContain(`--duration-${token}: ${ms}ms;`);
+    }
+    expect(css).toContain(`--easing: ${MOTION.easing};`);
+    expect(css).toContain(`--easing-enter: ${MOTION.easingEnter};`);
+    expect(css).toContain(`--easing-exit: ${MOTION.easingExit};`);
+  });
+
+  test('crossfades a theme change: every role is an animatable color, transitioned once a theme has been shown', () => {
+    for (const role of COLOR_ROLES) {
+      expect(css).toContain(
+        `@property --${role} {\n  syntax: "<color>";\n  inherits: true;\n  initial-value: transparent;\n}`,
+      );
+    }
+    const start = css.indexOf(':root[data-theme-motion] {');
+    const transition = css.slice(start, css.indexOf('}', start));
+    for (const role of COLOR_ROLES) {
+      expect(transition).toContain(`--${role} var(--duration-slow) var(--easing)`);
+    }
+    // The first theme is shown as it is: no transition outside the attribute `applyTheme` adds later.
+    expect(css.replace(transition, '')).not.toMatch(/transition:[^;]*--bg /);
+  });
+
   test('keeps the old variable names resolving to the new roles', () => {
     const OLD_NAMES = [
       'page',

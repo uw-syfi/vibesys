@@ -85,6 +85,11 @@
   font: inherit;
   cursor: pointer;
   -webkit-app-region: no-drag;
+  /* A hover or a selection answers the touch, quickly. */
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    border-color var(--duration-fast) var(--easing),
+    color var(--duration-fast) var(--easing);
 }
 .vs-rail-item .vs-text {
   color: inherit;
