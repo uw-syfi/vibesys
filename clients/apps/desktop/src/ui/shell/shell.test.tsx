@@ -30,6 +30,7 @@ const host: HostSnapshot = {
   label: 'This machine',
   model: {data: scenario.changes.reduce(applyChange, emptyState), agentCursors: {}},
   connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
+  freshness: {status: 'live', lastUpdateMs: null},
   runsFeed: {_tag: 'Live'},
   agentFeeds: {},
   history: {earlier: {_tag: 'Idle'}, wholes: {}},

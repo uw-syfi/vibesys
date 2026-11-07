@@ -11,14 +11,10 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Option from 'effect/Option';
 import type * as Scope from 'effect/Scope';
+import {UNARY_BOUND_MS} from '../state/gateway-policy.js';
 import {decodeFrames, encodeFrame, isFault} from '../state/grpc-frames.js';
+import {callStatus} from '../state/grpc-status.js';
 import {GrpcCode, GrpcFailed} from './errors.js';
-
-/** The total a unary call may take, answered or not. */
-const UNARY_BOUND = '15 seconds';
-
-const GRPC_OK = '0';
-const UNKNOWN = 2;
 
 export interface GatewaySession {
   /**
@@ -30,10 +26,17 @@ export interface GatewaySession {
     bytes: Uint8Array,
     receive: (message: Uint8Array) => void,
   ) => Effect.Effect<void, GrpcFailed>;
-  /** A call with exactly one reply, bounded by `UNARY_BOUND`. */
+  /** A call with exactly one reply, bounded by `UNARY_BOUND_MS`. */
   readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, GrpcFailed>;
   /** Completes when the session ended: the peer closed it, said goaway, or the scope closed. */
   readonly lost: Effect.Effect<void>;
+  /**
+   * How many times the peer has sent something on any call (headers, a chunk of a message, the
+   * end) since the session opened. It only rises, so two reads that differ prove the link
+   * delivered bytes between them; a message that trickles in over a slow link rises with every
+   * chunk, which is how a slow transfer is told from a dead link.
+   */
+  readonly activity: Effect.Effect<number>;
 }
 
 const METHOD = /^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/;
@@ -76,11 +79,13 @@ const watchStream = (
   finish: (error?: GrpcFailed) => void,
   settled: () => boolean,
   receiveLimit: number,
+  heard: () => void,
 ): void => {
   let rest: Uint8Array = new Uint8Array(0);
   let status: string | undefined;
   let detail = '';
   const headers = (value: IncomingHttpHeaders): void => {
+    heard();
     if (value['grpc-status'] !== undefined) status = String(value['grpc-status']);
     if (value['grpc-message'] !== undefined) detail = String(value['grpc-message']);
     const http = value[':status'];
@@ -110,6 +115,7 @@ const watchStream = (
   stream.on('trailers', headers);
   stream.on('error', error => finish(unavailable(error.message)));
   stream.on('data', (chunk: Buffer) => {
+    heard();
     if (settled()) return;
     const decoded = decodeFrames(rest, chunk, receiveLimit);
     if (isFault(decoded)) return finish(new GrpcFailed(decoded));
@@ -117,20 +123,19 @@ const watchStream = (
     deliver(decoded.messages);
   });
   stream.on('end', () => {
+    // A stream that ends with no status was cut, not answered: `callStatus` makes it UNAVAILABLE,
+    // which the client redials, rather than a status of the host's own, which it would not.
     if (rest.byteLength !== 0)
       return finish(new GrpcFailed({code: GrpcCode.DATA_LOSS, message: 'truncated gRPC message'}));
-    if (status !== GRPC_OK)
-      return finish(
-        new GrpcFailed({code: Number(status ?? UNKNOWN), message: detail || 'missing gRPC status'}),
-      );
-    finish();
+    const failure = callStatus(status, detail);
+    finish(failure === undefined ? undefined : new GrpcFailed(failure));
   });
   stream.on('close', () => finish(unavailable('gRPC connection closed')));
 };
 
 /** One call over `http2`: send `bytes`, then `watchStream`. Interrupting resets the stream. */
 const callOver =
-  (http2: ClientHttp2Session): GatewaySession['call'] =>
+  (http2: ClientHttp2Session, heard: () => void): GatewaySession['call'] =>
   (method, bytes, receive) =>
     Effect.callback<void, GrpcFailed>(resume => {
       const frame = encodeFrame(bytes, HOST_API_MAX_MESSAGE_BYTES);
@@ -154,6 +159,7 @@ const callOver =
         method.startsWith(`/${OrchestratorService.typeName}/`)
           ? ORCHESTRATOR_MAX_MESSAGE_BYTES
           : HOST_API_MAX_MESSAGE_BYTES,
+        heard,
       );
       return Effect.sync(() => {
         if (settled) return;
@@ -162,7 +168,7 @@ const callOver =
       });
     });
 
-/** A call with exactly one reply, within `UNARY_BOUND`. */
+/** A call with exactly one reply, within `UNARY_BOUND_MS`. */
 const unaryOver =
   (call: GatewaySession['call']): GatewaySession['unary'] =>
   (method, bytes) =>
@@ -172,7 +178,7 @@ const unaryOver =
         if (reply !== undefined) throw new Error('unary returned multiple messages');
         reply = message;
       }).pipe(
-        Effect.timeoutOption(UNARY_BOUND),
+        Effect.timeoutOption(`${UNARY_BOUND_MS} millis`),
         Effect.flatMap(done => {
           if (Option.isNone(done))
             return Effect.fail(
@@ -209,6 +215,14 @@ export const openSession = (duplex: Duplex): Effect.Effect<GatewaySession, never
           markLost();
         }),
     );
-    const call = callOver(http2);
-    return {call, unary: unaryOver(call), lost: Deferred.await(lost)} satisfies GatewaySession;
+    let heard = 0;
+    const call = callOver(http2, () => {
+      heard += 1;
+    });
+    return {
+      call,
+      unary: unaryOver(call),
+      lost: Deferred.await(lost),
+      activity: Effect.sync(() => heard),
+    } satisfies GatewaySession;
   });

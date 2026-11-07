@@ -216,16 +216,30 @@ describe('gateway connection', () => {
     ),
   );
 
-  it.effect('gives a dial that never answers 3 minutes, then counts it as a failure', () =>
+  it.effect('never cuts a dial for taking long: it has no bound of its own, its phases do', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const {dialer, dialedAt} = scriptedDialer(fakeGateway(), ['never', 'never']);
+        const peer = fakeGateway();
+        let dials = 0;
+        // A first connection that copies the host program for ten minutes before it can connect.
+        const dialer: GatewayDialer = {
+          dial: () =>
+            Effect.gen(function* () {
+              dials += 1;
+              yield* Effect.sleep('10 minutes');
+              const duplex: Duplex = peer.connect();
+              yield* Effect.addFinalizer(() => Effect.sync(() => duplex.destroy()));
+              return duplex;
+            }),
+        };
         const connection = yield* makeGatewayConnection(dialer, quiet);
-        const call = yield* Effect.forkChild(connection.unary(SERVE, bytes()).pipe(Effect.ignore));
-        yield* TestClock.adjust('180 seconds');
-        yield* TestClock.adjust('500 millis');
-        expect(dialedAt).toEqual([0, 180_500]);
-        yield* Fiber.interrupt(call);
+        const call = yield* Effect.forkChild(connection.stream(SERVE, bytes(1), () => {}));
+        yield* TestClock.adjust('10 minutes');
+        yield* until(() => peer.calls.length === 1);
+        peer.calls[0]?.end();
+        yield* Fiber.join(call);
+        expect(dials).toBe(1);
+        expect(yield* connection.ended).toBe(false);
       }),
     ),
   );

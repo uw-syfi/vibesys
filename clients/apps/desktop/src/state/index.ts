@@ -14,7 +14,14 @@ export {
 } from './connection.js';
 export {FAULT_KINDS, type Fault, type FaultKind} from './fault.js';
 export type {FeedStatus} from './feed.js';
-export {type Freshness, freshnessOf} from './freshness.js';
+export {
+  type Freshness,
+  freshnessOf,
+  type HostFreshness,
+  hostFreshness,
+  type LinkStatus,
+  staleForMs,
+} from './freshness.js';
 export {
   type HostId,
   type HostKey,
