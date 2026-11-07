@@ -29,6 +29,10 @@ func oneOfEach() map[string]*pb.TaskFact {
 		"trouble": {Fact: &pb.TaskFact_Trouble{Trouble: &pb.JobTrouble{
 			JobId: "j1", Failure: &pb.Failure{Kind: pb.FailureKind_FAILURE_KIND_UNAVAILABLE, Message: "waiting"},
 		}}},
+		"workstream": {Fact: &pb.TaskFact_Workstream{Workstream: &pb.Workstream{
+			Number: 1, Title: "KV cache layout", Status: pb.WorkstreamStatus_WORKSTREAM_STATUS_ACTIVE,
+			Origin: &pb.RecordOrigin{RunId: "r", Agent: "lead", At: at}, UpdatedAt: at,
+		}}},
 		"bound": {Fact: &pb.TaskFact_Bound{Bound: &pb.ObjectiveBound{
 			Seq: 1, Origin: &pb.RecordOrigin{RunId: "r", Agent: "lead", At: at}, Objective: "tok_s",
 			Direction: pb.Direction_DIRECTION_MAXIMIZE, Value: 15600, Unit: "tok/s", Note: "derived",
