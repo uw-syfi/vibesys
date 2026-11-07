@@ -36,6 +36,11 @@ message RunRecord {
   // whichever is latest: the time the next progress report is counted from. Absent on a run recorded
   // before the schedule existed.
   google.protobuf.Timestamp last_summary_at = 3 [(stored_only) = true];
+  // The newest report the lead posted about the whole run (never one that answered a check-in): the
+  // message the run is summed up by. The host serves the message in RunSummary and a client never
+  // looks for it. Absent before the lead posts one, and on a run recorded before this field existed,
+  // which the host then finds in the run's messages.
+  string summary_report_id = 4 [(stored_only) = true];
 }
 
 // ReceiptRecord is a receipt as it is stored.

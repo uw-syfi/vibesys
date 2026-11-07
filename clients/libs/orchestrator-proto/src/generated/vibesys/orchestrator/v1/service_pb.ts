@@ -2,8 +2,8 @@
 // @generated from file vibesys/orchestrator/v1/service.proto (package vibesys.orchestrator.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenExtension, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { extDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenExtension, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, extDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { FileOptions } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
@@ -13,7 +13,7 @@ import type { RunCost } from "./cost_pb.js";
 import { file_vibesys_orchestrator_v1_cost } from "./cost_pb.js";
 import type { Command, Delta, Receipt, RunChange } from "./events_pb.js";
 import { file_vibesys_orchestrator_v1_events } from "./events_pb.js";
-import type { Agent, BuildVersions, Compatibility, Item, Message as Message$1, Run, Turn } from "./orchestrator_pb.js";
+import type { Agent, AgentRole, BuildVersions, Compatibility, Item, Message as Message$1, Run, Turn } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_orchestrator } from "./orchestrator_pb.js";
 import type { SearchState } from "./search_pb.js";
 import { file_vibesys_orchestrator_v1_search } from "./search_pb.js";
@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/service.proto.
  */
 export const file_vibesys_orchestrator_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJMCg9EaXNwYXRjaFJlcXVlc3QSOQoHY29tbWFuZBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbW1hbmRCBrpIA8gBASJNChBEaXNwYXRjaFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWNlaXB0Qga6SAPIAQEiTgoMSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASKaAQoNSGVsbG9SZXNwb25zZRI+CgZkYWVtb24YASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAAiKgoQV2F0Y2hSdW5zUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoBCLeAgoMUnVuc1NuYXBzaG90EioKBHJ1bnMYASADKAsyHC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW4SLgoGYWdlbnRzGAIgAygLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnQSEAoIc2VxdWVuY2UYAyABKAQSLAoFdHVybnMYBCADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuEjIKCG1lc3NhZ2VzGAUgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZRI2CghzZWFyY2hlcxgGIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlEhEKCXRydW5jYXRlZBgHIAEoCBIzCgljaGVja19pbnMYCCADKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DaGVja0luIssBChFXYXRjaFJ1bnNSZXNwb25zZRI5CghzbmFwc2hvdBgBIAEoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bnNTbmFwc2hvdEgAEjQKBmNoYW5nZRgCIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bkNoYW5nZUgAEjYKBnNlYXJjaBgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlSABCDQoEYm9keRIFukgCCAEiZQoRV2F0Y2hBZ2VudFJlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHQoJcGFnZV9zaXplGAIgASgNQgq6SAcqBRjoByAAEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgEIpwBCglJdGVtc1BhZ2USLAoFaXRlbXMYASADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtEhAKCHNlcXVlbmNlGAIgASgEEhsKE25leHRfYmVmb3JlX29yZGluYWwYAyABKA0SMgoIZWxpc2lvbnMYBCADKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FbGlzaW9uIkAKB0VsaXNpb24SGAoHb3JkaW5hbBgBIAEoDUIHukgEKgIgABIbCgpib2R5X2J5dGVzGAIgASgEQge6SAQyAiAAIvgBChJXYXRjaEFnZW50UmVzcG9uc2USMgoEcGFnZRgBIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1zUGFnZUgAEi0KBGl0ZW0YAiABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtSAASLwoFZGVsdGEYAyABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EZWx0YUgAEi0KBHR1cm4YBCABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuSAASEAoIc2VxdWVuY2UYBSABKARCDQoEYm9keRIFukgCCAEibQoQTGlzdEl0ZW1zUmVxdWVzdBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIfCg5iZWZvcmVfb3JkaW5hbBgCIAEoDUIHukgEKgIgABIdCglwYWdlX3NpemUYAyABKA1CCrpIByoFGOgHIAAiTQoRTGlzdEl0ZW1zUmVzcG9uc2USOAoEcGFnZRgBIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1zUGFnZUIGukgDyAEBIkUKDkdldEl0ZW1SZXF1ZXN0EhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEhgKB29yZGluYWwYAiABKA1CB7pIBCoCIAAiWAoPR2V0SXRlbVJlc3BvbnNlEjMKBGl0ZW0YASABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtQga6SAPIAQESEAoIc2VxdWVuY2UYAiABKAQiLgoTV2F0Y2hSdW5Db3N0UmVxdWVzdBIXCgZydW5faWQYASABKAlCB7pIBHICEAEiTgoUV2F0Y2hSdW5Db3N0UmVzcG9uc2USNgoEY29zdBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bkNvc3RCBrpIA8gBATLOBQoTT3JjaGVzdHJhdG9yU2VydmljZRJWCgVIZWxsbxIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVxdWVzdBomLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVzcG9uc2USXwoIRGlzcGF0Y2gSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlc3BvbnNlEmQKCVdhdGNoUnVucxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXNwb25zZTABEmcKCldhdGNoQWdlbnQSKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVxdWVzdBorLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXNwb25zZTABEmIKCUxpc3RJdGVtcxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXNwb25zZRJcCgdHZXRJdGVtEicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuR2V0SXRlbVJlcXVlc3QaKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5HZXRJdGVtUmVzcG9uc2USbQoMV2F0Y2hSdW5Db3N0EiwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hSdW5Db3N0UmVxdWVzdBotLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuQ29zdFJlc3BvbnNlMAE6SQoQcHJvdG9jb2xfdmVyc2lvbhIcLmdvb2dsZS5wcm90b2J1Zi5GaWxlT3B0aW9ucxi+hwMgASgNUg9wcm90b2NvbFZlcnNpb246UAoUbWluX3Byb3RvY29sX3ZlcnNpb24SHC5nb29nbGUucHJvdG9idWYuRmlsZU9wdGlvbnMYv4cDIAEoDVISbWluUHJvdG9jb2xWZXJzaW9uQlxaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjHwuxgB+LsYAWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_checkin, file_vibesys_orchestrator_v1_cost, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJMCg9EaXNwYXRjaFJlcXVlc3QSOQoHY29tbWFuZBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbW1hbmRCBrpIA8gBASJNChBEaXNwYXRjaFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWNlaXB0Qga6SAPIAQEiTgoMSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASKaAQoNSGVsbG9SZXNwb25zZRI+CgZkYWVtb24YASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAAibQoQV2F0Y2hSdW5zUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoBBJBCgZkZXRhaWwYAiABKA4yJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TbmFwc2hvdERldGFpbEIIukgFggECEAEirQMKDFJ1bnNTbmFwc2hvdBIqCgRydW5zGAEgAygLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuEi4KBmFnZW50cxgCIAMoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50EhAKCHNlcXVlbmNlGAMgASgEEiwKBXR1cm5zGAQgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybhIyCghtZXNzYWdlcxgFIAMoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USNgoIc2VhcmNoZXMYBiADKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZRIRCgl0cnVuY2F0ZWQYByABKAgSMwoJY2hlY2tfaW5zGAggAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2hlY2tJbhI2CglzdW1tYXJpZXMYCSADKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5TdW1tYXJ5EhUKDXJ1bnNfbGVmdF9vdXQYCiABKA0i+AQKClJ1blN1bW1hcnkSFwoGcnVuX2lkGAEgASgJQge6SARyAhABEjAKBnJlcG9ydBgCIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USFgoOYWdlbnRzX3dvcmtpbmcYAyABKA0SFAoMYWdlbnRzX3RvdGFsGAQgASgNEjwKBXJvbGVzGAUgAygLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUm9sZUFnZW50c0IIukgFkgECEBASRAoKb2JqZWN0aXZlcxgGIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9iamVjdGl2ZUhlYWRCCLpIBZIBAhBAOuwCukjoAhrsAQogcnVuX3N1bW1hcnkucmVwb3J0X2lzX29mX3RoZV9ydW4SUnRoZSByZXBvcnQgaXMgdGhlIHdob2xlLXJ1biByZXBvcnQgb2YgdGhpcyBydW4sIG5ldmVyIG9uZSB0aGF0IGFuc3dlcmVkIGEgY2hlY2staW4adCFoYXModGhpcy5yZXBvcnQpIHx8ICh0aGlzLnJlcG9ydC5ydW5faWQgPT0gdGhpcy5ydW5faWQgJiYgaGFzKHRoaXMucmVwb3J0LnJlcG9ydCkgJiYgdGhpcy5yZXBvcnQucmVwb3J0LnNjb3BlICE9IDIpGncKIHJ1bl9zdW1tYXJ5Lndvcmtpbmdfd2l0aGluX3RvdGFsEilhZ2VudHNfd29ya2luZyBjYW5ub3QgZXhjZWVkIGFnZW50c190b3RhbBoodGhpcy5hZ2VudHNfd29ya2luZyA8PSB0aGlzLmFnZW50c190b3RhbCLKAQoKUm9sZUFnZW50cxI6CgRyb2xlGAEgASgOMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRSb2xlQgi6SAWCAQIQARINCgV0b3RhbBgCIAEoDRIPCgd3b3JraW5nGAMgASgNOmC6SF0aWwogcm9sZV9hZ2VudHMud29ya2luZ193aXRoaW5fdG90YWwSG3dvcmtpbmcgY2Fubm90IGV4Y2VlZCB0b3RhbBoadGhpcy53b3JraW5nIDw9IHRoaXMudG90YWwipQEKDU9iamVjdGl2ZUhlYWQSGAoEbmFtZRgBIAEoCUIKukgHcgUQASiAAhIbCgV2YWx1ZRgCIAEoAUIHukgEEgJAAUgAiAEBEhYKBHVuaXQYAyABKAlCCLpIBXIDKIACEiYKEHBlcmNlbnRfb2ZfYm91bmQYBCABKAFCB7pIBBICQAFIAYgBAUIICgZfdmFsdWVCEwoRX3BlcmNlbnRfb2ZfYm91bmQigwIKEVdhdGNoUnVuc1Jlc3BvbnNlEjkKCHNuYXBzaG90GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuc1NuYXBzaG90SAASNAoGY2hhbmdlGAIgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuQ2hhbmdlSAASNgoGc2VhcmNoGAMgASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoU3RhdGVIABI2CgdzdW1tYXJ5GAQgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuU3VtbWFyeUgAQg0KBGJvZHkSBbpIAggBImUKEVdhdGNoQWdlbnRSZXF1ZXN0EhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEh0KCXBhZ2Vfc2l6ZRgCIAEoDUIKukgHKgUY6AcgABIWCg5hZnRlcl9zZXF1ZW5jZRgDIAEoBCKcAQoJSXRlbXNQYWdlEiwKBWl0ZW1zGAEgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbRIQCghzZXF1ZW5jZRgCIAEoBBIbChNuZXh0X2JlZm9yZV9vcmRpbmFsGAMgASgNEjIKCGVsaXNpb25zGAQgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRWxpc2lvbiJACgdFbGlzaW9uEhgKB29yZGluYWwYASABKA1CB7pIBCoCIAASGwoKYm9keV9ieXRlcxgCIAEoBEIHukgEMgIgACL4AQoSV2F0Y2hBZ2VudFJlc3BvbnNlEjIKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VIABItCgRpdGVtGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEi8KBWRlbHRhGAMgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsdGFIABItCgR0dXJuGAQgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEhAKCHNlcXVlbmNlGAUgASgEQg0KBGJvZHkSBbpIAggBIm0KEExpc3RJdGVtc1JlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHwoOYmVmb3JlX29yZGluYWwYAiABKA1CB7pIBCoCIAASHQoJcGFnZV9zaXplGAMgASgNQgq6SAcqBRjoByAAIk0KEUxpc3RJdGVtc1Jlc3BvbnNlEjgKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VCBrpIA8gBASJFCg5HZXRJdGVtUmVxdWVzdBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdvcmRpbmFsGAIgASgNQge6SAQqAiAAIlgKD0dldEl0ZW1SZXNwb25zZRIzCgRpdGVtGAEgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUIGukgDyAEBEhAKCHNlcXVlbmNlGAIgASgEIj8KFEdldFJ1bkhpc3RvcnlSZXF1ZXN0EhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQARIOCgZjdXJzb3IYAiABKAQiuQIKFUdldFJ1bkhpc3RvcnlSZXNwb25zZRIQCghzZXF1ZW5jZRgBIAEoBBIuCgZhZ2VudHMYAiADKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudBIsCgV0dXJucxgDIAMoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm4SMwoJY2hlY2tfaW5zGAQgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2hlY2tJbhIyCghtZXNzYWdlcxgFIAMoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USEwoLbmV4dF9jdXJzb3IYBiABKAQSFgoOdHVybnNfbGVmdF9vdXQYByABKAgSGgoSY2hlY2tfaW5zX2xlZnRfb3V0GAggASgIIi4KE1dhdGNoUnVuQ29zdFJlcXVlc3QSFwoGcnVuX2lkGAEgASgJQge6SARyAhABIk4KFFdhdGNoUnVuQ29zdFJlc3BvbnNlEjYKBGNvc3QYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5Db3N0Qga6SAPIAQEqTgoOU25hcHNob3REZXRhaWwSHwobU05BUFNIT1RfREVUQUlMX1VOU1BFQ0lGSUVEEAASGwoXU05BUFNIT1RfREVUQUlMX1NVTU1BUlkQATK+BgoTT3JjaGVzdHJhdG9yU2VydmljZRJWCgVIZWxsbxIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVxdWVzdBomLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVzcG9uc2USXwoIRGlzcGF0Y2gSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlc3BvbnNlEmQKCVdhdGNoUnVucxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXNwb25zZTABEmcKCldhdGNoQWdlbnQSKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVxdWVzdBorLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXNwb25zZTABEmIKCUxpc3RJdGVtcxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXNwb25zZRJcCgdHZXRJdGVtEicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuR2V0SXRlbVJlcXVlc3QaKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5HZXRJdGVtUmVzcG9uc2USbgoNR2V0UnVuSGlzdG9yeRItLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkdldFJ1bkhpc3RvcnlSZXF1ZXN0Gi4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuR2V0UnVuSGlzdG9yeVJlc3BvbnNlEm0KDFdhdGNoUnVuQ29zdBIsLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuQ29zdFJlcXVlc3QaLS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bkNvc3RSZXNwb25zZTABOkkKEHByb3RvY29sX3ZlcnNpb24SHC5nb29nbGUucHJvdG9idWYuRmlsZU9wdGlvbnMYvocDIAEoDVIPcHJvdG9jb2xWZXJzaW9uOlAKFG1pbl9wcm90b2NvbF92ZXJzaW9uEhwuZ29vZ2xlLnByb3RvYnVmLkZpbGVPcHRpb25zGL+HAyABKA1SEm1pblByb3RvY29sVmVyc2lvbkJcWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYx8LsYAfi7GAFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_checkin, file_vibesys_orchestrator_v1_cost, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.DispatchRequest
@@ -108,6 +108,14 @@ export type WatchRunsRequest = Message<"vibesys.orchestrator.v1.WatchRunsRequest
    * @generated from field: uint64 after_sequence = 1;
    */
   afterSequence: bigint;
+
+  /**
+   * What the snapshot holds of each run. Unspecified is whole histories, as clients that read a run's
+   * transcript from the stream need them.
+   *
+   * @generated from field: vibesys.orchestrator.v1.SnapshotDetail detail = 2;
+   */
+  detail: SnapshotDetail;
 };
 
 /**
@@ -127,6 +135,8 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
   runs: Run[];
 
   /**
+   * The agents of the listed runs; empty in a snapshot of detail SUMMARY.
+   *
    * @generated from field: repeated vibesys.orchestrator.v1.Agent agents = 2;
    */
   agents: Agent[];
@@ -141,7 +151,7 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
   /**
    * Every turn and message of those runs, so that a client that connects late can show when each
    * agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
-   * WatchAgent and ListItems page them.
+   * WatchAgent and ListItems page them. Empty in a snapshot of detail SUMMARY.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.Turn turns = 4;
    */
@@ -158,8 +168,9 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
   searches: SearchState[];
 
   /**
-   * Older run bundles or history were omitted to fit the snapshot byte budget.
-   * Search views omitted here follow as individual search responses.
+   * The snapshot left something out to fit its byte budget: the history of some run (detail
+   * UNSPECIFIED), or whole runs (`runs_left_out` says how many). Search views left out here follow as
+   * individual search responses.
    *
    * @generated from field: bool truncated = 7;
    */
@@ -174,6 +185,24 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
    * @generated from field: repeated vibesys.orchestrator.v1.CheckIn check_ins = 8;
    */
   checkIns: CheckIn[];
+
+  /**
+   * The summary of every run in `runs`, the same for every detail, one each. A client shows these and
+   * works out none of them: the report that sums a run up, the agents working and the head of each
+   * objective.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.RunSummary summaries = 9;
+   */
+  summaries: RunSummary[];
+
+  /**
+   * How many runs the host has that are not in `runs`, because listing them would pass the byte
+   * budget: the oldest finished ones, never a live run before a finished one. Zero when every run is
+   * listed.
+   *
+   * @generated from field: uint32 runs_left_out = 10;
+   */
+  runsLeftOut: number;
 };
 
 /**
@@ -182,6 +211,137 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
  */
 export const RunsSnapshotSchema: GenMessage<RunsSnapshot> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_service, 5);
+
+/**
+ * RunSummary is what a client shows of a run without reading its history. The host works every figure
+ * out, so that the app derives none of them from messages and agents it may not hold: it is sent in a
+ * snapshot, and again as a whole, replacing the one before, each time anything it says changes.
+ *
+ * @generated from message vibesys.orchestrator.v1.RunSummary
+ */
+export type RunSummary = Message<"vibesys.orchestrator.v1.RunSummary"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * The newest report the lead posted about the whole run, whole: its time is when the lead last
+   * reported, and its kind says whether that was its last word. A report that answered a check-in
+   * covers a span of the run and is never this one, so a Catch me up answer does not replace it.
+   * Absent before the lead has posted a report about the run.
+   *
+   * @generated from field: vibesys.orchestrator.v1.Message report = 2;
+   */
+  report?: Message$1 | undefined;
+
+  /**
+   * How many of the run's agents are working: launching, in a turn, or waiting on subagents. Every
+   * client counts the same set, whatever it shows it for.
+   *
+   * @generated from field: uint32 agents_working = 3;
+   */
+  agentsWorking: number;
+
+  /**
+   * Every agent the run has had, over or not.
+   *
+   * @generated from field: uint32 agents_total = 4;
+   */
+  agentsTotal: number;
+
+  /**
+   * The same by type of agent, in the order of the role enum; a type with no agent is left out.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.RoleAgents roles = 5;
+   */
+  roles: RoleAgents[];
+
+  /**
+   * The head's value on each objective, in the order of the task's metrics, then the objectives that
+   * have a declared bound and no measurement.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.ObjectiveHead objectives = 6;
+   */
+  objectives: ObjectiveHead[];
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.RunSummary.
+ * Use `create(RunSummarySchema)` to create a new message.
+ */
+export const RunSummarySchema: GenMessage<RunSummary> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 6);
+
+/**
+ * RoleAgents counts the agents of one type in a run.
+ *
+ * @generated from message vibesys.orchestrator.v1.RoleAgents
+ */
+export type RoleAgents = Message<"vibesys.orchestrator.v1.RoleAgents"> & {
+  /**
+   * @generated from field: vibesys.orchestrator.v1.AgentRole role = 1;
+   */
+  role: AgentRole;
+
+  /**
+   * @generated from field: uint32 total = 2;
+   */
+  total: number;
+
+  /**
+   * @generated from field: uint32 working = 3;
+   */
+  working: number;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.RoleAgents.
+ * Use `create(RoleAgentsSchema)` to create a new message.
+ */
+export const RoleAgentsSchema: GenMessage<RoleAgents> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 7);
+
+/**
+ * ObjectiveHead is the run's head on one objective.
+ *
+ * @generated from message vibesys.orchestrator.v1.ObjectiveHead
+ */
+export type ObjectiveHead = Message<"vibesys.orchestrator.v1.ObjectiveHead"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * The head's value, absent when the head has none for the objective.
+   *
+   * @generated from field: optional double value = 2;
+   */
+  value?: number | undefined;
+
+  /**
+   * What the value is counted in, as the agents that declared the bound said; empty with no bound.
+   *
+   * @generated from field: string unit = 3;
+   */
+  unit: string;
+
+  /**
+   * How close the head is to the standing bound, in percent, as ObjectiveBounds says it; absent with
+   * no bound or no head value.
+   *
+   * @generated from field: optional double percent_of_bound = 4;
+   */
+  percentOfBound?: number | undefined;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.ObjectiveHead.
+ * Use `create(ObjectiveHeadSchema)` to create a new message.
+ */
+export const ObjectiveHeadSchema: GenMessage<ObjectiveHead> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 8);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchRunsResponse
@@ -208,6 +368,15 @@ export type WatchRunsResponse = Message<"vibesys.orchestrator.v1.WatchRunsRespon
      */
     value: SearchState;
     case: "search";
+  } | {
+    /**
+     * A run's summary, whole: it replaces the one the client holds for the run. Not an event of the
+     * log, so it has no sequence: it is as of the moment it was sent, after the changes before it.
+     *
+     * @generated from field: vibesys.orchestrator.v1.RunSummary summary = 4;
+     */
+    value: RunSummary;
+    case: "summary";
   } | { case: undefined; value?: undefined };
 };
 
@@ -216,7 +385,7 @@ export type WatchRunsResponse = Message<"vibesys.orchestrator.v1.WatchRunsRespon
  * Use `create(WatchRunsResponseSchema)` to create a new message.
  */
 export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 6);
+  messageDesc(file_vibesys_orchestrator_v1_service, 9);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchAgentRequest
@@ -247,7 +416,7 @@ export type WatchAgentRequest = Message<"vibesys.orchestrator.v1.WatchAgentReque
  * Use `create(WatchAgentRequestSchema)` to create a new message.
  */
 export const WatchAgentRequestSchema: GenMessage<WatchAgentRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 7);
+  messageDesc(file_vibesys_orchestrator_v1_service, 10);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ItemsPage
@@ -289,7 +458,7 @@ export type ItemsPage = Message<"vibesys.orchestrator.v1.ItemsPage"> & {
  * Use `create(ItemsPageSchema)` to create a new message.
  */
 export const ItemsPageSchema: GenMessage<ItemsPage> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 8);
+  messageDesc(file_vibesys_orchestrator_v1_service, 11);
 
 /**
  * Elision says a page left out the text of one of its items: the text of a reasoning item or the
@@ -320,7 +489,7 @@ export type Elision = Message<"vibesys.orchestrator.v1.Elision"> & {
  * Use `create(ElisionSchema)` to create a new message.
  */
 export const ElisionSchema: GenMessage<Elision> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 9);
+  messageDesc(file_vibesys_orchestrator_v1_service, 12);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchAgentResponse
@@ -371,7 +540,7 @@ export type WatchAgentResponse = Message<"vibesys.orchestrator.v1.WatchAgentResp
  * Use `create(WatchAgentResponseSchema)` to create a new message.
  */
 export const WatchAgentResponseSchema: GenMessage<WatchAgentResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 10);
+  messageDesc(file_vibesys_orchestrator_v1_service, 13);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsRequest
@@ -400,7 +569,7 @@ export type ListItemsRequest = Message<"vibesys.orchestrator.v1.ListItemsRequest
  * Use `create(ListItemsRequestSchema)` to create a new message.
  */
 export const ListItemsRequestSchema: GenMessage<ListItemsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 11);
+  messageDesc(file_vibesys_orchestrator_v1_service, 14);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsResponse
@@ -417,7 +586,7 @@ export type ListItemsResponse = Message<"vibesys.orchestrator.v1.ListItemsRespon
  * Use `create(ListItemsResponseSchema)` to create a new message.
  */
 export const ListItemsResponseSchema: GenMessage<ListItemsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 12);
+  messageDesc(file_vibesys_orchestrator_v1_service, 15);
 
 /**
  * @generated from message vibesys.orchestrator.v1.GetItemRequest
@@ -441,7 +610,7 @@ export type GetItemRequest = Message<"vibesys.orchestrator.v1.GetItemRequest"> &
  * Use `create(GetItemRequestSchema)` to create a new message.
  */
 export const GetItemRequestSchema: GenMessage<GetItemRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 13);
+  messageDesc(file_vibesys_orchestrator_v1_service, 16);
 
 /**
  * @generated from message vibesys.orchestrator.v1.GetItemResponse
@@ -467,7 +636,105 @@ export type GetItemResponse = Message<"vibesys.orchestrator.v1.GetItemResponse">
  * Use `create(GetItemResponseSchema)` to create a new message.
  */
 export const GetItemResponseSchema: GenMessage<GetItemResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 14);
+  messageDesc(file_vibesys_orchestrator_v1_service, 17);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.GetRunHistoryRequest
+ */
+export type GetRunHistoryRequest = Message<"vibesys.orchestrator.v1.GetRunHistoryRequest"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * Zero reads the first page; otherwise the next_cursor of the page before.
+   *
+   * @generated from field: uint64 cursor = 2;
+   */
+  cursor: bigint;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.GetRunHistoryRequest.
+ * Use `create(GetRunHistoryRequestSchema)` to create a new message.
+ */
+export const GetRunHistoryRequestSchema: GenMessage<GetRunHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 18);
+
+/**
+ * GetRunHistoryResponse is one page of a run's history. The first page also holds what is not paged:
+ * the agents, the turns and the check-ins. Everything is current to `sequence` of that page, and the
+ * stream's changes after the client's own sequence keep it so: a client keeps a record it already
+ * holds and adds the ones it does not.
+ *
+ * @generated from message vibesys.orchestrator.v1.GetRunHistoryResponse
+ */
+export type GetRunHistoryResponse = Message<"vibesys.orchestrator.v1.GetRunHistoryResponse"> & {
+  /**
+   * The sequence this page is current to.
+   *
+   * @generated from field: uint64 sequence = 1;
+   */
+  sequence: bigint;
+
+  /**
+   * First page only.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.Agent agents = 2;
+   */
+  agents: Agent[];
+
+  /**
+   * First page only: the turns of the run in start order, up to the host's timeline window.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.Turn turns = 3;
+   */
+  turns: Turn[];
+
+  /**
+   * First page only: the newest 64 check-ins of each viewer, oldest first.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.CheckIn check_ins = 4;
+   */
+  checkIns: CheckIn[];
+
+  /**
+   * The run's messages in the order they were made, as many as fit a page.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.Message messages = 5;
+   */
+  messages: Message$1[];
+
+  /**
+   * Pass as cursor to read the next page. Zero when this was the last.
+   *
+   * @generated from field: uint64 next_cursor = 6;
+   */
+  nextCursor: bigint;
+
+  /**
+   * First page only: the run has more turns than the timeline window holds, and the later ones are
+   * not here.
+   *
+   * @generated from field: bool turns_left_out = 7;
+   */
+  turnsLeftOut: boolean;
+
+  /**
+   * First page only: a viewer made more check-ins than the 64 held, and the older ones are not here.
+   *
+   * @generated from field: bool check_ins_left_out = 8;
+   */
+  checkInsLeftOut: boolean;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.GetRunHistoryResponse.
+ * Use `create(GetRunHistoryResponseSchema)` to create a new message.
+ */
+export const GetRunHistoryResponseSchema: GenMessage<GetRunHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_service, 19);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchRunCostRequest
@@ -484,7 +751,7 @@ export type WatchRunCostRequest = Message<"vibesys.orchestrator.v1.WatchRunCostR
  * Use `create(WatchRunCostRequestSchema)` to create a new message.
  */
 export const WatchRunCostRequestSchema: GenMessage<WatchRunCostRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 15);
+  messageDesc(file_vibesys_orchestrator_v1_service, 20);
 
 /**
  * WatchRunCostResponse is the run's cost view. The first one the stream sends is the view as of the
@@ -504,7 +771,37 @@ export type WatchRunCostResponse = Message<"vibesys.orchestrator.v1.WatchRunCost
  * Use `create(WatchRunCostResponseSchema)` to create a new message.
  */
 export const WatchRunCostResponseSchema: GenMessage<WatchRunCostResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 16);
+  messageDesc(file_vibesys_orchestrator_v1_service, 21);
+
+/**
+ * SnapshotDetail says what a snapshot of runs holds of each run.
+ *
+ * @generated from enum vibesys.orchestrator.v1.SnapshotDetail
+ */
+export enum SnapshotDetail {
+  /**
+   * Every listed run with its whole history: agents, turns, messages and check-ins, as much as fits the
+   * snapshot's byte budget. A run whose history was cut is the reason `truncated` is set.
+   *
+   * @generated from enum value: SNAPSHOT_DETAIL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The runs and their summaries, and nothing of their histories: the size of the snapshot follows the
+   * number of runs and not the length of their mailboxes. A run's history is read with GetRunHistory,
+   * and everything after the snapshot's sequence still arrives as changes.
+   *
+   * @generated from enum value: SNAPSHOT_DETAIL_SUMMARY = 1;
+   */
+  SUMMARY = 1,
+}
+
+/**
+ * Describes the enum vibesys.orchestrator.v1.SnapshotDetail.
+ */
+export const SnapshotDetailSchema: GenEnum<SnapshotDetail> = /*@__PURE__*/
+  enumDesc(file_vibesys_orchestrator_v1_service, 0);
 
 /**
  * OrchestratorService is what the daemon serves to its clients, the desktop app and the headless
@@ -533,7 +830,8 @@ export const OrchestratorService: GenService<{
     output: typeof DispatchResponseSchema;
   },
   /**
-   * Snapshot of runs and agents, then every change after its sequence.
+   * Snapshot of runs, then every change after its sequence, and a RunSummary each time a run's summary
+   * moves. What the snapshot holds of each run is the request's `detail`.
    *
    * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.WatchRuns
    */
@@ -571,6 +869,17 @@ export const OrchestratorService: GenService<{
     methodKind: "unary";
     input: typeof GetItemRequestSchema;
     output: typeof GetItemResponseSchema;
+  },
+  /**
+   * One run's history, paged: the agents, turns and check-ins it has and its messages, which a
+   * snapshot of detail SUMMARY leaves out.
+   *
+   * @generated from rpc vibesys.orchestrator.v1.OrchestratorService.GetRunHistory
+   */
+  getRunHistory: {
+    methodKind: "unary";
+    input: typeof GetRunHistoryRequestSchema;
+    output: typeof GetRunHistoryResponseSchema;
   },
   /**
    * What one run has cost: its whole cost view, then the whole view again each time it changes. The

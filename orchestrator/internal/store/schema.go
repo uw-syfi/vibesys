@@ -128,6 +128,7 @@ var screenQueries = map[string]string{
 	"events of all":     queryAllEvents,
 	"items page":        queryItems,
 	"messages of a run": queryMessages,
+	"message by id":     queryMessage,
 	"turns in window":   queryTurns,
 	"receipt":           `SELECT result FROM command_receipts WHERE command_id = ?`,
 	"claim":             queryClaim,
@@ -142,6 +143,7 @@ const (
 	queryAllEvents      = `SELECT body FROM events WHERE sequence > ? ORDER BY sequence LIMIT ?`
 	queryItems          = `SELECT body FROM items WHERE agent_id = ? AND ordinal < ? ORDER BY ordinal DESC LIMIT ?`
 	queryMessages       = `SELECT body, seq FROM messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`
+	queryMessage        = `SELECT body FROM messages WHERE id = ?`
 	// The turns that overlap a window, in start order. The index holds started_at in order and
 	// ended_at beside it, so the overlap test runs on the index entry and only a turn that passes is
 	// read. INDEXED BY keeps the planner from choosing another index and sorting.

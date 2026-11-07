@@ -139,6 +139,9 @@ type Reader interface {
 	// cursor above the end of the log is ErrAheadOfLog.
 	Messages(run core.RunID, after uint64, limit int) ([]MessageRecord, error)
 
+	// Message returns one message by its id, as it stands, and says whether the store has it.
+	Message(id core.MessageID) (core.Message, bool, error)
+
 	// Turns returns the turns of a run that overlap [from, to]: started before to, and still
 	// running or ended after from. They come in start order.
 	Turns(run core.RunID, from, to time.Time, limit int) (TurnWindow, error)

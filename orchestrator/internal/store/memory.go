@@ -467,6 +467,20 @@ func (m *Memory) Messages(run core.RunID, after uint64, limit int) ([]MessageRec
 	return all[:min(len(all), pageLimit(limit, MaxPageMessages))], nil
 }
 
+// Message implements Reader.
+func (m *Memory) Message(id core.MessageID) (core.Message, bool, error) {
+	unlock, err := m.lock()
+	if err != nil {
+		return core.Message{}, false, err
+	}
+	defer unlock()
+	r, ok := m.shared.tables.messages[id]
+	if !ok {
+		return core.Message{}, false, nil
+	}
+	return r.event.Body.(core.Message), true, nil
+}
+
 // Turns implements Reader.
 func (m *Memory) Turns(run core.RunID, from, to time.Time, limit int) (TurnWindow, error) {
 	unlock, err := m.lock()

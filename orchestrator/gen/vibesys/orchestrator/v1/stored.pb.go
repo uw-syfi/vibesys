@@ -89,8 +89,13 @@ type RunRecord struct {
 	// whichever is latest: the time the next progress report is counted from. Absent on a run recorded
 	// before the schedule existed.
 	LastSummaryAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_summary_at,json=lastSummaryAt,proto3" json:"last_summary_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The newest report the lead posted about the whole run (never one that answered a check-in): the
+	// message the run is summed up by. The host serves the message in RunSummary and a client never
+	// looks for it. Absent before the lead posts one, and on a run recorded before this field existed,
+	// which the host then finds in the run's messages.
+	SummaryReportId string `protobuf:"bytes,4,opt,name=summary_report_id,json=summaryReportId,proto3" json:"summary_report_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RunRecord) Reset() {
@@ -142,6 +147,13 @@ func (x *RunRecord) GetLastSummaryAt() *timestamppb.Timestamp {
 		return x.LastSummaryAt
 	}
 	return nil
+}
+
+func (x *RunRecord) GetSummaryReportId() string {
+	if x != nil {
+		return x.SummaryReportId
+	}
+	return ""
 }
 
 // ReceiptRecord is a receipt as it is stored.
@@ -536,11 +548,12 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"$vibesys/orchestrator/v1/stored.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%vibesys/orchestrator/v1/checkin.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a,vibesys/orchestrator/v1/stored_options.proto\"|\n" +
 	"\vAgentRecord\x12<\n" +
 	"\x05agent\x18\x01 \x01(\v2\x1e.vibesys.orchestrator.v1.AgentB\x06\xbaH\x03\xc8\x01\x01R\x05agent\x12/\n" +
-	"\fresume_token\x18\x02 \x01(\fB\f\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\vresumeToken\"\xd8\x01\n" +
+	"\fresume_token\x18\x02 \x01(\fB\f\xbaH\x05z\x03\x18\x80 \x90\xbd\x18\x01R\vresumeToken\"\x8a\x02\n" +
 	"\tRunRecord\x126\n" +
 	"\x03run\x18\x01 \x01(\v2\x1c.vibesys.orchestrator.v1.RunB\x06\xbaH\x03\xc8\x01\x01R\x03run\x12I\n" +
 	"\bjob_tool\x18\x02 \x01(\v2(.vibesys.orchestrator.v1.JobToolEndpointB\x04\x90\xbd\x18\x01R\ajobTool\x12H\n" +
-	"\x0flast_summary_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x04\x90\xbd\x18\x01R\rlastSummaryAt\"\x95\x01\n" +
+	"\x0flast_summary_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x04\x90\xbd\x18\x01R\rlastSummaryAt\x120\n" +
+	"\x11summary_report_id\x18\x04 \x01(\tB\x04\x90\xbd\x18\x01R\x0fsummaryReportId\"\x95\x01\n" +
 	"\rReceiptRecord\x12B\n" +
 	"\areceipt\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\areceipt\x12@\n" +
 	"\x0ecommand_digest\x18\x02 \x01(\tB\x19\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x90\xbd\x18\x01R\rcommandDigest\"\x86\x01\n" +

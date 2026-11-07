@@ -193,6 +193,19 @@ enum ReportKind {
   REPORT_KIND_FINAL = 2;
 }
 
+// ReportScope says what a report is about. The host sets it when it records the report; a lead cannot
+// choose it.
+enum ReportScope {
+  // A report recorded before scope existed, or one in a command: read as the whole run.
+  REPORT_SCOPE_UNSPECIFIED = 0;
+  // The whole run: the lead's account of where it stands. The run's summary is the newest of these.
+  REPORT_SCOPE_RUN = 1;
+  // A span of the run: a progress report that answers a check-in (Catch me up), posted in the turn the
+  // request started, covering only that check-in's window. It is never the run's summary and does not
+  // postpone the lead's next scheduled report.
+  REPORT_SCOPE_WINDOW = 2;
+}
+
 // JobOutcome is how a vibesys-cli job finished.
 enum JobOutcome {
   JOB_OUTCOME_UNSPECIFIED = 0;
@@ -641,6 +654,12 @@ message Report {
   // Zero in a command. The orchestrator numbers the reports of a run from 1 in the order it
   // records them, so a reader can ask for those after the last one it saw.
   uint32 sequence = 7 [(tool_field_hidden) = true];
+  // What the report is about; set by the host, UNSPECIFIED in a command. The lead does not choose it:
+  // the host knows that the report answers a check-in because of the turn it is posted in.
+  ReportScope scope = 8 [
+    (buf.validate.field).enum.defined_only = true,
+    (tool_field_hidden) = true
+  ];
 }
 
 message JobFinished {

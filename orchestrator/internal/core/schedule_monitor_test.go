@@ -203,6 +203,10 @@ func (m *monitor) summaryBooks(effects []core.Effect) error {
 			return fmt.Errorf("run %s holds its schedule as every %v from %v, next %v, and the books say every %v from %v, next %v",
 				id, run.SummaryEvery, run.LastSummaryAt, run.NextSummaryAt, s.every, s.base, s.due)
 		}
+		if run.SummaryReport != m.summary[id] || m.windows[run.SummaryReport] {
+			return fmt.Errorf("run %s is summed up by report %q, and the newest report about the run is %q (a window report: %t)",
+				id, run.SummaryReport, m.summary[id], m.windows[run.SummaryReport])
+		}
 		if got, want := armed[id], m.arms[id]; !slices.EqualFunc(got, want, time.Time.Equal) {
 			return fmt.Errorf("run %s armed summary timers for %v, and its requests became due at %v", id, got, want)
 		}

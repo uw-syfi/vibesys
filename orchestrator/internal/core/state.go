@@ -194,6 +194,18 @@ func (s State) Agents(run RunID) []Agent {
 	return out
 }
 
+// AgentsByRun returns every run's agents, each run's in id order, in one pass.
+func (s State) AgentsByRun() map[RunID][]Agent {
+	out := map[RunID][]Agent{}
+	for _, a := range s.agents {
+		out[a.Run] = append(out[a.Run], a.Agent)
+	}
+	for _, agents := range out {
+		slices.SortFunc(agents, func(x, y Agent) int { return cmp.Compare(x.ID, y.ID) })
+	}
+	return out
+}
+
 // ActiveTurn returns the turn an agent is running.
 func (s State) ActiveTurn(id AgentID) (Turn, bool) {
 	if t := s.agents[id].turn; t != nil {

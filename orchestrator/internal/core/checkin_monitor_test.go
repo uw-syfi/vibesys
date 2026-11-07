@@ -16,8 +16,11 @@ type checkInCoverage struct {
 	// presses that named no viewer, asked the requests sent to a lead, inFlight the presses that sent
 	// none because one was on its way, cannot those that sent none because the run could not be asked,
 	// ready and failed the answers, linked the reports that answered a request, overRuns the presses on
-	// a run that was over, and empty the windows with nothing in them.
+	// a run that was over, and empty the windows with nothing in them. windowReports are the linked reports
+	// that were about the window alone (progress), and finalAnswers those the lead gave as its last word,
+	// which are about the run.
 	made, repeated, unviewed, asked, inFlight, cannot, ready, failed, linked, overRuns, empty int
+	windowReports, finalAnswers                                                               int
 }
 
 func (c *checkInCoverage) add(o checkInCoverage) {
@@ -32,6 +35,8 @@ func (c *checkInCoverage) add(o checkInCoverage) {
 	c.linked += o.linked
 	c.overRuns += o.overRuns
 	c.empty += o.empty
+	c.windowReports += o.windowReports
+	c.finalAnswers += o.finalAnswers
 }
 
 // checkInRecord is the monitor's own account of one check-in, kept from the committed events.
@@ -308,6 +313,14 @@ func (m *monitor) answer(in core.Command, receipt *core.Receipt, changed []core.
 		return fmt.Errorf("a report %q posted in the turn of request %s should have answered check-in %s, and changed %+v", receipt.Message, want.ask, want.id, changed)
 	}
 	m.covered.checkIns.linked++
+	// A progress report that answers a request is about the window it covers; the lead's last word is about
+	// the run, whatever asked for it.
+	if post, ok := in.Body.(core.PostReport); ok && post.Report.Kind == core.ReportProgress {
+		m.windows[receipt.Message] = true
+		m.covered.checkIns.windowReports++
+	} else {
+		m.covered.checkIns.finalAnswers++
+	}
 	return nil
 }
 

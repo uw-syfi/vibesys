@@ -34,7 +34,7 @@ func spanOut(d time.Duration) *durationpb.Duration {
 
 // runRecordOut is a run as it is stored: the public message, and what only the host keeps.
 func runRecordOut(r core.Run) *pb.RunRecord {
-	return &pb.RunRecord{Run: runOut(r), JobTool: jobToolOut(r.JobTool), LastSummaryAt: when(r.LastSummaryAt)}
+	return &pb.RunRecord{Run: runOut(r), JobTool: jobToolOut(r.JobTool), LastSummaryAt: when(r.LastSummaryAt), SummaryReportId: string(r.SummaryReport)}
 }
 
 // limitOut is the contract's cost limit: absent for none.
@@ -49,6 +49,7 @@ func runRecordIn(r *pb.RunRecord, errs *errorList) core.Run {
 	out := runIn(r.GetRun(), errs)
 	out.JobTool = jobToolIn(r.GetJobTool())
 	out.LastSummaryAt = moment(r.GetLastSummaryAt(), errs)
+	out.SummaryReport = core.MessageID(r.GetSummaryReportId())
 	return out
 }
 
@@ -327,14 +328,14 @@ func handoffIn(h *pb.Handoff, errs *errorList) core.Handoff {
 
 func reportOut(r core.Report) *pb.Report {
 	return &pb.Report{
-		Kind: reportKinds.out(r.Kind), Sequence: r.Sequence, Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions,
+		Kind: reportKinds.out(r.Kind), Scope: reportScopes.out(r.Scope), Sequence: r.Sequence, Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions,
 		OpenForUser: r.OpenForUser,
 	}
 }
 
 func reportIn(r *pb.Report, errs *errorList) core.Report {
 	return core.Report{
-		Kind: reportKinds.in(r.GetKind(), errs), Sequence: r.GetSequence(), Headline: r.GetHeadline(), Changed: r.GetChanged(), InFlight: r.GetInFlight(), Decisions: r.GetDecisions(),
+		Kind: reportKinds.in(r.GetKind(), errs), Scope: reportScopes.in(r.GetScope(), errs), Sequence: r.GetSequence(), Headline: r.GetHeadline(), Changed: r.GetChanged(), InFlight: r.GetInFlight(), Decisions: r.GetDecisions(),
 		OpenForUser: r.GetOpenForUser(),
 	}
 }

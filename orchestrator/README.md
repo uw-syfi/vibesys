@@ -411,10 +411,47 @@ the existing path ends its process. A launch whose session ended before the daem
 for the process it may have started and ends that too. A restart of the daemon during a launch changes
 none of this: the session opens, fails with its reason, or is written off by the timer.
 
-A snapshot holds runs and agents, and every turn and message of those runs, not items, so the snapshot
+A snapshot of whole histories holds runs and agents, and every turn and message of those runs, not items, so the snapshot
 shows an agent's turns and the handoffs and reports a late watcher missed, and not what the agent said
 in them (`WatchAgent` and `ListItems` page items). A run with more turns than a timeline window holds
 shows its earliest in the snapshot.
+
+### What a run summarizes
+
+The host owns the facts a list of runs shows, and no client derives them from messages and agents it may
+not hold. `RunSummary` is the run's report, its agents and the head of each objective, worked out by the
+host (`internal/daemon/summary.go`, `search.Heads`):
+
+- **The report.** The summary report is the newest report the lead posted about the whole run. A report that
+  answers Catch me up covers a window, and the core marks it: `Report.scope` is `WINDOW` for a progress report
+  posted in the turn a catch-up request started (the turn already says which check-in it answers), `RUN` for
+  every other one, and the lead cannot choose. A final report that answers a request is still the lead's last
+  word on the run, so it is `RUN`. A window report is not the summary, does not postpone the lead's next
+  scheduled report (the hour is counted from the last report about the run), and does not say the lead has
+  finished; it still takes its number among the run's reports. The core names the summary report
+  (`RunRecord.summary_report_id`, stored, set in the event that records the report), and the host reads the
+  message by id. A run recorded before the field existed has none named, and the host finds its newest
+  non-window report once in its messages.
+- **The agents.** `agents_working` counts the agents launching, in a turn, or waiting on subagents
+  (`AgentStatus.Working`, the one definition), with the same split by type of agent.
+- **The head.** One entry per objective: the head's value, the unit of the standing bound and the share of it.
+
+A snapshot carries one summary for every run it lists, whatever its detail, and a stream whose request asked for
+detail `SUMMARY` also receives a `summary` frame, the whole summary of a run, each time something it says
+changes (a poll's events are folded first, then one frame for each run they touched). A summary frame is not an
+event of the log and has no sequence; it replaces the client's summary of the run. A reader that did not ask for
+summaries is never sent the frame.
+
+A snapshot of detail `SUMMARY` holds runs and summaries only, so its size follows the number of runs and not the
+length of their mailboxes. Runs are listed live first, then the newest started; if the next run and its summary do
+not fit `MaxSnapshotBytes`, it and every run after it are left out, counted in `runs_left_out`, and `truncated` is
+set: the oldest finished runs go first and none disappears unsaid. A client then reads a run's history with
+`GetRunHistory` when it opens the run: the first page holds its agents, turns and check-ins and the first messages,
+and each page names the cursor of the next (zero at the last), a page holding at most `MaxHistoryPageBytes` of
+messages and at least one. The history is current to the page's `sequence`; a client keeps a record it already
+holds and adds the others, and the stream's changes keep it current. A snapshot of detail unspecified is whole
+histories as before, so the headless client is unchanged; it sheds search views, then check-ins, then turns and
+messages before it leaves a run out, and says `truncated`.
 
 A page of items leaves out the text of a reasoning item or the output of a tool call larger than
 `daemon.ElideOver` (4096 bytes), so that a page of an agent that thought and ran a lot stays small: the

@@ -19,13 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrchestratorService_Hello_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
-	OrchestratorService_Dispatch_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
-	OrchestratorService_WatchRuns_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
-	OrchestratorService_WatchAgent_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
-	OrchestratorService_ListItems_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
-	OrchestratorService_GetItem_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
-	OrchestratorService_WatchRunCost_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
+	OrchestratorService_Hello_FullMethodName         = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
+	OrchestratorService_Dispatch_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
+	OrchestratorService_WatchRuns_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
+	OrchestratorService_WatchAgent_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
+	OrchestratorService_ListItems_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
+	OrchestratorService_GetItem_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
+	OrchestratorService_GetRunHistory_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
+	OrchestratorService_WatchRunCost_FullMethodName  = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -39,7 +40,8 @@ type OrchestratorServiceClient interface {
 	// Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
 	// and reusing an id for another command is an error.
 	Dispatch(ctx context.Context, in *DispatchRequest, opts ...grpc.CallOption) (*DispatchResponse, error)
-	// Snapshot of runs and agents, then every change after its sequence.
+	// Snapshot of runs, then every change after its sequence, and a RunSummary each time a run's summary
+	// moves. What the snapshot holds of each run is the request's `detail`.
 	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(ctx context.Context, in *WatchAgentRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchAgentResponse], error)
@@ -47,6 +49,9 @@ type OrchestratorServiceClient interface {
 	ListItems(ctx context.Context, in *ListItemsRequest, opts ...grpc.CallOption) (*ListItemsResponse, error)
 	// One item of an agent, whole: what a page left out.
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
+	// One run's history, paged: the agents, turns and check-ins it has and its messages, which a
+	// snapshot of detail SUMMARY leaves out.
+	GetRunHistory(ctx context.Context, in *GetRunHistoryRequest, opts ...grpc.CallOption) (*GetRunHistoryResponse, error)
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error)
@@ -138,6 +143,16 @@ func (c *orchestratorServiceClient) GetItem(ctx context.Context, in *GetItemRequ
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) GetRunHistory(ctx context.Context, in *GetRunHistoryRequest, opts ...grpc.CallOption) (*GetRunHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRunHistoryResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_GetRunHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *orchestratorServiceClient) WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &OrchestratorService_ServiceDesc.Streams[2], OrchestratorService_WatchRunCost_FullMethodName, cOpts...)
@@ -168,7 +183,8 @@ type OrchestratorServiceServer interface {
 	// Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
 	// and reusing an id for another command is an error.
 	Dispatch(context.Context, *DispatchRequest) (*DispatchResponse, error)
-	// Snapshot of runs and agents, then every change after its sequence.
+	// Snapshot of runs, then every change after its sequence, and a RunSummary each time a run's summary
+	// moves. What the snapshot holds of each run is the request's `detail`.
 	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(*WatchAgentRequest, grpc.ServerStreamingServer[WatchAgentResponse]) error
@@ -176,6 +192,9 @@ type OrchestratorServiceServer interface {
 	ListItems(context.Context, *ListItemsRequest) (*ListItemsResponse, error)
 	// One item of an agent, whole: what a page left out.
 	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
+	// One run's history, paged: the agents, turns and check-ins it has and its messages, which a
+	// snapshot of detail SUMMARY leaves out.
+	GetRunHistory(context.Context, *GetRunHistoryRequest) (*GetRunHistoryResponse, error)
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error
@@ -206,6 +225,9 @@ func (UnimplementedOrchestratorServiceServer) ListItems(context.Context, *ListIt
 }
 func (UnimplementedOrchestratorServiceServer) GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetItem not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) GetRunHistory(context.Context, *GetRunHistoryRequest) (*GetRunHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRunHistory not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchRunCost not implemented")
@@ -325,6 +347,24 @@ func _OrchestratorService_GetItem_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_GetRunHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRunHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).GetRunHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_GetRunHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).GetRunHistory(ctx, req.(*GetRunHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrchestratorService_WatchRunCost_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(WatchRunCostRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -358,6 +398,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetItem",
 			Handler:    _OrchestratorService_GetItem_Handler,
+		},
+		{
+			MethodName: "GetRunHistory",
+			Handler:    _OrchestratorService_GetRunHistory_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

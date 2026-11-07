@@ -68,6 +68,7 @@ func (c coverage) require(t *testing.T) {
 		"presses with a request in flight": c.checkIns.inFlight, "presses on a run that could not be asked": c.checkIns.cannot,
 		"check-ins made ready": c.checkIns.ready, "check-ins failed": c.checkIns.failed,
 		"reports that answered a catch-up": c.checkIns.linked, "presses on a run that was over": c.checkIns.overRuns,
+		"progress reports that answered a catch-up": c.checkIns.windowReports, "final reports that answered a catch-up": c.checkIns.finalAnswers,
 		"empty windows": c.checkIns.empty,
 	} {
 		if n == 0 {
@@ -123,6 +124,10 @@ type monitor struct {
 	// finished holds the runs whose lead's latest report is final and which have started no new work
 	// since: no agent spawned, no more jobs running, no progress report.
 	finished map[core.RunID]bool
+	// windows holds the reports that are about a window and not the run: a progress report that answered a
+	// check-in's request. summary holds each run's newest report that is about the run.
+	windows map[core.MessageID]bool
+	summary map[core.RunID]core.MessageID
 	// limited holds the runs that were told their limit was reached, with the message that told them.
 	limited map[core.RunID]core.MessageID
 	// books holds each run's report schedule as the monitor works it out, and startEvery the interval
@@ -150,6 +155,7 @@ func newMonitor() *monitor {
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
 		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
+		windows: map[core.MessageID]bool{}, summary: map[core.RunID]core.MessageID{},
 		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{}, checkInBooks: newCheckInBooks(),
 	}
 }
@@ -568,8 +574,20 @@ func (m *monitor) message(msg core.Message) error {
 				return fmt.Errorf("report %s has kind %q", msg.ID, b.Kind)
 			}
 			m.reports[msg.Run]++
-			m.finished[msg.Run] = b.Kind == core.ReportFinal
-			m.reported(msg)
+			wantScope := core.ReportScopeRun
+			if m.windows[msg.ID] {
+				wantScope = core.ReportScopeWindow
+			}
+			if b.Scope != wantScope {
+				return fmt.Errorf("report %s has scope %q, want %q", msg.ID, b.Scope, wantScope)
+			}
+			// A report about a window is not the run's report: it does not sum the run up, count as the lead's
+			// scheduled report, or say the lead has finished.
+			if wantScope == core.ReportScopeRun {
+				m.finished[msg.Run] = b.Kind == core.ReportFinal
+				m.summary[msg.Run] = msg.ID
+				m.reported(msg)
+			}
 			if b.Sequence != m.reports[msg.Run] || m.runs[msg.Run].ReportsPosted != b.Sequence {
 				return fmt.Errorf("report %s is number %d, the run counts %d, want %d", msg.ID, b.Sequence, m.runs[msg.Run].ReportsPosted, m.reports[msg.Run])
 			}
