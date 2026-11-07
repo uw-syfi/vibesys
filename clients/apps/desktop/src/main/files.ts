@@ -31,7 +31,7 @@ export interface FileOps {
   readonly remove: (path: string) => Promise<void>;
 }
 
-export const nodeFileOps: FileOps = {
+const nodeFileOps: FileOps = {
   mkdir: async directory => {
     await mkdir(directory, {recursive: true});
   },
