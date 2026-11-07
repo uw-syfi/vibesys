@@ -44,6 +44,9 @@ enum DesktopRefusal {
   DESKTOP_REFUSAL_HOST_PROGRAM_MISSING = 3;
   // The request breaks its schema, so it can never be answered as sent.
   DESKTOP_REFUSAL_INVALID_REQUEST = 4;
+  // The host lacks something installing the host program needs (a tool, or a writable home
+  // directory), so no retry installs it; the end's `error` names what is missing.
+  DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING = 5;
 }
 
 message DesktopGatewayEnd {

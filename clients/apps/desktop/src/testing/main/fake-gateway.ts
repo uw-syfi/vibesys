@@ -41,6 +41,15 @@ export interface FakeCall {
   readonly cancelled: () => boolean;
 }
 
+/** What the test lets through a throttled link. */
+interface Throttle {
+  /**
+   * Let `bytes` bytes through to the client on every connection throttled: whatever the peer sent
+   * and the link still holds, in order, cut anywhere (the middle of an HTTP/2 frame included).
+   */
+  drip(bytes: number): void;
+}
+
 export interface FakeGateway {
   /** The handshake hash the peer answers with; defaults to the client's. */
   schemaHash: string;
@@ -61,6 +70,12 @@ export interface FakeGateway {
   hang(): void;
   /** Deliver what a hang held back, and carry on. */
   resume(): void;
+  /**
+   * Carry the peer's bytes to the client only as the test drips them, on every connection made
+   * after this call: a link of any speed, down to a byte now and then. Nothing is lost; what
+   * the link has not carried is held.
+   */
+  throttle(): Throttle;
   /** Called with each call received on a scripted method, as it arrives. */
   onCall: ((call: FakeCall) => void) | undefined;
 }
@@ -76,10 +91,36 @@ function gate(hold: {held: boolean}, waiting: Set<() => void>): Transform {
   });
 }
 
+/** A pipe that holds every byte until the test lets some through. */
+class Meter extends Transform {
+  private held: Buffer[] = [];
+
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
+    this.held.push(chunk);
+    callback();
+  }
+
+  drip(bytes: number): void {
+    let allowance = bytes;
+    while (allowance > 0 && this.held.length > 0) {
+      const head = this.held[0] as Buffer;
+      const take = head.subarray(0, allowance);
+      allowance -= take.length;
+      if (take.length === head.length) this.held.shift();
+      else this.held[0] = head.subarray(take.length);
+      this.push(take);
+    }
+  }
+}
+
 /** A pair of duplexes wired back to back through pipes that a hang can hold. */
-function duplexPair(hold: {held: boolean}, waiting: Set<() => void>): [Duplex, Duplex] {
+function duplexPair(
+  hold: {held: boolean},
+  waiting: Set<() => void>,
+  meter?: Meter,
+): [Duplex, Duplex] {
   const aToB = gate(hold, waiting);
-  const bToA = gate(hold, waiting);
+  const bToA = meter ?? gate(hold, waiting);
   return [
     Duplex.from({readable: bToA, writable: aToB}),
     Duplex.from({readable: aToB, writable: bToA}),
@@ -177,8 +218,18 @@ export function fakeGateway(): FakeGateway {
   const headersSeen: IncomingHttpHeaders[] = [];
   const waiting = new Set<() => void>();
   const holds = new Set<{held: boolean}>();
+  const meters = new Set<Meter>();
+  let throttled = false;
   const gateway: FakeGateway = {
     onCall: undefined,
+    throttle: () => {
+      throttled = true;
+      return {
+        drip: bytes => {
+          for (const meter of meters) meter.drip(bytes);
+        },
+      };
+    },
     hang: () => {
       for (const hold of holds) hold.held = true;
     },
@@ -195,7 +246,9 @@ export function fakeGateway(): FakeGateway {
     connect: () => {
       const hold = {held: false};
       holds.add(hold);
-      const [client, peer] = duplexPair(hold, waiting);
+      const meter = throttled ? new Meter() : undefined;
+      if (meter !== undefined) meters.add(meter);
+      const [client, peer] = duplexPair(hold, waiting, meter);
       // Destroying one end aborts the pair; no one is left to read that as a fault.
       client.on('error', () => {});
       peer.on('error', () => {});
@@ -208,6 +261,7 @@ export function fakeGateway(): FakeGateway {
       for (const session of sessions) session.destroy();
       for (const socket of sockets) socket.destroy();
       sockets.clear();
+      meters.clear();
     },
   };
   server.on('session', session => {

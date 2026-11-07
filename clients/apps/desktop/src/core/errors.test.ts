@@ -92,6 +92,7 @@ const APP_REFUSALS = [
   DesktopRefusal.INVALID_REQUEST,
   DesktopRefusal.UNSUPPORTED_PLATFORM,
   DesktopRefusal.HOST_PROGRAM_MISSING,
+  DesktopRefusal.HOST_PREREQUISITE_MISSING,
 ] as const;
 
 it.prop(

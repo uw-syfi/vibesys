@@ -32,7 +32,7 @@ import {
   grpcCodeOf,
   type LinkFailed,
 } from './errors.js';
-import {type GatewaySession, openSession} from './grpc-session.js';
+import {type CallFailed, type GatewaySession, openSession} from './grpc-session.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 
@@ -74,8 +74,8 @@ const helloBytes = toBinary(
 );
 
 /** The handshake: the gateway must answer with the schema hash this client was built with. */
-const hello = (session: GatewaySession): Effect.Effect<void, GrpcFailed> =>
-  session.unary(HELLO_METHOD, helloBytes).pipe(
+const hello = (ask: GatewaySession['unary']): Effect.Effect<void, CallFailed> =>
+  ask(HELLO_METHOD, helloBytes).pipe(
     Effect.flatMap(bytes =>
       Effect.try({
         try: () => validatedFromBinary(HelloResponseSchema, bytes),
@@ -108,7 +108,7 @@ export type SessionOpener = (
   duplex: Duplex,
 ) => Effect.Effect<GatewaySession, GrpcFailed, Scope.Scope>;
 
-type DialError = GrpcFailed | GatewayFailed | GatewayRefused | LinkFailed;
+type DialError = CallFailed | GatewayFailed | GatewayRefused | LinkFailed;
 
 /** Dial, open the session and shake hands; on any failure nothing stays open. */
 const openOnce = (
@@ -121,7 +121,7 @@ const openOnce = (
     return yield* Effect.gen(function* () {
       const duplex = yield* dialer.dial(force);
       const session = yield* openSessionWith(duplex);
-      yield* hello(session);
+      yield* hello(session.unary);
       return {session, scope} satisfies Opened;
     }).pipe(
       Effect.provideService(Scope.Scope, scope),
@@ -195,15 +195,12 @@ const silent = (session: GatewaySession): Effect.Effect<void> =>
         quiet = step.silent;
         if (step.action === 'lost') return;
         // The probe's own failure is not the verdict: only silence is.
-        if (step.action === 'probe') yield* Effect.forkScoped(Effect.ignore(hello(session)));
+        if (step.action === 'probe') yield* Effect.forkScoped(Effect.ignore(hello(session.probe)));
       }
     }),
   );
 
-const lostError = new GrpcFailed({
-  code: GrpcCode.UNAVAILABLE,
-  message: 'gateway connection lost',
-});
+const lostError = new GatewayFailed({message: 'gateway connection lost'});
 
 /** A connection that dials at once and ends with the scope it is made in. */
 export const makeGatewayConnection = (
@@ -253,7 +250,7 @@ export const makeGatewayConnection = (
     );
 
     /** `run` on the ready session, ended when that session is lost. */
-    const onSession = <A>(run: (session: GatewaySession) => Effect.Effect<A, GrpcFailed>) =>
+    const onSession = <A>(run: (session: GatewaySession) => Effect.Effect<A, CallFailed>) =>
       Effect.flatMap(ready, session =>
         Effect.raceFirst(run(session), Effect.andThen(session.lost, Effect.fail(lostError))),
       );

@@ -34,10 +34,10 @@ const play = (arrivals: readonly number[]) =>
     const opener: SessionOpener = () =>
       Effect.gen(function* () {
         openedAt.push(yield* Effect.clockWith(clock => clock.currentTimeMillis));
-        let unaries = 0;
         return {
-          // The handshake that opens a session is answered; every later request is a probe.
-          unary: () => (++unaries === 1 ? Effect.succeed(hello) : Effect.never),
+          // The handshake that opens a session is answered; a probe never is.
+          unary: () => Effect.succeed(hello),
+          probe: () => Effect.never,
           call: () => Effect.never,
           lost: Effect.never,
           activity: Effect.sync(() => heard),

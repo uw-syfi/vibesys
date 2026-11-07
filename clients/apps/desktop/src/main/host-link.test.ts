@@ -38,8 +38,9 @@ import {defaultReconnect} from '../core/reconnect.js';
 import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
 import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
+import {HOST_PREREQUISITES} from '../state/host-prerequisites.js';
 import {type HostConnectionState, hostKey} from '../state/index.js';
-import {SILENCE_BOUND_MS} from '../state/liveness.js';
+import {LIVENESS_WINDOW_MS, SILENCE_BOUND_MS} from '../state/liveness.js';
 import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
 import {fakeSshHost} from '../testing/main/fake-ssh-host.js';
@@ -393,6 +394,14 @@ interface SshOptions {
   /** The host programs the app's own build holds: a dev build may hold fewer than all. */
   readonly built: readonly GatewayTarget[];
   readonly unserving?: Unserving;
+  /** Prerequisites the host lacks, as `HOST_PREREQUISITES` names them. */
+  readonly lacking?: readonly string[];
+  /** The host already holds the program. */
+  readonly provisioned?: boolean;
+  /** The host's link carries bytes only as the test lets them through (`FakeGateway.throttle`). */
+  readonly throttled?: boolean;
+  /** The first orchestrator Hellos the link loses: cut without a status, or dropped. */
+  readonly lostHellos?: {readonly how: 'cut' | 'drop'; readonly count: number};
   /**
    * The window's run feed: not mounted, mounted and answered at once, or mounted with its first
    * frame held back for the test to deliver.
@@ -405,7 +414,11 @@ const sshHost = (options: SshOptions) =>
   Effect.gen(function* () {
     const peer = fakeGateway();
     const host = fakeSshHost(peer, PLATFORM[options.platform]);
+    for (const name of options.lacking ?? []) host.state.lacking.add(name);
+    host.state.provisioned = options.provisioned ?? false;
     const pending: FakeCall[] = [];
+    const logs: string[] = [];
+    let lost = options.lostHellos?.count ?? 0;
     const {unserving} = options;
     const identity = toBinary(
       IdentifyResponseSchema,
@@ -426,6 +439,16 @@ const sshHost = (options: SshOptions) =>
               },
       }),
     );
+    const answerHello = (call: FakeCall): void => {
+      if (lost > 0) {
+        lost -= 1;
+        if (options.lostHellos?.how === 'cut') call.endWithoutStatus();
+        else peer.drop();
+        return;
+      }
+      call.send(helloReply);
+      call.end();
+    };
     peer.onCall = call => {
       if (call.method === IDENTIFY) {
         call.send(identity);
@@ -433,10 +456,7 @@ const sshHost = (options: SshOptions) =>
       }
       if (unserving !== undefined && call.method.startsWith(`/${OrchestratorService.typeName}/`))
         return call.end(14, 'the orchestrator is not served by this process');
-      if (call.method === HELLO) {
-        call.send(helloReply);
-        return call.end();
-      }
+      if (call.method === HELLO) return answerHello(call);
       // A feed's own stream is answered at once; anything else a test asks for waits for it.
       if (call.method === WATCH_RUNS && options.feed === 'answered')
         return call.send(snapshotReply);
@@ -457,9 +477,11 @@ const sshHost = (options: SshOptions) =>
       const pool = yield* makeLinkPool('/tmp/vsd-1/%C', () => {});
       return yield* makeGatewayDialers(pool, () => {});
     }).pipe(Effect.provide(Layer.mergeAll(host.spawner.layer, fakeLocalHost().layer, built)));
-    const calls = yield* makeGatewayCalls(dialers, () => {});
+    const calls = yield* makeGatewayCalls(dialers, (_host, line) => logs.push(line));
     const seen = yield* windowOver(calls, peer, options.feed !== 'off');
-    return {...seen, calls, peer, host, pending};
+    const throttle = options.throttled === true ? peer.throttle() : undefined;
+    const identifies = () => peer.methods.filter(name => name === IDENTIFY).length;
+    return {...seen, calls, peer, host, pending, logs, identifies, throttle};
   });
 type SshWorld = Effect.Success<ReturnType<typeof sshHost>>;
 
@@ -478,6 +500,20 @@ const failure = Schema.Union([
     kind: Schema.Literal('build'),
     platform: Schema.Literals([...ALL_TARGETS, 'unsupported']),
     built: Schema.Array(Schema.Literals(ALL_TARGETS)).check(Schema.isMaxLength(3)),
+  }),
+  // A host that lacks something the install needs refuses, naming each, and is never retried.
+  Schema.Struct({
+    kind: Schema.Literal('prerequisite'),
+    lacking: Schema.Array(Schema.Literals(HOST_PREREQUISITES.map(({name}) => name)))
+      .check(Schema.isMinLength(1))
+      .check(Schema.isMaxLength(4)),
+  }),
+  // A link that loses the first Hellos is redialed: no host answered, so none is asked why, and
+  // each loss is logged once.
+  Schema.Struct({
+    kind: Schema.Literal('lost'),
+    how: Schema.Literals(['cut', 'drop']),
+    count: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 3})),
   }),
   // A host that says why it does not serve: what it refuses for good is shown and not retried,
   // what may pass (held by another process) is waited out.
@@ -568,6 +604,69 @@ const playBuild = (platform: Platform, built: readonly GatewayTarget[]) =>
     expect(world.connection()._tag).toBe('Unusable');
   });
 
+const playPrerequisite = (lacking: readonly string[]) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, lacking});
+    yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
+    const state = world.connection();
+    expect(state._tag).toBe('Unusable');
+    if (state._tag !== 'Unusable') return;
+    expect(state.fault.kind).toBe('Refused');
+    expect(state.fault.cause).toBe('host-prerequisite-missing');
+    expect(state.fault.retryable).toBe(false);
+    // It names everything the host lacks, and nothing was copied.
+    for (const name of lacking) expect(state.fault.detail).toContain(name);
+    expect(world.host.state.uploads).toBe(0);
+    const probes = world.host.state.probes;
+    yield* world.elapse(10 * 60_000, 30_000);
+    // Never retried: the host was not probed or dialed again.
+    expect(world.host.state.probes).toBe(probes);
+    expect(world.host.state.connects).toBe(0);
+    expect(world.connection()._tag).toBe('Unusable');
+  });
+
+/** The most drips a trickling link may need to carry a connect, however slow. */
+const MOST_DRIPS = 800;
+/** Drips after the connection is live: its liveness probes, answered at the same pace. */
+const DRIPS_AFTER_LIVE = 12;
+
+const playTrickle = (bytes: number, gap: number, stopAfter: number | undefined) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, throttled: true});
+    const cutLogged = () =>
+      world.logs.some(line => line.includes('dial 1 failed') || line.includes('went silent'));
+    let drips = 0;
+    let liveFor = 0;
+    // Every drip is progress: whatever the connect has taken so far, nothing is cut. A link that
+    // never stops carries the connect to its end and a while beyond.
+    while (stopAfter === undefined ? liveFor < DRIPS_AFTER_LIVE : drips < stopAfter) {
+      expect(drips).toBeLessThan(MOST_DRIPS);
+      yield* world.elapse(gap * 1000, 1000);
+      world.throttle?.drip(bytes);
+      drips += 1;
+      if (world.live()) liveFor += 1;
+      expect(cutLogged()).toBe(false);
+      expect(world.host.state.connects).toBeLessThanOrEqual(1);
+    }
+    if (stopAfter === undefined) return;
+    // The link stopped: cut within the bound of what it was doing, and not left connected.
+    yield* world.elapse(Math.max(2 * REPLY_STALL_MS, SILENCE_BOUND_MS) + 2000, 500);
+    expect(cutLogged()).toBe(true);
+  });
+
+const playLost = (how: 'cut' | 'drop', count: number) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, lostHellos: {how, count}});
+    expect(yield* world.until(() => world.live(), 120_000)).not.toBeNull();
+    const failedHellos = world.logs.filter(line =>
+      line.startsWith(`gateway call failed: ${HELLO}`),
+    );
+    // Each lost Hello is named once, and nothing asked the host `Identify`: no host answered.
+    expect(failedHellos).toHaveLength(count);
+    expect(world.identifies()).toBe(0);
+    expect(world.logs.filter(line => line.includes(IDENTIFY))).toEqual([]);
+  });
+
 const REFUSED_CAUSE = {
   [StateRefusal.NETWORK_FILESYSTEM]: 'state-network-filesystem',
   [StateRefusal.UNKNOWN_FILESYSTEM]: 'state-unknown-filesystem',
@@ -584,6 +683,8 @@ const playUnserved = (reason: UnservedReason, stateRefusal: StateRefusal) =>
       yield* world.elapse(60_000, 1000);
       expect(world.connection()._tag).not.toBe('Unusable');
       expect(world.hellos()).toBeGreaterThan(1);
+      // The host answered UNAVAILABLE, so it was asked why.
+      expect(world.identifies()).toBeGreaterThan(0);
       return;
     }
     yield* world.until(() => world.connection()._tag === 'Unusable', 60_000);
@@ -599,6 +700,17 @@ const playUnserved = (reason: UnservedReason, stateRefusal: StateRefusal) =>
     yield* world.elapse(10 * 60_000, 30_000);
     expect(world.hellos()).toBe(asked);
   });
+
+it.effect('a host that already holds the program connects though it lacks gzip', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const world = yield* sshHost({...served, lacking: ['gzip'], provisioned: true});
+      // Nothing is installed, so nothing the install needs is required.
+      expect(yield* world.until(() => world.live(), 60_000)).not.toBeNull();
+      expect(world.host.state.uploads).toBe(0);
+    }),
+  ),
+);
 
 /** The window's own feed, whose first frame the host takes many windows to deliver. */
 const playSlowFeed = (spacing: number, count: number) =>
@@ -773,6 +885,10 @@ it.effect.prop(
         switch (failure.kind) {
           case 'build':
             return yield* playBuild(failure.platform, failure.built);
+          case 'prerequisite':
+            return yield* playPrerequisite(failure.lacking);
+          case 'lost':
+            return yield* playLost(failure.how, failure.count);
           case 'unserved':
             return yield* playUnserved(failure.reason, failure.stateRefusal);
           case 'slow':
@@ -785,4 +901,21 @@ it.effect.prop(
       }),
     ),
   {arbitrary: {runs: 20}},
+);
+
+// A link that delivers a few bytes at a time, however slowly (connection-level frames and the
+// middle of frames included), is never cut while it delivers; once it stops, it is cut within the
+// bound of whatever it was doing (a call's stall window, the liveness silence).
+it.effect.prop(
+  'a link that keeps delivering bytes is never cut, however slowly, and one that stops is cut within the bound',
+  {
+    bytes: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 3})),
+    gap: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: LIVENESS_WINDOW_MS / 1000 - 1})),
+    stopAfter: Schema.Union([
+      Schema.Undefined,
+      Schema.Int.check(Schema.isBetween({minimum: 0, maximum: 400})),
+    ]),
+  },
+  ({bytes, gap, stopAfter}) => Effect.scoped(playTrickle(bytes, gap, stopAfter)),
+  {arbitrary: {runs: 25}},
 );

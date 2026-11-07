@@ -238,6 +238,13 @@ class DesktopRefusal(Enum):
             ```proto
             DESKTOP_REFUSAL_INVALID_REQUEST = 4
             ```
+        HOST_PREREQUISITE_MISSING:
+            The host lacks something installing the host program needs (a tool, or a writable home
+            directory), so no retry installs it; the end's `error` names what is missing.
+
+            ```proto
+            DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING = 5
+            ```
     """
 
     UNSPECIFIED = 0
@@ -245,10 +252,11 @@ class DesktopRefusal(Enum):
     UNSUPPORTED_PLATFORM = 2
     HOST_PROGRAM_MISSING = 3
     INVALID_REQUEST = 4
+    HOST_PREREQUISITE_MISSING = 5
 
 
 _DESC = file_desc(
-    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"\xbe\x02\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12&\n\x06status\x18\x02 \x01(\x05H\x01R\x06statusB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x88\x01\x01\x12Z\n\x0clink_problem\x18\x03 \x01(\x0e2&.vibesys.desktop.v1.DesktopLinkProblemH\x02R\x0blinkProblemB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12M\n\x07refusal\x18\x04 \x01(\x0e2".vibesys.desktop.v1.DesktopRefusalH\x03R\x07refusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x08\n\x06_errorB\t\n\x07_statusB\x0f\n\r_link_problemB\n\n\x08_refusal"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02*\x9b\x01\n\x12DesktopLinkProblem\x12$\n DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03*\xd4\x01\n\x0eDesktopRefusal\x12\x1f\n\x1bDESKTOP_REFUSAL_UNSPECIFIED\x10\x00\x12(\n$DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE\x10\x01\x12(\n$DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM\x10\x02\x12(\n$DESKTOP_REFUSAL_HOST_PROGRAM_MISSING\x10\x03\x12#\n\x1fDESKTOP_REFUSAL_INVALID_REQUEST\x10\x04BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"\xbe\x02\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12&\n\x06status\x18\x02 \x01(\x05H\x01R\x06statusB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x88\x01\x01\x12Z\n\x0clink_problem\x18\x03 \x01(\x0e2&.vibesys.desktop.v1.DesktopLinkProblemH\x02R\x0blinkProblemB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12M\n\x07refusal\x18\x04 \x01(\x0e2".vibesys.desktop.v1.DesktopRefusalH\x03R\x07refusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x08\n\x06_errorB\t\n\x07_statusB\x0f\n\r_link_problemB\n\n\x08_refusal"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02*\x9b\x01\n\x12DesktopLinkProblem\x12$\n DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03*\x83\x02\n\x0eDesktopRefusal\x12\x1f\n\x1bDESKTOP_REFUSAL_UNSPECIFIED\x10\x00\x12(\n$DESKTOP_REFUSAL_METHOD_NOT_AVAILABLE\x10\x01\x12(\n$DESKTOP_REFUSAL_UNSUPPORTED_PLATFORM\x10\x02\x12(\n$DESKTOP_REFUSAL_HOST_PROGRAM_MISSING\x10\x03\x12#\n\x1fDESKTOP_REFUSAL_INVALID_REQUEST\x10\x04\x12-\n)DESKTOP_REFUSAL_HOST_PREREQUISITE_MISSING\x10\x05BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
     ],

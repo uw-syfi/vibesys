@@ -11,6 +11,8 @@ const UNAVAILABLE = 14;
 export interface CallStatus {
   readonly code: number;
   readonly message: string;
+  /** The host sent this status; false when the link ended the call with none. */
+  readonly answered: boolean;
 }
 
 /** A status the peer can send: one to three digits, no sign, no spaces. */
@@ -23,9 +25,11 @@ const STATUS = /^\d{1,3}$/;
 export function callStatus(status: string | undefined, detail: string): CallStatus | undefined {
   if (status !== undefined && STATUS.test(status)) {
     const code = Number(status);
-    return code === 0 ? undefined : {code, message: detail === '' ? `gRPC status ${code}` : detail};
+    return code === 0
+      ? undefined
+      : {code, message: detail === '' ? `gRPC status ${code}` : detail, answered: true};
   }
   const said = status === undefined ? 'no gRPC status' : `gRPC status ${JSON.stringify(status)}`;
   const tail = detail === '' ? '' : `: ${detail}`;
-  return {code: UNAVAILABLE, message: `the stream ended with ${said}${tail}`};
+  return {code: UNAVAILABLE, message: `the stream ended with ${said}${tail}`, answered: false};
 }

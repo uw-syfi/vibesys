@@ -52,6 +52,12 @@ export {
   type HostModel,
   runsCursor,
 } from './host-model.js';
+export {
+  HOST_PREREQUISITES,
+  missingPrerequisites,
+  PREREQUISITE_SCRIPT,
+  prerequisiteMessage,
+} from './host-prerequisites.js';
 export {type HostRefusal, refusalOf} from './host-refusal.js';
 export {
   type CheckInRead,

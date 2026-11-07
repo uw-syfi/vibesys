@@ -84,12 +84,15 @@ separately. Each phase of dialing a host has the bound that fits what it waits f
 the ssh link up and short commands by the clock, the copy of the host program by its progress
 (a chunk not accepted within a stall window ends it, a slow copy that keeps moving never is),
 and the handshake once the program runs. Nothing bounds a dial as a whole, so a slow first
-connection finishes. An open session is alive while bytes arrive from the host, however slowly.
+connection finishes. An open session is alive while bytes arrive from the host, however slowly: bytes are counted on the
+link itself, so a connection-level frame (SETTINGS, PING) or the middle of a frame counts as much
+as a call's event.
 A session silent for a window is probed with the handshake; one silent through a second window
 is lost and redialed, so a hung link is noticed within the silence bound (`state/liveness.ts`).
 
 A call is held to the same rule. A request, and a stream until its first reply, is stalled when a
-whole window (`REPLY_STALL_MS`) passed with nothing heard on it, so a reply that keeps arriving,
+whole window (`REPLY_STALL_MS`) passed with no byte heard on the link, except what a liveness probe
+heard (a probe's reply proves the link alive, not that the host will answer a call it ignores), so a reply that keeps arriving,
 however slowly and however large, is never cut, and one that stops is cut within two windows. The
 window has no wall deadline of its own on a call; only a command's receipt keeps one. A host's
 connection outlives its last call by a short linger (`CONNECTION_LINGER_MS`), so the handshake and
@@ -103,8 +106,11 @@ a closed socket and an ssh exit are a lost link, which the reconnect policy redi
 the host's own word and is shown as such, never retried. So is what the app refuses itself, typed
 across the port (`DesktopRefusal`): a method it does not allow, a request that breaks its schema, a
 platform no host program is built for, a build that holds none for the host's platform (the message
-names the platform and the version, which is the API hash of the program). And so is what the host
-says about why it does not serve: after an UNAVAILABLE handshake the connection asks `Identify`, and
+names the platform and the version, which is the API hash of the program), a host that lacks
+something installing the program needs (one check before the copy covers a table of tools and a
+writable home, `state/host-prerequisites.ts`; the message names what is missing). And so is what the
+host says about why it does not serve: after a handshake the host answered UNAVAILABLE (a lost link
+is not that answer, and asks nothing) the connection asks `Identify`, and
 a state or configuration the host refused is shown with its cause and the setting that fixes it
 (a state directory on a local disk), not retried; a host merely held by another process is waited
 out. The connection exposes each host's freshness as data (live, reconnecting or stale, and when
