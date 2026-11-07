@@ -28,7 +28,7 @@ func (a *App) DeclareBound(ctx context.Context, c core.CallContext, commit core.
 	if err != nil {
 		return core.Bound{}, err
 	}
-	decided, err := core.DecideBound(t.Declared(), statement, core.RecordOrigin{Run: c.Run, Agent: c.Agent, At: a.now()})
+	decided, err := core.DecideBound(t.Declared(), statement, a.originOf(c))
 	if err != nil {
 		return core.Bound{}, err
 	}

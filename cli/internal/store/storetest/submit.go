@@ -564,7 +564,7 @@ func testSubmit(t *testing.T, newStore New) {
 
 func (e *env) createPlan(title string) core.Plan {
 	e.t.Helper()
-	plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: title, Body: "body of " + title, At: e.now()})
+	plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: title, Body: "body of " + title, Origin: core.RecordOrigin{At: e.now()}})
 	if err != nil {
 		e.t.Fatalf("CreatePlan(%q): %v", title, err)
 	}

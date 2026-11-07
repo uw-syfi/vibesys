@@ -22,8 +22,8 @@
 //	results/<job>.json         the result a job saved, with its place in the order of saving
 //	plans/<number>.json        one plan, replaced whole on each change
 //	promotions/<n>.json        the nth promotion
-//	bounds/<n>.json            the nth declared performance bound, written once; a store made before
-//	                           bounds has no such directory, which reads as none declared
+//	bounds/<n>.json            the nth declared performance bound, written once
+//	workstreams/               where the records of workstreams go; made with the store
 //	frontier/<n>.json          the frontier after its nth change, whole; the last one is the frontier
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written
@@ -104,13 +104,18 @@
 // read, with an error of kind core.FailureIncompatible that names the file: a newer version says to
 // upgrade, and version 1, the hand-written encoding that came before protojson, says the store is
 // to be removed, because nothing migrates it and no release wrote it. This program reads versions 2
-// to 4. The refusal of version 1 names the store's directory and, when the index records it, the
+// to 6. The refusal of version 1 names the store's directory and, when the index records it, the
 // index entry to remove. The index reads an entry of another version for its task when it has this
 // version's shape, so such a store stays known and is refused alone. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
 // promotion and a refusal), so Open migrates a store of version 2 under the owner's lock: it makes
 // the directories version 2 did not have, then writes the format file at version 3, which is the
 // migration's one commit point. Version 4 only added a job's placement, so a store of version 2 or
-// 3 is migrated the same way, to version 4. A record keeps the version it was written with.
+// 3 is migrated the same way, to version 4. Version 5 added a job's needs and task version, and version 6
+// a plan's origin, transitions and workstream with the directories bounds/ and workstreams/, so a
+// store of 2 to 5 is migrated to 6 the same way too: every directory it lacks is made, and the
+// format file is written last. A program of an older version refuses the store from then on, since
+// it would otherwise open it and ignore the directories it does not know. A record keeps the version
+// it was written with.
 // It refuses a record it cannot decode, one with a field it does not know, and one whose name and
 // content disagree, with an error of kind core.FailureInternal that names the file. It refuses a
 // directory that holds other files and no format file. The .owner file is a record like any other.

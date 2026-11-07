@@ -123,7 +123,7 @@ func script() []op {
 		submit("create a measure job", core.Submission{Spec: measureSpec("c1"), Key: "k1", Note: note("first", 1), At: at(1)}),
 		submit("join it with a note, from a second run", core.Submission{Context: core.CallContext{Run: "run-b", Agent: "lead"}, Spec: measureSpec("c1"), Key: "k1", Note: note("second", 2), At: at(2)}),
 		{"create a plan", func(ctx context.Context, s store.Store) error {
-			_, err := s.CreatePlan(ctx, core.NewPlan{Title: "tile the loop", Body: "try 8x8", At: at(3)})
+			_, err := s.CreatePlan(ctx, core.NewPlan{Title: "tile the loop", Body: "try 8x8", Origin: core.RecordOrigin{Run: "run-a", Agent: "lead", At: at(3)}})
 			return err
 		}},
 		submit("link the plan", core.Submission{Spec: measureSpec("c1"), Key: "k1", Plan: 1, At: at(4)}),
@@ -141,7 +141,7 @@ func script() []op {
 		}},
 		{"edit the plan", func(ctx context.Context, s store.Store) error {
 			status := core.PlanChosen
-			_, err := s.EditPlan(ctx, 1, core.PlanEdit{Status: &status, Comment: &core.PlanComment{Text: "go", At: at(12), Agent: "agent-a"}, At: at(12)})
+			_, err := s.EditPlan(ctx, 1, core.PlanEdit{Status: &status, Comment: &core.PlanComment{Text: "go", At: at(12), Agent: "agent-a"}, Origin: core.RecordOrigin{Run: "run-b", Agent: "lead", At: at(12)}})
 			return err
 		}},
 		bound("declare a bound", "ops", 15000, 12),

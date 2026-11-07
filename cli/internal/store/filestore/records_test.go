@@ -101,6 +101,11 @@ func fill(m protoreflect.Message, variant int) {
 		v := core.Headline(ob.Values)
 		ob.Value = &v
 	}
+	// A plan's status is the status of its last transition, and a file whose two disagree is refused.
+	if md.FullName() == "vibesys.cli.v1.Plan" {
+		plan := m.Interface().(*cliv1.Plan)
+		plan.Transitions[len(plan.Transitions)-1].Status = plan.Status
+	}
 }
 
 func scalar(fd protoreflect.FieldDescriptor, n int) protoreflect.Value {
@@ -136,7 +141,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 5, Event: event}
+			want := &cliv1.EventFile{Format: 6, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)
@@ -186,7 +191,7 @@ func seedFrom(f *testing.F, name string) {
 	f.Add(data)
 	f.Add(withVersion(data, "1"))
 	f.Add(withVersion(data, "2"))
-	f.Add(withVersion(data, "6"))
+	f.Add(withVersion(data, "7"))
 	f.Add([]byte(`{"format": 2}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`[]`))

@@ -16,7 +16,7 @@ func testPlans(t *testing.T, newStore New) {
 		e := newEnv(t, newStore)
 		for i := 1; i <= 5; i++ {
 			at := e.now()
-			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: "t", Body: "b", At: at})
+			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: "t", Body: "b", Origin: core.RecordOrigin{At: at}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -25,7 +25,7 @@ func testPlans(t *testing.T, newStore New) {
 			}
 			if i == 3 {
 				// A refused create takes no number.
-				_, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: "bad\xff", At: e.now()})
+				_, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: "bad\xff", Origin: core.RecordOrigin{At: e.now()}})
 				wantKind(t, "a title that is not UTF-8", err, core.FailureInvalidInput)
 			}
 		}
@@ -45,19 +45,20 @@ func testPlans(t *testing.T, newStore New) {
 		plan := e.createPlan("first")
 		status, title := core.PlanChosen, "renamed"
 		comment := core.PlanComment{Text: "chosen because it is cheap", At: e.now(), Agent: "lead"}
-		editAt := e.now()
-		edited, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Title: &title, Status: &status, Comment: &comment, At: editAt})
+		editAt := core.PlanEdit{Origin: core.RecordOrigin{Run: "r2", Agent: "lead", At: e.now()}}
+		edited, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Title: &title, Status: &status, Comment: &comment, Origin: editAt.Origin})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := plan
-		want.Title, want.Status, want.Comments, want.UpdatedAt = title, status, []core.PlanComment{comment}, editAt
+		want.Title, want.Status, want.Comments, want.UpdatedAt = title, status, []core.PlanComment{comment}, editAt.Origin.At
+		want.Transitions = append(slices.Clone(plan.Transitions), core.PlanTransition{Status: status, Origin: editAt.Origin})
 		if !reflect.DeepEqual(edited, want) {
 			t.Errorf("edited plan = %+v, want %+v: a field left nil stays as it was", edited, want)
 		}
 		second := core.PlanComment{Text: "it won", At: e.now()}
 		won := core.PlanWon
-		edited, err = e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Status: &won, Comment: &second, At: e.now()})
+		edited, err = e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Status: &won, Comment: &second, Origin: core.RecordOrigin{At: e.now()}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,9 +77,9 @@ func testPlans(t *testing.T, newStore New) {
 		before := snapshot(t, e.s)
 		title, bad := "kept?", "bad\xff"
 		status := core.PlanParked
-		_, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Title: &title, Status: &status, Comment: &core.PlanComment{Text: bad}, At: e.now()})
+		_, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Title: &title, Status: &status, Comment: &core.PlanComment{Text: bad}, Origin: core.RecordOrigin{At: e.now()}})
 		wantKind(t, "a comment that is not UTF-8", err, core.FailureInvalidInput)
-		_, err = e.s.EditPlan(e.ctx, plan.Number+9, core.PlanEdit{Title: &title, At: e.now()})
+		_, err = e.s.EditPlan(e.ctx, plan.Number+9, core.PlanEdit{Title: &title, Origin: core.RecordOrigin{At: e.now()}})
 		wantKind(t, "an unknown plan", err, core.FailureNotFound)
 		unchanged(t, "a refused edit", e.s, before)
 	})
@@ -99,12 +100,12 @@ func testPlans(t *testing.T, newStore New) {
 		bodies := []string{"use a ring buffer", "hash by prefix", "", "LRU"}
 		statuses := []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}
 		for range 16 {
-			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: titles[rng.IntN(4)], Body: bodies[rng.IntN(4)], At: e.now()})
+			plan, err := e.s.CreatePlan(e.ctx, core.NewPlan{Title: titles[rng.IntN(4)], Body: bodies[rng.IntN(4)], Origin: core.RecordOrigin{At: e.now()}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			st := statuses[rng.IntN(5)]
-			if _, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Status: &st, At: e.now()}); err != nil {
+			if _, err := e.s.EditPlan(e.ctx, plan.Number, core.PlanEdit{Status: &st, Origin: core.RecordOrigin{At: e.now()}}); err != nil {
 				t.Fatal(err)
 			}
 		}

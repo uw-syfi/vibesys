@@ -45,7 +45,14 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 	if err != nil {
 		return core.Plan{}, err
 	}
-	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, GainBound: bound, At: a.now()})
+	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, GainBound: bound, Origin: a.originOf(c)})
+}
+
+// originOf is the origin a record the call makes has: the run and agent the call carried, and the
+// daemon's own clock now. A request carries neither the origin nor its time, so no caller states
+// another's.
+func (a *App) originOf(c core.CallContext) core.RecordOrigin {
+	return core.RecordOrigin{Run: c.Run, Agent: c.Agent, At: a.now()}
 }
 
 // Plans returns the plans of a task that match the filter, by number.
@@ -138,6 +145,6 @@ func (a *App) editPlan(ctx context.Context, c core.CallContext, number core.Plan
 	if err != nil {
 		return core.Plan{}, err
 	}
-	edit.At = a.now()
+	edit.Origin = a.originOf(c)
 	return st.EditPlan(ctx, number, edit)
 }

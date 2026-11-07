@@ -116,9 +116,9 @@ func (b *backend) writeFile(name string, data []byte) error {
 }
 
 // ensureBoundsDir makes the bounds directory and its entry in the store's root durable, once per
-// Recover. A store made by this build has the directory from the start. A store made before it
-// has none until the first declaration, which makes it. A directory found on disk may have been
-// made by a call that died before it synced the root, so the first write syncs again.
+// Recover. A store of format 6 has the directory, since Open makes it when it makes or migrates a
+// store, so this makes one only for a directory that was removed since. A directory found on disk may
+// have been made by a call that died before it synced the root, so the first write syncs again.
 func (b *backend) ensureBoundsDir() error {
 	dir := path.Join(b.root, boundsDir)
 	if b.durableDirs[dir] {

@@ -242,8 +242,8 @@ func (b *backend) loadPromotions() ([]core.Promotion, error) {
 	return promotions, nil
 }
 
-// loadBounds reads the log of declared bounds, numbered from 1 with no gap. A store with no bounds
-// directory is one that never had a bound declared.
+// loadBounds reads the log of declared bounds, numbered from 1 with no gap. Open makes the directory
+// in a store of format 6, so one with none is a directory removed since, and it reads as none declared.
 func (b *backend) loadBounds() ([]core.Bound, error) {
 	files, err := b.recordFiles(path.Join(b.root, boundsDir))
 	if errors.Is(err, fs.ErrNotExist) {

@@ -36,7 +36,11 @@ func (m *model) play(t *testing.T, op Operation) {
 		m.jobs = append(m.jobs, &pb.Job{Id: id, Key: key, Spec: &pb.JobSpec{Commit: op.Commit, Environment: pb.EnvironmentKind_ENVIRONMENT_KIND_HOST, Settings: &pb.JobSpec_Measure{Measure: &pb.MeasureSettings{Samples: 5}}}, State: pb.JobState_JOB_STATE_SUCCEEDED, Environment: environment(), SubmittedAt: stamp(), StartedAt: stamp(), FinishedAt: stamp(), CheckJobId: id, ResultJobId: id, Submitters: []*pb.Submitter{{At: stamp()}}})
 		m.results = append(m.results, &pb.Result{JobId: id, Key: key, Task: "kv-store", TaskVersion: "v1", Commit: op.Commit, SchemaVersion: 1, Environment: environment(), Machine: &pb.MachineFacts{Arch: "amd64", HostId: "host", LogicalCpus: 8, MemoryBytes: 17179869184, Os: "linux"}, Load: &pb.MachineLoad{LoadAverage_1M: 0.25, SampledAt: stamp()}, RecordedAt: stamp(), Outcome: &pb.Result_Measure{Measure: &pb.MeasureResult{Metric: &pb.Metric{Name: "ops", Direction: pb.Direction_DIRECTION_MAXIMIZE}, Samples: samples, Value: mean, CheckJobId: id}}})
 	case "create_plan":
-		m.plans = append(m.plans, &pb.Plan{Number: uint32(len(m.plans) + 1), Title: op.Title, Body: op.Body, Status: pb.PlanStatus_PLAN_STATUS_OPEN, CreatedAt: stamp(), UpdatedAt: stamp()})
+		origin := &pb.RecordOrigin{RunId: "run-1", Agent: "agent-1", At: stamp()}
+		m.plans = append(m.plans, &pb.Plan{
+			Number: uint32(len(m.plans) + 1), Title: op.Title, Body: op.Body, Status: pb.PlanStatus_PLAN_STATUS_OPEN, CreatedAt: stamp(), UpdatedAt: stamp(),
+			Origin: origin, Transitions: []*pb.PlanTransition{{Status: pb.PlanStatus_PLAN_STATUS_OPEN, Origin: origin}},
+		})
 	case "comment_plan":
 		if op.Number == 0 || int(op.Number) > len(m.plans) {
 			t.Fatal("unknown plan")
