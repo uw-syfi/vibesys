@@ -38,6 +38,8 @@ function fakeHost(artifact: Uint8Array, platform = 'Linux\nx86_64\n', paced = fa
     corrupt: false,
     /** The upload's input pipe when the test paces how fast the host takes it. */
     sink: undefined as PassThrough | undefined,
+    /** The virtual time the host started taking the upload: after the artifact was compressed. */
+    sinkAt: undefined as number | undefined,
     /** Accept what the pipe holds: the host is reading again. */
     finish: undefined as ((packed: Buffer) => void) | undefined,
   };
@@ -195,6 +197,7 @@ const artifactOf = (length: number): Uint8Array => {
 const readEvery = (fake: ReturnType<typeof fakeHost>, everyMs: number) =>
   Effect.gen(function* () {
     while (fake.host.sink === undefined) yield* Effect.sleep('10 millis');
+    fake.host.sinkAt = yield* Clock.currentTimeMillis;
     const input = fake.host.sink;
     const chunks: Buffer[] = [];
     let ended = false;
@@ -217,7 +220,8 @@ const provisionPaced = (bytes: Uint8Array, everyMs: number) =>
     const started = yield* Clock.currentTimeMillis;
     const running = yield* Effect.forkChild(Effect.exit(provision(bytes, false, fake)));
     const exit = yield* joinDriving(running, '100 millis');
-    return {fake, exit, tookMs: (yield* Clock.currentTimeMillis) - started};
+    const ended = yield* Clock.currentTimeMillis;
+    return {fake, exit, tookMs: ended - started, copyMs: ended - (fake.host.sinkAt ?? started)};
   });
 
 describe('the copy of the gateway is measured by progress, not by a wall deadline', () => {
@@ -257,13 +261,15 @@ describe('the copy of the gateway is measured by progress, not by a wall deadlin
   it.effect('fails a copy that stops being accepted, one stall bound after it stopped', () =>
     Effect.gen(function* () {
       const bytes = artifactOf(200_000);
-      const {fake, exit, tookMs} = yield* provisionPaced(bytes, Number.POSITIVE_INFINITY);
+      const {fake, exit, copyMs} = yield* provisionPaced(bytes, Number.POSITIVE_INFINITY);
       expect(exit._tag).toBe('Failure');
       expect(JSON.stringify(exit)).toContain('gateway upload stalled');
       expect(fake.host.installed).toBe(false);
-      // One stall window after the first chunk's pacing; the driver also moves the virtual clock
-      // while the artifact is compressed for real, which a few seconds more than covers.
-      expect(tookMs).toBeLessThanOrEqual(COPY_STALL_MS + 5_000);
+      // Counted from when the host took the upload (the artifact is compressed for real before
+      // that, while the driver moves the clock): the first chunk's pacing and one stall window,
+      // seen on the driver's 100 ms steps.
+      expect(copyMs).toBeGreaterThanOrEqual(COPY_STALL_MS - 200);
+      expect(copyMs).toBeLessThanOrEqual(COPY_STALL_MS + 1_000);
     }),
   );
 });
