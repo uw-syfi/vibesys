@@ -105,8 +105,19 @@ def _best(messages: Sequence[str]) -> HandedOff:
 def _start(me: Me, _messages: Sequence[str]) -> Script:
     base = yield from _head()
     yield cli(me, ["submit", "check", base], "--wait")
-    yield cli(me, ["submit", "measure", base], "--samples", "3", "--wait")
-    for plan, (harness, score) in enumerate(SCORES.items(), start=1):
+    # The base tests no plan.
+    yield cli(me, ["submit", "measure", base], "--samples", "3", "--no-plan", "--wait")
+    for harness, score in SCORES.items():
+        # A planner's work, done here so each worker has a plan its measure is linked to.
+        created = yield cli(
+            me,
+            ["plan", "create"],
+            "--title",
+            f"Setting score.txt to {score} scores {score}",
+            "--body",
+            f"Set score.txt to {score}.",
+        )
+        plan = int(created.text.split()[0])
         brief = (
             f"Plan {plan}: set score.txt to {score}, check it and measure it. Base commit {base}."
         )
@@ -141,7 +152,16 @@ def _judged(me: Me, messages: Sequence[str]) -> Script:
     best = _best(messages)
     yield cli(me, ["promote", best.commit])
     yield cli(me, ["submit", "check", best.commit], "--no-cache", "--wait")
-    yield cli(me, ["submit", "measure", best.commit], "--samples", "3", "--no-cache", "--wait")
+    # The head, measured again as a control: it tests no plan.
+    yield cli(
+        me,
+        ["submit", "measure", best.commit],
+        "--samples",
+        "3",
+        "--no-cache",
+        "--no-plan",
+        "--wait",
+    )
     result = yield cli(me, ["result"], "--json")
     value = json.loads(result.text)["current"]["result"]["measure"]["value"]
     yield Mcp(
@@ -200,7 +220,7 @@ def worker(me: Me, messages: Sequence[str]) -> Script:
     yield git("commit", "-q", "-a", "-m", f"set score {score}")
     commit = yield from _head()
     yield cli(me, ["submit", "check", commit], "--wait")
-    yield cli(me, ["submit", "measure", commit], "--samples", "3", "--wait")
+    yield cli(me, ["submit", "measure", commit], "--samples", "3", "--plan", str(plan), "--wait")
     shown = yield cli(me, ["show", commit], "--json")
     yield Mcp(
         "post_handoff",

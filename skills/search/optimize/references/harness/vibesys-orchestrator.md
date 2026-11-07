@@ -44,6 +44,11 @@ handoff wakes you. Wait in the foreground with `vibesys-cli wait` only when you 
 else to do. Workers and judges do the same inside their own turn: they submit, `wait` and
 measure before they hand off.
 
+Every measure you or an agent submits in this run says what it tests: `--plan <n>` for the plan
+it is a try of, `--no-plan` only for the baseline and a re-measure of the head. `vibesysd` refuses
+a measure from a run that gives neither, naming both flags, so the run's chart can show every
+point beside its idea.
+
 ## Schedule periodic work
 
 You set no timer for the progress report: the run asks for it. When work has moved since your last

@@ -29,6 +29,7 @@ import {
 import {isLive} from '../../state/orchestrator/fleet.js';
 import {ms} from '../../state/orchestrator/time.js';
 import {ChangeLog, Rng} from './log.js';
+import {measuredSearch, type ObjectiveSpec} from './report-fixtures.js';
 import type {Scenario} from './scenario.js';
 
 export interface FleetOptions {
@@ -117,6 +118,43 @@ function searchOf(rng: Rng, runId: string, atMs: number): SearchState {
           },
         ]
       : [],
+  });
+}
+
+/**
+ * The search of a run that has measured candidates, on one objective or (one run in four) two, as an
+ * orchestrator that serves a series sends it.
+ */
+function measuredOf(rng: Rng, run: Run, nowMs: number): SearchState {
+  const base = 50 + rng.int(100);
+  const objectives: ObjectiveSpec[] = [
+    {
+      name: 'throughput',
+      direction: Direction.MAXIMIZE,
+      unit: rng.pick(UNITS),
+      base,
+      best: base * (1.5 + rng.next() * 2),
+      bound: base * 5,
+    },
+    ...(rng.int(4) === 0
+      ? [
+          {
+            name: 'latency',
+            direction: Direction.MINIMIZE,
+            unit: 'ms',
+            base: 200,
+            best: 90 + rng.int(50),
+            bound: 60,
+          },
+        ]
+      : []),
+  ];
+  return measuredSearch(run.id, {
+    seed: 1 + rng.int(1_000_000),
+    candidates: 3 + rng.int(40),
+    startMs: ms(run.createdAt) ?? nowMs,
+    endMs: ms(run.endedAt) ?? nowMs,
+    objectives,
   });
 }
 
@@ -221,7 +259,13 @@ function pushRun(
     const reportAt = (ms(run.endedAt) ?? options.nowMs) - (1 + rng.int(90)) * MINUTE;
     log.push(reportAt, {case: 'message', value: reportOf(run, reportAt)});
   }
-  if (rng.int(6) !== 0) searches.push(searchOf(rng, run.id, options.nowMs));
+  // Most runs have measured candidates; some have a head and a bound and no series (a host that
+  // does not serve one, or a run with nothing measured yet), and some have no search at all.
+  const kind = rng.int(6);
+  if (kind === 0) return;
+  searches.push(
+    kind === 1 ? searchOf(rng, run.id, options.nowMs) : measuredOf(rng, run, options.nowMs),
+  );
 }
 
 export function fleetScenario(options: FleetOptions): Scenario & {

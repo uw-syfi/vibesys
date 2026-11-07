@@ -39,7 +39,8 @@ set; export it as the absolute path of the vibesys-cli to use`.
    candidate as a full commit with `Checks: pass`. A cheap check on a commit that needs no number:
    `vibesys-cli submit check <sha> --wait --plan <n>`. For the number, follow your brief: if it
    grants a budget, `vibesys-cli submit measure <sha> --samples 5 --plan <n>` and wait for it
-   (`vibesys:measure`), otherwise return the SHA as `ready for measurement`. Then
+   (`vibesys:measure`; a measure without `--plan <n>` is refused), otherwise return the SHA as
+   `ready for measurement`. Then
    `vibesys-cli compare <sha>`, and add `--against <sha>` when you built on a candidate, to see the
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.

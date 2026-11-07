@@ -1,4 +1,5 @@
 import {
+  type ComponentProps,
   type CSSProperties,
   type FocusEvent,
   type JSX,
@@ -12,6 +13,7 @@ import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
 import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
+import {Sparkline} from './sparkline.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
@@ -343,4 +345,25 @@ export function CellInline(props: {
 /** A small mark before a cell's figure: filled when `on` (it set a best), else an empty slot of its width. */
 export function CellMark(props: {readonly on: boolean}): JSX.Element {
   return <span className="vs-columnlist-mark" data-on={props.on || undefined} aria-hidden="true" />;
+}
+
+/**
+ * A cell's small trend: a `Sparkline` as wide as the cell leaves it and as high as the row's two
+ * lines, and after it a slot of fixed width for `more` (how many other series there are, as `+2`),
+ * so the lines of every row start and end at the same places whether or not a row has more.
+ */
+export function CellSparkline(
+  props: ComponentProps<typeof Sparkline> & {readonly more?: number},
+): JSX.Element {
+  const {more, ...spark} = props;
+  return (
+    <span className="vs-columnlist-spark">
+      <Sparkline {...spark} />
+      <span className="vs-columnlist-spark-more">
+        {more === undefined || more <= 0 ? null : (
+          <Text variant="caption" tone="muted">{`+${more}`}</Text>
+        )}
+      </span>
+    </span>
+  );
 }

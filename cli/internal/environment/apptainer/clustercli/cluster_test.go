@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/quick"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
 // fakeSrun runs a step here: it drops srun's options, takes the job's id from --jobid, and exits
@@ -80,16 +82,29 @@ echo "$*" >> "$(dirname "$0")/scancel.log"
 `
 
 // shell runs programs here, finding the fakes first, and takes an exit code of 255 for the
-// transport's when lost255 is set, as ssh's is. With exit set, every program reads its input and
-// exits with that code instead, as a connection that drops does.
+// transport's when lost255 is set, as ssh's is, and what ssh says of it as ssh does. With exit set,
+// every program reads its input and exits with that code instead, as a connection that drops does.
+// While drops is above zero, each call takes one from it and, instead of its program, writes the
+// lines dropped to standard error and exits with 255, as ssh does when it cannot connect. calls
+// counts the calls.
 type shell struct {
 	bin     string
 	lost255 bool
 	env     []string
 	exit    string
+	drops   *atomic.Int32
+	dropped string
+	calls   *atomic.Int32
 }
 
+// kexDropped is what ssh wrote when a login node closed its connection during the key exchange.
+const kexDropped = "kex_exchange_identification: Connection closed by remote host\r\nConnection closed by UNKNOWN port 65535\r\n"
+
 func (s shell) Command(ctx context.Context, argv []string) *exec.Cmd {
+	s.calls.Add(1)
+	if s.drops.Add(-1) >= 0 {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf "$1" >&2; exit 255`, "vs-ssh", s.dropped)
+	}
 	if s.exit != "" {
 		argv = []string{"/bin/sh", "-c", "cat > /dev/null; exit " + s.exit}
 	}
@@ -102,7 +117,10 @@ func (s shell) Command(ctx context.Context, argv []string) *exec.Cmd {
 }
 
 func (s shell) Lost(code int) bool { return s.lost255 && code == 255 }
-func (shell) Where() string        { return "host-a" }
+func (s shell) Unreached(code int, stderr string) bool {
+	return s.lost255 && (remote.SSH{}).Unreached(code, stderr)
+}
+func (shell) Where() string { return "host-a" }
 
 func newShell(t *testing.T) shell {
 	t.Helper()
@@ -112,7 +130,7 @@ func newShell(t *testing.T) shell {
 			t.Fatal(err)
 		}
 	}
-	return shell{bin: bin}
+	return shell{bin: bin, drops: &atomic.Int32{}, dropped: kexDropped, calls: &atomic.Int32{}}
 }
 
 func newCluster(t *testing.T, sh shell) *clustercli.Cluster {

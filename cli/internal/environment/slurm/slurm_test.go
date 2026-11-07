@@ -361,8 +361,9 @@ func (s *scriptShell) Command(ctx context.Context, argv []string) *exec.Cmd {
 	return exec.CommandContext(ctx, "/bin/sh", "-c", `printf '%s' "$1"`, "sh", answer)
 }
 
-func (*scriptShell) Lost(int) bool { return false }
-func (*scriptShell) Where() string { return "host-a" }
+func (*scriptShell) Lost(int) bool              { return false }
+func (*scriptShell) Unreached(int, string) bool { return false }
+func (*scriptShell) Where() string              { return "host-a" }
 
 func TestACancelWaitsUntilTheJobIsGone(t *testing.T) {
 	sh := &scriptShell{squeue: []string{"RUNNING\n", "COMPLETING\n", ""}}

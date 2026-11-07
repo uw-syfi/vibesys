@@ -369,8 +369,11 @@ type ObjectiveSeries struct {
 	// Which way the objective improves, as the newest measurement of it says. A measurement that says
 	// the other way (the task changed its mind) is left out, as a bound of the other way is.
 	Direction v1.Direction `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
-	// Oldest first, by the time the measurement was recorded. When the run has more than fit, the
-	// oldest are left out and the state is marked truncated.
+	// Oldest first, by the time the measurement was recorded (the job's end when the result states
+	// none). When the run has more than fit, the points that set a best are kept before the others,
+	// and the oldest of each go first, and the state is marked truncated. So a cut series always
+	// holds its newest best-so-far point, which is the best the run reached, and holds every
+	// best-so-far point while there are at most 400 of them.
 	Points        []*MeasuredPoint `protobuf:"bytes,3,rep,name=points,proto3" json:"points,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -438,8 +441,10 @@ type MeasuredPoint struct {
 	At     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=at,proto3" json:"at,omitempty"`
 	// The headline number of the measurement on the objective, as the job service computed it.
 	Value float64 `protobuf:"fixed64,4,opt,name=value,proto3" json:"value,omitempty"`
-	// The point is better than every earlier point of the objective, in its direction: the best so far
-	// steps here. The first point is always one.
+	// The point is better than every earlier measurement of the objective, in its direction, whether
+	// or not that one is in `points`: the best so far steps here. The first measurement is always one,
+	// and is in `points` unless the series was cut. The newest point marked is the best the run
+	// reached, and every series has one.
 	BestSoFar     bool `protobuf:"varint,5,opt,name=best_so_far,json=bestSoFar,proto3" json:"best_so_far,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -517,8 +522,10 @@ type Tradeoff struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The task's objectives in the order it declares them, each as the newest measurement says it.
 	Objectives []*TradeoffObjective `protobuf:"bytes,1,rep,name=objectives,proto3" json:"objectives,omitempty"`
-	// Candidates measured on every one of the objectives, oldest first. Over the limit the oldest are
-	// left out and the state is marked truncated.
+	// Candidates measured on every one of the objectives, oldest first. Over the limit the candidates
+	// on the frontier are kept before the others, and the oldest of each go first, and the state is
+	// marked truncated: a frontier candidate is left out only when no candidate off the frontier is
+	// left.
 	Points        []*TradeoffPoint `protobuf:"bytes,2,rep,name=points,proto3" json:"points,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

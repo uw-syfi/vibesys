@@ -4,7 +4,7 @@ Read before planning. Each pattern says what it looks like and what to do.
 
 **Chasing noise.** A candidate "wins" by 1-3% on one run. Trust only a `better` verdict from
 `vibesys-cli compare`. For a close call, take more samples of the commit
-(`submit measure --samples`); do not reword the claim.
+(`submit measure --samples 5 --plan <n>`); do not reword the claim.
 
 **Measuring a commit without the change.** The change is not on the path the benchmark runs (a
 flag, a registration, an import that is really used), or the commit lacks a file the change

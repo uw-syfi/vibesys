@@ -152,7 +152,8 @@ func TestTwoMeasuresRunAtOnceEachAloneOnItsOwnPlacement(t *testing.T) {
 	ctx := ctxFor(t)
 	submit := func(settings core.Settings) core.Job {
 		t.Helper()
-		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: settings}, NoCache: true})
+		spec := core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: settings}
+		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: spec, NoCache: true, NoPlan: noPlan(spec)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +253,7 @@ func TestAMeasureHoldsItsPlacementAndClusterAloneWhileOtherPlacementsRun(t *test
 		awaitState(t, a, first[i].ID, core.JobSucceeded)
 	}
 
-	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{
+	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, NoPlan: true, Spec: core.JobSpec{
 		Commit: commit, Environment: core.EnvironmentDocker, Placement: "a", Settings: core.MeasureSettings{Samples: 1},
 	}})
 	if err != nil {
@@ -318,7 +319,7 @@ func TestACommandOfNoEnvironmentRunsWhereItsTaskRunsAndWaitsBehindAMeasure(t *te
 	a := newPlacementApp(w, []core.PlacementOffer{{Name: "local"}}, envs)
 	ctx := ctxFor(t)
 
-	measured, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Placement: "local", Settings: core.MeasureSettings{Samples: 1}}})
+	measured, err := a.Submit(ctx, app.SubmitRequest{Context: call, NoPlan: true, Spec: core.JobSpec{Commit: commit, Placement: "local", Settings: core.MeasureSettings{Samples: 1}}})
 	if err != nil {
 		t.Fatal(err)
 	}

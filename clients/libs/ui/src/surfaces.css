@@ -489,6 +489,11 @@
   padding: var(--space-8) var(--space-6);
   text-align: center;
 }
+.vs-empty[data-align="start"] {
+  align-items: flex-start;
+  padding-inline: 0;
+  text-align: start;
+}
 .vs-empty-action {
   padding-top: var(--space-3);
 }

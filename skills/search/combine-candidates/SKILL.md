@@ -31,7 +31,8 @@ Load `vibesys:commit`, `vibesys:measure` and the domain skills the brief names.
 4. Run the project's fast tests and fix what the combination broke.
 5. Commit as `vibesys:commit` says: a full commit with `Checks: pass`. Without a measurement
    budget, return the SHA as `ready for measurement` for the lead. Otherwise measure the commit
-   with `vibesys:measure` (`vibesys-cli submit measure <sha> --samples 5`) and compare it with the
+   with `vibesys:measure` (`vibesys-cli submit measure <sha> --samples 5 --plan <n>`, the plan
+   your brief names) and compare it with the
    result branch head: `vibesys-cli compare <sha> --against <head SHA>`, and with each part.
 
 ## Never

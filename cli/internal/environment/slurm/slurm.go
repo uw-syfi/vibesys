@@ -221,7 +221,7 @@ func (b Buildx) Remove(ctx context.Context) error {
 		program = dockercli.DefaultProgram
 	}
 	script := `"$1" buildx inspect "$2" >/dev/null 2>&1 || exit 0; exec "$1" buildx rm --keep-state "$2"`
-	if _, err := remote.Output(bounded, b.Shell, []string{"sh", "-c", script, "vs-builder", program, b.Name}, nil); err != nil {
+	if _, err := remote.Output(bounded, b.Timers, b.Shell, []string{"sh", "-c", script, "vs-builder", program, b.Name}, ""); err != nil {
 		return fmt.Errorf("removing the builder %s: %w", b.Name, err)
 	}
 	return nil
