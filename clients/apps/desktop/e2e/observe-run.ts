@@ -306,7 +306,9 @@ async function pressStopAndSeeTheRunEnd(page: Page): Promise<void> {
   // scripted run ends the moment the Stop is accepted: the press has an answer when the line
   // reads accepted or the run is already over, and the run is over once it reads Finished.
   const finished = page.getByText('Finished', {exact: true});
-  await expect(page.getByRole('status', {name: 'Stop: outcome'}).or(finished).first()).toBeVisible();
+  await expect(
+    page.getByRole('status', {name: 'Stop: outcome'}).or(finished).first(),
+  ).toBeVisible();
   await expect(finished).toBeVisible();
   await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
