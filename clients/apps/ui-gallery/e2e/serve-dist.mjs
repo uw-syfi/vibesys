@@ -2,8 +2,7 @@
 
 /**
  * Serves the built gallery (`dist/`) on 127.0.0.1 at the port given as the one argument. Plain Node
- * with no dependency, so the suite runs the same in CI and in the Linux image that writes the
- * screenshot baselines, where the host's native bundler binaries would not load.
+ * with no dependency, so the suite serves the same in CI and locally.
  */
 
 import {readFile} from 'node:fs/promises';

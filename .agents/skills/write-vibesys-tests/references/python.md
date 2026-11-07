@@ -119,10 +119,7 @@ is read where Python cannot make it: the conversion goldens
 gateway's Skeleton wire golden with its retained RPC replies, and the frozen
 retained corpus. After a converter or gateway change run
 `./scripts/regenerate_goldens.sh` and commit every file it rewrites; it is the
-only regeneration command, and each stale-golden failure names it. It does not
-touch the UI gallery screenshot baselines, which need Docker and depend on the
-UI, not the schema (`update:screenshots`, in
-[clients-architecture.md](../../../../docs/contributing/clients-architecture.md)).
+only regeneration command, and each stale-golden failure names it.
 These carry no hash of their inputs, because a byte comparison already fails a
 stale one: `test_gateway_conversion_fixture_regenerates_identically` runs in the
 proto check group, and the gateway tests compare the wire golden and the replies;
