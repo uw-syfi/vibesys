@@ -32,10 +32,10 @@ import {
 import fc from 'fast-check';
 
 /** One viewer, an install of the app and the name it shows. */
-export const viewerOf = (id: string, label = `${id}'s laptop`) => create(ViewerSchema, {id, label});
+const viewerOf = (id: string, label = `${id}'s laptop`) => create(ViewerSchema, {id, label});
 
 /** What a role spent in a window, with the cost left out when `costUsd` is absent (never zero). */
-export function roleSpend(
+function roleSpend(
   role: AgentRole,
   turns: number,
   unpricedTurns: number,
@@ -54,7 +54,7 @@ export function roleSpend(
 }
 
 /** The best value of an objective up to `atMs`, from the job and commit that made it. */
-export function bestValue(value: number, atMs: number, job: string): BestValue {
+function bestValue(value: number, atMs: number, job: string): BestValue {
   return create(BestValueSchema, {
     value,
     jobId: job,
@@ -254,13 +254,39 @@ export function pressesToCopies(
   return {copies, finals};
 }
 
-/** An objective that improves by `value`, for a facts fixture. */
-export const maximize = (metric: string) => ({metric, direction: ObjectiveDirection.MAXIMIZE});
-
-/** The agent roles a fixture's spend is split over. */
-export const SPEND_ROLES = [
-  AgentRole.LEAD,
-  AgentRole.PLANNER,
-  AgentRole.WORKER,
-  AgentRole.JUDGE,
-] as const;
+/**
+ * The facts of a busy window: spend across four types of agent with one unpriced turn, agents
+ * started and ended, measurements, a throughput objective that improved and a latency one that
+ * had not been measured before, plans created and changed. `reportMessageIds` names the reports
+ * posted in the window.
+ */
+export function busyFacts(startMs: number, reportMessageIds: readonly string[] = []): WindowFacts {
+  return windowFactsOf({
+    roles: [
+      roleSpend(AgentRole.LEAD, 4, 0, 1.25),
+      roleSpend(AgentRole.PLANNER, 2, 0, 0.5),
+      roleSpend(AgentRole.WORKER, 9, 1, 11.4),
+      roleSpend(AgentRole.JUDGE, 1, 1, undefined),
+    ],
+    costUsd: 13.15,
+    agentsStarted: 4,
+    agentsEnded: 3,
+    jobsMeasured: 7,
+    objectives: [
+      {
+        metric: 'throughput',
+        direction: ObjectiveDirection.MAXIMIZE,
+        start: bestValue(1.84, startMs - 60_000, 'job-1'),
+        end: bestValue(2.31, startMs + 60_000, 'job-7'),
+      },
+      {
+        metric: 'p99 latency',
+        direction: ObjectiveDirection.MINIMIZE,
+        end: bestValue(118, startMs + 90_000, 'job-6'),
+      },
+    ],
+    plansCreated: [31, 32],
+    plansChanged: [26],
+    reportMessageIds,
+  });
+}

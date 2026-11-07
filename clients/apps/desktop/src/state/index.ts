@@ -6,6 +6,13 @@
  * data that any test calls directly.
  */
 export * from './agents/index.js';
+export {
+  CATCH_UP_REFUSALS,
+  type CatchUpPress,
+  type CatchUpRefusal,
+  pressOf,
+  refusalOf,
+} from './catch-up.js';
 export {answered, type CommandProgress, settle} from './commands.js';
 export {
   type HostConnectionState,

@@ -158,6 +158,9 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     if (fate === 'lose-request') return [lost('connection lost before the command arrived')];
     const {command} = fromBinary(DispatchRequestSchema, target.request);
     if (command === undefined) return [{end: {status: RpcStatus.INVALID_ARGUMENT}}];
+    const refused = daemon.callRefusal(command);
+    if (refused !== undefined)
+      return [{end: {message: refused, status: RpcStatus.INVALID_ARGUMENT}}];
     const receipt = daemon.dispatch(command);
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
