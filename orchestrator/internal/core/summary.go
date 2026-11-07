@@ -28,6 +28,9 @@ import "time"
 // SummaryEvery apart, and each follows movement since the last report or request; none is made once the
 // run is not live, has reached a limit or has a final report standing; and a repeated, stale or
 // restarted timer sends nothing, because a timer is answered only for the time the run still holds.
+// The spacing assumes what the shell promises of every timer, that it is offered once it is due. The
+// core does not compare the input's time with the timer's: a timer that was ignored for coming early
+// would not be offered again, and the schedule would be lost.
 
 // moved says a message tells of work in its run: an agent was started, or an agent's result, a job's
 // end or an agent's stopping reached the lead. What the lead does itself, what the operator says, what
