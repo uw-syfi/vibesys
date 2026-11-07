@@ -83,6 +83,7 @@ func (t *tx) sweep(id RunID) {
 		}
 	}
 	t.markStall(id)
+	t.endFinished(id)
 	t.finishRun(id)
 }
 

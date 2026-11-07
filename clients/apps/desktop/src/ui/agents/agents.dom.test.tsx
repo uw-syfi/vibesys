@@ -37,6 +37,26 @@ describe('the agents screen', () => {
       />,
     );
 
+  it('draws its time axis at round, equally spaced moments, whatever moment the run starts at', () => {
+    const screen = view();
+    const marks = [...screen.container.querySelectorAll('.vs-gantt-tick')].map(
+      tick => tick.textContent ?? '',
+    );
+    const seconds = marks.map(text => {
+      const [clock = '', half = ''] = text.split(' ');
+      const [h = 0, m = 0, sec = 0] = clock.split(':').map(Number);
+      return ((h % 12) + (half === 'PM' ? 12 : 0)) * 3600 + m * 60 + sec;
+    });
+    expect(seconds.length).toBeGreaterThanOrEqual(2);
+    const step = (seconds[1] ?? 0) - (seconds[0] ?? 0);
+    expect(step).toBeGreaterThan(0);
+    seconds.forEach((at, index) => {
+      expect(at).toBe((seconds[0] ?? 0) + index * step);
+      expect(at % step).toBe(0);
+    });
+    screen.unmount();
+  });
+
   it('is a page with a key to its bars: running, done, failed, a result returned, the machine, folded', () => {
     const screen = view();
     const key = screen.container.querySelector('ul[aria-label="Key to the bars"]');

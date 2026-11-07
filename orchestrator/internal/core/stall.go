@@ -6,12 +6,19 @@ import "time"
 // handoff. Each is a small function over the transaction, called from the places that change what
 // it reads: sweep for the stall, a turn's end for the handoff reminder, a timer for the lead's.
 
-// stalled says nothing is left that could move the run: it is running, its lead rests with nothing
-// to do (and has not just given its final report), no other agent is launching or working, and no job is queued or running. Such a run stays
-// as it is until an operator acts, whatever the lead meant to do next. An agent that is idle
-// without a handoff does not count as working: the lead has been told of it.
-func (s State) stalled(run Run) bool {
-	if run.Status != RunRunning || run.ActiveJobs > 0 || run.FinalReported {
+// stalled says nothing is left that could move the run and its lead has not said it is done: see
+// quiet. The lead is reminded, and a lead that still does nothing ends the run (leadIdle).
+func (s State) stalled(run Run) bool { return s.quiet(run) && !run.FinalReported }
+
+// finished says the lead gave its final report, started no new work since, and nothing is left that
+// could move the run: the run ends (endFinished).
+func (s State) finished(run Run) bool { return s.quiet(run) && run.FinalReported }
+
+// quiet says nothing is left that could move the run: it is running, its lead rests with nothing to
+// do, no other agent is launching or working, no job is queued or running and no message is on its way.
+// An agent that is idle without a handoff does not count as working: the lead has been told of it.
+func (s State) quiet(run Run) bool {
+	if run.Status != RunRunning || run.ActiveJobs > 0 {
 		return false
 	}
 	for _, m := range s.messages {
@@ -38,22 +45,34 @@ func (t *tx) markStall(id RunID) {
 	case stalled && run.StalledSince.IsZero():
 		run.StalledSince = t.in.At
 		t.emit(id, run)
-		if run.LeadReminders < MaxLeadReminders {
-			t.effect(ArmTimer{Kind: TimerLeadIdle, Run: id, FireAt: t.in.At.Add(LeadIdleAfter)})
-		}
+		t.effect(ArmTimer{Kind: TimerLeadIdle, Run: id, FireAt: t.in.At.Add(LeadIdleAfter)})
 	case !stalled && !run.StalledSince.IsZero():
 		run.StalledSince = time.Time{}
 		t.emit(id, run)
 	}
 }
 
-// leadIdle answers the timer armed when a stall began. It reminds the lead once for that stall,
-// while the stall is the one the timer was armed for, and no more than MaxLeadReminders times in a
-// run. Nothing ends the run: a lead that stays quiet leaves a stall anyone can see.
+// endFinished ends a run whose lead gave its final report and whose work has come to rest. Runs
+// are autonomous: the final report is the lead's word that it is done, so nothing waits for an operator.
+func (t *tx) endFinished(id RunID) {
+	if run := t.s.runs[id]; t.s.finished(run) {
+		t.beginStop(run, StopFinished)
+	}
+}
+
+// leadIdle answers the timer armed when a stall began, while the stall is the one the timer was armed
+// for. It reminds the lead once for that stall, no more than MaxLeadReminders times in a run, and when
+// the reminders are spent and the run stands still again for as long, it ends the run: a lead that
+// stays quiet after being told three times is not going to act, and a run no one can move is over.
 func (t *tx) leadIdle(b TimerFired) {
 	run, ok := t.s.runs[b.Timer.Run]
-	if !ok || run.StalledSince.IsZero() || run.LeadReminders >= MaxLeadReminders ||
+	if !ok || run.StalledSince.IsZero() ||
 		!run.StalledSince.Add(LeadIdleAfter).Equal(b.Timer.FireAt) || !t.s.stalled(run) {
+		return
+	}
+	if run.LeadReminders >= MaxLeadReminders {
+		t.beginStop(run, StopStalled)
+		t.sweep(run.ID)
 		return
 	}
 	run.LeadReminders++

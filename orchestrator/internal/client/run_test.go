@@ -198,13 +198,11 @@ func TestAWholeRunFromAClient(t *testing.T) {
 		return ev.GetMessage().GetReport().GetHeadline() == "plan 1 won"
 	})
 
-	// The operator stops the run.
-	if r, err := op.Dispatch(ctx, &pb.Command{Id: "stop-1", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run)}}}); err != nil || r.GetRefusal() != 0 {
-		t.Fatalf("stop: %v %v", r, err)
-	}
+	// The final report ends the run on its own, as finished: no one stops it.
 	feed.until("the run to end", func(ev *pb.RunChange) bool {
 		r := ev.GetRun()
-		return r != nil && r.GetId() == string(run) && r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED
+		return r != nil && r.GetId() == string(run) && r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED &&
+			r.GetStopReason() == pb.RunStopReason_RUN_STOP_REASON_FINISHED
 	})
 }
 

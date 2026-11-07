@@ -15,7 +15,7 @@ type coverage struct {
 	retriedDeliveries, operatorStops, deadlineStops, runsFailed, leadsOutOfResumes      int
 	costStops, limitMessages, limitRefusals, finishedStops                              int
 	startsFailed, startsTimedOut                                                        int
-	stalls, leadReminders, handoffReminders, reports                                    int
+	finishedEnds, stalledEnds, stalls, leadReminders, handoffReminders, reports         int
 	schedule                                                                            scheduleCoverage
 	checkIns                                                                            checkInCoverage
 }
@@ -42,6 +42,8 @@ func (c *coverage) add(o coverage) {
 	c.startsFailed += o.startsFailed
 	c.startsTimedOut += o.startsTimedOut
 	c.stalls += o.stalls
+	c.finishedEnds += o.finishedEnds
+	c.stalledEnds += o.stalledEnds
 	c.leadReminders += o.leadReminders
 	c.handoffReminders += o.handoffReminders
 	c.reports += o.reports
@@ -59,7 +61,7 @@ func (c coverage) require(t *testing.T) {
 		"time limit stops": c.deadlineStops, "cost limit stops": c.costStops, "messages that a limit was reached": c.limitMessages,
 		"spawns refused for a limit": c.limitRefusals, "stops of a lead that had finished": c.finishedStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
 		"sessions that failed to start": c.startsFailed, "sessions that timed out opening": c.startsTimedOut,
-		"stalled runs": c.stalls, "reminders to a lead": c.leadReminders, "reminders to hand off": c.handoffReminders,
+		"stalled runs": c.stalls, "runs ended by a final report": c.finishedEnds, "runs ended by a stall": c.stalledEnds, "reminders to a lead": c.leadReminders, "reminders to hand off": c.handoffReminders,
 		"reports": c.reports, "requests for a report": c.schedule.asks, "requests for a report that were still unread": c.schedule.swallowed,
 		"summary timers that were stale": c.schedule.stale, "reports that restarted the interval": c.schedule.restarted,
 		"requests for a report that a limit, a stop or a final report took away": c.schedule.cancelled,
@@ -396,6 +398,16 @@ func (m *monitor) run(r core.Run) error {
 		m.covered.deadlineStops++
 	case r.Status == core.RunEnded && r.StopReason == core.StopCostLimit:
 		m.covered.costStops++
+	case r.Status == core.RunEnded && r.StopReason == core.StopFinished:
+		if !r.FinalReported {
+			return fmt.Errorf("run %s ended as finished with no final report standing", r.ID)
+		}
+		m.covered.finishedEnds++
+	case r.Status == core.RunEnded && r.StopReason == core.StopStalled:
+		if r.LeadReminders != core.MaxLeadReminders {
+			return fmt.Errorf("run %s ended as stalled after %d reminders", r.ID, r.LeadReminders)
+		}
+		m.covered.stalledEnds++
 	case r.Status == core.RunEnded:
 		m.covered.operatorStops++
 	}

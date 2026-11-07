@@ -22,7 +22,8 @@ const (
 	// LeadIdleAfter is how long a run may stand still before its lead is reminded.
 	LeadIdleAfter = 10 * time.Minute
 	// MaxLeadReminders is how many reminders a run's lead gets in all. A lead that does not act on
-	// three is confused, and each further reminder would only cost money; the stall stays visible.
+	// three is confused, and each further reminder would only cost money; the run ends, for having
+	// stalled, once LeadIdleAfter passes after the last.
 	MaxLeadReminders = 3
 	// LimitGrace is how long a lead has to finish after its run reached a limit. When it has passed,
 	// or when the lead has given its final report, the run stops.
@@ -85,6 +86,11 @@ const (
 	StopTimeLimit RunStopReason = "time_limit"
 	StopCostLimit RunStopReason = "cost_limit"
 	StopLeadGone  RunStopReason = "lead_gone"
+	// StopFinished is a run whose lead gave its final report and whose work then came to rest.
+	StopFinished RunStopReason = "finished"
+	// StopStalled is a run that stood still, its lead reminded the most times it is, and went on standing
+	// still.
+	StopStalled RunStopReason = "stalled"
 )
 
 // AgentRole is what an agent is for.

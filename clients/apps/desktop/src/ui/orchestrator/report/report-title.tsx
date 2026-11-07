@@ -73,12 +73,12 @@ export function ReportActions(props: {
   readonly stoppable: boolean;
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
-  /** Press Catch me up on the run and open its page. */
-  readonly catchUp: () => void;
+  /** Open the run's Catch me up page. Opening it only reads: a check-in is made by New check-in there. */
+  readonly openCatchUp: () => void;
 }): JSX.Element {
   return (
     <>
-      <Button text="Catch me up" variant="primary" press={props.catchUp} />
+      <Button text="Catch me up" variant="primary" press={props.openCatchUp} />
       {props.stoppable ? (
         <Button
           text="Stop run"

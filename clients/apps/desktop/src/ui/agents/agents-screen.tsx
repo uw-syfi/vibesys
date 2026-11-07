@@ -27,8 +27,6 @@ import {
 import {agentLabel, groupLabel} from './labels.js';
 import {axisLabel, formatSpan, formatUsd} from './time.js';
 
-const TICKS = 5;
-
 /** What the bars of the tree say, in the words the page's own chips and column use. */
 const LEGEND: GanttLegend = {
   live: 'Running',
@@ -48,13 +46,6 @@ export function guidesOf(lineage: readonly Branch[]): Guide[] {
 }
 
 const KIND = {running: 'solid', done: 'grey', failed: 'err'} as const;
-
-function ticksOf(from: number, to: number) {
-  return Array.from({length: TICKS + 1}, (_, index) => {
-    const at = from + ((to - from) * index) / TICKS;
-    return {at, label: axisLabel(at, to - from)};
-  });
-}
 
 interface Actions {
   readonly open: (agentId: string) => void;
@@ -177,7 +168,7 @@ export function AgentsScreen(props: {
           label="Agents over time"
           from={tree.startMs}
           to={to}
-          ticks={ticksOf(tree.startMs, to)}
+          axis={{label: axisLabel}}
           rows={rows}
           nameLabel="Agent"
           tagLabel="Machine"

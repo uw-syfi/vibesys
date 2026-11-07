@@ -65,7 +65,7 @@ function report(
       stopProgress={stopProgress}
       stop={() => undefined}
       retryStop={() => undefined}
-      catchUp={() => undefined}
+      openCatchUp={() => undefined}
       goRuns={() => undefined}
       openAgents={() => undefined}
       openCost={() => undefined}

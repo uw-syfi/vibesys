@@ -8,6 +8,7 @@ import {Icon} from './icon.js';
 import {placeLabels, useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
+import {fittedTimeTicks} from './time-ticks.js';
 import {useWindowed} from './windowing.js';
 
 /**
@@ -72,6 +73,11 @@ export interface GanttRow {
 export interface GanttTick {
   readonly at: number;
   readonly label: string;
+}
+
+/** A time axis the Gantt ticks itself, at round intervals that fit its width, labelled by `label`. */
+export interface GanttAxis {
+  readonly label: (at: number, spanMs: number) => string;
 }
 
 /** The part of the axis in view. */
@@ -208,8 +214,13 @@ function GanttBar(props: {
   );
 }
 
+/** The axis a Gantt draws: its given ticks, else its time axis, else none. */
+function axisOf(props: {readonly ticks?: readonly GanttTick[]; readonly axis?: GanttAxis}) {
+  return props.ticks ?? props.axis;
+}
+
 function AxisRow(props: {
-  readonly ticks: readonly GanttTick[];
+  readonly ticks: readonly GanttTick[] | GanttAxis;
   readonly view: GanttView;
   readonly nameLabel: string | undefined;
   readonly tagLabel: string | undefined;
@@ -217,7 +228,11 @@ function AxisRow(props: {
 }): JSX.Element {
   const {view} = props;
   const [measure, width] = useInlineSize();
-  const shown = props.ticks.filter(tick => tick.at >= view.from && tick.at <= view.to);
+  // An axis of round time ticks is drawn to the width it has; explicit ticks are filtered to the view.
+  const shown =
+    'label' in props.ticks
+      ? fittedTimeTicks(view.from, view.to, width, props.ticks.label)
+      : props.ticks.filter(tick => tick.at >= view.from && tick.at <= view.to);
   // Once the track is measured only the labels that can be read side by side are drawn.
   const placed =
     width === null
@@ -482,7 +497,9 @@ export function Gantt(props: {
   readonly from: number;
   readonly to: number;
   readonly playhead?: number;
+  /** The ticks of the axis: given, or `axis` for a time axis the Gantt ticks to its width. */
   readonly ticks?: readonly GanttTick[];
+  readonly axis?: GanttAxis;
   readonly rows: readonly GanttRow[];
   readonly strip?: boolean;
   /** Column names on the tick row: over the names, the tags and the figures. */
@@ -500,6 +517,7 @@ export function Gantt(props: {
   const whole: GanttView = {from: props.from, to: props.to};
   const view = props.view ?? whole;
   const strip = props.strip === true;
+  const axis = axisOf(props);
   const {rows, changeView} = props;
   const detail = props.detail ?? (rows.length > AGGREGATE_ABOVE ? 'aggregate' : 'full');
   const foldable = rows.some(row => row.fold !== undefined);
@@ -542,9 +560,9 @@ export function Gantt(props: {
       {strip || changeView === undefined ? null : (
         <ZoomBar view={view} whole={whole} change={changeView} />
       )}
-      {strip || props.ticks === undefined ? null : (
+      {strip || axis === undefined ? null : (
         <AxisRow
-          ticks={props.ticks}
+          ticks={axis}
           view={view}
           nameLabel={props.nameLabel}
           tagLabel={props.tagLabel}

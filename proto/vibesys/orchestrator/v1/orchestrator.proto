@@ -31,6 +31,11 @@ enum RunStopReason {
   RUN_STOP_REASON_LEAD_GONE = 3;
   // The run's cost limit was reached: see RUN_STOP_REASON_TIME_LIMIT. Ends the run as ENDED.
   RUN_STOP_REASON_COST_LIMIT = 4;
+  // The lead gave its final report and the run's work came to rest. Ends the run as ENDED.
+  RUN_STOP_REASON_FINISHED = 5;
+  // The run stood still, its lead was reminded as many times as it is, and it went on standing still.
+  // Ends the run as ENDED.
+  RUN_STOP_REASON_STALLED = 6;
 }
 
 // RunLimit is a limit an operator can put on a run.

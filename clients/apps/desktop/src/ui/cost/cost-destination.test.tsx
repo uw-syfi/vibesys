@@ -65,7 +65,6 @@ function Window(props: {
         retryStart: () => undefined,
         stopRun: () => undefined,
         retryStop: () => undefined,
-        catchUp: () => undefined,
         sendMessage: () => undefined,
         retrySend: () => undefined,
         loadEarlier: () => undefined,

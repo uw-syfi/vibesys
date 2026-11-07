@@ -48,6 +48,8 @@ var (
 		core.StopTimeLimit: pb.RunStopReason_RUN_STOP_REASON_TIME_LIMIT,
 		core.StopCostLimit: pb.RunStopReason_RUN_STOP_REASON_COST_LIMIT,
 		core.StopLeadGone:  pb.RunStopReason_RUN_STOP_REASON_LEAD_GONE,
+		core.StopFinished:  pb.RunStopReason_RUN_STOP_REASON_FINISHED,
+		core.StopStalled:   pb.RunStopReason_RUN_STOP_REASON_STALLED,
 	})
 	runLimits = newEnum(map[core.RunLimit]pb.RunLimit{
 		"":             pb.RunLimit_RUN_LIMIT_UNSPECIFIED,
