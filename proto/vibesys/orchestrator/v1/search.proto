@@ -8,6 +8,7 @@ import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/result.proto";
 import "vibesys/cli/v1/service.proto";
+import "vibesys/cli/v1/workstream.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
@@ -40,6 +41,91 @@ message SearchState {
   // The measured candidates of a task with two or more objectives, each with whether any other
   // measured candidate beats it. Absent for a task with fewer than two.
   Tradeoff tradeoff = 15;
+  // The task's workstreams, by number. Those the run's ideas belong to are kept before the others,
+  // and the newest of each go last; over the limit the state is marked truncated.
+  repeated vibesys.cli.v1.Workstream workstreams = 16 [(buf.validate.field).repeated.max_items = 100];
+  // One view for each plan in `plans`, in the same order: what a screen shows of an idea beyond the
+  // plan's own record, derived here so that no screen works out a verdict, a count or a gain.
+  repeated IdeaView ideas = 17 [(buf.validate.field).repeated.max_items = 200];
+  // The run's ideas counted by workstream, ascending by workstream number, over every idea of the
+  // run (IdeaView.in_run), including those the cap left out of `ideas`. Absent for a run with no
+  // idea.
+  repeated WorkstreamView workstream_views = 18 [(buf.validate.field).repeated.max_items = 101];
+  // How many of the run's measured candidates (the points of `series`, counted once for each job)
+  // name no plan: the baseline and the deliberate --no-plan measurements. `unattributed_jobs` is
+  // another count, of jobs that no run claimed.
+  uint32 unplanned = 19;
+}
+
+// IdeaVerdict is where an idea stands as a person reads it, derived from PlanStatus.
+enum IdeaVerdict {
+  IDEA_VERDICT_UNSPECIFIED = 0;
+  // A plan that is open or chosen, and one whose status was never set (a plan saved before plans
+  // had a status).
+  IDEA_VERDICT_OPEN = 1;
+  // A plan that won.
+  IDEA_VERDICT_KEPT = 2;
+  IDEA_VERDICT_REJECTED = 3;
+  IDEA_VERDICT_PARKED = 4;
+}
+
+// ObjectiveGain is what an idea's candidates reached on one objective, against where the run began.
+message ObjectiveGain {
+  string metric = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // The best value among the idea's measured candidates over the run's baseline, oriented so that
+  // more than 1 is better whichever way the objective improves: best over baseline when it is
+  // maximized, baseline over best when it is minimized. The baseline is the run's first measurement
+  // of the objective (the series' first point). Absent entries: a gain is left out when either number
+  // is not above zero, as a ratio of them would say nothing.
+  double ratio = 2 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // The best value itself, in the unit of the measurements.
+  double best_value = 3 [(buf.validate.field).double.finite = true];
+  double baseline_value = 4 [(buf.validate.field).double.finite = true];
+}
+
+// IdeaView is what is derived of one plan for the run: see SearchState.ideas.
+message IdeaView {
+  uint32 plan_number = 1 [(buf.validate.field).uint32.gt = 0];
+  IdeaVerdict verdict = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The measure jobs of the run that name the plan, oldest first, which are the chart points of the
+  // idea. Empty when nothing the run measured names it.
+  repeated string candidate_job_ids = 3 [(buf.validate.field).repeated = {
+    max_items: 200
+    items: {
+      string: {
+        min_len: 1
+        max_bytes: 256
+      }
+    }
+  }];
+  // One for each objective on which a linked candidate was measured, by metric name. Empty when
+  // nothing linked was measured.
+  repeated ObjectiveGain best = 4 [(buf.validate.field).repeated.max_items = 8];
+  // The plan was made in this run, or a status change of it was (its recorded origin and
+  // transitions: RecordOrigin.run_id equal to this run's). Never inferred from time or from the jobs
+  // that overlapped it. A plan saved before its origin was recorded is not in any run.
+  bool in_run = 5;
+}
+
+// WorkstreamView counts the run's ideas of one workstream.
+message WorkstreamView {
+  // 0 holds the ideas that name no workstream.
+  uint32 number = 1;
+  uint32 kept = 2;
+  uint32 rejected = 3;
+  uint32 open = 4;
+  uint32 parked = 5;
+  // For each objective, the best gain among the counted ideas, by metric name.
+  repeated ObjectiveGain best = 6 [(buf.validate.field).repeated.max_items = 8];
 }
 
 // ObjectiveBounds is the performance bound the run's agents declared for one objective, with every

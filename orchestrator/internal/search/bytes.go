@@ -50,6 +50,10 @@ func boundBytes(s *pb.SearchState, v View) {
 	s.Truncated = true
 	size = proto.Size(s)
 	jobs, commits := ages(v)
+	planned := map[uint32]time.Time{}
+	for _, p := range s.Plans {
+		planned[p.Number] = p.GetCreatedAt().AsTime()
+	}
 	var entries []*byteEntry
 	m := s.ProtoReflect()
 	m.Range(func(fd protoreflect.FieldDescriptor, value protoreflect.Value) bool {
@@ -62,7 +66,7 @@ func boundBytes(s *pb.SearchState, v View) {
 		for i := 0; i < list.Len(); i++ {
 			value := list.Get(i)
 			msg := value.Message().Interface()
-			entries = append(entries, &byteEntry{field: fd, index: i, value: value, at: entryAge(msg, jobs, commits), bytes: protowire.SizeTag(protowire.Number(fd.Number())) + protowire.SizeBytes(proto.Size(msg))})
+			entries = append(entries, &byteEntry{field: fd, index: i, value: value, at: entryAge(msg, jobs, commits, planned), bytes: protowire.SizeTag(protowire.Number(fd.Number())) + protowire.SizeBytes(proto.Size(msg))})
 		}
 		return true
 	})
@@ -104,6 +108,13 @@ func boundBytes(s *pb.SearchState, v View) {
 	}
 	s.Results = slices.DeleteFunc(s.Results, func(r *cli.Result) bool { return !kept[r.JobId] })
 	s.Troubles = slices.DeleteFunc(s.Troubles, func(r *cli.JobTrouble) bool { return !kept[r.JobId] })
+	// A plan and its idea are one entry to a reader. They are as old as each other and the plan sorts
+	// first, so the plan goes first and the cut can leave only an idea whose plan went: it goes too.
+	planKept := map[uint32]bool{}
+	for _, p := range s.Plans {
+		planKept[p.Number] = true
+	}
+	s.Ideas = slices.DeleteFunc(s.Ideas, func(i *pb.IdeaView) bool { return !planKept[i.PlanNumber] })
 	shrinkTrajectory(s, func() bool { return proto.Size(s) <= MaxStateBytes })
 	// Head can contain a result of arbitrary size. Retain health and identity even
 	// when that singleton cannot fit after every historical entry was removed.
@@ -130,7 +141,7 @@ func ages(v View) (map[string]time.Time, map[string]time.Time) {
 	}
 	return jobs, commits
 }
-func entryAge(m proto.Message, jobs, commits map[string]time.Time) time.Time {
+func entryAge(m proto.Message, jobs, commits map[string]time.Time, plans map[uint32]time.Time) time.Time {
 	switch x := m.(type) {
 	case *cli.Job:
 		return x.GetSubmittedAt().AsTime()
@@ -144,9 +155,13 @@ func entryAge(m proto.Message, jobs, commits map[string]time.Time) time.Time {
 		return x.GetPromotion().GetAt().AsTime()
 	case *cli.JobTrouble:
 		return jobs[x.JobId]
-	case *pb.ObjectiveBounds:
-		// A run's declared bounds are a few entries it states once and revises rarely: they go last,
-		// after every job, result and judgment that is older than the end of time.
+	case *pb.IdeaView:
+		// An idea goes with its plan: it is as old as the plan.
+		return plans[x.GetPlanNumber()]
+	case *pb.ObjectiveBounds, *cli.Workstream, *pb.WorkstreamView:
+		// A run's declared bounds, its workstreams and their counts are a few entries each, stated
+		// once and revised rarely: they go last, after every job, result and judgment that is older
+		// than the end of time.
 		return lastToGo
 	default:
 		panic("search: unknown historical entry")
