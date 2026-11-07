@@ -67,9 +67,9 @@ func TestStandingsListTheMeasuredObjectivesThenTheBoundOnesThenTheSeriesOnes(t *
 	}
 	sameStandings(t, search.Standings(state), []*pb.ObjectiveStanding{
 		{Name: "latency", HeadValue: ptr(12)},
-		{Name: "tput", HeadValue: ptr(90), Unit: "tok/s", HeadPercentOfBound: ptr(45)},
+		{Name: "tput", HeadValue: ptr(90), BoundUnit: "tok/s", HeadPercentOfBound: ptr(45)},
 		{Name: "memory"},
-		{Name: "accuracy", Unit: "%"},
+		{Name: "accuracy", BoundUnit: "%"},
 		{Name: "score", BestValue: ptr(5)},
 	})
 	if search.Standings(nil) != nil || len(search.Standings(&pb.SearchState{})) != 0 {
@@ -99,7 +99,7 @@ func TestTheHeadAndTheBestAreServedApartAndNeitherStandsInForTheOther(t *testing
 		// No bound: the head is the last measurement the run promoted, the best is where the series' best line ends.
 		{Name: "tput", HeadValue: ptr(60), BestValue: ptr(90)},
 		// A bound: the host's own best and its share of the bound.
-		{Name: "latency", HeadValue: ptr(30), Unit: "ms", HeadPercentOfBound: ptr(50), BestValue: ptr(12), BestPercentOfBound: ptr(125)},
+		{Name: "latency", HeadValue: ptr(30), BoundUnit: "ms", HeadPercentOfBound: ptr(50), BestValue: ptr(12), BestPercentOfBound: ptr(125)},
 	})
 }
 
