@@ -109,7 +109,7 @@ func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Write
 	img, ok, err := p.cfg.Engine.Image(ctx, tag)
 	if err == nil && !ok {
 		_, _ = fmt.Fprintf(log, "[candidate] building %s from %s\n", tag, b.Dockerfile)
-		if err = p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}}, log); err == nil {
+		if err = p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}, Role: CandidateImage}, log); err == nil {
 			img, ok, err = p.cfg.Engine.Image(ctx, tag)
 			if err == nil && !ok {
 				err = &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the engine built %s and does not have it", tag)}

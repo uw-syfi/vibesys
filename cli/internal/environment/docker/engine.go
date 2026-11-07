@@ -102,7 +102,21 @@ type BuildSpec struct {
 	// Context is the whole build input: a tar with the Dockerfile at its root, made by Context.
 	Context []byte
 	Labels  Labels
+	// Role is which image of the task the build makes, as what the build says names it. Empty
+	// names the image by its tag alone.
+	Role ImageRole
 }
+
+// ImageRole is which image of a task a build makes, as a person reads it: a task with a
+// [candidate] has two images, and a failed build says which of them failed.
+type ImageRole string
+
+const (
+	// TaskImage is the task's image, where the job's commands run.
+	TaskImage ImageRole = "the task's image"
+	// CandidateImage is the candidate's image, where the candidate's server runs.
+	CandidateImage ImageRole = "the candidate's image"
+)
 
 // Mount is a directory of the host made visible in the container.
 type Mount struct {
