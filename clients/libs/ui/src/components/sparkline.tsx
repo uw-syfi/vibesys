@@ -13,8 +13,9 @@ export interface SparkStep {
 /**
  * A tiny best-so-far line with no axes: `steps` drawn as a step line that holds each value until
  * the next, over the x range `[from, to]`, and an optional dashed `reference` line (the starting
- * value). The y range fits the steps and the reference, so a flat series sits in the middle.
- * `label` describes it for assistive technology.
+ * value). `points` are the readings behind the line, drawn as faint dots under it. The y range
+ * fits the steps, the points and the reference, so a flat series sits in the middle. `tone` colors
+ * the line (`muted` for a series that is over). `label` describes it for assistive technology.
  */
 export function Sparkline(props: {
   readonly label: string;
@@ -22,9 +23,13 @@ export function Sparkline(props: {
   readonly from: number;
   readonly to: number;
   readonly reference?: number;
+  readonly points?: readonly SparkStep[];
+  readonly tone?: 'accent' | 'muted';
 }): JSX.Element {
+  const points = props.points ?? [];
   const ys = [
     ...props.steps.map(step => step.y),
+    ...points.map(point => point.y),
     ...(props.reference === undefined ? [] : [props.reference]),
   ];
   const low = Math.min(...ys);
@@ -35,6 +40,9 @@ export function Sparkline(props: {
   const width = props.to - props.from;
   const x = (value: number): number =>
     width <= 0 ? 0 : Math.max(0, Math.min(WIDTH, ((value - props.from) / width) * WIDTH));
+  // A dot is a zero-length stroke with a rounded cap: its size is in pixels, so it stays a dot
+  // when the plot is stretched to its box.
+  const dots = points.map(point => `M${x(point.x)} ${y(point.y)}h0`).join('');
   const first = props.steps[0];
   const path =
     first === undefined
@@ -61,7 +69,8 @@ export function Sparkline(props: {
           y2={y(props.reference)}
         />
       )}
-      {path === '' ? null : <path className="vs-spark-line" d={path} />}
+      {dots === '' ? null : <path className="vs-spark-dots" d={dots} />}
+      {path === '' ? null : <path className="vs-spark-line" d={path} data-tone={props.tone} />}
     </svg>
   );
 }

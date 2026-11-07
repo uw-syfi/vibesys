@@ -1,0 +1,55 @@
+/*
+ * The `Sparkline` and its cell in a `ColumnList` (`CellSparkline`). Every value is a token variable
+ * from `tokens.css`. A dot is a zero-length stroke with a round cap, drawn in pixels (not scaled with
+ * the plot), so it stays round when the plot is stretched to its box.
+ */
+
+.vs-spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.vs-spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.vs-spark-dots {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.45;
+  vector-effect: non-scaling-stroke;
+}
+.vs-spark-reference {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+/* A series that is over is drawn quiet. */
+.vs-spark-line[data-tone="muted"] {
+  stroke: var(--muted);
+}
+
+/* The trend in a list cell: as high as a row's two lines, with a fixed slot after it for a count. */
+.vs-columnlist-spark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+.vs-columnlist-spark > .vs-spark {
+  flex: 1;
+  min-width: 0;
+  height: var(--space-7);
+}
+.vs-columnlist-spark-more {
+  flex: none;
+  width: var(--space-6);
+  font-variant-numeric: tabular-nums;
+}

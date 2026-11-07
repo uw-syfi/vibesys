@@ -1164,6 +1164,7 @@ button.vs-crumb:focus-visible {
 }
 .vs-columnlist-cell {
   min-width: 0;
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1915,25 +1916,6 @@ button.vs-dotlegend-item:focus-visible {
 .vs-tile-trend {
   height: var(--space-7);
   margin-top: auto;
-}
-.vs-spark {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.vs-spark-line {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-.vs-spark-reference {
-  stroke: var(--muted);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.6;
-  vector-effect: non-scaling-stroke;
 }
 
 /* --- area chart: overlaid areas over a tidy axis, a crosshair and a tooltip under the pointer --- */
