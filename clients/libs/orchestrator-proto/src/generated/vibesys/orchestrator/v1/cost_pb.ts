@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/cost.proto.
  */
 export const file_vibesys_orchestrator_v1_cost: GenFile = /*@__PURE__*/
-  fileDesc("CiJ2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jb3N0LnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSLYBAoHUnVuQ29zdBIXCgZydW5faWQYASABKAlCB7pIBHICEAESEAoIc2VxdWVuY2UYAiABKAQSMQoFYXNfb2YYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESNQoFdG90YWwYBCABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEisKDG1heF9jb3N0X3VzZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEg0KBXR1cm5zGAYgASgNEhYKDnVucHJpY2VkX3R1cm5zGAcgASgNEjoKBXJvbGVzGAggAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUm9sZUNvc3RCCLpIBZIBAhAQEjIKBm1vZGVscxgJIAMoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsQ29zdBI8CgZzZXJpZXMYCiABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TcGVuZFNlcmllc0IGukgDyAEBEiwKDWxhc3RfaG91cl91c2QYCyABKAFCELpIDRILQAEpAAAAAAAAAABIAYgBATplukhiGmAKF3J1bl9jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnNCDwoNX21heF9jb3N0X3VzZEIQCg5fbGFzdF9ob3VyX3VzZCKeAgoIUm9sZUNvc3QSPAoEcm9sZRgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABIOCgZhZ2VudHMYAiABKA0SDQoFdHVybnMYAyABKA0SFgoOdW5wcmljZWRfdHVybnMYBCABKA0SNQoFdXNhZ2UYBSABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBOma6SGMaYQoYcm9sZV9jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnMiWAoITW9kZWxSZWYSPQoHaGFybmVzcxgBIAEoDjIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhcm5lc3NCCrpIB4IBBBABIAASDQoFbW9kZWwYAiABKAkijAIKCU1vZGVsQ29zdBI4CgVtb2RlbBgBIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsUmVmQga6SAPIAQESDQoFdHVybnMYAiABKA0SFgoOdW5wcmljZWRfdHVybnMYAyABKA0SNQoFdXNhZ2UYBCABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBOme6SGQaYgoZbW9kZWxfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zIroBCgtTcGVuZFNlcmllcxIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI1CgV3aWR0aBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkILukgIyAEBqgECKgASQQoHYnVja2V0cxgDIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNwZW5kQnVja2V0Qgq6SAeSAQQIARBAIpsBCgtTcGVuZEJ1Y2tldBIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIiCghjb3N0X3VzZBgCIAEoAUIQukgNEgtAASkAAAAAAAAAABI1CghieV9tb2RlbBgDIAMoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsU3BlbmQiagoKTW9kZWxTcGVuZBI4CgVtb2RlbBgBIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsUmVmQga6SAPIAQESIgoIY29zdF91c2QYAiABKAFCELpIDRILQAEhAAAAAAAAAABCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
+  fileDesc("CiJ2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jb3N0LnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSL8BAoHUnVuQ29zdBIXCgZydW5faWQYASABKAlCB7pIBHICEAESEAoIc2VxdWVuY2UYAiABKAQSMQoFYXNfb2YYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESNQoFdG90YWwYBCABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEisKDG1heF9jb3N0X3VzZBgFIAEoAUIQukgNEgtAASEAAAAAAAAAAEgAiAEBEg0KBXR1cm5zGAYgASgNEhYKDnVucHJpY2VkX3R1cm5zGAcgASgNEjoKBXJvbGVzGAggAygLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUm9sZUNvc3RCCLpIBZIBAhAQEjwKBm1vZGVscxgJIAMoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsQ29zdEIIukgFkgECEEASPAoGc2VyaWVzGAogASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3BlbmRTZXJpZXNCBrpIA8gBARIsCg1sYXN0X2hvdXJfdXNkGAsgASgBQhC6SA0SC0ABKQAAAAAAAAAASAGIAQESGAoQbW9kZWxzX3RydW5jYXRlZBgMIAEoCDplukhiGmAKF3J1bl9jb3N0LnVucHJpY2VkX3R1cm5zEiJ1bnByaWNlZF90dXJucyBjYW5ub3QgZXhjZWVkIHR1cm5zGiF0aGlzLnVucHJpY2VkX3R1cm5zIDw9IHRoaXMudHVybnNCDwoNX21heF9jb3N0X3VzZEIQCg5fbGFzdF9ob3VyX3VzZCK0AgoIUm9sZUNvc3QSPAoEcm9sZRgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABIOCgZhZ2VudHMYAiABKA0SDQoFdHVybnMYAyABKA0SFgoOdW5wcmljZWRfdHVybnMYBCABKA0SNQoFdXNhZ2UYBSABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZUIGukgDyAEBEhQKDHRvdGFsX3Rva2VucxgGIAEoBDpmukhjGmEKGHJvbGVfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zImIKCE1vZGVsUmVmEj0KB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEhcKBW1vZGVsGAIgASgJQgi6SAVyAyiAAiKiAgoJTW9kZWxDb3N0EjgKBW1vZGVsGAEgASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTW9kZWxSZWZCBrpIA8gBARINCgV0dXJucxgCIAEoDRIWCg51bnByaWNlZF90dXJucxgDIAEoDRI1CgV1c2FnZRgEIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQESFAoMdG90YWxfdG9rZW5zGAUgASgEOme6SGQaYgoZbW9kZWxfY29zdC51bnByaWNlZF90dXJucxIidW5wcmljZWRfdHVybnMgY2Fubm90IGV4Y2VlZCB0dXJucxohdGhpcy51bnByaWNlZF90dXJucyA8PSB0aGlzLnR1cm5zIroBCgtTcGVuZFNlcmllcxIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI1CgV3aWR0aBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkILukgIyAEBqgECKgASQQoHYnVja2V0cxgDIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNwZW5kQnVja2V0Qgq6SAeSAQQIARBAIqUBCgtTcGVuZEJ1Y2tldBIxCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIiCghjb3N0X3VzZBgCIAEoAUIQukgNEgtAASkAAAAAAAAAABI/CghieV9tb2RlbBgDIAMoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1vZGVsU3BlbmRCCLpIBZIBAhBAImoKCk1vZGVsU3BlbmQSOAoFbW9kZWwYASABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Nb2RlbFJlZkIGukgDyAEBEiIKCGNvc3RfdXNkGAIgASgBQhC6SA0SC0ABIQAAAAAAAAAAQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
 
 /**
  * RunCost is what a run has cost, worked out by the host from the finished turns of its agents. A
@@ -89,7 +89,8 @@ export type RunCost = Message<"vibesys.orchestrator.v1.RunCost"> & {
 
   /**
    * One entry for each model the run's agents ran on, most costly first; a model with no priced
-   * turn comes last, in the order of its harness and name.
+   * turn comes last, in the order of its harness and name. When the run ran on more models than fit,
+   * the first ones are kept (the most costly) and models_truncated says so.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.ModelCost models = 9;
    */
@@ -107,6 +108,15 @@ export type RunCost = Message<"vibesys.orchestrator.v1.RunCost"> & {
    * @generated from field: optional double last_hour_usd = 11;
    */
   lastHourUsd?: number | undefined;
+
+  /**
+   * True when the view leaves something of the models out: a model past the limit of models (here
+   * and in every bucket's by_model), or a model name cut to fit. Every figure that is not a list of
+   * models, the total and every bucket's cost_usd among them, still counts every turn.
+   *
+   * @generated from field: bool models_truncated = 12;
+   */
+  modelsTruncated: boolean;
 };
 
 /**
@@ -150,6 +160,14 @@ export type RoleCost = Message<"vibesys.orchestrator.v1.RoleCost"> & {
    * @generated from field: vibesys.orchestrator.v1.Usage usage = 5;
    */
   usage?: Usage | undefined;
+
+  /**
+   * All the tokens of the type: the sum of the five kinds in usage, a kind no turn reported counting
+   * as none. The host adds them up so that no client does.
+   *
+   * @generated from field: uint64 total_tokens = 6;
+   */
+  totalTokens: bigint;
 };
 
 /**
@@ -171,7 +189,8 @@ export type ModelRef = Message<"vibesys.orchestrator.v1.ModelRef"> & {
   harness: Harness;
 
   /**
-   * Empty is the harness's own default model.
+   * Empty is the harness's own default model. A name longer than the limit is cut to it, at a
+   * character boundary, and the view says so in RunCost.models_truncated.
    *
    * @generated from field: string model = 2;
    */
@@ -210,6 +229,14 @@ export type ModelCost = Message<"vibesys.orchestrator.v1.ModelCost"> & {
    * @generated from field: vibesys.orchestrator.v1.Usage usage = 4;
    */
   usage?: Usage | undefined;
+
+  /**
+   * All the tokens of the model: the sum of the five kinds in usage, a kind no turn reported
+   * counting as none.
+   *
+   * @generated from field: uint64 total_tokens = 5;
+   */
+  totalTokens: bigint;
 };
 
 /**
@@ -275,7 +302,9 @@ export type SpendBucket = Message<"vibesys.orchestrator.v1.SpendBucket"> & {
   costUsd: number;
 
   /**
-   * That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket.
+   * That cost by model, in the order of RunCost.models, leaving out a model with none in this bucket
+   * and a model RunCost.models left out. cost_usd is the cost of every model, so it can exceed the
+   * sum of by_model when RunCost.models_truncated is set.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.ModelSpend by_model = 3;
    */

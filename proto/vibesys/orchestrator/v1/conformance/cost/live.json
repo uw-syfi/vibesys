@@ -23,7 +23,8 @@
           "cacheReadTokens": "40000",
           "reasoningTokens": "500",
           "costUsd": 3.75
-        }
+        },
+        "totalTokens": "57500"
       },
       {
         "role": "AGENT_ROLE_LEAD",
@@ -33,7 +34,8 @@
           "inputTokens": "1200",
           "outputTokens": "750",
           "costUsd": 1.25
-        }
+        },
+        "totalTokens": "1950"
       },
       {
         "role": "AGENT_ROLE_PROFILER",
@@ -43,7 +45,8 @@
         "usage": {
           "inputTokens": "700",
           "outputTokens": "90"
-        }
+        },
+        "totalTokens": "790"
       }
     ],
     "models": [
@@ -58,7 +61,8 @@
           "cacheReadTokens": "40000",
           "reasoningTokens": "500",
           "costUsd": 3.75
-        }
+        },
+        "totalTokens": "57500"
       },
       {
         "model": {
@@ -69,7 +73,8 @@
           "inputTokens": "1200",
           "outputTokens": "750",
           "costUsd": 1.25
-        }
+        },
+        "totalTokens": "1950"
       },
       {
         "model": {
@@ -81,7 +86,8 @@
         "usage": {
           "inputTokens": "700",
           "outputTokens": "90"
-        }
+        },
+        "totalTokens": "790"
       }
     ],
     "series": {

@@ -214,6 +214,7 @@ describe('the Cost screen over the stream', () => {
               turns: 4,
               unpricedTurns: 1,
               usage: usage({costUsd: 12.5, outputTokens: 900n}),
+              totalTokens: 123_400n,
             }),
           ],
           models: [
@@ -222,6 +223,7 @@ describe('the Cost screen over the stream', () => {
               turns: 4,
               unpricedTurns: 1,
               usage: usage({costUsd: 12.5}),
+              totalTokens: 7_650_000n,
             }),
           ],
           series: {
@@ -249,6 +251,8 @@ describe('the Cost screen over the stream', () => {
       expect(text).toContain('of $40.00');
       expect(text).toContain('$12.50/h');
       expect(text).toContain('Live');
+      expect(text).toContain('123.4k');
+      expect(text).toContain('7.7M');
       expect(text).toMatch(/Unpriced turns\s*1/);
     }),
   );

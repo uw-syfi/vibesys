@@ -10,6 +10,7 @@ import {
 } from '../../testing/orchestrator/cost-views.js';
 import {COST_WORDS} from '../orchestrator/cost-words.js';
 import {costScreenModel} from './cost-model.js';
+import {formatTokens} from './words.js';
 
 const NUMBER_WORDS = /NaN|undefined|Infinity|\[object/;
 
@@ -54,6 +55,14 @@ describe('the cost screen model', () => {
             expect(row.note === 'No price').toBe(cost === null);
           });
         }
+        // The Tokens column is the number the host served for the type or model, as the host
+        // served it: the screen adds up no kinds, so it shows a total that is not their sum.
+        expect(model.types.map(row => row.figures.at(-2))).toEqual(
+          view.roles.map(role => formatTokens(role.totalTokens)),
+        );
+        expect(model.models.map(row => row.figures.at(-2))).toEqual(
+          view.models.map(cost => formatTokens(cost.totalTokens)),
+        );
         expect(model.kinds.map(row => row.figures[0] === null)).toEqual([
           view.total.inputTokens === null,
           view.total.cacheReadTokens === null,
@@ -183,7 +192,7 @@ describe('the cost screen model', () => {
       ['Reviewer', undefined],
       ['Profiler', 'No price'],
     ]);
-    expect(model.types.at(-1)?.figures).toEqual(['×1', '41', null]);
+    expect(model.types.at(-1)?.figures).toEqual(['×1', '41', '2.2M', null]);
     expect(model.spend.floor).toBe(true);
     expect(costScreenModel(ENDED_RUN, COST_WORDS).spend.floor).toBe(false);
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();

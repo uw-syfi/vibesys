@@ -133,9 +133,9 @@ func TestPercentIsUndefinedWhereNothingMeaningfulIsGiven(t *testing.T) {
 	}
 }
 
-// The view of a run holds the bounds that run declared, one entry per objective by name, each with
-// every version oldest first and the standing bound last. The store holds the bounds of every run of
-// the task, so another run's, and one declared outside any run, are not this run's.
+// The view of a run holds the bounds that run declared and those a person declared outside any run, one
+// entry per objective by name, each with every version oldest first and the standing bound last. The
+// store holds the bounds of every run of the task, so another run's are not this run's.
 func TestTheViewHoldsThisRunsBoundsPerObjective(t *testing.T) {
 	s := project(t,
 		boundFact(3, "r", "tok_s", maximize, 12000),
@@ -156,14 +156,33 @@ func TestTheViewHoldsThisRunsBoundsPerObjective(t *testing.T) {
 	if fmt.Sprint(seqs) != "[1 3 6]" || tok.Direction != maximize || tok.Versions[2].Value != 13000 {
 		t.Fatalf("tok_s versions %v, direction %v, standing %v; want [1 3 6], maximize and 13000 standing", seqs, tok.Direction, tok.Versions[2].GetValue())
 	}
-	if lat := byObjective(s, "ttft_ms"); len(lat.Versions) != 1 || lat.Versions[0].Value != 74 || lat.Direction != minimize {
-		t.Fatalf("ttft_ms = %v: another run's bound and one outside any run must be left out", lat)
+	lat := byObjective(s, "ttft_ms")
+	if len(lat.Versions) != 2 || lat.Versions[0].Origin.RunId != "" || lat.Versions[1].Value != 74 || lat.Direction != minimize {
+		t.Fatalf("ttft_ms = %v: want the person's bound (no run) and then the run's standing 74", lat)
 	}
 	if s.Truncated {
 		t.Error("a view that left nothing of this run out is marked truncated")
 	}
 	if none := project(t, boundFact(1, "other", "tok_s", maximize, 1)); len(none.Bounds) != 0 {
 		t.Errorf("a run with no bounds of its own shows %v", none.Bounds)
+	}
+}
+
+// A bound a person declared outside any run stands for every run of the task, and stands as the
+// standing bound when it is the newest declared for its objective: a person's correction of what the
+// agents derived is the bound the head is measured against.
+func TestAPersonsBoundOutsideAnyRunStandsForTheRun(t *testing.T) {
+	s := project(t,
+		boundFact(1, "r", "tok_s", maximize, 20000),
+		boundFact(2, "", "tok_s", maximize, 15000),
+		headOf("tok_s", maximize, 7500, nil, nil),
+	)
+	tok := byObjective(s, "tok_s")
+	if tok == nil || len(tok.Versions) != 2 || tok.Versions[1].Value != 15000 || math.Abs(tok.GetPercentOfBound()-50) > 1e-9 {
+		t.Fatalf("tok_s = %v, want the person's 15000 standing and the head at 50 percent of it", tok)
+	}
+	if only := byObjective(project(t, boundFact(1, "", "ttft_ms", minimize, 74)), "ttft_ms"); only == nil {
+		t.Error("a bound declared outside any run, with no agent's, is not shown")
 	}
 }
 
@@ -260,7 +279,7 @@ func TestEveryProjectionOfBoundsHoldsTheContractsRules(t *testing.T) {
 			run := []string{"r", "other", ""}[r.Intn(3)]
 			o := objectives[r.Intn(len(objectives))]
 			facts = append(facts, boundFact(seq, run, o, directions[o], float64(1+r.Intn(1000))))
-			if run == "r" {
+			if run == "r" || run == "" {
 				declared[o] = append(declared[o], seq)
 			}
 		}

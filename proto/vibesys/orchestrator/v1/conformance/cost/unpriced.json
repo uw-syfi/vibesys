@@ -18,7 +18,8 @@
         "usage": {
           "inputTokens": "5000",
           "outputTokens": "40"
-        }
+        },
+        "totalTokens": "5040"
       }
     ],
     "models": [
@@ -32,7 +33,8 @@
         "usage": {
           "inputTokens": "5000",
           "outputTokens": "40"
-        }
+        },
+        "totalTokens": "5040"
       }
     ],
     "series": {
