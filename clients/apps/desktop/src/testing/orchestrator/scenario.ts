@@ -85,7 +85,8 @@ export interface Scenario {
   readonly endMs: number;
 }
 
-const START_MS = Date.UTC(2026, 10, 1, 17, 0, 0);
+/** When the scenario's run starts. */
+export const START_MS = Date.UTC(2026, 10, 1, 17, 0, 0);
 const MINUTE = 60_000;
 
 const ROLES = [
