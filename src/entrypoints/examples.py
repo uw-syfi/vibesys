@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import posixpath
+import re
 import shutil
 import sys
 import tomllib
@@ -119,7 +120,8 @@ class GitExampleMaterializer:
             if not (destination / vendored).is_dir():
                 message = f"{pyproject}: source {relative} tracks no files in {checkout}"
                 raise ExampleMaterializationError(message)
-            text = text.replace(f'"{relative}"', f'"{vendored}"')
+            quoted = re.compile(rf"""(["']){re.escape(relative)}\1""")
+            text = quoted.sub(rf"\1{vendored}\1", text)
         pyproject.write_text(text, encoding="utf-8")
 
     def clone_pinned(self, checkout: Path, example: PurePosixPath, destination: Path) -> None:

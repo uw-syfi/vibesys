@@ -14,6 +14,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.specifiers import SpecifierSet
 from scripts.example_repositories import is_example_repository_path
 
 from entrypoints.example_catalog import ExampleEntry, Registry
@@ -119,3 +120,46 @@ def suggested_entry(path: str) -> str:
     """Return the registry entry to paste for an unregistered example."""
     entry = f'[[example]]\npath = "{path}"'
     return f"{entry}\nexternal_repo = true" if path in submodule_example_paths() else entry
+
+
+_PYTHON_MINORS = tuple(f"3.{minor}" for minor in range(8, 21))
+
+
+def outside_path_sources(example: Path) -> list[str]:
+    """The ``[tool.uv.sources]`` paths of ``example``'s pyproject that leave the example."""
+    manifest = example / "pyproject.toml"
+    if not manifest.is_file():
+        return []
+    sources = tomllib.loads(manifest.read_text(encoding="utf-8")).get("tool", {}).get("uv", {})
+    return [
+        source["path"]
+        for source in sources.get("sources", {}).values()
+        if isinstance(source.get("path"), str) and source["path"].startswith("..")
+    ]
+
+
+def path_source_failures(project: Path) -> list[str]:
+    """Why uv could not resolve ``project``'s path dependencies from where it is, if it cannot.
+
+    Every ``[tool.uv.sources]`` path must hold a project, and ``requires-python`` must admit
+    no Python the dependency refuses (``uv lock`` fails otherwise).
+    """
+    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    own = SpecifierSet(config["project"].get("requires-python", ""))
+    failures: list[str] = []
+    for name, source in config.get("tool", {}).get("uv", {}).get("sources", {}).items():
+        if "path" not in source:
+            continue
+        manifest = project / source["path"] / "pyproject.toml"
+        if not manifest.is_file():
+            failures.append(f"{name}: path {source['path']!r} has no pyproject.toml")
+            continue
+        dependency = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+        theirs = SpecifierSet(dependency.get("requires-python", ""))
+        refused = [v for v in _PYTHON_MINORS if v in own and v not in theirs]
+        if refused:
+            failures.append(
+                f"{name}: requires-python {str(own)!r} admits Python {refused} that "
+                f"{str(theirs)!r} refuses; raise the example's requires-python"
+            )
+    return failures

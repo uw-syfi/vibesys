@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import pytest
-from packaging.specifiers import SpecifierSet
 from tests.support import run_test_command
 from tests.support.example_materializer import (
     check_copy_tracked_contract,
 )
-from tests.support.example_registry import REPO_ROOT, example_root, load_registry
+from tests.support.example_registry import (
+    REPO_ROOT,
+    example_root,
+    load_registry,
+    path_source_failures,
+)
 
 from entrypoints.examples import GitExampleMaterializer, default_checkout, run
 from vs_project.api import Git
@@ -92,7 +95,7 @@ def test_a_path_source_outside_the_example_is_vendored_and_rewritten(tmp_path: P
     example.mkdir(parents=True)
     (example / "pyproject.toml").write_text(
         '[project]\nname = "demo"\ndependencies = ["toolkit"]\n'
-        '[tool.uv.sources]\ntoolkit = { path = "../../../sdk/toolkit" }\n',
+        "[tool.uv.sources]\ntoolkit = { path = '../../../sdk/toolkit' }\n",
         encoding="utf-8",
     )
     _git(checkout, "init", "--quiet")
@@ -104,7 +107,7 @@ def test_a_path_source_outside_the_example_is_vendored_and_rewritten(tmp_path: P
         checkout, PurePosixPath("examples/serving/demo"), destination, message="Start"
     )
 
-    assert 'path = "vendor/toolkit"' in (destination / "pyproject.toml").read_text()
+    assert "path = 'vendor/toolkit'" in (destination / "pyproject.toml").read_text()
     assert (destination / "vendor" / "toolkit" / "src" / "toolkit.py").is_file()
     assert (destination / "vendor" / "toolkit" / "pyproject.toml").is_file()
     assert _git(destination, "status", "--porcelain") == ""
@@ -134,9 +137,6 @@ def test_new_from_the_real_catalog_creates_a_runnable_project(tmp_path: Path) ->
     ]
 
 
-_PYTHON_MINORS = tuple(f"3.{minor}" for minor in range(8, 21))
-
-
 @pytest.mark.parametrize(
     "entry",
     [
@@ -158,23 +158,5 @@ def test_a_copied_example_resolves_its_path_dependencies(
     GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
         REPO_ROOT, PurePosixPath(entry.path), project, message="Start"
     )
-    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
-    own = SpecifierSet(config["project"].get("requires-python", ""))
-    sources = config.get("tool", {}).get("uv", {}).get("sources", {})
-    failures: list[str] = []
-    for name, source in sources.items():
-        if "path" not in source:
-            continue
-        manifest = project / source["path"] / "pyproject.toml"
-        if not manifest.is_file():
-            failures.append(f"{name}: path {source['path']!r} has no pyproject.toml in a copy")
-            continue
-        dependency = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
-        theirs = SpecifierSet(dependency.get("requires-python", ""))
-        refused = [v for v in _PYTHON_MINORS if v in own and v not in theirs]
-        if refused:
-            failures.append(
-                f"{name}: requires-python {str(own)!r} admits Python {refused} that "
-                f"{str(theirs)!r} refuses; raise the example's requires-python"
-            )
+    failures = path_source_failures(project)
     assert not failures, f"{entry.path}: " + "; ".join(failures)
