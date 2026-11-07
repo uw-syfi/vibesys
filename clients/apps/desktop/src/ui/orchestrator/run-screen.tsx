@@ -130,6 +130,7 @@ export function RunScreen(props: RunScreenProps): JSX.Element {
       goRuns={props.goRuns}
       openAgents={() => props.show('agents')}
       openCost={() => props.show('cost')}
+      names={agentNames(props.state, props.runId)}
     />
   );
 }

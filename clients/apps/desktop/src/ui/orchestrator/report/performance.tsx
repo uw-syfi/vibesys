@@ -42,10 +42,16 @@ const Y_LABELS = 3;
 /** The share of the value range left above and below the data, so no point sits on the frame. */
 const PAD = 0.1;
 
-function boundReference(objective: ObjectiveReport): ChartReference | undefined {
+function boundReference(
+  objective: ObjectiveReport,
+  names: ReadonlyMap<string, string>,
+): ChartReference | undefined {
   const bound = objective.bound?.current;
   if (bound === undefined) return undefined;
-  const who = [bound.agent, bound.atMs === null ? '' : seattleMoment(bound.atMs)]
+  const who = [
+    names.get(bound.agent) ?? bound.agent,
+    bound.atMs === null ? '' : seattleMoment(bound.atMs),
+  ]
     .filter(part => part !== '')
     .join(' · ');
   return {
@@ -69,10 +75,19 @@ function valueDomain(objective: ObjectiveReport): readonly [number, number] {
   return [low - room, high + room];
 }
 
+/** The labels of a value axis: the ticks over the objective's range, in figures. */
+function valueLabels(objective: ObjectiveReport): ChartTick[] {
+  const [low, high] = valueDomain(objective);
+  return valueTicks(low, high, Y_LABELS).map(value => ({value, label: formatFigure(value)}));
+}
+
 function ObjectiveChart(props: {
   readonly objective: ObjectiveReport;
   readonly span: RunReport['span'];
   readonly size: 'default' | 'compact';
+  readonly names: ReadonlyMap<string, string>;
+  /** The widest value label of any chart on this axis, so every plot starts at one left edge. */
+  readonly labelChars: number;
 }): JSX.Element | null {
   const {objective, span} = props;
   if (objective.points.length === 0) return null;
@@ -96,11 +111,8 @@ function ObjectiveChart(props: {
   const xTicks: ChartTick[] = timeTicks(span.fromMs, span.toMs, X_LABELS, seattleOffsetMs).map(
     value => ({value, label: axisMoment(value, length)}),
   );
-  const yTicks: ChartTick[] = valueTicks(domain[0], domain[1], Y_LABELS).map(value => ({
-    value,
-    label: formatFigure(value),
-  }));
-  const reference = boundReference(objective);
+  const yTicks = valueLabels(objective);
+  const reference = boundReference(objective, props.names);
   const best =
     objective.best === undefined
       ? undefined
@@ -120,6 +132,7 @@ function ObjectiveChart(props: {
         yDomain={domain}
         xTicks={xTicks}
         yTicks={yTicks}
+        yLabelChars={props.labelChars}
         size={props.size}
         {...(reference === undefined ? {} : {references: [reference]})}
       />
@@ -131,8 +144,14 @@ function ObjectiveChart(props: {
 export function OverTime(props: {
   readonly objectives: readonly ObjectiveReport[];
   readonly span: RunReport['span'];
+  /** What each agent is called on screen, by agent id. */
+  readonly names: ReadonlyMap<string, string>;
 }): JSX.Element {
   const measured = props.objectives.filter(objective => objective.points.length > 0);
+  const labelChars = Math.max(
+    0,
+    ...measured.flatMap(objective => valueLabels(objective).map(tick => tick.label.length)),
+  );
   return (
     <Card section="Over time">
       {measured.length === 0 ? (
@@ -151,6 +170,8 @@ export function OverTime(props: {
               key={objective.name}
               objective={objective}
               span={props.span}
+              names={props.names}
+              labelChars={labelChars}
               size={measured.length === 1 ? 'default' : 'compact'}
             />
           ))}

@@ -1,4 +1,4 @@
-import {Row, Stack} from '@vibesys/ui';
+import {ChartColumns, Stack} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {CommandProgress, FeedStatus, Freshness, RunReport} from '../../../state/index.js';
 import {AgentsCard} from './agents-card.js';
@@ -30,6 +30,8 @@ export function ReportScreen(props: {
   readonly goRuns: () => void;
   readonly openAgents: () => void;
   readonly openCost: () => void;
+  /** What each agent is called on screen, by agent id. */
+  readonly names: ReadonlyMap<string, string>;
   readonly ideas?: ReactNode;
 }): JSX.Element {
   const {report} = props;
@@ -49,25 +51,17 @@ export function ReportScreen(props: {
       />
       <LeadSummary summary={report.summary} nowMs={props.nowMs} />
       <ObjectiveTiles objectives={report.objectives} />
-      <Row gap="space-5" wrap align="start">
+      <ChartColumns>
         {report.tradeoff === undefined ? null : (
-          <Stack width="chart" gap="space-4">
-            <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
-          </Stack>
+          <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
         )}
-        <Stack width="chart" gap="space-4">
-          <OverTime objectives={report.objectives} span={report.span} />
-        </Stack>
-      </Row>
+        <OverTime objectives={report.objectives} span={report.span} names={props.names} />
+      </ChartColumns>
       {props.ideas ?? null}
-      <Row gap="space-5" wrap align="start">
-        <Stack width="chart" gap="space-4">
-          <AgentsCard agents={report.agents} open={props.openAgents} />
-        </Stack>
-        <Stack width="chart" gap="space-4">
-          <CostCard cost={report.cost} feed={props.costFeed} open={props.openCost} />
-        </Stack>
-      </Row>
+      <ChartColumns>
+        <AgentsCard agents={report.agents} open={props.openAgents} />
+        <CostCard cost={report.cost} feed={props.costFeed} open={props.openCost} />
+      </ChartColumns>
     </Stack>
   );
 }

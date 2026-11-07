@@ -98,7 +98,7 @@ export function CostCard(props: {
           </>
         )}
         <Row gap="space-3" justify="end">
-          <Button text="Cost" label="Open cost" variant="quiet" size="sm" press={props.open} />
+          <Button text="Details" label="Open cost" variant="quiet" size="sm" press={props.open} />
         </Row>
       </Stack>
     </Card>

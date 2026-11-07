@@ -165,6 +165,20 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
+  it('starts every chart on the time axis at one left edge, whatever its labels are', () => {
+    const wide: readonly ObjectiveSpec[] = [
+      {name: 'small', direction: 1 as never, unit: 'x', base: 1, best: 9},
+      {name: 'large', direction: 1 as never, unit: 'x', base: 1000, best: 98_000},
+    ];
+    const {screen} = render({objectives: wide});
+    const lefts = [...screen.container.querySelectorAll('svg.vs-chart')]
+      .filter(svg => svg.getAttribute('aria-label')?.includes('over time'))
+      .map(svg => svg.querySelector('line.vs-chart-axis')?.getAttribute('x1'));
+    expect(lefts).toHaveLength(2);
+    expect(new Set(lefts).size).toBe(1);
+    screen.unmount();
+  });
+
   it('draws each measured candidate as a point and the best so far as a line, per objective', () => {
     const {screen} = render({candidates: 25});
     const charts = [...screen.container.querySelectorAll('.vs-chart-panel')].filter(panel =>

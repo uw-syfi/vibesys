@@ -4,7 +4,14 @@ import type {JSX} from 'react';
 import type {CommandProgress, Freshness, ObjectiveReport, RunReport} from '../../../state/index.js';
 import {CommandLine} from '../command-line.js';
 import {runWord} from '../words.js';
-import {formatAge, formatElapsed, formatFigure, seattleMoment, withUnit} from './format.js';
+import {
+  formatAge,
+  formatElapsed,
+  formatExact,
+  formatFigure,
+  seattleMoment,
+  withUnit,
+} from './format.js';
 
 /** What a data state is called when the data is not current; a current one needs no word. */
 const FRESHNESS: Readonly<
@@ -30,11 +37,16 @@ function BestLine(props: {readonly objectives: readonly ObjectiveReport[]}): JSX
       </Text>
       {rows.map(({objective, value}) => (
         <Row key={objective.name} gap="space-2" align="baseline">
-          <Text variant="metric">{withUnit(formatFigure(value), objective.unit)}</Text>
+          <Text variant="metric" title={withUnit(formatExact(value), objective.unit)}>
+            {formatFigure(value)}
+          </Text>
           <Text variant="small" tone="muted" title={objective.name}>
-            {objective.percentOfBound === undefined
-              ? objective.name
-              : `${objective.name} · ${Math.round(objective.percentOfBound)}% of bound`}
+            {[
+              objective.unit === null ? objective.name : `${objective.unit} ${objective.name}`,
+              ...(objective.percentOfBound === undefined
+                ? []
+                : [`${Math.round(objective.percentOfBound)}% of bound`]),
+            ].join(' · ')}
           </Text>
         </Row>
       ))}

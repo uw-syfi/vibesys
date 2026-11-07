@@ -76,12 +76,13 @@ interface Plot {
  */
 function plotFor(
   yTicks: readonly ChartTick[],
+  labelChars: number,
   size: ChartSize,
   width: number,
   captioned: boolean,
   united: boolean,
 ): Plot {
-  const longest = Math.max(0, ...yTicks.map(tick => tick.label.length));
+  const longest = Math.max(labelChars, ...yTicks.map(tick => tick.label.length));
   const glyph = TYPE.section.size * MONO_ADVANCE;
   return {
     right: width - MARGIN_RIGHT,
@@ -393,6 +394,11 @@ interface ChartProps {
   readonly unit?: string;
   readonly xTicks?: readonly ChartTick[];
   readonly yTicks?: readonly ChartTick[];
+  /**
+   * At least this many characters of room for the y labels: charts stacked on one time axis give
+   * every chart the longest label of any, so their plots start at one left edge.
+   */
+  readonly yLabelChars?: number;
   /** The x-axis range, fixed by the caller; without it the range fits the points, steps and ticks. */
   readonly xDomain?: readonly [number, number];
   /** The y-axis range, fixed by the caller; without it the range fits the points and ticks. */
@@ -411,6 +417,7 @@ function layoutOf(
   const steps = props.steps ?? [];
   const plot = plotFor(
     props.yTicks ?? [],
+    props.yLabelChars ?? 0,
     props.size ?? 'default',
     width,
     props.caption !== undefined,

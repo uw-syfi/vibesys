@@ -95,6 +95,43 @@ describe('Chart references', () => {
   });
 });
 
+describe('Chart label room', () => {
+  const axisLeft = (root: HTMLElement): string | null | undefined =>
+    root.querySelector('line.vs-chart-axis')?.getAttribute('x1');
+
+  test('property: charts told the same room start their plots at one left edge, whatever their labels', () => {
+    return fc.assert(
+      fc.asyncProperty(fc.integer({min: 1, max: 6}), fc.integer({min: 1, max: 6}), async (a, b) => {
+        const ticks = (chars: number) => [{value: 1, label: '1'.repeat(chars)}];
+        const room = Math.max(a, b);
+        const first = await mount(
+          <Chart label="a" points={[{x: 1, y: 1}]} yTicks={ticks(a)} yLabelChars={room} />,
+        );
+        const second = await mount(
+          <Chart label="b" points={[{x: 1, y: 1}]} yTicks={ticks(b)} yLabelChars={room} />,
+        );
+        expect(axisLeft(first)).toBe(axisLeft(second));
+      }),
+      {numRuns: 25, seed: 4052},
+    );
+  });
+
+  test('a label longer than the room still gets its own', async () => {
+    const roomy = await mount(
+      <Chart label="a" points={[{x: 1, y: 1}]} yTicks={[{value: 1, label: '1'}]} yLabelChars={2} />,
+    );
+    const long = await mount(
+      <Chart
+        label="b"
+        points={[{x: 1, y: 1}]}
+        yTicks={[{value: 1, label: '1'.repeat(8)}]}
+        yLabelChars={2}
+      />,
+    );
+    expect(Number(axisLeft(long))).toBeGreaterThan(Number(axisLeft(roomy)));
+  });
+});
+
 describe('Chart points that open nothing', () => {
   test('say what they are on hover and are not controls', async () => {
     const root = await mount(
