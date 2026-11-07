@@ -113,11 +113,16 @@ class SkyPilotEnvironmentFacts:
 
 @dataclass(frozen=True)
 class ModalEnvironmentFacts:
-    """Resolved Modal facts needed by product presentation and opening."""
+    """Resolved Modal facts needed by product presentation and opening.
+
+    ``entrypoint`` is the project-relative file the trusted evaluator runs ``modal deploy`` on:
+    the task's declared entrypoint, or the evaluator's default when the task declares none.
+    """
 
     gpu: str
     app_name: str
     reference_path: str
+    entrypoint: str
     runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
 
 

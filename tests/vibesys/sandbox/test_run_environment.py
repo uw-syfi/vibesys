@@ -1955,6 +1955,46 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param(None, id="default"),
+        pytest.param("examples/deployment/service with space.py", id="declared"),
+    ],
+)
+def test_modal_runtime_notes_name_the_file_the_trusted_evaluator_deploys(
+    tmp_path: Path, declared: str | None
+) -> None:
+    """Regression (#4037): the notes said no filename was fixed, yet the evaluator deploys one.
+
+    The deployed file is the one the gate command passes as ``--entrypoint``, or the
+    evaluator's documented ``main.py`` when the task declares none; the agent must learn it
+    and that the file defines the app as ``app``.
+    """
+    backend = FakeBackend()
+    options = {} if declared is None else {"entrypoint": declared}
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("modal", options)),
+        _request(
+            tmp_path,
+            backend,
+            agent_backend="cli",
+            cli_provider="codex",
+            accuracy_command="trusted-check",
+        ),
+    )
+
+    gate_command = session.view.paths.accuracy_command
+    assert gate_command is not None
+    gate = shlex.split(gate_command)
+    deployed = gate[gate.index("--entrypoint") + 1] if "--entrypoint" in gate else "main.py"
+    notes = _modal_runtime_document(tmp_path)
+    assert f"runs `modal deploy` on `{deployed}`" in notes
+    assert "under the name `app`" in notes
+    assert "no incumbent filename is fixed" not in notes
+
+
 _TOOL_CACHE_VARIABLES = ("UV_CACHE_DIR", "CARGO_HOME")
 
 

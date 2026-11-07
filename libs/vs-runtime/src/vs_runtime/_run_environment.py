@@ -1323,6 +1323,9 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             gpu=self.config.gpu,
             app_name=app_name,
             reference_path=reference_container_path(request).removeprefix("/workspace/"),
+            # `_open` passes `--entrypoint` only when the task declares one; the evaluator
+            # deploys its own default otherwise, so the default is read from the evaluator.
+            entrypoint=self.config.entrypoint or evaluator_helpers.DEFAULT_MODAL_ENTRYPOINT,
         )
         return _PreparedRunEnvironment(
             facts,
