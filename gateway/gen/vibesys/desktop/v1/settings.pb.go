@@ -200,7 +200,7 @@ type DesktopSshOptions struct {
 	Port  *uint32                `protobuf:"varint,1,opt,name=port,proto3,oneof" json:"port,omitempty"`
 	// A comma-separated ProxyJump list; it cannot start with a dash, which ssh would read as a flag.
 	Jump          string `protobuf:"bytes,2,opt,name=jump,proto3" json:"jump,omitempty"`
-	IdentityFile  string `protobuf:"bytes,3,opt,name=identity_file,json=identityFile,proto3" json:"identity_file,omitempty"`
+	Identity      string `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -249,9 +249,9 @@ func (x *DesktopSshOptions) GetJump() string {
 	return ""
 }
 
-func (x *DesktopSshOptions) GetIdentityFile() string {
+func (x *DesktopSshOptions) GetIdentity() string {
 	if x != nil {
-		return x.IdentityFile
+		return x.Identity
 	}
 	return ""
 }
@@ -1430,11 +1430,11 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\x13DesktopHostSettings\x12B\n" +
 	"\bcheckout\x18\x01 \x01(\tB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\bcheckout\x12<\n" +
 	"\x03ssh\x18\x03 \x01(\v2%.vibesys.desktop.v1.DesktopSshOptionsH\x00R\x03ssh\x88\x01\x01B\x06\n" +
-	"\x04_sshJ\x04\b\x02\x10\x03R\x10run_transport_v2\"\xdc\x01\n" +
+	"\x04_sshJ\x04\b\x02\x10\x03R\x10run_transport_v2\"\xd3\x01\n" +
 	"\x11DesktopSshOptions\x12$\n" +
 	"\x04port\x18\x01 \x01(\rB\v\xbaH\b*\x06\x18\xff\xff\x03(\x01H\x00R\x04port\x88\x01\x01\x12J\n" +
-	"\x04jump\x18\x02 \x01(\tB6\xbaH3\xd8\x01\x01r.\x18\x80\x042)^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$R\x04jump\x12L\n" +
-	"\ridentity_file\x18\x03 \x01(\tB'\xbaH$\xd8\x01\x01r\x1f\x18\x80\b2\x1a^[^\\x00\\r\\n-][^\\x00\\r\\n]*$R\fidentityFileB\a\n" +
+	"\x04jump\x18\x02 \x01(\tB6\xbaH3\xd8\x01\x01r.\x18\x80\x042)^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$R\x04jump\x12C\n" +
+	"\bidentity\x18\x03 \x01(\tB'\xbaH$\xd8\x01\x01r\x1f\x18\x80\b2\x1a^[^\\x00\\r\\n-][^\\x00\\r\\n]*$R\bidentityB\a\n" +
 	"\x05_port\"\xad\x01\n" +
 	"\x15DesktopMachineRestore\x12G\n" +
 	"\x04host\x18\x01 \x01(\tB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$R\x04host\x12K\n" +

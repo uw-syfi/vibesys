@@ -4,7 +4,7 @@
  * relative path read from beside the config, `~` from the home directory. A file that is missing
  * or cannot be read has no aliases and costs nothing else; includes nest to a bounded depth and a
  * file is read once, so a loop ends. The config's path is `~/.ssh/config`, or the one the app was
- * told to use (`VIBESYS_DESKTOP_SSH_CONFIG`, for tests and captures); `sshConfigArgs` gives ssh the
+ * told to use (`SSH_CONFIG_ENV`, for tests and captures); `sshConfigArgs` gives ssh the
  * same file then, so what is offered is what ssh will use.
  */
 import {dirname, isAbsolute, join} from 'node:path';

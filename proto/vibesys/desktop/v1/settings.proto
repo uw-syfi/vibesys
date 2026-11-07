@@ -46,7 +46,7 @@ message DesktopSshOptions {
       pattern: "^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$"
     }
   ];
-  string identity_file = 3 [
+  string identity = 3 [
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string = {
       max_len: 1024

@@ -36,7 +36,7 @@ export function settingsOfTarget(target: SshTarget): DesktopHostSettings {
           ssh: create(DesktopSshOptionsSchema, {
             ...(target.port === undefined ? {} : {port: target.port}),
             jump: target.jump ?? '',
-            identityFile: target.identityFile ?? '',
+            identity: target.identityFile ?? '',
           }),
         }
       : {}),
@@ -51,7 +51,7 @@ export function sshArgsOfSettings(settings: DesktopHostSettings): string[] {
     destination: 'unused',
     ...(ssh.port === undefined ? {} : {port: ssh.port}),
     ...(ssh.jump === '' ? {} : {jump: ssh.jump}),
-    ...(ssh.identityFile === '' ? {} : {identityFile: ssh.identityFile}),
+    ...(ssh.identity === '' ? {} : {identityFile: ssh.identity}),
   });
 }
 

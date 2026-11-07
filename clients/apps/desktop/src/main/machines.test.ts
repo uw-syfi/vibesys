@@ -200,7 +200,7 @@ describe('the options a command can carry', () => {
           const bytes = toBinary(
             DesktopHostSettingsSchema,
             create(DesktopHostSettingsSchema, {
-              ssh: create(DesktopSshOptionsSchema, {port, jump, identityFile: '~/k'}),
+              ssh: create(DesktopSshOptionsSchema, {port, jump, identity: '~/k'}),
             }),
           );
           expect(bytes.length).toBeGreaterThan(0);
