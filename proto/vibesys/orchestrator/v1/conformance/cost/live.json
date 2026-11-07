@@ -1,0 +1,193 @@
+{
+  "cost": {
+    "runId": "run-1",
+    "sequence": "41",
+    "asOf": "2026-11-01T14:00:00Z",
+    "total": {
+      "inputTokens": "18900",
+      "cacheReadTokens": "40000",
+      "outputTokens": "840",
+      "reasoningTokens": "500",
+      "costUsd": 5
+    },
+    "maxCostUsd": 500,
+    "turns": 5,
+    "unpricedTurns": 1,
+    "roles": [
+      {
+        "role": "AGENT_ROLE_WORKER",
+        "agents": 1,
+        "turns": 2,
+        "usage": {
+          "inputTokens": "17000",
+          "cacheReadTokens": "40000",
+          "reasoningTokens": "500",
+          "costUsd": 3.75
+        }
+      },
+      {
+        "role": "AGENT_ROLE_LEAD",
+        "agents": 1,
+        "turns": 2,
+        "usage": {
+          "inputTokens": "1200",
+          "outputTokens": "750",
+          "costUsd": 1.25
+        }
+      },
+      {
+        "role": "AGENT_ROLE_PROFILER",
+        "agents": 1,
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "700",
+          "outputTokens": "90"
+        }
+      }
+    ],
+    "models": [
+      {
+        "model": {
+          "harness": "HARNESS_CODEX",
+          "model": "model-x"
+        },
+        "turns": 2,
+        "usage": {
+          "inputTokens": "17000",
+          "cacheReadTokens": "40000",
+          "reasoningTokens": "500",
+          "costUsd": 3.75
+        }
+      },
+      {
+        "model": {
+          "harness": "HARNESS_CLAUDE_CODE"
+        },
+        "turns": 2,
+        "usage": {
+          "inputTokens": "1200",
+          "outputTokens": "750",
+          "costUsd": 1.25
+        }
+      },
+      {
+        "model": {
+          "harness": "HARNESS_CLAUDE_CODE",
+          "model": "model-small"
+        },
+        "turns": 1,
+        "unpricedTurns": 1,
+        "usage": {
+          "inputTokens": "700",
+          "outputTokens": "90"
+        }
+      }
+    ],
+    "series": {
+      "start": "2026-11-01T09:00:00Z",
+      "width": "900s",
+      "buckets": [
+        {
+          "start": "2026-11-01T09:00:00Z",
+          "costUsd": 0.75,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CLAUDE_CODE"
+              },
+              "costUsd": 0.75
+            }
+          ]
+        },
+        {
+          "start": "2026-11-01T09:15:00Z"
+        },
+        {
+          "start": "2026-11-01T09:30:00Z"
+        },
+        {
+          "start": "2026-11-01T09:45:00Z"
+        },
+        {
+          "start": "2026-11-01T10:00:00Z",
+          "costUsd": 2.5,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CODEX",
+                "model": "model-x"
+              },
+              "costUsd": 2.5
+            }
+          ]
+        },
+        {
+          "start": "2026-11-01T10:15:00Z"
+        },
+        {
+          "start": "2026-11-01T10:30:00Z"
+        },
+        {
+          "start": "2026-11-01T10:45:00Z"
+        },
+        {
+          "start": "2026-11-01T11:00:00Z"
+        },
+        {
+          "start": "2026-11-01T11:15:00Z"
+        },
+        {
+          "start": "2026-11-01T11:30:00Z",
+          "costUsd": 1.25,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CODEX",
+                "model": "model-x"
+              },
+              "costUsd": 1.25
+            }
+          ]
+        },
+        {
+          "start": "2026-11-01T11:45:00Z"
+        },
+        {
+          "start": "2026-11-01T12:00:00Z"
+        },
+        {
+          "start": "2026-11-01T12:15:00Z"
+        },
+        {
+          "start": "2026-11-01T12:30:00Z"
+        },
+        {
+          "start": "2026-11-01T12:45:00Z"
+        },
+        {
+          "start": "2026-11-01T13:00:00Z"
+        },
+        {
+          "start": "2026-11-01T13:15:00Z"
+        },
+        {
+          "start": "2026-11-01T13:30:00Z"
+        },
+        {
+          "start": "2026-11-01T13:45:00Z",
+          "costUsd": 0.5,
+          "byModel": [
+            {
+              "model": {
+                "harness": "HARNESS_CLAUDE_CODE"
+              },
+              "costUsd": 0.5
+            }
+          ]
+        }
+      ]
+    },
+    "lastHourUsd": 0.5
+  }
+}

@@ -154,10 +154,10 @@ func (u Usage) merged(newer Usage) Usage {
 	return out
 }
 
-// plus returns the sum of two usages. A field neither reports stays nil, and one only a side
+// Plus returns the sum of two usages. A field neither reports stays nil, and one only a side
 // reports is that side's, so a provider that reports tokens and no dollars adds up to tokens and no
 // dollars, never to a zero cost.
-func (u Usage) plus(o Usage) Usage {
+func (u Usage) Plus(o Usage) Usage {
 	sum := func(a, b *uint64) *uint64 {
 		switch {
 		case a == nil:

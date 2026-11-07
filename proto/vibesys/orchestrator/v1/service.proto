@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
+import "vibesys/orchestrator/v1/cost.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/search.proto";
@@ -32,6 +33,9 @@ service OrchestratorService {
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
   // Older history, paged.
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // What one run has cost: its whole cost view, then the whole view again each time it changes. The
+  // host works it out, so the client sums nothing.
+  rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
 }
 
 message DispatchRequest {
@@ -130,4 +134,14 @@ message ListItemsRequest {
 
 message ListItemsResponse {
   ItemsPage page = 1 [(buf.validate.field).required = true];
+}
+
+message WatchRunCostRequest {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// WatchRunCostResponse is the run's cost view. The first one the stream sends is the view as of the
+// call, and each later one replaces it: a client keeps the latest and never combines two.
+message WatchRunCostResponse {
+  RunCost cost = 1 [(buf.validate.field).required = true];
 }

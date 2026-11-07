@@ -29,15 +29,16 @@ plan reader is a placeholder in production and the job source is left unwired un
 | Package | Holds | May import |
 | --- | --- | --- |
 | `internal/core` | State, `Decide`, the role table. No I/O, clock or randomness | Nothing of this module |
+| `internal/cost` | What a run has cost, worked out from its finished turns: the `Ledger` and its `View`. No I/O, clock or randomness | `core` |
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
-| `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `gen` |
+| `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `cost`, `gen` |
 | `internal/prompts` | The words an agent is sent for a message: Go templates, goldens from the Python renderer they replaced | `core` |
 | `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
 | `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
 | `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |
 | `internal/hub` | Live deltas to the clients watching an agent: merged, bounded, never stored | `core`, `gen` |
-| `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `store`, `jobs`, `wire`, `hub`, `gen` |
+| `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `cost`, `store`, `jobs`, `wire`, `hub`, `gen` |
 | `internal/daemon/daemontest` | The Fakes and the `Rig` that wire a whole daemon in memory | `daemon` and what it imports |
 | `internal/client` | The client library and `connect`, over the public service API | `gen` only |
 | `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `clientcli/attachview`, `client`, `gen` |
@@ -388,6 +389,41 @@ A snapshot holds runs and agents, and every turn and message of those runs, not 
 shows an agent's turns and the handoffs and reports a late watcher missed, and not what the agent said
 in them (`WatchAgent` and `ListItems` page items). A run with more turns than a timeline window holds
 shows its earliest in the snapshot.
+
+### What a run has cost
+
+The host owns every number a screen shows of a run's cost: no client sums, splits or buckets anything.
+`WatchRunCost(run_id)` streams a `RunCost`, the whole view, when it opens and the whole view again after
+each change, so a client keeps the latest and combines nothing. It is a stream of its own and not a part
+of `WatchRuns`: cost is read for one run on one screen, so a client pays for the breakdown only while it
+watches, a new breakdown is one more field of one message, and the run stream and its readers do not
+change. `Run.usage` and `Run.max_cost_usd` stay on the run stream for the lists that show a run's spend.
+
+A `RunCost` holds, for the finished turns of the run (the turns `Run.usage` counts):
+
+- the total, with its tokens by kind, and the run's cost limit;
+- one entry for each type of agent (`AgentRole`), with how many agents of the type the run has had, its
+  turns, its tokens and its cost, and the same for each model (an agent's harness and model);
+- the spend over time as buckets from the run's start to the instant of the view, each with its start, its
+  cost and its cost by model; the host picks the bucket width from a fixed ladder (one minute to a week)
+  so the series stays at 48 buckets or fewer however long the run goes on, and a turn is in the bucket its
+  end falls in;
+- the cost of the turns that finished in the hour before the view, which is a rate in dollars an hour for
+  a run that has gone on that long.
+
+A turn is **priced** when its provider reported a cost and **unpriced** when it reported tokens and no
+cost. An unpriced turn is counted, with its tokens, in every figure and adds no dollar: a price is never
+made up. A cost with unpriced turns behind it is a lower bound, and `unpriced_turns` (also on each type
+and model) says how many. A cost no turn reported is absent, never zero, and so is the rate.
+
+The ledger (`internal/cost`) is a pure fold: the same turns in any order, told again or not, give the same
+view, and the total, the types, the models and the buckets each hold exactly the total's cost. A stream
+reads the run's turns from the store once when it opens, a window at a time, where nothing commits (as the
+snapshot's reads of turns do), and adds each turn that ends from then on, so a view costs the size of the
+view and not of the run. The view is as of a time:
+the host's clock while the run lives (so a stream sends a fresh view each `daemon.CostRefresh` even when
+nothing happens, and the last hour does not stand still) and the run's end once it is over (so a finished
+run's view never changes and is sent once).
 
 ### The `run attach` view
 

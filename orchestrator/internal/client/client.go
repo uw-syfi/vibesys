@@ -132,6 +132,12 @@ func (c *Client) WatchAgent(ctx context.Context, agent string, pageSize uint32, 
 	return c.svc.WatchAgent(ctx, &pb.WatchAgentRequest{AgentId: agent, PageSize: pageSize, AfterSequence: after})
 }
 
+// WatchRunCost opens the stream of what one run has cost: its whole cost view, then the whole view
+// again each time it changes. A client keeps the last view and combines none.
+func (c *Client) WatchRunCost(ctx context.Context, run string) (grpc.ServerStreamingClient[pb.WatchRunCostResponse], error) {
+	return c.svc.WatchRunCost(ctx, &pb.WatchRunCostRequest{RunId: run})
+}
+
 // ListItems reads older items of an agent.
 func (c *Client) ListItems(ctx context.Context, agent string, before, pageSize uint32) (*pb.ItemsPage, error) {
 	resp, err := c.svc.ListItems(ctx, &pb.ListItemsRequest{AgentId: agent, BeforeOrdinal: before, PageSize: pageSize})

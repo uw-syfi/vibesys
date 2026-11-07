@@ -25,12 +25,14 @@ import {
   ItemStatus,
   oneofIs,
   type RunChange,
+  type RunCost,
   type RunsSnapshot,
   type SearchState,
   type Turn,
   TurnStatus,
   type WatchAgentResponse,
 } from '@vibesys/orchestrator-proto';
+import {costViewOf} from './cost.js';
 import type {OrchestratorState, Overlay, Progress} from './state.js';
 
 function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<string, T> {
@@ -227,4 +229,9 @@ export function applySearch(state: OrchestratorState, search: SearchState): Orch
     searches: {...state.searches, [search.runId]: search},
     searchRevisions: {...state.searchRevisions, [search.runId]: search.revision},
   };
+}
+
+/** One whole cost view replaces the one held for its run: the host sends whole views, never parts. */
+export function applyCost(state: OrchestratorState, cost: RunCost): OrchestratorState {
+  return {...state, costs: {...state.costs, [cost.runId]: costViewOf(cost)}};
 }

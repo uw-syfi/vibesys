@@ -21,6 +21,13 @@ func AgentMessage(a core.Agent) *pb.Agent { return agentOut(a) }
 // TurnMessage returns a turn as the contract states it.
 func TurnMessage(t core.Turn) *pb.Turn { return turnOut(t) }
 
+// TurnFromMessage reads a turn given as the contract states it: the inverse of TurnMessage.
+func TurnFromMessage(t *pb.Turn) (core.Turn, error) {
+	var errs errorList
+	out := turnIn(t, &errs)
+	return out, errs.err()
+}
+
 // MailboxMessage returns a message between agents (a brief, a handoff, a report) as the contract
 // states it.
 func MailboxMessage(m core.Message) *pb.Message { return messageOut(m) }

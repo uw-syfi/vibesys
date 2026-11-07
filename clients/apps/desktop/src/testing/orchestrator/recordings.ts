@@ -19,6 +19,8 @@ import {
   type RunChange,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
+  WatchRunCostRequestSchema,
+  WatchRunCostResponseSchema,
   WatchRunsRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/orchestrator-proto';
@@ -92,6 +94,32 @@ function agentFrameOf(
   return null;
 }
 
+/** The page of older items a ListItems call asks for. */
+function listItemsSteps(daemon: FakeDaemon, target: CallTarget): ReadonlyArray<Step> {
+  const request = fromBinary(ListItemsRequestSchema, target.request);
+  const page = daemon.page(request.agentId, request.pageSize, request.beforeOrdinal);
+  const bytes = toBinary(
+    ListItemsResponseSchema,
+    create(ListItemsResponseSchema, {page: create(ItemsPageSchema, page)}),
+  );
+  return [{frame: bytes}];
+}
+
+/** The one view of a run's cost the host would send when a stream opens, and then the stream. */
+function costSteps(
+  daemon: FakeDaemon,
+  target: CallTarget,
+  tail: ReadonlyArray<Step>,
+): ReadonlyArray<Step> {
+  const {runId} = fromBinary(WatchRunCostRequestSchema, target.request);
+  const cost = daemon.costOf(runId);
+  if (cost === undefined) {
+    return [{end: {message: `no run ${runId}`, status: RpcStatus.NOT_FOUND}}];
+  }
+  const frame = toBinary(WatchRunCostResponseSchema, create(WatchRunCostResponseSchema, {cost}));
+  return [{frame}, ...tail];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -117,16 +145,6 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     const receipt = daemon.dispatch(command);
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
-    return [{frame: bytes}];
-  };
-
-  const listItems = (target: CallTarget): ReadonlyArray<Step> => {
-    const request = fromBinary(ListItemsRequestSchema, target.request);
-    const page = daemon.page(request.agentId, request.pageSize, request.beforeOrdinal);
-    const bytes = toBinary(
-      ListItemsResponseSchema,
-      create(ListItemsResponseSchema, {page: create(ItemsPageSchema, page)}),
-    );
     return [{frame: bytes}];
   };
 
@@ -186,11 +204,13 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('Dispatch'):
           return dispatch(target, nth);
         case methodPathOf('ListItems'):
-          return listItems(target);
+          return listItemsSteps(daemon, target);
         case methodPathOf('WatchRuns'):
           return watchRuns(target);
         case methodPathOf('WatchAgent'):
           return watchAgent(target);
+        case methodPathOf('WatchRunCost'):
+          return costSteps(daemon, target, tail);
         default:
           return [
             {end: {message: `unknown method ${target.method}`, status: RpcStatus.UNIMPLEMENTED}},
