@@ -60,8 +60,10 @@ type Best struct {
 type ObjectiveMove struct {
 	Metric    string
 	Direction Direction
-	Start     *Best
-	End       *Best
+	// Unit is what the values are counted in, "" when unknown (see search.CommonUnit).
+	Unit  string
+	Start *Best
+	End   *Best
 }
 
 // WindowFacts is what happened in a run during a window.

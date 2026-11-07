@@ -62,8 +62,9 @@ func measure(job string, run core.RunID, at time.Time, metric string, value floa
 	}
 }
 
-func plan(n uint32, at time.Time) *cli.TaskFact {
-	return &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: n, CreatedAt: timestamppb.New(at), UpdatedAt: timestamppb.New(at)}}}
+func plan(n uint32, run core.RunID, at time.Time) *cli.TaskFact {
+	origin := &cli.RecordOrigin{RunId: string(run), At: timestamppb.New(at)}
+	return &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: n, CreatedAt: timestamppb.New(at), UpdatedAt: timestamppb.New(at), Origin: origin}}}
 }
 
 func ready(t *testing.T, c core.CheckIn) core.WindowFacts {
@@ -88,7 +89,7 @@ func TestACatchUpFreezesFactsWorkedOutFromTheHostsRecords(t *testing.T) {
 	rig.Clock.Advance(time.Minute)
 	first := rig.Clock.Now()
 	rig.Clock.Advance(time.Minute)
-	facts := slices.Concat(measure("j1", run.ID, first, "tput", 5), []*cli.TaskFact{plan(1, first)})
+	facts := slices.Concat(measure("j1", run.ID, first, "tput", 5), []*cli.TaskFact{plan(1, run.ID, first)})
 	searches.Put(run.ID, search.Fold(facts))
 
 	receipt, err := press(t, viewing(ann), rig, run.ID)
@@ -110,7 +111,7 @@ func TestACatchUpFreezesFactsWorkedOutFromTheHostsRecords(t *testing.T) {
 	rig.Clock.Advance(time.Minute)
 	second := rig.Clock.Now()
 	rig.Clock.Advance(time.Minute)
-	searches.Put(run.ID, search.Fold(slices.Concat(facts, measure("j2", run.ID, second, "tput", 9), []*cli.TaskFact{plan(2, second)})))
+	searches.Put(run.ID, search.Fold(slices.Concat(facts, measure("j2", run.ID, second, "tput", 9), []*cli.TaskFact{plan(2, run.ID, second)})))
 	again, err := press(t, viewing(ann), rig, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +208,7 @@ func TestACatchUpFailsRatherThanKeepLessThanHappened(t *testing.T) {
 	run, _ := beginRun(t, rig)
 	var facts []*cli.TaskFact
 	for n := range uint32(1200) {
-		facts = append(facts, plan(n+1, run.CreatedAt.Add(time.Second)))
+		facts = append(facts, plan(n+1, run.ID, run.CreatedAt.Add(time.Second)))
 	}
 	searches.Put(run.ID, search.Fold(facts))
 	rig.Clock.Advance(time.Minute)

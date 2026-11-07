@@ -76,7 +76,7 @@ func Prepare(in Starting) (Plan, error) {
 		return p, nil
 	}
 	settings := job.Spec.Settings.(core.MeasureSettings)
-	p.Benchmark, p.Result, p.Metric, p.Objectives = t.Benchmark, t.Result, t.Metric, t.Objectives
+	p.Benchmark, p.Result, p.Metric, p.Others, p.Objectives = t.Benchmark, t.Result, t.Metric, t.Others, t.Objectives
 
 	cache, err := core.PlanCache(core.CacheQuery{Key: key, Settings: settings, DefaultSamples: t.Samples, NoCache: in.NoCache, Saved: in.Saved})
 	if err != nil {

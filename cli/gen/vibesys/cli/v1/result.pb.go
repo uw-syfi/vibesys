@@ -7,6 +7,7 @@
 package cliv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -74,9 +75,14 @@ func (Direction) EnumDescriptor() ([]byte, []int) {
 }
 
 type Metric struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Direction     Direction              `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Direction Direction              `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.Direction" json:"direction,omitempty"`
+	// What the metric is counted in, such as "tok/s" or "ms", as the task's objectives.toml declares
+	// it (TaskObjective.unit). A label for people: nothing converts it. Empty when the task declares
+	// none, and in a result saved before units were kept: the unit is then unknown, which no reader
+	// may take for a match with any other unit.
+	Unit          string `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -125,6 +131,13 @@ func (x *Metric) GetDirection() Direction {
 	return Direction_DIRECTION_UNSPECIFIED
 }
 
+func (x *Metric) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
 // metric. It is part of a verdict only when it is an objective of a multi-objective task.
 type Observation struct {
@@ -134,7 +147,9 @@ type Observation struct {
 	// The headline number of the values: their mean, the number compare weighs for an objective, as
 	// MeasureResult.value is for the scored metric. The daemon computes it, so no reader recomputes
 	// it. Absent when there are no values, and from a daemon or a saved result older than this field.
-	Value         *float64 `protobuf:"fixed64,3,opt,name=value,proto3,oneof" json:"value,omitempty"`
+	Value *float64 `protobuf:"fixed64,3,opt,name=value,proto3,oneof" json:"value,omitempty"`
+	// What the series is counted in, as Metric.unit says it for an objective. Empty when unknown.
+	Unit          string `protobuf:"bytes,4,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -188,6 +203,13 @@ func (x *Observation) GetValue() float64 {
 		return *x.Value
 	}
 	return 0
+}
+
+func (x *Observation) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
 }
 
 // Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
@@ -711,14 +733,16 @@ var File_vibesys_cli_v1_result_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\n" +
-	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"U\n" +
+	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"r\n" +
 	"\x06Metric\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x127\n" +
-	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\"^\n" +
+	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\x12\x1b\n" +
+	"\x04unit\x18\x03 \x01(\tB\a\xbaH\x04r\x02(@R\x04unit\"{\n" +
 	"\vObservation\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06values\x18\x02 \x03(\x01R\x06values\x12\x19\n" +
-	"\x05value\x18\x03 \x01(\x01H\x00R\x05value\x88\x01\x01B\b\n" +
+	"\x05value\x18\x03 \x01(\x01H\x00R\x05value\x88\x01\x01\x12\x1b\n" +
+	"\x04unit\x18\x04 \x01(\tB\a\xbaH\x04r\x02(@R\x04unitB\b\n" +
 	"\x06_value\"\x9b\x01\n" +
 	"\n" +
 	"Objectives\x120\n" +

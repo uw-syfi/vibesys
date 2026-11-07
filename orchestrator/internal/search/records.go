@@ -27,7 +27,10 @@ type Measurement struct {
 type Value struct {
 	Metric    string
 	Direction core.Direction
-	Number    float64
+	// Unit is what Number is counted in, "" when unknown. Values of one metric that state a unit
+	// share it.
+	Unit   string
+	Number float64
 	// Best says the value is better than every earlier measurement's of the metric, in its direction,
 	// the earliest of equal values keeping it: the best so far steps here. It is the mark the series
 	// of Trajectory carries, from the same projection.
@@ -45,7 +48,7 @@ func (v View) Measurements(run core.RunID) []Measurement {
 		values := make([]Value, 0, len(m.values))
 		for _, name := range slices.Sorted(maps.Keys(m.values)) {
 			x := m.values[name]
-			values = append(values, Value{Metric: name, Direction: directions[x.direction], Number: x.value, Best: x.best})
+			values = append(values, Value{Metric: name, Direction: directions[x.direction], Unit: x.unit, Number: x.value, Best: x.best})
 		}
 		out = append(out, Measurement{Job: core.JobID(m.jobID), Commit: core.Commit(m.commit), At: m.at, Values: values})
 	}
@@ -57,28 +60,41 @@ var directions = map[cli.Direction]core.Direction{
 	cli.Direction_DIRECTION_MINIMIZE: core.Minimize,
 }
 
-// Plan is when a plan was made and last edited. The plans of a view are those of the whole task: a
-// plan belongs to a repository and its task, not to a run. A time the plan does not state is the zero
-// time.
+// Plan is when the run made a plan and changed its status. The plans of a view are those of the whole
+// task: a plan belongs to a repository and its task, not to a run, so Plans keeps only those that are
+// the run's (inRun, the rule the ideas of the run use) and the times that are the run's own. A time the
+// plan does not state is the zero time.
 type Plan struct {
-	Number               uint32
-	CreatedAt, UpdatedAt time.Time
+	Number uint32
+	// MadeByRun says the run made the plan (its origin), as opposed to a plan another run or a person
+	// made, of which the run only set a status.
+	MadeByRun bool
+	// CreatedAt is when the plan was made, by whoever made it.
+	CreatedAt time.Time
+	// RunTransitions are the times the run set a status of the plan (its transitions with the run's
+	// origin), oldest first.
+	RunTransitions []time.Time
 }
 
-// Plans are the task's plans, ascending by number, as the view holds them.
-func (v View) Plans() []Plan {
+// Plans are the plans of the run, ascending by number: those it made or set a status of (inRun), and
+// no other. A plan another run made and changed, and a plan a person made, are not its.
+func (v View) Plans(run core.RunID) []Plan {
 	var out []Plan
-	for _, f := range v.Facts {
-		if p := f.GetPlan(); p != nil && p.GetNumber() != 0 {
-			plan := Plan{Number: p.GetNumber()}
-			if p.GetCreatedAt() != nil {
-				plan.CreatedAt = p.GetCreatedAt().AsTime()
-			}
-			if p.GetUpdatedAt() != nil {
-				plan.UpdatedAt = p.GetUpdatedAt().AsTime()
-			}
-			out = append(out, plan)
+	for _, p := range latestPlans(v.Facts) {
+		if !inRun(p, string(run)) {
+			continue
 		}
+		plan := Plan{Number: p.GetNumber(), MadeByRun: p.GetOrigin().GetRunId() == string(run)}
+		if p.GetCreatedAt() != nil {
+			plan.CreatedAt = p.GetCreatedAt().AsTime()
+		}
+		for _, t := range p.GetTransitions() {
+			if t.GetOrigin().GetRunId() == string(run) && t.GetOrigin().GetAt() != nil {
+				plan.RunTransitions = append(plan.RunTransitions, t.GetOrigin().GetAt().AsTime())
+			}
+		}
+		slices.SortFunc(plan.RunTransitions, time.Time.Compare)
+		out = append(out, plan)
 	}
 	slices.SortStableFunc(out, func(a, b Plan) int { return cmp.Compare(a.Number, b.Number) })
 	return out

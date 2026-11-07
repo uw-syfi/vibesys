@@ -26,6 +26,12 @@ import (
 //     direction, from the task or from its bound, is no objective: "better" would be a guess.
 //   - Which way an objective improves: as its newest measurement says. The values of an older
 //     measurement that said the other way (the task changed) are dropped, as no longer about it.
+//   - What a value is counted in: the unit its measurement records (Metric.unit for the scored metric,
+//     Observation.unit for another objective), as the task declared it. A measurement that records
+//     none has an unknown unit (""), which is no match for any other. A value counted in another known
+//     unit than its objective's newest known one is dropped, as one of the other direction is, so no
+//     series, best or window compares numbers of different units (settleUnits). What a bound is
+//     checked against is the unit of the value it is compared with (checkUnit).
 //   - The best so far: a value is the best so far when it is better than every earlier value of its
 //     objective, the earliest of equal values keeping it. markBests is the only place it is decided.
 
@@ -35,7 +41,9 @@ import (
 type objectiveValue struct {
 	value     float64
 	direction cli.Direction
-	best      bool
+	// unit is what the value is counted in, "" when unknown.
+	unit string
+	best bool
 }
 
 // measured is one measure result of the run: the candidate, when it happened, and its value on each
@@ -79,6 +87,7 @@ func measurements(facts []*cli.TaskFact, run string) []*measured {
 		return cmp.Or(a.at.Compare(b.at), cmp.Compare(a.jobID, b.jobID))
 	})
 	settleDirections(out)
+	settleUnits(out)
 	markBests(out)
 	return out
 }
@@ -110,7 +119,7 @@ func readings(m *cli.MeasureResult, standing map[string]*cli.ObjectiveBound) (va
 		declared = append(declared, metric.GetName())
 	}
 	if scored := m.GetMetric(); scored.GetName() != "" && scored.GetDirection() != cli.Direction_DIRECTION_UNSPECIFIED && finite(m.GetValue()) {
-		values[scored.GetName()] = objectiveValue{value: m.GetValue(), direction: scored.GetDirection()}
+		values[scored.GetName()] = objectiveValue{value: m.GetValue(), direction: scored.GetDirection(), unit: scored.GetUnit()}
 	}
 	for _, o := range m.GetObservations() {
 		_, isDeclared := says[o.GetName()]
@@ -123,7 +132,7 @@ func readings(m *cli.MeasureResult, standing map[string]*cli.ObjectiveBound) (va
 			direction = bound.GetDirection()
 		}
 		if direction != cli.Direction_DIRECTION_UNSPECIFIED {
-			values[o.GetName()] = objectiveValue{value: o.GetValue(), direction: direction}
+			values[o.GetName()] = objectiveValue{value: o.GetValue(), direction: direction, unit: o.GetUnit()}
 		}
 	}
 	return values, declared
@@ -175,6 +184,41 @@ func settleDirections(all []*measured) {
 			}
 		}
 	}
+}
+
+// settleUnits drops each value counted in a known unit other than the newest known unit of its
+// objective, so the values left of an objective share one unit or have none known. A value of an
+// unknown unit stays: nothing says it differs.
+func settleUnits(all []*measured) {
+	newest := map[string]string{}
+	for _, m := range all {
+		for name, v := range m.values {
+			if v.unit != "" {
+				newest[name] = v.unit
+			}
+		}
+	}
+	for _, m := range all {
+		for name, v := range m.values {
+			if v.unit != "" && v.unit != newest[name] {
+				delete(m.values, name)
+			}
+		}
+	}
+}
+
+// CommonUnit is the unit all of the values are counted in: the one they share, and "" (unknown)
+// when any is unknown or two differ, as no unit can then be stated for all of them.
+func CommonUnit(units []string) string {
+	if len(units) == 0 {
+		return ""
+	}
+	for _, u := range units[1:] {
+		if u != units[0] {
+			return ""
+		}
+	}
+	return units[0]
 }
 
 // better says a is a better value than b in the direction.

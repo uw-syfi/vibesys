@@ -12,6 +12,7 @@ import {
   AgentSchema,
   AgentStatus,
   AgentStopStage,
+  BoundUnitCheck,
   Delivery,
   Direction,
   Harness,
@@ -115,6 +116,8 @@ function searchOf(rng: Rng, runId: string, atMs: number): SearchState {
             ],
             headValue,
             percentOfBound: Math.round((headValue / bound) * 1000) / 10,
+            measuredUnit: unit,
+            unitCheck: BoundUnitCheck.MATCH,
           },
         ]
       : [],
