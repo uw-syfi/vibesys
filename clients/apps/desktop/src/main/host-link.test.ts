@@ -38,9 +38,9 @@ import {defaultReconnect} from '../core/reconnect.js';
 import {GatewayPorts, GatewayTransportLive} from '../core/transport/live.js';
 import {CONNECTION_LINGER_MS, COPY_STALL_MS, REPLY_STALL_MS} from '../state/gateway-policy.js';
 import {GATEWAY_TARGETS, type GatewayTarget} from '../state/gateway-target.js';
-import {type HostConnectionState, hostKey} from '../state/index.js';
 import {HOST_PREREQUISITES} from '../state/host-prerequisites.js';
-import {SILENCE_BOUND_MS} from '../state/liveness.js';
+import {type HostConnectionState, hostKey} from '../state/index.js';
+import {LIVENESS_WINDOW_MS, SILENCE_BOUND_MS} from '../state/liveness.js';
 import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
 import {fakeSshHost} from '../testing/main/fake-ssh-host.js';
@@ -398,6 +398,8 @@ interface SshOptions {
   readonly lacking?: readonly string[];
   /** The host already holds the program. */
   readonly provisioned?: boolean;
+  /** The host's link carries bytes only as the test lets them through (`FakeGateway.throttle`). */
+  readonly throttled?: boolean;
   /** The first orchestrator Hellos the link loses: cut without a status, or dropped. */
   readonly lostHellos?: {readonly how: 'cut' | 'drop'; readonly count: number};
   /**
@@ -437,6 +439,16 @@ const sshHost = (options: SshOptions) =>
               },
       }),
     );
+    const answerHello = (call: FakeCall): void => {
+      if (lost > 0) {
+        lost -= 1;
+        if (options.lostHellos?.how === 'cut') call.endWithoutStatus();
+        else peer.drop();
+        return;
+      }
+      call.send(helloReply);
+      call.end();
+    };
     peer.onCall = call => {
       if (call.method === IDENTIFY) {
         call.send(identity);
@@ -444,14 +456,7 @@ const sshHost = (options: SshOptions) =>
       }
       if (unserving !== undefined && call.method.startsWith(`/${OrchestratorService.typeName}/`))
         return call.end(14, 'the orchestrator is not served by this process');
-      if (call.method === HELLO) {
-        if (lost > 0) {
-          lost -= 1;
-          return options.lostHellos?.how === 'cut' ? call.endWithoutStatus() : peer.drop();
-        }
-        call.send(helloReply);
-        return call.end();
-      }
+      if (call.method === HELLO) return answerHello(call);
       // A feed's own stream is answered at once; anything else a test asks for waits for it.
       if (call.method === WATCH_RUNS && options.feed === 'answered')
         return call.send(snapshotReply);
@@ -474,8 +479,9 @@ const sshHost = (options: SshOptions) =>
     }).pipe(Effect.provide(Layer.mergeAll(host.spawner.layer, fakeLocalHost().layer, built)));
     const calls = yield* makeGatewayCalls(dialers, (_host, line) => logs.push(line));
     const seen = yield* windowOver(calls, peer, options.feed !== 'off');
+    const throttle = options.throttled === true ? peer.throttle() : undefined;
     const identifies = () => peer.methods.filter(name => name === IDENTIFY).length;
-    return {...seen, calls, peer, host, pending, logs, identifies};
+    return {...seen, calls, peer, host, pending, logs, identifies, throttle};
   });
 type SshWorld = Effect.Success<ReturnType<typeof sshHost>>;
 
@@ -619,11 +625,42 @@ const playPrerequisite = (lacking: readonly string[]) =>
     expect(world.connection()._tag).toBe('Unusable');
   });
 
+/** The most drips a trickling link may need to carry a connect, however slow. */
+const MOST_DRIPS = 800;
+/** Drips after the connection is live: its liveness probes, answered at the same pace. */
+const DRIPS_AFTER_LIVE = 12;
+
+const playTrickle = (bytes: number, gap: number, stopAfter: number | undefined) =>
+  Effect.gen(function* () {
+    const world = yield* sshHost({...served, throttled: true});
+    const cutLogged = () =>
+      world.logs.some(line => line.includes('dial 1 failed') || line.includes('went silent'));
+    let drips = 0;
+    let liveFor = 0;
+    // Every drip is progress: whatever the connect has taken so far, nothing is cut. A link that
+    // never stops carries the connect to its end and a while beyond.
+    while (stopAfter === undefined ? liveFor < DRIPS_AFTER_LIVE : drips < stopAfter) {
+      expect(drips).toBeLessThan(MOST_DRIPS);
+      yield* world.elapse(gap * 1000, 1000);
+      world.throttle?.drip(bytes);
+      drips += 1;
+      if (world.live()) liveFor += 1;
+      expect(cutLogged()).toBe(false);
+      expect(world.host.state.connects).toBeLessThanOrEqual(1);
+    }
+    if (stopAfter === undefined) return;
+    // The link stopped: cut within the bound of what it was doing, and not left connected.
+    yield* world.elapse(Math.max(2 * REPLY_STALL_MS, SILENCE_BOUND_MS) + 2000, 500);
+    expect(cutLogged()).toBe(true);
+  });
+
 const playLost = (how: 'cut' | 'drop', count: number) =>
   Effect.gen(function* () {
     const world = yield* sshHost({...served, lostHellos: {how, count}});
     expect(yield* world.until(() => world.live(), 120_000)).not.toBeNull();
-    const failedHellos = world.logs.filter(line => line.startsWith(`gateway call failed: ${HELLO}`));
+    const failedHellos = world.logs.filter(line =>
+      line.startsWith(`gateway call failed: ${HELLO}`),
+    );
     // Each lost Hello is named once, and nothing asked the host `Identify`: no host answered.
     expect(failedHellos).toHaveLength(count);
     expect(world.identifies()).toBe(0);
@@ -864,4 +901,21 @@ it.effect.prop(
       }),
     ),
   {arbitrary: {runs: 20}},
+);
+
+// A link that delivers a few bytes at a time, however slowly (connection-level frames and the
+// middle of frames included), is never cut while it delivers; once it stops, it is cut within the
+// bound of whatever it was doing (a call's stall window, the liveness silence).
+it.effect.prop(
+  'a link that keeps delivering bytes is never cut, however slowly, and one that stops is cut within the bound',
+  {
+    bytes: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: 3})),
+    gap: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: LIVENESS_WINDOW_MS / 1000 - 1})),
+    stopAfter: Schema.Union([
+      Schema.Undefined,
+      Schema.Int.check(Schema.isBetween({minimum: 0, maximum: 400})),
+    ]),
+  },
+  ({bytes, gap, stopAfter}) => Effect.scoped(playTrickle(bytes, gap, stopAfter)),
+  {arbitrary: {runs: 25}},
 );

@@ -13,12 +13,12 @@ import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
 import {COMMAND_BOUND_MS, COPY_STALL_MS} from '../state/gateway-policy.js';
+import {type GatewayTarget, gatewayTarget} from '../state/gateway-target.js';
 import {
   missingPrerequisites,
   PREREQUISITE_SCRIPT,
   prerequisiteMessage,
 } from '../state/host-prerequisites.js';
-import {type GatewayTarget, gatewayTarget} from '../state/gateway-target.js';
 import {uploadSchedule} from '../state/upload-pacing.js';
 import {GatewayFailed, GatewayRefused, type LinkFailed, type SpawnFailed} from './errors.js';
 import type {SpawnedProcess} from './process.js';

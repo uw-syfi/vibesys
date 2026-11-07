@@ -74,8 +74,8 @@ const helloBytes = toBinary(
 );
 
 /** The handshake: the gateway must answer with the schema hash this client was built with. */
-const hello = (session: GatewaySession): Effect.Effect<void, CallFailed> =>
-  session.unary(HELLO_METHOD, helloBytes).pipe(
+const hello = (ask: GatewaySession['unary']): Effect.Effect<void, CallFailed> =>
+  ask(HELLO_METHOD, helloBytes).pipe(
     Effect.flatMap(bytes =>
       Effect.try({
         try: () => validatedFromBinary(HelloResponseSchema, bytes),
@@ -121,7 +121,7 @@ const openOnce = (
     return yield* Effect.gen(function* () {
       const duplex = yield* dialer.dial(force);
       const session = yield* openSessionWith(duplex);
-      yield* hello(session);
+      yield* hello(session.unary);
       return {session, scope} satisfies Opened;
     }).pipe(
       Effect.provideService(Scope.Scope, scope),
@@ -195,7 +195,7 @@ const silent = (session: GatewaySession): Effect.Effect<void> =>
         quiet = step.silent;
         if (step.action === 'lost') return;
         // The probe's own failure is not the verdict: only silence is.
-        if (step.action === 'probe') yield* Effect.forkScoped(Effect.ignore(hello(session)));
+        if (step.action === 'probe') yield* Effect.forkScoped(Effect.ignore(hello(session.probe)));
       }
     }),
   );

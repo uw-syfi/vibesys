@@ -106,20 +106,22 @@ export function fakeSshHost(peer: FakeGateway, platform: string): FakeSshHost {
       return void process.end(0, [...state.lacking].map(name => `missing ${name}\n`).join(''));
     }
     if (script === GATEWAY_CONNECT_SCRIPT) return void bridge(started);
-    if (script.includes('gzip -dc')) {
-      // A host that lacks a tool the install runs fails it with an exit code, as a real one does.
-      if (state.lacking.size > 0) return void process.end(1, '', 'sh: command not found');
-      const chunks: Buffer[] = [];
-      process.input.on('data', (chunk: Buffer) => chunks.push(chunk));
-      process.input.on('end', () => {
-        gunzipSync(Buffer.concat(chunks));
-        state.uploads += 1;
-        state.provisioned = true;
-        process.end(0);
-      });
-      return;
-    }
+    if (script.includes('gzip -dc')) return void install(started);
     process.end(0, state.provisioned ? 'match' : '');
+  };
+
+  /** The install: it takes the compressed program on its input, or fails if the host lacks a tool. */
+  const install = ({process}: Started): void => {
+    // A host that lacks a tool the install runs fails it with an exit code, as a real one does.
+    if (state.lacking.size > 0) return void process.end(1, '', 'sh: command not found');
+    const chunks: Buffer[] = [];
+    process.input.on('data', (chunk: Buffer) => chunks.push(chunk));
+    process.input.on('end', () => {
+      gunzipSync(Buffer.concat(chunks));
+      state.uploads += 1;
+      state.provisioned = true;
+      process.end(0);
+    });
   };
 
   /** `ps` and `kill`, which look at and end the master by its pid. */

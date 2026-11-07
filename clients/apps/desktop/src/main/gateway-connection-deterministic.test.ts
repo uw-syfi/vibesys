@@ -71,6 +71,7 @@ it.effect('attaches to a 0.1.0 host and redials after session loss and a long ou
         call: () => Effect.void,
         lost: Deferred.await(lost),
         activity: livelyActivity(),
+        probe: () => Effect.succeed(hello),
       };
       let opened = 0;
       const opener: SessionOpener = () =>
@@ -119,6 +120,7 @@ it.effect.prop(
                   : Deferred.succeed(callStarted, undefined).pipe(Effect.andThen(Effect.never)),
               lost: gate === undefined ? Effect.never : Deferred.await(gate),
               activity: livelyActivity(),
+              probe: () => Effect.succeed(hello),
             };
           });
         const connection = yield* makeGatewayConnection(dialer, quiet, opener);
