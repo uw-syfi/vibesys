@@ -158,8 +158,7 @@ func (d *Daemon) observeSetup(ctx context.Context) (bool, error) {
 
 // startSetupRead begins a read of the run's task and returns its number.
 func (d *Daemon) startSetupRead(ctx context.Context, run core.Run) uint64 {
-	d.setupSeq++
-	seq, task, id := d.setupSeq, run.SetupTask, run.ID
+	seq, task, id := d.Setup.Next(), run.SetupTask, run.ID
 	bctx, cancel := d.cfg.Bounds.Bound(ctx)
 	d.setupInbox.outstanding.Add(1)
 	var once sync.Once
