@@ -16,7 +16,15 @@ export type RemoveOutcome =
   | {readonly kind: 'removed'; readonly host: string; readonly undo: MachineUndo}
   | {readonly kind: 'refused'; readonly reason: string};
 
+export type FoldersOutcome =
+  | {readonly kind: 'saved'; readonly directories: Readonly<Record<string, string>>}
+  | {readonly kind: 'refused'; readonly reason: string};
+
 export interface MachineActions {
+  /** The repositories folder kept for each machine, by host key; none when they cannot be read. */
+  readonly repositories: Effect.Effect<Readonly<Record<string, string>>>;
+  /** Keeps (empty clears) one machine's repositories folder. */
+  readonly setRepositories: (host: string, directory: string) => Effect.Effect<FoldersOutcome>;
   /** The aliases to offer for what was typed; none when they cannot be read. */
   readonly match: (query: string) => Effect.Effect<readonly string[]>;
   /** Saves an alias or pasted ssh command and connects to it; a host already saved is found, not saved twice. */
@@ -31,6 +39,14 @@ export function makeMachineActions(machines: MachinesApi, roster: Roster): Machi
   const refused = (error: {readonly detail: string}) =>
     Effect.succeed({kind: 'refused', reason: error.detail} as const);
   return {
+    repositories: machines.repositories.pipe(
+      Effect.catchTag('MachinesError', () => Effect.succeed({})),
+    ),
+    setRepositories: (host, directory) =>
+      machines.setRepositories(host, directory).pipe(
+        Effect.map(directories => ({kind: 'saved', directories}) as const),
+        Effect.catchTag('MachinesError', refused),
+      ),
     match: query =>
       machines.match(query).pipe(Effect.catchTag('MachinesError', () => Effect.succeed([]))),
     add: input =>

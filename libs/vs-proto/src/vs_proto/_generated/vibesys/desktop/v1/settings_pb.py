@@ -154,7 +154,7 @@ class DesktopMachineRestore(Message[_DesktopMachineRestoreFields]):
         host: str
         settings: DesktopHostSettings | None
 
-_DesktopMachineRequestFields: TypeAlias = Literal["match", "add", "remove", "restore"]
+_DesktopMachineRequestFields: TypeAlias = Literal["match", "add", "remove", "restore", "repositories", "set_repositories"]
 
 class DesktopMachineRequest(Message[_DesktopMachineRequestFields]):
     """
@@ -176,11 +176,77 @@ class DesktopMachineRequest(Message[_DesktopMachineRequestFields]):
         def __init__(
             self,
             *,
-            op: Oneof[Literal["match"], str] | Oneof[Literal["add"], str] | Oneof[Literal["remove"], str] | Oneof[Literal["restore"], DesktopMachineRestore] | None = None,
+            op: Oneof[Literal["match"], str] | Oneof[Literal["add"], str] | Oneof[Literal["remove"], str] | Oneof[Literal["restore"], DesktopMachineRestore] | Oneof[Literal["repositories"], bool] | Oneof[Literal["set_repositories"], DesktopMachineSetRepositories] | None = None,
         ) -> None:
             pass
 
-        op: Oneof[Literal["match"], str] | Oneof[Literal["add"], str] | Oneof[Literal["remove"], str] | Oneof[Literal["restore"], DesktopMachineRestore] | None
+        op: Oneof[Literal["match"], str] | Oneof[Literal["add"], str] | Oneof[Literal["remove"], str] | Oneof[Literal["restore"], DesktopMachineRestore] | Oneof[Literal["repositories"], bool] | Oneof[Literal["set_repositories"], DesktopMachineSetRepositories] | None
+
+_DesktopMachineSetRepositoriesFields: TypeAlias = Literal["host", "repositories_directory"]
+
+class DesktopMachineSetRepositories(Message[_DesktopMachineSetRepositoriesFields]):
+    """
+    ```proto
+    message vibesys.desktop.v1.DesktopMachineSetRepositories
+    ```
+
+    Attributes:
+        host:
+            ```proto
+            string host = 1;
+            ```
+        repositories_directory:
+            Empty clears it: the machine takes its host's own default.
+
+            ```proto
+            string repositories_directory = 2;
+            ```
+    """
+
+    __slots__ = ("host", "repositories_directory")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            host: str = "",
+            repositories_directory: str = "",
+        ) -> None:
+            pass
+
+        host: str
+        repositories_directory: str
+
+_DesktopMachineRepositoriesFields: TypeAlias = Literal["directories"]
+
+class DesktopMachineRepositories(Message[_DesktopMachineRepositoriesFields]):
+    """
+    The repositories folder of each machine that has one, by host key.
+
+    ```proto
+    message vibesys.desktop.v1.DesktopMachineRepositories
+    ```
+
+    Attributes:
+        directories:
+            ```proto
+            map<string, string> directories = 1;
+            ```
+    """
+
+    __slots__ = ("directories",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            directories: dict[str, str] | None = None,
+        ) -> None:
+            pass
+
+        directories: dict[str, str]
 
 _DesktopMachineMatchesFields: TypeAlias = Literal["aliases"]
 
@@ -304,7 +370,7 @@ class DesktopMachineRefused(Message[_DesktopMachineRefusedFields]):
 
         reason: str
 
-_DesktopMachineReplyFields: TypeAlias = Literal["matches", "added", "removed", "refused"]
+_DesktopMachineReplyFields: TypeAlias = Literal["matches", "added", "removed", "refused", "repositories"]
 
 class DesktopMachineReply(Message[_DesktopMachineReplyFields]):
     """
@@ -326,11 +392,11 @@ class DesktopMachineReply(Message[_DesktopMachineReplyFields]):
         def __init__(
             self,
             *,
-            result: Oneof[Literal["matches"], DesktopMachineMatches] | Oneof[Literal["added"], DesktopMachineAdded] | Oneof[Literal["removed"], DesktopMachineRemoved] | Oneof[Literal["refused"], DesktopMachineRefused] | None = None,
+            result: Oneof[Literal["matches"], DesktopMachineMatches] | Oneof[Literal["added"], DesktopMachineAdded] | Oneof[Literal["removed"], DesktopMachineRemoved] | Oneof[Literal["refused"], DesktopMachineRefused] | Oneof[Literal["repositories"], DesktopMachineRepositories] | None = None,
         ) -> None:
             pass
 
-        result: Oneof[Literal["matches"], DesktopMachineMatches] | Oneof[Literal["added"], DesktopMachineAdded] | Oneof[Literal["removed"], DesktopMachineRemoved] | Oneof[Literal["refused"], DesktopMachineRefused] | None
+        result: Oneof[Literal["matches"], DesktopMachineMatches] | Oneof[Literal["added"], DesktopMachineAdded] | Oneof[Literal["removed"], DesktopMachineRemoved] | Oneof[Literal["refused"], DesktopMachineRefused] | Oneof[Literal["repositories"], DesktopMachineRepositories] | None
 
 _DesktopHostsFields: TypeAlias = Literal["version", "hosts"]
 
@@ -877,7 +943,7 @@ extend google.protobuf.FieldOptions { optional string retained_json_key = 50120 
 
 
 _DESC = file_desc(
-    b'\n!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto"\x96\x02\n\x13DesktopHostSettings\x12B\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x03ssh\x18\x03 \x01(\x0b2%.vibesys.desktop.v1.DesktopSshOptionsH\x00R\x03ssh\x88\x01\x01\x12]\n\x16repositories_directory\x18\x04 \x01(\tR\x15repositoriesDirectoryB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$B\x06\n\x04_sshJ\x04\x08\x02\x10\x03R\x10run_transport_v2"\xd3\x01\n\x11DesktopSshOptions\x12$\n\x04port\x18\x01 \x01(\rH\x00R\x04portB\x0b\xbaH\x08*\x06\x18\xff\xff\x03(\x01\x88\x01\x01\x12J\n\x04jump\x18\x02 \x01(\tR\x04jumpB6\xbaH3\xd8\x01\x01r.\x18\x80\x042)^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$\x12C\n\x08identity\x18\x03 \x01(\tR\x08identityB\'\xbaH$\xd8\x01\x01r\x1f\x18\x80\x082\x1a^[^\\x00\\r\\n-][^\\x00\\r\\n]*$B\x07\n\x05_port"\xad\x01\n\x15DesktopMachineRestore\x12G\n\x04host\x18\x01 \x01(\tR\x04hostB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12K\n\x08settings\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x08settingsB\x06\xbaH\x03\xc8\x01\x01"\x88\x02\n\x15DesktopMachineRequest\x12 \n\x05match\x18\x01 \x01(\tH\x00R\x05matchB\x08\xbaH\x05r\x03\x18\x80\x04\x12*\n\x03add\x18\x02 \x01(\tH\x00R\x03addB\x16\xbaH\x13r\x11\x10\x01\x18\x80 2\n^[^\\x00]*$\x12M\n\x06remove\x18\x03 \x01(\tH\x00R\x06removeB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12E\n\x07restore\x18\x04 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRestoreH\x00R\x07restoreB\x0b\n\x02op\x12\x05\xbaH\x02\x08\x01";\n\x15DesktopMachineMatches\x12"\n\x07aliases\x18\x01 \x03(\tR\x07aliasesB\x08\xbaH\x05\x92\x01\x02\x102"x\n\x13DesktopMachineAdded\x12G\n\x04host\x18\x01 \x01(\tR\x04hostB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12\x18\n\x07created\x18\x02 \x01(\x08R\x07created"^\n\x15DesktopMachineRemoved\x12E\n\x04undo\x18\x01 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRestoreR\x04undoB\x06\xbaH\x03\xc8\x01\x01";\n\x15DesktopMachineRefused\x12"\n\x06reason\x18\x01 \x01(\tR\x06reasonB\n\xbaH\x07r\x05\x10\x01\x18\x80\x08"\xbc\x02\n\x13DesktopMachineReply\x12E\n\x07matches\x18\x01 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineMatchesH\x00R\x07matches\x12?\n\x05added\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopMachineAddedH\x00R\x05added\x12E\n\x07removed\x18\x03 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRemovedH\x00R\x07removed\x12E\n\x07refused\x18\x04 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRefusedH\x00R\x07refusedB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\x9d\x02\n\x0cDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x86\x01\n\x05hosts\x18\x02 \x03(\x0b2+.vibesys.desktop.v1.DesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1aa\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12=\n\x05value\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01"\xc0\x01\n\x1bRetainedDesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12H\n\x13discarded_selection\x18\x02 \x01(\x08H\x00R\x12discardedSelectionB\x12\xc2\xbc\x18\x0erunTransportV2\x88\x01\x01B\x16\n\x14_discarded_selection"\xb5\x02\n\x14RetainedDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x8e\x01\n\x05hosts\x18\x02 \x03(\x0b23.vibesys.desktop.v1.RetainedDesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1ai\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12E\n\x05value\x18\x02 \x01(\x0b2/.vibesys.desktop.v1.RetainedDesktopHostSettingsR\x05value:\x028\x01"\xe8\x01\n\x11DesktopAppearance\x12I\n\x04mode\x18\x01 \x01(\x0e2).vibesys.desktop.v1.DesktopAppearanceModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x05light\x18\x02 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x05lightB\x0c\xbaH\t\x82\x01\x06\x18\x01\x18\x02\x18\x03\x12B\n\x04dark\x18\x03 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x04darkB\x0c\xbaH\t\x82\x01\x06\x18\x04\x18\x05\x18\x06"\x9c\x01\n\rDesktopRunRef\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12:\n\x06run_id\x18\x02 \x01(\tR\x05runIdB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$"y\n\rDesktopViewer\x12.\n\x02id\x18\x01 \x01(\tR\x02idB\x1e\xbaH\x1br\x192\x17^[A-Za-z0-9._-]{1,128}$\x128\n\x05label\x18\x02 \x01(\tR\x05labelB"\xbaH\x1fr\x1d2\x1b^[!-~]([ -~]{0,126}[!-~])?$"\xf8\x02\n\x12DesktopPreferences\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12M\n\nappearance\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopAppearanceR\nappearanceB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x15notifications_enabled\x18\x03 \x01(\x08H\x00R\x14notificationsEnabledB\x06\xbaH\x03\xc8\x01\x01\x88\x01\x01\x12I\n\x08archived\x18\x04 \x03(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x08archivedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12>\n\x06viewer\x18\x05 \x01(\x0b2!.vibesys.desktop.v1.DesktopViewerH\x01R\x06viewer\x88\x01\x01B\x18\n\x16_notifications_enabledB\t\n\x07_viewer"\xd2\x02\n\x0fDesktopRunStart\x12:\n\x07harness\x18\x01 \x01(\x0b2 .vibesys.host.v1.StartRunHarnessR\x07harness\x12B\n\x07options\x18\x02 \x01(\x0b2 .vibesys.host.v1.StartRunOptionsR\x07optionsB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x06agents\x18\x03 \x03(\x0b2\x1e.vibesys.host.v1.StartRunAgentR\x06agentsB\x08\xbaH\x05\x92\x01\x02\x10 \x12G\n\nmeasure_on\x18\x04 \x01(\x0b2 .vibesys.host.v1.StartRunMeasureR\tmeasureOnB\x06\xbaH\x03\xc8\x01\x01\x124\n\x04args\x18\x05 \x03(\tR\x04argsB \xbaH\x1d\x92\x01\x1a\x10\x80\x02"\x15r\x13(\x80 2\x0e^[^\\r\\n\\x00]*$"\x90\x03\n\x10DesktopRecentRun\x12;\n\x03run\x18\x01 \x01(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x03runB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x07project\x18\x02 \x01(\tR\x07projectB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x04task\x18\x03 \x01(\tH\x00R\x04taskB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$\x88\x01\x01\x12;\n\x0binstance_id\x18\x04 \x01(\tH\x01R\ninstanceIdB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{12}$\x88\x01\x01\x121\n\x0battached_at\x18\x05 \x01(\x01R\nattachedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x129\n\x05start\x18\x06 \x01(\x0b2#.vibesys.desktop.v1.DesktopRunStartR\x05startB\x07\n\x05_taskB\x0e\n\x0c_instance_id"d\n\x1aDesktopRetainedRecentEntry\x12\x14\n\x05after\x18\x01 \x01(\rR\x05after\x120\n\roriginal_json\x18\x02 \x01(\x0cR\x0coriginalJsonB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@"\xd0\x01\n\rDesktopRecent\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12D\n\x04runs\x18\x02 \x03(\x0b2$.vibesys.desktop.v1.DesktopRecentRunR\x04runsB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12V\n\x08retained\x18\x03 \x03(\x0b2..vibesys.desktop.v1.DesktopRetainedRecentEntryR\x08retainedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06*\xa9\x01\n\x15DesktopAppearanceMode\x12\'\n#DESKTOP_APPEARANCE_MODE_UNSPECIFIED\x10\x00\x12"\n\x1eDESKTOP_APPEARANCE_MODE_SYSTEM\x10\x01\x12!\n\x1dDESKTOP_APPEARANCE_MODE_LIGHT\x10\x02\x12 \n\x1cDESKTOP_APPEARANCE_MODE_DARK\x10\x03*\xc5\x01\n\x0cDesktopTheme\x12\x1d\n\x19DESKTOP_THEME_UNSPECIFIED\x10\x00\x12\x17\n\x13DESKTOP_THEME_PAPER\x10\x01\x12\x16\n\x12DESKTOP_THEME_MIST\x10\x02\x12\x16\n\x12DESKTOP_THEME_SAND\x10\x03\x12\x15\n\x11DESKTOP_THEME_INK\x10\x04\x12\x1a\n\x16DESKTOP_THEME_MIDNIGHT\x10\x05\x12\x1a\n\x16DESKTOP_THEME_TERMINAL\x10\x06:K\n\x11retained_json_key\x18\xc8\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x0fretainedJsonKeyBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto"\x96\x02\n\x13DesktopHostSettings\x12B\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x03ssh\x18\x03 \x01(\x0b2%.vibesys.desktop.v1.DesktopSshOptionsH\x00R\x03ssh\x88\x01\x01\x12]\n\x16repositories_directory\x18\x04 \x01(\tR\x15repositoriesDirectoryB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$B\x06\n\x04_sshJ\x04\x08\x02\x10\x03R\x10run_transport_v2"\xd3\x01\n\x11DesktopSshOptions\x12$\n\x04port\x18\x01 \x01(\rH\x00R\x04portB\x0b\xbaH\x08*\x06\x18\xff\xff\x03(\x01\x88\x01\x01\x12J\n\x04jump\x18\x02 \x01(\tR\x04jumpB6\xbaH3\xd8\x01\x01r.\x18\x80\x042)^[A-Za-z0-9_.@:\\[][A-Za-z0-9_.@:,\\[\\]-]*$\x12C\n\x08identity\x18\x03 \x01(\tR\x08identityB\'\xbaH$\xd8\x01\x01r\x1f\x18\x80\x082\x1a^[^\\x00\\r\\n-][^\\x00\\r\\n]*$B\x07\n\x05_port"\xad\x01\n\x15DesktopMachineRestore\x12G\n\x04host\x18\x01 \x01(\tR\x04hostB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12K\n\x08settings\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x08settingsB\x06\xbaH\x03\xc8\x01\x01"\x97\x03\n\x15DesktopMachineRequest\x12 \n\x05match\x18\x01 \x01(\tH\x00R\x05matchB\x08\xbaH\x05r\x03\x18\x80\x04\x12*\n\x03add\x18\x02 \x01(\tH\x00R\x03addB\x16\xbaH\x13r\x11\x10\x01\x18\x80 2\n^[^\\x00]*$\x12M\n\x06remove\x18\x03 \x01(\tH\x00R\x06removeB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12E\n\x07restore\x18\x04 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRestoreH\x00R\x07restore\x12-\n\x0crepositories\x18\x05 \x01(\x08H\x00R\x0crepositoriesB\x07\xbaH\x04j\x02\x08\x01\x12^\n\x10set_repositories\x18\x06 \x01(\x0b21.vibesys.desktop.v1.DesktopMachineSetRepositoriesH\x00R\x0fsetRepositoriesB\x0b\n\x02op\x12\x05\xbaH\x02\x08\x01"\xcf\x01\n\x1dDesktopMachineSetRepositories\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12]\n\x16repositories_directory\x18\x02 \x01(\tR\x15repositoriesDirectoryB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$"\xca\x01\n\x1aDesktopMachineRepositories\x12l\n\x0bdirectories\x18\x01 \x03(\x0b2?.vibesys.desktop.v1.DesktopMachineRepositories.DirectoriesEntryR\x0bdirectoriesB\t\xbaH\x06\x9a\x01\x03\x10\x90N\x1a>\n\x10DirectoriesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x028\x01";\n\x15DesktopMachineMatches\x12"\n\x07aliases\x18\x01 \x03(\tR\x07aliasesB\x08\xbaH\x05\x92\x01\x02\x102"x\n\x13DesktopMachineAdded\x12G\n\x04host\x18\x01 \x01(\tR\x04hostB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$\x12\x18\n\x07created\x18\x02 \x01(\x08R\x07created"^\n\x15DesktopMachineRemoved\x12E\n\x04undo\x18\x01 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRestoreR\x04undoB\x06\xbaH\x03\xc8\x01\x01";\n\x15DesktopMachineRefused\x12"\n\x06reason\x18\x01 \x01(\tR\x06reasonB\n\xbaH\x07r\x05\x10\x01\x18\x80\x08"\x92\x03\n\x13DesktopMachineReply\x12E\n\x07matches\x18\x01 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineMatchesH\x00R\x07matches\x12?\n\x05added\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopMachineAddedH\x00R\x05added\x12E\n\x07removed\x18\x03 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRemovedH\x00R\x07removed\x12E\n\x07refused\x18\x04 \x01(\x0b2).vibesys.desktop.v1.DesktopMachineRefusedH\x00R\x07refused\x12T\n\x0crepositories\x18\x05 \x01(\x0b2..vibesys.desktop.v1.DesktopMachineRepositoriesH\x00R\x0crepositoriesB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\x9d\x02\n\x0cDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x86\x01\n\x05hosts\x18\x02 \x03(\x0b2+.vibesys.desktop.v1.DesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1aa\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12=\n\x05value\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01"\xc0\x01\n\x1bRetainedDesktopHostSettings\x12?\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12H\n\x13discarded_selection\x18\x02 \x01(\x08H\x00R\x12discardedSelectionB\x12\xc2\xbc\x18\x0erunTransportV2\x88\x01\x01B\x16\n\x14_discarded_selection"\xb5\x02\n\x14RetainedDesktopHosts\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12\x8e\x01\n\x05hosts\x18\x02 \x03(\x0b23.vibesys.desktop.v1.RetainedDesktopHosts.HostsEntryR\x05hostsBC\xbaH@\x9a\x01=\x10\x90N"8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x1ai\n\nHostsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12E\n\x05value\x18\x02 \x01(\x0b2/.vibesys.desktop.v1.RetainedDesktopHostSettingsR\x05value:\x028\x01"\xe8\x01\n\x11DesktopAppearance\x12I\n\x04mode\x18\x01 \x01(\x0e2).vibesys.desktop.v1.DesktopAppearanceModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x05light\x18\x02 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x05lightB\x0c\xbaH\t\x82\x01\x06\x18\x01\x18\x02\x18\x03\x12B\n\x04dark\x18\x03 \x01(\x0e2 .vibesys.desktop.v1.DesktopThemeR\x04darkB\x0c\xbaH\t\x82\x01\x06\x18\x04\x18\x05\x18\x06"\x9c\x01\n\rDesktopRunRef\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12:\n\x06run_id\x18\x02 \x01(\tR\x05runIdB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$"y\n\rDesktopViewer\x12.\n\x02id\x18\x01 \x01(\tR\x02idB\x1e\xbaH\x1br\x192\x17^[A-Za-z0-9._-]{1,128}$\x128\n\x05label\x18\x02 \x01(\tR\x05labelB"\xbaH\x1fr\x1d2\x1b^[!-~]([ -~]{0,126}[!-~])?$"\xf8\x02\n\x12DesktopPreferences\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12M\n\nappearance\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopAppearanceR\nappearanceB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x15notifications_enabled\x18\x03 \x01(\x08H\x00R\x14notificationsEnabledB\x06\xbaH\x03\xc8\x01\x01\x88\x01\x01\x12I\n\x08archived\x18\x04 \x03(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x08archivedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12>\n\x06viewer\x18\x05 \x01(\x0b2!.vibesys.desktop.v1.DesktopViewerH\x01R\x06viewer\x88\x01\x01B\x18\n\x16_notifications_enabledB\t\n\x07_viewer"\xd2\x02\n\x0fDesktopRunStart\x12:\n\x07harness\x18\x01 \x01(\x0b2 .vibesys.host.v1.StartRunHarnessR\x07harness\x12B\n\x07options\x18\x02 \x01(\x0b2 .vibesys.host.v1.StartRunOptionsR\x07optionsB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x06agents\x18\x03 \x03(\x0b2\x1e.vibesys.host.v1.StartRunAgentR\x06agentsB\x08\xbaH\x05\x92\x01\x02\x10 \x12G\n\nmeasure_on\x18\x04 \x01(\x0b2 .vibesys.host.v1.StartRunMeasureR\tmeasureOnB\x06\xbaH\x03\xc8\x01\x01\x124\n\x04args\x18\x05 \x03(\tR\x04argsB \xbaH\x1d\x92\x01\x1a\x10\x80\x02"\x15r\x13(\x80 2\x0e^[^\\r\\n\\x00]*$"\x90\x03\n\x10DesktopRecentRun\x12;\n\x03run\x18\x01 \x01(\x0b2!.vibesys.desktop.v1.DesktopRunRefR\x03runB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x07project\x18\x02 \x01(\tR\x07projectB#\xbaH r\x1e\x10\x01\x18\x80\x082\x17^(~$|/|~/)[^\\x00\\r\\n]*$\x12<\n\x04task\x18\x03 \x01(\tH\x00R\x04taskB#\xbaH r\x1e2\x1c^[a-z0-9][a-z0-9._-]{0,127}$\x88\x01\x01\x12;\n\x0binstance_id\x18\x04 \x01(\tH\x01R\ninstanceIdB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{12}$\x88\x01\x01\x121\n\x0battached_at\x18\x05 \x01(\x01R\nattachedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x129\n\x05start\x18\x06 \x01(\x0b2#.vibesys.desktop.v1.DesktopRunStartR\x05startB\x07\n\x05_taskB\x0e\n\x0c_instance_id"d\n\x1aDesktopRetainedRecentEntry\x12\x14\n\x05after\x18\x01 \x01(\rR\x05after\x120\n\roriginal_json\x18\x02 \x01(\x0cR\x0coriginalJsonB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@"\xd0\x01\n\rDesktopRecent\x12!\n\x07version\x18\x01 \x01(\rR\x07versionB\x07\xbaH\x04*\x02\x08\x01\x12D\n\x04runs\x18\x02 \x03(\x0b2$.vibesys.desktop.v1.DesktopRecentRunR\x04runsB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06\x12V\n\x08retained\x18\x03 \x03(\x0b2..vibesys.desktop.v1.DesktopRetainedRecentEntryR\x08retainedB\n\xbaH\x07\x92\x01\x04\x10\xa0\x8d\x06*\xa9\x01\n\x15DesktopAppearanceMode\x12\'\n#DESKTOP_APPEARANCE_MODE_UNSPECIFIED\x10\x00\x12"\n\x1eDESKTOP_APPEARANCE_MODE_SYSTEM\x10\x01\x12!\n\x1dDESKTOP_APPEARANCE_MODE_LIGHT\x10\x02\x12 \n\x1cDESKTOP_APPEARANCE_MODE_DARK\x10\x03*\xc5\x01\n\x0cDesktopTheme\x12\x1d\n\x19DESKTOP_THEME_UNSPECIFIED\x10\x00\x12\x17\n\x13DESKTOP_THEME_PAPER\x10\x01\x12\x16\n\x12DESKTOP_THEME_MIST\x10\x02\x12\x16\n\x12DESKTOP_THEME_SAND\x10\x03\x12\x15\n\x11DESKTOP_THEME_INK\x10\x04\x12\x1a\n\x16DESKTOP_THEME_MIDNIGHT\x10\x05\x12\x1a\n\x16DESKTOP_THEME_TERMINAL\x10\x06:K\n\x11retained_json_key\x18\xc8\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x0fretainedJsonKeyBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
         descriptor_pb.desc(),
@@ -888,6 +954,8 @@ _DESC = file_desc(
         "DesktopSshOptions": DesktopSshOptions,
         "DesktopMachineRestore": DesktopMachineRestore,
         "DesktopMachineRequest": DesktopMachineRequest,
+        "DesktopMachineSetRepositories": DesktopMachineSetRepositories,
+        "DesktopMachineRepositories": DesktopMachineRepositories,
         "DesktopMachineMatches": DesktopMachineMatches,
         "DesktopMachineAdded": DesktopMachineAdded,
         "DesktopMachineRemoved": DesktopMachineRemoved,

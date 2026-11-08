@@ -41,6 +41,11 @@ export interface SavedHostsStore {
   readonly add: (host: SavedHost) => Effect.Effect<boolean, Error>;
   /** Forgets the host and returns what was kept for it; null when it was not saved. */
   readonly remove: (key: HostKey) => Effect.Effect<SavedHost | null, Error>;
+  /**
+   * Keeps `directory` as the repositories folder of a saved host (empty clears it). This machine is
+   * kept on first use; any other host must already be saved, else the call fails naming it.
+   */
+  readonly setRepositories: (key: HostKey, directory: string) => Effect.Effect<void, Error>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -130,6 +135,7 @@ export function makeSavedHostsStore(
   const clean = (settings: DesktopHostSettings): DesktopHostSettings =>
     create(DesktopHostSettingsSchema, {
       checkout: settings.checkout,
+      repositoriesDirectory: settings.repositoriesDirectory,
       ...(settings.ssh === undefined ? {} : {ssh: settings.ssh}),
     });
   return {
@@ -167,6 +173,25 @@ export function makeSavedHostsStore(
           const {[key]: _removed, ...rest} = hosts;
           yield* save(rest);
           return {key, settings};
+        }),
+      ),
+    setRepositories: (key, directory) =>
+      locked(
+        Effect.gen(function* () {
+          const hosts = yield* beforeSave;
+          const settings = hosts[key];
+          if (settings === undefined && key !== hostKey({kind: 'local'}))
+            return yield* Effect.fail(new Error(`${key} is not saved`));
+          yield* save({
+            ...hosts,
+            [key]: clean(
+              create(DesktopHostSettingsSchema, {
+                checkout: settings?.checkout ?? '',
+                repositoriesDirectory: directory,
+                ...(settings?.ssh === undefined ? {} : {ssh: settings.ssh}),
+              }),
+            ),
+          });
         }),
       ),
   };

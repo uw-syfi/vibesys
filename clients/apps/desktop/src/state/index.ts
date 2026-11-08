@@ -236,6 +236,7 @@ export {
   withMode,
   withTheme,
 } from './settings/appearance.js';
+export {type Reach, reachOf} from './settings/eval-places.js';
 export {
   type MachineHost,
   type MachineRow,
@@ -247,6 +248,11 @@ export {
   addMachineStep,
   emptyAddMachine,
 } from './settings/machines.js';
+export {
+  checkRepositoriesFolder,
+  type FolderCheck,
+  REPOSITORIES_FIELD,
+} from './settings/repositories-folder.js';
 export {
   MATCH_LIMIT,
   matchAliases,

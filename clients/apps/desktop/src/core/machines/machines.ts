@@ -38,6 +38,13 @@ export interface MachinesApi {
   readonly remove: (host: string) => Effect.Effect<MachineUndo, MachinesError>;
   /** Puts back what a removal took. */
   readonly restore: (undo: MachineUndo) => Effect.Effect<MachineAdded, MachinesError>;
+  /** The repositories folder kept for each machine that has one, by host key. */
+  readonly repositories: Effect.Effect<Readonly<Record<string, string>>, MachinesError>;
+  /** Keeps (empty clears) a machine's repositories folder; answers every machine's folder after. */
+  readonly setRepositories: (
+    host: string,
+    directory: string,
+  ) => Effect.Effect<Readonly<Record<string, string>>, MachinesError>;
 }
 
 export class Machines extends Context.Service<Machines, MachinesApi>()('app/Machines') {}
@@ -59,7 +66,13 @@ export function machinesApiOver(ask: AskMachines): MachinesApi {
         ? Effect.succeed({host: reply.host, created: reply.created})
         : Effect.fail(unexpected),
     );
+  const folders = (request: MachineRequest) =>
+    Effect.flatMap(ask(request), reply =>
+      reply.kind === 'repositories' ? Effect.succeed(reply.directories) : Effect.fail(unexpected),
+    );
   return {
+    repositories: folders({op: 'repositories'}),
+    setRepositories: (host, directory) => folders({op: 'set-repositories', host, directory}),
     match: query =>
       Effect.flatMap(ask({op: 'match', query}), reply =>
         reply.kind === 'matches' ? Effect.succeed(reply.aliases) : Effect.fail(unexpected),

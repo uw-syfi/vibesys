@@ -53,6 +53,7 @@
   ],
   "proto/vibesys/desktop/v1/settings.proto": [
     "DesktopHostSettings.repositories_directory",
+    "DesktopMachineSetRepositories.repositories_directory",
     "DesktopRetainedRecentEntry.original_json"
   ],
   "proto/vibesys/evaluator/v1/core.proto": [

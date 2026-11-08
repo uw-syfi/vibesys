@@ -45,6 +45,7 @@ export {Ids} from './ids.js';
 export {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
 export {
   type AddOutcome,
+  type FoldersOutcome,
   type MachineActions,
   makeMachineActions,
   type RemoveOutcome,
