@@ -232,6 +232,22 @@ function retryFeeds(
   if (runId !== undefined) dispatch(session.runHistory.retry(runId), () => undefined);
 }
 
+/**
+ * The streams the open screen needs, followed while it is open: the open agent's stream and the open
+ * run's history, which the run stream does not carry, and the open run's cost stream, which is open
+ * only while the Cost view shows (leaving it closes the stream).
+ */
+function useOpenStreams(hosts: readonly ConnectedHost[], open: ReturnType<typeof openOf>): void {
+  const {openHost, openAgent, openRun, costHost, costRun} = open;
+  useAtomMount(
+    useMemo(
+      () => watchOpen(hosts, openHost, openAgent, openRun),
+      [hosts, openHost, openAgent, openRun],
+    ),
+  );
+  useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
+}
+
 /** The commands that change a live run's settings, whose last outcome is kept by run id. */
 function updateCommands(
   issue: (host: string, intent: Intent, kept: (issued: Issued) => void) => void,
@@ -263,16 +279,7 @@ export function ConnectedApp(props: {
 }): JSX.Element {
   const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
   const {openHost, openAgent, openRun, costHost, costRun} = openOf(route);
-  // The open agent's stream, and the open run's history, which the run stream does not carry: both are
-  // followed while a screen of them is open.
-  useAtomMount(
-    useMemo(
-      () => watchOpen(hosts, openHost, openAgent, openRun),
-      [hosts, openHost, openAgent, openRun],
-    ),
-  );
-  // The cost stream is open only while the Cost view shows: leaving it closes the stream.
-  useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
+  useOpenStreams(hosts, openOf(route));
   const clock = useAtomValue(nowMs);
   const view = useAtomValue(
     useMemo(
