@@ -316,7 +316,9 @@ export function TradeOff(props: {
       <Stack gap="space-4">
         <Row gap="space-4" rowGap="space-2" wrap justify="between">
           <Text variant="small" tone="muted">
-            {`${tradeoff.points.length} candidates · ${tradeoff.frontierCount} on the frontier`}
+            {`${tradeoff.points.length} ${
+              tradeoff.points.length === 1 ? 'candidate' : 'candidates'
+            } · ${tradeoff.frontierCount} on the frontier`}
           </Text>
           {names.length > 2 ? (
             <Row gap="space-3" wrap>

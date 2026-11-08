@@ -427,6 +427,13 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
+  it('says one candidate, not one candidates, for a trade-off with a single measured point', () => {
+    const {screen} = render({candidates: 1});
+    expect(cardText(screen.container, 'Trade-off')).toContain('1 candidate ·');
+    expect(cardText(screen.container, 'Trade-off')).not.toContain('1 candidates');
+    screen.unmount();
+  });
+
   it('with three objectives picks the pair to plot, and joins the frontier on none', () => {
     const three: readonly ObjectiveSpec[] = [
       ...SERVING,
