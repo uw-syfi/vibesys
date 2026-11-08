@@ -23,8 +23,9 @@ Llama-3.1-8B-Instruct-MLX-8bit/
     ├── vibesys.input.toml    # manifest: check and benchmark commands
     ├── objectives.toml       # headline metric: latency_ms.p50, lower is better
     ├── OBJECTIVE.md          # what to optimize, the launch and server contracts
-    ├── pyproject.toml, uv.lock  # the judge's environment (vibesys-evaluator, httpx, jsonschema)
+    ├── pyproject.toml, uv.lock  # the judge's environment (vibesys-evaluator, httpx, jsonschema, tokenizers)
     ├── bench.py              # check, benchmark and profile, on vibesys_evaluator.main
+    ├── client.py             # one streaming request, timed; reads no finish_reason
     ├── launch.py             # starts the candidate's server, waits for /health, stops its group
     └── workload.py           # which schemas, the prompt, the sentinel, the gate
 ```
@@ -57,21 +58,41 @@ uv run --frozen --project .vibesys/tasks/default python .vibesys/tasks/default/b
 
 ## What the task asks
 
-The `val` split of the JSONSchemaBench dataset's default config, pinned to
+The `val` split of the JSONSchemaBench dataset's default config (the dev split, which
+scores the loop), pinned to
 revision `5bd0f4640badc6f3f02df796421d21cb0ca0b141`, without the schemas above
-1500 characters (444 of 937 remain). A fixed pseudo-random order picks the first
-40 schemas for the check and the first 24 for the benchmark. The model is pinned to revision
+1500 characters (444 of 937 remain; the cap is about time, not about what a
+decoder supports, see `OBJECTIVE.md`). A fixed pseudo-random order picks the
+schemas: ranks 0 to 23 for the benchmark and ranks 24 to 63 for the check, so
+they share none. Each request's sentinel is drawn at run time, never from the
+schema or a seed. The model is pinned to revision
 `142d428004044c37c441272c91316251d9aecc58`.
 
-- **Check.** At least 85% of the answers validate against their schema, at
-  least 80% of the answers to schemas that can hold a string include the
-  sentinel from the prompt, and no request fails. The baseline answers 37 of 40
-  validly: the misses are objects whose properties the model wrote in another
-  order than the grammar allows, and answers cut off at 256 tokens.
+- **Check.** No request fails, every answer that ended validates against its
+  schema, at most 10% of the answers are cut off at 512 tokens, and at least
+  80% of the answers that ended, to schemas that can hold a string, include the
+  sentinel from the prompt. The judge decides itself what was cut off: an
+  invalid answer of at least 320 tokens by its own count, with the pinned
+  model's tokenizer, was; a shorter one ended. It never reads the server's
+  `finish_reason`. The baseline's answers: 40 answers, 39 valid, 1 cut off, none that ended invalid, the sentinel in 30 of 34. The cut-offs are
+  objects whose properties the model wrote in another order than the grammar
+  allows, and a string it never closes.
 - **Benchmark.** One request that is not counted, then 24 requests one after
   another. `latency_ms.p50` is the median time from sending a request to its
   last chunk. A sample is a measurement only if every request completes and the
   answers pass the check's gate.
+- **Holdout.** The benchmark's measurement and gate on the dataset's `test`
+  split (1400 schemas of at most 1500 characters; the first 96 of the fixed
+  order are asked), with validity broken down by the schema's source. Run it on
+  a final or promoted commit, never in the loop (no manifest section runs it):
+  `vibesys-cli submit command <commit> -- uv run --frozen --project
+  .vibesys/tasks/default python .vibesys/tasks/default/bench.py holdout`. It
+  takes about 7 minutes with the baseline (48 schemas took 3.4 minutes). It reports `latency_ms.p50` and the
+  other benchmark metrics, plus `valid_frac.<source>` for each of `github`,
+  `glaive`, `kubernetes`, `snowplow`, `washingtonpost` and `store` the subset
+  contains (the source is read off the id's shape, as the parquet has no such
+  column), and fails as the benchmark does when the answers are not correct.
+  The records are kept as `holdout.jsonl` in the job's artifacts.
 - **Profile.** `bench.py profile` asks 4 requests and keeps the server log and
   answers with the job. A task of one image has no `[profile]` section for
   `submit profile`; run the mode as a command job under a profiler's wrapper:

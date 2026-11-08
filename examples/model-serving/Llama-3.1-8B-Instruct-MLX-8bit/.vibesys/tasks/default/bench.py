@@ -1,34 +1,39 @@
 """JSONSchemaBench on a Mac: the check, the benchmark and the profile load of the MLX Llama server.
 
-check       schema validity and sentinel inclusion of CHECK_CASES answers (the gate)
-benchmark   closed-loop latency of BENCHMARK_CASES requests; vibesys-cli appends --vs-output FILE
+check       the gate over the answers to workload.CHECK, schemas of the dev split (val)
+benchmark   closed-loop latency of workload.BENCHMARK, other schemas of val; vibesys-cli appends
+            --vs-output FILE
 profile     a few requests, the load a profiler records; never scored
+holdout     the benchmark's measurement on the held-out split (test), for a final or promoted
+            commit; no manifest section runs it, so the loop never does
 
-Each mode starts the candidate's server from the checkout (launch.py), asks it, and stops it.
+Each mode starts the candidate's server from the checkout (launch.py), asks it, and stops it. The
+judge counts every answer's tokens itself, with the tokenizer of the pinned model snapshot, and
+draws each request's sentinel from the operating system's randomness at run time.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import statistics
-import time
+import sys
+import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 
+import client
 import httpx
 import workload
+from tokenizers import Tokenizer
 
 import launch
 from vibesys_evaluator import Metric, Run, main
 
 ROOT = Path(__file__).resolve().parents[3]
 
-# 40 answers let the gate (95% valid) tolerate two bad ones; the benchmark's median needs fewer.
-CHECK_CASES = 40
-BENCHMARK_CASES = 24
-PROFILE_CASES = 4
-REQUEST_TIMEOUT_SECONDS = 120.0
+REQUEST_TIMEOUT_SECONDS = 180.0
 
 METRICS = {
     "latency_ms.p50": Metric(unit="ms", direction="min"),
@@ -45,90 +50,64 @@ class WorkloadError(Exception):
 
 @dataclass(frozen=True)
 class Answer:
-    """What one streamed request came to. A chunk is one server-sent text delta, about one token."""
+    """A request, its reply, and what the judge made of it (None when the request failed)."""
 
     unique_id: str
-    text: str
-    chunks: int
-    latency: float  # seconds, request sent to last chunk
-    ttft: float | None  # seconds, request sent to first chunk
-    error: str | None
+    reply: client.Reply
+    tokens: int  # counted by the judge, not reported by the server
     verdict: workload.Verdict | None
 
 
-def ask(client: httpx.Client, url: str, request: workload.Case) -> Answer:
-    """Send one streaming completion request and judge the answer. Never raises on a server fault."""
-    body = {
-        "prompt": request.prompt,
-        "max_tokens": workload.MAX_TOKENS,
-        "temperature": 0,
-        "stream": True,
-        "response_format": {"type": "json_schema", "json_schema": {"schema": request.schema}},
-    }
-    pieces: list[str] = []
-    ttft = None
-    started = time.perf_counter()
-    try:
-        with client.stream("POST", f"{url}/v1/completions", json=body) as response:
-            if response.status_code != httpx.codes.OK:
-                response.read()
-                return failed(
-                    request, started, f"HTTP {response.status_code}: {response.text[:200]}"
-                )
-            if "text/event-stream" not in response.headers.get("content-type", ""):
-                return failed(request, started, "the response is not a text/event-stream")
-            for line in response.iter_lines():
-                if time.perf_counter() - started > REQUEST_TIMEOUT_SECONDS:
-                    return failed(
-                        request, started, f"no end within {REQUEST_TIMEOUT_SECONDS:.0f} s"
-                    )
-                if not line.startswith("data: "):
-                    continue
-                data = line.removeprefix("data: ").strip()
-                if data == "[DONE]":
-                    break
-                text = delta(json.loads(data))
-                if text:
-                    ttft = ttft if ttft is not None else time.perf_counter() - started
-                    pieces.append(text)
-    except (httpx.HTTPError, ValueError) as error:
-        return failed(request, started, f"{type(error).__name__}: {error}")
-    latency = time.perf_counter() - started
-    text = "".join(pieces)
-    return Answer(
-        request.unique_id, text, len(pieces), latency, ttft, None, workload.judge(request, text)
+def token_counter(model: Path) -> Callable[[str], int]:
+    """A function that counts the tokens of a text with the pinned model's own tokenizer."""
+    tokenizer = Tokenizer.from_file(str(model / "tokenizer.json"))
+    return lambda text: len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+
+def ask(
+    http: httpx.Client, url: str, request: workload.Case, count_tokens: Callable[[str], int]
+) -> Answer:
+    """Send one request and judge the answer."""
+    reply = client.stream_completion(
+        http, url, workload.request_body(request), REQUEST_TIMEOUT_SECONDS
     )
+    if reply.error is not None:
+        return Answer(request.unique_id, reply, 0, None)
+    tokens = count_tokens(reply.text)
+    return Answer(request.unique_id, reply, tokens, workload.judge(request, reply.text, tokens))
 
 
-def delta(event: dict[str, Any]) -> str:
-    """The text an OpenAI-style completion chunk carries."""
-    choices = event.get("choices") or [{}]
-    return choices[0].get("text") or ""
-
-
-def failed(request: workload.Case, started: float, error: str) -> Answer:
-    return Answer(request.unique_id, "", 0, time.perf_counter() - started, None, error, None)
-
-
-def ask_all(url: str, requests: list[workload.Case]) -> list[Answer]:
+def ask_all(
+    url: str, requests: list[workload.Case], count_tokens: Callable[[str], int]
+) -> list[Answer]:
     """Ask the requests one after another: a closed loop of one."""
-    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        return [ask(client, url, request) for request in requests]
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as http:
+        return [ask(http, url, request, count_tokens) for request in requests]
 
 
-def serve_and_ask(run: Run, count: int, *, warm_up: bool = False) -> list[Answer]:
-    """Start the server, ask the first `count` requests of the workload, stop the server."""
-    requests = workload.select(workload.load_pool(), count)
+def serve_and_ask(
+    run: Run,
+    ranks: workload.Ranks,
+    *,
+    split: workload.Split = workload.Split.VAL,
+    warm_up: workload.Ranks | None = None,
+) -> list[Answer]:
+    """Start the server, ask the schemas at `ranks` of `split`, stop the server.
+
+    With `warm_up`, one more request first, not counted: the first generation compiles Metal kernels.
+    """
+    pool = workload.load_pool(split)
+    requests = workload.select(pool, ranks)
     model = workload.model_dir()
+    count_tokens = token_counter(model)
     with launch.serving(ROOT, model, run.phase("server") / "server.log") as url:
-        if warm_up:
-            # The first generation compiles Metal kernels; the benchmark measures the second on.
-            ask_all(url, requests[:1])
-        return ask_all(url, requests)
+        if warm_up is not None:
+            ask_all(url, workload.select(pool, warm_up), count_tokens)
+        return ask_all(url, requests, count_tokens)
 
 
 def failures(answers: list[Answer]) -> list[str]:
-    return [f"{a.unique_id}: {a.error}" for a in answers if a.error is not None]
+    return [f"{a.unique_id}: {a.reply.error}" for a in answers if a.reply.error is not None]
 
 
 def require_completed(answers: list[Answer]) -> None:
@@ -139,15 +118,32 @@ def require_completed(answers: list[Answer]) -> None:
         )
 
 
+def verdicts_of(answers: list[Answer]) -> list[workload.Verdict]:
+    return [a.verdict for a in answers if a.verdict is not None]
+
+
+def counts(answers: list[Answer]) -> str:
+    """The answers' outcomes in one line."""
+    verdicts = verdicts_of(answers)
+    held = [v.sentinel_ok for v in verdicts if v.valid and v.sentinel_ok is not None]
+    by = {outcome: sum(v.outcome is outcome for v in verdicts) for outcome in workload.Outcome}
+    return (
+        f"answers={len(verdicts)} valid={by[workload.Outcome.VALID]} "
+        f"cut_off={by[workload.Outcome.CUT_OFF]} ended_invalid={by[workload.Outcome.INVALID]} "
+        f"sentinel={sum(held)}/{len(held)}"
+    )
+
+
 def keep(run: Run, answers: list[Answer]) -> None:
     """Keep every answer with the job, for whoever reads why a gate failed."""
-    rows = [asdict(a) for a in answers]
-    (run.phase("answers") / "answers.json").write_text(json.dumps(rows, indent=2))
+    (run.phase("answers") / "answers.json").write_text(
+        json.dumps([asdict(a) for a in answers], indent=2)
+    )
 
 
 def check(run: Run) -> str | None:
     try:
-        answers = serve_and_ask(run, CHECK_CASES)
+        answers = serve_and_ask(run, workload.CHECK)
     except launch.ServerError as error:
         return str(error)
     keep(run, answers)
@@ -155,16 +151,14 @@ def check(run: Run) -> str | None:
         return f"{len(failed_requests)} of {len(answers)} requests failed\n" + "\n".join(
             f"- {line}" for line in failed_requests[:10]
         )
-    verdicts = [a.verdict for a in answers if a.verdict is not None]
-    sentinels = [v.sentinel_ok for v in verdicts if v.sentinel_ok is not None]
-    print(
-        f"schema_valid={sum(v.valid for v in verdicts)}/{len(verdicts)} "
-        f"sentinel={sum(sentinels)}/{len(sentinels)}",
-        flush=True,
-    )
-    if reason := workload.gate(verdicts):
-        bad = [f"- {a.unique_id}: {a.verdict.error}; output={a.text[:200]!r}"
-               for a in answers if a.verdict and not a.verdict.valid]  # fmt: skip
+    print(counts(answers), flush=True)
+    if reason := workload.gate(verdicts_of(answers)):
+        bad = [
+            f"- {a.unique_id} ({a.verdict.outcome}, {a.tokens} tokens): {a.verdict.error}; "
+            f"output={a.reply.text[:200]!r}"
+            for a in answers
+            if a.verdict and not a.verdict.valid
+        ]
         return reason + "\n" + "\n".join(bad[:10])
     print("PASS: JSON-schema accuracy gate passed", flush=True)
     return None
@@ -172,43 +166,116 @@ def check(run: Run) -> str | None:
 
 def benchmark(run: Run) -> None:
     try:
-        answers = serve_and_ask(run, BENCHMARK_CASES, warm_up=True)
+        answers = serve_and_ask(run, workload.BENCHMARK, warm_up=workload.WARM_UP)
     except launch.ServerError as error:
         raise WorkloadError(str(error)) from error
     keep(run, answers)
     require_completed(answers)
-    verdicts = [a.verdict for a in answers if a.verdict is not None]
-    if reason := workload.gate(verdicts):
+    print(counts(answers), flush=True)
+    if reason := workload.gate(verdicts_of(answers)):
         raise WorkloadError(
             f"the answers are not correct, so their latency means nothing: {reason}"
         )
     run.report(summarize(answers))
 
 
+def by_source(answers: list[Answer]) -> dict[str, list[workload.Verdict]]:
+    """The verdicts of the answers, grouped by the dataset subset their schema comes from."""
+    groups: dict[str, list[workload.Verdict]] = {}
+    for answer in answers:
+        if answer.verdict is not None:
+            groups.setdefault(workload.source_of(answer.unique_id), []).append(answer.verdict)
+    return groups
+
+
+def valid_fractions(answers: list[Answer]) -> dict[str, float]:
+    """The share of valid answers per source, as the metrics `valid_frac.<source>`."""
+    return {
+        f"valid_frac.{source}": sum(v.valid for v in verdicts) / len(verdicts)
+        for source, verdicts in sorted(by_source(answers).items())
+    }
+
+
 def summarize(answers: list[Answer]) -> dict[str, float]:
     """The metrics of a sample whose requests all completed."""
     ms = 1000.0
-    ttfts = [a.ttft * ms for a in answers if a.ttft is not None]
+    replies = [a.reply for a in answers]
+    ttfts = [r.ttft * ms for r in replies if r.ttft is not None]
     tpots = [
-        (a.latency - a.ttft) * ms / (a.chunks - 1)
-        for a in answers
-        if a.ttft is not None and a.chunks > 1
+        (r.latency - r.ttft) * ms / (r.chunks - 1)
+        for r in replies
+        if r.ttft is not None and r.chunks > 1
     ]
-    wall = sum(a.latency for a in answers)  # a closed loop of one: the requests do not overlap
+    wall = sum(r.latency for r in replies)  # a closed loop of one: the requests do not overlap
     return {
-        "latency_ms.p50": statistics.median(a.latency * ms for a in answers),
+        "latency_ms.p50": statistics.median(r.latency * ms for r in replies),
         "ttft_ms.p50": statistics.median(ttfts),
         "tpot_ms.p50": statistics.median(tpots),
-        "token_throughput": sum(a.chunks for a in answers) / wall,
+        "token_throughput": sum(r.chunks for r in replies) / wall,
         "schema_ok_frac": sum(bool(a.verdict and a.verdict.valid) for a in answers) / len(answers),
     }
 
 
 def profile(run: Run) -> None:
-    answers = serve_and_ask(run, PROFILE_CASES)
+    answers = serve_and_ask(run, workload.PROFILE)
     keep(run, answers)
     require_completed(answers)
 
 
+def holdout(run: Run) -> None:
+    """The benchmark's measurement and gate on the held-out split, with validity by source."""
+    try:
+        answers = serve_and_ask(
+            run, workload.HOLDOUT, split=workload.Split.TEST, warm_up=workload.HOLDOUT_WARM_UP
+        )
+    except launch.ServerError as error:
+        raise WorkloadError(str(error)) from error
+    keep(run, answers)
+    require_completed(answers)
+    print(counts(answers), flush=True)
+    for source, verdicts in by_source(answers).items():
+        by = {o: sum(v.outcome is o for v in verdicts) for o in workload.Outcome}
+        print(
+            f"  {source}: {len(verdicts)} answers, valid={by[workload.Outcome.VALID]} "
+            f"cut_off={by[workload.Outcome.CUT_OFF]} ended_invalid={by[workload.Outcome.INVALID]}",
+            flush=True,
+        )
+    metrics = {**summarize(answers), **valid_fractions(answers)}
+    if reason := workload.gate(verdicts_of(answers)):
+        # Shown to whoever reads the log, not reported: the latency of wrong answers means nothing.
+        print("holdout, not reported: " + json.dumps(metrics, sort_keys=True), flush=True)
+        raise WorkloadError(
+            f"the answers are not correct, so their latency means nothing: {reason}"
+        )
+    print("holdout: " + json.dumps(metrics, sort_keys=True), flush=True)
+    run.report(metrics)
+
+
+def run_holdout() -> None:
+    """`bench.py holdout [--vs-output FILE]`: the benchmark's sample lifecycle, another workload.
+
+    The evaluator's command line has the three modes of `main` and no fourth, so this runs `main`
+    as a benchmark whose records go to FILE, by default `holdout.jsonl` in the job's artifacts
+    directory. The sources in the metrics are those of the fixed subset.
+    """
+    sources = {
+        workload.source_of(c.unique_id)
+        for c in workload.select(workload.load_pool(workload.Split.TEST), workload.HOLDOUT)
+    }
+    metrics = {
+        **METRICS,
+        **{f"valid_frac.{s}": Metric(unit="fraction", direction="max") for s in sorted(sources)},
+    }
+    sys.argv[1:2] = ["benchmark"]
+    if "--vs-output" not in sys.argv:
+        folder = Path(
+            os.environ.get("VIBESYS_ARTIFACTS_DIR") or tempfile.mkdtemp(prefix="holdout-")
+        )
+        sys.argv += ["--vs-output", str(folder / "holdout.jsonl")]
+    main(metrics=metrics, benchmark=holdout)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["holdout"]:
+        run_holdout()
     main(metrics=METRICS, check=check, benchmark=benchmark, profile=profile)

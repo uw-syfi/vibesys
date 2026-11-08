@@ -16,20 +16,20 @@ command = [
   "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
   "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "check",
 ]
-# Measured on an M3 Pro with the baseline, warm caches, other jobs on the machine: 3.5 min (40
-# requests and one server start). The first job on a machine also installs both environments and
-# downloads the model (8.5 GB, 2 min on a fast link) and the dataset. 20 minutes is about 6 times
-# the warm run, which holds that and a slower machine.
-timeout_seconds = 1200
+# Through vibesys-cli on an M3 Pro, warm caches, the baseline's check took 177 s (40 requests, one of
+# them cut off at 512 tokens, and a server start). The first job on a machine also installs both
+# environments (about 1 min) and downloads the model (8.5 GB, 2 min). Three times the warm run plus
+# that is 710 s, rounded up to 900 s.
+timeout_seconds = 900
 
 [benchmark]
 command = [
   "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
   "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "benchmark",
 ]
-# Measured the same way: 2 min for one sample (a server start, one request that is not counted, and
-# 24 that are). A server may take 300 s to start (launch.py), so 600 s is about 5 times the sample
-# and leaves room for the slowest start.
+# One sample took 90 s (a server start, one request that is not counted, 24 that are, no cut-off
+# answer); a cut-off answer adds 37 s. A server may take 300 s to start (launch.py), so the limit
+# is that start plus the sample with four cut-offs: 300 + 90 + 150 = 540 s, rounded up to 600 s.
 timeout_seconds = 600
 result_protocol = 2
 
