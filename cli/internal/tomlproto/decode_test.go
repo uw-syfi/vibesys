@@ -172,3 +172,37 @@ func TestNonFiniteNumbersDecodeToTheValueInsteadOfFailingWithoutAKey(t *testing.
 		}
 	}
 }
+
+// A section held as data is a google.protobuf.Struct, which is JSON, and JSON has no nan or
+// infinity. A non-finite number in one cannot be represented, so it is refused naming its key, the
+// way an unknown key or a wrong type is, instead of reaching json.Marshal, whose error names
+// neither the key nor the section.
+func TestANonFiniteNumberInADataSectionIsRefusedNamingItsKey(t *testing.T) {
+	cases := map[string]string{
+		"[resources]\nx = nan":          "resources.x",
+		"[resources]\nx = inf":          "resources.x",
+		"[resources]\nx = -inf":         "resources.x",
+		"[resources.limits]\nz = nan":   "resources.limits.z",
+		"[resources]\narr = [1.0, nan]": "resources.arr[1]",
+		"[workspace]\ny = -inf":         "workspace.y",
+	}
+	for text, says := range cases {
+		var m cliv1.TaskManifestV02
+		err := tomlproto.Decode([]byte(text), &m, tomlproto.Options{})
+		if err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("%q: %v, want it to name %q", text, err, says)
+		}
+	}
+}
+
+// A data section of finite values still decodes to the struct it did before.
+func TestAFiniteDataSectionDecodesToItsValues(t *testing.T) {
+	var m cliv1.TaskManifestV02
+	if err := tomlproto.Decode([]byte("[resources]\ngpus = 4\nname = \"a100\"\nratio = 0.5"), &m, tomlproto.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := m.GetResources().AsMap()
+	if got["gpus"] != float64(4) || got["name"] != "a100" || got["ratio"] != 0.5 {
+		t.Errorf("resources %v", got)
+	}
+}
