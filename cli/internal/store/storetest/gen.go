@@ -156,13 +156,25 @@ func (g *gen) outcome(measure bool) core.Outcome {
 	if !measure {
 		return core.CheckOutcome{Duration: time.Duration(1 + g.r.Int64N(1<<50))}
 	}
+	samples := g.floats()
 	return core.MeasureOutcome{
 		Metric:       g.metric(),
-		Samples:      g.floats(),
+		Samples:      samples,
 		Observations: []core.Observation{{Name: g.text(), Values: g.floats(), Unit: g.unit()}, {Name: g.text(), Values: g.floats(), Unit: g.unit()}},
 		CheckJob:     core.JobID(g.name()),
 		Objectives:   g.objectives(),
+		Services:     g.sampleServices(len(samples)),
 	}
+}
+
+// sampleServices are the servers of n samples, each one a sample can name.
+func (g *gen) sampleServices(n int) []core.SampleService {
+	all := []core.SampleService{core.SampleServiceStarted, core.SampleServiceReused, core.SampleServiceRestarted}
+	out := make([]core.SampleService, n)
+	for i := range out {
+		out[i] = all[g.pick(len(all))]
+	}
+	return out
 }
 
 func (g *gen) metric() core.Metric {

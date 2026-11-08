@@ -68,6 +68,11 @@ message CheckResult {
 
 // MeasureResult is the official measurement of a commit.
 message MeasureResult {
+  option (buf.validate.message).cel = {
+    id: "measure.sample_services_per_sample"
+    expression: "this.sample_services.size() == 0 || this.sample_services.size() == this.samples.size() ? '' : 'sample_services has ' + string(this.sample_services.size()) + ' entries for ' + string(this.samples.size()) + ' samples'"
+  };
+
   Metric metric = 1;
   // The scored metric's samples, in the order they were taken.
   repeated double samples = 2;
@@ -79,6 +84,26 @@ message MeasureResult {
   double value = 5;
   // Set for a measurement of a multi-objective task, and absent otherwise.
   Objectives objectives = 6;
+  // For a task with a job-scoped server ([service] in its manifest), the server each sample ran on,
+  // in the order of samples: one per sample. Empty for any other task, and in a result saved before
+  // this field; a measurement that pools both has SAMPLE_SERVICE_UNSPECIFIED for the samples of the
+  // results that recorded none.
+  repeated SampleService sample_services = 7 [(buf.validate.field).repeated.items.enum.defined_only = true];
+}
+
+// SampleService is the server a sample of a task with a job-scoped server ran on. A sample that is
+// the first command on its server ran on a server that nothing had used yet; any other ran on one
+// that earlier commands of the job used, after the task's reset.
+enum SampleService {
+  // The sample ran on no job-scoped server, or its result does not say.
+  SAMPLE_SERVICE_UNSPECIFIED = 0;
+  // The first command on the server the job started.
+  SAMPLE_SERVICE_STARTED = 1;
+  // A server an earlier command of the job used, after the task's reset.
+  SAMPLE_SERVICE_REUSED = 2;
+  // The first command on a server the job started again, because the one an earlier command used
+  // had ended.
+  SAMPLE_SERVICE_RESTARTED = 3;
 }
 
 // Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up

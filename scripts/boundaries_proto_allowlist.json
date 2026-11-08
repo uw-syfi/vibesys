@@ -130,6 +130,14 @@
   "proto/vibesys/orchestrator/v1/provision.proto": [
     "ProvisionRepositoryRequest.parent_directory"
   ],
+  "proto/vibesys/orchestrator/v1/service.proto": [
+    "DirectoryEntry",
+    "DirectoryEntry.is_directory",
+    "ListDirectoryRequest",
+    "ListDirectoryRequest.path",
+    "ListDirectoryResponse",
+    "OrchestratorService.ListDirectory"
+  ],
   "proto/vibesys/orchestrator/v1/stored.proto": [
     "JobToolEndpoint.runtime_directory"
   ]

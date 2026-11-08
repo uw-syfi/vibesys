@@ -35,6 +35,7 @@ type Rig struct {
 	Sidecars *Sidecars
 	Jobs     *jobstest.FakeJobSource
 	Starts   *StartChecks
+	Dirs     *Directories
 	// Models is the host's model policy, which every daemon reads at each start. A new Rig has none.
 	Models *Models
 	// Checkouts is the Fake of the agents' working copies, given to every daemon.
@@ -80,7 +81,7 @@ func NewRig(tb testing.TB) *Rig {
 	}
 	r := &Rig{
 		Store: store.NewMemory(), Clock: NewClock(), Nonces: &Nonces{}, Sidecars: NewSidecars(),
-		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Models: &Models{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
+		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Dirs: &Directories{}, Models: &Models{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
 		Log: slog.New(slog.DiscardHandler), Limits: hub.DefaultLimits, Wake: make(chan struct{}, 1),
 	}
 	r.Sidecars.Elapse = r.Bounds.Expire
@@ -134,7 +135,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Daemon = d
 	for audience, service := range map[daemon.Audience]**daemon.Service{daemon.AudienceOperator: &r.Service, daemon.AudienceAgent: &r.AgentService} {
 		if *service, err = daemon.NewService(d.Engine, daemon.ServiceDeps{
-			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, JobTool: r.jobTool,
+			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, Directories: r.Dirs, JobTool: r.jobTool,
 		}); err != nil {
 			tb.Fatal(err)
 		}
