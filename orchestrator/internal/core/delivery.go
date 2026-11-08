@@ -231,7 +231,7 @@ func (t *tx) endTurn(a agentState, status TurnStatus, usage Usage) {
 	turn := *a.turn
 	turn.Status, turn.EndedAt, turn.Usage = status, t.in.At, turn.Usage.merged(usage)
 	t.emit(a.Run, turn)
-	t.rollUp(a, turn.Usage)
+	t.rollUp(a, turn)
 
 	m := t.s.messages[turn.Message]
 	switch {
@@ -245,9 +245,10 @@ func (t *tx) endTurn(a agentState, status TurnStatus, usage Usage) {
 	t.emit(a.Run, m)
 }
 
-// rollUp adds a finished turn's cost to its agent's and its run's. A turn that reported nothing
-// adds nothing and writes nothing.
-func (t *tx) rollUp(a agentState, u Usage) {
+// rollUp adds a finished turn's cost to its agent's and its run's, and to the run's setup when the turn
+// began before the run left setup. A turn that reported nothing adds nothing and writes nothing.
+func (t *tx) rollUp(a agentState, turn Turn) {
+	u := turn.Usage
 	if u == (Usage{}) {
 		return
 	}
@@ -256,6 +257,14 @@ func (t *tx) rollUp(a agentState, u Usage) {
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	run.Usage = run.Usage.Plus(u)
+	if run.startedInSetup(turn.StartedAt) {
+		var setup Usage
+		if run.SetupUsage != nil {
+			setup = *run.SetupUsage
+		}
+		setup = setup.Plus(u)
+		run.SetupUsage = &setup
+	}
 	t.emit(run.ID, run)
 }
 

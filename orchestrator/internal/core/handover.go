@@ -78,7 +78,7 @@ func (t *tx) handoverFor(run Run, lead agentState) LeadHandover {
 	h := LeadHandover{
 		Task: run.Task, FanoutLimit: run.FanoutLimit, Previous: lead.Spec,
 		// Whole seconds, as the wire holds them, so the log replays the message that was posted.
-		Elapsed: t.in.At.Sub(run.CreatedAt).Truncate(time.Second), Spent: run.Usage.CostUSD, MaxCost: run.MaxCostUSD,
+		Elapsed: t.in.At.Sub(run.limitClock()).Truncate(time.Second), Spent: run.optimizeUsage().CostUSD, MaxCost: run.MaxCostUSD,
 		LimitReached: run.LimitReached, ReportsPosted: run.ReportsPosted, ActiveJobs: run.ActiveJobs,
 	}
 	if total := run.totalTime(); total > 0 {

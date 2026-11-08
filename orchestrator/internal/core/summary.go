@@ -51,7 +51,7 @@ func moved(m Message) bool {
 // reached no limit (the lead was told to finish, which is the one report that matters) and its lead has
 // not finished.
 func (r Run) asksForReports() bool {
-	return r.SummaryEvery > 0 && r.Status.Live() && r.LimitReached == "" && !r.FinalReported
+	return r.SummaryEvery > 0 && r.Phase.Optimizing() && r.Status.Live() && r.LimitReached == "" && !r.FinalReported
 }
 
 // markMoved records that work moved in a run. The first movement since the lead last reported or was

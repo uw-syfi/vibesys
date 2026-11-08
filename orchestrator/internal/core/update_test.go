@@ -302,11 +302,12 @@ func TestAnUpdateOfARunThatIsGoneOrNotTheOperatorsIsRefused(t *testing.T) {
 	}
 }
 
-// The limits of a run in setup are those of the optimize phase, which its completion sets.
+// The limits and the fan-out of a run in setup are those of the optimize phase, which its completion sets;
+// the lead it talks to may change.
 func TestTheLimitsOfARunInSetupAreRefusedButItsLeadMayChange(t *testing.T) {
 	w := newScript(t)
 	at := epoch
-	run := core.Run{ID: "run-s", Repository: "repo", Status: core.RunRunning, Lead: "lead-s", FanoutLimit: 1, CreatedAt: at, Phase: core.PhaseSetup, StalledSince: at,
+	run := core.Run{ID: "run-s", Repository: "repo", Status: core.RunRunning, Lead: "lead-s", FanoutLimit: 1, CreatedAt: at, Phase: core.PhaseSetup,
 		Allowed: []core.AgentChoice{{Harness: lead.Harness, Model: lead.Model}}}
 	agent := core.Agent{ID: "lead-s", Run: "run-s", Role: core.RoleLead, Spec: lead, Status: core.AgentIdle, Stop: core.StopNone, Session: 1, StartedAt: at}
 	w.s = core.Replay(core.State{}, []core.Event{{Run: "run-s", At: at, Body: run}, {Run: "run-s", At: at, Body: agent}})
@@ -317,8 +318,11 @@ func TestTheLimitsOfARunInSetupAreRefusedButItsLeadMayChange(t *testing.T) {
 	if r := w.update("run-s", core.UpdateRun{TimeLimit: setTime(time.Hour), Fanout: fanout(2)}); r.Refusal != core.RefuseNotPermitted {
 		t.Fatalf("a time limit in setup: %+v", r)
 	}
-	if r := w.update("run-s", core.UpdateRun{Fanout: fanout(2), Lead: &leadOn}); r.Refusal != "" || w.runOf("run-s").FanoutLimit != 2 {
-		t.Fatalf("the fan-out and the lead in setup: %+v", r)
+	if r := w.update("run-s", core.UpdateRun{Fanout: fanout(2), Lead: &leadOn}); r.Refusal != core.RefuseNotPermitted || w.runOf("run-s").FanoutLimit != 1 {
+		t.Fatalf("a fan-out in setup: %+v", r)
+	}
+	if r := w.update("run-s", core.UpdateRun{Lead: &leadOn}); r.Refusal != "" || w.runOf("run-s").PendingLead == nil {
+		t.Fatalf("the lead in setup: %+v", r)
 	}
 }
 

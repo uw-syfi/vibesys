@@ -51,6 +51,9 @@ func (s State) Violations() []string {
 				bad("run %s keeps a checkout of %s, which is not one of its subagents", run.ID, c.Agent)
 			}
 		}
+		for _, breach := range run.phaseBreaches(subagents[run.ID]) {
+			bad("run %s %s", run.ID, breach)
+		}
 		for _, breach := range run.limitBreaches() {
 			bad("run %s %s", run.ID, breach)
 		}
@@ -149,6 +152,34 @@ func (run Run) summaryBreaches() []string {
 	if run.NextSummaryAt.Before(run.LastSummaryAt.Add(run.SummaryEvery)) {
 		found = append(found, fmt.Sprintf("is to be asked for a report at %v, before %v, the interval after %v",
 			run.NextSummaryAt, run.LastSummaryAt.Add(run.SummaryEvery), run.LastSummaryAt))
+	}
+	return found
+}
+
+// phaseBreaches says how a run's phase disagrees with the rest of it. A run in setup has no subagent, no
+// task, no limit, no schedule and no setup account; the setup account of a run that left setup is a part
+// of its usage, and exists only once the run has an optimize start to be apart from.
+func (run Run) phaseBreaches(subagents uint32) []string {
+	var found []string
+	if run.SetupUsage != nil {
+		if run.OptimizeStartedAt.IsZero() {
+			found = append(found, "has a setup account and never left setup")
+		}
+		if !run.SetupUsage.within(run.Usage) {
+			found = append(found, fmt.Sprintf("spent %+v in setup, more than its usage %+v", *run.SetupUsage, run.Usage))
+		}
+	}
+	if !run.inSetup() {
+		return found
+	}
+	if subagents > 0 {
+		found = append(found, fmt.Sprintf("is in setup with %d live subagents", subagents))
+	}
+	if run.Task != "" || !run.OptimizeStartedAt.IsZero() || run.SetupUsage != nil {
+		found = append(found, fmt.Sprintf("is in setup with task %q, optimize start %v and setup usage %v", run.Task, run.OptimizeStartedAt, run.SetupUsage))
+	}
+	if !run.Deadline.IsZero() || run.MaxCostUSD != 0 || run.LimitReached != "" || run.FinalReported || !run.NextSummaryAt.IsZero() {
+		found = append(found, "is in setup with a limit, a final report or a report due")
 	}
 	return found
 }

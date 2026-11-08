@@ -107,8 +107,12 @@ func (t *tx) command(c Command) {
 			run = t.requestCatchUp(c, b, &r)
 		case UpdateRun:
 			run = t.updateRun(b, &r)
-		case BeginSetup, CompleteSetup, DeclareTask:
-			// permit refuses them until their behavior exists (see permissions), so none arrives here.
+		case BeginSetup:
+			run = t.beginSetup(b, &r)
+		case DeclareTask:
+			run = t.declareTask(c, b, &r)
+		case CompleteSetup:
+			// permit refuses it until its behavior exists (see permissions), so it does not arrive here.
 			panic(fmt.Sprintf("core: %T is not decided yet", c.Body))
 		default:
 			panic(fmt.Sprintf("core: unknown command %T", c.Body))
@@ -184,7 +188,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, MaxCostUSD: b.MaxCostUSD, CreatedAt: t.in.At,
 		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow), SummaryEvery: b.SummaryEvery, LastSummaryAt: t.in.At,
-		TaskCard: facts.Card, EvalPlace: facts.EvalPlace,
+		TaskCard: facts.Card, EvalPlace: facts.EvalPlace, Phase: PhaseOptimize,
 	}
 	if run.SummaryEvery == 0 {
 		run.SummaryEvery = DefaultSummaryEvery
@@ -259,6 +263,10 @@ func (t *tx) spawnAgent(c Command, b SpawnAgent, r *Receipt) RunID {
 		return ""
 	case run.Status != RunRunning:
 		r.Run, r.Refusal = run.ID, RefuseRunNotRunning
+		return ""
+	case run.inSetup():
+		// Whatever the fan-out limit says, which the operator may change in setup: a setup run has no subagent.
+		r.Run, r.Refusal = run.ID, RefuseNotPermitted
 		return ""
 	}
 	switch run.LimitReached {
@@ -422,7 +430,8 @@ func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 		report.Scope = ReportScopeWindow
 	} else {
 		report.Scope = ReportScopeRun
-		run.FinalReported = report.Kind == ReportFinal
+		// A final report in setup ends nothing: there is no task yet to have finished.
+		run.FinalReported = report.Kind == ReportFinal && run.Phase.Optimizing()
 		run.SummaryReport = id
 		run = run.reported(t.in.At)
 	}
