@@ -16,6 +16,13 @@ interface CommandWords {
   readonly canRetry: boolean;
 }
 
+/**
+ * The detail to show under the label, or null when the fault carries none. An empty detail is none:
+ * the host may send one (the proto does not require a word), and a bare "Details:" says nothing. The
+ * connection status drops an empty detail the same way.
+ */
+const detailToShow = (detail: string): string | null => (detail === '' ? null : detail);
+
 /** How a command stands, in words. `done` names what was asked ("Stop", "Start"). */
 function commandWords(progress: CommandProgress, done: string): CommandWords {
   switch (progress._tag) {
@@ -34,7 +41,7 @@ function commandWords(progress: CommandProgress, done: string): CommandWords {
       return {
         label: `${done}: not confirmed \u00b7 ${faultText(progress.fault)}`,
         tone: 'warn',
-        details: progress.fault.detail,
+        details: detailToShow(progress.fault.detail),
         hint: `${faultHint(progress.fault)} It may still have gone through.`,
         canRetry: true,
       };
@@ -42,7 +49,7 @@ function commandWords(progress: CommandProgress, done: string): CommandWords {
       return {
         label: `${done}: not done \u00b7 ${faultText(progress.fault)}`,
         tone: 'err',
-        details: progress.fault.detail,
+        details: detailToShow(progress.fault.detail),
         hint: faultHint(progress.fault),
         canRetry: progress.fault.retryable,
       };
