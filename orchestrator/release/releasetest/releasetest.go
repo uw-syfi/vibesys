@@ -123,6 +123,12 @@ func Write(t testing.TB, dir string, options ...Option) {
 	t.Helper()
 	for name, file := range Tree(t, dir, options...) {
 		path := filepath.Join("/", name)
+		if file.Mode&fs.ModeDir != 0 {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}

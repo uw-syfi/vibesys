@@ -119,7 +119,7 @@ phase_install() {
   check "layout"
   for f in bin/vibesys-client bin/vibesys-host bin/vibesys-cli sidecar/pyproject.toml sidecar/uv.lock \
     sidecar/README.md sidecar/src/vs_sidecar/__init__.py sidecar/.venv/bin/python \
-    marketplace/.claude-plugin/marketplace.json marketplace/skills/README.md release.json; do
+    marketplace/.claude-plugin/marketplace.json marketplace/skills/README.md catalogue.pb examples/data-structures/stack/.vibesys/tasks release.json; do
     [ -e "$home/releases/1.0.0/$f" ] || die "missing $home/releases/1.0.0/$f"
   done
   [ "$(readlink "$home/current")" = "releases/1.0.0" ] || die "current does not point at releases/1.0.0"

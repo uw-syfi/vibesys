@@ -706,7 +706,15 @@ RELEASE/release.json        the manifest
 RELEASE/bin/                vibesys-client  vibesys-host  vibesys-cli
 RELEASE/sidecar/            pyproject.toml, uv.lock, src/, .venv/   (.venv made at install by uv sync --frozen)
 RELEASE/marketplace/        .claude-plugin/marketplace.json, skills/...
+RELEASE/catalogue.pb        the ReleaseCatalogue: one entry per example task, built from the CLI's card reader
+RELEASE/examples/           one folder per example, at its id (model-serving/flint)
 ```
+
+The examples are those of `examples/registry.toml`. `orchestrator/release/assemble` lays each into the
+release and writes `catalogue.pb` from the task files, so the catalogue cannot say anything the
+tasks do not; an example that lives in another repository carries only its own files, and its entry
+pins the clone (URL and full commit, from the checkout's submodule). `release.ExampleSource` reads an
+example back from a release, and `internal/production` serves the catalogue and the trees to the host.
 
 `vibesys-client release verify [--installed] DIR` checks DIR against its own manifest, names every
 file that is missing or cannot run, prints the version on success, and needs no host. The installer

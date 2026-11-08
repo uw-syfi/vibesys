@@ -10,7 +10,15 @@
 #   bin/{vibesys-client,vibesys-host,vibesys-cli}   static Go binaries (CGO off)
 #   sidecar/                                        pyproject.toml uv.lock README.md src/
 #   marketplace/                                    .claude-plugin/marketplace.json and skills/
+#   examples/                                       the example tasks of examples/registry.toml, one folder each
+#   catalogue.pb                                    the ReleaseCatalogue: one entry per example task
 #   release.json                                    the ReleaseManifest, written last
+#
+# examples/ and catalogue.pb are made by orchestrator/cmd/release-manifest from the repository's
+# examples/registry.toml: an example that lives in another repository carries only its own files,
+# fetched at the revision this checkout pins (so that step needs the network), and the catalogue
+# pins the clone. The catalogue is read from the task files by this build's own vibesys-cli, so it
+# cannot drift from them. Nothing under examples/*/repositories/ in the checkout is shipped.
 #
 # release.json is the one definition of the layout (orchestrator/release): it is written by
 # orchestrator/cmd/release-manifest, which refuses to write it when a file it requires is not in
@@ -43,7 +51,8 @@ mkdir -p "$4"
 out="$(cd "$4" && pwd)"
 name="vibesys_${version}_${os}_${arch}"
 stage="$(mktemp -d)"
-trap 'rm -rf "$stage"' EXIT
+work="$(mktemp -d)"
+trap 'rm -rf "$stage" "$work"' EXIT
 mkdir -p "$stage/bin" "$stage/sidecar" "$stage/marketplace/.claude-plugin"
 
 # gobuild MODULE_DIR PACKAGE BINARY VERSION_VAR: one static binary for the target. VERSION_VAR is the
@@ -71,6 +80,13 @@ find "$stage/sidecar" -name __pycache__ -prune -exec rm -rf {} +
 cp "$root/.claude-plugin/marketplace.json" "$stage/marketplace/.claude-plugin/"
 cp -R "$root/skills" "$stage/marketplace/skills"
 find "$stage/marketplace" -name __pycache__ -prune -exec rm -rf {} +
+
+# The examples and their catalogue. The card reader is a vibesys-cli this machine can run, whatever
+# platform the release is for.
+(cd "$root/cli" && env -u GOOS -u GOARCH -u CGO_ENABLED \
+  go build -trimpath -buildvcs=false -o "$work/vibesys-cli" ./cmd/vibesys-cli)
+(cd "$root/orchestrator" && env -u GOOS -u GOARCH -u CGO_ENABLED \
+  go run ./cmd/release-manifest examples "$version" "$root" "$stage" "$work/vibesys-cli")
 
 # The manifest is written by the build machine's own Go, whatever platform the binaries are for.
 (cd "$root/orchestrator" && env -u GOOS -u GOARCH -u CGO_ENABLED \
