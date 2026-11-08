@@ -10,6 +10,7 @@ import {
   decodeValidated,
   encodeMessage,
   Harness,
+  ProvisionRepositoryRequestSchema,
   RunChangeSchema,
 } from './index.js';
 
@@ -48,5 +49,30 @@ describe('the orchestrator bindings', () => {
       startedAt: timestampFromMs(0),
     });
     expect(() => decodeValidated(AgentSchema, encodeMessage(AgentSchema, agent))).toThrow(/id/);
+  });
+
+  test('a repository is made under an absolute folder, the home folder, or the host default', () => {
+    const request = (parentDirectory: string) =>
+      create(ProvisionRepositoryRequestSchema, {
+        requestId: 'r',
+        name: 'repo',
+        source: {case: 'empty', value: {}},
+        parentDirectory,
+      });
+    const parses = (parent: string): boolean => {
+      try {
+        decodeValidated(
+          ProvisionRepositoryRequestSchema,
+          encodeMessage(ProvisionRepositoryRequestSchema, request(parent)),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (const allowed of ['', '/srv/repos', '~', '~/work', '~/a/b'])
+      expect(parses(allowed)).toBe(true);
+    for (const refused of ['work', '~user/x', '~work', './x', '~/a\0b'])
+      expect(parses(refused)).toBe(false);
   });
 });
