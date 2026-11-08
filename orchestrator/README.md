@@ -727,6 +727,14 @@ tasks do not; an example that lives in another repository carries only its own f
 pins the clone (URL and full commit, from the checkout's submodule). `release.ExampleSource` reads an
 example back from a release, and `internal/production` serves the catalogue and the trees to the host.
 
+The cards come from the release's own `vibesys-cli`, run as a sandbox daemon of its own (its home,
+temporary files and runtime directory are in a folder the build makes, and `VIBESYS_CLI_SANDBOX=1`), so
+the build never takes the machine lock of the daemon a user runs, never reads through it and never stops
+it. A card also says whether the job tool can run its task (`unsupported`, the refusal the job tool's own
+loader makes of the same files). The catalogue keeps such an example, and `ListCatalogue` gives it the fit
+`UNSUPPORTED` whatever the places are, so it is never offered as one a run can start from, and a start on
+a task whose card says so is refused with the job tool's words.
+
 `vibesys-client release verify [--installed] DIR` checks DIR against its own manifest, names every
 file that is missing or cannot run, prints the version on success, and needs no host. The installer
 asks it, instead of keeping a path list. `--installed` also requires what install makes, the session

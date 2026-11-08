@@ -375,7 +375,11 @@ never calls them.
   every card (`DescribeTask`), so it reads no task file and no hardware itself.
   A `Fit` is advice worked out per call from the current places; `StartRun`
   decides again, and refuses a place that is unknown or does not give the
-  task's accelerator.
+  task's accelerator. A card also says whether the job tool can run the task at
+  all (`TaskCard.unsupported`, the refusal the job tool's loader makes of the
+  same files, so the host keeps no list of what is supported): such an example
+  is `UNSUPPORTED` whatever the places are, and `StartRun` refuses a task
+  whose card says so, with the job tool's words.
 - `ProvisionRepository` makes a git repository on the host, from a catalogue
   example or empty, and never overwrites. It is idempotent on its request id. A
   refusal is a typed `ProvisionRefusal`, not an error. `CheckRepository` and

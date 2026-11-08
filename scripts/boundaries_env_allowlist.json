@@ -51,6 +51,10 @@
   "orchestrator/internal/localfs/localfs.go": {
     "XDG_STATE_HOME": 1
   },
+  "orchestrator/release/assemble/os.go": {
+    "VIBESYS_CLI_SANDBOX": 1,
+    "XDG_RUNTIME_DIR": 1
+  },
   "sdk/vibesys-evaluator/go/evaluator/files.go": {
     "VIBESYS_ARTIFACTS_DIR": 1,
     "VIBESYS_SAMPLE_SEED": 1
