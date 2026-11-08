@@ -33,8 +33,9 @@ func examples(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The CLI's daemon keeps its state and socket under the home it is given, so the build leaves
-	// nothing in the builder's own, and the folder is short enough to hold a socket.
+	// The card reader's daemon keeps all its state in this folder (a sandbox daemon of its own, so the
+	// build neither collides with the builder's daemon nor reaches it), and the folder is short enough
+	// to hold a socket.
 	work, err := os.MkdirTemp("/tmp", "vsb")
 	if err != nil {
 		return err
@@ -58,9 +59,7 @@ func examples(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	cards := assemble.CLICardReader{Program: cli, Env: []string{
-		"HOME=" + work, "TMPDIR=" + work,
-	}}
+	cards := assemble.CLICardReader{Program: cli, State: work}
 	catalogue, err := assemble.Catalogue(ctx, version, stage, staged, cards)
 	if stopErr := cards.Stop(ctx); err == nil && stopErr != nil {
 		err = fmt.Errorf("stopping the CLI's daemon: %w", stopErr)

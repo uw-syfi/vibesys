@@ -30,16 +30,58 @@ func (s DirSink) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return os.WriteFile(filepath.Join(s.Root, filepath.FromSlash(name)), data, perm)
 }
 
+// Runner runs a program with exactly the environment it is given, and returns what it wrote. The error
+// is the program's status.
+type Runner interface {
+	Run(ctx context.Context, program string, args, env []string) (stdout, stderr []byte, err error)
+}
+
+// ExecRunner is the real program, as a Runner.
+type ExecRunner struct{}
+
+var _ Runner = ExecRunner{}
+
+// Run implements Runner.
+func (ExecRunner) Run(ctx context.Context, program string, args, env []string) ([]byte, []byte, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.Env, cmd.Stdout, cmd.Stderr = env, &stdout, &stderr
+	err := cmd.Run()
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
 // CLICardReader reads a card by running `vibesys-cli task card --json --folder`. The CLI's daemon is
-// the one reader of task files, so this is the reader a run would use. Env is the environment the
-// program runs in, so a builder gives it a state folder of its own, and the daemon it starts is
-// stopped with Stop.
+// the one reader of task files, so this is the reader a run would use.
+//
+// The daemon it starts is its own, and shares nothing with the daemon of the person who builds. A
+// user has one daemon on a machine, which holds the machine lock whatever its runtime directory, and a
+// program with no runtime directory of its own reaches the user's default one: a card read that took
+// either would fail the build while the user's daemon runs, or read through that daemon and then stop
+// it. So the reader's environment is made here, from State alone and never from the builder's: a
+// sandbox daemon (which takes no machine lock) with State as its home, its temporary files and its
+// runtime directory. Stop ends it.
 type CLICardReader struct {
 	Program string
-	Env     []string
+	// State is an existing folder the reader owns while it is used, which holds all the daemon's state
+	// and none of the builder's. It is short enough for a socket's path, as a folder made under /tmp is.
+	State string
+	// Runner runs the program. Nil is ExecRunner.
+	Runner Runner
 }
 
 var _ CardReader = CLICardReader{}
+
+// Environ is the whole environment the program runs in: nothing of the builder's reaches it.
+func (r CLICardReader) Environ() []string {
+	return []string{
+		"HOME=" + r.State,
+		"TMPDIR=" + r.State,
+		"XDG_RUNTIME_DIR=" + filepath.Join(r.State, "run"),
+		// The name and the value are the CLI's (production.EnvSandbox in vibesys-cli): a sandbox daemon
+		// holds no machine lock and is told apart from the one a user's work depends on.
+		"VIBESYS_CLI_SANDBOX=1",
+	}
+}
 
 // Card implements CardReader.
 func (r CLICardReader) Card(ctx context.Context, folder, task string) (*cliv1.TaskCard, error) {
@@ -54,20 +96,22 @@ func (r CLICardReader) Card(ctx context.Context, folder, task string) (*cliv1.Ta
 	return &card, nil
 }
 
-// Stop stops the daemon the card reads started.
+// Stop stops the daemon the card reads started, which is the reader's own.
 func (r CLICardReader) Stop(ctx context.Context) error {
 	_, err := r.run(ctx, "daemon", "stop")
 	return err
 }
 
 func (r CLICardReader) run(ctx context.Context, args ...string) ([]byte, error) {
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, r.Program, args...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = r.Env, &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%s %s: %w: %s", filepath.Base(r.Program), strings.Join(args[:2], " "), err, strings.TrimSpace(stderr.String()))
+	runner := r.Runner
+	if runner == nil {
+		runner = ExecRunner{}
 	}
-	return stdout.Bytes(), nil
+	stdout, stderr, err := runner.Run(ctx, r.Program, args, r.Environ())
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w: %s", filepath.Base(r.Program), strings.Join(args[:2], " "), err, strings.TrimSpace(string(stderr)))
+	}
+	return stdout, nil
 }
 
 // GitExternals fetches an external example's own files from the repository the checkout pins as a
