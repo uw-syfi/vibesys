@@ -536,6 +536,36 @@ func TestASecondChangeOfTheLeadWaitsForTheFirstHandoverToBeRead(t *testing.T) {
 	}
 }
 
+// A lead that falls before it read the handover of a change, while another change waits, is handed the run
+// once: the handover it never read is written again as the run stands, not queued beside the new one.
+func TestALeadThatFallsBeforeReadingItsHandoverIsHandedTheRunOnce(t *testing.T) {
+	w, run, leadID := started(t, 2, noSteer)
+	w.update(run, core.UpdateRun{Lead: &leadOn})
+	w.fact(leadID, core.SessionClosed{})
+	next := core.AgentSpec{Harness: core.ClaudeCode, Model: "sonnet"}
+	w.update(run, core.UpdateRun{Lead: &next})
+
+	w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: 2}, Detail: "gone"})
+	if l, ok := w.launched(); !ok || l.Spec != next || l.Session.N != 3 || l.ResumeToken != "" {
+		t.Fatalf("launch = %+v (%v)", l, ok)
+	}
+	var handovers []core.LeadHandover
+	for _, m := range w.s.InTransit() {
+		if h, ok := m.Body.(core.LeadHandover); ok {
+			handovers = append(handovers, h)
+		}
+	}
+	if len(handovers) != 1 || handovers[0].Previous != leadOn {
+		t.Fatalf("the handovers waiting for the lead: %+v, want one, from the lead that fell", handovers)
+	}
+	w.open(leadID, noSteer)
+	if turn, ok := w.startedTurn(); !ok {
+		t.Fatal("no turn started")
+	} else if _, ok := turn.Message.Body.(core.LeadHandover); !ok {
+		t.Fatalf("first turn is for %+v", turn.Message.Body)
+	}
+}
+
 // A crash at any point between the request and the switch recovers from the log: the run holds the
 // wanted lead, and what is left of the change is done once.
 func TestACrashBetweenRequestedAndAppliedRecoversFromThePendingLead(t *testing.T) {

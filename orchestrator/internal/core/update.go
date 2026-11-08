@@ -136,15 +136,18 @@ func (r Run) totalTime() time.Duration {
 
 // wantLead records that the lead is to run on want, on a copy of the run, and says what changed. Asking
 // for the spec the lead has already withdraws a change that waited, and asking for the one that waits
-// changes nothing. The lead's harness and model join the run's allowance if they were not in it, as a
-// start's lead is, so that the lead is never outside it.
+// changes nothing. A change whose session is already closing cannot be withdrawn, since that session is
+// going: asking for another spec, the lead's own included, sets what the fresh session opens on. The
+// lead's harness and model join the run's allowance if they were not in it, as a start's lead is, so
+// that the lead is never outside it.
 func (t *tx) wantLead(run *Run, want AgentSpec) (SettingChange, bool) {
-	current := t.s.agents[run.Lead].Spec
+	lead := t.s.agents[run.Lead]
+	current, closing := lead.Spec, lead.Stop != StopNone
 	pending := run.PendingLead
 	switch {
 	case want == current && pending == nil:
 		return SettingChange{}, false
-	case want == current:
+	case want == current && !closing:
 		run.PendingLead = nil
 		return SettingChange{Lead: &LeadChange{From: *pending, To: current, State: LeadChangeApplied}}, true
 	case pending != nil && *pending == want:

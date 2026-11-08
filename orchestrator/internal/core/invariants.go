@@ -84,15 +84,15 @@ func (s State) Violations() []string {
 }
 
 // leadChangeBreaches says how a run's wait to change its lead disagrees with the run: it waits only in
-// a run that is live, for a spec other than the lead's that the run allows, and the lead of a live run
-// stops only to be replaced.
+// a run that is live, for a spec that the run allows and that is not the lead's unless the lead's session
+// is already closing, and the lead of a live run stops only to be replaced.
 func (s State) leadChangeBreaches(run Run, bad func(format string, args ...any)) {
 	lead, ok := s.agents[run.Lead]
 	if run.PendingLead != nil {
 		switch {
 		case !run.Status.Live():
 			bad("run %s is %s and still waits to change its lead to %+v", run.ID, run.Status, *run.PendingLead)
-		case ok && lead.Spec == *run.PendingLead:
+		case ok && lead.Spec == *run.PendingLead && lead.Stop == StopNone:
 			bad("run %s waits to change its lead to the spec it has: %+v", run.ID, lead.Spec)
 		case !slices.Contains(run.Allowed, AgentChoice{Harness: run.PendingLead.Harness, Model: run.PendingLead.Model}):
 			bad("run %s waits to change its lead to %+v, outside what it allows: %v", run.ID, *run.PendingLead, run.Allowed)

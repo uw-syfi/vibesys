@@ -35,12 +35,18 @@ func (t *tx) handoverDue(a agentState) bool {
 	if a.Role != RoleLead || !run.Status.Live() || run.PendingLead == nil || t.steerPending(a.ID) {
 		return false
 	}
+	_, unread := t.queuedHandover(a)
+	return !unread
+}
+
+// queuedHandover finds the handover an agent has been sent and not yet started a turn on.
+func (t *tx) queuedHandover(a agentState) (MessageID, bool) {
 	for _, id := range a.queue {
 		if _, held := t.s.messages[id].Body.(LeadHandover); held {
-			return false
+			return id, true
 		}
 	}
-	return true
+	return "", false
 }
 
 // beginHandover closes the session of a lead that is due to be replaced. The grace timer ends the wait
@@ -60,7 +66,10 @@ func (t *tx) handOver(a agentState) {
 	t.emit(run.ID, RunSettingsUpdated{Run: run.ID, Changes: []SettingChange{
 		{Lead: &LeadChange{From: handover.Previous, To: to, State: LeadChangeApplied}},
 	}})
-	t.post(Message{Run: run.ID, To: a.ID, Body: handover})
+	// A lead that fell before it read the handover of an earlier change is handed the run as it stands now
+	// in the same message: one handover is read, never two.
+	unread, _ := t.queuedHandover(a)
+	t.post(Message{ID: unread, Run: run.ID, To: a.ID, Body: handover})
 }
 
 // handoverFor words what the new lead is told, from the run as it stands: nothing in it is read from
