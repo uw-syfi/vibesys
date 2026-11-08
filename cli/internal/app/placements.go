@@ -102,16 +102,20 @@ func (r *PlacementReader) read(ctx context.Context, name string, p Placement) co
 			view.Unknown = core.OffersNotProbeable
 		}
 		view.Detail = truncate(fmt.Sprintf("%s: %v", name, err), maxDetailBytes)
-		view.Reason = view.Detail
+		if view.Unknown == core.OffersNotProbeable {
+			view.Reach = core.ReachNotProbed
+			return view
+		}
+		view.Reach, view.Reason = core.ReachUnreachable, view.Detail
 		return view
 	}
 	view.Offers, view.Source = slices.Clone(offers), p.Source
 	if p.Source == core.OfferDeclared {
 		// Nothing was asked of the placement, so nothing is known of whether it answers.
-		view.Reason = "not probed"
+		view.Reach = core.ReachNotProbed
 		return view
 	}
-	view.Reachable, view.ProbedAt = true, r.clock.Now()
+	view.Reach, view.ProbedAt = core.ReachReachable, r.clock.Now()
 	return view
 }
 

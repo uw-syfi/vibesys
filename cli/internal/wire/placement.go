@@ -27,6 +27,12 @@ func ToPlacementKind(field string, k cliv1.PlacementKind) (core.PlacementKind, e
 	return 0, invalid("%s: %s is not a placement kind", field, k)
 }
 
+var reachStates = map[core.Reach]cliv1.ReachState{
+	core.ReachReachable:   cliv1.ReachState_REACH_STATE_REACHABLE,
+	core.ReachUnreachable: cliv1.ReachState_REACH_STATE_UNREACHABLE,
+	core.ReachNotProbed:   cliv1.ReachState_REACH_STATE_NOT_PROBED,
+}
+
 var acceleratorVendors = []struct {
 	domain core.AcceleratorVendor
 	wire   cliv1.AcceleratorVendor
@@ -69,7 +75,7 @@ func AcceleratorOffer(a core.Accelerator) *cliv1.AcceleratorOffer {
 
 // PlacementView returns the contract's view of a placement reading.
 func PlacementView(r core.PlacementReading) *cliv1.PlacementView {
-	view := &cliv1.PlacementView{Name: r.Name, MaxJobs: r.MaxJobs, Reach: &cliv1.PlacementReach{Reachable: r.Reachable, Reason: r.Reason}}
+	view := &cliv1.PlacementView{Name: r.Name, MaxJobs: r.MaxJobs, Reach: &cliv1.PlacementReach{State: reachStates[r.Reach], Reason: r.Reason}}
 	for _, p := range placementKinds {
 		if p.domain == r.Kind {
 			view.Kind = p.wire
