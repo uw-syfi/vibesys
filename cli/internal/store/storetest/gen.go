@@ -277,7 +277,7 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
-		Needs: g.needs(), TaskVersion: g.name(),
+		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck,
 	}
 }
 

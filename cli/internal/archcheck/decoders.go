@@ -30,6 +30,7 @@ var unfuzzedDecoders = map[string]string{
 	"ToPlacementKind":      "an enum translator, held total over every contract value by TestPlacementKindsRoundTripAndUnspecifiedIsRefused",
 	"ToJobState":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 	"ToRunPhase":           "an enum translator with no refusal: a phase it cannot read is running, which is the side that holds; TestAPhaseTheDaemonCannotReadHolds covers it",
+	"ToJobStage":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused; unspecified is none",
 	"ToJobKind":            "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 	"ToEnvironmentKind":    "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 	"ToBackendKind":        "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",

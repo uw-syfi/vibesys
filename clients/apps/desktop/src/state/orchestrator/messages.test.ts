@@ -11,6 +11,7 @@ import {
   ReportSchema,
   RunLimit,
   RunLimitReachedSchema,
+  SetupBriefSchema,
   SubagentSettledSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
@@ -30,6 +31,10 @@ const BODIES: readonly (readonly [Kind, Message['body']])[] = [
   ],
   ['brief', {case: 'brief', value: 'work'}],
   ['leadBrief', {case: 'leadBrief', value: create(LeadBriefSchema, {task: 'faster'})}],
+  [
+    'setupBrief',
+    {case: 'setupBrief', value: create(SetupBriefSchema, {repository: '/repo', steering: 'tune'})},
+  ],
   [
     'handoffReminder',
     {case: 'handoffReminder', value: {$typeName: 'vibesys.orchestrator.v1.HandoffReminder'}},
@@ -66,6 +71,9 @@ describe('a message body', () => {
     expect(noteOf(messageOf({case: 'reportDue', value: create(ReportDueSchema)})).kind).toBe(
       'report-due',
     );
+    expect(
+      noteOf(messageOf({case: 'setupBrief', value: create(SetupBriefSchema, {steering: 'tune'})})),
+    ).toEqual({kind: 'brief', text: 'tune'});
     expect(
       noteOf(messageOf({case: 'leadBrief', value: create(LeadBriefSchema, {task: 'x'})})),
     ).toEqual({

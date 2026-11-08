@@ -13,6 +13,7 @@ import "vibesys/cli/v1/placement.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
 import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/setup.proto";
 import "vibesys/cli/v1/task.proto";
 import "vibesys/cli/v1/verdict.proto";
 import "vibesys/cli/v1/version.proto";
@@ -96,6 +97,12 @@ service DaemonService {
   // DescribeTask reads one task's files and answers the card a client shows of it, or why the files
   // cannot be read. The daemon is the only reader of task files.
   rpc DescribeTask(DescribeTaskRequest) returns (DescribeTaskResponse);
+  // DescribeSetup reads, in one pass, what the setup checks of a draft task are derived from: the
+  // task's declarations and version in the working tree, the head of the repository, and the task's
+  // check and measure jobs and base measurements in the store. It decides nothing. Git is read before
+  // the store, so a job newer than the head shows on the next read. An older daemon answers
+  // Unimplemented, which a caller reads as a failure to read, not as an empty answer.
+  rpc DescribeSetup(DescribeSetupRequest) returns (DescribeSetupResponse);
   // ListPlacements reports every placement and the hardware it gives.
   rpc ListPlacements(ListPlacementsRequest) returns (ListPlacementsResponse);
 }
@@ -159,6 +166,20 @@ message TaskUnreadable {
     min_len: 1
     max_bytes: 2048
   }];
+}
+
+message DescribeSetupRequest {
+  string repository = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+  string task = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"];
+}
+
+message DescribeSetupResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    SetupFacts facts = 1;
+    // A half-written manifest: the draft has no facts yet.
+    TaskUnreadable unreadable = 2;
+  }
 }
 
 // CallContext identifies who is calling and about what. The daemon serves many repositories and

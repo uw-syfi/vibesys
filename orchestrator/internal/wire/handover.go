@@ -15,7 +15,7 @@ func leadHandoverOut(h core.LeadHandover) *pb.LeadHandover {
 		PreviousHarness: harnesses.out(h.Previous.Harness), PreviousModel: string(h.Previous.Model), PreviousReasoningEffort: string(h.Previous.Effort),
 		ElapsedSeconds: uint32(h.Elapsed / time.Second), SpentUsd: h.Spent, MaxCostUsd: limitOut(h.MaxCost),
 		LimitReached: runLimits.out(h.LimitReached), ReportsPosted: h.ReportsPosted,
-		AgentsEnded: h.AgentsEnded, ActiveJobs: h.ActiveJobs,
+		AgentsEnded: h.AgentsEnded, ActiveJobs: h.ActiveJobs, Phase: runPhases.out(h.Phase),
 	}
 	if h.MaxTime > 0 {
 		seconds := uint32(h.MaxTime / time.Second)
@@ -41,7 +41,7 @@ func leadHandoverIn(h *pb.LeadHandover, errs *errorList) core.LeadHandover {
 		Elapsed: time.Duration(h.GetElapsedSeconds()) * time.Second, Spent: h.SpentUsd, MaxCost: h.GetMaxCostUsd(),
 		MaxTime:      time.Duration(h.GetMaxTimeSeconds()) * time.Second,
 		LimitReached: runLimits.in(h.GetLimitReached(), errs), ReportsPosted: h.GetReportsPosted(),
-		AgentsEnded: h.GetAgentsEnded(), ActiveJobs: h.GetActiveJobs(),
+		AgentsEnded: h.GetAgentsEnded(), ActiveJobs: h.GetActiveJobs(), Phase: runPhases.in(h.GetPhase(), errs),
 	}
 	if h.LatestReport != nil {
 		report := reportIn(h.LatestReport, errs)
