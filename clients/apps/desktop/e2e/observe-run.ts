@@ -147,19 +147,17 @@ async function launch(world: World, userData: string): Promise<ElectronApplicati
 }
 
 /**
- * The New run page's catalogue step carries the run's two bounds, and its More options a Model control;
- * Escape puts the page away, back to the run list. The host of this world has no policy and cannot name
- * its tool's models, so the model is the tool's own default; the form's choices from a host's models
- * are covered by its DOM tests. With a window folder set, the page is captured (the window alone).
+ * New run opens as a page with its two entry cards and the machine strip, and Escape puts it away, back
+ * to the run list. Which examples fit is the host's catalogue, which this world does not script, so the
+ * Model control and the run's two bounds under a picked example are covered by the DOM tests of the
+ * page, which give it a catalogue. With a window folder set, the page is captured (the window alone).
  */
-async function checkTheStartFormNamesTheModelAndBoundsTheRun(page: Page): Promise<void> {
+async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'New run'}).click();
-  await page.getByRole('button', {name: /Start from an example/}).click();
-  await page.locator('.vs-pick-card:not([data-unavailable])').first().click();
-  await page.getByRole('button', {name: 'More options'}).click();
-  await expect(page.getByLabel('Model')).toBeVisible();
-  await expect(page.getByLabel('Time limit')).toBeVisible();
-  await expect(page.getByLabel('Cost limit ($)')).toBeVisible();
+  await expect(page.getByRole('heading', {level: 1, name: 'New run'})).toBeVisible();
+  await expect(page.getByRole('button', {name: /Start from an example/})).toBeVisible();
+  await expect(page.getByRole('button', {name: /Bring a repository/})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Edit in Machines'})).toBeVisible();
   const folder = process.env['VIBESYS_E2E_SHOTS'];
   if (folder !== undefined && folder !== '')
     await page.screenshot({path: join(folder, '1b-start.png')});
@@ -175,7 +173,7 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await expect(row).toBeVisible();
   await expect(row).toContainText('Finished');
   await seen(page, '1-runs');
-  await checkTheStartFormNamesTheModelAndBoundsTheRun(page);
+  await checkTheNewRunPageOpensAndCloses(page);
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
   await seen(page, '2-report');

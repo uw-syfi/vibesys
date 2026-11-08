@@ -289,6 +289,11 @@ describe('the catalog step', () => {
     if (first === undefined) throw new Error('the catalogue has a card that fits');
     screen.press(first);
     expect(screen.text()).toContain('Evals on');
+    // The run's bounds are on the panel; the model is under More options.
+    expect(screen.text()).toContain('Time limit');
+    expect(screen.text()).toContain('Cost limit ($)');
+    screen.press(screen.control('More options'));
+    expect(screen.text()).toContain('Model');
     screen.press(screen.control('Start run'));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.host).toBe('local');
