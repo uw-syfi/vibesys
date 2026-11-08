@@ -75,12 +75,12 @@ export const fixturePlacesResponse = () =>
 /** Whether any place gives the card's accelerator, and which: the host's fit rule. */
 export function fitOf(card: TaskCard, places: ReadonlyArray<EvalPlace>): Fit {
   const need = card.hardware;
-  // A place whose hardware is unreadable fits nothing, a CPU need included.
+  // A place whose hardware is unreadable fits nothing, a CPU need included. With no place that can
+  // be read, and none at all is that case, the answer is PLACES_UNREADABLE whatever the need.
   const readable = places.filter(each =>
     oneofIs(each.state, 'known', {known: true, unreadable: true}),
   );
-  if (readable.length === 0 && places.length > 0)
-    return create(FitSchema, {state: FitState.PLACES_UNREADABLE});
+  if (readable.length === 0) return create(FitSchema, {state: FitState.PLACES_UNREADABLE});
   if (need === undefined || need.vendor === AcceleratorVendor.CPU)
     return create(FitSchema, {state: FitState.FITS, places: readable.map(each => each.name)});
   if (need.model === AcceleratorModel.OTHER)
