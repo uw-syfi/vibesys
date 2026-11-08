@@ -14,6 +14,7 @@ import {
   Grid,
   ICON_NAMES,
   Icon,
+  Measure,
   PathInput,
   PickCard,
   PickCards,
@@ -515,6 +516,15 @@ export const BASIC_ENTRIES = {
     ),
   },
   PathInput: {render: () => <PathDemo />},
+  Measure: {
+    render: () => (
+      <Measure>
+        <Field label="Name">
+          <TextInput value="ring-buffer" mono readOnly />
+        </Field>
+      </Measure>
+    ),
+  },
   PickCards: {
     render: () => (
       <PickCards label="Examples" columns="fill">

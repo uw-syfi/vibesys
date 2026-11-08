@@ -36,6 +36,8 @@ export function useFieldWiring(control: string): FieldWiring {
 export function Field(props: {
   readonly label: string;
   readonly help?: string;
+  /** The tone of the help line: a check that passed (`ok`) or one to heed (`warn`). */
+  readonly helpTone?: 'ok' | 'warn';
   /** What the field needs explained, shown as the label's tooltip instead of a line of help. */
   readonly hint?: string;
   readonly error?: string;
@@ -75,7 +77,7 @@ export function Field(props: {
       </label>
       <FieldContext.Provider value={wiring}>{props.children}</FieldContext.Provider>
       {helpId === undefined ? null : (
-        <p className="vs-help" id={helpId}>
+        <p className="vs-help" data-tone={props.helpTone} id={helpId}>
           {props.help}
         </p>
       )}

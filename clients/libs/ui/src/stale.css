@@ -32,3 +32,8 @@
   flex: none;
   mask-image: none;
 }
+
+.vs-measure {
+  min-width: 0;
+  max-width: calc(var(--column-main) + var(--column-aside) / 2);
+}

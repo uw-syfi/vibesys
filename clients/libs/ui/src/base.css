@@ -50,6 +50,12 @@ body > div:first-child {
 .vs-help[data-tone="err"] {
   color: var(--err);
 }
+.vs-help[data-tone="ok"] {
+  color: var(--ok);
+}
+.vs-help[data-tone="warn"] {
+  color: var(--warn);
+}
 
 /*
  * The least room between two neighbours that can be hovered or chosen (tabs, rail buttons, sidebar

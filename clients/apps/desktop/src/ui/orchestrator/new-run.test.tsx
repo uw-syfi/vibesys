@@ -355,6 +355,9 @@ describe('the My own step', () => {
     screen.press(card(screen, 'A repository with a task'));
     type(field(screen, 'Pick or type a path'), '/work/decode-service');
     expect(screen.text()).toContain('Git repository, 2 tasks');
+    expect(screen.container.querySelector('.vs-help[data-tone="ok"]')?.textContent).toBe(
+      'Git repository, 2 tasks',
+    );
     screen.press(card(screen, 'prefill'));
     screen.press(screen.control('Start run'));
     expect(started).toEqual([{host: 'local', repository: '/work/decode-service', task: 'prefill'}]);

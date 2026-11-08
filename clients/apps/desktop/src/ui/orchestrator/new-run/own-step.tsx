@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Field,
+  Measure,
   PathInput,
   PickCard,
   PickCards,
@@ -50,7 +51,11 @@ const CASES: readonly {
 ];
 
 /** What the host said of the path typed: its refusal, or the tasks it holds; one line that keeps its room. */
-function checkWords(verdict: RepositoryVerdict): {readonly help?: string; readonly error?: string} {
+function checkWords(verdict: RepositoryVerdict): {
+  readonly help?: string;
+  readonly helpTone?: 'ok';
+  readonly error?: string;
+} {
   switch (verdict._tag) {
     case 'Empty':
       return {};
@@ -60,6 +65,7 @@ function checkWords(verdict: RepositoryVerdict): {readonly help?: string; readon
       return {error: verdict.reason};
     case 'Valid':
       return {
+        helpTone: 'ok',
         help:
           verdict.tasks.length === 0
             ? 'Git repository, no tasks'
@@ -100,21 +106,31 @@ function RepositoryPath(props: {
       ? []
       : completionsOf(split, host?.directories.get(listingKey(split.folder, split.hidden)));
   return (
-    <Field label={`Repository on ${host?.label ?? ''}`} reserveLine {...checkWords(props.verdict)}>
-      <PathInput
-        value={draft.repository}
-        change={props.change}
-        completions={(props.verdict._tag === 'Valid' ? [] : completionsFor(props.own, listed)).map(
-          ({value, detail}) => ({
+    <Measure>
+      {' '}
+      <Field
+        label={`Repository on ${host?.label ?? ''}`}
+        reserveLine
+        {...checkWords(props.verdict)}
+      >
+        <PathInput
+          value={draft.repository}
+          change={props.change}
+          completions={(props.verdict._tag === 'Valid'
+            ? []
+            : completionsFor(props.own, listed)
+          ).map(({value, detail}) => ({
             value,
             ...(detail === undefined ? {} : {detail}),
-          }),
-        )}
-        tabCompletes={split !== undefined && split.prefix !== '' && draft.repository.trim() !== ''}
-        focus={props.enter}
-        placeholder={props.own === 'tasks' ? 'Pick or type a path' : '~/code/my-server'}
-      />
-    </Field>
+          }))}
+          tabCompletes={
+            split !== undefined && split.prefix !== '' && draft.repository.trim() !== ''
+          }
+          focus={props.enter}
+          placeholder={props.own === 'tasks' ? 'Pick or type a path' : '~/code/my-server'}
+        />
+      </Field>
+    </Measure>
   );
 }
 
@@ -243,8 +259,13 @@ function nameLine(
   clash: boolean,
   line: ReturnType<typeof provisionLine>,
   folder: string,
-): {readonly help?: string; readonly error?: string; readonly errorHint?: string} {
-  if (clash) return {error: 'Name taken'};
+): {
+  readonly help?: string;
+  readonly helpTone?: 'ok' | 'warn';
+  readonly error?: string;
+  readonly errorHint?: string;
+} {
+  if (clash) return {help: 'Name taken', helpTone: 'warn'};
   if (line?.failed === true) {
     return {error: line.text, ...(line.title === undefined ? {} : {errorHint: line.title})};
   }
@@ -266,22 +287,25 @@ function NewRepository(props: OwnProps): JSX.Element {
   const block = newBlock(name, clash, props.sending || host?.provision._tag === 'Working');
   return (
     <Stack gap="space-4">
-      <Field
-        label="Name"
-        reserveLine
-        {...nameLine(
-          clash,
-          provisionLine(host?.provision ?? {_tag: 'Idle'}),
-          props.repositories.folder,
-        )}
-      >
-        <TextInput
-          value={page.newName}
-          change={newName => props.act({type: 'new-name', name: newName})}
-          placeholder="ring-buffer"
-          mono
-        />
-      </Field>
+      <Measure>
+        {' '}
+        <Field
+          label="Name"
+          reserveLine
+          {...nameLine(
+            clash,
+            provisionLine(host?.provision ?? {_tag: 'Idle'}),
+            props.repositories.folder,
+          )}
+        >
+          <TextInput
+            value={page.newName}
+            change={newName => props.act({type: 'new-name', name: newName})}
+            placeholder="ring-buffer"
+            mono
+          />
+        </Field>
+      </Measure>
       <Row>
         <Button
           text="Set up a task"
