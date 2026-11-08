@@ -123,6 +123,14 @@
     "Harness.HARNESS_CODEX",
     "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE"
   ],
+  "proto/vibesys/orchestrator/v1/service.proto": [
+    "DirectoryEntry",
+    "DirectoryEntry.is_directory",
+    "ListDirectoryRequest",
+    "ListDirectoryRequest.path",
+    "ListDirectoryResponse",
+    "OrchestratorService.ListDirectory"
+  ],
   "proto/vibesys/orchestrator/v1/stored.proto": [
     "JobToolEndpoint.runtime_directory"
   ]

@@ -43,6 +43,11 @@ export function Field(props: {
   readonly errorHint?: string;
   /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
   readonly hideLabel?: boolean;
+  /**
+   * Keep the line under the control, as one empty line, when there is neither help nor error, so
+   * the text that comes and goes there (a check's answer) never moves what is below it.
+   */
+  readonly reserveLine?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const id = useId();
@@ -74,6 +79,11 @@ export function Field(props: {
           {props.help}
         </p>
       )}
+      {props.reserveLine === true && helpId === undefined && errorId === undefined ? (
+        <p className="vs-help" aria-hidden="true">
+          {'\u00a0'}
+        </p>
+      ) : null}
       {errorId === undefined ? null : (
         <p className="vs-help" data-tone="err" id={errorId} title={props.errorHint}>
           {props.error}

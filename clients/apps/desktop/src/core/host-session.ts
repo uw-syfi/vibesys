@@ -16,6 +16,7 @@ import {makeClient} from './client/make-client.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
+import {type DirectoryListings, makeDirectoryListings} from './directory-listing.js';
 import {makeHostReadiness} from './host-control.js';
 import {type HostCostFeed, makeHostCostFeed} from './host-cost-feed.js';
 import {makeHostStore} from './host-store.js';
@@ -46,6 +47,8 @@ export interface HostSession {
   readonly commands: Commands;
   /** The host's answer about the repository path being typed in the Start form. */
   readonly repositoryCheck: RepositoryCheck;
+  /** The host's folder listings, for completing the repository path as it is typed. */
+  readonly directories: DirectoryListings;
   /** The press of Catch me up, over `commands`. */
   readonly catchUp: CatchUp;
 }
@@ -76,6 +79,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     }),
     commands,
     repositoryCheck: yield* makeRepositoryCheck(parts),
+    directories: yield* makeDirectoryListings(parts),
     catchUp: yield* makeCatchUp(commands),
   };
 });

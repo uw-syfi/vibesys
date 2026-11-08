@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -23,6 +25,11 @@ type Tree interface {
 	// HasCommit says the git work tree at repository has a commit at HEAD. A branch that was created
 	// and never committed to has none. A detached HEAD that names a commit counts.
 	HasCommit(repository string) (bool, error)
+	// ReadDirNames returns the names of the children of the directory path, in no order, and an error
+	// that wraps fs.ErrNotExist or fs.ErrPermission when that is why it cannot.
+	ReadDirNames(path string) ([]string, error)
+	// Home is the home directory of the user the daemon runs as.
+	Home() (string, error)
 	// CommittedDir says dir, a slash-separated path from the root of the work tree, is a directory
 	// at the commit HEAD names. The files of the working tree do not count.
 	CommittedDir(repository, dir string) (bool, error)
@@ -55,6 +62,19 @@ func (OSTree) HasCommit(repository string) (bool, error) {
 	}
 	return err == nil, err
 }
+
+// ReadDirNames implements Tree.
+func (OSTree) ReadDirNames(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
+// Home implements Tree.
+func (OSTree) Home() (string, error) { return os.UserHomeDir() }
 
 // CommittedDir implements Tree.
 func (OSTree) CommittedDir(repository, dir string) (bool, error) {
@@ -132,6 +152,31 @@ func (c StartChecks) CheckRepository(repository string) (string, error) {
 		return "", err
 	}
 	return repository, c.ready()
+}
+
+// Tasks implements daemon.StartChecks: the folders under the repository's .vibesys/tasks, sorted.
+func (c StartChecks) Tasks(repository string) ([]string, error) {
+	return taskNames(c.Tree, repository)
+}
+
+// taskNames lists the task folders of repository. A repository with no .vibesys/tasks holds none.
+func taskNames(tree Tree, repository string) ([]string, error) {
+	dir := filepath.Join(repository, ".vibesys", "tasks")
+	names, err := tree.ReadDirNames(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("tasks of %s: %w", repository, err)
+	}
+	var tasks []string
+	for _, name := range names {
+		if tree.IsDir(filepath.Join(dir, name)) {
+			tasks = append(tasks, name)
+		}
+	}
+	slices.Sort(tasks)
+	return tasks, nil
 }
 
 // CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a

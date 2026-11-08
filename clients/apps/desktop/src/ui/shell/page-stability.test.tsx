@@ -3,7 +3,6 @@ import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
   AgentStatus,
-  BuildVersionsSchema,
   RunSchema,
   RunStatus,
   RunStopReason,
@@ -19,6 +18,7 @@ import {
   navigationReducer,
   type OrchestratorState,
 } from '../../state/index.js';
+import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
@@ -36,19 +36,8 @@ const scenario = generateScenario({seed: 5, subagents: 2, live: true});
 const live: OrchestratorState = scenario.changes.reduce(applyChange, emptyState);
 const TASK = live.runs[scenario.runId]?.task ?? '';
 
-const hostOf = (data: OrchestratorState): HostSnapshot => ({
-  key: 'local',
-  label: 'This machine',
-  repositoryChecked: undefined,
-  model: {data, agentCursors: {}},
-  connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
-  freshness: {status: 'live', lastUpdateMs: null},
-  runsFeed: {_tag: 'Live'},
-  agentFeeds: {},
-  costFeeds: {},
-  runHistory: {_tag: 'Idle'},
-  history: {earlier: {_tag: 'Idle'}, wholes: {}},
-});
+const hostOf = (data: OrchestratorState): HostSnapshot =>
+  hostSnapshotOf({model: {data, agentCursors: {}}});
 
 /** The window over the navigation fold, drawing the host it is given, recording every intent sent. */
 function Window(props: {
@@ -65,20 +54,7 @@ function Window(props: {
       <OrchestratorApp
         hosts={[props.host]}
         nowMs={scenario.endMs}
-        commands={{
-          start: undefined,
-          stop: {},
-          send: {},
-          startRun: () => undefined,
-          retryStart: () => undefined,
-          stopRun: () => undefined,
-          retryStop: () => undefined,
-          sendMessage: () => undefined,
-          retrySend: () => undefined,
-          loadEarlier: () => undefined,
-          expand: () => undefined,
-          checkRepository: () => undefined,
-        }}
+        commands={appCommandsOf()}
         retryHost={() => undefined}
         retryCost={() => undefined}
         route={navigation.runs}
