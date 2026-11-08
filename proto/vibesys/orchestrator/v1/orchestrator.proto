@@ -21,8 +21,9 @@ enum RunStatus {
   RUN_STATUS_FAILED = 5;
 }
 
-// RunPhase is which part of its life a run is in. A run recorded before phases existed reads as
-// OPTIMIZE.
+// RunPhase is which part of its life a run is in. UNSPECIFIED is a run recorded before phases existed
+// (the field is absent, so it reads 0): every reader treats it as OPTIMIZE, and a writer of a new run
+// always sets SETUP or OPTIMIZE.
 enum RunPhase {
   RUN_PHASE_UNSPECIFIED = 0;
   // The run is making its task with the operator: a chat with the lead, no subagents, no limits.
@@ -233,6 +234,18 @@ enum JobOutcome {
   JOB_OUTCOME_LOST = 4;
 }
 
+// PendingLead is an AgentSpec for the lead that is not yet running. It is a message of its own and not
+// AgentSpec because Run is in this file and AgentSpec is in events.proto, which imports this one, and
+// moving AgentSpec breaks buf's file check; item I6 maps one to the other.
+message PendingLead {
+  Harness harness = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string model = 2;
+  string reasoning_effort = 3;
+}
+
 message Run {
   option (buf.validate.message).cel = {
     id: "run.task_unless_setup"
@@ -314,9 +327,9 @@ message Run {
   // The eval place the run's evaluations go to, by name, resolved when the run started. Empty when the
   // task needs no accelerator and the start chose none.
   string eval_place = 28;
-  // Number 29 is held for the lead change that waits for the lead's turn to end (UpdateRun), which
-  // needs AgentSpec, defined beside the commands.
-  reserved 29;
+  // The lead a change of the lead waits to apply when the lead's current turn ends (UpdateRun). Durable,
+  // so a restart in the middle of a handover finds it. Absent when none waits.
+  PendingLead pending_lead = 29;
   RunPhase phase = 30 [(buf.validate.field).enum.defined_only = true];
   // When the run left setup. Absent while it is in setup and for runs that never had one. The run's
   // time limit and its cost limit count from here for a run that had a setup.

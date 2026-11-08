@@ -50,12 +50,34 @@ message EvalPlace {
   }];
   // What the place gives, in the order the place reported it. Empty with a known state means no
   // accelerator.
-  repeated vibesys.cli.v1.AcceleratorOffer offers = 3 [(buf.validate.field).repeated.max_items = 64];
+  repeated EvalOffer offers = 3 [(buf.validate.field).repeated.max_items = 64];
   oneof state {
     option (buf.validate.oneof).required = true;
     OffersKnown known = 4;
     OffersUnreadable unreadable = 5;
   }
+}
+
+// EvalOffer is what an eval place gives: `count` devices of one model. It is the orchestrator's own
+// message: the CLI's offers are private to its contract, and the host maps one to the other.
+message EvalOffer {
+  option (buf.validate.message).cel = {
+    id: "eval_offer.model_of_vendor"
+    message: "the model is not a device of the vendor, or is missing"
+    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
+  };
+
+  vibesys.cli.v1.AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  vibesys.cli.v1.AcceleratorModel model = 2 [(buf.validate.field).enum.defined_only = true];
+  uint32 count = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 4096
+  }];
+  // The device as it reported itself, for a client to show beside an OTHER model.
+  string device_name = 4 [(buf.validate.field).string.max_bytes = 128];
 }
 
 message OffersKnown {

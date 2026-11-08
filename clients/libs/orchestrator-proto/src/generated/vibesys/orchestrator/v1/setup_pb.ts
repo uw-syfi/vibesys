@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/setup.proto.
  */
 export const file_vibesys_orchestrator_v1_setup: GenFile = /*@__PURE__*/
-  fileDesc("CiN2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXR1cC5wcm90bxIXdmliZXN5cy5vcmNoZXN0cmF0b3IudjEiqgEKClNldHVwQ2hlY2sSPQoCaWQYASABKA4yJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXR1cENoZWNrSWRCCrpIB4IBBBABIAASQwoFc3RhdGUYAiABKA4yKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXR1cENoZWNrU3RhdGVCCrpIB4IBBBABIAASGAoGZGV0YWlsGAMgASgJQgi6SAVyAyiACCIyChRTZXR1cERyYWZ0VW5yZWFkYWJsZRIaCgZkZXRhaWwYASABKAlCCrpIB3IFEAEogBAi7AMKCVNldHVwVmlldxIWCgR0YXNrGAEgASgJQgi6SAVyAyiAAhIoCgRjYXJkGAIgASgLMhgudmliZXN5cy5jbGkudjEuVGFza0NhcmRIABJDCgp1bnJlYWRhYmxlGAMgASgLMi0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2V0dXBEcmFmdFVucmVhZGFibGVIABI/CgZjaGVja3MYBCADKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXR1cENoZWNrQgq6SAeSAQQIBhAGEiQKDmJhc2VsaW5lX3ZhbHVlGAUgASgBQge6SAQSAkABSAGIAQESHgoNYmFzZWxpbmVfdW5pdBgGIAEoCUIHukgEcgIoQBItChdiYXNlbGluZV9zcHJlYWRfcGVyY2VudBgHIAEoAUIHukgEEgJAAUgCiAEBEhEKCWNhbl9zdGFydBgIIAEoCBIjCglzcGVudF91c2QYCSABKAFCELpIDRILQAEpAAAAAAAAAAASMgoHZWxhcHNlZBgKIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIGukgDyAEBQgcKBWRyYWZ0QhEKD19iYXNlbGluZV92YWx1ZUIaChhfYmFzZWxpbmVfc3ByZWFkX3BlcmNlbnQq8wEKDFNldHVwQ2hlY2tJZBIeChpTRVRVUF9DSEVDS19JRF9VTlNQRUNJRklFRBAAEhwKGFNFVFVQX0NIRUNLX0lEX09CSkVDVElWRRABEiQKIFNFVFVQX0NIRUNLX0lEX0NPUlJFQ1RORVNTX0NIRUNLEAISHAoYU0VUVVBfQ0hFQ0tfSURfQkVOQ0hNQVJLEAMSHgoaU0VUVVBfQ0hFQ0tfSURfQkFTRV9QQVNTRVMQBBIfChtTRVRVUF9DSEVDS19JRF9CUk9LRU5fRkFJTFMQBRIgChxTRVRVUF9DSEVDS19JRF9OVU1CRVJfU1RBQkxFEAYqrgEKD1NldHVwQ2hlY2tTdGF0ZRIhCh1TRVRVUF9DSEVDS19TVEFURV9VTlNQRUNJRklFRBAAEh0KGVNFVFVQX0NIRUNLX1NUQVRFX1BFTkRJTkcQARIdChlTRVRVUF9DSEVDS19TVEFURV9SVU5OSU5HEAISHAoYU0VUVVBfQ0hFQ0tfU1RBVEVfUEFTU0VEEAMSHAoYU0VUVVBfQ0hFQ0tfU1RBVEVfRkFJTEVEEARCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_vibesys_cli_v1_task]);
+  fileDesc("CiN2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXR1cC5wcm90bxIXdmliZXN5cy5vcmNoZXN0cmF0b3IudjEiqgEKClNldHVwQ2hlY2sSPQoCaWQYASABKA4yJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXR1cENoZWNrSWRCCrpIB4IBBBABIAASQwoFc3RhdGUYAiABKA4yKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXR1cENoZWNrU3RhdGVCCrpIB4IBBBABIAASGAoGZGV0YWlsGAMgASgJQgi6SAVyAyiACCIyChRTZXR1cERyYWZ0VW5yZWFkYWJsZRIaCgZkZXRhaWwYASABKAlCCrpIB3IFEAEogBAi0gQKCVNldHVwVmlldxIWCgR0YXNrGAEgASgJQgi6SAVyAyiAAhIoCgRjYXJkGAIgASgLMhgudmliZXN5cy5jbGkudjEuVGFza0NhcmRIABJDCgp1bnJlYWRhYmxlGAMgASgLMi0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2V0dXBEcmFmdFVucmVhZGFibGVIABK3AQoGY2hlY2tzGAQgAygLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2V0dXBDaGVja0KBAbpIfroBdAodc2V0dXBfdmlldy5jaGVja3NfaW5faWRfb3JkZXISKnRoZSBjaGVja3MgYXJlIG9uZSBvZiBlYWNoIGlkLCBpbiBpZCBvcmRlchondGhpcy5tYXAoYywgYy5pZCkgPT0gWzEsIDIsIDMsIDQsIDUsIDZdkgEECAYQBhIkCg5iYXNlbGluZV92YWx1ZRgFIAEoAUIHukgEEgJAAUgBiAEBEh4KDWJhc2VsaW5lX3VuaXQYBiABKAlCB7pIBHICKEASLQoXYmFzZWxpbmVfc3ByZWFkX3BlcmNlbnQYByABKAFCB7pIBBICQAFIAogBARIjCglzcGVudF91c2QYCCABKAFCELpIDRILQAEpAAAAAAAAAAASMgoHZWxhcHNlZBgJIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIGukgDyAEBQgcKBWRyYWZ0QhEKD19iYXNlbGluZV92YWx1ZUIaChhfYmFzZWxpbmVfc3ByZWFkX3BlcmNlbnQq8wEKDFNldHVwQ2hlY2tJZBIeChpTRVRVUF9DSEVDS19JRF9VTlNQRUNJRklFRBAAEhwKGFNFVFVQX0NIRUNLX0lEX09CSkVDVElWRRABEiQKIFNFVFVQX0NIRUNLX0lEX0NPUlJFQ1RORVNTX0NIRUNLEAISHAoYU0VUVVBfQ0hFQ0tfSURfQkVOQ0hNQVJLEAMSHgoaU0VUVVBfQ0hFQ0tfSURfQkFTRV9QQVNTRVMQBBIfChtTRVRVUF9DSEVDS19JRF9CUk9LRU5fRkFJTFMQBRIgChxTRVRVUF9DSEVDS19JRF9OVU1CRVJfU1RBQkxFEAYqrgEKD1NldHVwQ2hlY2tTdGF0ZRIhCh1TRVRVUF9DSEVDS19TVEFURV9VTlNQRUNJRklFRBAAEh0KGVNFVFVQX0NIRUNLX1NUQVRFX1BFTkRJTkcQARIdChlTRVRVUF9DSEVDS19TVEFURV9SVU5OSU5HEAISHAoYU0VUVVBfQ0hFQ0tfU1RBVEVfUEFTU0VEEAMSHAoYU0VUVVBfQ0hFQ0tfU1RBVEVfRkFJTEVEEARCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_vibesys_cli_v1_task]);
 
 /**
  * SetupCheck is one check as the host derived it from facts, never from an agent's account.
@@ -104,7 +104,8 @@ export type SetupView = Message<"vibesys.orchestrator.v1.SetupView"> & {
   } | { case: undefined; value?: undefined };
 
   /**
-   * One of each id, in id order.
+   * One of each id, in id order. Whether setup can complete is not a field: it is every check passed,
+   * which the consumer reads from here, and CompleteSetup decides again.
    *
    * @generated from field: repeated vibesys.orchestrator.v1.SetupCheck checks = 4;
    */
@@ -126,17 +127,10 @@ export type SetupView = Message<"vibesys.orchestrator.v1.SetupView"> & {
   baselineSpreadPercent?: number | undefined;
 
   /**
-   * All six checks passed, and CompleteSetup agrees.
-   *
-   * @generated from field: bool can_start = 8;
-   */
-  canStart: boolean;
-
-  /**
    * What the setup phase has cost, in dollars: every turn of every agent of the run while it was in
    * setup. Not counted toward the run's cost limit.
    *
-   * @generated from field: double spent_usd = 9;
+   * @generated from field: double spent_usd = 8;
    */
   spentUsd: number;
 
@@ -144,7 +138,7 @@ export type SetupView = Message<"vibesys.orchestrator.v1.SetupView"> & {
    * How long the setup phase has lasted, or lasted when it ended. Not counted toward the run's time
    * limit.
    *
-   * @generated from field: google.protobuf.Duration elapsed = 10;
+   * @generated from field: google.protobuf.Duration elapsed = 9;
    */
   elapsed?: Duration | undefined;
 };

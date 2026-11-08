@@ -335,9 +335,13 @@ func (ResourceKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{4}
 }
 
-// AcceleratorNeed is what a task wants of the place that evaluates it. A need fits an offer when the
-// vendor is the same, the offer has at least `count` devices, and the model is the same or the need
-// names none: a need of "NVIDIA GPU" (model unspecified) fits any device of that vendor.
+// AcceleratorNeed is what a task wants of the place that evaluates it. Precedence of the fit rule, which
+// the orchestrator's fit function states once: a place whose hardware is unknown or unreadable fits
+// nothing, a CPU need included; an offer whose model is OTHER fits nothing, since a device the registry
+// does not know cannot be shown to be the one wanted; otherwise a need fits an offer when the vendor is
+// the same, the offer has at least `count` devices, and the model is the same or the need names none:
+// a need of "NVIDIA GPU" (model unspecified) fits any known device of that vendor. A CPU need fits any
+// place with a known state. The model must be a device of the vendor (see the rule below).
 type AcceleratorNeed struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Vendor AcceleratorVendor      `protobuf:"varint,1,opt,name=vendor,proto3,enum=vibesys.cli.v1.AcceleratorVendor" json:"vendor,omitempty"`
@@ -710,13 +714,14 @@ var File_vibesys_cli_v1_environment_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbc\x01\n" +
+	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9f\x04\n" +
 	"\x0fAcceleratorNeed\x12E\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
 	"\x05model\x18\x02 \x01(\x0e2 .vibesys.cli.v1.AcceleratorModelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n" +
 	"\x05count\x18\x03 \x01(\rB\n" +
-	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\"\xe8\x01\n" +
+	"\xbaH\a*\x05\x18\x80 (\x01R\x05count:\xe0\x02\xbaH\xdc\x02\x1a\xd9\x02\n" +
+	" accelerator_need.model_of_vendor\x12Cthe model is not a device of the vendor (a CPU need names no model)\x1a\xef\x01this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false\"\xd4\x04\n" +
 	"\x10AcceleratorOffer\x12E\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
@@ -724,7 +729,8 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x05count\x18\x03 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\x12)\n" +
 	"\vdevice_name\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\n" +
-	"deviceName\"\xaa\x02\n" +
+	"deviceName:\xe9\x02\xbaH\xe5\x02\x1a\xe2\x02\n" +
+	"!accelerator_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x84\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\xaa\x02\n" +
 	"\x16EnvironmentFingerprint\x123\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1f.vibesys.cli.v1.EnvironmentKindR\x04kind\x125\n" +
 	"\abackend\x18\x02 \x01(\x0e2\x1b.vibesys.cli.v1.BackendKindR\abackend\x12!\n" +

@@ -80,6 +80,9 @@ type Run struct {
 	// SetupUsage is what the setup phase cost, frozen when it ended; nil before that and for a run
 	// that never had a setup. The cost limit counts Usage less this.
 	SetupUsage *Usage
+	// PendingLead is the lead a change of the lead waits to apply when the lead's current turn ends;
+	// nil when none waits. It is durable, so a restart in the middle of a handover finds it.
+	PendingLead *AgentSpec
 }
 
 // Checkout is a working copy of a run's repository that one agent made.

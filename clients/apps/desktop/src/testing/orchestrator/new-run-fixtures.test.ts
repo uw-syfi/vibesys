@@ -4,9 +4,13 @@ import {
   AcceleratorModel,
   AcceleratorVendor,
   decodeValidated,
+  EvalPlaceKind,
+  EvalPlaceSchema,
   FitState,
   ListCatalogueResponseSchema,
   ListEvalPlacesResponseSchema,
+  OffersSource,
+  OffersUnreadableReason,
   ProvisionRefusal,
   ProvisionRepositoryRequestSchema,
   ProvisionRepositoryResponseSchema,
@@ -67,6 +71,31 @@ describe('the fake host answers the New run calls', () => {
     expect(fitOf(need(AcceleratorModel.H100, 9), places).state).toBe(FitState.NO_ACCELERATOR);
     expect(fitOf(need(AcceleratorModel.A100, 1), places).state).toBe(FitState.NO_ACCELERATOR);
     expect(fitOf(need(AcceleratorModel.OTHER, 1), places).state).toBe(FitState.UNKNOWN_ACCELERATOR);
+  });
+
+  it('fits nothing on an unreadable place or an OTHER device, a CPU need included', () => {
+    const unreadable = create(EvalPlaceSchema, {
+      name: 'host-b',
+      kind: EvalPlaceKind.SSH,
+      state: {case: 'unreadable', value: {reason: OffersUnreadableReason.UNREACHABLE}},
+    });
+    const odd = create(EvalPlaceSchema, {
+      name: 'cluster-b',
+      kind: EvalPlaceKind.SLURM,
+      offers: [{vendor: AcceleratorVendor.NVIDIA, model: AcceleratorModel.OTHER, count: 8}],
+      state: {case: 'known', value: {source: OffersSource.PROBED}},
+    });
+    const cpu = create(TaskCardSchema, {
+      task: 'c',
+      hardware: {vendor: AcceleratorVendor.CPU, model: AcceleratorModel.UNSPECIFIED, count: 1},
+    });
+    const gpu = create(TaskCardSchema, {
+      task: 'g',
+      hardware: {vendor: AcceleratorVendor.NVIDIA, model: AcceleratorModel.UNSPECIFIED, count: 1},
+    });
+    expect(fitOf(cpu, [unreadable]).state).toBe(FitState.PLACES_UNREADABLE);
+    expect(fitOf(cpu, [unreadable, ...fixturePlaces()]).places).not.toContain('host-b');
+    expect(fitOf(gpu, [odd]).state).toBe(FitState.NO_ACCELERATOR);
   });
 
   it('provisions a name once and refuses it the second time, and an example that needs a clone', () => {

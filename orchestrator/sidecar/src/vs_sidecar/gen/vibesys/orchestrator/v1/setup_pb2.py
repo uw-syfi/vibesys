@@ -27,7 +27,7 @@ from google.protobuf import duration_pb2 as google_dot_protobuf_dot_duration__pb
 from vs_sidecar.gen.vibesys.cli.v1 import task_pb2 as vibesys_dot_cli_dot_v1_dot_task__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#vibesys/orchestrator/v1/setup.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19vibesys/cli/v1/task.proto\"\xbd\x01\n\nSetupCheck\x12\x41\n\x02id\x18\x01 \x01(\x0e\x32%.vibesys.orchestrator.v1.SetupCheckIdB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x02id\x12J\n\x05state\x18\x02 \x01(\x0e\x32(.vibesys.orchestrator.v1.SetupCheckStateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x05state\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80\x08R\x06\x64\x65tail\":\n\x14SetupDraftUnreadable\x12\"\n\x06\x64\x65tail\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x10R\x06\x64\x65tail\"\xdd\x04\n\tSetupView\x12\x1c\n\x04task\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x02R\x04task\x12.\n\x04\x63\x61rd\x18\x02 \x01(\x0b\x32\x18.vibesys.cli.v1.TaskCardH\x00R\x04\x63\x61rd\x12O\n\nunreadable\x18\x03 \x01(\x0b\x32-.vibesys.orchestrator.v1.SetupDraftUnreadableH\x00R\nunreadable\x12G\n\x06\x63hecks\x18\x04 \x03(\x0b\x32#.vibesys.orchestrator.v1.SetupCheckB\n\xbaH\x07\x92\x01\x04\x08\x06\x10\x06R\x06\x63hecks\x12\x33\n\x0e\x62\x61seline_value\x18\x05 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x01R\rbaselineValue\x88\x01\x01\x12,\n\rbaseline_unit\x18\x06 \x01(\tB\x07\xbaH\x04r\x02(@R\x0c\x62\x61selineUnit\x12\x44\n\x17\x62\x61seline_spread_percent\x18\x07 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x02R\x15\x62\x61selineSpreadPercent\x88\x01\x01\x12\x1b\n\tcan_start\x18\x08 \x01(\x08R\x08\x63\x61nStart\x12-\n\tspent_usd\x18\t \x01(\x01\x42\x10\xbaH\r\x12\x0b)\x00\x00\x00\x00\x00\x00\x00\x00@\x01R\x08spentUsd\x12;\n\x07\x65lapsed\x18\n \x01(\x0b\x32\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\x07\x65lapsedB\x07\n\x05\x64raftB\x11\n\x0f_baseline_valueB\x1a\n\x18_baseline_spread_percent*\xf3\x01\n\x0cSetupCheckId\x12\x1e\n\x1aSETUP_CHECK_ID_UNSPECIFIED\x10\x00\x12\x1c\n\x18SETUP_CHECK_ID_OBJECTIVE\x10\x01\x12$\n SETUP_CHECK_ID_CORRECTNESS_CHECK\x10\x02\x12\x1c\n\x18SETUP_CHECK_ID_BENCHMARK\x10\x03\x12\x1e\n\x1aSETUP_CHECK_ID_BASE_PASSES\x10\x04\x12\x1f\n\x1bSETUP_CHECK_ID_BROKEN_FAILS\x10\x05\x12 \n\x1cSETUP_CHECK_ID_NUMBER_STABLE\x10\x06*\xae\x01\n\x0fSetupCheckState\x12!\n\x1dSETUP_CHECK_STATE_UNSPECIFIED\x10\x00\x12\x1d\n\x19SETUP_CHECK_STATE_PENDING\x10\x01\x12\x1d\n\x19SETUP_CHECK_STATE_RUNNING\x10\x02\x12\x1c\n\x18SETUP_CHECK_STATE_PASSED\x10\x03\x12\x1c\n\x18SETUP_CHECK_STATE_FAILED\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#vibesys/orchestrator/v1/setup.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19vibesys/cli/v1/task.proto\"\xbd\x01\n\nSetupCheck\x12\x41\n\x02id\x18\x01 \x01(\x0e\x32%.vibesys.orchestrator.v1.SetupCheckIdB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x02id\x12J\n\x05state\x18\x02 \x01(\x0e\x32(.vibesys.orchestrator.v1.SetupCheckStateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x05state\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80\x08R\x06\x64\x65tail\":\n\x14SetupDraftUnreadable\x12\"\n\x06\x64\x65tail\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x10R\x06\x64\x65tail\"\xb9\x05\n\tSetupView\x12\x1c\n\x04task\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x02R\x04task\x12.\n\x04\x63\x61rd\x18\x02 \x01(\x0b\x32\x18.vibesys.cli.v1.TaskCardH\x00R\x04\x63\x61rd\x12O\n\nunreadable\x18\x03 \x01(\x0b\x32-.vibesys.orchestrator.v1.SetupDraftUnreadableH\x00R\nunreadable\x12\xbf\x01\n\x06\x63hecks\x18\x04 \x03(\x0b\x32#.vibesys.orchestrator.v1.SetupCheckB\x81\x01\xbaH~\x92\x01\x04\x08\x06\x10\x06\xba\x01t\n\x1dsetup_view.checks_in_id_order\x12*the checks are one of each id, in id order\x1a\'this.map(c, c.id) == [1, 2, 3, 4, 5, 6]R\x06\x63hecks\x12\x33\n\x0e\x62\x61seline_value\x18\x05 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x01R\rbaselineValue\x88\x01\x01\x12,\n\rbaseline_unit\x18\x06 \x01(\tB\x07\xbaH\x04r\x02(@R\x0c\x62\x61selineUnit\x12\x44\n\x17\x62\x61seline_spread_percent\x18\x07 \x01(\x01\x42\x07\xbaH\x04\x12\x02@\x01H\x02R\x15\x62\x61selineSpreadPercent\x88\x01\x01\x12-\n\tspent_usd\x18\x08 \x01(\x01\x42\x10\xbaH\r\x12\x0b)\x00\x00\x00\x00\x00\x00\x00\x00@\x01R\x08spentUsd\x12;\n\x07\x65lapsed\x18\t \x01(\x0b\x32\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\x07\x65lapsedB\x07\n\x05\x64raftB\x11\n\x0f_baseline_valueB\x1a\n\x18_baseline_spread_percent*\xf3\x01\n\x0cSetupCheckId\x12\x1e\n\x1aSETUP_CHECK_ID_UNSPECIFIED\x10\x00\x12\x1c\n\x18SETUP_CHECK_ID_OBJECTIVE\x10\x01\x12$\n SETUP_CHECK_ID_CORRECTNESS_CHECK\x10\x02\x12\x1c\n\x18SETUP_CHECK_ID_BENCHMARK\x10\x03\x12\x1e\n\x1aSETUP_CHECK_ID_BASE_PASSES\x10\x04\x12\x1f\n\x1bSETUP_CHECK_ID_BROKEN_FAILS\x10\x05\x12 \n\x1cSETUP_CHECK_ID_NUMBER_STABLE\x10\x06*\xae\x01\n\x0fSetupCheckState\x12!\n\x1dSETUP_CHECK_STATE_UNSPECIFIED\x10\x00\x12\x1d\n\x19SETUP_CHECK_STATE_PENDING\x10\x01\x12\x1d\n\x19SETUP_CHECK_STATE_RUNNING\x10\x02\x12\x1c\n\x18SETUP_CHECK_STATE_PASSED\x10\x03\x12\x1c\n\x18SETUP_CHECK_STATE_FAILED\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -46,7 +46,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SETUPVIEW'].fields_by_name['task']._loaded_options = None
   _globals['_SETUPVIEW'].fields_by_name['task']._serialized_options = b'\272H\005r\003(\200\002'
   _globals['_SETUPVIEW'].fields_by_name['checks']._loaded_options = None
-  _globals['_SETUPVIEW'].fields_by_name['checks']._serialized_options = b'\272H\007\222\001\004\010\006\020\006'
+  _globals['_SETUPVIEW'].fields_by_name['checks']._serialized_options = b'\272H~\222\001\004\010\006\020\006\272\001t\n\035setup_view.checks_in_id_order\022*the checks are one of each id, in id order\032\'this.map(c, c.id) == [1, 2, 3, 4, 5, 6]'
   _globals['_SETUPVIEW'].fields_by_name['baseline_value']._loaded_options = None
   _globals['_SETUPVIEW'].fields_by_name['baseline_value']._serialized_options = b'\272H\004\022\002@\001'
   _globals['_SETUPVIEW'].fields_by_name['baseline_unit']._loaded_options = None
@@ -57,14 +57,14 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SETUPVIEW'].fields_by_name['spent_usd']._serialized_options = b'\272H\r\022\013)\000\000\000\000\000\000\000\000@\001'
   _globals['_SETUPVIEW'].fields_by_name['elapsed']._loaded_options = None
   _globals['_SETUPVIEW'].fields_by_name['elapsed']._serialized_options = b'\272H\003\310\001\001'
-  _globals['_SETUPCHECKID']._serialized_start=1013
-  _globals['_SETUPCHECKID']._serialized_end=1256
-  _globals['_SETUPCHECKSTATE']._serialized_start=1259
-  _globals['_SETUPCHECKSTATE']._serialized_end=1433
+  _globals['_SETUPCHECKID']._serialized_start=1105
+  _globals['_SETUPCHECKID']._serialized_end=1348
+  _globals['_SETUPCHECKSTATE']._serialized_start=1351
+  _globals['_SETUPCHECKSTATE']._serialized_end=1525
   _globals['_SETUPCHECK']._serialized_start=153
   _globals['_SETUPCHECK']._serialized_end=342
   _globals['_SETUPDRAFTUNREADABLE']._serialized_start=344
   _globals['_SETUPDRAFTUNREADABLE']._serialized_end=402
   _globals['_SETUPVIEW']._serialized_start=405
-  _globals['_SETUPVIEW']._serialized_end=1010
+  _globals['_SETUPVIEW']._serialized_end=1102
 # @@protoc_insertion_point(module_scope)

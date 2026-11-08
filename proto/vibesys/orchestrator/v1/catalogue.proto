@@ -9,8 +9,9 @@ option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchest
 // FitState says whether a task's accelerator is given by any place the host can evaluate on.
 enum FitState {
   FIT_STATE_UNSPECIFIED = 0;
-  // At least one place gives it: the task's model (any of the vendor when it names none) in at least
-  // its count.
+  // At least one place gives it: the task's model (any known model of the vendor when it names none) in
+  // at least its count; a CPU need fits any place with a known state. An unknown or unreadable place
+  // fits nothing, and an offer of model OTHER fits nothing (see AcceleratorNeed).
   FIT_STATE_FITS = 1;
   // The places are known and none gives it.
   FIT_STATE_NO_ACCELERATOR = 2;
@@ -27,7 +28,10 @@ message Fit {
     not_in: [0]
   }];
   // The places that give the accelerator, by name, when the state is FITS.
-  repeated string places = 2 [(buf.validate.field).repeated.max_items = 64];
+  repeated string places = 2 [
+    (buf.validate.field).repeated.max_items = 64,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
 }
 
 // CatalogueEntry is one example task a run can start from.

@@ -53,10 +53,20 @@ enum AcceleratorModel {
   ACCELERATOR_MODEL_OTHER = 99;
 }
 
-// AcceleratorNeed is what a task wants of the place that evaluates it. A need fits an offer when the
-// vendor is the same, the offer has at least `count` devices, and the model is the same or the need
-// names none: a need of "NVIDIA GPU" (model unspecified) fits any device of that vendor.
+// AcceleratorNeed is what a task wants of the place that evaluates it. Precedence of the fit rule, which
+// the orchestrator's fit function states once: a place whose hardware is unknown or unreadable fits
+// nothing, a CPU need included; an offer whose model is OTHER fits nothing, since a device the registry
+// does not know cannot be shown to be the one wanted; otherwise a need fits an offer when the vendor is
+// the same, the offer has at least `count` devices, and the model is the same or the need names none:
+// a need of "NVIDIA GPU" (model unspecified) fits any known device of that vendor. A CPU need fits any
+// place with a known state. The model must be a device of the vendor (see the rule below).
 message AcceleratorNeed {
+  option (buf.validate.message).cel = {
+    id: "accelerator_need.model_of_vendor"
+    message: "the model is not a device of the vendor (a CPU need names no model)"
+    expression: "this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false"
+  };
+
   AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
@@ -71,6 +81,12 @@ message AcceleratorNeed {
 
 // AcceleratorOffer is what a place gives: `count` devices of one model.
 message AcceleratorOffer {
+  option (buf.validate.message).cel = {
+    id: "accelerator_offer.model_of_vendor"
+    message: "the model is not a device of the vendor, or is missing"
+    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
+  };
+
   AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]

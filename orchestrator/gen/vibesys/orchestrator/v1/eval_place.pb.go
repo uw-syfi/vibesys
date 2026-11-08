@@ -204,7 +204,7 @@ type EvalPlace struct {
 	Kind  EvalPlaceKind          `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.orchestrator.v1.EvalPlaceKind" json:"kind,omitempty"`
 	// What the place gives, in the order the place reported it. Empty with a known state means no
 	// accelerator.
-	Offers []*v1.AcceleratorOffer `protobuf:"bytes,3,rep,name=offers,proto3" json:"offers,omitempty"`
+	Offers []*EvalOffer `protobuf:"bytes,3,rep,name=offers,proto3" json:"offers,omitempty"`
 	// Types that are valid to be assigned to State:
 	//
 	//	*EvalPlace_Known
@@ -258,7 +258,7 @@ func (x *EvalPlace) GetKind() EvalPlaceKind {
 	return EvalPlaceKind_EVAL_PLACE_KIND_UNSPECIFIED
 }
 
-func (x *EvalPlace) GetOffers() []*v1.AcceleratorOffer {
+func (x *EvalPlace) GetOffers() []*EvalOffer {
 	if x != nil {
 		return x.Offers
 	}
@@ -306,6 +306,77 @@ func (*EvalPlace_Known) isEvalPlace_State() {}
 
 func (*EvalPlace_Unreadable) isEvalPlace_State() {}
 
+// EvalOffer is what an eval place gives: `count` devices of one model. It is the orchestrator's own
+// message: the CLI's offers are private to its contract, and the host maps one to the other.
+type EvalOffer struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Vendor v1.AcceleratorVendor   `protobuf:"varint,1,opt,name=vendor,proto3,enum=vibesys.cli.v1.AcceleratorVendor" json:"vendor,omitempty"`
+	Model  v1.AcceleratorModel    `protobuf:"varint,2,opt,name=model,proto3,enum=vibesys.cli.v1.AcceleratorModel" json:"model,omitempty"`
+	Count  uint32                 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	// The device as it reported itself, for a client to show beside an OTHER model.
+	DeviceName    string `protobuf:"bytes,4,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EvalOffer) Reset() {
+	*x = EvalOffer{}
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EvalOffer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EvalOffer) ProtoMessage() {}
+
+func (x *EvalOffer) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EvalOffer.ProtoReflect.Descriptor instead.
+func (*EvalOffer) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *EvalOffer) GetVendor() v1.AcceleratorVendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return v1.AcceleratorVendor(0)
+}
+
+func (x *EvalOffer) GetModel() v1.AcceleratorModel {
+	if x != nil {
+		return x.Model
+	}
+	return v1.AcceleratorModel(0)
+}
+
+func (x *EvalOffer) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *EvalOffer) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
 type OffersKnown struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Source OffersSource           `protobuf:"varint,1,opt,name=source,proto3,enum=vibesys.orchestrator.v1.OffersSource" json:"source,omitempty"`
@@ -317,7 +388,7 @@ type OffersKnown struct {
 
 func (x *OffersKnown) Reset() {
 	*x = OffersKnown{}
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -329,7 +400,7 @@ func (x *OffersKnown) String() string {
 func (*OffersKnown) ProtoMessage() {}
 
 func (x *OffersKnown) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[1]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -342,7 +413,7 @@ func (x *OffersKnown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OffersKnown.ProtoReflect.Descriptor instead.
 func (*OffersKnown) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *OffersKnown) GetSource() OffersSource {
@@ -369,7 +440,7 @@ type OffersUnreadable struct {
 
 func (x *OffersUnreadable) Reset() {
 	*x = OffersUnreadable{}
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -381,7 +452,7 @@ func (x *OffersUnreadable) String() string {
 func (*OffersUnreadable) ProtoMessage() {}
 
 func (x *OffersUnreadable) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -394,7 +465,7 @@ func (x *OffersUnreadable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OffersUnreadable.ProtoReflect.Descriptor instead.
 func (*OffersUnreadable) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *OffersUnreadable) GetReason() OffersUnreadableReason {
@@ -421,7 +492,7 @@ type ListEvalPlacesRequest struct {
 
 func (x *ListEvalPlacesRequest) Reset() {
 	*x = ListEvalPlacesRequest{}
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -433,7 +504,7 @@ func (x *ListEvalPlacesRequest) String() string {
 func (*ListEvalPlacesRequest) ProtoMessage() {}
 
 func (x *ListEvalPlacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -446,7 +517,7 @@ func (x *ListEvalPlacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEvalPlacesRequest.ProtoReflect.Descriptor instead.
 func (*ListEvalPlacesRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListEvalPlacesRequest) GetRefresh() bool {
@@ -465,7 +536,7 @@ type ListEvalPlacesResponse struct {
 
 func (x *ListEvalPlacesResponse) Reset() {
 	*x = ListEvalPlacesResponse{}
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -477,7 +548,7 @@ func (x *ListEvalPlacesResponse) String() string {
 func (*ListEvalPlacesResponse) ProtoMessage() {}
 
 func (x *ListEvalPlacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_eval_place_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -490,7 +561,7 @@ func (x *ListEvalPlacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEvalPlacesResponse.ProtoReflect.Descriptor instead.
 func (*ListEvalPlacesResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListEvalPlacesResponse) GetPlaces() []*EvalPlace {
@@ -504,17 +575,26 @@ var File_vibesys_orchestrator_v1_eval_place_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_eval_place_proto_rawDesc = "" +
 	"\n" +
-	"(vibesys/orchestrator/v1/eval_place.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\xe9\x02\n" +
+	"(vibesys/orchestrator/v1/eval_place.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\xeb\x02\n" +
 	"\tEvalPlace\x125\n" +
 	"\x04name\x18\x01 \x01(\tB!\xbaH\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\x04name\x12F\n" +
 	"\x04kind\x18\x02 \x01(\x0e2&.vibesys.orchestrator.v1.EvalPlaceKindB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12B\n" +
-	"\x06offers\x18\x03 \x03(\v2 .vibesys.cli.v1.AcceleratorOfferB\b\xbaH\x05\x92\x01\x02\x10@R\x06offers\x12<\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12D\n" +
+	"\x06offers\x18\x03 \x03(\v2\".vibesys.orchestrator.v1.EvalOfferB\b\xbaH\x05\x92\x01\x02\x10@R\x06offers\x12<\n" +
 	"\x05known\x18\x04 \x01(\v2$.vibesys.orchestrator.v1.OffersKnownH\x00R\x05known\x12K\n" +
 	"\n" +
 	"unreadable\x18\x05 \x01(\v2).vibesys.orchestrator.v1.OffersUnreadableH\x00R\n" +
 	"unreadableB\x0e\n" +
-	"\x05state\x12\x05\xbaH\x02\b\x01\"\x91\x01\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"\xc6\x04\n" +
+	"\tEvalOffer\x12E\n" +
+	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
+	"\x05model\x18\x02 \x01(\x0e2 .vibesys.cli.v1.AcceleratorModelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n" +
+	"\x05count\x18\x03 \x01(\rB\n" +
+	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\x12)\n" +
+	"\vdevice_name\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\n" +
+	"deviceName:\xe2\x02\xbaH\xde\x02\x1a\xdb\x02\n" +
+	"\x1aeval_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x84\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\x91\x01\n" +
 	"\vOffersKnown\x12I\n" +
 	"\x06source\x18\x01 \x01(\x0e2%.vibesys.orchestrator.v1.OffersSourceB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06source\x127\n" +
@@ -558,33 +638,37 @@ func file_vibesys_orchestrator_v1_eval_place_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_eval_place_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_orchestrator_v1_eval_place_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_vibesys_orchestrator_v1_eval_place_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_orchestrator_v1_eval_place_proto_goTypes = []any{
 	(EvalPlaceKind)(0),             // 0: vibesys.orchestrator.v1.EvalPlaceKind
 	(OffersSource)(0),              // 1: vibesys.orchestrator.v1.OffersSource
 	(OffersUnreadableReason)(0),    // 2: vibesys.orchestrator.v1.OffersUnreadableReason
 	(*EvalPlace)(nil),              // 3: vibesys.orchestrator.v1.EvalPlace
-	(*OffersKnown)(nil),            // 4: vibesys.orchestrator.v1.OffersKnown
-	(*OffersUnreadable)(nil),       // 5: vibesys.orchestrator.v1.OffersUnreadable
-	(*ListEvalPlacesRequest)(nil),  // 6: vibesys.orchestrator.v1.ListEvalPlacesRequest
-	(*ListEvalPlacesResponse)(nil), // 7: vibesys.orchestrator.v1.ListEvalPlacesResponse
-	(*v1.AcceleratorOffer)(nil),    // 8: vibesys.cli.v1.AcceleratorOffer
-	(*timestamppb.Timestamp)(nil),  // 9: google.protobuf.Timestamp
+	(*EvalOffer)(nil),              // 4: vibesys.orchestrator.v1.EvalOffer
+	(*OffersKnown)(nil),            // 5: vibesys.orchestrator.v1.OffersKnown
+	(*OffersUnreadable)(nil),       // 6: vibesys.orchestrator.v1.OffersUnreadable
+	(*ListEvalPlacesRequest)(nil),  // 7: vibesys.orchestrator.v1.ListEvalPlacesRequest
+	(*ListEvalPlacesResponse)(nil), // 8: vibesys.orchestrator.v1.ListEvalPlacesResponse
+	(v1.AcceleratorVendor)(0),      // 9: vibesys.cli.v1.AcceleratorVendor
+	(v1.AcceleratorModel)(0),       // 10: vibesys.cli.v1.AcceleratorModel
+	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_eval_place_proto_depIdxs = []int32{
-	0, // 0: vibesys.orchestrator.v1.EvalPlace.kind:type_name -> vibesys.orchestrator.v1.EvalPlaceKind
-	8, // 1: vibesys.orchestrator.v1.EvalPlace.offers:type_name -> vibesys.cli.v1.AcceleratorOffer
-	4, // 2: vibesys.orchestrator.v1.EvalPlace.known:type_name -> vibesys.orchestrator.v1.OffersKnown
-	5, // 3: vibesys.orchestrator.v1.EvalPlace.unreadable:type_name -> vibesys.orchestrator.v1.OffersUnreadable
-	1, // 4: vibesys.orchestrator.v1.OffersKnown.source:type_name -> vibesys.orchestrator.v1.OffersSource
-	9, // 5: vibesys.orchestrator.v1.OffersKnown.probed_at:type_name -> google.protobuf.Timestamp
-	2, // 6: vibesys.orchestrator.v1.OffersUnreadable.reason:type_name -> vibesys.orchestrator.v1.OffersUnreadableReason
-	3, // 7: vibesys.orchestrator.v1.ListEvalPlacesResponse.places:type_name -> vibesys.orchestrator.v1.EvalPlace
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	0,  // 0: vibesys.orchestrator.v1.EvalPlace.kind:type_name -> vibesys.orchestrator.v1.EvalPlaceKind
+	4,  // 1: vibesys.orchestrator.v1.EvalPlace.offers:type_name -> vibesys.orchestrator.v1.EvalOffer
+	5,  // 2: vibesys.orchestrator.v1.EvalPlace.known:type_name -> vibesys.orchestrator.v1.OffersKnown
+	6,  // 3: vibesys.orchestrator.v1.EvalPlace.unreadable:type_name -> vibesys.orchestrator.v1.OffersUnreadable
+	9,  // 4: vibesys.orchestrator.v1.EvalOffer.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	10, // 5: vibesys.orchestrator.v1.EvalOffer.model:type_name -> vibesys.cli.v1.AcceleratorModel
+	1,  // 6: vibesys.orchestrator.v1.OffersKnown.source:type_name -> vibesys.orchestrator.v1.OffersSource
+	11, // 7: vibesys.orchestrator.v1.OffersKnown.probed_at:type_name -> google.protobuf.Timestamp
+	2,  // 8: vibesys.orchestrator.v1.OffersUnreadable.reason:type_name -> vibesys.orchestrator.v1.OffersUnreadableReason
+	3,  // 9: vibesys.orchestrator.v1.ListEvalPlacesResponse.places:type_name -> vibesys.orchestrator.v1.EvalPlace
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_eval_place_proto_init() }
@@ -602,7 +686,7 @@ func file_vibesys_orchestrator_v1_eval_place_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_eval_place_proto_rawDesc), len(file_vibesys_orchestrator_v1_eval_place_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -7,7 +7,7 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { AcceleratorOffer } from "../../cli/v1/environment_pb.js";
+import type { AcceleratorModel, AcceleratorVendor } from "../../cli/v1/environment_pb.js";
 import { file_vibesys_cli_v1_environment } from "../../cli/v1/environment_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/eval_place.proto.
  */
 export const file_vibesys_orchestrator_v1_eval_place: GenFile = /*@__PURE__*/
-  fileDesc("Cih2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmFsX3BsYWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSLCAgoJRXZhbFBsYWNlEi8KBG5hbWUYASABKAlCIbpIHnIcMhpeW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9JBJACgRraW5kGAIgASgOMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRXZhbFBsYWNlS2luZEIKukgHggEEEAEgABI6CgZvZmZlcnMYAyADKAsyIC52aWJlc3lzLmNsaS52MS5BY2NlbGVyYXRvck9mZmVyQgi6SAWSAQIQQBI1CgVrbm93bhgEIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9mZmVyc0tub3duSAASPwoKdW5yZWFkYWJsZRgFIAEoCzIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9mZmVyc1VucmVhZGFibGVIAEIOCgVzdGF0ZRIFukgCCAEifwoLT2ZmZXJzS25vd24SQQoGc291cmNlGAEgASgOMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuT2ZmZXJzU291cmNlQgq6SAeCAQQQASAAEi0KCXByb2JlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAieQoQT2ZmZXJzVW5yZWFkYWJsZRJLCgZyZWFzb24YASABKA4yLy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5PZmZlcnNVbnJlYWRhYmxlUmVhc29uQgq6SAeCAQQQASAAEhgKBmRldGFpbBgCIAEoCUIIukgFcgMogAgiKAoVTGlzdEV2YWxQbGFjZXNSZXF1ZXN0Eg8KB3JlZnJlc2gYASABKAgiVgoWTGlzdEV2YWxQbGFjZXNSZXNwb25zZRI8CgZwbGFjZXMYASADKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FdmFsUGxhY2VCCLpIBZIBAhBAKrkBCg1FdmFsUGxhY2VLaW5kEh8KG0VWQUxfUExBQ0VfS0lORF9VTlNQRUNJRklFRBAAEhkKFUVWQUxfUExBQ0VfS0lORF9MT0NBTBABEhcKE0VWQUxfUExBQ0VfS0lORF9TU0gQAhIZChVFVkFMX1BMQUNFX0tJTkRfU0xVUk0QAxIdChlFVkFMX1BMQUNFX0tJTkRfQVBQVEFJTkVSEAQSGQoVRVZBTF9QTEFDRV9LSU5EX0NMT1VEEAUqYwoMT2ZmZXJzU291cmNlEh0KGU9GRkVSU19TT1VSQ0VfVU5TUEVDSUZJRUQQABIYChRPRkZFUlNfU09VUkNFX1BST0JFRBABEhoKFk9GRkVSU19TT1VSQ0VfREVDTEFSRUQQAirpAQoWT2ZmZXJzVW5yZWFkYWJsZVJlYXNvbhIoCiRPRkZFUlNfVU5SRUFEQUJMRV9SRUFTT05fVU5TUEVDSUZJRUQQABIoCiRPRkZFUlNfVU5SRUFEQUJMRV9SRUFTT05fVU5SRUFDSEFCTEUQARInCiNPRkZFUlNfVU5SRUFEQUJMRV9SRUFTT05fVU5SRUFEQUJMRRACEiYKIk9GRkVSU19VTlJFQURBQkxFX1JFQVNPTl9USU1FRF9PVVQQAxIqCiZPRkZFUlNfVU5SRUFEQUJMRV9SRUFTT05fTk9UX1BST0JFQUJMRRAEQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Cih2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmFsX3BsYWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSLEAgoJRXZhbFBsYWNlEi8KBG5hbWUYASABKAlCIbpIHnIcMhpeW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9JBJACgRraW5kGAIgASgOMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRXZhbFBsYWNlS2luZEIKukgHggEEEAEgABI8CgZvZmZlcnMYAyADKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FdmFsT2ZmZXJCCLpIBZIBAhBAEjUKBWtub3duGAQgASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuT2ZmZXJzS25vd25IABI/Cgp1bnJlYWRhYmxlGAUgASgLMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuT2ZmZXJzVW5yZWFkYWJsZUgAQg4KBXN0YXRlEgW6SAIIASKkBAoJRXZhbE9mZmVyEj0KBnZlbmRvchgBIAEoDjIhLnZpYmVzeXMuY2xpLnYxLkFjY2VsZXJhdG9yVmVuZG9yQgq6SAeCAQQQASAAEjkKBW1vZGVsGAIgASgOMiAudmliZXN5cy5jbGkudjEuQWNjZWxlcmF0b3JNb2RlbEIIukgFggECEAESGQoFY291bnQYAyABKA1CCrpIByoFGIAgKAESHQoLZGV2aWNlX25hbWUYBCABKAlCCLpIBXIDKIABOuICukjeAhrbAgoaZXZhbF9vZmZlci5tb2RlbF9vZl92ZW5kb3ISNnRoZSBtb2RlbCBpcyBub3QgYSBkZXZpY2Ugb2YgdGhlIHZlbmRvciwgb3IgaXMgbWlzc2luZxqEAnRoaXMubW9kZWwgIT0gMCAmJiAodGhpcy5tb2RlbCA9PSAwID8gdHJ1ZSA6IHRoaXMubW9kZWwgPT0gOTkgPyB0aGlzLnZlbmRvciAhPSA1IDogdGhpcy5tb2RlbCBpbiBbMSwgMiwgMywgNF0gPyB0aGlzLnZlbmRvciA9PSAyIDogdGhpcy5tb2RlbCBpbiBbNSwgNiwgNywgOF0gPyB0aGlzLnZlbmRvciA9PSAxIDogdGhpcy5tb2RlbCA9PSA5ID8gdGhpcy52ZW5kb3IgPT0gMyA6IHRoaXMubW9kZWwgPT0gMTAgPyB0aGlzLnZlbmRvciA9PSA0IDogZmFsc2UpIn8KC09mZmVyc0tub3duEkEKBnNvdXJjZRgBIAEoDjIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9mZmVyc1NvdXJjZUIKukgHggEEEAEgABItCglwcm9iZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wInkKEE9mZmVyc1VucmVhZGFibGUSSwoGcmVhc29uGAEgASgOMi8udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuT2ZmZXJzVW5yZWFkYWJsZVJlYXNvbkIKukgHggEEEAEgABIYCgZkZXRhaWwYAiABKAlCCLpIBXIDKIAIIigKFUxpc3RFdmFsUGxhY2VzUmVxdWVzdBIPCgdyZWZyZXNoGAEgASgIIlYKFkxpc3RFdmFsUGxhY2VzUmVzcG9uc2USPAoGcGxhY2VzGAEgAygLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRXZhbFBsYWNlQgi6SAWSAQIQQCq5AQoNRXZhbFBsYWNlS2luZBIfChtFVkFMX1BMQUNFX0tJTkRfVU5TUEVDSUZJRUQQABIZChVFVkFMX1BMQUNFX0tJTkRfTE9DQUwQARIXChNFVkFMX1BMQUNFX0tJTkRfU1NIEAISGQoVRVZBTF9QTEFDRV9LSU5EX1NMVVJNEAMSHQoZRVZBTF9QTEFDRV9LSU5EX0FQUFRBSU5FUhAEEhkKFUVWQUxfUExBQ0VfS0lORF9DTE9VRBAFKmMKDE9mZmVyc1NvdXJjZRIdChlPRkZFUlNfU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUT0ZGRVJTX1NPVVJDRV9QUk9CRUQQARIaChZPRkZFUlNfU09VUkNFX0RFQ0xBUkVEEAIq6QEKFk9mZmVyc1VucmVhZGFibGVSZWFzb24SKAokT0ZGRVJTX1VOUkVBREFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASKAokT0ZGRVJTX1VOUkVBREFCTEVfUkVBU09OX1VOUkVBQ0hBQkxFEAESJwojT0ZGRVJTX1VOUkVBREFCTEVfUkVBU09OX1VOUkVBREFCTEUQAhImCiJPRkZFUlNfVU5SRUFEQUJMRV9SRUFTT05fVElNRURfT1VUEAMSKgomT0ZGRVJTX1VOUkVBREFCTEVfUkVBU09OX05PVF9QUk9CRUFCTEUQBEJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * EvalPlace is one place a run's candidates can be evaluated, and the hardware it gives. A client
@@ -38,9 +38,9 @@ export type EvalPlace = Message<"vibesys.orchestrator.v1.EvalPlace"> & {
    * What the place gives, in the order the place reported it. Empty with a known state means no
    * accelerator.
    *
-   * @generated from field: repeated vibesys.cli.v1.AcceleratorOffer offers = 3;
+   * @generated from field: repeated vibesys.orchestrator.v1.EvalOffer offers = 3;
    */
-  offers: AcceleratorOffer[];
+  offers: EvalOffer[];
 
   /**
    * @generated from oneof vibesys.orchestrator.v1.EvalPlace.state
@@ -68,6 +68,43 @@ export const EvalPlaceSchema: GenMessage<EvalPlace> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_eval_place, 0);
 
 /**
+ * EvalOffer is what an eval place gives: `count` devices of one model. It is the orchestrator's own
+ * message: the CLI's offers are private to its contract, and the host maps one to the other.
+ *
+ * @generated from message vibesys.orchestrator.v1.EvalOffer
+ */
+export type EvalOffer = Message<"vibesys.orchestrator.v1.EvalOffer"> & {
+  /**
+   * @generated from field: vibesys.cli.v1.AcceleratorVendor vendor = 1;
+   */
+  vendor: AcceleratorVendor;
+
+  /**
+   * @generated from field: vibesys.cli.v1.AcceleratorModel model = 2;
+   */
+  model: AcceleratorModel;
+
+  /**
+   * @generated from field: uint32 count = 3;
+   */
+  count: number;
+
+  /**
+   * The device as it reported itself, for a client to show beside an OTHER model.
+   *
+   * @generated from field: string device_name = 4;
+   */
+  deviceName: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.EvalOffer.
+ * Use `create(EvalOfferSchema)` to create a new message.
+ */
+export const EvalOfferSchema: GenMessage<EvalOffer> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_eval_place, 1);
+
+/**
  * @generated from message vibesys.orchestrator.v1.OffersKnown
  */
 export type OffersKnown = Message<"vibesys.orchestrator.v1.OffersKnown"> & {
@@ -89,7 +126,7 @@ export type OffersKnown = Message<"vibesys.orchestrator.v1.OffersKnown"> & {
  * Use `create(OffersKnownSchema)` to create a new message.
  */
 export const OffersKnownSchema: GenMessage<OffersKnown> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_eval_place, 1);
+  messageDesc(file_vibesys_orchestrator_v1_eval_place, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.OffersUnreadable
@@ -111,7 +148,7 @@ export type OffersUnreadable = Message<"vibesys.orchestrator.v1.OffersUnreadable
  * Use `create(OffersUnreadableSchema)` to create a new message.
  */
 export const OffersUnreadableSchema: GenMessage<OffersUnreadable> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_eval_place, 2);
+  messageDesc(file_vibesys_orchestrator_v1_eval_place, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListEvalPlacesRequest
@@ -130,7 +167,7 @@ export type ListEvalPlacesRequest = Message<"vibesys.orchestrator.v1.ListEvalPla
  * Use `create(ListEvalPlacesRequestSchema)` to create a new message.
  */
 export const ListEvalPlacesRequestSchema: GenMessage<ListEvalPlacesRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_eval_place, 3);
+  messageDesc(file_vibesys_orchestrator_v1_eval_place, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListEvalPlacesResponse
@@ -147,7 +184,7 @@ export type ListEvalPlacesResponse = Message<"vibesys.orchestrator.v1.ListEvalPl
  * Use `create(ListEvalPlacesResponseSchema)` to create a new message.
  */
 export const ListEvalPlacesResponseSchema: GenMessage<ListEvalPlacesResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_eval_place, 4);
+  messageDesc(file_vibesys_orchestrator_v1_eval_place, 5);
 
 /**
  * EvalPlaceKind is where a place evaluates candidates. It is closed, and the host reports only the

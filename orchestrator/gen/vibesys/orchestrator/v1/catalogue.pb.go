@@ -28,8 +28,9 @@ type FitState int32
 
 const (
 	FitState_FIT_STATE_UNSPECIFIED FitState = 0
-	// At least one place gives it: the task's model (any of the vendor when it names none) in at least
-	// its count.
+	// At least one place gives it: the task's model (any known model of the vendor when it names none) in
+	// at least its count; a CPU need fits any place with a known state. An unknown or unreadable place
+	// fits nothing, and an offer of model OTHER fits nothing (see AcceleratorNeed).
 	FitState_FIT_STATE_FITS FitState = 1
 	// The places are known and none gives it.
 	FitState_FIT_STATE_NO_ACCELERATOR FitState = 2
@@ -312,11 +313,11 @@ var File_vibesys_orchestrator_v1_catalogue_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_catalogue_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/orchestrator/v1/catalogue.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19vibesys/cli/v1/task.proto\"l\n" +
+	"'vibesys/orchestrator/v1/catalogue.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19vibesys/cli/v1/task.proto\"r\n" +
 	"\x03Fit\x12C\n" +
 	"\x05state\x18\x01 \x01(\x0e2!.vibesys.orchestrator.v1.FitStateB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12 \n" +
-	"\x06places\x18\x02 \x03(\tB\b\xbaH\x05\x92\x01\x02\x10@R\x06places\"\xc5\x01\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12&\n" +
+	"\x06places\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\x10@\"\x04r\x02\x10\x01R\x06places\"\xc5\x01\n" +
 	"\x0eCatalogueEntry\x12$\n" +
 	"\aexample\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\aexample\x124\n" +

@@ -264,3 +264,17 @@ func commandIn(m *pb.Command, errs *errorList) (core.CommandBody, bool) {
 	}
 	return nil, false
 }
+
+func pendingLeadOut(s *core.AgentSpec) *pb.PendingLead {
+	if s == nil {
+		return nil
+	}
+	return &pb.PendingLead{Harness: harnesses.out(s.Harness), Model: string(s.Model), ReasoningEffort: string(s.Effort)}
+}
+
+func pendingLeadIn(s *pb.PendingLead, errs *errorList) *core.AgentSpec {
+	if s == nil {
+		return nil
+	}
+	return &core.AgentSpec{Harness: harnesses.in(s.GetHarness(), errs), Model: core.ModelName(s.GetModel()), Effort: core.EffortName(s.GetReasoningEffort())}
+}
