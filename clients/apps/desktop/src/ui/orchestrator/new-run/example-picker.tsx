@@ -90,13 +90,11 @@ function statusOf(line: ReturnType<typeof provisionLine>) {
   return {error: line.text, ...(line.title === undefined ? {} : {errorHint: line.title})};
 }
 
-/** The one line that tells how the read of the catalogue stands; it keeps its place whatever it says. */
-function catalogueStatus(host: StartHost | undefined, shown: number): string {
+/** The word that tells how the read of the catalogue stands, or none when it is read. */
+function catalogueStatus(host: StartHost | undefined): string {
   if (host === undefined) return '';
-  const {catalogue} = host;
-  if (catalogue.failure !== null) return 'Catalogue unreadable';
-  if (catalogue.reading) return 'Reading';
-  return catalogue.data === null ? '' : `${shown}`;
+  if (host.catalogue.failure !== null) return 'Catalogue unreadable';
+  return host.catalogue.reading ? 'Reading' : '';
 }
 
 /**
@@ -146,7 +144,7 @@ export function ExamplePicker(props: {
           ]}
           change={value => set({fitsOnly: value === 'fits'})}
         />
-        <Text tone="muted">{catalogueStatus(host, shown.length)}</Text>
+        <Text tone="muted">{catalogueStatus(host)}</Text>
       </Row>
       <Stack gap="space-3">
         {groupByDomain(shown).map(group => (
