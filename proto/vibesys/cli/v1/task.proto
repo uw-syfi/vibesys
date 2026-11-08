@@ -113,11 +113,11 @@ message TaskManifestV02 {
   google.protobuf.Struct resources = 14 [(task_schema_since_minor) = 2];
   google.protobuf.Struct workspace = 15 [(task_schema_since_minor) = 2];
   google.protobuf.Struct plan = 16 [(task_schema_since_minor) = 2];
-  reserved 17;
+  // `[catalogue]` is held as data here, because a field's type cannot change under buf breaking. Its
+  // definition is TaskCatalogueV02, which the reader decodes it into (task.Catalogue) and refuses a
+  // table that does not meet, naming the key.
+  google.protobuf.Struct catalogue = 17 [(task_schema_since_minor) = 2];
   repeated google.protobuf.Struct comparison = 18 [(task_schema_since_minor) = 2];
-  // `[catalogue]`: what a client shows of the task. Field 17 held it as opaque data before it had a
-  // definition here.
-  TaskCatalogueV02 catalogue = 19 [(task_schema_since_minor) = 2];
 }
 
 // TaskDomain is what an example task optimizes. A task names one as the value's name without its
@@ -143,7 +143,7 @@ enum ModelMaker {
   MODEL_MAKER_OTHER = 8;
 }
 
-// TaskCatalogueV02 is the `[catalogue]` table: the facts a client words a task by. A key it has no
+// TaskCatalogueV02 is the definition of the `[catalogue]` table, held in TaskManifestV02.catalogue as data: the facts a client words a task by. A key it has no
 // field for is refused by name. There is no variant: a client shows the task's folder name.
 message TaskCatalogueV02 {
   option (buf.validate.message).cel = {

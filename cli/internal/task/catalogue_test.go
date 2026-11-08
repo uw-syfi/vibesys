@@ -7,12 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"buf.build/go/protovalidate"
 	"github.com/BurntSushi/toml"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
-	"github.com/uw-syfi/vibesys/cli/internal/tomlproto"
 )
 
 func decodeCatalogue(manifest string) (*cliv1.TaskCatalogueV02, error) {
@@ -20,16 +18,7 @@ func decodeCatalogue(manifest string) (*cliv1.TaskCatalogueV02, error) {
 	if _, err := toml.Decode(manifest, &table); err != nil {
 		return nil, err
 	}
-	var m cliv1.TaskManifestV02
-	declared := task.Schema02
-	err := tomlproto.DecodeTable(map[string]any{"version": "0.2", "catalogue": table["catalogue"]}, &m, tomlproto.Options{Declared: &declared})
-	if err != nil {
-		return nil, err
-	}
-	if err := protovalidate.Validate(m.GetCatalogue()); err != nil {
-		return nil, err
-	}
-	return m.GetCatalogue(), nil
+	return task.Catalogue(table["catalogue"].(map[string]any))
 }
 
 // Every [catalogue] table of the repository's examples decodes into the typed message and meets its

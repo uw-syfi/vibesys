@@ -296,14 +296,15 @@ type TaskManifestV02 struct {
 	Agent *TaskAgentV02 `protobuf:"bytes,12,opt,name=agent,proto3" json:"agent,omitempty"`
 	// The sections below are the Python product's: vibesys-cli accepts them, as 0.1 does, without
 	// reading them, so their keys are not held here.
-	ProfileGuided *structpb.Struct   `protobuf:"bytes,13,opt,name=profile_guided,json=profileGuided,proto3" json:"profile_guided,omitempty"`
-	Resources     *structpb.Struct   `protobuf:"bytes,14,opt,name=resources,proto3" json:"resources,omitempty"`
-	Workspace     *structpb.Struct   `protobuf:"bytes,15,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Plan          *structpb.Struct   `protobuf:"bytes,16,opt,name=plan,proto3" json:"plan,omitempty"`
+	ProfileGuided *structpb.Struct `protobuf:"bytes,13,opt,name=profile_guided,json=profileGuided,proto3" json:"profile_guided,omitempty"`
+	Resources     *structpb.Struct `protobuf:"bytes,14,opt,name=resources,proto3" json:"resources,omitempty"`
+	Workspace     *structpb.Struct `protobuf:"bytes,15,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Plan          *structpb.Struct `protobuf:"bytes,16,opt,name=plan,proto3" json:"plan,omitempty"`
+	// `[catalogue]` is held as data here, because a field's type cannot change under buf breaking. Its
+	// definition is TaskCatalogueV02, which the reader decodes it into (task.Catalogue) and refuses a
+	// table that does not meet, naming the key.
+	Catalogue     *structpb.Struct   `protobuf:"bytes,17,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
 	Comparison    []*structpb.Struct `protobuf:"bytes,18,rep,name=comparison,proto3" json:"comparison,omitempty"`
-	// `[catalogue]`: what a client shows of the task. Field 17 held it as opaque data before it had a
-	// definition here.
-	Catalogue     *TaskCatalogueV02 `protobuf:"bytes,19,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -450,6 +451,13 @@ func (x *TaskManifestV02) GetPlan() *structpb.Struct {
 	return nil
 }
 
+func (x *TaskManifestV02) GetCatalogue() *structpb.Struct {
+	if x != nil {
+		return x.Catalogue
+	}
+	return nil
+}
+
 func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
 	if x != nil {
 		return x.Comparison
@@ -457,14 +465,7 @@ func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
 	return nil
 }
 
-func (x *TaskManifestV02) GetCatalogue() *TaskCatalogueV02 {
-	if x != nil {
-		return x.Catalogue
-	}
-	return nil
-}
-
-// TaskCatalogueV02 is the `[catalogue]` table: the facts a client words a task by. A key it has no
+// TaskCatalogueV02 is the definition of the `[catalogue]` table, held in TaskManifestV02.catalogue as data: the facts a client words a task by. A key it has no
 // field for is refused by name. There is no variant: a client shows the task's folder name.
 type TaskCatalogueV02 struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
@@ -1579,7 +1580,7 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xe0\b\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd1\b\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
@@ -1598,11 +1599,11 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x0eprofile_guided\x18\r \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\rprofileGuided\x12;\n" +
 	"\tresources\x18\x0e \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tresources\x12;\n" +
 	"\tworkspace\x18\x0f \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tworkspace\x121\n" +
-	"\x04plan\x18\x10 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x04plan\x12=\n" +
+	"\x04plan\x18\x10 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x04plan\x12;\n" +
+	"\tcatalogue\x18\x11 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tcatalogue\x12=\n" +
 	"\n" +
 	"comparison\x18\x12 \x03(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\n" +
-	"comparison\x12D\n" +
-	"\tcatalogue\x18\x13 \x01(\v2 .vibesys.cli.v1.TaskCatalogueV02B\x04\xd0\xf3\x18\x02R\tcatalogue:\x06\xca\xf3\x18\x02\x10\x02J\x04\b\x11\x10\x12\"\xd0\x04\n" +
+	"comparison:\x06\xca\xf3\x18\x02\x10\x02\"\xd0\x04\n" +
 	"\x10TaskCatalogueV02\x12B\n" +
 	"\x06domain\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.TaskDomainB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x06domain\x12G\n" +
 	"\bhardware\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.TaskHardwareV02B\n" +
@@ -1774,8 +1775,8 @@ var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
 	21, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
 	21, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
 	21, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
-	21, // 13: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
-	5,  // 14: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> vibesys.cli.v1.TaskCatalogueV02
+	21, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
+	21, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
 	0,  // 15: vibesys.cli.v1.TaskCatalogueV02.domain:type_name -> vibesys.cli.v1.TaskDomain
 	6,  // 16: vibesys.cli.v1.TaskCatalogueV02.hardware:type_name -> vibesys.cli.v1.TaskHardwareV02
 	7,  // 17: vibesys.cli.v1.TaskCatalogueV02.model:type_name -> vibesys.cli.v1.TaskServedModelV02

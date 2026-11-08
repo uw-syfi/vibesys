@@ -47,6 +47,11 @@ func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task,
 	if err := validate(ManifestName, &m); err != nil {
 		return Task{}, err
 	}
+	if c, ok := table["catalogue"].(map[string]any); ok {
+		if _, err := Catalogue(c); err != nil {
+			return Task{}, err
+		}
+	}
 	t := Task{Name: name, Samples: DefaultSamples, Schema: Schema02}
 	var err error
 	if t.Backend, err = backendOf(m.GetBackends()); err != nil {
