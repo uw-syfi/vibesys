@@ -15,6 +15,7 @@ import {COPY_STALL_MS} from '../state/gateway-policy.js';
 import {commandOf} from '../state/remote-command.js';
 import {uploadSchedule} from '../state/upload-pacing.js';
 import {joinDriving} from '../testing/main/drive.js';
+import {packInPlace} from '../testing/main/fake-pack.js';
 import {fakeSpawner} from '../testing/main/fake-process.js';
 import {LinkFailed} from './errors.js';
 import {
@@ -79,7 +80,7 @@ function fakeHost(artifact: Uint8Array, platform = 'Linux\nx86_64\n', paced = fa
 const gunzipSyncLength = (bytes: Uint8Array): number => gzipSync(bytes).length;
 
 const artifactsOf = (bytes: Uint8Array) =>
-  Layer.succeed(GatewayArtifacts, {read: () => Effect.succeed(bytes)});
+  Layer.succeed(GatewayArtifacts, {read: () => Effect.succeed(bytes), pack: packInPlace});
 
 const provision = (bytes: Uint8Array, force: boolean, fake: ReturnType<typeof fakeHost>) =>
   Effect.gen(function* () {

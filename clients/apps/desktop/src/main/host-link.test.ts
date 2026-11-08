@@ -7,6 +7,7 @@
  * within the policy, every hang is noticed within the silence bound, a refusal is not retried.
  */
 import type {Duplex} from 'node:stream';
+import {gzip} from 'node:zlib';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, it} from '@effect/vitest';
 import {
@@ -48,6 +49,7 @@ import {type HostConnectionState, hostKey, hostStatusOf} from '../state/index.js
 import {LIVENESS_WINDOW_MS, SILENCE_BOUND_MS} from '../state/liveness.js';
 import {type FakeCall, type FakeGateway, fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
+import {packInPlace} from '../testing/main/fake-pack.js';
 import {fakeSshHost} from '../testing/main/fake-ssh-host.js';
 import {portedBridge} from '../testing/main/ported-calls.js';
 import {GatewayFailed, GatewayRefused} from './errors.js';
@@ -497,6 +499,7 @@ const sshHost = (options: SshOptions) =>
       pending.push(call);
     };
     const built = Layer.succeed(GatewayArtifacts, {
+      pack: packInPlace,
       read: target =>
         options.built.includes(target)
           ? Effect.succeed(HOST_PROGRAM_BYTES)
@@ -957,4 +960,20 @@ it.effect.prop(
   },
   ({bytes, gap, stopAfter}) => Effect.scoped(playTrickle(bytes, gap, stopAfter)),
   {arbitrary: {runs: 25}},
+);
+
+/**
+ * Replay of run 42450221478: a link that carried three bytes and stopped was not cut within the
+ * bound, because the dial's own gzip waited on a busy thread pool while the virtual clock ran on.
+ * The pool is kept busy here, so that the case fails at once if provisioning needs it again.
+ */
+it.effect('a link that stops is cut within the bound however busy the thread pool is', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.sync(() => {
+        for (let job = 0; job < 8; job += 1) gzip(Buffer.alloc(8_000_000, job), () => {});
+      });
+      yield* playTrickle(1, 3, 3);
+    }),
+  ),
 );
