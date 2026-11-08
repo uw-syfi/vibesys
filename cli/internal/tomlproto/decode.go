@@ -204,6 +204,19 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 		if n < 0 && (fd.Kind() == protoreflect.Uint32Kind || fd.Kind() == protoreflect.Uint64Kind) {
 			return nil, wrong("a number that is not negative")
 		}
+		// A TOML integer is 64-bit, so a 32-bit field's value must fit it, or protojson would refuse
+		// it later by the proto's camel-case field name and a position in the JSON this builds, not
+		// by the key the file spells. (A 64-bit field holds any TOML integer.)
+		switch fd.Kind() {
+		case protoreflect.Int32Kind:
+			if n < math.MinInt32 || n > math.MaxInt32 {
+				return nil, wrong("a number that fits a signed 32-bit field")
+			}
+		case protoreflect.Uint32Kind:
+			if n > math.MaxUint32 {
+				return nil, wrong("a number that fits an unsigned 32-bit field")
+			}
+		}
 	case protoreflect.DoubleKind, protoreflect.FloatKind:
 		switch n := v.(type) {
 		case float64:
