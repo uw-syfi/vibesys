@@ -2,6 +2,7 @@ export {
   type CatalogueFilter,
   type DomainGroup,
   domainOf,
+  entryKey,
   type FitWord,
   fits,
   fitWord,

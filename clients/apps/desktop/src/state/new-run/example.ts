@@ -4,7 +4,7 @@
  * when the host's verdict on its entry says so, and a place when the host named it there.
  */
 import type {CatalogueEntry, EvalPlace} from '@vibesys/orchestrator-proto';
-import {fits, fitWord, folderName} from './catalogue.js';
+import {entryKey, fits, fitWord, folderName} from './catalogue.js';
 import {placeChoice} from './places.js';
 import {defaultName, parentOf} from './provision.js';
 
@@ -12,7 +12,7 @@ export interface ExampleDraft {
   readonly query: string;
   /** List only what the host says fits. */
   readonly fitsOnly: boolean;
-  /** The example id picked, or null. */
+  /** The entry picked, by `entryKey`, or null. */
   readonly picked: string | null;
   /** The eval place the person picked, or null for the first fitting one. */
   readonly place: string | null;
@@ -31,7 +31,7 @@ export const emptyExampleDraft: ExampleDraft = {
   parent: '',
 };
 
-/** Pick an example: the place and the name go back to their own defaults for it. */
+/** Pick an entry (by `entryKey`): the place and the name go back to their own defaults for it. */
 export const pickExample = (draft: ExampleDraft, example: string): ExampleDraft => ({
   ...draft,
   picked: example,
@@ -59,7 +59,7 @@ export function exampleTarget(
   places: readonly EvalPlace[],
   draft: ExampleDraft,
 ): ExampleTarget {
-  const entry = entries.find(each => each.example === draft.picked);
+  const entry = entries.find(each => entryKey(each) === draft.picked);
   if (entry === undefined) return {ready: false, reason: 'Pick an example'};
   if (!fits(entry)) return {ready: false, reason: fitWord(entry.fit)};
   const place = placeChoice(draft.place, places, entry.fit);

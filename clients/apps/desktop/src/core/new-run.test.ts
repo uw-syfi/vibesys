@@ -41,6 +41,7 @@ describe('what the New run screen asks of the host', () => {
         'local',
         'host-a',
         'cluster-a',
+        'cluster-b',
       ]);
     }),
   );

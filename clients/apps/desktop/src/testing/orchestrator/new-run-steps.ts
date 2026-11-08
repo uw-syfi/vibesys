@@ -10,10 +10,10 @@ import {
 import {RpcStatus} from '../../core/errors.js';
 import type {Step} from '../transport/index.js';
 import {
-  fixtureCatalogueResponse,
-  fixturePlacesResponse,
-  provisionAnswer,
-} from './new-run-fixtures.js';
+  richCatalogueResponse,
+  richPlacesResponse,
+  richProvisionAnswer,
+} from './new-run-catalogue.js';
 
 /**
  * The repositories a fake host has made so far, so a name used twice is refused as taken. One set per
@@ -23,11 +23,11 @@ export function newRunSteps(taken: Set<string>) {
   return (method: string, request: Uint8Array): ReadonlyArray<Step> => {
     switch (method) {
       case 'ListCatalogue':
-        return [{frame: toBinary(ListCatalogueResponseSchema, fixtureCatalogueResponse())}];
+        return [{frame: toBinary(ListCatalogueResponseSchema, richCatalogueResponse())}];
       case 'ListEvalPlaces':
-        return [{frame: toBinary(ListEvalPlacesResponseSchema, fixturePlacesResponse())}];
+        return [{frame: toBinary(ListEvalPlacesResponseSchema, richPlacesResponse())}];
       case 'ProvisionRepository': {
-        const answer = provisionAnswer(
+        const answer = richProvisionAnswer(
           fromBinary(ProvisionRepositoryRequestSchema, request),
           taken,
         );

@@ -19,6 +19,7 @@ import {
   autoPick,
   defaultName,
   domainOf,
+  entryKey,
   fits,
   fitWord,
   folderName,
@@ -126,6 +127,17 @@ describe('the catalogue grouped by domain', () => {
         if (unspecified >= 0) expect(unspecified).toBe(groups.length - 1);
       }),
     );
+  });
+
+  it('keeps two tasks of one example apart: each is its own entry with its own key', () => {
+    const entry = (task: string) =>
+      create(CatalogueEntrySchema, {
+        example: 'data-structures/prioqueue',
+        card: create(TaskCardSchema, {task, domain: TaskDomain.DATA_STRUCTURES}),
+      });
+    const entries = [entry('mpmc'), entry('spsc')];
+    expect(new Set(entries.map(entryKey)).size).toBe(2);
+    expect(groupByDomain(entries).flatMap(group => group.entries)).toHaveLength(2);
   });
 
   it('names an entry by the last part of its example id', () => {

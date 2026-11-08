@@ -41,7 +41,9 @@ const placesArb: fc.Arbitrary<EvalPlace[]> = fc.shuffledSubarray([...NAMES]).map
 const draftArb = fc.record({
   query: fc.constant(''),
   fitsOnly: fc.boolean(),
-  picked: fc.option(fc.constantFrom('model-serving/a', 'databases/b', 'x/missing'), {nil: null}),
+  picked: fc.option(fc.constantFrom('model-serving/a:t', 'databases/b:t', 'x/missing:t'), {
+    nil: null,
+  }),
   place: fc.option(fc.constantFrom(...NAMES), {nil: null}),
   name: fc.option(fc.constantFrom('', '  ', 'copy-1'), {nil: null}),
   parent: fc.constantFrom('', ' ~/work ', '/srv/repos'),
@@ -71,7 +73,7 @@ describe('what a Start from an example comes to', () => {
         const entry = withExample('model-serving/a', fit);
         const target = exampleTarget([entry], places, {
           ...emptyExampleDraft,
-          picked: 'model-serving/a',
+          picked: 'model-serving/a:t',
         });
         if (!fits(entry)) expect(target).toEqual({ready: false, reason: fitWord(fit)});
       }),
@@ -88,8 +90,8 @@ describe('what a Start from an example comes to', () => {
   it('forgets the place and the name when another example is picked', () => {
     const picked = pickExample(
       {...emptyExampleDraft, place: 'a', name: 'mine', parent: '~/x'},
-      'databases/b',
+      'databases/b:t',
     );
-    expect(picked).toMatchObject({picked: 'databases/b', place: null, name: null, parent: '~/x'});
+    expect(picked).toMatchObject({picked: 'databases/b:t', place: null, name: null, parent: '~/x'});
   });
 });

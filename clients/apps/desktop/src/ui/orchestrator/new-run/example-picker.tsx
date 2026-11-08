@@ -17,6 +17,7 @@ import type {JSX} from 'react';
 import {
   completionsOf,
   type ExampleDraft,
+  entryKey,
   fits,
   fitWord,
   folderName,
@@ -50,6 +51,13 @@ function placeOptions(
   });
 }
 
+/** The folder of the entry, with its task when the folder holds more than the one called by its own name. */
+function summaryOf(entry: CatalogueEntry): string {
+  const folder = folderName(entry);
+  const task = entry.card?.task ?? '';
+  return task === '' || task === folder || task === 'default' ? folder : `${folder} / ${task}`;
+}
+
 function EntryRows(props: {
   readonly entries: readonly CatalogueEntry[];
   readonly picked: string | null;
@@ -62,12 +70,12 @@ function EntryRows(props: {
         const folder = folderName(entry);
         return (
           <PickRow
-            key={entry.example}
-            id={entry.example}
+            key={entryKey(entry)}
+            id={entryKey(entry)}
             title={runTitle(entry.card ?? null, folder)}
-            summary={folder}
+            summary={summaryOf(entry)}
             badges={[{label: word, tone: fitTone(word)}]}
-            select={() => props.pick(entry.example)}
+            select={() => props.pick(entryKey(entry))}
           />
         );
       })}
@@ -110,7 +118,7 @@ export function ExamplePicker(props: {
   const places = host?.evalPlaces.data?.places ?? [];
   const fitting = entries.filter(fits).length;
   const shown = visibleEntries(entries, {query: draft.query, fitsOnly: draft.fitsOnly});
-  const picked = entries.find(entry => entry.example === draft.picked);
+  const picked = entries.find(entry => entryKey(entry) === draft.picked);
   const chosen = picked === undefined ? undefined : placeChoice(draft.place, places, picked.fit);
   const line = provisionLine(host?.provision ?? {_tag: 'Idle'});
   const split = splitPath(draft.parent);

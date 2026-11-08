@@ -30,13 +30,20 @@ export function folderName(entry: Pick<CatalogueEntry, 'example'>): string {
   );
 }
 
+/**
+ * What tells entries apart: the example (a project root) and the task of it. One example may hold
+ * several tasks, each its own entry, so the example alone names none of them.
+ */
+export const entryKey = (entry: Pick<CatalogueEntry, 'example' | 'card'>): string =>
+  `${entry.example}:${entry.card?.task ?? ''}`;
+
 export interface DomainGroup {
   readonly domain: TaskDomain;
   readonly entries: readonly CatalogueEntry[];
 }
 
 const byName = (a: CatalogueEntry, b: CatalogueEntry): number =>
-  folderName(a).localeCompare(folderName(b)) || a.example.localeCompare(b.example);
+  folderName(a).localeCompare(folderName(b)) || entryKey(a).localeCompare(entryKey(b));
 
 /**
  * The entries in domain groups: groups in the screen's order, entries in a group by folder name, no
