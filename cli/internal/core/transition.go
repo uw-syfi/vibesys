@@ -98,6 +98,9 @@ func (j Job) Apply(t Transition) (Job, error) {
 		code := *t.ExitCode
 		out.ExitCode = &code
 	}
+	if t.To == JobFailed {
+		out.FailedStage = t.FailedStage
+	}
 	if t.To == JobCancelled {
 		out.CancelReason = t.CancelReason
 	}
@@ -132,6 +135,12 @@ func checkEffects(j Job, kind JobKind, t Transition) error {
 		return failf(FailureInvalidInput, "transition: a cancel reason goes with cancelled, not %s", t.To)
 	case t.ExitCode != nil && t.To != JobSucceeded && t.To != JobFailed:
 		return failf(FailureInvalidInput, "transition: an exit code goes with succeeded or failed, not %s", t.To)
+	case t.FailedStage != "" && t.To != JobFailed:
+		return failf(FailureInvalidInput, "transition: a failed stage goes with failed, not %s", t.To)
+	case t.FailedStage != "" && kind == JobCommand:
+		return failf(FailureInvalidInput, "transition: a command job has no stages")
+	case t.FailedStage != "" && !t.FailedStage.Valid():
+		return failf(FailureInvalidInput, "transition: failed stage %q is not one of the stages", t.FailedStage)
 	case t.To == JobQueued && t.Cut == nil:
 		return failf(FailureInvalidInput, "transition: the move back to queued says how the attempt was cut off, and none is set")
 	case t.To != JobQueued && t.Cut != nil:

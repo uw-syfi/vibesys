@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -17,6 +18,18 @@ type Branches interface {
 	// Head returns the commit the branch is at. It fails with core.FailureNotFound when the
 	// repository has no such branch.
 	Head(ctx context.Context, repository, branch string) (core.Commit, error)
+
+	// CheckoutHead returns the commit the repository's own checkout (the directory the repository
+	// is named by) is at, on a branch or detached. It fails with core.FailureNotFound when there is
+	// none: a repository with no commit.
+	CheckoutHead(ctx context.Context, repository string) (core.Commit, error)
+
+	// ChangedPaths returns the paths whose content differs between the two commits, sorted and
+	// slash-separated from the repository's root: a file added, removed or modified is one, and a
+	// file that was renamed is two, its old path and its new one. Changes that cancel each other
+	// are not changes. The order of the commits does not matter. It fails with core.FailureNotFound
+	// when the repository lacks either commit.
+	ChangedPaths(ctx context.Context, repository string, base, commit core.Commit) ([]string, error)
 
 	// IsAncestor reports whether ancestor is reachable from descendant. A commit is its own
 	// ancestor. It fails with core.FailureNotFound when the repository lacks either commit.
@@ -51,6 +64,37 @@ func (System) Head(ctx context.Context, repository, branch string) (core.Commit,
 		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s has no branch %q", repository, branch)}
 	}
 	return commit, nil
+}
+
+// CheckoutHead implements Branches.
+func (System) CheckoutHead(ctx context.Context, repository string) (core.Commit, error) {
+	out, _, err := runStatus(ctx, repository, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	commit := core.Commit(out)
+	if err != nil || !commit.Valid() {
+		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s has no commit checked out", repository)}
+	}
+	return commit, nil
+}
+
+// ChangedPaths implements Branches.
+func (System) ChangedPaths(ctx context.Context, repository string, base, commit core.Commit) ([]string, error) {
+	for _, c := range []core.Commit{base, commit} {
+		if _, _, err := runStatus(ctx, repository, "cat-file", "-e", string(c)+"^{commit}"); err != nil {
+			return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s lacks commit %s", repository, c)}
+		}
+	}
+	out, err := runRaw(ctx, repository, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", string(base), string(commit), "--")
+	if err != nil {
+		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot list what changed from %s to %s in %s: %v", base, commit, repository, err)}
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	slices.Sort(paths)
+	return paths, nil
 }
 
 // IsAncestor implements Branches.

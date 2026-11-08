@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
@@ -28,10 +29,24 @@ func (s *Server) DescribeTask(ctx context.Context, req *cliv1.DescribeTaskReques
 	return resp, nil
 }
 
-// DescribeSetup implements cliv1.DaemonServiceServer. It answers Unimplemented until the daemon reads
-// the setup facts.
-func (s *Server) DescribeSetup(context.Context, *cliv1.DescribeSetupRequest) (*cliv1.DescribeSetupResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "DescribeSetup is not implemented by this daemon yet")
+// DescribeSetup implements cliv1.DaemonServiceServer. It reads, in one pass, what the setup checks
+// of a draft task are derived from (git, the working tree, the store) and decides nothing; a draft
+// whose files cannot be read yet answers why, as DescribeTask does.
+func (s *Server) DescribeSetup(ctx context.Context, req *cliv1.DescribeSetupRequest) (*cliv1.DescribeSetupResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	if err := protovalidate.Validate(req); err != nil {
+		return nil, wire.Error(&core.Failure{Kind: core.FailureInvalidInput, Message: "describe setup: " + err.Error()})
+	}
+	read, err := s.app.ReadSetup(ctx, app.Caller{Directory: req.GetRepository(), Task: req.GetTask()}, s.cardFiles)
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	resp := setupResponse(req.GetTask(), read)
+	if err := protovalidate.Validate(resp); err != nil {
+		return nil, wire.Error(&core.Failure{Kind: core.FailureInternal, Message: "describe setup: the answer is invalid: " + err.Error()})
+	}
+	return resp, nil
 }
 
 // ListPlacements implements cliv1.DaemonServiceServer.

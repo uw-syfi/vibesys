@@ -207,6 +207,22 @@ const (
 	StageReset Stage = "reset"
 )
 
+// JobStage is the stage of a job's record that an ending in this step belongs to: the image or the
+// candidate's image that did not build is BUILD, the correctness check is CHECK, the benchmark is
+// MEASURE. A step outside those (the checkout, a server, a reset, a look at the machine) is none: it
+// says nothing of whether the candidate built or the check judged it.
+func (s Stage) JobStage() core.JobStage {
+	switch s {
+	case StageBuild, StageCandidate:
+		return core.StageBuild
+	case StageCheck:
+		return core.StageCheck
+	case StageBenchmark:
+		return core.StageMeasure
+	}
+	return ""
+}
+
 // Findings is what a job that passed found out.
 type Findings struct {
 	// CheckTook is how long the check ran, for a check job.
