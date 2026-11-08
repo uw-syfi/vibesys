@@ -65,6 +65,12 @@ type ServiceDeps struct {
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
 	// a host with no job tool, and its runs record none.
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
+	// Tasks reads the card of a task at start, Places lists the eval places and Fit says which of them
+	// give what a task needs. All three are optional: without Tasks a run records no card, without
+	// Places a start names no place the host has. Fit is required with Places.
+	Tasks  TaskReader
+	Places PlaceSource
+	Fit    PlaceFit
 	// HistoryPageBytes is the byte budget of one page of GetRunHistory. Zero is MaxHistoryPageBytes;
 	// a smaller one lets a test fill a page with a small fleet.
 	HistoryPageBytes int
@@ -87,6 +93,9 @@ func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
 	}
 	if deps.Starts == nil {
 		return nil, errors.New("daemon: ServiceDeps.Starts is required")
+	}
+	if deps.Places != nil && deps.Fit == nil {
+		return nil, errors.New("daemon: ServiceDeps.Fit is required with Places")
 	}
 	if deps.HistoryPageBytes <= 0 {
 		deps.HistoryPageBytes = MaxHistoryPageBytes
@@ -311,7 +320,10 @@ func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Comman
 	switch {
 	case err == nil:
 		start.Repository = canonical
-		if s.JobTool != nil {
+		if start.Facts, err = s.startFacts(ctx, start); err != nil {
+			return cmd, err
+		}
+		if start.Facts.Refused == nil && s.JobTool != nil {
 			start.JobTool, err = s.JobTool(ctx)
 			if err != nil {
 				return cmd, status.Error(codes.FailedPrecondition, err.Error())
