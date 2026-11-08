@@ -337,7 +337,8 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 
 	// One brief, three handoffs, and the job-completion notices that came before the run ended wake the
 	// lead (how many came is timing: see fixtureJobs). Read the typed deliveries once the run is over, then count the files.
-	expectedPrompts := 1 + 3 + r.awaitLeadDeliveries(started.RunID, lead.ID)
+	toldOf := r.awaitLeadDeliveries(started.RunID, lead.ID)
+	expectedPrompts := 1 + 3 + len(toldOf)
 	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
 		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
 	}
@@ -441,6 +442,17 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	}
 	if len(jobs.Jobs) == 0 {
 		t.Error("vibesys-cli ran no job for the run")
+	}
+	// A job the lead was told of is a job the job service ran: a notice is never about a job that does not exist.
+	for _, told := range toldOf {
+		if !slices.ContainsFunc(jobs.Jobs, func(j struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		}) bool {
+			return j.ID == told
+		}) {
+			t.Errorf("the lead was told of job %s, which vibesys-cli does not know", told)
+		}
 	}
 	for _, j := range jobs.Jobs {
 		if j.State != "JOB_STATE_SUCCEEDED" {
