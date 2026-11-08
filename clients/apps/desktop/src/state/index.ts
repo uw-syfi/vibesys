@@ -261,6 +261,22 @@ export {
   sshArgs,
   targetFromInput,
 } from './settings/ssh-target.js';
+export {
+  type Baseline,
+  type CheckRow,
+  type CheckState,
+  type Draft,
+  followedAgent,
+  inSetup,
+  SETUP_CHECKS,
+  type SetupFacts,
+  type StartOutcome,
+  setupFacts,
+  setupLead,
+  setupOf,
+  startOutcome,
+  unmetOf,
+} from './setup/index.js';
 export {isBack, type KeyPress} from './shell/keys.js';
 export {
   type Destination,
