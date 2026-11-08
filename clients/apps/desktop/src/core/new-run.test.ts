@@ -46,6 +46,20 @@ describe('what the New run screen asks of the host', () => {
     }),
   );
 
+  it.effect('reads only the places for the Machines page, and again on a refresh', () =>
+    Effect.gen(function* () {
+      const h = yield* hostHarness(new FakeDaemon(scenario));
+      yield* h.session.newRun.loadPlaces;
+      expect(callsTo(h, 'ListEvalPlaces')).toHaveLength(1);
+      expect(callsTo(h, 'ListCatalogue')).toHaveLength(0);
+      yield* h.session.newRun.refreshPlaces;
+      expect(callsTo(h, 'ListEvalPlaces')).toHaveLength(2);
+      const places = yield* h.read(h.session.newRun.places);
+      expect(places).toMatchObject({reading: false, failure: null});
+      expect(places.data?.places).toHaveLength(4);
+    }),
+  );
+
   it.effect('makes the repository, then starts the run in it, as one step', () =>
     Effect.gen(function* () {
       const h = yield* hostHarness(new FakeDaemon(scenario));

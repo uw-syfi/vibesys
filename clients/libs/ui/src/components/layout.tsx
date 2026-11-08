@@ -111,6 +111,18 @@ export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
 }
 
 /**
+ * What was read before and is read again: quieter while `reading`, until the answer replaces it,
+ * once. It takes no room of its own, so nothing around it moves.
+ */
+export function Dim(props: {readonly reading: boolean; readonly children: ReactNode}): JSX.Element {
+  return (
+    <div className="vs-dim" data-dim={props.reading || undefined} aria-busy={props.reading}>
+      {props.children}
+    </div>
+  );
+}
+
+/**
  * The main area: the page gutter, and content centred at `width`. Without a `header` or `footer`
  * the page scrolls as one document, which suits a short page. With either, the page never
  * scrolls: the `header` (a title, a logo, the page's actions) and the `footer` (the page's primary

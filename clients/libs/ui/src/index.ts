@@ -89,6 +89,7 @@ export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {type AxisLabel, labelsFit, type PlacedLabel, placeLabels} from './components/label-fit.js';
 export {
   type Align,
+  Dim,
   Dock,
   Grid,
   type GridColumn,

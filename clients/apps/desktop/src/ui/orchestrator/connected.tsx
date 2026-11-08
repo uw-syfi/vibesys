@@ -53,6 +53,7 @@ export interface Issues {
 
 export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}, updates: {}};
 
+const NO_FOLDERS: Readonly<Record<string, string>> = {};
 const OPENING: FeedStatus = {_tag: 'Opening'};
 const IDLE: HistoryStatus = {_tag: 'Idle'};
 const RUN_HISTORY_IDLE: RunHistoryStatus = {_tag: 'Idle'};
@@ -114,15 +115,19 @@ const openAgentHistory = (
 const snapshots = (
   hosts: readonly ConnectedHost[],
   issues: Issues,
-  openHost: string | undefined,
-  openAgent: string | null | undefined,
-  openRun: string | undefined,
+  open: {
+    readonly host: string | undefined;
+    readonly agent: string | null | undefined;
+    readonly run: string | undefined;
+  },
   cost: CostTarget | null,
+  repositories: Readonly<Record<string, string>>,
 ): Atom.Atom<{
   readonly hosts: readonly HostSnapshot[];
   readonly progress: AppCommandsProgress;
 }> =>
   Atom.make(get => {
+    const {host: openHost, agent: openAgent, run: openRun} = open;
     const progressOf = (issued: Issued | undefined): CommandProgress | undefined => {
       const session = hosts.find(candidate => candidate.key === issued?.host)?.session;
       return issued === undefined || session === undefined
@@ -148,6 +153,7 @@ const snapshots = (
         directories: get(session.directories.state),
         catalogue: get(session.newRun.catalogue),
         evalPlaces: get(session.newRun.places),
+        repositoriesDirectory: repositories[key] ?? '',
         provision: get(session.newRun.provision),
         agentFeeds:
           openHost === key && openAgent !== null && openAgent !== undefined
@@ -276,8 +282,11 @@ export function ConnectedApp(props: {
   readonly go: (action: NavigationAction) => void;
   readonly issues: Issues;
   readonly setIssues: (update: (all: Issues) => Issues) => void;
+  /** The Repositories folder kept for each machine, by host key: New run's Copy to starts there. */
+  readonly repositories?: Readonly<Record<string, string>>;
 }): JSX.Element {
   const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
+  const repositories = props.repositories ?? NO_FOLDERS;
   const {openHost, openAgent, openRun, costHost, costRun} = openOf(route);
   useOpenStreams(hosts, openOf(route));
   const clock = useAtomValue(nowMs);
@@ -287,12 +296,11 @@ export function ConnectedApp(props: {
         snapshots(
           hosts,
           issues,
-          openHost,
-          openAgent,
-          openRun,
+          {host: openHost, agent: openAgent, run: openRun},
           costHost === undefined || costRun === undefined ? null : {host: costHost, runId: costRun},
+          repositories,
         ),
-      [hosts, issues, openHost, openAgent, openRun, costHost, costRun],
+      [hosts, issues, openHost, openAgent, openRun, costHost, costRun, repositories],
     ),
   );
   const sessionOf = (host: string): HostSession | undefined =>

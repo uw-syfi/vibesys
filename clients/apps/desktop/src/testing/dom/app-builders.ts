@@ -21,6 +21,7 @@ export function hostSnapshotOf(overrides: Partial<HostSnapshot> = {}): HostSnaps
     directories: new Map(),
     catalogue: NOT_READ,
     evalPlaces: NOT_READ,
+    repositoriesDirectory: '',
     provision: NOT_PROVISIONING,
     agentFeeds: {},
     costFeeds: {},

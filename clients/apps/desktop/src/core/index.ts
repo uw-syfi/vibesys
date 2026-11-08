@@ -50,6 +50,7 @@ export {
   makeMachineActions,
   type RemoveOutcome,
 } from './machines/actions.js';
+export {type MachineFolders, makeMachineFolders} from './machines/folders.js';
 export {
   type AskMachines,
   type MachineAdded,

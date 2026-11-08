@@ -48,6 +48,8 @@ export interface StartHost {
   readonly catalogue: Remote<ListCatalogueResponse>;
   /** The host's eval places. */
   readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** The Repositories folder kept for this machine, empty when none: where Copy to starts. */
+  readonly repositoriesDirectory?: string;
   /** Where the repository being made from an example stands. */
   readonly provision: ProvisionProgress;
 }
