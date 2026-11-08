@@ -237,6 +237,78 @@ describe('PathInput', () => {
     expect(input.getAttribute('aria-expanded')).toBe('false');
     expect(input.getAttribute('aria-controls')).toBeNull();
   });
+
+  test('Tab takes the highlighted completion, the first one only with tabCompletes, else moves on', async () => {
+    const taken: string[] = [];
+    const tab = async (props: {readonly tabCompletes?: boolean; readonly highlight?: boolean}) => {
+      const container = await mount(
+        <Field label="Folder">
+          <PathInput
+            value=""
+            change={() => undefined}
+            completions={COMPLETIONS}
+            pick={completion => taken.push(completion.value)}
+            {...(props.tabCompletes === true ? {tabCompletes: true} : {})}
+          />
+        </Field>,
+      );
+      const input = one(container, 'input');
+      if (props.highlight === true) {
+        await press(input, 'ArrowDown');
+        await press(input, 'ArrowDown');
+      }
+      const event = new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, cancelable: true});
+      await act(async () => {
+        input.dispatchEvent(event);
+      });
+      return event.defaultPrevented;
+    };
+    expect(await tab({highlight: true})).toBe(true);
+    expect(await tab({tabCompletes: true})).toBe(true);
+    expect(await tab({})).toBe(false);
+    expect(taken).toEqual(['/srv/beta', '/srv/alpha']);
+  });
+
+  test('tells its owner when it takes the focus', async () => {
+    let focused = 0;
+    const container = await mount(
+      <Field label="Folder">
+        <PathInput value="" change={() => undefined} completions={[]} focus={() => focused++} />
+      </Field>,
+    );
+    await act(async () => one(container, 'input').focus());
+    expect(focused).toBe(1);
+  });
+
+  test('the list floats in a scroll region of its own, so it adds nothing to the layout', async () => {
+    const container = await mount(<ControlledPath completions={COMPLETIONS} />);
+    const list = one(container, '[role="listbox"]');
+    expect(list.getAttribute('data-scroll')).toBe('feed');
+    expect(list.classList.contains('vs-completions')).toBe(true);
+  });
+});
+
+describe('Field reserveLine', () => {
+  test('keeps one hidden line under the control when there is neither help nor error', async () => {
+    const lines = async (props: {readonly help?: string; readonly reserve?: boolean}) => {
+      const container = await mount(
+        <Field
+          label="Path"
+          {...(props.reserve === true ? {reserveLine: true} : {})}
+          {...(props.help === undefined ? {} : {help: props.help})}
+        >
+          <TextInput value="" />
+        </Field>,
+      );
+      return [...container.querySelectorAll('.vs-help')].map(line =>
+        line.getAttribute('aria-hidden'),
+      );
+    };
+    expect(await lines({})).toEqual([]);
+    expect(await lines({reserve: true})).toEqual(['true']);
+    // With help to show, that line is the one under the control.
+    expect(await lines({reserve: true, help: 'Tasks: a'})).toEqual([null]);
+  });
 });
 
 describe('Button', () => {

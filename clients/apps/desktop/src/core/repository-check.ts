@@ -34,8 +34,8 @@ export const makeRepositoryCheck = Effect.fn('RepositoryCheck.make')(function* (
   const checked = yield* SubscriptionRef.make<RepositoryChecked | undefined>(undefined);
   const answer = (repository: string): Effect.Effect<RepositoryAnswer> =>
     client.checkRepository({repository}).pipe(
-      Effect.map(({refusal}): RepositoryAnswer => {
-        if (refusal === undefined) return {_tag: 'Passed'};
+      Effect.map(({refusal, tasks}): RepositoryAnswer => {
+        if (refusal === undefined) return {_tag: 'Passed', tasks};
         // A host that cannot launch agents refuses whatever the path: that is not the path's fault.
         return refusal.notReady ? UNASKED : {_tag: 'Refused', reason: refusal.reason};
       }),
