@@ -35,7 +35,7 @@ import type {StartHost} from '../start-run-form.js';
 import {domainWord, fitTone, placeLabel, provisionLine} from './words.js';
 
 /** Where Copy to starts: the folder kept for the machine, else the host's own default. */
-export function copyDefault(host: StartHost | undefined): string {
+function copyDefault(host: StartHost | undefined): string {
   if (host === undefined) return '';
   const kept = host.repositoriesDirectory ?? '';
   return kept === '' ? (host.catalogue.data?.repositoriesDirectory ?? '') : kept;

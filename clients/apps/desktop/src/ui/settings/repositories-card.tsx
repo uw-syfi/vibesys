@@ -3,7 +3,7 @@ import {type JSX, useState} from 'react';
 import {checkRepositoriesFolder, REPOSITORIES_FIELD} from '../../state/index.js';
 
 /** One machine and the Repositories folder kept for it; empty when none is kept. */
-export interface FolderRow {
+interface FolderRow {
   readonly key: string;
   readonly label: string;
   readonly folder: string;
