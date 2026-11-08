@@ -259,7 +259,7 @@ func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
 		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool, Provisioner: x.wiring.Provisioner,
-		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool),
+		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool), Tasks: tasksOf(x.wiring.JobTool),
 	})
 }
 
@@ -380,4 +380,13 @@ func placesOf(jobTool func(context.Context) (core.JobToolEndpoint, error)) daemo
 		return nil
 	}
 	return NewCLIPlaces(jobTool)
+}
+
+// tasksOf is the task reader of a host with a job tool; a host without one has no reader, and its
+// runs record no card, as a reader it does not have and not as one that reads nothing.
+func tasksOf(jobTool func(context.Context) (core.JobToolEndpoint, error)) daemon.TaskReader {
+	if jobTool == nil {
+		return nil
+	}
+	return NewCLITasks(jobTool)
 }
