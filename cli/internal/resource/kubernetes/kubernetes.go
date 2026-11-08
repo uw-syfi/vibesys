@@ -149,3 +149,8 @@ func (k *Kubernetes) Attach(ctx context.Context) (resource.Attachment, error) {
 func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: "kubernetes: " + fmt.Sprintf(format, args...)}
 }
+
+// Offers implements resource.Resource: this resource gives no accelerators.
+func (*Kubernetes) Offers(ctx context.Context) ([]core.Accelerator, error) {
+	return nil, ctx.Err()
+}

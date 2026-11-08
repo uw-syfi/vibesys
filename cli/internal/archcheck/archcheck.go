@@ -191,7 +191,7 @@ var rules = map[string][]string{
 		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease", "internal/lease/kubelease",
 		"internal/lease/locallease", "internal/neighbors",
 		"internal/backend/amd", "internal/resource/rocm", "internal/environment/apptainer", "internal/environment/apptainer/clustercli",
-		"internal/environment/apptainer/localsif",
+		"internal/environment/apptainer/localsif", "internal/wire",
 	},
 
 	// Replacing the running binary with a newer release.

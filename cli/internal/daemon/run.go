@@ -38,8 +38,9 @@ type Runtime struct {
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
 	// Placements are the placements a docker job can run on (app.Config.Placements).
-	Placements []core.PlacementOffer
-	Branches   gitrepo.Branches
+	Placements      []core.PlacementOffer
+	PlacementReader *app.PlacementReader
+	Branches        gitrepo.Branches
 	// Repositories resolves a caller's directory to the repository its store is keyed by.
 	Repositories gitrepo.Resolver
 	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
@@ -177,7 +178,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors).WithCardFiles(cfg.Runtime.CardFiles)
+	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors).WithPlacements(cfg.Runtime.PlacementReader).WithCardFiles(cfg.Runtime.CardFiles)
 	server := grpc.NewServer(grpc.ChainUnaryInterceptor(wire.RequestValidator()), grpc.ChainStreamInterceptor(wire.StreamRequestValidator()))
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)

@@ -25,16 +25,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
-// ListPlacements answers Unimplemented, naming itself, until the probes exist: never an empty
-// success a client would read as "no places".
-func TestListPlacementsIsUnimplementedAndNamesItself(t *testing.T) {
-	r := newDescribeRig(t, true)
-	_, err := r.client.ListPlacements(ctxFor(t), &cliv1.ListPlacementsRequest{})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "ListPlacements") {
-		t.Errorf("got %v, want Unimplemented naming the call", err)
-	}
-}
-
 // describeRig is a daemon over memory card files, reached through an in-memory connection.
 type describeRig struct {
 	client cliv1.DaemonServiceClient

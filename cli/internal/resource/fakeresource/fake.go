@@ -66,3 +66,9 @@ func (f *Fake) Attach(ctx context.Context) (resource.Attachment, error) {
 	a.Env = maps.Clone(a.Env)
 	return a, nil
 }
+
+// Offers implements resource.Resource.
+func (f *Fake) Offers(ctx context.Context) ([]core.Accelerator, error) {
+	_, err := f.Fingerprint(ctx)
+	return nil, err
+}
