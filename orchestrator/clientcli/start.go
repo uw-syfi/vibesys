@@ -27,6 +27,12 @@ const confinementNotice = "note: agents run as your user with their permissions 
 // clean. A run has no default limit, so the person is told it has none and how to give it one.
 const noLimitNotice = "note: this run has no time or spending limit; --max-time 30m and --max-cost 5 (dollars) set one."
 
+// minSummaryEvery is the least --summary-every the contract allows (StartRun.summary_every's
+// duration.gte of 300s, in events.proto). The shell holds the value to this least so the person who
+// asks for a shorter interval is told at once and clearly, rather than having the host refuse the
+// start after the client has printed its notices and opened a connection.
+const minSummaryEvery = 5 * time.Minute
+
 // startArgs are the flags of `run start`.
 type startArgs struct {
 	repository, task, brief, harness, model, effort string
@@ -72,8 +78,8 @@ func parseStart(args []string) (startArgs, error) {
 	})
 	fs.Func("summary-every", "how often the lead is asked for a progress report while work moves, such as 30m (default: 1h; at least 5m)", func(v string) error {
 		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return fmt.Errorf("%q is not a positive duration such as 30m", v)
+		if err != nil || d < minSummaryEvery {
+			return fmt.Errorf("%q is not a duration of at least 5m, such as 30m", v)
 		}
 		a.summaryEvery = d
 		return nil
