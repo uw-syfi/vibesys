@@ -94,6 +94,13 @@ The app displays that projection without rebuilding search policy locally.
 6. The orchestrator streams every change to the app. If the host restarts, sidecars keep running and the
    orchestrator re-attaches to each by reading from its last committed offset.
 
+A run may begin in a setup phase instead. The operator chats with a lead agent that makes the run's task
+in the repository. The orchestrator reads the draft through `vibesysd` and derives, from facts, whether
+the task is ready (the lead's word does not count). When every check passes, the operator completes setup:
+the run switches to optimizing with a fresh lead, and the run's limits count from that point. A setup run is
+listed and stopped like any run, has no subagents, and never stalls. Setup spend and time are reported
+apart. A run recorded before phases is an optimizing run.
+
 ## Host composition
 
 The host only composes typed services. Its entrypoint hands control to the composition layer;

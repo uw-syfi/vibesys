@@ -31,6 +31,35 @@ of the example listing.
 The legacy `example list --json` command is removed. Use `vibesys example new`
 to create a project, as described in [Running VibeSys](../running-vibesys.md).
 
+## How examples reach a new run
+
+The desktop app starts a run from an example through the host, not through
+`vibesys example new`.
+
+- **Packaging.** The release builder reads each registered example's tasks with
+  the job tool's card reader and writes `catalogue.pb` (a `ReleaseCatalogue`)
+  beside an `examples/` folder holding each example's files at the example's id,
+  such as `examples/<category>/<example>`. The catalogue says nothing the task
+  files do not, so a task's `[catalogue]` metadata is what the catalogue shows.
+  A task has no variant field: a client shows the task's folder name, the last
+  part of the example id. An `external_repo` example carries only its own
+  files and the catalogue pins the revision to clone.
+- **Copying.** `ProvisionRepository` builds the repository in a staging folder
+  beside its final place and renames it into place, so a failure leaves nothing
+  and a name that exists is refused, never overwritten. The copy takes regular
+  files and folders only. An external example is cloned at its pinned revision
+  without history, the release's files are written over it, and the result is
+  one commit. The host needs the network only for that clone. The name is
+  lowercase letters, digits and dashes.
+- **Where.** A request with no parent folder uses the host's repositories
+  directory, which `ListCatalogue` reports.
+
+Both sides are defined in
+[`release_catalogue.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/orchestrator/v1/release_catalogue.proto)
+and
+[`provision.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/orchestrator/v1/provision.proto).
+The calls are described in [Process boundaries](process-boundaries.md#making-a-run).
+
 ## Static checks run for every example
 
 Static checks (structure and configuration) run for every registered example
