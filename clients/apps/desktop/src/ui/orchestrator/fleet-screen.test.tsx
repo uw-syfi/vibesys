@@ -564,26 +564,52 @@ describe('the fleet screen', () => {
   });
 
   it('draws only the rows near the view, however many runs there are', () => {
-    const scenario = fleetScenario({seed: 5, prefix: 'big', runs: 600, live: 3, nowMs: NOW});
-    const data = applySnapshot(emptyState, new FakeDaemon(scenario).snapshot());
-    const {screen} = open([
-      {
-        key: 'local',
-        label: 'This Mac',
-        freshness: 'live',
-        status: statusFor('live', null, null),
-        data,
-      },
-    ]);
-    const history = screen.container.querySelector('[role="listbox"][aria-label="Run history"]');
-    const drawn = history?.querySelectorAll('[role="option"]') ?? [];
-    expect(drawn.length).toBeGreaterThan(0);
-    expect(drawn.length).toBeLessThan(60);
-    expect(drawn[0]?.getAttribute('aria-setsize')).toBe('597');
-    // The scenario's runs have series, and only the rows drawn draw them.
-    expect(history?.querySelectorAll('.vs-spark').length).toBeGreaterThan(0);
-    expect(history?.querySelectorAll('.vs-spark').length).toBeLessThanOrEqual(drawn.length);
-    screen.unmount();
+    const LIVE = 3;
+    // What a host of `runs` runs draws: the rows on screen, the history size one of them names, and
+    // the series, which only the drawn rows draw.
+    const shownOf = (runs: number): {drawn: number; setsize: string | null; sparks: number} => {
+      const scenario = fleetScenario({seed: 5, prefix: 'big', runs, live: LIVE, nowMs: NOW});
+      const data = applySnapshot(emptyState, new FakeDaemon(scenario).snapshot());
+      const {screen} = open([
+        {
+          key: 'local',
+          label: 'This Mac',
+          freshness: 'live',
+          status: statusFor('live', null, null),
+          data,
+        },
+      ]);
+      try {
+        const history = screen.container.querySelector(
+          '[role="listbox"][aria-label="Run history"]',
+        );
+        const drawn = [...(history?.querySelectorAll('[role="option"]') ?? [])];
+        return {
+          drawn: drawn.length,
+          setsize: drawn[0]?.getAttribute('aria-setsize') ?? null,
+          sparks: history?.querySelectorAll('.vs-spark').length ?? 0,
+        };
+      } finally {
+        screen.unmount();
+      }
+    };
+    // A history that fits a screenful is drawn whole.
+    const few = shownOf(8);
+    expect(few.drawn).toBe(8 - LIVE);
+    expect(few.setsize).toBe(String(8 - LIVE));
+    // Histories well past a screenful, an order of magnitude apart: each names its own size, and only
+    // the rows it draws draw their series.
+    const many = [20, 60, 150].map(runs => ({runs, ...shownOf(runs)}));
+    for (const {runs, drawn, setsize, sparks} of many) {
+      expect(drawn).toBeGreaterThan(0);
+      expect(drawn).toBeLessThan(60);
+      expect(setsize).toBe(String(runs - LIVE));
+      expect(sparks).toBeGreaterThan(0);
+      expect(sparks).toBeLessThanOrEqual(drawn);
+    }
+    // However many runs there are, the same screenful is drawn: the window is bounded, never a
+    // fraction of the history that grows with it.
+    expect(new Set(many.map(each => each.drawn)).size).toBe(1);
   });
 
   it('flashes a row for a run that began or ended just now, and no other', () => {
