@@ -44,8 +44,8 @@ type Run struct {
 	LeadReminders uint32
 	// Usage is the cost of every finished turn of every agent of the run.
 	Usage Usage
-	// Allowed is what the run may spend on: set when it starts, never changed. A subagent runs
-	// only on one of these.
+	// Allowed is what the run may spend on: set when it starts, and added to only when an update
+	// switches the lead to a harness and model outside it. A subagent runs only on one of these.
 	Allowed []AgentChoice
 	// Kept are the working copies agents made that were not removed when the run ended, because they
 	// hold changes git does not have. Empty until the run is over and its checkouts are released.
@@ -421,11 +421,44 @@ type (
 		Status AgentStatus
 		Detail string
 	}
+	// LeadHandover is the first prompt of a lead that replaces another in a running run, as data a
+	// template renders: what the run is, how far it has got and who is in it, as the core knows it when
+	// the new session is launched. Elapsed is in whole seconds, as the wire holds it. Mail the old lead
+	// had not read is queued behind it.
+	LeadHandover struct {
+		Task        string
+		FanoutLimit uint32
+		// Previous is the spec of the lead this one replaces.
+		Previous AgentSpec
+		Elapsed  time.Duration
+		// Spent is nil when no turn has reported a cost; MaxCost and MaxTime are zero for no limit.
+		Spent   *float64
+		MaxCost float64
+		MaxTime time.Duration
+		// LimitReached is the limit the run has reached, empty for none: the old lead was told to finish.
+		LimitReached  RunLimit
+		ReportsPosted uint32
+		// LatestReport is the newest report about the whole run, nil when the old lead posted none.
+		LatestReport *Report
+		// Agents are the subagents that are not over, in id order, and AgentsEnded how many are.
+		Agents      []HandoverAgent
+		AgentsEnded uint32
+		ActiveJobs  uint32
+	}
 )
 
-func (Text) messageBody()      {}
-func (Brief) messageBody()     {}
-func (LeadBrief) messageBody() {}
+// HandoverAgent is one live subagent, as a lead that takes over is told of it.
+type HandoverAgent struct {
+	ID         AgentID
+	Role       AgentRole
+	Status     AgentStatus
+	PlanNumber uint32
+}
+
+func (Text) messageBody()         {}
+func (Brief) messageBody()        {}
+func (LeadBrief) messageBody()    {}
+func (LeadHandover) messageBody() {}
 
 // Role is the role the handoff's body belongs to, empty for a handoff with no body.
 func (h Handoff) Role() AgentRole {
@@ -472,7 +505,7 @@ type Message struct {
 // trigger says what kind of turn the message starts.
 func (m Message) trigger() TurnTrigger {
 	switch m.Body.(type) {
-	case Brief, LeadBrief:
+	case Brief, LeadBrief, LeadHandover:
 		return TriggerBrief
 	case Handoff:
 		return TriggerHandoff

@@ -24,6 +24,7 @@ const MESSAGE_KINDS = {
   subagentSettled: true,
   brief: true,
   leadBrief: true,
+  leadHandover: true,
   handoffReminder: true,
   leadIdleReminder: true,
   reportDue: true,

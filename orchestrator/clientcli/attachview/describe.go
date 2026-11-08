@@ -204,6 +204,8 @@ func (v *View) reminderText(c Change) string {
 		return fmt.Sprintf("%s was asked for a progress report", v.AgentName(c.Message.GetToAgentId()))
 	case *pb.Message_CatchUpRequest:
 		return fmt.Sprintf("%s was asked for a report on what happened since the operator last looked", v.AgentName(c.Message.GetToAgentId()))
+	case *pb.Message_LeadHandover:
+		return fmt.Sprintf("%s was handed the run to take over as lead", v.AgentName(c.Message.GetToAgentId()))
 	}
 	return fmt.Sprintf("%s was reminded to post a handoff", v.AgentName(c.Message.GetToAgentId()))
 }

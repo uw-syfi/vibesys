@@ -29,6 +29,7 @@ const BODY_KINDS = {
   subagentSettled: true,
   brief: true,
   leadBrief: true,
+  leadHandover: true,
   handoffReminder: true,
   leadIdleReminder: true,
   reportDue: true,
@@ -90,6 +91,7 @@ export function noteOf(message: Message): MessageNote {
       return {kind: 'settled', agentId: body.value.agentId, status: body.value.status};
     case 'handoffReminder':
     case 'leadIdleReminder':
+    case 'leadHandover':
       return {kind: 'reminder'};
     case 'reportDue':
     case 'catchUpRequest':
