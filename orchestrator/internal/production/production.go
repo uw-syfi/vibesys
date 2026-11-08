@@ -259,7 +259,7 @@ func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
 		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool, Provisioner: x.wiring.Provisioner,
-		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool), Tasks: tasksOf(x.wiring.JobTool),
+		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool), Tasks: tasksOf(x.wiring.JobTool), SetupReads: x.wiring.SetupReads,
 	})
 }
 

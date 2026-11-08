@@ -112,8 +112,7 @@ func (t *tx) command(c Command) {
 		case DeclareTask:
 			run = t.declareTask(c, b, &r)
 		case CompleteSetup:
-			// permit refuses it until its behavior exists (see permissions), so it does not arrive here.
-			panic(fmt.Sprintf("core: %T is not decided yet", c.Body))
+			run = t.completeSetup(b, &r)
 		default:
 			panic(fmt.Sprintf("core: unknown command %T", c.Body))
 		}
@@ -166,7 +165,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		r.Run, r.Refusal = busy, RefuseRepositoryInUse
 		return ""
 	}
-	facts := startFacts(b)
+	facts := resolvedFacts(b.Facts, b.EvalPlace)
 	if facts.Refused != nil {
 		r.Refusal, r.EvalPlaces = facts.Refused.Refusal, facts.Refused.Places
 		return ""

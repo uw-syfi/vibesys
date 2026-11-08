@@ -128,13 +128,12 @@ func ResolveStartFacts(card *TaskCard, chosen string, places []PlaceVerdict) Sta
 	return StartFacts{Card: card, EvalPlace: fitting[0]}
 }
 
-// startFacts is what a StartRun records. A client's chosen place is only ever kept as the shell
-// resolved it: a start whose facts name another place than the one chosen was not resolved by a
-// shell that held it, and is refused as a place not found rather than recorded as a guess.
-func startFacts(b StartRun) StartFacts {
-	f := b.Facts
-	if f.Refused == nil && b.EvalPlace != "" && f.EvalPlace != b.EvalPlace {
-		return StartFacts{Refused: &PlaceRefusal{Refusal: RefuseEvalPlaceNotFound, Place: b.EvalPlace}}
+// resolvedFacts is what a StartRun or a completed setup records. A client's chosen place is only ever
+// kept as the shell resolved it: facts that name another place than the one chosen were not resolved
+// by a shell that held it, and are refused as a place not found rather than recorded as a guess.
+func resolvedFacts(f StartFacts, chosen string) StartFacts {
+	if f.Refused == nil && chosen != "" && f.EvalPlace != chosen {
+		return StartFacts{Refused: &PlaceRefusal{Refusal: RefuseEvalPlaceNotFound, Place: chosen}}
 	}
 	return f
 }
