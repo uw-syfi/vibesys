@@ -296,6 +296,46 @@ describe('what the screen shows of the machine', () => {
     expect(failed('Refused', false)).toMatchObject({why: 'failed'});
     expect(machineView(ready, fold([OPEN, SYNCED]))).toEqual({_tag: 'Missing', why: 'no-readings'});
   });
+
+  /** A stream that ended in a way the screen reads as the link going down. */
+  const linkLost = fault
+    .map(failure => ({_tag: 'End', why: {_tag: 'Failed', fault: failure}}) as const)
+    .filter(lost => {
+      const view = machineView(ready, fold([lost], current));
+      return view._tag === 'Shown' && view.stale === 'disconnected';
+    });
+
+  it('stops saying the link is down once a stream opens on the next link', () => {
+    fc.assert(
+      fc.property(linkLost, fc.array(change), (lost, snapshot) => {
+        // The feed opens the next stream after such an end only once the link is new.
+        expect(machineRetry(lost.why)).toBe('lost');
+        const dropped = fold([lost], current);
+        // The reading from before the drop stays, updating, while the new snapshot is read.
+        expect(machineView(ready, fold([OPEN, ...snapshot], dropped))).toEqual({
+          _tag: 'Shown',
+          sample: one,
+          stale: 'updating',
+        });
+        // With nothing read before the drop, the new stream's snapshot is a wait, not a fault.
+        expect(machineView(ready, fold([OPEN, lost, OPEN, ...snapshot]))).toEqual({
+          _tag: 'Waiting',
+        });
+      }),
+    );
+  });
+
+  it('never says the link is down while a stream is open on a ready link', () => {
+    fc.assert(
+      fc.property(fc.array(event, {maxLength: 40}), events => {
+        const model = fold(events);
+        const view = machineView(ready, model);
+        const why = view._tag === 'Shown' ? view.stale : view._tag === 'Missing' ? view.why : null;
+        if (model.open) expect(why).not.toBe('disconnected');
+      }),
+      {numRuns: 500},
+    );
+  });
 });
 
 describe('the bounds on a stream', () => {

@@ -320,7 +320,10 @@ function endWhy(end: MachineEnd): MachineWhy {
 }
 
 function whyNotCurrent(connection: HostConnectionState, model: MachineStats): MachineWhy | null {
-  if (model.ended !== null) return endWhy(model.ended);
+  const ended = model.ended === null ? null : endWhy(model.ended);
+  // After a lost link the next stream opens only on a new link, so an open one says the loss is
+  // over; whether the link is up now is the connection's to say.
+  if (ended !== null && !(ended === 'disconnected' && model.open)) return ended;
   if (connection._tag !== 'Ready') return 'disconnected';
   if (!model.open || model.reading !== null) return 'updating';
   return model.aged ? 'not-updating' : null;
