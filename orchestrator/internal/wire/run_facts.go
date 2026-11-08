@@ -288,6 +288,10 @@ func TaskCardFromMessage(m *cliv1.TaskCard) (core.TaskCard, error) {
 	return *card, errs.err()
 }
 
+// NeedMessage is a task's need as the contract states it, for the packages that judge it against
+// what a place gives.
+func NeedMessage(n *core.AcceleratorNeed) *cliv1.AcceleratorNeed { return needOut(n) }
+
 func pendingLeadIn(s *pb.PendingLead, errs *errorList) *core.AgentSpec {
 	if s == nil {
 		return nil

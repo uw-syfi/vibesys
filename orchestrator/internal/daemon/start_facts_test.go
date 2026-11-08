@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -22,8 +23,19 @@ var mi300x = core.TaskCard{
 	Hardware: &core.AcceleratorNeed{Vendor: core.VendorAMD, Model: core.ModelMI300X, Count: 8}, HardwareName: "AMD MI300X",
 }
 
-func place(name string) *pb.EvalPlace {
-	return &pb.EvalPlace{Name: name, Kind: pb.EvalPlaceKind_EVAL_PLACE_KIND_LOCAL, State: &pb.EvalPlace_Known{Known: &pb.OffersKnown{}}}
+// placeGiving is a place with a known state that gives eight MI300X when gives is set and no accelerator
+// otherwise; unreadable is one whose hardware could not be read. Whether either fits is internal/fit's
+// answer, which these tests do not restate: they set up places the rule plainly separates.
+func placeGiving(name string, gives bool) *pb.EvalPlace {
+	p := &pb.EvalPlace{Name: name, Kind: pb.EvalPlaceKind_EVAL_PLACE_KIND_LOCAL, State: &pb.EvalPlace_Known{Known: &pb.OffersKnown{Source: pb.OffersSource_OFFERS_SOURCE_PROBED}}}
+	if gives {
+		p.Offers = []*pb.EvalOffer{{Vendor: cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, Model: cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X, Count: 8}}
+	}
+	return p
+}
+
+func unreadable(name string) *pb.EvalPlace {
+	return &pb.EvalPlace{Name: name, Kind: pb.EvalPlaceKind_EVAL_PLACE_KIND_LOCAL, State: &pb.EvalPlace_Unreadable{Unreadable: &pb.OffersUnreadable{Reason: pb.OffersUnreadableReason_OFFERS_UNREADABLE_REASON_UNREACHABLE, Detail: "ssh refused"}}}
 }
 
 func startAt(id, evalPlace string) *pb.Command {
@@ -32,24 +44,21 @@ func startAt(id, evalPlace string) *pb.Command {
 	return cmd
 }
 
-// rigWith is a rig whose task needs eight MI300X and whose host has the named places, the fitting ones
-// as the fit port says.
-func rigWith(t *testing.T, card core.TaskCard, fitting []string, others ...string) *daemontest.Rig {
+// rigWith is a rig whose task reads as card and whose host has the places that give eight MI300X, those
+// that give nothing and an unreadable one.
+func rigWith(t *testing.T, card core.TaskCard, giving []string, others ...string) *daemontest.Rig {
 	t.Helper()
 	r := daemontest.NewRig(t)
 	r.Tasks.Set("task", card)
-	for _, name := range append(slices.Clone(fitting), others...) {
-		r.Places.Set(append(placesOf(r), place(name))...)
+	var places []*pb.EvalPlace
+	for _, name := range giving {
+		places = append(places, placeGiving(name, true))
 	}
-	for _, name := range fitting {
-		r.Fit.Set(name, true)
+	for _, name := range others {
+		places = append(places, placeGiving(name, false))
 	}
+	r.Places.Set(places...)
 	return r
-}
-
-func placesOf(r *daemontest.Rig) []*pb.EvalPlace {
-	got, _ := r.Places.Places(context.Background(), false)
-	return got
 }
 
 func runOf(t *testing.T, r *daemontest.Rig, receipt *pb.Receipt) core.Run {
@@ -138,7 +147,7 @@ func TestAStartIsRefusedForAPlaceThatDoesNotFitOrIsNotThereOrIsAmbiguous(t *test
 				t.Fatalf("%d runs, want none", n)
 			}
 			// The refusal is the command's receipt: a retry answers it again, even once the places change.
-			r.Fit.Set("cpu-box", true)
+			r.Places.Set(placeGiving("cpu-box", true))
 			if again := dispatch(t, r, startAt("c1", c.place)); again.GetRefusal() != c.want {
 				t.Fatalf("retry %v, want the same refusal", again)
 			}
@@ -169,13 +178,32 @@ func TestAStartRecordsTheResolvedEvalPlace(t *testing.T) {
 	}
 }
 
-// Fit is the port's alone, and it is asked only of a task that needs something: a task with no
-// accelerator and no place named never reads the places, and is left unpinned.
-func TestATaskThatNeedsNoAcceleratorIsUnpinnedAndFitIsNeverAsked(t *testing.T) {
-	r := rigWith(t, core.TaskCard{Task: "task"}, []string{"cluster-a"}, "cluster-b")
-	receipt := dispatch(t, r, startRun("c1"))
-	if got := runOf(t, r, receipt); got.EvalPlace != "" || len(r.Fit.Asked()) != 0 {
-		t.Fatalf("place %q, fit asked %v, want unpinned and no question", got.EvalPlace, r.Fit.Asked())
+// A task that needs no accelerator and names no place is left unpinned, and a CPU need is no
+// accelerator: neither takes one of the places, however many there are.
+func TestATaskThatNeedsNoAcceleratorIsUnpinned(t *testing.T) {
+	cpu := core.TaskCard{Task: "task", Hardware: &core.AcceleratorNeed{Vendor: core.VendorCPU, Count: 4}}
+	for name, card := range map[string]core.TaskCard{"no hardware": {Task: "task"}, "cpu": cpu} {
+		t.Run(name, func(t *testing.T) {
+			r := rigWith(t, card, []string{"cluster-a", "cluster-b"}, "cpu-box")
+			receipt := dispatch(t, r, startRun("c1"))
+			if got := runOf(t, r, receipt); receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED || got.EvalPlace != "" {
+				t.Fatalf("receipt %v place %q, want an accepted start, unpinned", receipt, got.EvalPlace)
+			}
+		})
+	}
+}
+
+// A place whose hardware could not be read fits nothing, so a task that needs an accelerator is refused
+// it and is not offered it, however it is named.
+func TestAPlaceWhoseHardwareIsUnreadableIsNeverRecorded(t *testing.T) {
+	r := daemontest.NewRig(t)
+	r.Tasks.Set("task", mi300x)
+	r.Places.Set(unreadable("cluster-a"))
+	for _, named := range []string{"cluster-a", ""} {
+		receipt := dispatch(t, r, startAt("c-"+named, named))
+		if receipt.GetRefusal() != pb.Refusal_REFUSAL_EVAL_PLACE_MISFIT || len(receipt.GetEvalPlaces()) != 0 {
+			t.Fatalf("named %q: receipt %v, want a misfit naming no place", named, receipt)
+		}
 	}
 }
 

@@ -90,6 +90,9 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 		if _, err := s.Resource.Fingerprint(ctx); !errors.Is(err, context.Canceled) {
 			t.Errorf("Fingerprint: %v, want the context's error", err)
 		}
+		if _, err := s.Resource.Offers(ctx); !errors.Is(err, context.Canceled) {
+			t.Errorf("Offers: %v, want the context's error", err)
+		}
 		if _, err := s.Resource.Attach(ctx); !errors.Is(err, context.Canceled) {
 			t.Errorf("Attach: %v, want the context's error", err)
 		}

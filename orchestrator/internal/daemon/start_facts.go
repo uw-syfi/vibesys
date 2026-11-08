@@ -9,14 +9,9 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/fit"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
-
-// PlaceFit says whether an eval place gives what a task needs. The rule is the host's catalogue
-// package's; the daemon only asks, so it holds no copy of it. It is pure: it reads what the place
-// reported and nothing else, and a place whose hardware is unreadable fits nothing.
-type PlaceFit interface {
-	Fits(need core.AcceleratorNeed, place *pb.EvalPlace) bool
-}
 
 // startFacts establishes what a start records on its run, before the command is decided: the task's
 // card, read from the repository the start runs in, and the eval place, resolved and checked for fit.
@@ -33,12 +28,15 @@ func (s *Service) startFacts(ctx context.Context, start core.StartRun) (core.Sta
 	}
 	var verdicts []core.PlaceVerdict
 	if need != nil || start.EvalPlace != "" {
+		// The rule of fit is internal/fit's alone: the verdict of each place is its answer, and the
+		// core holds the verdicts as data.
+		message := wire.NeedMessage(need)
 		places, err := s.places(ctx)
 		if err != nil {
 			return core.StartFacts{}, err
 		}
 		for _, p := range places {
-			verdicts = append(verdicts, core.PlaceVerdict{Name: p.GetName(), Fits: need != nil && s.Fit.Fits(*need, p)})
+			verdicts = append(verdicts, core.PlaceVerdict{Name: p.GetName(), Fits: need != nil && fit.Fits(message, p)})
 		}
 	}
 	return core.ResolveStartFacts(card, start.EvalPlace, verdicts), nil

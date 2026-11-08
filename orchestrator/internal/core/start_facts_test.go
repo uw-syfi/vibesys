@@ -76,6 +76,7 @@ func TestAStartIsRefusedForAPlaceThatDoesNotFitAndNeverRecordsOne(t *testing.T) 
 		if card != nil {
 			need = card.Hardware
 		}
+		accelerator := need != nil && need.Vendor != core.VendorCPU
 		_, has := verdict[chosen]
 		var want core.Refusal
 		switch {
@@ -83,9 +84,9 @@ func TestAStartIsRefusedForAPlaceThatDoesNotFitAndNeverRecordsOne(t *testing.T) 
 			want = core.RefuseEvalPlaceNotFound
 		case chosen != "" && need != nil && !verdict[chosen]:
 			want = core.RefuseEvalPlaceMisfit
-		case chosen == "" && need != nil && len(fitting) == 0:
+		case chosen == "" && accelerator && len(fitting) == 0:
 			want = core.RefuseEvalPlaceMisfit
-		case chosen == "" && need != nil && len(fitting) > 1:
+		case chosen == "" && accelerator && len(fitting) > 1:
 			want = core.RefuseEvalPlaceAmbiguous
 		}
 		if want != "" {
@@ -104,10 +105,10 @@ func TestAStartIsRefusedForAPlaceThatDoesNotFitAndNeverRecordsOne(t *testing.T) 
 		if got.Refused != nil || got.Card != card {
 			t.Fatalf("#%d card %+v chosen %q places %v: got %+v, want the card recorded and no refusal", i, card, chosen, places, got)
 		}
-		if need != nil && !verdict[got.EvalPlace] {
+		if need != nil && got.EvalPlace != "" && !verdict[got.EvalPlace] {
 			t.Fatalf("#%d recorded place %q does not fit %v", i, got.EvalPlace, need)
 		}
-		if chosen != "" && got.EvalPlace != chosen || chosen == "" && need == nil && got.EvalPlace != "" {
+		if chosen != "" && got.EvalPlace != chosen || chosen == "" && !accelerator && got.EvalPlace != "" {
 			t.Fatalf("#%d chosen %q need %v: recorded %q", i, chosen, need, got.EvalPlace)
 		}
 	}

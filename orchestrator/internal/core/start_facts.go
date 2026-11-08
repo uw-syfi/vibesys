@@ -85,7 +85,7 @@ func (n *AcceleratorNeed) String() string {
 //   - A task that needs an accelerator never starts without a resolved place: a named place that does
 //     not fit is refused as a misfit; an unnamed one takes the only fitting place, and is refused as a
 //     misfit when none fits and as ambiguous when several do.
-//   - A task that needs none, or has no card, takes the place named, if the host has it, and is
+//   - A task that needs none (a CPU need is none), or has no card, takes the place named, if the host has it, and is
 //     unpinned otherwise. The fit of a place is not judged without a need, and that is the state the
 //     run records, not a guess.
 func ResolveStartFacts(card *TaskCard, chosen string, places []PlaceVerdict) StartFacts {
@@ -93,6 +93,8 @@ func ResolveStartFacts(card *TaskCard, chosen string, places []PlaceVerdict) Sta
 	if card != nil {
 		need = card.Hardware
 	}
+	// A CPU need is no accelerator: a place named for it is still judged, but none is chosen for it.
+	accelerator := need != nil && need.Vendor != VendorCPU
 	var all, fitting []string
 	var named *PlaceVerdict
 	for i, p := range places {
@@ -116,7 +118,7 @@ func ResolveStartFacts(card *TaskCard, chosen string, places []PlaceVerdict) Sta
 		return refuse(RefuseEvalPlaceMisfit, fitting)
 	case chosen != "":
 		return StartFacts{Card: card, EvalPlace: chosen}
-	case need == nil:
+	case !accelerator:
 		return StartFacts{Card: card}
 	case len(fitting) == 0:
 		return refuse(RefuseEvalPlaceMisfit, nil)

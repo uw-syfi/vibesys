@@ -18,10 +18,11 @@ import (
 // Server serves an App as the DaemonService. Create it with NewServer.
 type Server struct {
 	cliv1.UnimplementedDaemonServiceServer
-	app       *app.App
-	binary    string
-	inherited Inherited
-	machine   Machine
+	app        *app.App
+	placements *app.PlacementReader
+	binary     string
+	inherited  Inherited
+	machine    Machine
 	// neighbors lists the other daemons of the machine for the status; nil lists none.
 	neighbors func() []Neighbor
 
@@ -353,3 +354,6 @@ func leaseConflicts(cs []app.LeaseConflict) []*cliv1.LeaseConflict {
 	}
 	return out
 }
+
+// WithPlacements supplies the configured placement reader.
+func (s *Server) WithPlacements(p *app.PlacementReader) *Server { s.placements = p; return s }
