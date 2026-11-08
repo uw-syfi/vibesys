@@ -116,6 +116,12 @@ message SlurmSettings {
   // Zero means the default.
   double poll_interval_seconds = 8 [(buf.validate.field).double.gte = 0];
   double queue_timeout_seconds = 9 [(buf.validate.field).double.gte = 0];
+  // The longest time limit the cluster grants a job of the placement, as a site's QOS or partition
+  // caps it, in whole minutes: no allocation asks for more. A reused allocation is at most this
+  // long, a container with no limit of its own gets what fits, and a container whose limit and the
+  // 10 minutes that stop it do not fit is refused before anything is submitted. Zero means no cap.
+  // Only for the apptainer kind.
+  double max_time_seconds = 10 [(buf.validate.field).double.gte = 0];
 }
 
 // ContainerRuntime is what runs a container of the apptainer kind on a compute node.
@@ -156,9 +162,10 @@ message ApptainerSettings {
   // whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
   // allocation of its own, cancelled with it.
   double idle_release_seconds = 7 [(buf.validate.field).double.gte = 0];
-  // The time limit of a reused allocation, at most the partition's: a container claims only an
-  // allocation with its own limit and 10 minutes left. Zero means a day. Only with
-  // idle_release_seconds.
+  // The time limit of a reused allocation, at most the partition's and at most [slurm]
+  // max_time_seconds: a container claims only an allocation with its own limit and 10 minutes left,
+  // and one with no limit the one with the most time left. Zero means [slurm] max_time_seconds, or a
+  // day without it. Only with idle_release_seconds.
   double allocation_limit_seconds = 8 [(buf.validate.field).double.gte = 0];
 }
 

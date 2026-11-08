@@ -153,17 +153,24 @@ type Config struct {
 	// without a container before it ends itself. Zero gives each container an allocation of its
 	// own, cancelled with it.
 	Idle time.Duration
-	// AllocationLimit is the time limit of a reusable allocation; zero is NoLimit. A container's
-	// allocation is never shorter than its own limit and StopMargin.
+	// AllocationLimit is the time limit of a reusable allocation; zero is MaxTime, or NoLimit
+	// without one. A container's allocation is never shorter than its own limit and StopMargin.
 	AllocationLimit time.Duration
+	// MaxTime, when set, is the longest time limit the cluster grants an allocation of the
+	// placement, as a site's QOS or partition caps it, in whole minutes, as Slurm counts them. No
+	// allocation asks for more: a container whose limit and StopMargin do not fit is refused before
+	// anything is submitted, and one with no limit gets what fits. Zero is no cap.
+	MaxTime time.Duration
 }
 
 // Engine is the docker.Engine of a cluster. Create it with New. It is safe for concurrent use.
 //
 // With Config.Idle, the allocations are reused. A container that has an allocation of its own
 // claims (Node.Claim) a running reusable allocation of its scope, of any process, with its limit
-// and StopMargin left, the one with the least time left first; with none to claim, it asks for a
-// new one, of AllocationLimit, sized for a measured container, so any container may use it. Its
+// and StopMargin left, the one with the least time left first (a container with no limit claims
+// the one with the most); with none to claim, it asks for a new one, of AllocationLimit or its own
+// limit and StopMargin when longer, sized for a measured container, so any container may use it.
+// No allocation asks for more than MaxTime. Its
 // removal kills its processes, waits for none to be left, and releases the claim; the allocation
 // then waits for the next claim, and ends itself after Idle without one. A claim is the
 // allocation's alone, so no other container runs in it beside a measured one (but the container
@@ -224,6 +231,14 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = DefaultConvertTimeout
+	}
+	switch {
+	case cfg.MaxTime < 0 || cfg.MaxTime%time.Minute != 0:
+		return nil, invalid("the longest allocation, %v, is not a whole number of minutes, as Slurm counts a time limit", cfg.MaxTime)
+	case cfg.MaxTime > 0 && cfg.MaxTime <= StopMargin:
+		return nil, invalid("the longest allocation, %v, leaves a container no time beyond the %v that stops it", cfg.MaxTime, StopMargin)
+	case cfg.MaxTime > 0 && cfg.AllocationLimit > cfg.MaxTime:
+		return nil, invalid("the reused allocations' limit, %v, is longer than the longest allocation, %v", cfg.AllocationLimit, cfg.MaxTime)
 	}
 	switch {
 	case cfg.Runtime != RuntimeApptainer && cfg.Runtime != RuntimePyxis:
@@ -465,6 +480,11 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	if !joins && spec.Network != "" && spec.Network != "host" {
 		return nil, invalid("the container %s asks for the network %q, and a container on a cluster's node has the node's network", spec.Name, spec.Network)
 	}
+	if !joins {
+		if err := e.fits(spec); err != nil {
+			return nil, err
+		}
+	}
 	b := &box{name: spec.Name, labels: maps.Clone(spec.Labels), spec: spec, owner: !joins}
 	e.mu.Lock()
 	if _, taken := e.boxes[spec.Name]; taken {
@@ -521,16 +541,16 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 // allocate asks for the box's allocation, waits for it to run, saying to log what Slurm says of the
 // wait, holds it for this process, and reads its node.
 func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
-	limit := NoLimit
-	if b.spec.Limit > 0 {
-		limit = b.spec.Limit
+	limit := e.need(b.spec)
+	if limit == 0 {
+		limit = e.capped(NoLimit + StopMargin)
 	}
 	scope := b.labels[docker.LabelScope]
 	if err := e.hold(ctx, scope); err != nil {
 		return err
 	}
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
-		Name: JobName(b.name), Comment: RunComment(e.placementScope(scope), scope), Limit: limit + StopMargin,
+		Name: JobName(b.name), Comment: RunComment(e.placementScope(scope), scope), Limit: limit,
 		Options: e.cfg.Sizing.Options(b.spec.Measured),
 	})
 	if err != nil {
@@ -553,15 +573,42 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	return e.read(ctx, node)
 }
 
+// need is the time limit an allocation of a container of the spec needs, its limit and
+// StopMargin, which MaxTime leaves room for (Start refuses the container otherwise); zero for a
+// container with no limit, whose allocation is as long as it is asked for.
+func (e *Engine) need(spec docker.ContainerSpec) time.Duration {
+	if spec.Limit <= 0 {
+		return 0
+	}
+	return spec.Limit + StopMargin
+}
+
+// capped is the time limit d, at most MaxTime.
+func (e *Engine) capped(d time.Duration) time.Duration {
+	if e.cfg.MaxTime > 0 {
+		return min(d, e.cfg.MaxTime)
+	}
+	return d
+}
+
+// fits refuses a container that asks for an allocation of its own whose limit and StopMargin are
+// longer than MaxTime, which the cluster would refuse to submit.
+func (e *Engine) fits(spec docker.ContainerSpec) error {
+	need := e.need(spec)
+	if e.cfg.MaxTime <= 0 || need <= e.cfg.MaxTime {
+		return nil
+	}
+	return invalid("the container %s may run for %v and is stopped %v after that, so its allocation needs %v, "+
+		"longer than the placement's longest allocation, [slurm] max_time_seconds = %d (%v); "+
+		"lower the command's timeout_seconds, or raise max_time_seconds if the cluster allows it",
+		spec.Name, spec.Limit, StopMargin, need, int64(e.cfg.MaxTime/time.Second), e.cfg.MaxTime)
+}
+
 // claim claims a reusable allocation for the box, of those that run with the time it needs left,
 // or asks for a new one, waits for it, and claims it. A new one that fails to run or to be claimed
 // is cancelled.
 func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
-	limit := NoLimit
-	if b.spec.Limit > 0 {
-		limit = b.spec.Limit
-	}
-	need := limit + StopMargin
+	need := e.need(b.spec)
 	// The reusable allocations are the placement's, claimed by any of its runs.
 	scope := e.placementScope(b.labels[docker.LabelScope])
 	jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
@@ -569,10 +616,15 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 		return err
 	}
 	jobs = slices.DeleteFunc(jobs, func(j Job) bool {
-		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Comment != scope || j.Phase != Running || j.Left < need
+		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Comment != scope || j.Phase != Running || j.Left < max(need, StopMargin)
 	})
-	// The one with the least time left first, which keeps the longer ones for longer limits.
-	slices.SortStableFunc(jobs, func(a, b Job) int { return int((a.Left - b.Left) / time.Second) })
+	if need > 0 {
+		// The one with the least time left first, which keeps the longer ones for longer limits.
+		slices.SortStableFunc(jobs, func(a, b Job) int { return int((a.Left - b.Left) / time.Second) })
+	} else {
+		// A container with no limit of its own runs as long as its allocation does: the longest.
+		slices.SortStableFunc(jobs, func(a, b Job) int { return int((b.Left - a.Left) / time.Second) })
+	}
 	for _, j := range jobs {
 		node := e.cfg.Cluster.Node(j.ID)
 		hold, err := node.Claim(ctx)
@@ -593,7 +645,7 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 	}
 	allocation := e.cfg.AllocationLimit
 	if allocation <= 0 {
-		allocation = NoLimit
+		allocation = e.capped(NoLimit)
 	}
 	name := PoolPrefix + b.name
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{

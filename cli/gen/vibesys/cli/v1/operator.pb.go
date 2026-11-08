@@ -482,8 +482,14 @@ type SlurmSettings struct {
 	// Zero means the default.
 	PollIntervalSeconds float64 `protobuf:"fixed64,8,opt,name=poll_interval_seconds,json=pollIntervalSeconds,proto3" json:"poll_interval_seconds,omitempty"`
 	QueueTimeoutSeconds float64 `protobuf:"fixed64,9,opt,name=queue_timeout_seconds,json=queueTimeoutSeconds,proto3" json:"queue_timeout_seconds,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The longest time limit the cluster grants a job of the placement, as a site's QOS or partition
+	// caps it, in whole minutes: no allocation asks for more. A reused allocation is at most this
+	// long, a container with no limit of its own gets what fits, and a container whose limit and the
+	// 10 minutes that stop it do not fit is refused before anything is submitted. Zero means no cap.
+	// Only for the apptainer kind.
+	MaxTimeSeconds float64 `protobuf:"fixed64,10,opt,name=max_time_seconds,json=maxTimeSeconds,proto3" json:"max_time_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SlurmSettings) Reset() {
@@ -579,6 +585,13 @@ func (x *SlurmSettings) GetQueueTimeoutSeconds() float64 {
 	return 0
 }
 
+func (x *SlurmSettings) GetMaxTimeSeconds() float64 {
+	if x != nil {
+		return x.MaxTimeSeconds
+	}
+	return 0
+}
+
 // ApptainerSettings is how the apptainer kind makes an allocation and runs a container in it.
 type ApptainerSettings struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -606,9 +619,10 @@ type ApptainerSettings struct {
 	// whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
 	// allocation of its own, cancelled with it.
 	IdleReleaseSeconds float64 `protobuf:"fixed64,7,opt,name=idle_release_seconds,json=idleReleaseSeconds,proto3" json:"idle_release_seconds,omitempty"`
-	// The time limit of a reused allocation, at most the partition's: a container claims only an
-	// allocation with its own limit and 10 minutes left. Zero means a day. Only with
-	// idle_release_seconds.
+	// The time limit of a reused allocation, at most the partition's and at most [slurm]
+	// max_time_seconds: a container claims only an allocation with its own limit and 10 minutes left,
+	// and one with no limit the one with the most time left. Zero means [slurm] max_time_seconds, or a
+	// day without it. Only with idle_release_seconds.
 	AllocationLimitSeconds float64 `protobuf:"fixed64,8,opt,name=allocation_limit_seconds,json=allocationLimitSeconds,proto3" json:"allocation_limit_seconds,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -1056,7 +1070,7 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\vssh_command\x18\x02 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\n" +
 	"sshCommand\x121\n" +
 	"\rrsync_command\x18\x03 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\frsyncCommand\x12F\n" +
-	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\x91\x04\n" +
+	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\xcb\x04\n" +
 	"\rSlurmSettings\x12;\n" +
 	"\tpartition\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\tpartition\x121\n" +
 	"\x04gres\x18\x02 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\x04gres\x12>\n" +
@@ -1067,7 +1081,9 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x06memory\x18\x06 \x01(\tB\x1d\xbaH\x1ar\x182\x16^([1-9][0-9]*[KMGT])?$R\x06memory\x125\n" +
 	"\x0esrun_arguments\x18\a \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\rsrunArguments\x12B\n" +
 	"\x15poll_interval_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13pollIntervalSeconds\x12B\n" +
-	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSecondsB\f\n" +
+	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSeconds\x128\n" +
+	"\x10max_time_seconds\x18\n" +
+	" \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x0emaxTimeSecondsB\f\n" +
 	"\n" +
 	"_exclusiveB\a\n" +
 	"\x05_cpus\"\x94\x04\n" +
