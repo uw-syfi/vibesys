@@ -132,6 +132,9 @@ func valid(r *rand.Rand, md protoreflect.MessageDescriptor, own string) map[stri
 func value(r *rand.Rand, fd protoreflect.FieldDescriptor) any {
 	switch fd.Kind() {
 	case protoreflect.StringKind:
+		if pattern := rulesOf(fd).GetString().GetPattern(); pattern != "" {
+			return matching(r, pattern)
+		}
 		return fmt.Sprintf("v%d é {{ %%s \"q\"", r.Uint32())
 	case protoreflect.BoolKind:
 		return r.IntN(2) == 0
@@ -150,6 +153,24 @@ func value(r *rand.Rand, fd protoreflect.FieldDescriptor) any {
 		return valid(r, fd.Message(), "")
 	}
 	panic("a kind the contract's tools do not take: " + fd.Kind().String())
+}
+
+// taskNamePattern is the rule of a task's name, which DeclareTask and the declare_task tool share.
+const taskNamePattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"
+
+// matching draws a string that satisfies a pattern a tool's field carries. A pattern is written
+// out here, and an unknown one fails, so a new pattern is a decision of this test and not a guess.
+func matching(r *rand.Rand, pattern string) string {
+	switch pattern {
+	case taskNamePattern:
+		const first, rest = "abcXYZ019_-", "abcXYZ019_-."
+		name := []byte{first[r.IntN(len(first))]}
+		for range r.IntN(20) {
+			name = append(name, rest[r.IntN(len(rest))])
+		}
+		return string(name)
+	}
+	panic("a pattern the contract's tools carry and this test cannot draw from: " + pattern)
 }
 
 // callerFor is a role that has the tool, with the roles of the tool's callers drawn at random.

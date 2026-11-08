@@ -42,6 +42,7 @@ var roles = []core.AgentRole{core.RoleLead, core.RolePlanner, core.RoleWorker, c
 var toolActions = map[string]core.Action{
 	"spawn_agent": core.ActionSpawnAgent, "send_message": core.ActionSendMessage, "list_agents": core.ActionListAgents,
 	"stop_agent": core.ActionStopAgent, "post_handoff": core.ActionPostHandoff, "post_report": core.ActionPostReport,
+	"declare_task": core.ActionDeclareTask,
 }
 
 func newServer(role core.AgentRole, d mcp.Daemon) *mcp.Server {
