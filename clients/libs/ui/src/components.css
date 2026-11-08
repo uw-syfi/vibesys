@@ -18,6 +18,7 @@
 @import './scroll.css';
 @import './pick-card.css';
 @import './stale.css';
+@import './readings.css';
 /*
  * The styles of the design system's components (the `.` entry). Every value is a token variable
  * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.

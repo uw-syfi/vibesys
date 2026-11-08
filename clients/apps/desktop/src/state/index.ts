@@ -77,6 +77,16 @@ export {
   hostStatusOf,
   hostStatusRank,
 } from './host-status.js';
+export {
+  type AbsenceCause,
+  type GpuReading,
+  type MachineSample,
+  type MachineView,
+  type MachineWhy,
+  type MemoryUse,
+  machineView,
+  type Section,
+} from './machine-stats.js';
 export * from './new-run/index.js';
 export {
   type CheckInRead,

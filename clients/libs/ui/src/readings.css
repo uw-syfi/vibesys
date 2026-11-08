@@ -1,0 +1,20 @@
+/*
+ * `ReadingsGroup`: a `fieldset` that names the readings inside it, as one group, for assistive
+ * technology, without drawing the name. Every value is a token variable from `tokens.css`.
+ */
+.vs-readings-group {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+.vs-readings-group-legend {
+  position: absolute;
+  width: var(--hairline);
+  height: var(--hairline);
+  margin: calc(var(--hairline) * -1);
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

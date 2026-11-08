@@ -33,6 +33,7 @@ import {
   PickList,
   PickRow,
   Readings,
+  ReadingsGroup,
   Reserve,
   Row,
   Said,
@@ -869,6 +870,16 @@ export const FRAME_ENTRIES = {
         </Readings>
         <Readings />
       </Stack>
+    ),
+  },
+  ReadingsGroup: {
+    render: () => (
+      <ReadingsGroup label="GPU 0">
+        <Readings>
+          <Gauge label="GPU 0" share={0.95} figure="95%" figureWidth={5} tone="warn" />
+          <Gauge label="Memory" share={0.9} figure="72.0 / 80.0 GiB" figureWidth={15} tone="warn" />
+        </Readings>
+      </ReadingsGroup>
     ),
   },
   LoadingBar: {

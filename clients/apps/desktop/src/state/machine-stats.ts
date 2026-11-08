@@ -264,7 +264,7 @@ export function nextLapse(
 }
 
 /** Why the screen cannot show a current reading. */
-type MachineWhy =
+export type MachineWhy =
   /** The link to the host is down. */
   | 'disconnected'
   /** A stream is opening, or reading its snapshot. */

@@ -118,7 +118,7 @@ export {
   ToolCall,
   type ToolState,
 } from './components/message.js';
-export {Gauge, LoadingBar, Meter, Readings} from './components/meter.js';
+export {Gauge, LoadingBar, Meter, Readings, ReadingsGroup} from './components/meter.js';
 export {denseTilesPerRow, MetricTile, MetricTiles} from './components/metric-tile.js';
 export {MiddleText} from './components/middle-text.js';
 export {

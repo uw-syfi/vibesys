@@ -141,3 +141,20 @@ export function Gauge(props: {
 export function Readings(props: {readonly children?: ReactNode}): JSX.Element {
   return <div className="vs-readings">{props.children}</div>;
 }
+
+/**
+ * Names the readings inside it for assistive technology, as one group, without drawing the name:
+ * for a `Readings` row whose own first reading already carries that name on the page (one GPU's
+ * utilization beside its memory), so the name would otherwise be announced twice.
+ */
+export function ReadingsGroup(props: {
+  readonly label: string;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  return (
+    <fieldset className="vs-readings-group">
+      <legend className="vs-readings-group-legend">{props.label}</legend>
+      {props.children}
+    </fieldset>
+  );
+}

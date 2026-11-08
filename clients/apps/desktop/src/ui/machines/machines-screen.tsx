@@ -3,6 +3,7 @@ import type {JSX} from 'react';
 import type {MachineRow} from '../../state/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import type {MachineControls} from './add-machine/machine-controls.js';
+import {type MachineStatsHost, MachineStatsPanel} from './machine-stats-panel.js';
 import {type PlacesHost, PlacesPanel} from './places-panel.js';
 
 const COLUMNS: readonly TableColumn<MachineRow>[] = [
@@ -40,13 +41,15 @@ export function MachinesScreen(props: {
   readonly rows: readonly MachineRow[];
   /** The Add machine and remove controls; a window without them lists the machines only. */
   readonly controls?: MachineControls;
+  /** Each machine's live CPU, memory and GPU readings; without them the page lists the machines only. */
+  readonly stats?: readonly MachineStatsHost[];
   /** Each machine's eval places and the refresh of one; without them the page lists the machines only. */
   readonly places?: {
     readonly hosts: readonly PlacesHost[];
     readonly refresh: (key: string) => void;
   };
 }): JSX.Element {
-  const {controls, places} = props;
+  const {controls, stats, places} = props;
   const table = (
     <Table
       label="Machines"
@@ -63,6 +66,7 @@ export function MachinesScreen(props: {
       <Stack gap="space-4">
         {controls?.bar}
         {table}
+        {stats === undefined ? null : <MachineStatsPanel hosts={stats} />}
         {places === undefined ? null : (
           <PlacesPanel hosts={places.hosts} refresh={places.refresh} />
         )}
