@@ -15,6 +15,7 @@ export function NewRun(props: {
   readonly progress: CommandProgress | undefined;
   readonly start: (host: string, request: StartRunRequest) => void;
   readonly checkRepository: (host: string, repository: string) => void;
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
   readonly retry: () => void;
   /** Show the run a Start created. */
   readonly openRun: (host: string, runId: string) => void;
@@ -35,6 +36,7 @@ export function NewRun(props: {
           progress={props.progress}
           start={props.start}
           checkRepository={props.checkRepository}
+          listDirectory={props.listDirectory}
           retry={props.retry}
           openRun={(host, runId) => {
             setOpen(false);

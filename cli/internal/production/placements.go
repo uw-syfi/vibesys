@@ -172,7 +172,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		shell, where, engineCfg.Shell = ssh, r.GetHost(), ssh
 		cfg.Backend = cpu.New(&remote.CPU{Shell: ssh, Timers: clk, Timeout: machine.CallTimeout}, clk)
 		staging := &machine.Remote{
-			Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: orDefault(r.GetRsyncCommand(), "rsync")},
+			Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: orDefault(r.GetRsyncCommand(), "rsync"), Timers: clk},
 			Root: r.GetRemoteWorkspaceRoot(), Scope: scope, Timers: clk,
 		}
 		if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {

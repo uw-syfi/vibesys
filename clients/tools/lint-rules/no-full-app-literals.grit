@@ -1,0 +1,13 @@
+// A test that writes out a whole `HostSnapshot` or `AppCommands` breaks every time either type gains
+// a member. Tests build them with `hostSnapshotOf` and `appCommandsOf` (testing/dom/app-builders.ts),
+// which hold the defaults, and name only what the test is about as overrides.
+language js;
+
+`{ $props }` as $literal where {
+  $props <: or { and { contains `runsFeed: $_`, contains `agentFeeds: $_` }, contains `retryStart: $_` },
+  register_diagnostic(
+    span = $literal,
+    message = "Do not write out a whole HostSnapshot or AppCommands. Use hostSnapshotOf(overrides) or appCommandsOf(overrides) from testing/dom/app-builders.ts, so a new member touches only the builder.",
+    severity = "error"
+  )
+}

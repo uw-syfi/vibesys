@@ -150,6 +150,16 @@
     },
     {
       "includes": [
+        "apps/desktop/src/**/*.test.ts",
+        "apps/desktop/src/**/*.test.tsx",
+        "apps/desktop/src/testing/**/*.ts",
+        "apps/desktop/src/testing/**/*.tsx",
+        "!apps/desktop/src/testing/dom/app-builders.ts"
+      ],
+      "plugins": ["./tools/lint-rules/no-full-app-literals.grit"]
+    },
+    {
+      "includes": [
         "apps/desktop/src/**/*.ts",
         "apps/desktop/src/**/*.tsx",
         "!apps/desktop/src/main/index.ts",

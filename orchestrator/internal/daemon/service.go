@@ -58,6 +58,8 @@ type ServiceDeps struct {
 	Binary string
 	// Starts refuses a StartRun that cannot work before it is decided.
 	Starts StartChecks
+	// Directories answers ListDirectory. Nil is a host that cannot list folders.
+	Directories Directories
 	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
 	// or replace the tool's daemon, so it is asked before the command reaches the engine, whose lock it
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
@@ -230,15 +232,64 @@ func (s *Service) CheckRepository(ctx context.Context, req *pb.CheckRepositoryRe
 	if err := operatorOnly(caller, "CheckRepository"); err != nil {
 		return nil, err
 	}
-	_, err = s.Starts.CheckRepository(req.GetRepository())
+	canonical, err := s.Starts.CheckRepository(req.GetRepository())
 	var refusal *StartRefusal
 	switch {
 	case err == nil:
-		return &pb.CheckRepositoryResponse{}, nil
+		tasks, err := s.Starts.Tasks(canonical)
+		if err != nil {
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
+		return &pb.CheckRepositoryResponse{Tasks: tasks}, nil
 	case errors.As(err, &refusal):
 		return &pb.CheckRepositoryResponse{Refusal: &pb.StartRefusal{Reason: refusal.Reason, NotReady: refusal.NotReady}}, nil
 	}
 	return nil, status.Error(codes.Unavailable, err.Error())
+}
+
+// ListDirectory lists the children of one folder of the host, for a path being typed. A path that
+// cannot be listed is the operator's to fix, so its refusal names the path and the field.
+func (s *Service) ListDirectory(ctx context.Context, req *pb.ListDirectoryRequest) (*pb.ListDirectoryResponse, error) {
+	if err := wire.Validate(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	caller, err := s.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := operatorOnly(caller, "ListDirectory"); err != nil {
+		return nil, err
+	}
+	if s.Directories == nil {
+		return nil, status.Error(codes.Unimplemented, "this host cannot list folders")
+	}
+	listing, err := bound(s.Bounds, ctx, func(c context.Context) (Listing, error) {
+		return s.Directories.List(c, req.GetPath(), req.GetIncludeHidden())
+	})
+	var fault *DirectoryError
+	switch {
+	case errors.As(err, &fault):
+		return nil, status.Error(directoryCode(fault.Fault), fault.Reason)
+	case err != nil:
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	entries := make([]*pb.DirectoryEntry, len(listing.Entries))
+	for i, e := range listing.Entries {
+		entries[i] = &pb.DirectoryEntry{Name: e.Name, IsDirectory: e.IsDirectory, IsGitRepository: e.IsGitRepository, HasTasks: e.HasTasks}
+	}
+	return &pb.ListDirectoryResponse{Entries: entries, Truncated: listing.Truncated}, nil
+}
+
+// directoryCode is the status code of a folder that cannot be listed.
+func directoryCode(f DirectoryFault) codes.Code {
+	switch f {
+	case DirectoryNotFound:
+		return codes.NotFound
+	case DirectoryDenied:
+		return codes.PermissionDenied
+	default:
+		return codes.InvalidArgument
+	}
 }
 
 // checkStart refuses a new StartRun whose repository, task or launcher cannot work, before the

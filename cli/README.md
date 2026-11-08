@@ -931,6 +931,29 @@ start without it, saying to install it.
   then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
+- A login node that briefly refuses new ssh connections, as sshd does under a burst of them
+  (`MaxStartups`: ssh exits 255 saying `kex_exchange_identification: Connection closed by remote
+  host`), fails no job. A call over ssh that never reached the login node (ssh exited 255 and said
+  it could not connect: the key exchange closed or reset, the connection refused, or not set up
+  within ssh's `ConnectTimeout` of 30 seconds) never ran, so it is made again, waiting 1, 2, 4, 8
+  and 16 seconds and then 30 seconds between attempts, 14 attempts over about four and a half
+  minutes: the polls of a queued allocation, its submission and cancellation, the steps that hold
+  or claim it and run its commands, the reads and signals of its node, and the rsync copies of the
+  run's directories. A call that reached the login node is never made again, whatever it ended
+  with: a program that failed, or a connection lost once its session was open (the command may
+  have run). Each attempt of a call that should answer at once is bounded by its own two minutes
+  (`<login node> did not answer within 2m0s`), so the waits between attempts never use the bound
+  up.
+- A read of a queued allocation's state that fails as unavailable (the login node, or Slurm, did not
+  answer) says nothing of the allocation, which keeps its place in the queue: the run says so in
+  the job's log once, and goes on reading every `[slurm] poll_interval_seconds`. Only reads that
+  keep failing for 15 minutes fail the run, and its allocation is then cancelled, as on every path
+  where the run ends before its command.
+- The step that holds a running allocation is one ssh connection that lasts the run. A login node
+  that refuses new connections leaves an open one alone, and a connection that is lost (no answer
+  for about three minutes, `ServerAliveInterval`) cancels the allocation: that is how a daemon that
+  died leaves no allocation behind, so a lost holder is not reconnected. The step is started again
+  only while it never reached the login node.
 - Several jobs of one placement run at once, up to its `max_jobs`, each in allocations of its own,
   which Slurm keeps apart (with `exclusive`, the default, a measured container holds its whole
   node). Each job's runs are a scope of their own under the placement's: its allocations are

@@ -3,6 +3,7 @@ package clustercli_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
 // fakeSqueue lists one job of the scope d1.
@@ -23,7 +25,7 @@ echo 'vibesys-apptainer-vibesys-cli-01|d1|11|RUNNING|5:00'
 `
 
 // attempts is how many times in all a call that never reaches the login node is made.
-const attempts = 5
+const attempts = remote.ReconnectAttempts
 
 // reconnecting is a cluster on sh whose waits between attempts end at once.
 func reconnecting(t *testing.T, sh shell, runtime apptainer.Runtime) *clustercli.Cluster {
@@ -57,7 +59,7 @@ func TestAListingThatDoesNotReachTheLoginNodeIsMadeAgain(t *testing.T) {
 			}
 			continue
 		}
-		if err == nil || !strings.Contains(err.Error(), "kex_exchange_identification") || !strings.Contains(err.Error(), "5 attempts") {
+		if err == nil || !strings.Contains(err.Error(), "kex_exchange_identification") || !strings.Contains(err.Error(), fmt.Sprintf("%d attempts", attempts)) {
 			t.Errorf("%d drops: %v; want the last failure and the attempts made", drops, err)
 		}
 	}

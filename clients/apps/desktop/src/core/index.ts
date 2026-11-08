@@ -15,6 +15,7 @@ export {
   makeHostConnection,
 } from './connection.js';
 export {type CostFeed, makeCostFeed} from './cost-feed.js';
+export {type DirectoryListings, makeDirectoryListings} from './directory-listing.js';
 export {
   type AppError,
   AuthenticationFailed,

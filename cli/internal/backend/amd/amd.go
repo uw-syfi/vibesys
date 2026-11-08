@@ -177,9 +177,7 @@ func (g *GPUs) GPUFacts(ctx context.Context) (map[string]string, error) {
 
 // ProbeFacts reads a fresh observation without changing the fingerprint cache.
 func (g *GPUs) ProbeFacts(ctx context.Context) (map[string]string, error) {
-	bounded, done := remote.Bounded(ctx, g.Timers, Timeout)
-	defer done()
-	out, err := remote.Output(bounded, g.Timers, g.Shell, []string{"sh", "-c", Script}, "")
+	out, err := remote.Within(ctx, g.Timers, g.Shell, Timeout, []string{"sh", "-c", Script}, "")
 	if err != nil {
 		return nil, fmt.Errorf("reading the GPUs: %w", err)
 	}

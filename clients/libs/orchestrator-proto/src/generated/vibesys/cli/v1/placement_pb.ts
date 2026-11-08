@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/placement.proto.
  */
 export const file_vibesys_cli_v1_placement: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL2NsaS92MS9wbGFjZW1lbnQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIigKFUxpc3RQbGFjZW1lbnRzUmVxdWVzdBIPCgdyZWZyZXNoGAEgASgIIlUKFkxpc3RQbGFjZW1lbnRzUmVzcG9uc2USOwoKcGxhY2VtZW50cxgBIAMoCzIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudFZpZXdCCLpIBZIBAhBAIp0CCg1QbGFjZW1lbnRWaWV3EhUKBG5hbWUYASABKAlCB7pIBHICEAESNwoEa2luZBgCIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASEAoIbWF4X2pvYnMYAyABKA0SMAoFa25vd24YBCABKAsyHy52aWJlc3lzLmNsaS52MS5QbGFjZW1lbnRPZmZlcnNIABIwCgd1bmtub3duGAUgASgLMh0udmliZXN5cy5jbGkudjEuT2ZmZXJzVW5rbm93bkgAEjUKBXJlYWNoGAYgASgLMh4udmliZXN5cy5jbGkudjEuUGxhY2VtZW50UmVhY2hCBrpIA8gBAUIPCgZvZmZlcnMSBbpIAggBIrUBCg9QbGFjZW1lbnRPZmZlcnMSOgoGb2ZmZXJzGAEgAygLMiAudmliZXN5cy5jbGkudjEuQWNjZWxlcmF0b3JPZmZlckIIukgFkgECEEASNwoGc291cmNlGAIgASgOMhsudmliZXN5cy5jbGkudjEuT2ZmZXJTb3VyY2VCCrpIB4IBBBABIAASLQoJcHJvYmVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJqCg1PZmZlcnNVbmtub3duEj8KBnJlYXNvbhgBIAEoDjIjLnZpYmVzeXMuY2xpLnYxLk9mZmVyc1Vua25vd25SZWFzb25CCrpIB4IBBBABIAASGAoGZGV0YWlsGAIgASgJQgi6SAVyAyiACCI9Cg5QbGFjZW1lbnRSZWFjaBIRCglyZWFjaGFibGUYASABKAgSGAoGcmVhc29uGAIgASgJQgi6SAVyAyiACCpfCgtPZmZlclNvdXJjZRIcChhPRkZFUl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIXChNPRkZFUl9TT1VSQ0VfUFJPQkVEEAESGQoVT0ZGRVJfU09VUkNFX0RFQ0xBUkVEEAIq1wEKE09mZmVyc1Vua25vd25SZWFzb24SJQohT0ZGRVJTX1VOS05PV05fUkVBU09OX1VOU1BFQ0lGSUVEEAASJQohT0ZGRVJTX1VOS05PV05fUkVBU09OX1VOUkVBQ0hBQkxFEAESJAogT0ZGRVJTX1VOS05PV05fUkVBU09OX1VOUkVBREFCTEUQAhIjCh9PRkZFUlNfVU5LTk9XTl9SRUFTT05fVElNRURfT1VUEAMSJwojT0ZGRVJTX1VOS05PV05fUkVBU09OX05PVF9QUk9CRUFCTEUQBEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_operator]);
+  fileDesc("Ch52aWJlc3lzL2NsaS92MS9wbGFjZW1lbnQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIigKFUxpc3RQbGFjZW1lbnRzUmVxdWVzdBIPCgdyZWZyZXNoGAEgASgIIlUKFkxpc3RQbGFjZW1lbnRzUmVzcG9uc2USOwoKcGxhY2VtZW50cxgBIAMoCzIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudFZpZXdCCLpIBZIBAhBAIp0CCg1QbGFjZW1lbnRWaWV3EhUKBG5hbWUYASABKAlCB7pIBHICEAESNwoEa2luZBgCIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASEAoIbWF4X2pvYnMYAyABKA0SMAoFa25vd24YBCABKAsyHy52aWJlc3lzLmNsaS52MS5QbGFjZW1lbnRPZmZlcnNIABIwCgd1bmtub3duGAUgASgLMh0udmliZXN5cy5jbGkudjEuT2ZmZXJzVW5rbm93bkgAEjUKBXJlYWNoGAYgASgLMh4udmliZXN5cy5jbGkudjEuUGxhY2VtZW50UmVhY2hCBrpIA8gBAUIPCgZvZmZlcnMSBbpIAggBIrUBCg9QbGFjZW1lbnRPZmZlcnMSOgoGb2ZmZXJzGAEgAygLMiAudmliZXN5cy5jbGkudjEuQWNjZWxlcmF0b3JPZmZlckIIukgFkgECEEASNwoGc291cmNlGAIgASgOMhsudmliZXN5cy5jbGkudjEuT2ZmZXJTb3VyY2VCCrpIB4IBBBABIAASLQoJcHJvYmVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJqCg1PZmZlcnNVbmtub3duEj8KBnJlYXNvbhgBIAEoDjIjLnZpYmVzeXMuY2xpLnYxLk9mZmVyc1Vua25vd25SZWFzb25CCrpIB4IBBBABIAASGAoGZGV0YWlsGAIgASgJQgi6SAVyAyiACCKAAgoOUGxhY2VtZW50UmVhY2gSNQoFc3RhdGUYASABKA4yGi52aWJlc3lzLmNsaS52MS5SZWFjaFN0YXRlQgq6SAeCAQQQASAAEhgKBnJlYXNvbhgCIAEoCUIIukgFcgMogAg6nAG6SJgBGpUBCixwbGFjZW1lbnRfcmVhY2gucmVhc29uX29ubHlfd2hlbl91bnJlYWNoYWJsZRI7YSByZWFzb24gaXMgZ2l2ZW4gZXhhY3RseSB3aGVuIHRoZSBwbGFjZW1lbnQgaXMgdW5yZWFjaGFibGUaKCh0aGlzLnN0YXRlID09IDIpID09ICh0aGlzLnJlYXNvbiAhPSAnJykqXwoLT2ZmZXJTb3VyY2USHAoYT0ZGRVJfU09VUkNFX1VOU1BFQ0lGSUVEEAASFwoTT0ZGRVJfU09VUkNFX1BST0JFRBABEhkKFU9GRkVSX1NPVVJDRV9ERUNMQVJFRBACKtcBChNPZmZlcnNVbmtub3duUmVhc29uEiUKIU9GRkVSU19VTktOT1dOX1JFQVNPTl9VTlNQRUNJRklFRBAAEiUKIU9GRkVSU19VTktOT1dOX1JFQVNPTl9VTlJFQUNIQUJMRRABEiQKIE9GRkVSU19VTktOT1dOX1JFQVNPTl9VTlJFQURBQkxFEAISIwofT0ZGRVJTX1VOS05PV05fUkVBU09OX1RJTUVEX09VVBADEicKI09GRkVSU19VTktOT1dOX1JFQVNPTl9OT1RfUFJPQkVBQkxFEAQqfQoKUmVhY2hTdGF0ZRIbChdSRUFDSF9TVEFURV9VTlNQRUNJRklFRBAAEhkKFVJFQUNIX1NUQVRFX1JFQUNIQUJMRRABEhsKF1JFQUNIX1NUQVRFX1VOUkVBQ0hBQkxFEAISGgoWUkVBQ0hfU1RBVEVfTk9UX1BST0JFRBADQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_operator]);
 
 /**
  * ListPlacementsRequest asks which placements the daemon has and what hardware each gives.
@@ -166,18 +166,18 @@ export const OffersUnknownSchema: GenMessage<OffersUnknown> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_placement, 4);
 
 /**
- * PlacementReach is whether the daemon can reach the placement now.
+ * PlacementReach is whether the daemon can reach the placement, in three states.
  *
  * @generated from message vibesys.cli.v1.PlacementReach
  */
 export type PlacementReach = Message<"vibesys.cli.v1.PlacementReach"> & {
   /**
-   * @generated from field: bool reachable = 1;
+   * @generated from field: vibesys.cli.v1.ReachState state = 1;
    */
-  reachable: boolean;
+  state: ReachState;
 
   /**
-   * Why not, when it is not reachable.
+   * Why not, when the state is UNREACHABLE; empty otherwise.
    *
    * @generated from field: string reason = 2;
    */
@@ -268,4 +268,44 @@ export enum OffersUnknownReason {
  */
 export const OffersUnknownReasonSchema: GenEnum<OffersUnknownReason> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_placement, 1);
+
+/**
+ * ReachState is whether the daemon can reach a placement.
+ *
+ * @generated from enum vibesys.cli.v1.ReachState
+ */
+export enum ReachState {
+  /**
+   * @generated from enum value: REACH_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Reached when last asked. The placement's offers fit tasks.
+   *
+   * @generated from enum value: REACH_STATE_REACHABLE = 1;
+   */
+  REACHABLE = 1,
+
+  /**
+   * Asked and not reached. Its offers fit nothing.
+   *
+   * @generated from enum value: REACH_STATE_UNREACHABLE = 2;
+   */
+  UNREACHABLE = 2,
+
+  /**
+   * Never asked: the placement's kind is not probed, such as a declared Slurm or Apptainer placement.
+   * Its declared offers DO fit tasks; a client does not read this as unreachable.
+   *
+   * @generated from enum value: REACH_STATE_NOT_PROBED = 3;
+   */
+  NOT_PROBED = 3,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.ReachState.
+ */
+export const ReachStateSchema: GenEnum<ReachState> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_placement, 2);
 

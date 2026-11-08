@@ -1,11 +1,8 @@
-import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
 import {APPEARANCE_MODES, themesOf} from '@vibesys/ui/tokens';
 import {act, type JSX, useEffect, useReducer} from 'react';
 import {
   applyChange,
-  type CommandProgress,
   defaultAppearance,
   emptyState,
   initialAppearance,
@@ -16,11 +13,12 @@ import {
   type NavigationKind,
   navigationReducer,
 } from '../../state/index.js';
+import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
-import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
+import {OrchestratorApp} from '../orchestrator/app.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
@@ -28,33 +26,11 @@ import {AppShell} from './shell.js';
 installDom();
 
 const scenario = generateScenario({seed: 3, subagents: 2, live: true});
-const host: HostSnapshot = {
-  key: 'local',
-  label: 'This machine',
-  repositoryChecked: undefined,
+const host = hostSnapshotOf({
   model: {data: scenario.changes.reduce(applyChange, emptyState), agentCursors: {}},
-  connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
-  freshness: {status: 'live', lastUpdateMs: null},
-  runsFeed: {_tag: 'Live'},
-  agentFeeds: {},
-  costFeeds: {},
-  runHistory: {_tag: 'Idle'},
-  history: {earlier: {_tag: 'Idle'}, wholes: {}},
-};
+});
 /** A second host that has said nothing yet, so the list offers a host filter. */
-const quiet: HostSnapshot = {
-  key: 'ssh:other',
-  label: 'Other host',
-  repositoryChecked: undefined,
-  model: {data: emptyState, agentCursors: {}},
-  connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
-  freshness: {status: 'live', lastUpdateMs: null},
-  runsFeed: {_tag: 'Live'},
-  agentFeeds: {},
-  costFeeds: {},
-  runHistory: {_tag: 'Idle'},
-  history: {earlier: {_tag: 'Idle'}, wholes: {}},
-};
+const quiet = hostSnapshotOf({key: 'ssh:other', label: 'Other host'});
 const machines: readonly MachineRow[] = [
   {key: 'local', label: 'This machine', status: {kind: 'live', cause: null, staleForMs: null}},
   {
@@ -65,7 +41,6 @@ const machines: readonly MachineRow[] = [
 ];
 /** The rail's destinations, in the order it lists them. */
 const RAIL_ORDER = ['Runs', 'Cost', 'Machines', 'Settings'];
-const idle: CommandProgress | undefined = undefined;
 
 /** What the run is called on the list and in every trail. */
 const TASK = host.model.data.runs[scenario.runId]?.task ?? '';
@@ -96,20 +71,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
               <OrchestratorApp
                 hosts={[host, quiet]}
                 nowMs={scenario.endMs}
-                commands={{
-                  start: idle,
-                  stop: {},
-                  send: {},
-                  startRun: () => undefined,
-                  checkRepository: () => undefined,
-                  retryStart: () => undefined,
-                  stopRun: () => undefined,
-                  retryStop: () => undefined,
-                  sendMessage: () => undefined,
-                  retrySend: () => undefined,
-                  loadEarlier: () => undefined,
-                  expand: () => undefined,
-                }}
+                commands={appCommandsOf()}
                 retryHost={() => undefined}
                 retryCost={() => undefined}
                 route={navigation.runs}

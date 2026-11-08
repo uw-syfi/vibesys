@@ -84,6 +84,11 @@ class OrchestratorServiceStub(object):
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.FromString,
                 _registered_method=True)
+        self.ListDirectory = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/ListDirectory',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryResponse.FromString,
+                _registered_method=True)
         self.WatchHostCost = channel.unary_stream(
                 '/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost',
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostRequest.SerializeToString,
@@ -180,6 +185,15 @@ class OrchestratorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListDirectory(self, request, context):
+        """The entries of one folder of the host's file system, for a path being typed: the client asks for
+        the folder the path has reached and narrows the answer by what is typed after it. Only the
+        folder's own children are read, never what is below them. For the operator only.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def WatchHostCost(self, request, context):
         """What every run the host holds has cost, live and ended: the whole host cost view, then the whole
         view again each time any run's cost changes. The host works it out, so the client sums nothing.
@@ -257,6 +271,11 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.CheckRepository,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.SerializeToString,
+            ),
+            'ListDirectory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListDirectory,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryResponse.SerializeToString,
             ),
             'WatchHostCost': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchHostCost,
@@ -524,6 +543,33 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/CheckRepository',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListDirectory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/ListDirectory',
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.ListDirectoryResponse.FromString,
             options,
             channel_credentials,
             insecure,
