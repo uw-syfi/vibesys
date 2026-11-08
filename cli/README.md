@@ -118,6 +118,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/lease/kubelease/` | The leases of a Kubernetes cluster: `coordination.k8s.io` `Lease` objects, renewed every third of their duration and taken over once expired, through `kubectl`. `kubefake` is an API server in memory. |
 | `internal/lease/fakelease/`, `leasetest/` | A `Leases` in memory, and the one contract suite every `Leases` passes. Tests only. |
 | `internal/neighbors/` | The daemons of the machine, of every user, as `/proc` lists them, for `daemon status`. |
+| `internal/proctable/` | The machine's process table for tests that run real processes: the processes that carry a variable under a directory, and their descendants, and whether a process still runs. Linux reads `/proc`, macOS asks the kernel with `sysctl`, and a table that cannot be read is an error, never an empty answer. Tests only. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
@@ -158,7 +159,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/production/` | The wiring of the shipped binary: which environments (one docker environment per placement, with its resources), stores and supervisors the daemon runs with. The only package that names a concrete placement kind or resource kind. |
 | `internal/upgrade/` | `vibesys-cli upgrade`: the release asset names, a `Source` of releases (GitHub over HTTP, or the in-memory fake in `upgradetest/`), and the verify-then-rename install. |
 | `internal/sim/` | The whole-daemon simulation: the real `app`, server and client over Fakes, driven by a seed. Tests only; it has no product code. |
-| `internal/archcheck/` | The layer, layout, clock, goroutine and fuzzing rules below, as a check `go test` runs. |
+| `internal/archcheck/` | The layer, layout, clock, goroutine, `/proc` and fuzzing rules below, as a check `go test` runs. |
 | `gen/` | Generated Go for `proto/vibesys/cli/v1`. Never edited by hand. |
 
 ## Layer rules
@@ -208,11 +209,16 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
   another kind's, and only `production` imports a concrete kind. A string literal that spells
   `kubernetes`, `slurm` or `nvidia`, in any case, appears only in the package that implements it and
   in the decoding of the operator config (`operator`), so no other code branches on a concrete name.
+- A test file that names a path under `/proc` is Linux-only (a `_linux` name or a `//go:build`
+  constraint that keeps it off macOS) or is listed in `archcheck` with the reason it runs where
+  `/proc` is missing. macOS has no `/proc`, so a test that read it for processes found none there and
+  passed or failed for the wrong reason, and left the daemons it was to end running. A test that
+  needs the processes of a machine reads them through `internal/proctable`.
 
 `internal/archcheck` enforces all of these. A new package needs an entry in its rules table in the
 same change, so an unlisted package fails the test instead of passing unchecked. Imports that only
-test files may use are listed separately, so a fake never ships. A file that must break the clock
-or goroutine rule is listed in `archcheck` with its reason, and an entry whose file no longer
+test files may use are listed separately, so a fake never ships. A file that must break the clock,
+goroutine or `/proc` rule is listed in `archcheck` with its reason, and an entry whose file no longer
 breaks the rule fails the check until it is removed.
 
 ## Commands

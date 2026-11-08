@@ -84,34 +84,6 @@ func untilNoneRunning(list func() []int) []int {
 	return left
 }
 
-// processTable reads the live executable paths from proc.
-func processTable() []proc {
-	entries, _ := filepath.Glob("/proc/[0-9]*/exe")
-	var table []proc
-	for _, entry := range entries {
-		target, err := os.Readlink(entry)
-		if err != nil {
-			continue
-		}
-		pid, err := strconv.Atoi(strings.Split(entry, "/")[2])
-		if err == nil && running(pid) {
-			table = append(table, proc{pid, target})
-		}
-	}
-	return table
-}
-
-// processesOf lists the live processes running the executable at path.
-func processesOf(path string) []int {
-	var pids []int
-	for _, p := range processTable() {
-		if p.exe == path {
-			pids = append(pids, p.pid)
-		}
-	}
-	return pids
-}
-
 // useMarketplace points the orchestrator at this repository's own plugin marketplace, which is
 // what every session loads (the daemon refuses to start a session without one). Nothing is
 // installed: the providers are scripted.

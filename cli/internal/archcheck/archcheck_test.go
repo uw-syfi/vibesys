@@ -168,7 +168,7 @@ func TestExceptionsAreStillNeeded(t *testing.T) {
 		t.Error(line)
 	}
 	clockList, goList := archcheck.Exceptions()
-	for _, e := range append(clockList, goList...) {
+	for _, e := range append(append(clockList, goList...), archcheck.ProcExceptions()...) {
 		if strings.TrimSpace(e.Reason) == "" {
 			t.Errorf("%s: an exception states no reason", e.File)
 		}
@@ -219,7 +219,7 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
 		"internal/environment/fakeenv/fakeworld", "internal/environment/docker/dockerfake",
 		"internal/environment/docker/dockertest", "internal/resource/resourcetest", "internal/resource/fakeresource",
-		"internal/environment/apptainer/clusterfake",
+		"internal/environment/apptainer/clusterfake", "internal/proctable",
 	}
 	var productDirs []string
 	for dir := range archcheck.Rules() {
@@ -652,5 +652,96 @@ func TestConcreteNamesAreSpelledOnlyWhereTheyAreImplemented(t *testing.T) {
 	imports := "package p\n\nimport (\n\t_ \"" + module + "internal/environment/slurm\"\n\t_ \"" + module + "internal/resource/kubernetes\"\n)\n"
 	if got := archcheck.Violations(map[string]string{"cli/internal/production/a.go": imports}); hasLine(got, "a string spells") {
 		t.Errorf("production importing the packages: %v, want it allowed", got)
+	}
+}
+
+// A test file that names a path under /proc is Linux-only or excused, because macOS has no /proc and
+// a test that reads it for processes finds none there. The shape of the sweep that left daemons on a
+// Mac is among the refused: a /proc path formatted for a pid, read in a file built everywhere.
+func TestATestThatReadsProcIsLinuxOnlyOrExcused(t *testing.T) {
+	const at = "cli/cmd/vibesys-cli/a_test.go"
+	read := func(path string) string {
+		return "package p\n\nimport \"os\"\n\nfunc f() { _, _ = os.ReadFile(" + path + ") }\n"
+	}
+	tagged := func(constraint, body string) string { return "//go:build " + constraint + "\n\n" + body }
+	refused := []string{
+		read(`fmt.Sprintf("/proc/%d/stat", pid)`),
+		read(`"/proc/" + e.Name() + "/environ"`),
+		read(`"/proc"`),
+		read(`"/proc/"`),
+		read(`"cat /proc/cpuinfo"`),
+		read("`/proc/self/status`"),
+		tagged("race", read(`"/proc/1/stat"`)),
+		tagged("!race", read(`"/proc/1/stat"`)),
+		tagged("darwin", read(`"/proc/1/stat"`)),
+		tagged("linux || darwin", read(`"/proc/1/stat"`)),
+		tagged("unix", read(`"/proc/1/stat"`)),
+		tagged("!linux", read(`"/proc/1/stat"`)),
+		tagged("linux && race || darwin", read(`"/proc/1/stat"`)),
+	}
+	for _, source := range refused {
+		// The first lines are a build constraint and a blank line when there is one, so the line of
+		// the string is not fixed.
+		if got := archcheck.Violations(map[string]string{at: source}); !hasLine(got, "a_test.go:") || !hasLine(got, "names a path under /proc") {
+			t.Errorf("%q: violations = %v, want the /proc path refused", source, got)
+		}
+	}
+	allowed := map[string]string{
+		at:                                    read(`"/process/1/stat"`) + "// reads /proc/1/stat\n",
+		"cli/cmd/vibesys-cli/a2_test.go":      read(`"/usr/proc/x"`) + read(`"/proc-stat"`),
+		"cli/cmd/vibesys-cli/a_linux_test.go": read(`"/proc/1/stat"`),
+		"cli/cmd/vibesys-cli/a_linux_amd64_test.go": read(`"/proc/1/stat"`),
+		"cli/cmd/vibesys-cli/b_test.go":             tagged("linux", read(`"/proc/1/stat"`)),
+		"cli/cmd/vibesys-cli/c_test.go":             tagged("linux && !race", read(`"/proc/1/stat"`)),
+		"cli/cmd/vibesys-cli/d_test.go":             tagged("!darwin", read(`"/proc/1/stat"`)),
+		"cli/cmd/vibesys-cli/e_test.go":             tagged("linux && (race || docker)", read(`"/proc/1/stat"`)),
+		// The rule holds test files: a product file may send a script naming /proc to a Linux node.
+		"cli/internal/remote/a.go": read(`"/proc/1/stat"`),
+		// Its own sources name /proc to test it.
+		"cli/internal/archcheck/a_test.go": read(`"/proc/1/stat"`),
+	}
+	for name, source := range allowed {
+		if got := archcheck.Violations(map[string]string{name: source}); hasLine(got, "names a path under /proc") {
+			t.Errorf("%s: violations = %v, want it allowed", name, got)
+		}
+	}
+	// An excused file is allowed, and the exception is stale once the file names no /proc.
+	excused := archcheck.ProcExceptions()
+	if len(excused) == 0 {
+		t.Fatal("no file is excused from the /proc rule, so the exception path is untested")
+	}
+	for _, e := range excused {
+		if got := archcheck.Violations(map[string]string{e.File: read(`"/proc/1/stat"`)}); hasLine(got, "names a path under /proc") {
+			t.Errorf("%s: violations = %v, want it excused", e.File, got)
+		}
+		stale := archcheck.StaleExceptions(map[string]string{e.File: "package p\n"})
+		if !hasLine(stale, e.File+": the proc exception is no longer needed") {
+			t.Errorf("%s: stale = %v, want the exception reported once the file names no /proc", e.File, stale)
+		}
+	}
+}
+
+// Whatever path under /proc a test file names, it is refused when built on macOS and allowed when
+// built on Linux only.
+func TestAnyProcPathInATestIsHeldToTheLinuxOnlyRule(t *testing.T) {
+	word := func(s string) string {
+		out := []rune{'x'}
+		for _, r := range s {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+				out = append(out, r)
+			}
+		}
+		return string(out)
+	}
+	err := quick.Check(func(pid uint16, file string, depth uint8) bool {
+		path := "/proc/" + strconv.Itoa(int(pid)) + strings.Repeat("/"+word(file), int(depth%3)+1)
+		body := "package p\n\nvar _ = " + strconv.Quote(path) + "\n"
+		everywhere := archcheck.Violations(map[string]string{"cli/internal/x/a_test.go": body})
+		linuxOnly := archcheck.Violations(map[string]string{"cli/internal/x/a_test.go": "//go:build linux\n\n" + body})
+		named := archcheck.Violations(map[string]string{"cli/internal/x/a_linux_test.go": body})
+		return hasLine(everywhere, "names a path under /proc") && !hasLine(linuxOnly, "/proc") && !hasLine(named, "/proc")
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

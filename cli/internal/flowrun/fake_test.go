@@ -204,7 +204,7 @@ func TestAnEnvironmentThatCannotRunIsNotAttempted(t *testing.T) {
 
 func TestAMachineThatCannotBeReadDoesNotStopTheJob(t *testing.T) {
 	r := newFakeRig(t).(*fakeRig)
-	r.system.FailWith(errors.New("no /proc"))
+	r.system.FailWith(errors.New("the machine cannot be read"))
 	v, err := flowrun.Run(context.Background(), r.config(io.Discard), scenarios()[2].plan(false))
 	passed, ok := v.(flow.Passed)
 	if err != nil || !ok {

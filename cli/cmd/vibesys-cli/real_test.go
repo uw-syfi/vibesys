@@ -8,13 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/proctable"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -57,59 +57,59 @@ func newMachine(t *testing.T) *machine {
 }
 
 // sweep kills every process of this machine's root, the daemons, supervisors and clients of every
-// runtime directory under it, and returns once they are gone. A process is of the root when its
-// XDG_RUNTIME_DIR is under it, which the processes the tool starts inherit.
-func (m *machine) sweep() {
+// runtime directory under it, and the programs they ran, and returns the pids it ended once no
+// process of the root is left. A process is of the root when its XDG_RUNTIME_DIR is under it, which
+// the processes the tool starts inherit, or when it descends from one that is (proctable says why
+// the second is needed on macOS). It lists again after each kill, since a process that was dying
+// may have started another, and stops at a listing that is empty.
+//
+// A process table that cannot be read fails the test and leaves the processes: an empty list is
+// the table saying nothing is there, and never a table that cannot say.
+func (m *machine) sweep() []int {
 	m.t.Helper()
-	pids := processesUnder(m.root)
-	for _, pid := range pids {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-	}
 	// Bounded only against a process the kernel will not end.
 	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
 	defer cancel()
-	for _, pid := range pids {
-		for alive(pid) {
-			if !clock.Sleep(ctx, clock.System{}, 10*time.Millisecond) {
-				m.t.Errorf("process %d of %s is still there after SIGKILL", pid, m.root)
-				return
-			}
-		}
-	}
-}
-
-// alive says whether the process runs: one that ended and is waiting to be reaped does not.
-func alive(pid int) bool {
-	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return false
-	}
-	// The state follows the command name, which is in parentheses and may hold anything.
-	i := bytes.LastIndexByte(stat, ')')
-	return i < 0 || i+2 >= len(stat) || stat[i+2] != 'Z'
-}
-
-// processesUnder are the processes other than this one whose XDG_RUNTIME_DIR is root or under it.
-func processesUnder(root string) []int {
-	entries, _ := os.ReadDir("/proc")
-	var out []int
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil || pid == os.Getpid() {
-			continue
-		}
-		env, err := os.ReadFile("/proc/" + e.Name() + "/environ")
+	var ended []int
+	for ctx.Err() == nil {
+		pids, err := proctable.WithEnvUnder("XDG_RUNTIME_DIR", m.root)
 		if err != nil {
-			continue
+			m.t.Errorf("listing the processes of %s to end them: %v", m.root, err)
+			return ended
 		}
-		for _, kv := range bytes.Split(env, []byte{0}) {
-			if v, ok := strings.CutPrefix(string(kv), "XDG_RUNTIME_DIR="); ok && (v == root || strings.HasPrefix(v, root+"/")) {
-				out = append(out, pid)
-				break
+		if len(pids) == 0 {
+			return ended
+		}
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+		ended = append(ended, pids...)
+		for _, pid := range pids {
+			if err := untilEnded(ctx, pid); err != nil {
+				m.t.Errorf("process %d of %s after SIGKILL: %v", pid, m.root, err)
+				return ended
 			}
 		}
 	}
-	return out
+	m.t.Errorf("processes of %s keep appearing, which a sweep cannot end", m.root)
+	return ended
+}
+
+// untilEnded returns once the process has ended, which the kernel does after the signal that ends it
+// is sent, not as it is sent. A process that ended and waits to be collected has ended.
+func untilEnded(ctx context.Context, pid int) error {
+	for {
+		running, err := proctable.Running(pid)
+		if err != nil {
+			return err
+		}
+		if !running {
+			return nil
+		}
+		if !clock.Sleep(ctx, clock.System{}, 10*time.Millisecond) {
+			return errors.New("it is still there")
+		}
+	}
 }
 
 func (m *machine) git(args ...string) string {
