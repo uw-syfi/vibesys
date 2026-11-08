@@ -50,8 +50,9 @@ print or an import) on the commit: the job builds the image from the commit and 
 before a measure pays for the build.
 
 Everything that puts load on the machine goes through a job, so the daemon decides what runs
-together and the numbers stay clean: a measure job holds its placement alone, while checks and
-command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
+together and the numbers stay clean: a measure job runs alone on its machine (it holds its
+placement alone, or, where each job gets a whole node of its own, its node), while checks and
+command jobs may share a placement up to its `max_jobs`. Do not start a benchmark, a profiler
 or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
 are checks, not load: run them in your worktree.
 

@@ -811,7 +811,7 @@ hf = "/shared/hf-cache"
 | `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
-| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local` or `apptainer`: an `ssh` or `slurm` placement stages and sweeps one job at a time on one shared Docker daemon, while each job of an `apptainer` placement has staged directories and allocations of its own (see below). |
+| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it, but on an `apptainer` placement of `[slurm] exclusive`, where it runs alone on a node of its own and takes one of the slots as any job does. More than 1 needs kind `local` or `apptainer`: an `ssh` or `slurm` placement stages and sweeps one job at a time on one shared Docker daemon, while each job of an `apptainer` placement has staged directories and allocations of its own (see below). |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
@@ -905,10 +905,14 @@ start without it, saying to install it.
   runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
   a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
-  placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the
-  jobs of the cluster's other placements run beside it, in allocations of their own. With
-  `exclusive = false`, a measure's allocation is a slice of a node whose other slices may run
-  other jobs, of this daemon's other placements or of anyone. Nothing of a placement of this kind
+  placement, `rocm:<placement>@<login node>`, and a measure is alone on its node without holding
+  its placement alone: it takes one of the placement's `max_jobs` slots as any job does, and other
+  measures and jobs of any task run beside it, each in allocations of its own, on other nodes. A
+  reused allocation (`idle_release_seconds`) is sized for a measure and runs one job at a time, so
+  it is a node of its own too. With `exclusive = false`, a measure's allocation is a slice of a
+  node whose other slices may run other jobs, of this daemon's other placements or of anyone, so a
+  measure holds its own placement alone, and the jobs of the cluster's other placements run beside
+  it. Nothing of a placement of this kind
   is leased between daemons: Slurm, which grants each its own allocations, is what keeps them
   apart.
 - The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the

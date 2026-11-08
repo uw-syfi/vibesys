@@ -198,10 +198,10 @@ const hostResource schedule.ResourceID = "host"
 // a docker job run on every placement that gives what its task needs (offers says what each gives),
 // a resource of max_jobs slots for each placement, and one for each resource the placements'
 // resources claim, with room for every job of the placements that claim it, so that it bounds only
-// the claims that take it whole: a measure's, and those a resource makes exclusive, such as a
-// cluster's. A host job runs on this machine beside the jobs of the local placement "default" of
-// the earlier shape, so it claims a slot of that placement; without one, host jobs have a resource
-// of one slot of their own.
+// the claims that take it whole: a measure's, but on a placement that keeps it apart by itself
+// (isolated), and those a resource makes exclusive, such as a cluster's. A host job runs on this
+// machine beside the jobs of the local placement "default" of the earlier shape, so it claims a
+// slot of that placement; without one, host jobs have a resource of one slot of their own.
 func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()
 	newPolicy, ok := policies[policy]
@@ -216,7 +216,7 @@ func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims 
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
 		slots := int(op.GetPlacements()[name].GetMaxJobs())
 		resources = append(resources, schedule.Resource{ID: schedule.PlacementOf(name), Capacity: slots})
-		var offered schedule.Offered
+		offered := schedule.Offered{Isolated: isolated(op.GetPlacements()[name])}
 		if i := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == name }); i >= 0 {
 			offered.Resources = offers[i].Resources
 		}
