@@ -37,6 +37,14 @@ export function unbrokenFrom(state: OrchestratorState, agentId: string): number 
   return from;
 }
 
+/**
+ * Whether any step of the agent is held, from its stream or read on request: what its screen
+ * shows, whatever the stream's cursor says.
+ */
+export function holdsSteps(state: OrchestratorState, agentId: string): boolean {
+  return Object.values(state.items).some(item => item.agentId === agentId);
+}
+
 /** Messages to or from an agent, oldest first. */
 export function messagesOf(state: OrchestratorState, agentId: string): Message[] {
   return Object.values(state.messages)

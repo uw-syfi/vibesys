@@ -207,6 +207,7 @@ export {
 export {ms} from './orchestrator/time.js';
 export {
   agentTurns,
+  holdsSteps,
   messagesOf,
   runAgents,
   unbrokenFrom,

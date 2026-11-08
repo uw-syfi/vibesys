@@ -21,6 +21,7 @@ import {
   type HostFreshness,
   type HostModel,
   type HostStatus,
+  holdsSteps,
   hostStatusOf,
   type IdeaWindow,
   inSetup,
@@ -230,7 +231,7 @@ function agentNote(
     what: `the steps of ${nameOf(names, agent)}`,
     connection: host.connection,
     feed: host.agentFeeds[agent.id] ?? {_tag: 'Opening'},
-    hasData: Object.values(host.model.data.items).some(item => item.agentId === agent.id),
+    hasData: holdsSteps(host.model.data, agent.id),
     staleForMs: staleForMs(host.freshness, props.nowMs),
     tryAgain: () => props.retryHost(host.key),
   };
