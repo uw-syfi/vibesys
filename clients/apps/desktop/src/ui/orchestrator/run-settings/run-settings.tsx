@@ -53,10 +53,10 @@ export function RunSettingsControl(props: {
   };
   return (
     <>
-      <Button text="Run settings" variant="secondary" press={show} />
+      <Button text="Adjust" variant="secondary" press={show} />
       <Dialog
         open={open}
-        title="Run settings"
+        title="Adjust run"
         dismiss={() => setOpen(false)}
         actions={
           <>

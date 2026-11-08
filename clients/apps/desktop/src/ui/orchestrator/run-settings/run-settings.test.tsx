@@ -101,7 +101,7 @@ function openSettings(daemon: FakeDaemon = new FakeDaemon(scenario)) {
   );
   const mounted = mount(app());
   screen = mounted;
-  mounted.press(mounted.control('Run settings'));
+  mounted.press(mounted.control('Adjust'));
   /** What the host holds of the run now. */
   const run = () => stateOf(daemon).runs[runId];
   /** Re-draws after the daemon moved on its own (a lead's turn ended). */
@@ -113,6 +113,15 @@ const dialogText = (screen: Screen): string =>
   screen.container.querySelector('dialog')?.textContent ?? '';
 
 describe('the run page settings', () => {
+  it('names no control with the window’s own Settings word, which the shell’s link owns', () => {
+    const {screen} = openSettings();
+    const names = [...screen.container.querySelectorAll('button, a')].map(
+      each => each.textContent ?? '',
+    );
+    expect(names.filter(name => /settings/i.test(name))).toEqual([]);
+    screen.unmount();
+  });
+
   it('starts on a live run', () => {
     const state = stateOf(new FakeDaemon(scenario));
     expect(state.runs[scenario.runId]?.status).toBe(RunStatus.RUNNING);
