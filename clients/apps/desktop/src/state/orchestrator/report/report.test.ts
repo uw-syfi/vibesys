@@ -6,6 +6,7 @@ import {
   Direction,
   MessageSchema,
   ObjectiveStandingSchema,
+  PlanStatus,
   ReportKind,
   ReportScope,
   RoleAgentsSchema,
@@ -518,6 +519,83 @@ describe('the run report', () => {
           });
         },
       ),
+    );
+  });
+
+  it('has no plans view before a search state is served', () => {
+    expect(runReport(stateOf(), 'r', 20_000)?.plans).toBeUndefined();
+  });
+
+  it('counts the run’s plans by status, keeping Chosen and Won apart, with the host’s words', () => {
+    const search = create(SearchStateSchema, {
+      runId: 'r',
+      plans: [
+        {number: 1, status: PlanStatus.OPEN},
+        {number: 2, status: PlanStatus.CHOSEN},
+        {number: 3, status: PlanStatus.WON},
+        {number: 4, status: PlanStatus.PARKED},
+        {number: 5, status: PlanStatus.REJECTED},
+        {number: 6, status: PlanStatus.OPEN},
+      ],
+      unattributedJobs: 3,
+    });
+    const report = runReport({...stateOf(), searches: {r: search}}, 'r', 20_000);
+    expect(report?.plans?.tallies.map(tally => [tally.label, tally.count])).toEqual([
+      ['Open', 2],
+      ['Chosen', 1],
+      ['Won', 1],
+      ['Parked', 1],
+      ['Rejected', 1],
+    ]);
+    expect(report?.plans?.total).toBe(6);
+    expect(report?.plans?.withoutRun).toBe(3);
+  });
+
+  it('counts every status in one fixed order and carries the jobs no run claimed, over any plans', () => {
+    const status = fc.constantFrom(
+      PlanStatus.OPEN,
+      PlanStatus.CHOSEN,
+      PlanStatus.WON,
+      PlanStatus.PARKED,
+      PlanStatus.REJECTED,
+      PlanStatus.UNSPECIFIED,
+    );
+    fc.assert(
+      fc.property(
+        fc.array(status, {maxLength: 30}),
+        fc.integer({min: 0, max: 99}),
+        (statuses, unattributedJobs) => {
+          const search = create(SearchStateSchema, {
+            runId: 'r',
+            plans: statuses.map((each, at) => ({number: at + 1, status: each})),
+            unattributedJobs,
+          });
+          const plans = runReport({...stateOf(), searches: {r: search}}, 'r', 20_000)?.plans;
+          // The figures are the host's, carried as they are.
+          expect(plans?.total).toBe(statuses.length);
+          expect(plans?.withoutRun).toBe(unattributedJobs);
+          // Each tally counts the plans of its status, and the counts sum to the total.
+          for (const tally of plans?.tallies ?? []) {
+            expect(tally.count).toBe(statuses.filter(each => each === tally.status).length);
+          }
+          expect((plans?.tallies ?? []).reduce((sum, tally) => sum + tally.count, 0)).toBe(
+            statuses.length,
+          );
+          // Only the statuses present appear, in the one fixed order, never twice.
+          const order = [
+            PlanStatus.OPEN,
+            PlanStatus.CHOSEN,
+            PlanStatus.WON,
+            PlanStatus.PARKED,
+            PlanStatus.REJECTED,
+            PlanStatus.UNSPECIFIED,
+          ];
+          expect(plans?.tallies.map(tally => tally.status)).toEqual(
+            order.filter(each => statuses.includes(each)),
+          );
+        },
+      ),
+      {seed: 17},
     );
   });
 });

@@ -17,6 +17,7 @@ import {IdeasCard} from './ideas-card.js';
 import {LeadSummary} from './lead-summary.js';
 import {ObjectiveTiles} from './objective-tiles.js';
 import {OverTime, TradeOff} from './performance.js';
+import {PlansSummary} from './plans-summary.js';
 import {isStoppable, ReportActions, ReportMeta} from './report-title.js';
 import {WorkstreamsCard} from './workstreams-card.js';
 
@@ -136,6 +137,7 @@ export function ReportScreen(props: {
           </ChartColumns>
         ) : (
           <>
+            {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}
             <ChartColumns dense align="start">
               <WorkstreamsCard workstreams={ideas.workstreams} />
               {cost}
