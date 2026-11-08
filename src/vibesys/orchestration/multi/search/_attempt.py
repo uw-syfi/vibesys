@@ -28,6 +28,7 @@ from vibesys.hypothesis import (
     JudgeSkipped,
     JudgeSkipReason,
     MeasuredEffect,
+    MechanismVerdict,
     OrchestratorPlan,
     measure_effect,
     reviewed,
@@ -199,6 +200,9 @@ class MultiAttempt:
     review_skipped: bool = False
     judge_pass: bool | None = None
     judge_invocation: InvocationRef | None = None
+    judge_mechanism: MechanismVerdict | None = None
+    """The judge's verdict on the plan's mechanism, recorded beside its pass or fail."""
+    judge_attribution: str = ""
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
     effect: MeasuredEffect | None = None
@@ -257,6 +261,8 @@ class MultiAttempt:
         self.effect = None
         self.judge_pass = None
         self.judge_invocation = None
+        self.judge_mechanism = None
+        self.judge_attribution = ""
         self.review_skipped = False
         self.official_reason = None
 
@@ -316,6 +322,8 @@ class MultiAttempt:
         passing = verdict.verdict is Verdict.PASS and conflict is None
         self.judge_pass = passing
         self.judge_invocation = invocation
+        self.judge_mechanism = verdict.mechanism
+        self.judge_attribution = verdict.mechanism_attribution
         if passing:
             return self._after_review()
         feedback = verdict.feedback or (DOMINATED if conflict is not None else "review failed")
@@ -332,6 +340,8 @@ class MultiAttempt:
         """
         self.judge_pass = None
         self.judge_invocation = None
+        self.judge_mechanism = None
+        self.judge_attribution = ""
         return Next.SETTLE
 
     def _after_review(self) -> Next:
@@ -510,7 +520,11 @@ class MultiAttempt:
     def judge_outcome(self) -> JudgeOutcome:
         """The round's review as the ledger records it."""
         if self.judge_pass is not None:
-            return JudgeReviewed("pass" if self.judge_pass else "fail")
+            return JudgeReviewed(
+                "pass" if self.judge_pass else "fail",
+                mechanism=self.judge_mechanism,
+                attribution=self.judge_attribution,
+            )
         if self.response is None:
             return JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
         if self.review_skipped:

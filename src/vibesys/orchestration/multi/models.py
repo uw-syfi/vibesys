@@ -9,6 +9,7 @@ from vibesys.hypothesis import (
     DecidedFrom,
     HypothesisOutcome,
     ImplementerStatus,
+    MechanismVerdict,
     SkillResourceSelection,
 )
 from vibesys.orchestration.review import Verdict
@@ -137,6 +138,30 @@ class JudgeResponse(BaseModel):
             "disposition under the objective invariants; final success criteria need not "
             "hold for a justified continue, disproven, or blocked outcome. FAIL otherwise."
         )
+    )
+    mechanism: Annotated[
+        MechanismVerdict,
+        DecidedFrom(
+            "plan.activation_evidence",
+            "plan.falsification_criteria",
+            "claims.evidence",
+            "cited_evidence",
+        ),
+    ] = Field(
+        default=MechanismVerdict.UNTESTED,
+        description=(
+            "Whether the evidence shows the plan's mechanism at work, apart from how much "
+            "the candidate gained: supported when the activation evidence holds and no "
+            "falsifier fired; refuted when a falsifier fired or the change works by another "
+            "mechanism; untested when the evidence cannot tell."
+        ),
+    )
+    mechanism_attribution: str = Field(
+        default="",
+        description=markdown_prose(
+            "What the evidence shows produced the candidate's measured change, in one or two "
+            "sentences naming the responsible edit. Empty when the evidence cannot tell."
+        ),
     )
     skills_used: list[SkillResourceSelection] = Field(
         default_factory=list,

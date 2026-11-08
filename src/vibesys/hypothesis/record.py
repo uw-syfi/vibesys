@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.hypothesis.attempts import recorded_judge_verdict
+from vibesys.hypothesis.attempts import JudgeReviewed, recorded_judge_verdict
 from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.transitions import (
     ResolutionEvidence,
@@ -279,6 +279,7 @@ def _candidate_retained(
 def build_round_record(data: RecordInput) -> RoundRecord:
     """Record final attempt, causal comparison, and trusted retention once."""
     attempt = data.attempt
+    judge = attempt.judge
     projection = data.projection
     candidate = _candidate(data)
     official = (
@@ -315,6 +316,10 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         hypothesis_id=data.plan.hypothesis_id,
         hypothesis_declared_outcome=declared.value if declared is not None else None,
         judge_verdict=recorded_judge_verdict(attempt.judge),
+        mechanism_verdict=judge.mechanism if isinstance(judge, JudgeReviewed) else None,
+        mechanism_attribution=(
+            judge.attribution or None if isinstance(judge, JudgeReviewed) else None
+        ),
         hypothesis_outcome=(
             resolution.value if resolution is not None else declared.value if declared else None
         ),

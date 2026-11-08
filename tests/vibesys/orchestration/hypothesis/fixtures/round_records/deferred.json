@@ -31,6 +31,8 @@
   "perf_delta_pct": null,
   "perf_comparison": "incomparable",
   "perf_gain": null,
+  "mechanism_verdict": null,
+  "mechanism_attribution": null,
   "perf_provenance": "implementer",
   "implementer_provider": null,
   "implementer_model": null,

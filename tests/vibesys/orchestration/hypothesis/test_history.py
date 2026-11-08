@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from vibesys.hypothesis import (
     JudgeVerdict,
+    MechanismVerdict,
     RoundHistory,
     RoundRecord,
     parse_round_record,
@@ -324,6 +325,8 @@ def _golden_record(name: str) -> RoundRecord:
             perf_delta_pct=12.5,
             perf_comparison=MetricComparison.BETTER,
             perf_gain=MetricComparison.BETTER,
+            mechanism_verdict=MechanismVerdict.REFUTED,
+            mechanism_attribution="fused epilogue, not the removed barrier",
             perf_provenance="framework",
             implementer_provider="codex",
             implementer_model="gpt-5.6-sol",

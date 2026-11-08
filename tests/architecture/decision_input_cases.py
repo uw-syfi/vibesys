@@ -203,6 +203,8 @@ _PLAN = HypothesisPlan(
     task="task",
     pass_criteria=_CRITERIA,
     invariants="invariants-f",
+    activation_evidence="activation-evidence-m",
+    falsification_criteria="falsifier-n",
     minimum_ratio=1.37,
 )
 _DESIGNER = PlanPrompt(
@@ -380,6 +382,8 @@ def cases() -> dict[str, Case]:
                 "claims.status": "status-claim-j",
                 "claims.evidence": "claimed-evidence-k",
                 "cited_evidence": "e" * 64,
+                "plan.activation_evidence": "activation-evidence-m",
+                "plan.falsification_criteria": "falsifier-n",
             },
             held=_EVIDENCE,
         ),

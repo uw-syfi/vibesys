@@ -37,6 +37,8 @@
   "perf_delta_pct": 12.5,
   "perf_comparison": "better",
   "perf_gain": "better",
+  "mechanism_verdict": "refuted",
+  "mechanism_attribution": "fused epilogue, not the removed barrier",
   "perf_provenance": "framework",
   "implementer_driver": "agentshim",
   "implementer_provider": "codex",

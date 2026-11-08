@@ -12,13 +12,13 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.multi._host import PLANNER, config
+from tests.vibesys.orchestration.multi._host import JUDGE, PLANNER, config, reviewed
 from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 
 import vs_core.api as core
-from vibesys.hypothesis import ImplementerStatus, RoundRecord
+from vibesys.hypothesis import ImplementerStatus, MechanismVerdict, RoundRecord
 from vibesys.orchestration.multi.models import ImplementerResponse
 from vs_core.api import RevisionRef
 from vs_sim.api.testing import examples
@@ -41,14 +41,20 @@ GAIN = {
 _ORDER = ("worse", "within_noise", "better")
 
 
-def played_round(*, restarting: bool, bar: float, ratio: float, noise: float) -> RoundRecord:
-    """One round of an idea with this bar, measured at this ratio over its base: its record."""
+def played_round(
+    *, restarting: bool, bar: float, ratio: float, noise: float, **review: object
+) -> RoundRecord:
+    """One round of an idea with this bar, measured at this ratio over its base: its record.
+
+    ``review`` adds fields to the judge's passing reply.
+    """
     host = start(
         config(max_rounds=1), restarting=restarting, comparisons={CANDIDATE: (ratio, noise)}
     )
     host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h1", minimum_ratio=bar))
     implement(host, "implemented", CANDIDATE)
-    judge(host, passed=True)
+    host.drain_until_turn(JUDGE)
+    host.run.reply(host.run.expect_turn(role=JUDGE), reviewed(passed=True, **review))
     host.drain()
     record = host.record
     assert record is not None
@@ -181,3 +187,65 @@ def test_an_idea_the_framework_has_no_comparison_for_is_inconclusive_never_suppo
     assert record is not None
     (round_record,) = record.hypotheses[0].rounds
     assert round_record.hypothesis_outcome == "inconclusive"
+
+
+@pytest.mark.regression
+@across_restarts
+def test_a_gain_from_another_mechanism_is_recorded_as_a_gain_with_its_mechanism_refuted(
+    *, restarting: bool
+) -> None:
+    """The measured gain and the judge's verdict on the plan's mechanism are recorded apart.
+
+    In the 2026-10-09 multimodal campaign pi0.5 round 2 was 1.9% faster, but from vectorized
+    epilogues rather than the barrier removal the plan proposed. One outcome word could not say
+    both, and the next designer abandoned synchronization work that a later round showed paid.
+    """
+    attribution = "vectorized epilogues; the removed barriers saved nothing"
+    round_record = played_round(
+        restarting=restarting,
+        bar=1.0,
+        ratio=1.2,
+        noise=0.01,
+        mechanism="refuted",
+        mechanism_attribution=attribution,
+    )
+    assert round_record.hypothesis_outcome == "proven"
+    assert round_record.perf_gain == "better"
+    assert round_record.mechanism_verdict is MechanismVerdict.REFUTED
+    assert round_record.mechanism_attribution == attribution
+
+
+@across_restarts
+@settings(max_examples=examples(pr=12, nightly=60), deadline=None, derandomize=True, database=None)
+@given(
+    mechanism=st.sampled_from(MechanismVerdict),
+    attribution=st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), max_size=40),
+    ratio=st.floats(0.6, 1.9, allow_nan=False),
+)
+def test_the_judges_mechanism_verdict_is_recorded_and_never_changes_the_measured_outcome(
+    *, restarting: bool, mechanism: MechanismVerdict, attribution: str, ratio: float
+) -> None:
+    """Whatever the judge says of the mechanism, the outcome and gain stay the framework's."""
+    plain = played_round(restarting=restarting, bar=1.05, ratio=ratio, noise=0.02)
+    stated = played_round(
+        restarting=restarting,
+        bar=1.05,
+        ratio=ratio,
+        noise=0.02,
+        mechanism=mechanism.value,
+        mechanism_attribution=attribution,
+    )
+    assert stated.mechanism_verdict is mechanism
+    assert stated.mechanism_attribution == (attribution or None)
+    assert (stated.hypothesis_outcome, stated.perf_gain, stated.perf_comparison) == (
+        plain.hypothesis_outcome,
+        plain.perf_gain,
+        plain.perf_comparison,
+    )
+
+
+def test_a_judge_that_states_no_mechanism_records_it_as_untested() -> None:
+    """An older judge reply without the field still validates, and claims nothing."""
+    round_record = played_round(restarting=False, bar=1.0, ratio=1.2, noise=0.01)
+    assert round_record.mechanism_verdict is MechanismVerdict.UNTESTED
+    assert round_record.mechanism_attribution is None
