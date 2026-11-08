@@ -1,19 +1,14 @@
 [project]
-name = "llama-3-1-8b-mlx-input"
+name = "jsonschemabench-engine"
 version = "0.1.0"
+description = "The candidate: an MLX server for Llama 3.1 8B Instruct 8-bit with JSON-schema constrained decoding."
 requires-python = ">=3.12"
+# What the candidate's server (engine/) imports, and nothing the judge needs: the task's own
+# environment is .vibesys/tasks/default/pyproject.toml. The candidate may change this file.
 dependencies = [
-  "datasets",
-  "httpx",
-  "huggingface_hub",
-  "jsonschema",
-  "mlx",
-  "mlx-lm",
-  "vs-bench",
+  "mlx-lm==0.32.2",
+  "llguidance==1.9.1",
 ]
 
 [tool.uv]
 package = false
-
-[tool.uv.sources]
-vs-bench = { path = "../../../sdk/vs-bench" }

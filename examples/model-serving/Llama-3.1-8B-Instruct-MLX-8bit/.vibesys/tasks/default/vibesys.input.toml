@@ -1,16 +1,37 @@
-version = "0.1"
+# Llama 3.1 8B Instruct (MLX, 8-bit) on a Mac: JSON-schema constrained generation, for vibesys-cli (schema 0.2).
+# Metal needs the host, so this is a task of one image read like a command task, with no Dockerfile
+# and no [candidate]: bench.py starts the candidate's server from the checkout (launch.py), asks it
+# and stops it, in each mode. The legacy Python app refuses this file.
+version = "0.2"
 backends = ["metal"]
 
 [agent]
 domain = "llm-serving"
+interface = "service"
 
+# bench.py runs in the environment of the task directory (pyproject.toml and uv.lock there, which the
+# candidate cannot change); the server it starts runs in the project root's.
 [accuracy]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
-timeout_seconds = 120
+command = [
+  "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
+  "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "check",
+]
+# Through vibesys-cli on an M3 Pro, warm caches, the baseline's check took 177 s (40 requests, one of
+# them cut off at 512 tokens, and a server start). The first job on a machine also installs both
+# environments (about 1 min) and downloads the model (8.5 GB, 2 min). Three times the warm run plus
+# that is 710 s, rounded up to 900 s.
+timeout_seconds = 900
 
 [benchmark]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
-timeout_seconds = 300
+command = [
+  "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
+  "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "benchmark",
+]
+# One sample took 90 s (a server start, one request that is not counted, 24 that are, no cut-off
+# answer); a cut-off answer adds 37 s. A server may take 300 s to start (launch.py), so the limit
+# is that start plus the sample with four cut-offs: 300 + 90 + 150 = 540 s, rounded up to 600 s.
+timeout_seconds = 600
+result_protocol = 2
 
 [catalogue]
 domain = "llm-serving"
