@@ -12,6 +12,7 @@ import {
   RunStatus,
   type RunSummary,
   type SearchState,
+  type TaskCard,
 } from '@vibesys/orchestrator-proto';
 import type {Freshness} from '../freshness.js';
 import type {HostStatus} from '../host-status.js';
@@ -86,6 +87,8 @@ export interface FleetRow {
   readonly runId: string;
   /** What the run is called: its task. */
   readonly name: string;
+  /** What the host read of the run's task when it started; null for a run recorded before cards. */
+  readonly card: TaskCard | null;
   readonly repository: string;
   readonly status: RunStatus;
   /** Still working: starting, running or stopping. */
@@ -147,6 +150,7 @@ function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): F
     host,
     runId: run.id,
     name: run.task,
+    card: run.taskCard ?? null,
     repository: run.repository,
     status: run.status,
     live: isLive(run.status),

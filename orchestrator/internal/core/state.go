@@ -40,6 +40,10 @@ type State struct {
 	// jobs holds the jobs whose end was already told, by run: a job id is only unique within the
 	// store of one task, so two runs can both finish a job called j1.
 	jobs map[toldJob]struct{}
+	// reports holds the newest report each run that is not over has had posted about the whole run. The
+	// operator's message is settled the moment it is posted and leaves messages, so this is where the
+	// lead that replaces another finds what the old one last said.
+	reports map[RunID]Report
 }
 
 // toldJob names a job whose end was told to a run's lead.
@@ -51,7 +55,7 @@ type toldJob struct {
 // written says which of a State's maps one transaction has its own copy of. A map is copied when
 // the fold first writes to it, so an input costs what it changes and not what the State has
 // remembered. What the maps hold is replaced and never changed in place, so it is shared.
-type written struct{ runs, agents, messages, receipts, checkIns, checkInIndex, jobs bool }
+type written struct{ runs, agents, messages, receipts, checkIns, checkInIndex, jobs, reports bool }
 
 // own gives the transaction its own copy of a map, once.
 func own[K comparable, V any](m *map[K]V, done *bool) {
@@ -87,6 +91,10 @@ func (s *State) apply(e Event, w *written) {
 				if key.run == b.ID {
 					delete(s.jobs, key)
 				}
+			}
+			if _, kept := s.reports[b.ID]; kept {
+				own(&s.reports, &w.reports)
+				delete(s.reports, b.ID)
 			}
 		}
 	case Agent:
@@ -154,7 +162,10 @@ func (s *State) applyMessage(m Message, w *written) {
 	if a, ok := s.agents[m.To]; ok {
 		own(&s.agents, &w.agents)
 		queue := slices.DeleteFunc(slices.Clone(a.queue), func(id MessageID) bool { return id == m.ID })
-		if m.Delivery == DeliveryQueued {
+		if _, handover := m.Body.(LeadHandover); handover && m.Delivery == DeliveryQueued {
+			// A new lead's first turn is the handover, whatever is waiting behind it.
+			queue = append([]MessageID{m.ID}, queue...)
+		} else if m.Delivery == DeliveryQueued {
 			queue = append(queue, m.ID)
 		}
 		if len(queue) == 0 {
@@ -167,6 +178,10 @@ func (s *State) applyMessage(m Message, w *written) {
 		delete(s.messages, m.ID)
 	} else {
 		s.messages[m.ID] = m
+	}
+	if report, ok := m.Body.(Report); ok && report.Scope != ReportScopeWindow && !s.runs[m.Run].Status.Final() {
+		own(&s.reports, &w.reports)
+		s.reports[m.Run] = report
 	}
 	if job, ok := m.Body.(JobFinished); ok && !s.runs[m.Run].Status.Final() {
 		own(&s.jobs, &w.jobs)

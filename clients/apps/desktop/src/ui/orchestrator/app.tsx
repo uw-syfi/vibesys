@@ -30,6 +30,7 @@ import {useDisplayClock} from '../display-clock.js';
 import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
 import {costWords} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
+import {runTitle} from './fleet-words.js';
 import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
@@ -343,7 +344,11 @@ function RunDestination(props: {
   );
   const toRun: readonly Crumb[] = [
     {id: 'runs', label: TITLE, press: goRuns},
-    {id: runId, label: run.task, press: () => go({type: 'show', view: 'report'})},
+    {
+      id: runId,
+      label: runTitle(run.taskCard ?? null, run.task),
+      press: () => go({type: 'show', view: 'report'}),
+    },
   ];
   if (route.view === 'cost') {
     const feed = host.costFeeds[runId] ?? OPENING_COST;

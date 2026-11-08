@@ -208,6 +208,26 @@ func (w *Workload) tool(n int) core.ToolCall {
 	return core.ToolCall{Use: uses[w.r.IntN(len(uses))], Output: w.text(n), ExitCode: &code}
 }
 
+// updateOf changes one setting of a live run: a limit, the fan-out or the lead, so that the store holds
+// the settings events and the handover a lead's replacement writes.
+func (w *Workload) updateOf(run core.Run) core.UpdateRun {
+	u := core.UpdateRun{Run: run.ID}
+	switch w.r.IntN(5) {
+	case 0:
+		u.CostLimit = &core.LimitChange[float64]{Set: float64(1 + w.r.IntN(20))}
+	case 1:
+		u.TimeLimit = &core.LimitChange[time.Duration]{Set: time.Duration(1+w.r.IntN(72)) * time.Hour}
+	case 2:
+		fanout := uint32(1 + w.r.IntN(4))
+		u.Fanout = &fanout
+	case 3:
+		u.CostLimit = &core.LimitChange[float64]{Remove: true}
+	default:
+		u.Lead = &core.AgentSpec{Harness: []core.Harness{core.ClaudeCode, core.Codex}[w.r.IntN(2)], Model: core.ModelName("model-" + string(rune('a'+w.r.IntN(3))))}
+	}
+	return u
+}
+
 // newCommand asks for something of the core, as a client or an agent would.
 func (w *Workload) newCommand() core.InputBody {
 	runs := w.state.Runs()
@@ -254,6 +274,8 @@ func (w *Workload) newCommand() core.InputBody {
 		return w.command(core.Operator{}, core.StopRun{Run: run.ID})
 	case n < 90:
 		return w.command(core.AgentCaller{Agent: run.Lead}, core.PostReport{Report: core.Report{Kind: core.ReportProgress, Headline: "status"}})
+	case n < 96:
+		return w.command(core.Operator{}, w.updateOf(run))
 	default:
 		// A command the core refuses: a receipt is still committed, and with no run.
 		return w.command(core.Operator{}, core.StopRun{Run: "run-none"})

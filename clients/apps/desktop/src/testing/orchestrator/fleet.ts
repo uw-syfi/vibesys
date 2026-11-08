@@ -29,6 +29,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {isLive} from '../../state/orchestrator/fleet.js';
 import {ms} from '../../state/orchestrator/time.js';
+import {fixtureTaskOf} from './builders.js';
 import {fleetTurns} from './fleet-turns.js';
 import {ChangeLog, Rng} from './log.js';
 import {measuredSearch, type ObjectiveSpec} from './report-fixtures.js';
@@ -44,25 +45,12 @@ export interface FleetOptions {
   readonly live: number;
   /** The moment the fleet is read at: live runs began before it, over runs ended before it. */
   readonly nowMs: number;
-  /** Name every nth run with a very long task name, to see how a cell cuts it. */
+  /** Give every nth run a model name too long for a cell, to see how it cuts it. */
   readonly longEvery?: number;
 }
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-
-const NAMES = [
-  'Qwen3 serving · MI300X',
-  'KV cache kernel · H100',
-  'queue-rs · mpmc',
-  'Sparse MoE router · H100',
-  'Flash attention backward · H100',
-  'Tokenizer throughput · CPU',
-  'GEMM tiling · MI300X',
-  'Radix tree · rust',
-  'Whisper decode · H100',
-  'Paged attention · MI300X',
-];
 
 const UNITS = ['tok/s', 'ops/s', 'TFLOPS', 'MB/s'] as const;
 
@@ -186,19 +174,18 @@ function timingOf(rng: Rng, options: FleetOptions, index: number): Timing {
   return {live, startMs, endMs, status};
 }
 
-function nameOf(options: FleetOptions, index: number): string {
-  const name = NAMES[index % NAMES.length] ?? 'run';
-  const long = options.longEvery !== undefined && index % options.longEvery === 0;
-  return long ? `${name} with a task name that runs on and on and on and on` : name;
-}
-
 function runOf(rng: Rng, options: FleetOptions, id: string, index: number): Run {
   const timing = timingOf(rng, options, index);
   const cost = Math.round(rng.next() * 1500 * 100) / 100;
+  const {task, card} = fixtureTaskOf(
+    index,
+    options.longEvery !== undefined && index % options.longEvery === 0,
+  );
   return create(RunSchema, {
     id,
     repository: 'decode-service',
-    task: nameOf(options, index),
+    task,
+    taskCard: card,
     status: timing.status,
     leadAgentId: `${id}-lead`,
     fanoutLimit: 4,

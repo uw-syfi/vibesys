@@ -42,7 +42,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `cost`, `store`, `jobs`, `wire`, `hub`, `gen` |
 | `internal/daemon/daemontest` | The Fakes and the `Rig` that wire a whole daemon in memory | `daemon` and what it imports |
 | `internal/client` | The client library and `connect`, over the public service API | `gen` only |
-| `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `clientcli/attachview`, `client`, `gen` |
+| `clientcli` | The verbs of `vibesys-client`: `run start`, `list`, `attach`, `get`, `wait`, `steer`, `update`, `stop`. Holds no run state; every real input (terminal, clock, signals, the way to the host) arrives in its `Env`. One of two packages, with `gatewayroot`, that `vibesys-client` imports | `clientcli/attachview`, `client`, `gen` |
 | `clientcli/attachview` | The pure display layer of `run attach` and the run as a client sees it (`View`, `Describe`): model, inputs, outputs, `Update`, line kinds and `Render`, names, key decoding, `Sanitize`. No I/O, clock or stream | `gen` |
 | `gatewayroot` | Which host `.vibesys` directory a gateway serves from, so the host and its clients agree on it | `localfs` |
 | `internal/mcp` | The stdio MCP server an agent talks to, over a small `Daemon` interface the client satisfies | `core`, `gen` |
@@ -226,8 +226,18 @@ vibesys-client run attach [RUN] [--agent AGENT] [--full-history]  # follow a run
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
 vibesys-client run wait [RUN] --until started|report|progress|stalled|ended --timeout 30m [--after N]
 vibesys-client run steer [RUN] "text" [--agent AGENT]
+vibesys-client run update [RUN] [--max-cost DOLLARS|none] [--max-time DURATION|none] [--fanout N] [--harness H] [--model M] [--effort E] [--json]
 vibesys-client run stop [RUN] [--yes]
 ```
+
+`run update` changes a live run and says what changed, a line to a setting. A limit is set, changed or removed (`none`); the
+time limit is the total from the run's start. A limit already passed is reached as any other: the lead is told to finish and the
+run stops when it has or after the grace, and a run that reached a limit refuses a change to that limit. Lowering `--fanout` stops
+no agent: no spawn or resume is admitted while the live subagents are at or over it. A lead flag asks for another tool or model:
+the lead's turn ends, its session closes, and a fresh session of the same agent opens on the new spec with a handover of the run's
+state (what the old lead last reported, who is live, spent and limits) as its first prompt, and the mail the old lead had not read
+after it. A change of the lead takes effect when the lead rests, is replaced by a later one that is asked for before then, and is
+dropped if the run stops first. An update is all or none, and each setting it changes is one entry of one `RunUpdated` event.
 
 A run spends only on agents its operator chose. It may start subagents on its lead's harness and model, and
 on each `--allow-agent` (a harness alone allows that harness's default model). A spawn that names neither

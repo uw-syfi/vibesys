@@ -202,6 +202,7 @@ func bodies(r *rand.Rand, rec records) []core.Message {
 		envelope(core.Text{Text: text(r, "text:", 8)}),
 		envelope(core.Brief{Text: text(r, "brief:", 8)}),
 		envelope(core.LeadBrief{Task: text(r, "task:", 4), FanoutLimit: r.Uint32(), Steering: optional(r, "steering:")}),
+		envelope(handover(r, reportKinds, statuses)),
 		envelope(handoff(r, core.WorkerCandidate{
 			Commit: core.Commit(optional(r, "commit:")), ParentCommit: core.Commit(optional(r, "parent:")),
 			Branch: optional(r, "branch:"), Checks: optional(r, "checks:"), Measurement: optional(r, "measurement:"),
@@ -244,6 +245,39 @@ func bodies(r *rand.Rand, rec records) []core.Message {
 		envelope(core.ReportDue{Every: time.Duration(r.Uint32()) * time.Second, Reports: r.Uint32()}),
 		envelope(catchUp(r, rec, since)),
 	}
+}
+
+// handover draws what a replacement lead is told: every optional part set about half the time.
+func handover(r *rand.Rand, reportKinds []core.ReportKind, statuses []core.AgentStatus) core.LeadHandover {
+	roles := []core.AgentRole{core.RolePlanner, core.RoleWorker, core.RoleJudge, core.RoleCombiner, core.RoleProfiler}
+	h := core.LeadHandover{
+		Task: text(r, "task:", 4), FanoutLimit: r.Uint32(),
+		Previous: core.AgentSpec{Harness: []core.Harness{core.ClaudeCode, core.Codex}[r.IntN(2)], Model: core.ModelName(optional(r, "model:"))},
+		Elapsed:  time.Duration(r.Uint32()) * time.Second, Spent: spent(r), ReportsPosted: r.Uint32(),
+		AgentsEnded: r.Uint32(), ActiveJobs: r.Uint32(),
+	}
+	if r.IntN(2) == 0 {
+		h.MaxCost = 1 + r.Float64()*100
+	}
+	if r.IntN(2) == 0 {
+		h.MaxTime = time.Duration(1+r.Uint32N(1<<20)) * time.Second
+	}
+	if r.IntN(3) == 0 {
+		h.LimitReached = []core.RunLimit{core.LimitTime, core.LimitCost}[r.IntN(2)]
+	}
+	if r.IntN(2) == 0 {
+		h.LatestReport = &core.Report{
+			Kind: reportKinds[r.IntN(len(reportKinds))], Scope: core.ReportScopeRun, Sequence: r.Uint32(), Headline: text(r, "headline:", 4),
+			Changed: optional(r, "changed:"), InFlight: optional(r, "flight:"), Decisions: optional(r, "decisions:"),
+		}
+	}
+	for i := range r.IntN(4) {
+		h.Agents = append(h.Agents, core.HandoverAgent{
+			ID: core.AgentID(text(r, fmt.Sprint("agent", i, ":"), 3)), Role: roles[r.IntN(len(roles))],
+			Status: statuses[r.IntN(len(statuses))], PlanNumber: r.Uint32N(5),
+		})
+	}
+	return h
 }
 
 // catchUp draws a request for a report and the ready check-in it is worded from, which it puts in rec.
@@ -315,6 +349,15 @@ func fieldsOf(m core.Message, rec records) []string {
 		return []string{b.Text}
 	case core.LeadBrief:
 		return []string{b.Task, b.Steering}
+	case core.LeadHandover:
+		fields := []string{b.Task, string(b.Previous.Model)}
+		if b.LatestReport != nil {
+			fields = append(fields, b.LatestReport.Headline, b.LatestReport.Changed, b.LatestReport.InFlight, b.LatestReport.Decisions)
+		}
+		for _, a := range b.Agents {
+			fields = append(fields, string(a.ID))
+		}
+		return fields
 	case core.Handoff:
 		fields := []string{string(m.From), b.Claim, b.Learned, b.Next, b.OpenItems}
 		switch k := b.Body.(type) {
@@ -397,6 +440,23 @@ func TestAnOptionalFieldIsSaidExactlyWhenItIsSet(t *testing.T) {
 			case core.LeadBrief:
 				if said("steering note") != (b.Steering != "") {
 					t.Fatalf("steering %q, rendered %q", b.Steering, got)
+				}
+			case core.LeadHandover:
+				if said("\nChanged: ") != (b.LatestReport != nil && b.LatestReport.Changed != "") ||
+					said("\nIn flight: ") != (b.LatestReport != nil && b.LatestReport.InFlight != "") ||
+					said("\nDecisions: ") != (b.LatestReport != nil && b.LatestReport.Decisions != "") ||
+					said("\nHeadline: ") != (b.LatestReport != nil) || said("No report about the whole run") != (b.LatestReport == nil) {
+					t.Fatalf("report %+v, rendered %q", b.LatestReport, got)
+				}
+				if said("\n  - ") != (len(b.Agents) > 0) || strings.Count(got, "\n  - ") != len(b.Agents) {
+					t.Fatalf("%d agents, rendered %q", len(b.Agents), got)
+				}
+				if said("The run has already reached its") != (b.LimitReached != "") || said("Finish now") != (b.LimitReached != "") ||
+					said("Read the run's records") != (b.LimitReached == "") {
+					t.Fatalf("limit %q, rendered %q", b.LimitReached, got)
+				}
+				if said("no cost reported yet") != (b.Spent == nil) || said("it may cost") != (b.MaxCost != 0) || said("the run may take") != (b.MaxTime != 0) {
+					t.Fatalf("spent %v, max cost %v, max time %v, rendered %q", b.Spent, b.MaxCost, b.MaxTime, got)
 				}
 			case core.Handoff:
 				_, candidate := b.Body.(core.WorkerCandidate)

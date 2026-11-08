@@ -1,0 +1,23 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "leadHandover": {
+    "elapsedSeconds": 3600,
+    "fanoutLimit": 2,
+    "latestReport": {
+      "headline": "nearly there",
+      "kind": "REPORT_KIND_PROGRESS",
+      "sequence": 1
+    },
+    "limitReached": "RUN_LIMIT_COST",
+    "maxCostUsd": 5,
+    "previousHarness": "HARNESS_CLAUDE_CODE",
+    "previousModel": "opus",
+    "reportsPosted": 1,
+    "spentUsd": 5.01,
+    "task": "kv-store"
+  },
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

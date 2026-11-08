@@ -22,6 +22,7 @@ import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
+import {runTitle} from '../orchestrator/fleet-words.js';
 import {AppShell} from './shell.js';
 
 installDom();
@@ -34,7 +35,8 @@ installDom();
  */
 const scenario = generateScenario({seed: 5, subagents: 2, live: true});
 const live: OrchestratorState = scenario.changes.reduce(applyChange, emptyState);
-const TASK = live.runs[scenario.runId]?.task ?? '';
+const run = live.runs[scenario.runId];
+const TASK = run === undefined ? '' : runTitle(run.taskCard ?? null, run.task);
 
 const hostOf = (data: OrchestratorState): HostSnapshot =>
   hostSnapshotOf({model: {data, agentCursors: {}}});
