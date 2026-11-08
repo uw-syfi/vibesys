@@ -198,3 +198,6 @@ func (f Facts) GPUFacts(ctx context.Context) (map[string]string, error) {
 
 // Unread is the value of a fact that no node has said yet.
 const Unread = "unread: read on a compute node by the placement's first job"
+
+// ProbeFacts returns the most recent compute-node observation, or unread facts before any job.
+func (f Facts) ProbeFacts(ctx context.Context) (map[string]string, error) { return f.GPUFacts(ctx) }

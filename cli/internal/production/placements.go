@@ -11,6 +11,7 @@ import (
 	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
@@ -44,6 +45,7 @@ type machines struct {
 	offers       []core.PlacementOffer
 	// claims are what the resources of each placement claim for a job that runs on it.
 	claims map[string][]core.Claim
+	probes map[string]app.Placement
 }
 
 // machineEnvironments are the environments this machine has: the host, and docker on each
@@ -74,7 +76,7 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	// placements that need one image build it once (engineBuilds).
 	builds := engineBuilds{}
 	providers := map[string]*docker.Provider{}
-	out := machines{claims: map[string][]core.Claim{}}
+	out := machines{claims: map[string][]core.Claim{}, probes: map[string]app.Placement{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
@@ -84,6 +86,11 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		providers[name] = provider
+		probe, err := placementProbe(op.GetPlacements()[name], provider)
+		if err != nil {
+			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
+		}
+		out.probes[name] = probe
 		out.offers = append(out.offers, provider.Offer())
 		out.claims[name] = provider.Claims()
 	}
