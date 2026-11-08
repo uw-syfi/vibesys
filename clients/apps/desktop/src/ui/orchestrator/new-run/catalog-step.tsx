@@ -254,7 +254,7 @@ export function CatalogStep(props: {
               size="sm"
               value={example.fitsOnly ? 'fits' : 'all'}
               options={[
-                {value: 'fits', label: `Fits ${host?.label ?? ''} · ${fitting}`},
+                {value: 'fits', label: `Fits · ${fitting}`},
                 {value: 'all', label: `All · ${entries.length}`},
               ]}
               change={value => set({fitsOnly: value === 'fits'})}

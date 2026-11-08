@@ -87,11 +87,13 @@ function RepositoryPath(props: {
   readonly own: OwnCase | null;
   readonly draft: StartDraft;
   readonly verdict: RepositoryVerdict;
+  /** The Repositories folder, whose listing the empty field offers. */
+  readonly folder: string;
   readonly change: (repository: string) => void;
   readonly enter: () => void;
 }): JSX.Element {
   const {host, draft} = props;
-  const split = splitPath(draft.repository);
+  const split = splitPath(draft.repository.trim() === '' ? `${props.folder}/` : draft.repository);
   const listed =
     split === undefined
       ? []
@@ -105,7 +107,7 @@ function RepositoryPath(props: {
           value,
           ...(detail === undefined ? {} : {detail}),
         }))}
-        tabCompletes={split !== undefined && split.prefix !== ''}
+        tabCompletes={split !== undefined && split.prefix !== '' && draft.repository.trim() !== ''}
         focus={props.enter}
         placeholder={props.own === 'tasks' ? 'Pick or type a path' : '~/code/my-server'}
       />
@@ -187,6 +189,7 @@ function ExistingRepository(props: OwnProps & {readonly own: 'tasks' | 'repo'}):
         own={props.own}
         draft={draft}
         verdict={verdict}
+        folder={props.repositories.folder}
         change={repository => {
           props.set({repository, task: ''});
           props.act({type: 'own-task', task: null});

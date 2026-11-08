@@ -265,6 +265,11 @@ describe('the window shell', () => {
     screen.press(screen.control('Machines'));
     screen.press(screen.control('Settings'));
     screen.press(screen.control('Runs'));
+    // The list's New run opens the page that starts a run; the rail's Runs comes back to the list.
+    screen.press(screen.control('New run'));
+    screen.press(
+      screen.controls('Runs').find(control => !control.classList.contains('vs-crumb')) ?? row(),
+    );
     // The list's own controls: its state filter and, with two hosts, its host filter.
     screen.press(
       screen.container.querySelector<HTMLElement>('input[type="radio"][value="live"]') ?? row(),

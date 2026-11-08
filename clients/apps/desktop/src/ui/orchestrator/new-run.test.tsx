@@ -197,7 +197,7 @@ describe('the catalog step', () => {
     expect(text).toContain('Catalog');
     expect(text).toContain('Model serving');
     expect(text).toContain('Data structures');
-    expect(text).toMatch(/Fits This machine · \d+/);
+    expect(text).toMatch(/Fits · \d+/);
     expect(text).toMatch(/All · \d+/);
     // The id line is the example's folder and its task.
     expect(text).toMatch(/\w+ \/ \w+/);
