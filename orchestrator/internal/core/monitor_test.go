@@ -366,6 +366,9 @@ func (m *monitor) observe(e core.Event) error {
 
 func (m *monitor) run(r core.Run) error {
 	if _, known := m.runs[r.ID]; !known {
+		if r.Phase == "" {
+			return fmt.Errorf("run %s is new and has no phase", r.ID)
+		}
 		if err := m.newSchedule(r); err != nil {
 			return err
 		}

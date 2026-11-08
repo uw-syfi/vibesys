@@ -53,9 +53,11 @@ var permissions = map[Action][]Principal{
 
 	ActionRequestCatchUp: {PrincipalOperator},
 	ActionUpdateRun:      {PrincipalOperator},
-	// ActionBeginSetup, ActionCompleteSetup and ActionDeclareTask have no entry until their behavior is
-	// decided: nobody is permitted, so a Decide refuses them before it reaches the command switch.
-	// Whoever implements one adds its row here, for the operator.
+	ActionBeginSetup:     {PrincipalOperator},
+	ActionDeclareTask:    {PrincipalLead},
+	// ActionCompleteSetup has no entry until its behavior is decided: nobody is permitted, so a Decide
+	// refuses it before it reaches the command switch. Whoever implements it adds its row here, for
+	// the operator.
 }
 
 // Allowed says whether a principal may do an action.

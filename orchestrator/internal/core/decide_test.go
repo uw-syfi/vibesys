@@ -266,6 +266,10 @@ func TestTheRoleTable(t *testing.T) {
 		core.ActionStopAgent:   func(p core.Principal) bool { return p == core.PrincipalOperator || p == core.PrincipalLead },
 		core.ActionPostHandoff: func(p core.Principal) bool { return p != core.PrincipalOperator && p != core.PrincipalLead },
 		core.ActionPostReport:  func(p core.Principal) bool { return p == core.PrincipalLead },
+		// The setup commands: the operator begins a setup, its lead names the task, and nobody completes it yet.
+		core.ActionBeginSetup:    func(p core.Principal) bool { return p == core.PrincipalOperator },
+		core.ActionDeclareTask:   func(p core.Principal) bool { return p == core.PrincipalLead },
+		core.ActionCompleteSetup: func(core.Principal) bool { return false },
 	}
 	for action, want := range allowed {
 		for _, p := range everyone {

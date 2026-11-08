@@ -184,6 +184,10 @@ func (t *tx) requestCatchUp(c Command, b RequestCatchUp, r *Receipt) RunID {
 	case viewer.ID == "" || viewer.Label == "":
 		r.Run, r.Refusal = run.ID, RefuseNoViewer
 		return ""
+	case run.inSetup():
+		// A run in setup has no work to catch up on.
+		r.Run, r.Refusal = run.ID, RefuseNotPermitted
+		return ""
 	}
 	r.Run = run.ID
 	pending, isPending, since := t.viewerChain(run, viewer.ID)

@@ -82,7 +82,7 @@ func (e *Engine) ModelPolicy() core.ModelPolicy {
 // launchesAgents says the command starts an agent, so that is the only input the policy is read for.
 func launchesAgents(c core.Command) bool {
 	switch c.Body.(type) {
-	case core.StartRun, core.SpawnAgent:
+	case core.StartRun, core.BeginSetup, core.SpawnAgent:
 		return true
 	}
 	return false

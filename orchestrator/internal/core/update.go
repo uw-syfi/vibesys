@@ -92,14 +92,16 @@ func (t *tx) updateRun(b UpdateRun, r *Receipt) RunID {
 }
 
 // limitRefusal is why an update may not change the limits it names, or empty: a limit the run has
-// reached stays as it is, and the limits of a run in setup are those of the optimize phase, which its
-// completion sets.
+// reached stays as it is, and the limits and the fan-out of a run in setup are those of the optimize
+// phase, which its completion sets (a setup run has no subagent).
 func (r Run) limitRefusal(b UpdateRun) Refusal {
 	switch {
+	case b.CostLimit == nil && b.TimeLimit == nil && b.Fanout == nil:
+		return ""
+	case r.inSetup():
+		return RefuseNotPermitted
 	case b.CostLimit == nil && b.TimeLimit == nil:
 		return ""
-	case !r.Phase.Optimizing():
-		return RefuseNotPermitted
 	case b.CostLimit != nil && r.LimitReached == LimitCost:
 		return RefuseCostLimitReached
 	case b.TimeLimit != nil && r.LimitReached == LimitTime:

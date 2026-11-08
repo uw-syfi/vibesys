@@ -18,7 +18,8 @@ func (s State) finished(run Run) bool { return s.quiet(run) && run.FinalReported
 // do, no other agent is launching or working, no job is queued or running and no message is on its way.
 // An agent that is idle without a handoff does not count as working: the lead has been told of it.
 func (s State) quiet(run Run) bool {
-	if run.Status != RunRunning || run.ActiveJobs > 0 {
+	if run.Status != RunRunning || run.ActiveJobs > 0 || run.inSetup() {
+		// A run in setup is talked to, and waits for the operator as long as it needs.
 		return false
 	}
 	for _, m := range s.messages {
