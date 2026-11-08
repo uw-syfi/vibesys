@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -113,25 +111,6 @@ func newMark(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(b)
-}
-
-// processesMarked lists the live processes whose environment carries the mark, which every
-// descendant of the observer inherits.
-func processesMarked(mark string) []int {
-	entries, _ := filepath.Glob("/proc/[0-9]*/environ")
-	want := []byte("VIBESYS_E2E_MARK=" + mark + "\x00")
-	var pids []int
-	for _, entry := range entries {
-		data, err := os.ReadFile(entry)
-		if err != nil || !bytes.Contains(data, want) {
-			continue
-		}
-		pid, err := strconv.Atoi(strings.Split(entry, "/")[2])
-		if err == nil && running(pid) {
-			pids = append(pids, pid)
-		}
-	}
-	return pids
 }
 
 // tail is the last n lines of text.

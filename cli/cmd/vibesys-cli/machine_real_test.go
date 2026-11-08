@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/proctable"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 )
@@ -192,6 +194,10 @@ func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
 
 // A daemon that no longer answers, which a stop cannot end, is gone once the test's machine is swept,
 // as the cleanup of every test of a machine does, with the supervisors and clients of its root.
+//
+// Regression: the sweep read /proc, which macOS does not have, so there it found no process and
+// ended none, and the daemon this test stops stayed on the machine for good. The sweep must find
+// the daemon, not only leave none behind, so that a sweep which cannot see passes nothing.
 func TestRealSweepEndsADaemonThatNoLongerAnswers(t *testing.T) {
 	t.Parallel()
 	m := newMachine(t)
@@ -200,14 +206,42 @@ func TestRealSweepEndsADaemonThatNoLongerAnswers(t *testing.T) {
 		t.Fatalf("the daemon: %+v", r)
 	}
 	pid := m.pidOf(env)
+	// The cleanup of the daemon's runtime directory asks it to stop, and a daemon stopped by a signal
+	// cannot answer, so the test that wedged it sweeps before that is asked, whatever else fails. It
+	// also ends the daemon itself if the sweep did not, so that a sweep that cannot see, which is
+	// what this test is for, fails the test and does not leave the daemon on the machine.
+	t.Cleanup(func() {
+		m.sweep()
+		if running, err := proctable.Running(pid); err != nil || running {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
 	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	if !alive(pid) {
-		t.Fatalf("the daemon %d is not there to be swept", pid)
+	assertRunning(t, pid, true, "while it is stopped")
+
+	swept := m.sweep()
+
+	if !slices.Contains(swept, pid) {
+		t.Fatalf("the sweep did not find daemon %d, which is stopped under %s: it ended %v", pid, m.root, swept)
 	}
-	m.sweep()
-	if alive(pid) {
-		t.Fatalf("daemon %d outlived the sweep of its machine", pid)
+	assertRunning(t, pid, false, "after the sweep of its machine")
+	left, err := proctable.WithEnvUnder("XDG_RUNTIME_DIR", m.root)
+	if err != nil || len(left) != 0 {
+		t.Fatalf("processes %v of %s outlived its sweep (error %v)", left, m.root, err)
+	}
+}
+
+// assertRunning fails the test unless the process is running, or is not, as want says. A table that
+// cannot say fails it too.
+func assertRunning(t *testing.T, pid int, want bool, when string) {
+	t.Helper()
+	got, err := proctable.Running(pid)
+	if err != nil {
+		t.Fatalf("whether process %d runs %s: %v", pid, when, err)
+	}
+	if got != want {
+		t.Fatalf("process %d running = %v %s, want %v", pid, got, when, want)
 	}
 }

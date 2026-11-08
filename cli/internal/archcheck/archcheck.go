@@ -27,8 +27,9 @@ const (
 )
 
 // testSupport lists the packages every test file may import: support that keeps a test binary's
-// environment from deciding its result, and that no product code reaches.
-var testSupport = []string{"internal/shorttmp"}
+// environment from deciding its result, or lets it end the processes it started and tell that they
+// ended, and that no product code reaches.
+var testSupport = []string{"internal/shorttmp", "internal/proctable"}
 
 // rules lists, for each package directory under cli/, the module packages it may import beyond
 // itself. An entry ending in "/" allows the whole subtree. A package with Go files and no entry
@@ -128,6 +129,9 @@ var rules = map[string][]string{
 	"internal/runtimedir": {"gen/", "internal/clock", "internal/core"},
 	// Test support only: keeps a test binary's TMPDIR short enough for a socket path.
 	"internal/shorttmp": {"internal/runtimedir"},
+	// Test support only: the machine's process table, read the way each system gives it, for a test
+	// that ends the processes it started and says that they ended.
+	"internal/proctable": {},
 
 	// Storage.
 	"internal/store":           {"internal/core"},
@@ -263,6 +267,7 @@ var testRules = map[string][]string{
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
 	},
 	"internal/store/ledger":    {"internal/clock"},
+	"internal/proctable":       {"internal/clock"},
 	"internal/hostfs":          {},
 	"internal/flowrun":         {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
 	"internal/task":            {"internal/task/tasktest"},
@@ -341,6 +346,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, effects(name, source)...)
 			found = append(found, approvalMints(name, source)...)
 			found = append(found, sweepViolations(name, source)...)
+			found = append(found, procReads(name, source, true)...)
 			found = append(found, scopeMints(name, source)...)
 			found = append(found, spellings(name, source)...)
 		case strings.HasSuffix(name, ".proto") && strings.HasPrefix(name, "proto/vibesys/cli/"):

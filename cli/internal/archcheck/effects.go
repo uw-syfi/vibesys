@@ -150,6 +150,7 @@ func StaleExceptions(files map[string]string) []string {
 	}
 	check("clock", clockExceptions, clockUses)
 	check("go statement", goExceptions, goStatements)
+	check("proc", procExceptions, procReads)
 	slices.Sort(stale)
 	return stale
 }
