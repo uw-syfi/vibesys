@@ -100,7 +100,7 @@ const latency = {name: 'latency', direction: TaskObjectiveDirection.MIN, unit: '
 const ops = {name: 'ops_per_sec', direction: TaskObjectiveDirection.MAX, unit: 'ops/s'};
 
 /** The example tasks of the fake host, as cards: one or two of each domain. */
-export const fixtureCards: ReadonlyArray<readonly [string, TaskCard, boolean]> = [
+const fixtureCards: ReadonlyArray<readonly [string, TaskCard, boolean]> = [
   [
     'model-serving/flint',
     card({
