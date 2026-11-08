@@ -304,13 +304,6 @@ body > div:first-child {
   flex-direction: column;
   visibility: hidden;
 }
-/* What was read before and is read again: quieter until the answer replaces it, once. */
-.vs-dim {
-  transition: opacity var(--duration-fast) var(--easing);
-}
-.vs-dim[data-dim] {
-  opacity: 0.45;
-}
 .vs-flex[data-width="chart"] {
   flex: 1 1 var(--column-chart);
   min-width: min(100%, var(--column-chart));

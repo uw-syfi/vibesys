@@ -75,7 +75,10 @@ describe('the eval places of a machine', () => {
 
   it('dims the places while they are read again, and swaps once to the answer', () => {
     const {screen, draw} = open(readOf(response));
-    const dimmed = () => screen.container.querySelector('.vs-dim')?.hasAttribute('data-dim');
+    const dimmed = () =>
+      screen.container
+        .querySelector('table[aria-label="This machine places"]')
+        ?.hasAttribute('data-dim');
     expect(dimmed()).toBe(false);
     screen.render(draw(readingOf(readOf(response))));
     expect(dimmed()).toBe(true);

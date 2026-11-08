@@ -1,16 +1,5 @@
 import type {EvalPlace, ListEvalPlacesResponse} from '@vibesys/orchestrator-proto';
-import {
-  Button,
-  Card,
-  Chip,
-  Dim,
-  Reserve,
-  Row,
-  Spacer,
-  Table,
-  type TableColumn,
-  Text,
-} from '@vibesys/ui';
+import {Button, Card, Chip, Reserve, Row, Spacer, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {type Reach, type Remote, reachOf} from '../../state/index.js';
 import {offerWords} from '../orchestrator/new-run/words.js';
@@ -79,14 +68,13 @@ function MachinePlaces(props: {
           {...(reading ? {disabledReason: 'Reading', quietReason: true} : {})}
         />
       </Row>
-      <Dim reading={reading}>
-        <Table
-          label={`${host.label} places`}
-          columns={COLUMNS}
-          rows={data?.places ?? []}
-          rowKey={place => place.name}
-        />
-      </Dim>
+      <Table
+        label={`${host.label} places`}
+        columns={COLUMNS}
+        rows={data?.places ?? []}
+        rowKey={place => place.name}
+        dim={reading}
+      />
     </Card>
   );
 }
