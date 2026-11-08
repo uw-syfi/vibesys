@@ -9,7 +9,7 @@ import {
   folderName,
   pickExample,
 } from '../../state/index.js';
-import {ExamplePicker} from './new-run/example-picker.js';
+import {ExamplePicker, withKeptParent} from './new-run/example-picker.js';
 import {placeLabel} from './new-run/words.js';
 import {emptyDraft, type StartDraft, type StartRunRequest} from './start-draft.js';
 import {type StartHost, StartRunForm} from './start-run-form.js';
@@ -57,7 +57,7 @@ export function NewRun(props: {
   const host = props.hosts.find(candidate => candidate.key === chosen) ?? props.hosts[0];
   const entries = host?.catalogue.data?.entries ?? [];
   const places = host?.evalPlaces.data?.places ?? [];
-  const target = exampleTarget(entries, places, example);
+  const target = exampleTarget(entries, places, withKeptParent(host, example));
   const pick = (picked: string): void => {
     setExample(pickExample(example, picked));
     if (host !== undefined) props.forgetProvision(host.key);

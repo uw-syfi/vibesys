@@ -328,6 +328,8 @@ type DesktopMachineRequest struct {
 	//	*DesktopMachineRequest_Add
 	//	*DesktopMachineRequest_Remove
 	//	*DesktopMachineRequest_Restore
+	//	*DesktopMachineRequest_Repositories
+	//	*DesktopMachineRequest_SetRepositories
 	Op            isDesktopMachineRequest_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -406,6 +408,24 @@ func (x *DesktopMachineRequest) GetRestore() *DesktopMachineRestore {
 	return nil
 }
 
+func (x *DesktopMachineRequest) GetRepositories() bool {
+	if x != nil {
+		if x, ok := x.Op.(*DesktopMachineRequest_Repositories); ok {
+			return x.Repositories
+		}
+	}
+	return false
+}
+
+func (x *DesktopMachineRequest) GetSetRepositories() *DesktopMachineSetRepositories {
+	if x != nil {
+		if x, ok := x.Op.(*DesktopMachineRequest_SetRepositories); ok {
+			return x.SetRepositories
+		}
+	}
+	return nil
+}
+
 type isDesktopMachineRequest_Op interface {
 	isDesktopMachineRequest_Op()
 }
@@ -429,6 +449,16 @@ type DesktopMachineRequest_Restore struct {
 	Restore *DesktopMachineRestore `protobuf:"bytes,4,opt,name=restore,proto3,oneof"`
 }
 
+type DesktopMachineRequest_Repositories struct {
+	// Reads the repositories folder kept for each machine.
+	Repositories bool `protobuf:"varint,5,opt,name=repositories,proto3,oneof"`
+}
+
+type DesktopMachineRequest_SetRepositories struct {
+	// Keeps, or clears, one machine's repositories folder.
+	SetRepositories *DesktopMachineSetRepositories `protobuf:"bytes,6,opt,name=set_repositories,json=setRepositories,proto3,oneof"`
+}
+
 func (*DesktopMachineRequest_Match) isDesktopMachineRequest_Op() {}
 
 func (*DesktopMachineRequest_Add) isDesktopMachineRequest_Op() {}
@@ -436,6 +466,108 @@ func (*DesktopMachineRequest_Add) isDesktopMachineRequest_Op() {}
 func (*DesktopMachineRequest_Remove) isDesktopMachineRequest_Op() {}
 
 func (*DesktopMachineRequest_Restore) isDesktopMachineRequest_Op() {}
+
+func (*DesktopMachineRequest_Repositories) isDesktopMachineRequest_Op() {}
+
+func (*DesktopMachineRequest_SetRepositories) isDesktopMachineRequest_Op() {}
+
+type DesktopMachineSetRepositories struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Host  string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Empty clears it: the machine takes its host's own default.
+	RepositoriesDirectory string `protobuf:"bytes,2,opt,name=repositories_directory,json=repositoriesDirectory,proto3" json:"repositories_directory,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *DesktopMachineSetRepositories) Reset() {
+	*x = DesktopMachineSetRepositories{}
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopMachineSetRepositories) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopMachineSetRepositories) ProtoMessage() {}
+
+func (x *DesktopMachineSetRepositories) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopMachineSetRepositories.ProtoReflect.Descriptor instead.
+func (*DesktopMachineSetRepositories) Descriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DesktopMachineSetRepositories) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *DesktopMachineSetRepositories) GetRepositoriesDirectory() string {
+	if x != nil {
+		return x.RepositoriesDirectory
+	}
+	return ""
+}
+
+// The repositories folder of each machine that has one, by host key.
+type DesktopMachineRepositories struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Directories   map[string]string      `protobuf:"bytes,1,rep,name=directories,proto3" json:"directories,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopMachineRepositories) Reset() {
+	*x = DesktopMachineRepositories{}
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopMachineRepositories) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopMachineRepositories) ProtoMessage() {}
+
+func (x *DesktopMachineRepositories) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopMachineRepositories.ProtoReflect.Descriptor instead.
+func (*DesktopMachineRepositories) Descriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DesktopMachineRepositories) GetDirectories() map[string]string {
+	if x != nil {
+		return x.Directories
+	}
+	return nil
+}
 
 type DesktopMachineMatches struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -446,7 +578,7 @@ type DesktopMachineMatches struct {
 
 func (x *DesktopMachineMatches) Reset() {
 	*x = DesktopMachineMatches{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[4]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +590,7 @@ func (x *DesktopMachineMatches) String() string {
 func (*DesktopMachineMatches) ProtoMessage() {}
 
 func (x *DesktopMachineMatches) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[4]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +603,7 @@ func (x *DesktopMachineMatches) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopMachineMatches.ProtoReflect.Descriptor instead.
 func (*DesktopMachineMatches) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DesktopMachineMatches) GetAliases() []string {
@@ -492,7 +624,7 @@ type DesktopMachineAdded struct {
 
 func (x *DesktopMachineAdded) Reset() {
 	*x = DesktopMachineAdded{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[5]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +636,7 @@ func (x *DesktopMachineAdded) String() string {
 func (*DesktopMachineAdded) ProtoMessage() {}
 
 func (x *DesktopMachineAdded) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[5]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +649,7 @@ func (x *DesktopMachineAdded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopMachineAdded.ProtoReflect.Descriptor instead.
 func (*DesktopMachineAdded) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DesktopMachineAdded) GetHost() string {
@@ -543,7 +675,7 @@ type DesktopMachineRemoved struct {
 
 func (x *DesktopMachineRemoved) Reset() {
 	*x = DesktopMachineRemoved{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[6]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -555,7 +687,7 @@ func (x *DesktopMachineRemoved) String() string {
 func (*DesktopMachineRemoved) ProtoMessage() {}
 
 func (x *DesktopMachineRemoved) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[6]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -568,7 +700,7 @@ func (x *DesktopMachineRemoved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopMachineRemoved.ProtoReflect.Descriptor instead.
 func (*DesktopMachineRemoved) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DesktopMachineRemoved) GetUndo() *DesktopMachineRestore {
@@ -588,7 +720,7 @@ type DesktopMachineRefused struct {
 
 func (x *DesktopMachineRefused) Reset() {
 	*x = DesktopMachineRefused{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[7]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +732,7 @@ func (x *DesktopMachineRefused) String() string {
 func (*DesktopMachineRefused) ProtoMessage() {}
 
 func (x *DesktopMachineRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[7]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +745,7 @@ func (x *DesktopMachineRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopMachineRefused.ProtoReflect.Descriptor instead.
 func (*DesktopMachineRefused) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DesktopMachineRefused) GetReason() string {
@@ -631,6 +763,7 @@ type DesktopMachineReply struct {
 	//	*DesktopMachineReply_Added
 	//	*DesktopMachineReply_Removed
 	//	*DesktopMachineReply_Refused
+	//	*DesktopMachineReply_Repositories
 	Result        isDesktopMachineReply_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -638,7 +771,7 @@ type DesktopMachineReply struct {
 
 func (x *DesktopMachineReply) Reset() {
 	*x = DesktopMachineReply{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[8]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +783,7 @@ func (x *DesktopMachineReply) String() string {
 func (*DesktopMachineReply) ProtoMessage() {}
 
 func (x *DesktopMachineReply) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[8]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +796,7 @@ func (x *DesktopMachineReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopMachineReply.ProtoReflect.Descriptor instead.
 func (*DesktopMachineReply) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DesktopMachineReply) GetResult() isDesktopMachineReply_Result {
@@ -709,6 +842,15 @@ func (x *DesktopMachineReply) GetRefused() *DesktopMachineRefused {
 	return nil
 }
 
+func (x *DesktopMachineReply) GetRepositories() *DesktopMachineRepositories {
+	if x != nil {
+		if x, ok := x.Result.(*DesktopMachineReply_Repositories); ok {
+			return x.Repositories
+		}
+	}
+	return nil
+}
+
 type isDesktopMachineReply_Result interface {
 	isDesktopMachineReply_Result()
 }
@@ -729,6 +871,10 @@ type DesktopMachineReply_Refused struct {
 	Refused *DesktopMachineRefused `protobuf:"bytes,4,opt,name=refused,proto3,oneof"`
 }
 
+type DesktopMachineReply_Repositories struct {
+	Repositories *DesktopMachineRepositories `protobuf:"bytes,5,opt,name=repositories,proto3,oneof"`
+}
+
 func (*DesktopMachineReply_Matches) isDesktopMachineReply_Result() {}
 
 func (*DesktopMachineReply_Added) isDesktopMachineReply_Result() {}
@@ -736,6 +882,8 @@ func (*DesktopMachineReply_Added) isDesktopMachineReply_Result() {}
 func (*DesktopMachineReply_Removed) isDesktopMachineReply_Result() {}
 
 func (*DesktopMachineReply_Refused) isDesktopMachineReply_Result() {}
+
+func (*DesktopMachineReply_Repositories) isDesktopMachineReply_Result() {}
 
 type DesktopHosts struct {
 	state         protoimpl.MessageState          `protogen:"open.v1"`
@@ -747,7 +895,7 @@ type DesktopHosts struct {
 
 func (x *DesktopHosts) Reset() {
 	*x = DesktopHosts{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[9]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -759,7 +907,7 @@ func (x *DesktopHosts) String() string {
 func (*DesktopHosts) ProtoMessage() {}
 
 func (x *DesktopHosts) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[9]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -772,7 +920,7 @@ func (x *DesktopHosts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopHosts.ProtoReflect.Descriptor instead.
 func (*DesktopHosts) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DesktopHosts) GetVersion() uint32 {
@@ -801,7 +949,7 @@ type RetainedDesktopHostSettings struct {
 
 func (x *RetainedDesktopHostSettings) Reset() {
 	*x = RetainedDesktopHostSettings{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[10]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -813,7 +961,7 @@ func (x *RetainedDesktopHostSettings) String() string {
 func (*RetainedDesktopHostSettings) ProtoMessage() {}
 
 func (x *RetainedDesktopHostSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[10]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -826,7 +974,7 @@ func (x *RetainedDesktopHostSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetainedDesktopHostSettings.ProtoReflect.Descriptor instead.
 func (*RetainedDesktopHostSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RetainedDesktopHostSettings) GetCheckout() string {
@@ -853,7 +1001,7 @@ type RetainedDesktopHosts struct {
 
 func (x *RetainedDesktopHosts) Reset() {
 	*x = RetainedDesktopHosts{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[11]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -865,7 +1013,7 @@ func (x *RetainedDesktopHosts) String() string {
 func (*RetainedDesktopHosts) ProtoMessage() {}
 
 func (x *RetainedDesktopHosts) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[11]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -878,7 +1026,7 @@ func (x *RetainedDesktopHosts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetainedDesktopHosts.ProtoReflect.Descriptor instead.
 func (*RetainedDesktopHosts) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RetainedDesktopHosts) GetVersion() uint32 {
@@ -906,7 +1054,7 @@ type DesktopAppearance struct {
 
 func (x *DesktopAppearance) Reset() {
 	*x = DesktopAppearance{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[12]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1066,7 @@ func (x *DesktopAppearance) String() string {
 func (*DesktopAppearance) ProtoMessage() {}
 
 func (x *DesktopAppearance) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[12]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +1079,7 @@ func (x *DesktopAppearance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopAppearance.ProtoReflect.Descriptor instead.
 func (*DesktopAppearance) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DesktopAppearance) GetMode() DesktopAppearanceMode {
@@ -965,7 +1113,7 @@ type DesktopRunRef struct {
 
 func (x *DesktopRunRef) Reset() {
 	*x = DesktopRunRef{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[13]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -977,7 +1125,7 @@ func (x *DesktopRunRef) String() string {
 func (*DesktopRunRef) ProtoMessage() {}
 
 func (x *DesktopRunRef) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[13]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -990,7 +1138,7 @@ func (x *DesktopRunRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRunRef.ProtoReflect.Descriptor instead.
 func (*DesktopRunRef) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DesktopRunRef) GetHost() string {
@@ -1022,7 +1170,7 @@ type DesktopViewer struct {
 
 func (x *DesktopViewer) Reset() {
 	*x = DesktopViewer{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[14]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1034,7 +1182,7 @@ func (x *DesktopViewer) String() string {
 func (*DesktopViewer) ProtoMessage() {}
 
 func (x *DesktopViewer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[14]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1047,7 +1195,7 @@ func (x *DesktopViewer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopViewer.ProtoReflect.Descriptor instead.
 func (*DesktopViewer) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DesktopViewer) GetId() string {
@@ -1078,7 +1226,7 @@ type DesktopPreferences struct {
 
 func (x *DesktopPreferences) Reset() {
 	*x = DesktopPreferences{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[15]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1238,7 @@ func (x *DesktopPreferences) String() string {
 func (*DesktopPreferences) ProtoMessage() {}
 
 func (x *DesktopPreferences) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[15]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1251,7 @@ func (x *DesktopPreferences) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopPreferences.ProtoReflect.Descriptor instead.
 func (*DesktopPreferences) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DesktopPreferences) GetVersion() uint32 {
@@ -1154,7 +1302,7 @@ type DesktopRunStart struct {
 
 func (x *DesktopRunStart) Reset() {
 	*x = DesktopRunStart{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[16]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1166,7 +1314,7 @@ func (x *DesktopRunStart) String() string {
 func (*DesktopRunStart) ProtoMessage() {}
 
 func (x *DesktopRunStart) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[16]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1179,7 +1327,7 @@ func (x *DesktopRunStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRunStart.ProtoReflect.Descriptor instead.
 func (*DesktopRunStart) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DesktopRunStart) GetHarness() *v1.StartRunHarness {
@@ -1231,7 +1379,7 @@ type DesktopRecentRun struct {
 
 func (x *DesktopRecentRun) Reset() {
 	*x = DesktopRecentRun{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[17]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1243,7 +1391,7 @@ func (x *DesktopRecentRun) String() string {
 func (*DesktopRecentRun) ProtoMessage() {}
 
 func (x *DesktopRecentRun) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[17]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1256,7 +1404,7 @@ func (x *DesktopRecentRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRecentRun.ProtoReflect.Descriptor instead.
 func (*DesktopRecentRun) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DesktopRecentRun) GetRun() *DesktopRunRef {
@@ -1313,7 +1461,7 @@ type DesktopRetainedRecentEntry struct {
 
 func (x *DesktopRetainedRecentEntry) Reset() {
 	*x = DesktopRetainedRecentEntry{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[18]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1325,7 +1473,7 @@ func (x *DesktopRetainedRecentEntry) String() string {
 func (*DesktopRetainedRecentEntry) ProtoMessage() {}
 
 func (x *DesktopRetainedRecentEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[18]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1338,7 +1486,7 @@ func (x *DesktopRetainedRecentEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRetainedRecentEntry.ProtoReflect.Descriptor instead.
 func (*DesktopRetainedRecentEntry) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{18}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DesktopRetainedRecentEntry) GetAfter() uint32 {
@@ -1366,7 +1514,7 @@ type DesktopRecent struct {
 
 func (x *DesktopRecent) Reset() {
 	*x = DesktopRecent{}
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[19]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1378,7 +1526,7 @@ func (x *DesktopRecent) String() string {
 func (*DesktopRecent) ProtoMessage() {}
 
 func (x *DesktopRecent) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[19]
+	mi := &file_vibesys_desktop_v1_settings_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1391,7 +1539,7 @@ func (x *DesktopRecent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRecent.ProtoReflect.Descriptor instead.
 func (*DesktopRecent) Descriptor() ([]byte, []int) {
-	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{19}
+	return file_vibesys_desktop_v1_settings_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DesktopRecent) GetVersion() uint32 {
@@ -1449,14 +1597,24 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\x05_port\"\xad\x01\n" +
 	"\x15DesktopMachineRestore\x12G\n" +
 	"\x04host\x18\x01 \x01(\tB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$R\x04host\x12K\n" +
-	"\bsettings\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopHostSettingsB\x06\xbaH\x03\xc8\x01\x01R\bsettings\"\x88\x02\n" +
+	"\bsettings\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopHostSettingsB\x06\xbaH\x03\xc8\x01\x01R\bsettings\"\x97\x03\n" +
 	"\x15DesktopMachineRequest\x12 \n" +
 	"\x05match\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04H\x00R\x05match\x12*\n" +
 	"\x03add\x18\x02 \x01(\tB\x16\xbaH\x13r\x11\x10\x01\x18\x80 2\n" +
 	"^[^\\x00]*$H\x00R\x03add\x12M\n" +
 	"\x06remove\x18\x03 \x01(\tB3\xbaH0r.2,^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$H\x00R\x06remove\x12E\n" +
-	"\arestore\x18\x04 \x01(\v2).vibesys.desktop.v1.DesktopMachineRestoreH\x00R\arestoreB\v\n" +
-	"\x02op\x12\x05\xbaH\x02\b\x01\";\n" +
+	"\arestore\x18\x04 \x01(\v2).vibesys.desktop.v1.DesktopMachineRestoreH\x00R\arestore\x12-\n" +
+	"\frepositories\x18\x05 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\frepositories\x12^\n" +
+	"\x10set_repositories\x18\x06 \x01(\v21.vibesys.desktop.v1.DesktopMachineSetRepositoriesH\x00R\x0fsetRepositoriesB\v\n" +
+	"\x02op\x12\x05\xbaH\x02\b\x01\"\xcf\x01\n" +
+	"\x1dDesktopMachineSetRepositories\x12O\n" +
+	"\x04host\x18\x01 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\x12]\n" +
+	"\x16repositories_directory\x18\x02 \x01(\tB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\x15repositoriesDirectory\"\xca\x01\n" +
+	"\x1aDesktopMachineRepositories\x12l\n" +
+	"\vdirectories\x18\x01 \x03(\v2?.vibesys.desktop.v1.DesktopMachineRepositories.DirectoriesEntryB\t\xbaH\x06\x9a\x01\x03\x10\x90NR\vdirectories\x1a>\n" +
+	"\x10DirectoriesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\";\n" +
 	"\x15DesktopMachineMatches\x12\"\n" +
 	"\aaliases\x18\x01 \x03(\tB\b\xbaH\x05\x92\x01\x02\x102R\aaliases\"x\n" +
 	"\x13DesktopMachineAdded\x12G\n" +
@@ -1466,12 +1624,13 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\x04undo\x18\x01 \x01(\v2).vibesys.desktop.v1.DesktopMachineRestoreB\x06\xbaH\x03\xc8\x01\x01R\x04undo\";\n" +
 	"\x15DesktopMachineRefused\x12\"\n" +
 	"\x06reason\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\x80\bR\x06reason\"\xbc\x02\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\bR\x06reason\"\x92\x03\n" +
 	"\x13DesktopMachineReply\x12E\n" +
 	"\amatches\x18\x01 \x01(\v2).vibesys.desktop.v1.DesktopMachineMatchesH\x00R\amatches\x12?\n" +
 	"\x05added\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopMachineAddedH\x00R\x05added\x12E\n" +
 	"\aremoved\x18\x03 \x01(\v2).vibesys.desktop.v1.DesktopMachineRemovedH\x00R\aremoved\x12E\n" +
-	"\arefused\x18\x04 \x01(\v2).vibesys.desktop.v1.DesktopMachineRefusedH\x00R\arefusedB\x0f\n" +
+	"\arefused\x18\x04 \x01(\v2).vibesys.desktop.v1.DesktopMachineRefusedH\x00R\arefused\x12T\n" +
+	"\frepositories\x18\x05 \x01(\v2..vibesys.desktop.v1.DesktopMachineRepositoriesH\x00R\frepositoriesB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01\"\x9d\x02\n" +
 	"\fDesktopHosts\x12!\n" +
 	"\aversion\x18\x01 \x01(\rB\a\xbaH\x04*\x02\b\x01R\aversion\x12\x86\x01\n" +
@@ -1568,71 +1727,77 @@ func file_vibesys_desktop_v1_settings_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_desktop_v1_settings_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_desktop_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_vibesys_desktop_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_vibesys_desktop_v1_settings_proto_goTypes = []any{
-	(DesktopAppearanceMode)(0),          // 0: vibesys.desktop.v1.DesktopAppearanceMode
-	(DesktopTheme)(0),                   // 1: vibesys.desktop.v1.DesktopTheme
-	(*DesktopHostSettings)(nil),         // 2: vibesys.desktop.v1.DesktopHostSettings
-	(*DesktopSshOptions)(nil),           // 3: vibesys.desktop.v1.DesktopSshOptions
-	(*DesktopMachineRestore)(nil),       // 4: vibesys.desktop.v1.DesktopMachineRestore
-	(*DesktopMachineRequest)(nil),       // 5: vibesys.desktop.v1.DesktopMachineRequest
-	(*DesktopMachineMatches)(nil),       // 6: vibesys.desktop.v1.DesktopMachineMatches
-	(*DesktopMachineAdded)(nil),         // 7: vibesys.desktop.v1.DesktopMachineAdded
-	(*DesktopMachineRemoved)(nil),       // 8: vibesys.desktop.v1.DesktopMachineRemoved
-	(*DesktopMachineRefused)(nil),       // 9: vibesys.desktop.v1.DesktopMachineRefused
-	(*DesktopMachineReply)(nil),         // 10: vibesys.desktop.v1.DesktopMachineReply
-	(*DesktopHosts)(nil),                // 11: vibesys.desktop.v1.DesktopHosts
-	(*RetainedDesktopHostSettings)(nil), // 12: vibesys.desktop.v1.RetainedDesktopHostSettings
-	(*RetainedDesktopHosts)(nil),        // 13: vibesys.desktop.v1.RetainedDesktopHosts
-	(*DesktopAppearance)(nil),           // 14: vibesys.desktop.v1.DesktopAppearance
-	(*DesktopRunRef)(nil),               // 15: vibesys.desktop.v1.DesktopRunRef
-	(*DesktopViewer)(nil),               // 16: vibesys.desktop.v1.DesktopViewer
-	(*DesktopPreferences)(nil),          // 17: vibesys.desktop.v1.DesktopPreferences
-	(*DesktopRunStart)(nil),             // 18: vibesys.desktop.v1.DesktopRunStart
-	(*DesktopRecentRun)(nil),            // 19: vibesys.desktop.v1.DesktopRecentRun
-	(*DesktopRetainedRecentEntry)(nil),  // 20: vibesys.desktop.v1.DesktopRetainedRecentEntry
-	(*DesktopRecent)(nil),               // 21: vibesys.desktop.v1.DesktopRecent
-	nil,                                 // 22: vibesys.desktop.v1.DesktopHosts.HostsEntry
-	nil,                                 // 23: vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry
-	(*v1.StartRunHarness)(nil),          // 24: vibesys.host.v1.StartRunHarness
-	(*v1.StartRunOptions)(nil),          // 25: vibesys.host.v1.StartRunOptions
-	(*v1.StartRunAgent)(nil),            // 26: vibesys.host.v1.StartRunAgent
-	(*v1.StartRunMeasure)(nil),          // 27: vibesys.host.v1.StartRunMeasure
-	(*descriptorpb.FieldOptions)(nil),   // 28: google.protobuf.FieldOptions
+	(DesktopAppearanceMode)(0),            // 0: vibesys.desktop.v1.DesktopAppearanceMode
+	(DesktopTheme)(0),                     // 1: vibesys.desktop.v1.DesktopTheme
+	(*DesktopHostSettings)(nil),           // 2: vibesys.desktop.v1.DesktopHostSettings
+	(*DesktopSshOptions)(nil),             // 3: vibesys.desktop.v1.DesktopSshOptions
+	(*DesktopMachineRestore)(nil),         // 4: vibesys.desktop.v1.DesktopMachineRestore
+	(*DesktopMachineRequest)(nil),         // 5: vibesys.desktop.v1.DesktopMachineRequest
+	(*DesktopMachineSetRepositories)(nil), // 6: vibesys.desktop.v1.DesktopMachineSetRepositories
+	(*DesktopMachineRepositories)(nil),    // 7: vibesys.desktop.v1.DesktopMachineRepositories
+	(*DesktopMachineMatches)(nil),         // 8: vibesys.desktop.v1.DesktopMachineMatches
+	(*DesktopMachineAdded)(nil),           // 9: vibesys.desktop.v1.DesktopMachineAdded
+	(*DesktopMachineRemoved)(nil),         // 10: vibesys.desktop.v1.DesktopMachineRemoved
+	(*DesktopMachineRefused)(nil),         // 11: vibesys.desktop.v1.DesktopMachineRefused
+	(*DesktopMachineReply)(nil),           // 12: vibesys.desktop.v1.DesktopMachineReply
+	(*DesktopHosts)(nil),                  // 13: vibesys.desktop.v1.DesktopHosts
+	(*RetainedDesktopHostSettings)(nil),   // 14: vibesys.desktop.v1.RetainedDesktopHostSettings
+	(*RetainedDesktopHosts)(nil),          // 15: vibesys.desktop.v1.RetainedDesktopHosts
+	(*DesktopAppearance)(nil),             // 16: vibesys.desktop.v1.DesktopAppearance
+	(*DesktopRunRef)(nil),                 // 17: vibesys.desktop.v1.DesktopRunRef
+	(*DesktopViewer)(nil),                 // 18: vibesys.desktop.v1.DesktopViewer
+	(*DesktopPreferences)(nil),            // 19: vibesys.desktop.v1.DesktopPreferences
+	(*DesktopRunStart)(nil),               // 20: vibesys.desktop.v1.DesktopRunStart
+	(*DesktopRecentRun)(nil),              // 21: vibesys.desktop.v1.DesktopRecentRun
+	(*DesktopRetainedRecentEntry)(nil),    // 22: vibesys.desktop.v1.DesktopRetainedRecentEntry
+	(*DesktopRecent)(nil),                 // 23: vibesys.desktop.v1.DesktopRecent
+	nil,                                   // 24: vibesys.desktop.v1.DesktopMachineRepositories.DirectoriesEntry
+	nil,                                   // 25: vibesys.desktop.v1.DesktopHosts.HostsEntry
+	nil,                                   // 26: vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry
+	(*v1.StartRunHarness)(nil),            // 27: vibesys.host.v1.StartRunHarness
+	(*v1.StartRunOptions)(nil),            // 28: vibesys.host.v1.StartRunOptions
+	(*v1.StartRunAgent)(nil),              // 29: vibesys.host.v1.StartRunAgent
+	(*v1.StartRunMeasure)(nil),            // 30: vibesys.host.v1.StartRunMeasure
+	(*descriptorpb.FieldOptions)(nil),     // 31: google.protobuf.FieldOptions
 }
 var file_vibesys_desktop_v1_settings_proto_depIdxs = []int32{
 	3,  // 0: vibesys.desktop.v1.DesktopHostSettings.ssh:type_name -> vibesys.desktop.v1.DesktopSshOptions
 	2,  // 1: vibesys.desktop.v1.DesktopMachineRestore.settings:type_name -> vibesys.desktop.v1.DesktopHostSettings
 	4,  // 2: vibesys.desktop.v1.DesktopMachineRequest.restore:type_name -> vibesys.desktop.v1.DesktopMachineRestore
-	4,  // 3: vibesys.desktop.v1.DesktopMachineRemoved.undo:type_name -> vibesys.desktop.v1.DesktopMachineRestore
-	6,  // 4: vibesys.desktop.v1.DesktopMachineReply.matches:type_name -> vibesys.desktop.v1.DesktopMachineMatches
-	7,  // 5: vibesys.desktop.v1.DesktopMachineReply.added:type_name -> vibesys.desktop.v1.DesktopMachineAdded
-	8,  // 6: vibesys.desktop.v1.DesktopMachineReply.removed:type_name -> vibesys.desktop.v1.DesktopMachineRemoved
-	9,  // 7: vibesys.desktop.v1.DesktopMachineReply.refused:type_name -> vibesys.desktop.v1.DesktopMachineRefused
-	22, // 8: vibesys.desktop.v1.DesktopHosts.hosts:type_name -> vibesys.desktop.v1.DesktopHosts.HostsEntry
-	23, // 9: vibesys.desktop.v1.RetainedDesktopHosts.hosts:type_name -> vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry
-	0,  // 10: vibesys.desktop.v1.DesktopAppearance.mode:type_name -> vibesys.desktop.v1.DesktopAppearanceMode
-	1,  // 11: vibesys.desktop.v1.DesktopAppearance.light:type_name -> vibesys.desktop.v1.DesktopTheme
-	1,  // 12: vibesys.desktop.v1.DesktopAppearance.dark:type_name -> vibesys.desktop.v1.DesktopTheme
-	14, // 13: vibesys.desktop.v1.DesktopPreferences.appearance:type_name -> vibesys.desktop.v1.DesktopAppearance
-	15, // 14: vibesys.desktop.v1.DesktopPreferences.archived:type_name -> vibesys.desktop.v1.DesktopRunRef
-	16, // 15: vibesys.desktop.v1.DesktopPreferences.viewer:type_name -> vibesys.desktop.v1.DesktopViewer
-	24, // 16: vibesys.desktop.v1.DesktopRunStart.harness:type_name -> vibesys.host.v1.StartRunHarness
-	25, // 17: vibesys.desktop.v1.DesktopRunStart.options:type_name -> vibesys.host.v1.StartRunOptions
-	26, // 18: vibesys.desktop.v1.DesktopRunStart.agents:type_name -> vibesys.host.v1.StartRunAgent
-	27, // 19: vibesys.desktop.v1.DesktopRunStart.measure_on:type_name -> vibesys.host.v1.StartRunMeasure
-	15, // 20: vibesys.desktop.v1.DesktopRecentRun.run:type_name -> vibesys.desktop.v1.DesktopRunRef
-	18, // 21: vibesys.desktop.v1.DesktopRecentRun.start:type_name -> vibesys.desktop.v1.DesktopRunStart
-	19, // 22: vibesys.desktop.v1.DesktopRecent.runs:type_name -> vibesys.desktop.v1.DesktopRecentRun
-	20, // 23: vibesys.desktop.v1.DesktopRecent.retained:type_name -> vibesys.desktop.v1.DesktopRetainedRecentEntry
-	2,  // 24: vibesys.desktop.v1.DesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.DesktopHostSettings
-	12, // 25: vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.RetainedDesktopHostSettings
-	28, // 26: vibesys.desktop.v1.retained_json_key:extendee -> google.protobuf.FieldOptions
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	26, // [26:27] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	6,  // 3: vibesys.desktop.v1.DesktopMachineRequest.set_repositories:type_name -> vibesys.desktop.v1.DesktopMachineSetRepositories
+	24, // 4: vibesys.desktop.v1.DesktopMachineRepositories.directories:type_name -> vibesys.desktop.v1.DesktopMachineRepositories.DirectoriesEntry
+	4,  // 5: vibesys.desktop.v1.DesktopMachineRemoved.undo:type_name -> vibesys.desktop.v1.DesktopMachineRestore
+	8,  // 6: vibesys.desktop.v1.DesktopMachineReply.matches:type_name -> vibesys.desktop.v1.DesktopMachineMatches
+	9,  // 7: vibesys.desktop.v1.DesktopMachineReply.added:type_name -> vibesys.desktop.v1.DesktopMachineAdded
+	10, // 8: vibesys.desktop.v1.DesktopMachineReply.removed:type_name -> vibesys.desktop.v1.DesktopMachineRemoved
+	11, // 9: vibesys.desktop.v1.DesktopMachineReply.refused:type_name -> vibesys.desktop.v1.DesktopMachineRefused
+	7,  // 10: vibesys.desktop.v1.DesktopMachineReply.repositories:type_name -> vibesys.desktop.v1.DesktopMachineRepositories
+	25, // 11: vibesys.desktop.v1.DesktopHosts.hosts:type_name -> vibesys.desktop.v1.DesktopHosts.HostsEntry
+	26, // 12: vibesys.desktop.v1.RetainedDesktopHosts.hosts:type_name -> vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry
+	0,  // 13: vibesys.desktop.v1.DesktopAppearance.mode:type_name -> vibesys.desktop.v1.DesktopAppearanceMode
+	1,  // 14: vibesys.desktop.v1.DesktopAppearance.light:type_name -> vibesys.desktop.v1.DesktopTheme
+	1,  // 15: vibesys.desktop.v1.DesktopAppearance.dark:type_name -> vibesys.desktop.v1.DesktopTheme
+	16, // 16: vibesys.desktop.v1.DesktopPreferences.appearance:type_name -> vibesys.desktop.v1.DesktopAppearance
+	17, // 17: vibesys.desktop.v1.DesktopPreferences.archived:type_name -> vibesys.desktop.v1.DesktopRunRef
+	18, // 18: vibesys.desktop.v1.DesktopPreferences.viewer:type_name -> vibesys.desktop.v1.DesktopViewer
+	27, // 19: vibesys.desktop.v1.DesktopRunStart.harness:type_name -> vibesys.host.v1.StartRunHarness
+	28, // 20: vibesys.desktop.v1.DesktopRunStart.options:type_name -> vibesys.host.v1.StartRunOptions
+	29, // 21: vibesys.desktop.v1.DesktopRunStart.agents:type_name -> vibesys.host.v1.StartRunAgent
+	30, // 22: vibesys.desktop.v1.DesktopRunStart.measure_on:type_name -> vibesys.host.v1.StartRunMeasure
+	17, // 23: vibesys.desktop.v1.DesktopRecentRun.run:type_name -> vibesys.desktop.v1.DesktopRunRef
+	20, // 24: vibesys.desktop.v1.DesktopRecentRun.start:type_name -> vibesys.desktop.v1.DesktopRunStart
+	21, // 25: vibesys.desktop.v1.DesktopRecent.runs:type_name -> vibesys.desktop.v1.DesktopRecentRun
+	22, // 26: vibesys.desktop.v1.DesktopRecent.retained:type_name -> vibesys.desktop.v1.DesktopRetainedRecentEntry
+	2,  // 27: vibesys.desktop.v1.DesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.DesktopHostSettings
+	14, // 28: vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.RetainedDesktopHostSettings
+	31, // 29: vibesys.desktop.v1.retained_json_key:extendee -> google.protobuf.FieldOptions
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	29, // [29:30] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_desktop_v1_settings_proto_init() }
@@ -1647,23 +1812,26 @@ func file_vibesys_desktop_v1_settings_proto_init() {
 		(*DesktopMachineRequest_Add)(nil),
 		(*DesktopMachineRequest_Remove)(nil),
 		(*DesktopMachineRequest_Restore)(nil),
+		(*DesktopMachineRequest_Repositories)(nil),
+		(*DesktopMachineRequest_SetRepositories)(nil),
 	}
-	file_vibesys_desktop_v1_settings_proto_msgTypes[8].OneofWrappers = []any{
+	file_vibesys_desktop_v1_settings_proto_msgTypes[10].OneofWrappers = []any{
 		(*DesktopMachineReply_Matches)(nil),
 		(*DesktopMachineReply_Added)(nil),
 		(*DesktopMachineReply_Removed)(nil),
 		(*DesktopMachineReply_Refused)(nil),
+		(*DesktopMachineReply_Repositories)(nil),
 	}
-	file_vibesys_desktop_v1_settings_proto_msgTypes[10].OneofWrappers = []any{}
-	file_vibesys_desktop_v1_settings_proto_msgTypes[15].OneofWrappers = []any{}
+	file_vibesys_desktop_v1_settings_proto_msgTypes[12].OneofWrappers = []any{}
 	file_vibesys_desktop_v1_settings_proto_msgTypes[17].OneofWrappers = []any{}
+	file_vibesys_desktop_v1_settings_proto_msgTypes[19].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_desktop_v1_settings_proto_rawDesc), len(file_vibesys_desktop_v1_settings_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   25,
 			NumExtensions: 1,
 			NumServices:   0,
 		},

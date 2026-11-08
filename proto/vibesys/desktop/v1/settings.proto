@@ -86,7 +86,29 @@ message DesktopMachineRequest {
     string remove = 3 [(buf.validate.field).string.pattern = "^ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254}$"];
     // Puts back what a remove took.
     DesktopMachineRestore restore = 4;
+    // Reads the repositories folder kept for each machine.
+    bool repositories = 5 [(buf.validate.field).bool.const = true];
+    // Keeps, or clears, one machine's repositories folder.
+    DesktopMachineSetRepositories set_repositories = 6;
   }
+}
+
+message DesktopMachineSetRepositories {
+  string host = 1 [(buf.validate.field).string.pattern = "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"];
+  // Empty clears it: the machine takes its host's own default.
+  string repositories_directory = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+      pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+    }
+  ];
+}
+
+// The repositories folder of each machine that has one, by host key.
+message DesktopMachineRepositories {
+  map<string, string> directories = 1 [(buf.validate.field).map.max_pairs = 10000];
 }
 
 message DesktopMachineMatches {
@@ -118,6 +140,7 @@ message DesktopMachineReply {
     DesktopMachineAdded added = 2;
     DesktopMachineRemoved removed = 3;
     DesktopMachineRefused refused = 4;
+    DesktopMachineRepositories repositories = 5;
   }
 }
 

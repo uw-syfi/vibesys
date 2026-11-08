@@ -19,6 +19,7 @@ import {
 } from '@vibesys/ui/tokens';
 import type {JSX, ReactNode} from 'react';
 import {type AppearanceState, themeShown, withMode, withTheme} from '../../state/index.js';
+import {RepositoriesCard, type RepositoriesControls} from './repositories-card.js';
 import {MODE_WORD, themeWord} from './words.js';
 
 const MODES = APPEARANCE_MODES.map(value => ({value, label: MODE_WORD[value]}));
@@ -96,14 +97,21 @@ function AppearanceCard(props: {
   );
 }
 
-/** Settings: how the app looks. The page holds one card; a setup added later gets its own beside it. */
+/** Settings: how the app looks, and where each machine's new repositories go. */
 export function SettingsScreen(props: {
   readonly appearance: AppearanceState;
   readonly choose: (appearance: Appearance) => void;
+  /** The Repositories folders of the machines; a window that cannot keep them shows the appearance only. */
+  readonly repositories?: RepositoriesControls;
 }): JSX.Element {
   return (
     <Page width="wide" state="ready" title="Settings">
-      <AppearanceCard state={props.appearance} choose={props.choose} />
+      <Stack gap="space-4">
+        <AppearanceCard state={props.appearance} choose={props.choose} />
+        {props.repositories === undefined ? null : (
+          <RepositoriesCard controls={props.repositories} />
+        )}
+      </Stack>
     </Page>
   );
 }

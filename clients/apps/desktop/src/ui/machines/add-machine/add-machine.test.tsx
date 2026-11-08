@@ -9,6 +9,7 @@ import {
   targetFromInput,
 } from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
+import {memoryFolders} from '../../../testing/settings/machine-folders.js';
 import {MachinesScreen} from '../machines-screen.js';
 import {type MachineDispatch as Dispatch, useMachineControls} from './machine-controls.js';
 
@@ -20,6 +21,7 @@ const ALIASES = ['host-a', 'host-b', 'my-host-c'];
 function fakeActions() {
   const saved = new Set<string>();
   const actions: MachineActions = {
+    ...memoryFolders().actions,
     match: query => Effect.succeed(matchAliases(ALIASES, query)),
     add: input =>
       Effect.sync(() => {

@@ -12,6 +12,7 @@ import {
   type DesktopMachineRequest,
   DesktopMachineRequestSchema,
   type DesktopMachineRestore,
+  DesktopMachineSetRepositoriesSchema,
   validatedExactFromBinary,
 } from '@vibesys/proto';
 
@@ -34,13 +35,16 @@ export type MachineRequest =
   | {readonly op: 'match'; readonly query: string}
   | {readonly op: 'add'; readonly input: string}
   | {readonly op: 'remove'; readonly host: string}
-  | {readonly op: 'restore'; readonly undo: MachineUndo};
+  | {readonly op: 'restore'; readonly undo: MachineUndo}
+  | {readonly op: 'repositories'}
+  | {readonly op: 'set-repositories'; readonly host: string; readonly directory: string};
 
 export type MachineReply =
   | {readonly kind: 'matches'; readonly aliases: readonly string[]}
   | {readonly kind: 'added'; readonly host: string; readonly created: boolean}
   | {readonly kind: 'removed'; readonly undo: MachineUndo}
-  | {readonly kind: 'refused'; readonly reason: string};
+  | {readonly kind: 'refused'; readonly reason: string}
+  | {readonly kind: 'repositories'; readonly directories: Readonly<Record<string, string>>};
 
 const requestMessage = (request: MachineRequest): DesktopMachineRequest => {
   switch (request.op) {
@@ -52,6 +56,18 @@ const requestMessage = (request: MachineRequest): DesktopMachineRequest => {
       return create(DesktopMachineRequestSchema, {op: {case: 'remove', value: request.host}});
     case 'restore':
       return create(DesktopMachineRequestSchema, {op: {case: 'restore', value: request.undo}});
+    case 'repositories':
+      return create(DesktopMachineRequestSchema, {op: {case: 'repositories', value: true}});
+    case 'set-repositories':
+      return create(DesktopMachineRequestSchema, {
+        op: {
+          case: 'setRepositories',
+          value: create(DesktopMachineSetRepositoriesSchema, {
+            host: request.host,
+            repositoriesDirectory: request.directory,
+          }),
+        },
+      });
   }
 };
 
@@ -74,6 +90,14 @@ export function machineRequestFromBytes(bytes: Uint8Array): MachineRequest {
       return {op: 'remove', host: op.value};
     case 'restore':
       return {op: 'restore', undo: op.value};
+    case 'repositories':
+      return {op: 'repositories'};
+    case 'setRepositories':
+      return {
+        op: 'set-repositories',
+        host: op.value.host,
+        directory: op.value.repositoriesDirectory,
+      };
     case undefined:
       throw new Error('the machine request names no operation');
     default:
@@ -100,6 +124,10 @@ const replyMessage = (reply: MachineReply): DesktopMachineReply => {
       return create(DesktopMachineReplySchema, {
         result: {case: 'refused', value: {reason: reply.reason}},
       });
+    case 'repositories':
+      return create(DesktopMachineReplySchema, {
+        result: {case: 'repositories', value: {directories: {...reply.directories}}},
+      });
   }
 };
 
@@ -123,6 +151,8 @@ export function machineReplyFromBytes(bytes: Uint8Array): MachineReply {
       return {kind: 'removed', undo: result.value.undo};
     case 'refused':
       return {kind: 'refused', reason: result.value.reason};
+    case 'repositories':
+      return {kind: 'repositories', directories: result.value.directories};
     case undefined:
       throw new Error('the machine reply names no result');
     default:

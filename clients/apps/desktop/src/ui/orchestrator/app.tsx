@@ -79,6 +79,8 @@ export interface HostSnapshot {
   readonly catalogue: Remote<ListCatalogueResponse>;
   /** The host's eval places, as of their last read. */
   readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** The Repositories folder kept for this machine (empty when none): where Copy to starts. */
+  readonly repositoriesDirectory: string;
   /** Where the repository being made from an example stands. */
   readonly provision: ProvisionProgress;
   /** The status of each agent's stream the screen has open, by agent id. */
@@ -270,6 +272,7 @@ export function OrchestratorApp(props: {
                 directories,
                 catalogue,
                 evalPlaces,
+                repositoriesDirectory,
                 provision,
               }) => ({
                 key,
@@ -279,6 +282,7 @@ export function OrchestratorApp(props: {
                 directories,
                 catalogue,
                 evalPlaces,
+                repositoriesDirectory,
                 provision,
               }),
             )}

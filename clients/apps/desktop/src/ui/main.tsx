@@ -18,10 +18,12 @@ import {
   GatewayTransportLive,
   Ids,
   type MachineActions,
+  type MachineFolders,
   Machines,
   MachinesFromWindow,
   makeAppearance,
   makeMachineActions,
+  makeMachineFolders,
   makeNavigation,
   makeRoster,
   type NavigationStore,
@@ -62,8 +64,11 @@ const open = Effect.gen(function* () {
   const roster = yield* makeRoster(
     hostsOfAddress(window.location.search).map(host => host.key),
   ).pipe(Scope.provide(scope));
-  const machines = makeMachineActions(yield* Machines, roster);
-  return {roster, machines, appearance, navigation, viewer};
+  const plain = makeMachineActions(yield* Machines, roster);
+  const folders = yield* makeMachineFolders(plain);
+  yield* folders.load;
+  const machines = folders.follow(plain);
+  return {roster, machines, folders, appearance, navigation, viewer};
 }).pipe(
   Effect.provide(
     Layer.mergeAll(
@@ -83,6 +88,7 @@ const open = Effect.gen(function* () {
 function Window(props: {
   readonly roster: Roster;
   readonly machines: MachineActions;
+  readonly folders: MachineFolders;
   readonly navigation: NavigationStore;
   readonly appearance: AppearanceStore;
   readonly viewerId: string | null;
@@ -96,6 +102,7 @@ function Window(props: {
       appearance={props.appearance}
       viewerId={props.viewerId}
       machines={props.machines}
+      folders={props.folders}
     />
   );
 }
@@ -106,13 +113,14 @@ const page = createRoot(root);
 // The display zone is the system's, read once here and passed in.
 const zone = systemDisplayZone();
 Effect.runFork(
-  Effect.map(open, ({roster, machines, appearance, navigation, viewer}) => {
+  Effect.map(open, ({roster, machines, folders, appearance, navigation, viewer}) => {
     page.render(
       <StrictMode>
         <DisplayClockProvider zone={zone}>
           <Window
             roster={roster}
             machines={machines}
+            folders={folders}
             navigation={navigation}
             appearance={appearance}
             viewerId={viewer}
