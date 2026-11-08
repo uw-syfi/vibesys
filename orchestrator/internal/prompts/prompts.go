@@ -87,6 +87,9 @@ type (
 	// whole dollars and cents, and a count of agents. HasSpent is false when no turn has reported a cost;
 	// MaxCost and MaxTimeMinutes are zero for no limit, and Limit is empty until the run reached one.
 	leadHandoverData struct {
+		// Setup is true when the run is in its setup phase: the replacement lead continues the
+		// task's making, and the facts of an optimization are not said.
+		Setup           bool
 		Task            string
 		FanoutLimit     uint32
 		PreviousHarness core.Harness
@@ -278,7 +281,7 @@ func dataOf(m core.Message, records Records) (string, any, error) {
 
 func leadHandoverDataOf(h core.LeadHandover) leadHandoverData {
 	d := leadHandoverData{
-		Task: h.Task, FanoutLimit: h.FanoutLimit, PreviousHarness: h.Previous.Harness, PreviousModel: h.Previous.Model,
+		Setup: !h.Phase.Optimizing(), Task: h.Task, FanoutLimit: h.FanoutLimit, PreviousHarness: h.Previous.Harness, PreviousModel: h.Previous.Model,
 		ElapsedMinutes: uint32(h.Elapsed / time.Minute), MaxTimeMinutes: uint32(h.MaxTime / time.Minute),
 		MaxCost: h.MaxCost, Limit: h.LimitReached, ReportsPosted: h.ReportsPosted, AgentsEnded: h.AgentsEnded, ActiveJobs: h.ActiveJobs,
 	}

@@ -73,6 +73,12 @@ var allTools = []tool{
 				return say("send_message", struct{ Message, Delivery string }{r.GetMessageId(), names.Spell(r.GetDelivery())})
 			})
 		}),
+	define(core.ActionDeclareTask, func() *pb.DeclareTaskInput { return &pb.DeclareTaskInput{} }, nil,
+		func(ctx context.Context, s *Server, in *pb.DeclareTaskInput, id string) (string, error) {
+			return s.send(ctx, &pb.Command{Id: id, Body: &pb.Command_DeclareTask{DeclareTask: &pb.DeclareTask{
+				RunId: string(s.id.Run), Task: in.GetTask(),
+			}}}, func(*pb.Receipt) string { return say("declare_task", struct{ Task string }{in.GetTask()}) })
+		}),
 	define(core.ActionListAgents, func() *pb.ListAgentsInput { return &pb.ListAgentsInput{} }, nil,
 		func(ctx context.Context, s *Server, _ *pb.ListAgentsInput, _ string) (string, error) {
 			agents, err := s.d.Agents(ctx)

@@ -76,6 +76,24 @@
       "name": "send_message"
     },
     {
+      "description": "Name the task you are making, as soon as you choose its directory name under .vibesys/tasks. The operator sees the name and the host checks that task's files and jobs, so declare it before you write them. Call it again to rename; the latest name counts. Only available while the run is in setup.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "description": "The task's directory name: letters, digits, dot, underscore and hyphen, not starting with a dot, at most 128 characters.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "name": "declare_task"
+    },
+    {
       "description": "List the agents of your run with their role, status and plan, so you can see who is working and who is done.",
       "inputSchema": {
         "additionalProperties": false,

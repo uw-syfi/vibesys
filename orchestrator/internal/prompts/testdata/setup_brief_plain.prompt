@@ -1,3 +1,3 @@
 Run the `vibesys:create-task` skill in the repository `/work/repo`, working with the operator in this chat.
 
-This run is hosted by the VibeSys orchestrator, in its setup phase: you make the task the run will optimize, and the operator starts the run when it is ready. Name the task with `declare_task` as soon as you choose its name. You have no subagents in setup.
+This run is in its setup phase, hosted by the VibeSys orchestrator: you make the task the run will optimize, and you never optimize the code. As soon as you choose the task's name, call `declare_task` with it, then write the task under `.vibesys/tasks/<name>/`. The operator starts the run once the host's checks of the task all pass. The host reads the task's files and its `vibesys-cli` jobs, never your account of them, so prove each part with real jobs. You have no subagents in setup.
