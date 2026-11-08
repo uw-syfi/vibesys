@@ -91,6 +91,12 @@ func (e *Environment) Candidate(context.Context, core.CandidateBuild, io.Writer)
 	return core.CandidateImage{}, environment.NoImages(core.EnvironmentHost)
 }
 
+// Serve implements environment.Environment: the host runs no job-scoped server, which runs in a
+// container of the task's image.
+func (e *Environment) Serve(context.Context, core.JobService, io.Writer) (environment.Service, core.Attempt) {
+	return nil, environment.NoService(core.EnvironmentHost)
+}
+
 // Run implements environment.Environment.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {

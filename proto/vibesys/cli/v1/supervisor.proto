@@ -144,6 +144,23 @@ message FlowPlan {
   // declares as objectives, with the unit of each, so the result's observations record it. The
   // scored metric is `metric`. Empty for a task with no other objective.
   repeated Metric others = 15 [(buf.validate.field).repeated.max_items = 64];
+  // For a task of one image with a job-scoped server: the server the job starts once and runs its
+  // samples (and, when the check shares it, its check) against, with the reset before each sample
+  // that reuses it.
+  PlanService service = 16;
+}
+
+// PlanService is a job-scoped server as a plan carries it.
+message PlanService {
+  // The server's command, with ${PROJECT_ROOT} and ${PORT} not yet replaced.
+  repeated string serve = 1 [(buf.validate.field).repeated.min_items = 1];
+  // The HTTP path that answers 2xx once the server is ready.
+  string ready = 2 [(buf.validate.field).string.pattern = "^/[^\\s]*$"];
+  google.protobuf.Duration startup_timeout = 3 [(buf.validate.field).required = true];
+  // Run against the server before every sample that reuses it.
+  PlanCommand reset_command = 4 [(buf.validate.field).required = true];
+  // The check runs against the server too.
+  bool share_with_check = 5;
 }
 
 // ExecutionKind is how a command ended.

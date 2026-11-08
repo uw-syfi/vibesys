@@ -65,6 +65,8 @@ type run struct {
 	boxes     []*box
 	stopLimit []func()
 	staged    *Dirs // the run's directories on the engine's machine, once staged
+	// against is the job-scoped server the run's command runs against, for a run of a Service.
+	against *served
 }
 
 // role is what a container of a run is for.
@@ -77,6 +79,11 @@ const (
 	roleServer
 	// roleBeside is the command's container of the task's image, beside the server's.
 	roleBeside
+	// roleService is the container of a job-scoped server, of the task's image: what roleOnly is,
+	// but for the commands, which run beside it.
+	roleService
+	// roleAgainst is a command's container beside a job-scoped server's, joined to its network.
+	roleAgainst
 )
 
 // prepareAndExecute makes the containers and runs the execution in them. Until a command starts
@@ -305,12 +312,16 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		mounts = append(mounts, Mount{Host: staged.Artifacts, Container: ArtifactsDir})
 		job.Artifacts = ArtifactsDir
 	}
-	if as == roleBeside {
+	if as == roleBeside || as == roleService {
+		// The probe runs where the server is reached from: beside a candidate's server, and in a
+		// job-scoped server's own container, whose network its commands join.
 		probe, err := m.Program(r.ctx, p.cfg.Probe)
 		if err != nil {
 			return ContainerSpec{}, err
 		}
 		mounts = append(mounts, Mount{Host: probe, Container: ProbeMount, ReadOnly: true})
+	}
+	if as == roleBeside || as == roleAgainst {
 		job.ServiceUrl = url
 	}
 	jobVariables, err := environment.JobVariables(job)
@@ -357,8 +368,14 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		Limit:    r.x.Timeout,
 		Measured: r.x.Measured,
 	}
-	if as == roleBeside {
+	switch as {
+	case roleBeside:
 		cs.Network = NetworkOf(r.boxes[0].name)
+	case roleAgainst:
+		// A network a resource asks for is the server's, which this container joins.
+		cs.Network = NetworkOf(r.against.name)
+	default:
+		// The container has the network its resources ask for.
 	}
 	return cs, nil
 }
@@ -406,13 +423,25 @@ var twoImageShares = map[core.ResourceKind]map[role]share{
 	core.ResourceKubernetes: {roleBeside: {given: true}},
 }
 
+// againstShares says which resources a command's container beside a job-scoped server gets: the
+// mounted directories and a cluster, as they are, and not the GPUs, which are the server's. The
+// server's container gets every resource, as the only container of a task of one image does.
+var againstShares = map[core.ResourceKind]share{
+	core.ResourceMounts:     {given: true},
+	core.ResourceKubernetes: {given: true},
+}
+
 // shareOf is how a container in the role gets a resource of the kind. The only container of a
 // task of one image gets every resource as it is.
 func shareOf(kind core.ResourceKind, as role) share {
-	if as == roleOnly {
+	switch as {
+	case roleOnly, roleService:
 		return share{given: true}
+	case roleAgainst:
+		return againstShares[kind]
+	default:
+		return twoImageShares[kind][as]
 	}
-	return twoImageShares[kind][as]
 }
 
 // mounts are the directories the commands see: the checkout, and the scratch directory when the

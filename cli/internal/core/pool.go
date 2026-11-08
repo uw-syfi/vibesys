@@ -54,6 +54,7 @@ func (m Measurement) pools(r Result) bool {
 
 func (m *Measurement) add(job JobID, o MeasureOutcome) {
 	m.Jobs = append(m.Jobs, job)
+	m.Outcome.Services = SampleServices(m.Outcome.Services, len(m.Outcome.Samples), o.Services, len(o.Samples))
 	m.Outcome.Samples = append(m.Outcome.Samples, o.Samples...)
 	m.Outcome.CheckJob = o.CheckJob
 	for _, ob := range o.Observations {

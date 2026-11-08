@@ -27,12 +27,13 @@ var namesOfOthers = map[string]string{
 }
 
 // Every VIBESYS_ name the search skills tell an agent to read is a field of a message the
-// orchestrator writes, so the skills and the environment cannot drift: renaming a field fails here
+// orchestrator writes, or of the environment vibesys-cli gives a task's commands (JobEnvironment),
+// which the task format tells a task's author to read, so the skills and the environment cannot drift: renaming a field fails here
 // before an agent finds a variable unset. The two names the skills run most, the run and the CLI,
 // must still be in the skills, so this test cannot pass over an emptied directory.
 func TestTheSearchSkillsNameOnlyDeclaredVariables(t *testing.T) {
 	declared := map[string]bool{}
-	for _, m := range []proto.Message{&cliv1.AgentContext{}, &cliv1.OperatorContext{}, &cliv1.SkillEnvironment{}, &pb.ToolServerCredentials{}} {
+	for _, m := range []proto.Message{&cliv1.AgentContext{}, &cliv1.OperatorContext{}, &cliv1.SkillEnvironment{}, &cliv1.JobEnvironment{}, &pb.ToolServerCredentials{}} {
 		for _, name := range names(t, m) {
 			declared[name] = true
 		}

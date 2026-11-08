@@ -63,3 +63,46 @@ func TestMeasurementsOfAnotherKindStayApart(t *testing.T) {
 		}
 	}
 }
+
+// Pooled measurements keep the server each sample ran on beside it: one per pooled sample, in the
+// jobs' order, with SampleServiceNone for the samples of a job that recorded none, and none at all
+// when no job recorded one.
+func TestAPooledMeasurementKeepsTheServerOfEachSample(t *testing.T) {
+	r := newRand(91)
+	kinds := []core.SampleService{core.SampleServiceStarted, core.SampleServiceReused, core.SampleServiceRestarted}
+	for range properties {
+		var results []core.Result
+		var want []core.SampleService
+		recorded := false
+		for i := range 1 + r.IntN(4) {
+			samples := samplesIn(r, 1+r.IntN(4), 100, 0.05)
+			var services []core.SampleService
+			if r.IntN(2) == 0 {
+				recorded = true
+				for range samples {
+					services = append(services, kinds[r.IntN(len(kinds))])
+				}
+			}
+			results = append(results, measurement(fmt.Sprintf("m%d", i), candidateCommit, samples, 10+i, func(res *core.Result) {
+				o := res.Outcome.(core.MeasureOutcome)
+				o.Services = services
+				res.Outcome = o
+			}))
+			if services == nil {
+				services = make([]core.SampleService, len(samples))
+			}
+			want = append(want, services...)
+		}
+		if !recorded {
+			want = nil
+		}
+		pooled := core.PoolMeasurements(results)
+		if len(pooled) != 1 {
+			t.Fatalf("%d measurements, want 1", len(pooled))
+		}
+		got := pooled[0].Outcome
+		if !slices.Equal(got.Services, want) || (got.Services != nil && len(got.Services) != len(got.Samples)) {
+			t.Fatalf("services %v for %d samples, want %v", got.Services, len(got.Samples), want)
+		}
+	}
+}

@@ -303,8 +303,13 @@ type TaskManifestV02 struct {
 	// `[catalogue]` is held as data here, because a field's type cannot change under buf breaking. Its
 	// definition is TaskCatalogueV02, which the reader decodes it into (task.Catalogue) and refuses a
 	// table that does not meet, naming the key.
-	Catalogue     *structpb.Struct   `protobuf:"bytes,17,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
-	Comparison    []*structpb.Struct `protobuf:"bytes,18,rep,name=comparison,proto3" json:"comparison,omitempty"`
+	Catalogue  *structpb.Struct   `protobuf:"bytes,17,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
+	Comparison []*structpb.Struct `protobuf:"bytes,18,rep,name=comparison,proto3" json:"comparison,omitempty"`
+	// A server of the task's own image that a job starts once and runs its samples against, instead
+	// of each sample starting it. Optional: a manifest without it starts nothing between commands.
+	// Only a task of one image has it: a task with [candidate] starts its candidate's server for
+	// each command.
+	Service       *TaskServiceV02 `protobuf:"bytes,19,opt,name=service,proto3" json:"service,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -461,6 +466,13 @@ func (x *TaskManifestV02) GetCatalogue() *structpb.Struct {
 func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
 	if x != nil {
 		return x.Comparison
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetService() *TaskServiceV02 {
+	if x != nil {
+		return x.Service
 	}
 	return nil
 }
@@ -984,6 +996,100 @@ func (x *TaskCandidateV02) GetAllowedBases() []string {
 	return nil
 }
 
+// TaskServiceV02 is [service]: the job-scoped server of a task of one image. A measure job starts it
+// once, in a container of the task's image of its own, after the check, and runs every sample in a
+// container beside it, which reaches it over HTTP at VIBESYS_SERVICE_URL. Before every sample that
+// runs on a server an earlier command of the job used, the reset runs; a reset that fails fails the
+// sample. A server that ended between two samples is started again, and the result records which
+// samples ran on a server that was started for them, reused or restarted. The server ends with the
+// job, however the job ends.
+type TaskServiceV02 struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The server, run in the task's image from the checkout's root. ${PROJECT_ROOT} is the checkout's
+	// root and ${PORT} the port the CLI chose for it, which the command must name.
+	Command []string `protobuf:"bytes,1,rep,name=command,proto3" json:"command,omitempty"`
+	// The HTTP path polled on 127.0.0.1:${PORT} until it answers 2xx.
+	Ready string `protobuf:"bytes,2,opt,name=ready,proto3" json:"ready,omitempty"`
+	// How long the server may take to become ready.
+	StartupTimeoutSeconds uint32 `protobuf:"varint,3,opt,name=startup_timeout_seconds,json=startupTimeoutSeconds,proto3" json:"startup_timeout_seconds,omitempty"`
+	// The reset: a command of the task container, run against the server before every sample that
+	// reuses it, which flushes what an earlier command left (such as a prefix cache) and confirms the
+	// server is idle and healthy. Exit 0 lets the sample run.
+	Reset_ *TaskCommandV02 `protobuf:"bytes,4,opt,name=reset,proto3" json:"reset,omitempty"`
+	// Whether the check runs against the server too. False, the default, runs the check as a task
+	// without [service] runs it, and the server starts after it. True starts the server before the
+	// check, in a check job as in a measure job, and a measure job's samples then reuse the server the
+	// check ran against.
+	ShareWithAccuracy bool `protobuf:"varint,5,opt,name=share_with_accuracy,json=shareWithAccuracy,proto3" json:"share_with_accuracy,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *TaskServiceV02) Reset() {
+	*x = TaskServiceV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskServiceV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskServiceV02) ProtoMessage() {}
+
+func (x *TaskServiceV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskServiceV02.ProtoReflect.Descriptor instead.
+func (*TaskServiceV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TaskServiceV02) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *TaskServiceV02) GetReady() string {
+	if x != nil {
+		return x.Ready
+	}
+	return ""
+}
+
+func (x *TaskServiceV02) GetStartupTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.StartupTimeoutSeconds
+	}
+	return 0
+}
+
+func (x *TaskServiceV02) GetReset_() *TaskCommandV02 {
+	if x != nil {
+		return x.Reset_
+	}
+	return nil
+}
+
+func (x *TaskServiceV02) GetShareWithAccuracy() bool {
+	if x != nil {
+		return x.ShareWithAccuracy
+	}
+	return false
+}
+
 // TaskCommandV02 is a command of the task container, run from the checkout's root.
 type TaskCommandV02 struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -996,7 +1102,7 @@ type TaskCommandV02 struct {
 
 func (x *TaskCommandV02) Reset() {
 	*x = TaskCommandV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +1114,7 @@ func (x *TaskCommandV02) String() string {
 func (*TaskCommandV02) ProtoMessage() {}
 
 func (x *TaskCommandV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +1127,7 @@ func (x *TaskCommandV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskCommandV02.ProtoReflect.Descriptor instead.
 func (*TaskCommandV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TaskCommandV02) GetCommand() []string {
@@ -1049,7 +1155,7 @@ type TaskBuildV02 struct {
 
 func (x *TaskBuildV02) Reset() {
 	*x = TaskBuildV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1167,7 @@ func (x *TaskBuildV02) String() string {
 func (*TaskBuildV02) ProtoMessage() {}
 
 func (x *TaskBuildV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1180,7 @@ func (x *TaskBuildV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskBuildV02.ProtoReflect.Descriptor instead.
 func (*TaskBuildV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TaskBuildV02) GetCommand() []string {
@@ -1110,7 +1216,7 @@ type TaskBenchmarkV02 struct {
 
 func (x *TaskBenchmarkV02) Reset() {
 	*x = TaskBenchmarkV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1122,7 +1228,7 @@ func (x *TaskBenchmarkV02) String() string {
 func (*TaskBenchmarkV02) ProtoMessage() {}
 
 func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1135,7 +1241,7 @@ func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskBenchmarkV02.ProtoReflect.Descriptor instead.
 func (*TaskBenchmarkV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TaskBenchmarkV02) GetCommand() []string {
@@ -1186,7 +1292,7 @@ type TaskResultV02 struct {
 
 func (x *TaskResultV02) Reset() {
 	*x = TaskResultV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1198,7 +1304,7 @@ func (x *TaskResultV02) String() string {
 func (*TaskResultV02) ProtoMessage() {}
 
 func (x *TaskResultV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1211,7 +1317,7 @@ func (x *TaskResultV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResultV02.ProtoReflect.Descriptor instead.
 func (*TaskResultV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TaskResultV02) GetJsonArgument() string {
@@ -1245,7 +1351,7 @@ type TaskEnvironmentV02 struct {
 
 func (x *TaskEnvironmentV02) Reset() {
 	*x = TaskEnvironmentV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1257,7 +1363,7 @@ func (x *TaskEnvironmentV02) String() string {
 func (*TaskEnvironmentV02) ProtoMessage() {}
 
 func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1270,7 +1376,7 @@ func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEnvironmentV02.ProtoReflect.Descriptor instead.
 func (*TaskEnvironmentV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TaskEnvironmentV02) GetNeeds() []string {
@@ -1307,7 +1413,7 @@ type TaskAgentV02 struct {
 
 func (x *TaskAgentV02) Reset() {
 	*x = TaskAgentV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1319,7 +1425,7 @@ func (x *TaskAgentV02) String() string {
 func (*TaskAgentV02) ProtoMessage() {}
 
 func (x *TaskAgentV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1438,7 @@ func (x *TaskAgentV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskAgentV02.ProtoReflect.Descriptor instead.
 func (*TaskAgentV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TaskAgentV02) GetDomain() string {
@@ -1368,7 +1474,7 @@ type TaskObjectives struct {
 
 func (x *TaskObjectives) Reset() {
 	*x = TaskObjectives{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1380,7 +1486,7 @@ func (x *TaskObjectives) String() string {
 func (*TaskObjectives) ProtoMessage() {}
 
 func (x *TaskObjectives) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1393,7 +1499,7 @@ func (x *TaskObjectives) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskObjectives.ProtoReflect.Descriptor instead.
 func (*TaskObjectives) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TaskObjectives) GetObjective() []*TaskObjective {
@@ -1431,7 +1537,7 @@ type TaskObjective struct {
 
 func (x *TaskObjective) Reset() {
 	*x = TaskObjective{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1549,7 @@ func (x *TaskObjective) String() string {
 func (*TaskObjective) ProtoMessage() {}
 
 func (x *TaskObjective) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1562,7 @@ func (x *TaskObjective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskObjective.ProtoReflect.Descriptor instead.
 func (*TaskObjective) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TaskObjective) GetName() string {
@@ -1499,7 +1605,7 @@ type TaskPareto struct {
 
 func (x *TaskPareto) Reset() {
 	*x = TaskPareto{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1511,7 +1617,7 @@ func (x *TaskPareto) String() string {
 func (*TaskPareto) ProtoMessage() {}
 
 func (x *TaskPareto) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1524,7 +1630,7 @@ func (x *TaskPareto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPareto.ProtoReflect.Descriptor instead.
 func (*TaskPareto) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TaskPareto) GetRelativeNoise() float64 {
@@ -1580,7 +1686,7 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd1\b\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\x91\t\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
@@ -1603,7 +1709,8 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\tcatalogue\x18\x11 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tcatalogue\x12=\n" +
 	"\n" +
 	"comparison\x18\x12 \x03(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\n" +
-	"comparison:\x06\xca\xf3\x18\x02\x10\x02\"\xd0\x04\n" +
+	"comparison\x12>\n" +
+	"\aservice\x18\x13 \x01(\v2\x1e.vibesys.cli.v1.TaskServiceV02B\x04\xd0\xf3\x18\x02R\aservice:\x06\xca\xf3\x18\x02\x10\x02\"\xd0\x04\n" +
 	"\x10TaskCatalogueV02\x12B\n" +
 	"\x06domain\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.TaskDomainB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x06domain\x12G\n" +
 	"\bhardware\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.TaskHardwareV02B\n" +
@@ -1652,7 +1759,14 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x05serve\x18\x03 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\x05serve\x12*\n" +
 	"\x05ready\x18\x04 \x01(\tB\x14\xbaH\rr\v2\t^/[^\\s]*$\xd0\xf3\x18\x02R\x05ready\x12G\n" +
 	"\x17startup_timeout_seconds\x18\x05 \x01(\rB\x0f\xbaH\b*\x06\x18\x80\xa3\x05(\x01\xd0\xf3\x18\x02R\x15startupTimeoutSeconds\x125\n" +
-	"\rallowed_bases\x18\x06 \x03(\tB\x10\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\fallowedBases\"v\n" +
+	"\rallowed_bases\x18\x06 \x03(\tB\x10\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\fallowedBases\"\xab\x02\n" +
+	"\x0eTaskServiceV02\x12,\n" +
+	"\acommand\x18\x01 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\acommand\x12*\n" +
+	"\x05ready\x18\x02 \x01(\tB\x14\xbaH\rr\v2\t^/[^\\s]*$\xd0\xf3\x18\x02R\x05ready\x12G\n" +
+	"\x17startup_timeout_seconds\x18\x03 \x01(\rB\x0f\xbaH\b*\x06\x18\x80\xa3\x05(\x01\xd0\xf3\x18\x02R\x15startupTimeoutSeconds\x12@\n" +
+	"\x05reset\x18\x04 \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\n" +
+	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\x05reset\x124\n" +
+	"\x13share_with_accuracy\x18\x05 \x01(\bB\x04\xd0\xf3\x18\x02R\x11shareWithAccuracy\"v\n" +
 	"\x0eTaskCommandV02\x12,\n" +
 	"\acommand\x18\x01 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\acommand\x126\n" +
 	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\"t\n" +
@@ -1732,7 +1846,7 @@ func file_vibesys_cli_v1_task_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_vibesys_cli_v1_task_proto_goTypes = []any{
 	(TaskDomain)(0),                     // 0: vibesys.cli.v1.TaskDomain
 	(ModelMaker)(0),                     // 1: vibesys.cli.v1.ModelMaker
@@ -1746,61 +1860,64 @@ var file_vibesys_cli_v1_task_proto_goTypes = []any{
 	(*TaskCard)(nil),                    // 9: vibesys.cli.v1.TaskCard
 	(*CardObjective)(nil),               // 10: vibesys.cli.v1.CardObjective
 	(*TaskCandidateV02)(nil),            // 11: vibesys.cli.v1.TaskCandidateV02
-	(*TaskCommandV02)(nil),              // 12: vibesys.cli.v1.TaskCommandV02
-	(*TaskBuildV02)(nil),                // 13: vibesys.cli.v1.TaskBuildV02
-	(*TaskBenchmarkV02)(nil),            // 14: vibesys.cli.v1.TaskBenchmarkV02
-	(*TaskResultV02)(nil),               // 15: vibesys.cli.v1.TaskResultV02
-	(*TaskEnvironmentV02)(nil),          // 16: vibesys.cli.v1.TaskEnvironmentV02
-	(*TaskAgentV02)(nil),                // 17: vibesys.cli.v1.TaskAgentV02
-	(*TaskObjectives)(nil),              // 18: vibesys.cli.v1.TaskObjectives
-	(*TaskObjective)(nil),               // 19: vibesys.cli.v1.TaskObjective
-	(*TaskPareto)(nil),                  // 20: vibesys.cli.v1.TaskPareto
-	(*structpb.Struct)(nil),             // 21: google.protobuf.Struct
-	(AcceleratorVendor)(0),              // 22: vibesys.cli.v1.AcceleratorVendor
-	(*AcceleratorNeed)(nil),             // 23: vibesys.cli.v1.AcceleratorNeed
-	(*descriptorpb.MessageOptions)(nil), // 24: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 25: google.protobuf.FieldOptions
+	(*TaskServiceV02)(nil),              // 12: vibesys.cli.v1.TaskServiceV02
+	(*TaskCommandV02)(nil),              // 13: vibesys.cli.v1.TaskCommandV02
+	(*TaskBuildV02)(nil),                // 14: vibesys.cli.v1.TaskBuildV02
+	(*TaskBenchmarkV02)(nil),            // 15: vibesys.cli.v1.TaskBenchmarkV02
+	(*TaskResultV02)(nil),               // 16: vibesys.cli.v1.TaskResultV02
+	(*TaskEnvironmentV02)(nil),          // 17: vibesys.cli.v1.TaskEnvironmentV02
+	(*TaskAgentV02)(nil),                // 18: vibesys.cli.v1.TaskAgentV02
+	(*TaskObjectives)(nil),              // 19: vibesys.cli.v1.TaskObjectives
+	(*TaskObjective)(nil),               // 20: vibesys.cli.v1.TaskObjective
+	(*TaskPareto)(nil),                  // 21: vibesys.cli.v1.TaskPareto
+	(*structpb.Struct)(nil),             // 22: google.protobuf.Struct
+	(AcceleratorVendor)(0),              // 23: vibesys.cli.v1.AcceleratorVendor
+	(*AcceleratorNeed)(nil),             // 24: vibesys.cli.v1.AcceleratorNeed
+	(*descriptorpb.MessageOptions)(nil), // 25: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 26: google.protobuf.FieldOptions
 }
 var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
 	11, // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
-	12, // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
-	14, // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	12, // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
-	16, // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
-	13, // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
-	12, // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
-	14, // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	17, // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
-	21, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
-	21, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
-	21, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
-	21, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
-	21, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
-	21, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
-	0,  // 15: vibesys.cli.v1.TaskCatalogueV02.domain:type_name -> vibesys.cli.v1.TaskDomain
-	6,  // 16: vibesys.cli.v1.TaskCatalogueV02.hardware:type_name -> vibesys.cli.v1.TaskHardwareV02
-	7,  // 17: vibesys.cli.v1.TaskCatalogueV02.model:type_name -> vibesys.cli.v1.TaskServedModelV02
-	8,  // 18: vibesys.cli.v1.TaskCatalogueV02.workload:type_name -> vibesys.cli.v1.TaskWorkloadV02
-	22, // 19: vibesys.cli.v1.TaskHardwareV02.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
-	1,  // 20: vibesys.cli.v1.TaskServedModelV02.maker:type_name -> vibesys.cli.v1.ModelMaker
-	0,  // 21: vibesys.cli.v1.TaskCard.domain:type_name -> vibesys.cli.v1.TaskDomain
-	23, // 22: vibesys.cli.v1.TaskCard.hardware:type_name -> vibesys.cli.v1.AcceleratorNeed
-	1,  // 23: vibesys.cli.v1.TaskCard.model_maker:type_name -> vibesys.cli.v1.ModelMaker
-	10, // 24: vibesys.cli.v1.TaskCard.objectives:type_name -> vibesys.cli.v1.CardObjective
-	2,  // 25: vibesys.cli.v1.CardObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
-	15, // 26: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
-	21, // 27: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
-	19, // 28: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
-	20, // 29: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
-	2,  // 30: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
-	24, // 31: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
-	25, // 32: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
-	3,  // 33: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	33, // [33:34] is the sub-list for extension type_name
-	31, // [31:33] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	13, // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
+	15, // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	13, // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
+	17, // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
+	14, // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
+	13, // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
+	15, // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	18, // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
+	22, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
+	22, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
+	22, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
+	22, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
+	22, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
+	22, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
+	12, // 15: vibesys.cli.v1.TaskManifestV02.service:type_name -> vibesys.cli.v1.TaskServiceV02
+	0,  // 16: vibesys.cli.v1.TaskCatalogueV02.domain:type_name -> vibesys.cli.v1.TaskDomain
+	6,  // 17: vibesys.cli.v1.TaskCatalogueV02.hardware:type_name -> vibesys.cli.v1.TaskHardwareV02
+	7,  // 18: vibesys.cli.v1.TaskCatalogueV02.model:type_name -> vibesys.cli.v1.TaskServedModelV02
+	8,  // 19: vibesys.cli.v1.TaskCatalogueV02.workload:type_name -> vibesys.cli.v1.TaskWorkloadV02
+	23, // 20: vibesys.cli.v1.TaskHardwareV02.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	1,  // 21: vibesys.cli.v1.TaskServedModelV02.maker:type_name -> vibesys.cli.v1.ModelMaker
+	0,  // 22: vibesys.cli.v1.TaskCard.domain:type_name -> vibesys.cli.v1.TaskDomain
+	24, // 23: vibesys.cli.v1.TaskCard.hardware:type_name -> vibesys.cli.v1.AcceleratorNeed
+	1,  // 24: vibesys.cli.v1.TaskCard.model_maker:type_name -> vibesys.cli.v1.ModelMaker
+	10, // 25: vibesys.cli.v1.TaskCard.objectives:type_name -> vibesys.cli.v1.CardObjective
+	2,  // 26: vibesys.cli.v1.CardObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	13, // 27: vibesys.cli.v1.TaskServiceV02.reset:type_name -> vibesys.cli.v1.TaskCommandV02
+	16, // 28: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
+	22, // 29: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
+	20, // 30: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
+	21, // 31: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
+	2,  // 32: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	25, // 33: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
+	26, // 34: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
+	3,  // 35: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	35, // [35:36] is the sub-list for extension type_name
+	33, // [33:35] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_task_proto_init() }
@@ -1809,15 +1926,15 @@ func file_vibesys_cli_v1_task_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
-	file_vibesys_cli_v1_task_proto_msgTypes[11].OneofWrappers = []any{}
-	file_vibesys_cli_v1_task_proto_msgTypes[16].OneofWrappers = []any{}
+	file_vibesys_cli_v1_task_proto_msgTypes[12].OneofWrappers = []any{}
+	file_vibesys_cli_v1_task_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_task_proto_rawDesc), len(file_vibesys_cli_v1_task_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 2,
 			NumServices:   0,
 		},
