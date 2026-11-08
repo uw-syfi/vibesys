@@ -12,5 +12,6 @@ export {
   setupLead,
   setupOf,
   startOutcome,
+  UNREAD_SETUP,
   unmetOf,
 } from './setup.js';

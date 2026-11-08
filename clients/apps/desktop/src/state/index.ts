@@ -275,6 +275,7 @@ export {
   setupLead,
   setupOf,
   startOutcome,
+  UNREAD_SETUP,
   unmetOf,
 } from './setup/index.js';
 export {isBack, type KeyPress} from './shell/keys.js';

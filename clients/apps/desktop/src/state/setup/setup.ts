@@ -125,6 +125,18 @@ export function setupFacts(view: SetupView): SetupFacts {
   };
 }
 
+/** What a run in setup shows before the host has sent its summary: six pending checks and nothing known. */
+export const UNREAD_SETUP: SetupFacts = {
+  task: '',
+  draft: {kind: 'none'},
+  checks: SETUP_CHECKS.map(id => ({id, state: 'pending', detail: ''})),
+  baseline: null,
+  spentUsd: 0,
+  elapsedSeconds: 0,
+  readFailure: null,
+  startable: false,
+};
+
 /** The setup of a run as its last summary says, or undefined for a run with none (never in setup, or no summary yet). */
 export function setupOf(state: OrchestratorState, runId: string): SetupFacts | undefined {
   const view = state.summaries[runId]?.setup;

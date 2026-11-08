@@ -47,12 +47,16 @@ import {
   span,
   unreadTitle,
 } from './fleet-words.js';
-import {runWord} from './words.js';
+import {runStateWord, setupTitle} from './setup/index.js';
 
 /** A row whose run started, or ended, within this long is new on screen: it arrives with a flash. */
 const FRESH_MS = 10_000;
 /** The host control's value for every host: no host key is empty. */
 const ALL_HOSTS = '';
+/** What a row is called: its task's title, or, in setup with no task, the state and the repository. */
+const rowTitle = (row: FleetRow): string =>
+  row.setup ? setupTitle(row.repository) : runTitle(row.card, row.name);
+
 /** Objectives a row names before it says how many more there are. */
 const OBJECTIVE_LINES = 2;
 
@@ -102,7 +106,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       size: 'fill',
       hint: row =>
         [
-          runTitle(row.card, row.name),
+          rowTitle(row),
           row.repository,
           row.startedMs === null ? '' : `Started ${clock.datedMoment(row.startedMs)}`,
         ]
@@ -110,7 +114,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
           .join('\n'),
       cell: row => (
         <CellLines
-          main={<Text variant="body-strong">{runTitle(row.card, row.name)}</Text>}
+          main={<Text variant="body-strong">{rowTitle(row)}</Text>}
           note={
             <Text variant="small" tone="muted">
               {elapsed(row, nowMs)}
@@ -128,7 +132,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       narrow: 'short',
       hint: row => whenHint(row, nowMs, clock) || undefined,
       cell: row => {
-        const word = runWord(row.status);
+        const word = runStateWord(row.setup, row.status);
         return (
           <CellLines
             main={<Chip label={word.label} tone={word.tone} dot />}
@@ -260,7 +264,7 @@ const columns = (
 const describe = (row: FleetRow, nowMs: number, clock: DisplayClock): string =>
   [
     `On ${row.host.label}`,
-    runWord(row.status).label,
+    runStateWord(row.setup, row.status).label,
     resultLines(row).join(', '),
     row.costUsd === null ? undefined : dollars(row.costUsd),
     whenLine(row, nowMs, clock),
