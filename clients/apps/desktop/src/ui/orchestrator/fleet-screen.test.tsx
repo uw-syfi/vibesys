@@ -11,6 +11,8 @@ import {
   MessageSchema,
   ReportKind,
   ReportSchema,
+  type Run,
+  RunLimit,
   RunSchema,
   RunStatus,
   RunsSnapshotSchema,
@@ -56,36 +58,53 @@ const NOW = Date.UTC(2026, 10, 7, 10, 0, 0);
 
 const noop = (): void => undefined;
 
+/** One run as the test states it: what a row reads of it, the rest left at its default. */
+interface RunFacts {
+  readonly id: string;
+  readonly task: string;
+  readonly status: RunStatus;
+  readonly startedMs: number;
+  readonly endedMs?: number;
+  readonly cost?: number;
+  readonly budget?: number;
+  readonly reportMs?: number;
+  readonly working?: number;
+  readonly result?: {readonly value: number; readonly unit: string; readonly percent?: number};
+  /** The search the host served for the run, whole: it replaces what `result` would make. */
+  readonly search?: SearchState;
+  readonly repository?: string;
+  readonly stalledMs?: number;
+  readonly limit?: RunLimit;
+  readonly limitMs?: number;
+  readonly finalReported?: boolean;
+  /** How many working copies the run kept. */
+  readonly kept?: number;
+  readonly deadlineMs?: number;
+}
+
+const runOf = (run: RunFacts): Run =>
+  create(RunSchema, {
+    id: run.id,
+    task: run.task,
+    repository: run.repository ?? 'decode-service',
+    status: run.status,
+    createdAt: timestampFromMs(run.startedMs),
+    ...(run.endedMs === undefined ? {} : {endedAt: timestampFromMs(run.endedMs)}),
+    ...(run.cost === undefined ? {} : {usage: {costUsd: run.cost}}),
+    ...(run.budget === undefined ? {} : {maxCostUsd: run.budget}),
+    ...(run.stalledMs === undefined ? {} : {stalledSince: timestampFromMs(run.stalledMs)}),
+    limitReached: run.limit ?? RunLimit.UNSPECIFIED,
+    ...(run.limitMs === undefined ? {} : {limitReachedAt: timestampFromMs(run.limitMs)}),
+    finalReported: run.finalReported ?? false,
+    // Where a checkout is kept is a path on the host; the list reads only how many there are.
+    keptCheckouts: Array.from({length: run.kept ?? 0}, (_, index) => ({agentId: `w${index}`})),
+    ...(run.deadlineMs === undefined ? {} : {deadline: timestampFromMs(run.deadlineMs)}),
+  });
+
 /** A run, its lead, a report, and the search facts a row reads: as a host would have sent them. */
-function stateOf(
-  runs: readonly {
-    readonly id: string;
-    readonly task: string;
-    readonly status: RunStatus;
-    readonly startedMs: number;
-    readonly endedMs?: number;
-    readonly cost?: number;
-    readonly budget?: number;
-    readonly reportMs?: number;
-    readonly working?: number;
-    readonly result?: {readonly value: number; readonly unit: string; readonly percent?: number};
-    /** The search the host served for the run, whole: it replaces what `result` would make. */
-    readonly search?: SearchState;
-  }[],
-): OrchestratorState {
+function stateOf(runs: readonly RunFacts[]): OrchestratorState {
   const snapshot = {
-    runs: runs.map(run =>
-      create(RunSchema, {
-        id: run.id,
-        task: run.task,
-        repository: 'decode-service',
-        status: run.status,
-        createdAt: timestampFromMs(run.startedMs),
-        ...(run.endedMs === undefined ? {} : {endedAt: timestampFromMs(run.endedMs)}),
-        ...(run.cost === undefined ? {} : {usage: {costUsd: run.cost}}),
-        ...(run.budget === undefined ? {} : {maxCostUsd: run.budget}),
-      }),
-    ),
+    runs: runs.map(runOf),
     agents: runs.flatMap(run =>
       Array.from({length: run.working ?? 0}, (_, index) =>
         create(AgentSchema, {
@@ -196,6 +215,14 @@ const statusFor = (
   return {kind, cause: null, staleForMs: kind === 'stale' ? staleForMs : null};
 };
 
+const withHost = (runs: Parameters<typeof stateOf>[0]): FleetHostInput => ({
+  key: 'local',
+  label: 'This Mac',
+  freshness: 'live',
+  status: statusFor('live', null, null),
+  data: stateOf(runs),
+});
+
 const hostA: FleetHostInput = {
   key: 'local',
   label: 'This Mac',
@@ -292,7 +319,7 @@ describe('the fleet screen', () => {
     screen.unmount();
   });
 
-  it('shows each row: host, state, best per objective with the host percent, cost of budget, agents, report age', () => {
+  it('shows each row: repository, host, state and for how long, best per objective with the host percent, cost of budget, agents, report age', () => {
     const {screen} = open([hostA, hostB]);
     const row = rowOf(screen, 'queue-rs');
     expect(cell(row, 'host').textContent).toContain('This Mac');
@@ -301,9 +328,35 @@ describe('the fleet screen', () => {
     expect(cell(row, 'best').textContent).toBe('2.31k tok/s · 71%');
     expect(cell(row, 'agents').textContent).toBe('3');
     expect(cell(row, 'cost').textContent).toBe('$318of $500');
-    expect(cell(row, 'name').textContent).toContain('5h 20m');
+    expect(cell(row, 'name').textContent).toContain('decode-service');
+    expect(cell(row, 'status').querySelector('.vs-chip')?.textContent).toBe('Running 5h 20m');
+    // A live run's chip grows with its running time; it is cut with an ellipsis, not left to
+    // overflow the narrow column's track into Best.
+    expect(cell(row, 'status').querySelector('.vs-chip')?.hasAttribute('data-clip')).toBe(true);
     // The row is named by its run alone, and says the rest as one description.
     expect(row.getAttribute('aria-description')).toContain('On This Mac');
+    expect(row.getAttribute('aria-description')).toContain('Running 5h 20m');
+    screen.unmount();
+  });
+
+  it('names the repository by its last name and keeps the whole of it for the pointer', () => {
+    const {screen} = open([
+      withHost([live('r1', 'path run', {repository: './work/decode-service'})]),
+    ]);
+    const name = cell(rowOf(screen, 'path run'), 'name');
+    expect(name.textContent).toContain('decode-service');
+    expect(name.textContent).not.toContain('./work/');
+    expect(name.getAttribute('title')).toContain('./work/decode-service');
+    screen.unmount();
+  });
+
+  it('labels the percent in the Best header with what it is of', () => {
+    const {screen} = open([hostA]);
+    const note = screen.container.querySelector(
+      '.vs-columnlist-headcell[title="Best"] .vs-columnlist-note',
+    );
+    expect(note?.textContent).toBe('% of bound');
+    expect(note?.getAttribute('title')).toContain('how close it is to the bound');
     screen.unmount();
   });
 
@@ -330,6 +383,10 @@ describe('the fleet screen', () => {
     const row = rowOf(screen, 'KV cache kernel');
     expect(cell(row, 'host').textContent).toContain('gpu-cluster-1');
     expect(cell(row, 'host').textContent).toContain('Stale 14m');
+    // In a narrow window the Host column gives way; the run's note keeps how stale the host is.
+    expect(cell(row, 'name').querySelector('[data-narrow-only]')?.textContent).toBe(
+      ' · gpu-cluster-1 · Stale 14m',
+    );
     expect(
       [...screen.container.querySelectorAll('option')].map(option => option.textContent),
     ).toContain('gpu-cluster-1 · Stale 14m');
@@ -424,6 +481,12 @@ describe('the fleet screen', () => {
     const {screen} = open([{...hostA, status: statusFor('live', null, 'job-tool-too-old')}]);
     expect(screen.text()).toContain('Job tool too old');
     expect(rows(screen)).not.toHaveLength(0);
+    // In a narrow window the Host column gives way; each run's note keeps the cause.
+    const row = rowOf(screen, 'queue-rs');
+    expect(cell(row, 'name').querySelector('[data-narrow-only]')?.textContent).toBe(
+      ' · This Mac · Job tool too old',
+    );
+    expect(row.getAttribute('aria-description')).toContain('On This Mac · Job tool too old');
     screen.unmount();
   });
 
@@ -646,6 +709,125 @@ describe('the fleet screen', () => {
   });
 });
 
+/** One live host whose runs each want a look for one reason, a calm one, and two that are over. */
+const troubled: FleetHostInput = withHost([
+  live('calm', 'calm run', {reportMs: NOW - MINUTE, deadlineMs: NOW + 4 * HOUR}),
+  live('final', 'final run', {finalReported: true, startedMs: NOW - HOUR, reportMs: NOW - MINUTE}),
+  live('limit', 'limit run', {
+    limit: RunLimit.COST,
+    limitMs: NOW - 30 * MINUTE,
+    cost: 510,
+    budget: 500,
+  }),
+  live('stuck', 'stuck run', {
+    search: create(SearchStateSchema, {
+      runId: 'stuck',
+      revision: 1n,
+      troubles: [1, 2, 3].map(index => ({jobId: `job-${index}`, failure: {message: 'No worker'}})),
+    }),
+  }),
+  // Told to finish at its time limit, the lead did nothing more.
+  live('stalled', 'stalled run', {
+    stalledMs: NOW - 2 * HOUR,
+    limit: RunLimit.TIME,
+    limitMs: NOW - 3 * HOUR,
+  }),
+  {
+    id: 'kept',
+    task: 'kept run',
+    status: RunStatus.ENDED,
+    startedMs: NOW - 3 * HOUR,
+    endedMs: NOW - 2 * HOUR,
+    kept: 2,
+  },
+  {
+    id: 'done',
+    task: 'done run',
+    status: RunStatus.ENDED,
+    startedMs: NOW - 3 * HOUR,
+    endedMs: NOW - HOUR,
+  },
+]);
+
+describe('the runs that want a look', () => {
+  const statusOf = (screen: ReturnType<typeof mount>, name: string): HTMLElement =>
+    cell(rowOf(screen, name), 'status');
+
+  it('say why in the Status cell, the most pressing reason with how many more, in its tone', () => {
+    const {screen} = open([troubled]);
+    const note = (name: string) => statusOf(screen, name).querySelector('.vs-text');
+    const said = (name: string) => [note(name)?.textContent, note(name)?.getAttribute('data-tone')];
+    expect(said('stalled run')).toEqual(['Stalled 2h 0m +1', 'warn']);
+    expect(said('stuck run')).toEqual(['3 jobs stuck', 'warn']);
+    expect(said('limit run')).toEqual(['Cost limit reached', 'warn']);
+    expect(said('final run')).toEqual(['Final report in', 'ok']);
+    expect(said('kept run')).toEqual(['2 checkouts kept', 'warn']);
+    // A run that wants no look says what it said before: the report's age, or when it ended.
+    expect(statusOf(screen, 'calm run').textContent).toContain('Report 1m ago');
+    expect(statusOf(screen, 'done run').textContent).toContain('Nov 7, 1:00 AM PST');
+    // A run that wants a look says so to a screen reader too.
+    expect(rowOf(screen, 'stuck run').getAttribute('aria-description')).toContain('3 jobs stuck');
+    expect(rowOf(screen, 'calm run').getAttribute('aria-description')).not.toMatch(
+      /stuck|Stalled|limit|kept/,
+    );
+    screen.unmount();
+  });
+
+  it('give every reason, with its account, on the pointer', () => {
+    const {screen} = open([troubled]);
+    const hint = (name: string) => statusOf(screen, name).getAttribute('title') ?? '';
+    expect(hint('stalled run').split('\n')).toEqual([
+      'Running, started Nov 6, 8:40 PM PST',
+      'Stalled 2h 0m: Nothing has moved the run since Nov 7, 12:00 AM PST: no agent is working, no message waits and no job runs',
+      'Time limit reached: The run reached its time limit at Nov 6, 11:00 PM PST; its lead was told to finish',
+      'The lead has not posted a report',
+    ]);
+    expect(hint('limit run')).toContain(
+      'Cost limit reached: The run reached its cost limit at Nov 7, 1:30 AM PST; its lead was told to finish',
+    );
+    expect(hint('stuck run')).toContain(
+      '3 jobs stuck: 3 jobs are not finished and nothing is working on them',
+    );
+    expect(hint('kept run')).toContain(
+      '2 checkouts kept: The run kept 2 working copies with changes git does not have',
+    );
+    screen.unmount();
+  });
+
+  it('tell how long a run that is over ran, and when a live one meets its time limit, on the pointer', () => {
+    const {screen} = open([troubled]);
+    expect(statusOf(screen, 'done run').querySelector('.vs-chip')?.textContent).toBe('Finished');
+    expect(statusOf(screen, 'done run').getAttribute('title')).toBe(
+      'Finished Nov 7, 1:00 AM PST, after 2h 0m',
+    );
+    expect(statusOf(screen, 'calm run').getAttribute('title')).toContain(
+      'Time limit Nov 7, 6:00 AM PST',
+    );
+    screen.unmount();
+  });
+
+  it('name a reason before saying the host could not serve the report, which stays on the pointer', () => {
+    const summary = troubled.data.summaries['stuck'];
+    if (summary === undefined) throw new Error('the fixture serves a summary of stuck');
+    const {screen} = open([
+      {
+        ...troubled,
+        data: {
+          ...troubled.data,
+          summaries: {...troubled.data.summaries, stuck: {...summary, reportUnavailable: true}},
+        },
+      },
+    ]);
+    expect(statusOf(screen, 'stuck run').querySelector('.vs-text')?.textContent).toBe(
+      '3 jobs stuck',
+    );
+    expect(statusOf(screen, 'stuck run').getAttribute('title')).toContain(
+      'Report unavailable: the host could not serve it',
+    );
+    screen.unmount();
+  });
+});
+
 const measuredRun = (id: string, task: string, objectives: typeof SERVING, more = {}) => ({
   id,
   task,
@@ -727,14 +909,6 @@ function expectSameShape(
 
 const trendOf = (screen: ReturnType<typeof mount>, name: string): HTMLElement =>
   cell(rowOf(screen, name), 'trend');
-
-const withHost = (runs: Parameters<typeof stateOf>[0]): FleetHostInput => ({
-  key: 'local',
-  label: 'This Mac',
-  freshness: 'live',
-  status: statusFor('live', null, null),
-  data: stateOf(runs),
-});
 
 describe('the candidates cell of the fleet screen', () => {
   const [throughput = SERVING[0], latency = SERVING[1]] = SERVING;

@@ -1,8 +1,8 @@
 /**
  * A host's whole fleet as a scenario: many runs, some live and some over, each with the agents,
- * report, cost, budget and search facts a row of the Runs screen reads. A function of its options
- * alone (seeded), so the same options give the same bytes. The fixture page serves it, and the
- * scale tests read its folded state.
+ * report, cost, budget and search facts a row of the Runs screen reads, and among the live ones a
+ * run for each reason a run wants a look. A function of its options alone (seeded), so the same
+ * options give the same bytes. The fixture page serves it, and the scale tests read its folded state.
  */
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
@@ -21,6 +21,7 @@ import {
   ReportKind,
   ReportSchema,
   type Run,
+  RunLimit,
   RunSchema,
   RunStatus,
   type SearchState,
@@ -174,6 +175,54 @@ function timingOf(rng: Rng, options: FleetOptions, index: number): Timing {
   return {live, startMs, endMs, status};
 }
 
+/**
+ * Why a live run wants a look, by its place among the live runs, so a handful of them shows every
+ * reason: it stood still, it reached its cost or its time limit, its lead posted a final report, or
+ * jobs of it are stuck (its search says so). Most live runs want no look. A run that is over wants
+ * none here: the checkouts it kept are paths on the host, which no fixture names.
+ */
+type LiveReason = 'stalled' | 'cost' | 'time' | 'final' | 'stuck' | null;
+
+const LIVE_REASONS: readonly LiveReason[] = [
+  'stalled',
+  'cost',
+  'final',
+  'stuck',
+  'time',
+  null,
+  null,
+];
+
+const reasonOf = (options: FleetOptions, index: number): LiveReason =>
+  index < options.live ? (LIVE_REASONS[index % LIVE_REASONS.length] ?? null) : null;
+
+/** The facts of the run that say why it wants a look; none for a run that wants none. */
+function reasonFacts(reason: LiveReason, nowMs: number, startMs: number, cost: number) {
+  switch (reason) {
+    case 'stalled':
+      return {stalledSince: timestampFromMs(Math.max(startMs, nowMs - 40 * MINUTE))};
+    case 'cost': {
+      const atMs = Math.max(startMs, nowMs - 20 * MINUTE);
+      // The cost passed the limit by what was in flight when it was reached.
+      const maxCostUsd = Math.max(1, Math.floor(cost / 50) * 50);
+      return {limitReached: RunLimit.COST, limitReachedAt: timestampFromMs(atMs), maxCostUsd};
+    }
+    case 'time': {
+      const atMs = Math.max(startMs, nowMs - 10 * MINUTE);
+      return {
+        limitReached: RunLimit.TIME,
+        limitReachedAt: timestampFromMs(atMs),
+        deadline: timestampFromMs(atMs),
+      };
+    }
+    case 'final':
+      return {finalReported: true};
+    case 'stuck':
+    case null:
+      return {};
+  }
+}
+
 function runOf(rng: Rng, options: FleetOptions, id: string, index: number): Run {
   const timing = timingOf(rng, options, index);
   const cost = Math.round(rng.next() * 1500 * 100) / 100;
@@ -181,6 +230,10 @@ function runOf(rng: Rng, options: FleetOptions, id: string, index: number): Run 
     index,
     options.longEvery !== undefined && index % options.longEvery === 0,
   );
+  const reason = reasonOf(options, index);
+  // Drawn in this order whatever the reason, so a reason changes no other run of the fleet.
+  const priced = rng.int(10) !== 0 || reason === 'cost';
+  const capped = rng.int(3) === 0;
   return create(RunSchema, {
     id,
     repository: 'decode-service',
@@ -191,15 +244,36 @@ function runOf(rng: Rng, options: FleetOptions, id: string, index: number): Run 
     fanoutLimit: 4,
     createdAt: timestampFromMs(timing.startMs),
     ...(timing.endMs === undefined ? {} : {endedAt: timestampFromMs(timing.endMs)}),
-    usage: create(UsageSchema, rng.int(10) === 0 ? {} : {costUsd: cost}),
-    ...(rng.int(3) === 0 ? {maxCostUsd: Math.ceil(cost / 100 + 1) * 100} : {}),
+    usage: create(UsageSchema, priced ? {costUsd: cost} : {}),
+    ...(capped ? {maxCostUsd: Math.ceil(cost / 100 + 1) * 100} : {}),
+    ...reasonFacts(reason, options.nowMs, timing.startMs, cost),
   });
 }
 
-function agentStatusOf(rng: Rng, live: boolean, lead: boolean): AgentStatus {
-  if (!live) return AgentStatus.ENDED;
+/** The jobs a stuck run's search says are not finished and that nothing works on. */
+function stuckOf(run: Run, search: SearchState | undefined, nowMs: number): SearchState {
+  const {troubles} = create(SearchStateSchema, {
+    troubles: [1, 2, 3].map(job => ({
+      jobId: `${run.id}-job-${job}`,
+      failure: {message: 'No worker has taken the job'},
+    })),
+  });
+  return search === undefined
+    ? create(SearchStateSchema, {
+        runId: run.id,
+        revision: 1n,
+        health: {state: {case: 'liveSince', value: timestampFromMs(nowMs)}},
+        troubles,
+      })
+    : {...search, troubles};
+}
+
+function agentStatusOf(rng: Rng, run: Run, lead: boolean): AgentStatus {
+  if (!isLive(run.status)) return AgentStatus.ENDED;
   if (lead) return AgentStatus.WAITING;
-  return rng.int(4) === 0 ? AgentStatus.IDLE : AgentStatus.ACTIVE;
+  // Drawn for a stalled run too, so the rest of the fleet is the same; nothing works in one.
+  const idle = rng.int(4) === 0 || run.stalledSince !== undefined;
+  return idle ? AgentStatus.IDLE : AgentStatus.ACTIVE;
 }
 
 function agentOf(rng: Rng, run: Run, index: number): Agent {
@@ -213,14 +287,14 @@ function agentOf(rng: Rng, run: Run, index: number): Agent {
     harness: Harness.CODEX,
     // The lead runs on the host's default model, which no price is known for; the workers on named ones.
     model: lead ? '' : index % 2 === 0 ? 'model-b' : 'model-a',
-    status: agentStatusOf(rng, isLive(run.status), lead),
+    status: agentStatusOf(rng, run, lead),
     session: 1,
     stopStage: AgentStopStage.NONE,
     startedAt: timestampFromMs(startMs),
   });
 }
 
-function reportOf(run: Run, atMs: number): Message {
+function reportOf(run: Run, atMs: number, kind: ReportKind): Message {
   return create(MessageSchema, {
     id: `${run.id}-report`,
     runId: run.id,
@@ -229,7 +303,10 @@ function reportOf(run: Run, atMs: number): Message {
     at: timestampFromMs(atMs),
     body: {
       case: 'report',
-      value: create(ReportSchema, {headline: 'Progress', kind: ReportKind.PROGRESS}),
+      value: create(ReportSchema, {
+        headline: kind === ReportKind.FINAL ? 'Done' : 'Progress',
+        kind,
+      }),
     },
   });
 }
@@ -251,17 +328,28 @@ function pushRun(
   // The turns come from a stream of their own, so adding them moved nothing else of the fleet.
   for (const {at, turn} of fleetTurns(options.seed, run, members, options.nowMs))
     log.push(at, {case: 'turn', value: turn});
+  // A run whose lead posted its final report has a report, whatever the draw; the draws are the
+  // same either way, so the rest of the fleet is too.
+  const final = run.finalReported;
   if (rng.int(4) !== 0) {
     const reportAt = (ms(run.endedAt) ?? options.nowMs) - (1 + rng.int(90)) * MINUTE;
-    log.push(reportAt, {case: 'message', value: reportOf(run, reportAt)});
+    const kind = final ? ReportKind.FINAL : ReportKind.PROGRESS;
+    log.push(reportAt, {case: 'message', value: reportOf(run, reportAt, kind)});
+  } else if (final) {
+    const reportAt = options.nowMs - 30 * MINUTE;
+    log.push(reportAt, {case: 'message', value: reportOf(run, reportAt, ReportKind.FINAL)});
   }
   // Most runs have measured candidates; some have a head and a bound and no series (a host that
   // does not serve one, or a run with nothing measured yet), and some have no search at all.
   const kind = rng.int(6);
-  if (kind === 0) return;
-  searches.push(
-    kind === 1 ? searchOf(rng, run.id, options.nowMs) : measuredOf(rng, run, options.nowMs),
-  );
+  const search =
+    kind === 0
+      ? undefined
+      : kind === 1
+        ? searchOf(rng, run.id, options.nowMs)
+        : measuredOf(rng, run, options.nowMs);
+  if (reasonOf(options, index) === 'stuck') searches.push(stuckOf(run, search, options.nowMs));
+  else if (search !== undefined) searches.push(search);
 }
 
 export function fleetScenario(options: FleetOptions): Scenario & {

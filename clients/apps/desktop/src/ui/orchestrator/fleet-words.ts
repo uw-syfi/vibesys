@@ -5,7 +5,8 @@
  * clock it is on.
  */
 import {AcceleratorVendor, type TaskCard} from '@vibesys/orchestrator-proto';
-import type {FleetHostRef, FleetObjective} from '../../state/index.js';
+import type {FleetAttention, FleetHostRef, FleetObjective} from '../../state/index.js';
+import type {DisplayClock} from '../display-time.js';
 import {span} from '../duration.js';
 import {formatFigure} from '../figures.js';
 import {hostStatusWord} from '../host-status-words.js';
@@ -65,6 +66,49 @@ export function resultHint(objective: FleetObjective): string {
 
 /** A share of a bound as a whole percent: `71%`. */
 export const percent = (value: number): string => `${Math.round(value)}%`;
+
+/** `1 job`, `3 jobs`. */
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** Why a run wants a look, as a few words in a tone and the account behind them. */
+export function attentionWords(
+  attention: FleetAttention,
+  nowMs: number,
+  clock: DisplayClock,
+): {readonly label: string; readonly tone: 'warn' | 'ok'; readonly hint: string} {
+  switch (attention.kind) {
+    case 'stalled':
+      return {
+        label: `Stalled ${span(nowMs - attention.sinceMs)}`,
+        tone: 'warn',
+        hint: `Nothing has moved the run since ${clock.datedMoment(attention.sinceMs)}: no agent is working, no message waits and no job runs`,
+      };
+    case 'troubles':
+      return {
+        label: `${count(attention.jobs, 'job', 'jobs')} stuck`,
+        tone: 'warn',
+        hint: `${count(attention.jobs, 'job is', 'jobs are')} not finished and nothing is working on them`,
+      };
+    case 'limit':
+      return {
+        label: `${attention.limit === 'cost' ? 'Cost' : 'Time'} limit reached`,
+        tone: 'warn',
+        hint: `The run reached its ${attention.limit} limit${attention.atMs === null ? '' : ` at ${clock.datedMoment(attention.atMs)}`}; its lead was told to finish`,
+      };
+    case 'final':
+      return {
+        label: 'Final report in',
+        tone: 'ok',
+        hint: 'The lead posted its final report and has started nothing since',
+      };
+    case 'kept':
+      return {
+        label: `${count(attention.checkouts, 'checkout', 'checkouts')} kept`,
+        tone: 'warn',
+        hint: `The run kept ${count(attention.checkouts, 'working copy', 'working copies')} with changes git does not have; decide what becomes of them`,
+      };
+  }
+}
 
 /** Words of a vendor that lead an authored accelerator name ("AMD MI300X"); a title leaves them out. */
 const VENDOR_WORDS: ReadonlySet<string> = new Set([

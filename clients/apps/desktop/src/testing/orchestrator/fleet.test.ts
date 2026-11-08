@@ -1,8 +1,11 @@
 import {describe, expect, it} from '@effect/vitest';
 import {
+  AgentStatus,
   decodeValidated,
   encodeMessage,
+  ReportKind,
   RunChangeSchema,
+  RunLimit,
   RunStatus,
   RunsSnapshotSchema,
 } from '@vibesys/orchestrator-proto';
@@ -49,6 +52,42 @@ describe('a generated fleet', () => {
     expect(runs).toHaveLength(12);
     expect(working).toHaveLength(5);
     expect(fleetScenario(options)).toEqual(fleetScenario(options));
+  });
+
+  it('has a live run for each reason a run wants a look, each as the host would hold it, and none among the runs that are over', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 1, max: 5000}), seed => {
+        const scenario = fleetScenario({seed, prefix: 'h2', runs: 14, live: 7, nowMs: NOW});
+        const state = scenario.changes.reduce(applyChange, emptyState);
+        const runs = Object.values(state.runs);
+        const live = runs.filter(run => run.endedAt === undefined);
+        const stuck = new Set(
+          scenario.searches.filter(s => s.troubles.length > 0).map(s => s.runId),
+        );
+        const [stalled, ...moreStalled] = live.filter(run => run.stalledSince !== undefined);
+        const [final, ...moreFinal] = live.filter(run => run.finalReported);
+        expect([moreStalled, moreFinal]).toEqual([[], []]);
+        expect(live.filter(run => run.limitReached === RunLimit.COST)).toHaveLength(1);
+        expect(live.filter(run => run.limitReached === RunLimit.TIME)).toHaveLength(1);
+        expect(live.filter(run => stuck.has(run.id))).toHaveLength(1);
+        // Nothing works in a stalled run, and a run whose lead reported its end has that report.
+        const agents = Object.values(state.agents);
+        expect(
+          agents.filter(a => a.runId === stalled?.id && a.status === AgentStatus.ACTIVE),
+        ).toEqual([]);
+        const reports = Object.values(state.messages).filter(m => m.runId === final?.id);
+        expect(reports.map(m => m.body)).toEqual([
+          {case: 'report', value: expect.objectContaining({kind: ReportKind.FINAL})},
+        ]);
+        const over = runs.filter(run => run.endedAt !== undefined);
+        expect(over).toHaveLength(7);
+        for (const run of over) {
+          expect(run.stalledSince ?? run.limitReachedAt).toBeUndefined();
+          expect(run.finalReported || stuck.has(run.id)).toBe(false);
+        }
+      }),
+      {numRuns: 40},
+    );
   });
 
   it('has every run begin before it ends and end before the fleet is read', () => {
