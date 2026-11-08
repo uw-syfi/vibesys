@@ -72,6 +72,58 @@ func toDirection(field string, d cliv1.Direction) (core.Direction, error) {
 	return "", invalid("%s: %s is not a direction", field, d)
 }
 
+var sampleServices = []struct {
+	domain core.SampleService
+	wire   cliv1.SampleService
+}{
+	{core.SampleServiceNone, cliv1.SampleService_SAMPLE_SERVICE_UNSPECIFIED},
+	{core.SampleServiceStarted, cliv1.SampleService_SAMPLE_SERVICE_STARTED},
+	{core.SampleServiceReused, cliv1.SampleService_SAMPLE_SERVICE_REUSED},
+	{core.SampleServiceRestarted, cliv1.SampleService_SAMPLE_SERVICE_RESTARTED},
+}
+
+func sampleServicesOf(ss []core.SampleService) []cliv1.SampleService {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]cliv1.SampleService, len(ss))
+	for i, s := range ss {
+		for _, p := range sampleServices {
+			if p.domain == s {
+				out[i] = p.wire
+			}
+		}
+	}
+	return out
+}
+
+// ToSampleServices reads the servers of a measurement's samples: none, or one per sample, each one
+// a sample can name.
+func ToSampleServices(field string, ss []cliv1.SampleService, samples int) ([]core.SampleService, error) {
+	return toSampleServices(field, ss, samples)
+}
+
+func toSampleServices(field string, ss []cliv1.SampleService, samples int) ([]core.SampleService, error) {
+	if len(ss) == 0 {
+		return nil, nil
+	}
+	if len(ss) != samples {
+		return nil, invalid("%s: %d entries for %d samples", field, len(ss), samples)
+	}
+	out := make([]core.SampleService, len(ss))
+next:
+	for i, s := range ss {
+		for _, p := range sampleServices {
+			if p.wire == s {
+				out[i] = p.domain
+				continue next
+			}
+		}
+		return nil, invalid("%s[%d]: %s is not a sample's server", field, i, s)
+	}
+	return out, nil
+}
+
 // Result returns the contract's message for a result.
 func Result(r core.Result) *cliv1.Result {
 	out := &cliv1.Result{
@@ -101,7 +153,7 @@ func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
 	m := &cliv1.MeasureResult{
 		Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction), Unit: o.Metric.Unit},
 		Samples: slices.Clone(o.Samples), CheckJobId: string(o.CheckJob),
-		Value: core.Headline(o.Samples),
+		Value: core.Headline(o.Samples), SampleServices: sampleServicesOf(o.Services),
 	}
 	for _, ob := range o.Observations {
 		m.Observations = append(m.Observations, observation(ob))
@@ -322,6 +374,9 @@ func toResult(field string, r *cliv1.Result) (core.Result, error) {
 			m.Observations = append(m.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues()), Unit: ob.GetUnit()})
 		}
 		if m.Objectives, err = toObjectives(field+".measure.objectives", o.Measure.GetObjectives(), toDirection); err != nil {
+			return core.Result{}, err
+		}
+		if m.Services, err = toSampleServices(field+".measure.sample_services", o.Measure.GetSampleServices(), len(m.Samples)); err != nil {
 			return core.Result{}, err
 		}
 		out.Outcome = m

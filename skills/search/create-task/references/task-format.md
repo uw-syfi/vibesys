@@ -51,7 +51,8 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 ```
 
 - `version = "0.1"` is the format on this page; `version = 1` is refused (write `"0.1"`). A
-  `version = "0.2"` task (a candidate server image and a task image) runs only under vibesys-cli.
+  `version = "0.2"` task (a candidate server image and a task image, or a task of one image with a
+  `[service]` kept for the job, below) runs only under vibesys-cli.
 - Commands are argv lists, run from the checkout's root. The only placeholder is
   `${PROJECT_ROOT}`, the checkout's root.
 - The benchmark is called with the `json_argument` flag and a path appended; it must write one
@@ -117,11 +118,40 @@ objective's own measured spread (validation.md).
 
 ## Services, clusters and remote hardware
 
-The check and the benchmark are plain commands; the CLI starts no service for them. A task whose
-code is a server ships a trusted wrapper in the task directory that builds the candidate, starts
-it through a contract the candidate implements (a start script, a port, a readiness endpoint),
-waits for it, runs the checker or the load generator against it, and stops its whole process
-group on every exit. Say the contract in `OBJECTIVE.md`.
+The check and the benchmark are plain commands; the CLI starts no service for them unless the task
+declares one (below). A task whose code is a server ships a trusted wrapper in the task directory
+that builds the candidate, starts it through a contract the candidate implements (a start script, a
+port, a readiness endpoint), waits for it, runs the checker or the load generator against it, and
+stops its whole process group on every exit. Say the contract in `OBJECTIVE.md`.
+
+**A server kept for the job.** When the server takes long to start (loading model weights, say)
+and a sample is short beside it, a `version = "0.2"` task of one image with a `Dockerfile` can ask
+the CLI to start it once per measure job instead of once per sample:
+
+```toml
+[service]
+command = ["python3", "${PROJECT_ROOT}/.vibesys/tasks/<task>/_server.py", "--port", "${PORT}"]
+ready = "/health"                  # polled on 127.0.0.1:${PORT} until it answers 2xx
+startup_timeout_seconds = 3600
+share_with_accuracy = false        # the default: the check starts its own server, as before
+
+[service.reset]                    # before every sample that reuses the server; exit 0 lets it run
+command = ["python3", "${PROJECT_ROOT}/.vibesys/tasks/<task>/reset.py"]
+timeout_seconds = 300
+```
+
+The server runs in a container of the task's image with the placement's GPUs, from after the check
+until the job ends. Each sample, and each reset, runs in a container of its own beside it, without
+the GPUs, and reaches it at `VIBESYS_SERVICE_URL` (`http://127.0.0.1:<port>`): the benchmark talks
+to that URL instead of starting a server. The command must name `${PORT}`. The reset flushes what
+an earlier sample left (a prefix cache, say) and confirms the server is idle and healthy; a reset
+that fails fails the sample. A server that ended between two samples is started again, never
+reused. Each result records, per sample, whether it ran on a server started for it, reused, or
+restarted (`sample_services`). Adding or removing `[service]` changes the task's version, so
+results of the two modes are never compared. `share_with_accuracy = true` starts the server before
+the check, which then runs against it, and the samples reuse it. A job on the host refuses a task
+with `[service]`; so does a placement without the static probe program (`ssh`, `slurm`), and a task
+with `[candidate]`.
 
 **On Kubernetes.** A service-style task that deploys to a cluster declares
 `[environment] needs = ["kubernetes"]`. A job container then has the cluster's kubeconfig

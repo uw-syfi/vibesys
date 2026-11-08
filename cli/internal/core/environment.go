@@ -136,6 +136,9 @@ type TaskSetup struct {
 	// TwoImages says the task's candidate has an image of its own (task schema 0.2), so its jobs
 	// run in docker.
 	TwoImages bool
+	// JobServer says the task keeps a server for the job ([service], task schema 0.2), which runs
+	// in a container of the task's image, so its jobs run in docker.
+	JobServer bool
 }
 
 // ChooseEnvironment decides where a task's jobs run. A task with a Dockerfile or a named image
@@ -167,6 +170,8 @@ func ChooseEnvironment(task TaskSetup, requested EnvironmentKind) (EnvironmentKi
 	switch {
 	case task.TwoImages && requested == EnvironmentHost:
 		return "", failf(FailureInvalidInput, "environment: the task runs its candidate in an image of the candidate's own and its commands in the task's image, so it cannot run on the host")
+	case task.JobServer && requested == EnvironmentHost:
+		return "", failf(FailureInvalidInput, "environment: the task keeps a server for the job ([service]) in a container of its image, beside the commands that run against it, so it cannot run on the host")
 	case requested != EnvironmentAuto:
 		return requested, nil
 	case task.HasDockerfile || task.Image != "":

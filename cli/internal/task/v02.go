@@ -32,6 +32,27 @@ func (c Candidate) ServeAt(root string, wrap []string) core.CandidateServe {
 	return core.CandidateServe{Argv: argv, Ready: c.Ready, StartupTimeout: c.StartupTimeout}
 }
 
+// Service is the job-scoped server of a task of one image: a job starts it once and runs its
+// samples, and its check when ShareWithCheck, against it.
+type Service struct {
+	// Serve is the server's command, run in a container of the task's image from the checkout's
+	// root, with ProjectRoot and core.PortPlaceholder not yet replaced. It names the port.
+	Serve []string
+	// Ready is the HTTP path that answers 2xx once the server is ready.
+	Ready string
+	// StartupTimeout bounds the wait for it.
+	StartupTimeout time.Duration
+	// Reset runs against the server before every sample that reuses it; exit 0 lets the sample run.
+	Reset Command
+	// ShareWithCheck starts the server before the check, which then runs against it, as the samples
+	// do. Without it the check runs as a task without a server runs it, and the server starts after.
+	ShareWithCheck bool
+}
+
+// ServeAt is the server as an execution starts it in the checkout at root: ProjectRoot replaced,
+// and the port left to the environment.
+func (s Service) ServeAt(root string) []string { return Command{Argv: s.Serve}.Resolve(root) }
+
 // parseV02 reads a manifest of task schema 0.2 (TaskManifestV02 in task.proto). Without [candidate]
 // the task has no Candidate, as a task of 0.1: its commands run in the task image and own the system
 // under test.
@@ -114,6 +135,14 @@ func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task,
 			return Task{}, err
 		}
 	}
+	if m.GetService() != nil {
+		if t.Candidate != nil {
+			return Task{}, invalid("%s: [service] is for a task of one image; a task with [candidate] starts its candidate's server for each command, and cannot keep it for the job", ManifestName)
+		}
+		if t.Service, err = serviceOf(m.GetService()); err != nil {
+			return Task{}, err
+		}
+	}
 	bench := &benchSection{ResultProtocol: int(b.GetResultProtocol())}
 	if r := b.GetResult(); r != nil {
 		bench.Result = &resultSection{JSONArgument: r.GetJsonArgument(), Metric: r.GetMetric()}
@@ -142,6 +171,31 @@ func candidateOf(c *cliv1.TaskCandidateV02) (*Candidate, error) {
 		Serve:          slices.Clone(c.GetServe()),
 		Ready:          c.GetReady(),
 		StartupTimeout: time.Duration(c.GetStartupTimeoutSeconds()) * time.Second,
+	}, nil
+}
+
+// serviceOf reads [service]: the server a job starts once, and the reset before each reuse of it.
+func serviceOf(s *cliv1.TaskServiceV02) (*Service, error) {
+	serve := Command{Argv: s.GetCommand()}
+	if err := checkPlaceholders(serve, core.PortPlaceholder); err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(serve.Argv, func(a string) bool { return strings.Contains(a, core.PortPlaceholder) }) {
+		return nil, invalid("%s: [service] command must name %s, the port the CLI chooses for the server and reaches it on", ManifestName, core.PortPlaceholder)
+	}
+	reset, err := makeCommand("service.reset", s.GetReset_().GetCommand(), int(s.GetReset_().GetTimeoutSeconds()))
+	if err != nil {
+		return nil, err
+	}
+	if err := checkPlaceholders(reset); err != nil {
+		return nil, err
+	}
+	return &Service{
+		Serve:          slices.Clone(serve.Argv),
+		Ready:          s.GetReady(),
+		StartupTimeout: time.Duration(s.GetStartupTimeoutSeconds()) * time.Second,
+		Reset:          reset,
+		ShareWithCheck: s.GetShareWithAccuracy(),
 	}, nil
 }
 

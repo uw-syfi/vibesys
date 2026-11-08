@@ -720,16 +720,17 @@ func (n *node) Start(spec apptainer.Box, argv []string, sink io.Writer) (environ
 	}
 	c.started = append(c.started, spec)
 	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
-		// The probe asks a port the node chose in this allocation, which another box's server
-		// answers on once it is ready: the node's network is the boxes' one network.
+		// The probe asks a port the node chose in this allocation, which a box's server answers on
+		// once it is ready, its own box's as another's: the node's network is the boxes' one
+		// network.
 		code := 1
 		mounted := slices.ContainsFunc(spec.Mounts, func(m docker.Mount) bool { return m.Container == docker.ProbeMount })
 		asked := slices.ContainsFunc(j.ports, func(p int) bool {
 			rest, ok := strings.CutPrefix(argv[2], fmt.Sprintf("http://127.0.0.1:%d", p))
 			return ok && (rest == "" || strings.HasPrefix(rest, "/"))
 		})
-		for name, other := range j.boxes {
-			if name != spec.Name && other.machine.Ready() && asked {
+		for _, other := range j.boxes {
+			if other.machine.Ready() && asked {
 				code = 0
 			}
 		}
