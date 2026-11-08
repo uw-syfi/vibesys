@@ -127,6 +127,17 @@ func TestReadsAJSONFileTask(t *testing.T) {
 	}
 }
 
+func TestATimeoutAtTheWeekCapIsAccepted(t *testing.T) {
+	manifest := strings.Replace(jsonManifest, "timeout_seconds = 600", fmt.Sprintf("timeout_seconds = %d", task.MaxCommandTimeoutSeconds), 1)
+	got, err := task.Read(repo(taskFiles("t", manifest, objectives)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Build == nil || got.Build.Timeout != task.MaxCommandTimeoutSeconds*time.Second {
+		t.Errorf("build timeout %v, want %v", got.Build, time.Duration(task.MaxCommandTimeoutSeconds)*time.Second)
+	}
+}
+
 func TestReadsAProtocol2TaskWithShortFormSections(t *testing.T) {
 	got, err := task.Read(repo(taskFiles("p", protocol2Manifest, objectives2)), "p")
 	if err != nil {
@@ -359,6 +370,18 @@ func TestWhatItCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 		},
 		"a negative timeout": {
 			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = -5", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
+		"a timeout past a week": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 604801", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
+		"a timeout that overflows the clock into a negative duration": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 9223372037", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
+		"a timeout that overflows the clock into a tiny duration": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 18446744074", 1),
 			"timeout_seconds", core.FailureInvalidInput,
 		},
 		"an option that is not one": {
