@@ -1,4 +1,11 @@
-/** Pure reads of CLI-owned facts. No verdict or headline is inferred from agent text. */
+/**
+ * Pure reads of CLI-owned facts. No verdict or headline is inferred from agent text.
+ *
+ * A verdict's kind and a plan's status are the CLI's own enums, carried on fields the contract does
+ * not pin to a known value (unlike the orchestrator's own statuses), so a newer host can name a kind
+ * or status this build does not have. A label falls back to the unspecified one rather than showing
+ * nothing for it.
+ */
 import {
   type Direction,
   JobState,
@@ -10,7 +17,9 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {ms} from './time.js';
 
-const verdictWords = {
+// Typed by a number so a kind outside the known set reads as undefined (a newer host can send one);
+// `satisfies` still makes a kind added to the enum a compile error here.
+const verdictWords: Readonly<Record<number, string>> = {
   [VerdictKind.UNSPECIFIED]: 'Not judged',
   [VerdictKind.BETTER]: 'Better',
   [VerdictKind.WORSE]: 'Worse',
@@ -47,7 +56,7 @@ export function candidates(search: SearchState): {
             ? oneofIs(outcome, 'refused', {comparison: true, refused: true})
               ? 'Comparison unavailable'
               : 'Not judged'
-            : verdictWords[verdict.kind],
+            : (verdictWords[verdict.kind] ?? 'Not judged'),
         stale: judgment !== undefined && !current,
       };
     });
@@ -71,7 +80,8 @@ export function jobQueue(
     }));
 }
 
-const planWords = {
+// Typed by a number for the same reason as `verdictWords`: an unknown status reads as undefined.
+const planWords: Readonly<Record<number, string>> = {
   [PlanStatus.UNSPECIFIED]: 'Unknown',
   [PlanStatus.OPEN]: 'Open',
   [PlanStatus.CHOSEN]: 'Chosen',
@@ -83,7 +93,7 @@ const planWords = {
 export function planStatus(
   search: SearchState,
 ): {plan: SearchState['plans'][number]; label: string}[] {
-  return search.plans.map(plan => ({plan, label: planWords[plan.status]}));
+  return search.plans.map(plan => ({plan, label: planWords[plan.status] ?? 'Unknown'}));
 }
 
 export function jobsWithNoRun(search: SearchState): number {

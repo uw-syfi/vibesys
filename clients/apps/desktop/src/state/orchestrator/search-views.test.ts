@@ -63,6 +63,38 @@ it('views preserve the facts while unreadable and only accept judgments against 
   );
 });
 
+it('labels a verdict kind or plan status this build does not know, instead of showing nothing', () => {
+  fc.assert(
+    fc.property(
+      // A value past the last known one of each enum: a newer host can name one, and the fields it
+      // rides (Verdict.kind, Plan.status) are not pinned to the known set, so it survives decoding.
+      fc.integer({min: 6, max: 2_147_483_647}),
+      fc.integer({min: 6, max: 2_147_483_647}),
+      (unknownVerdict, unknownStatus) => {
+        const search = create(SearchStateSchema, {
+          head: {state: {case: 'none', value: {head: 'head'}}},
+          results: [
+            {jobId: 'j1', commit: 'candidate', outcome: {case: 'measure', value: {value: 1}}},
+          ],
+          judgments: [
+            {
+              commit: 'candidate',
+              against: 'head',
+              outcome: {
+                case: 'comparison',
+                value: {verdict: {kind: unknownVerdict as VerdictKind}},
+              },
+            },
+          ],
+          plans: [{number: 1, status: unknownStatus as PlanStatus}],
+        });
+        expect(candidates(search).map(row => row.label)).toEqual(['Not judged']);
+        expect(planStatus(search).map(row => row.label)).toEqual(['Unknown']);
+      },
+    ),
+  );
+});
+
 describe('job queue time', () => {
   it('uses typed timestamps and includes only active jobs, at any injected time', () => {
     fc.assert(
