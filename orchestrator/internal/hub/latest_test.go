@@ -94,3 +94,52 @@ func TestLatestThousandPublishesAndLag(t *testing.T) {
 		t.Fatal("older revision replaced latest")
 	}
 }
+
+func TestSetupNotesNeverLagAndNeverRegress(t *testing.T) {
+	property := func(history []uint16) bool {
+		// One item and one byte of room: a stored event lags this subscription at once, and a note must not.
+		h := hub.New(hub.Limits{MaxItems: 1, MaxBytes: 1})
+		s := h.Subscribe(hub.Interest{Everything: true})
+		defer s.Close()
+		other := h.Subscribe(hub.Interest{Run: "0"})
+		defer other.Close()
+		want := map[core.RunID]uint64{}
+		seen := map[core.RunID]uint64{}
+		take := func() bool {
+			msgs, lag := s.Take()
+			if lag {
+				return false
+			}
+			for _, m := range msgs {
+				if m.Setup.Revision <= seen[m.Setup.Run] {
+					return false
+				}
+				seen[m.Setup.Run] = m.Setup.Revision
+			}
+			return true
+		}
+		for i, n := range history {
+			run := core.RunID(fmt.Sprint(n % 7))
+			rev := uint64(n) + 1
+			h.PublishSetup(run, rev)
+			want[run] = max(want[run], rev)
+			if i%11 == 0 && !take() {
+				return false
+			}
+		}
+		if !take() {
+			return false
+		}
+		for run, rev := range want {
+			if seen[run] != rev {
+				return false
+			}
+		}
+		// Only a watcher of everything is told: one scoped to a run gets stored events alone.
+		msgs, _ := other.Take()
+		return len(msgs) == 0
+	}
+	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(2))}); err != nil {
+		t.Fatal(err)
+	}
+}

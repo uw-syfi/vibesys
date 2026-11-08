@@ -1,7 +1,12 @@
-import {type Agent, RunStatus} from '@vibesys/orchestrator-proto';
+import {
+  type Agent,
+  type ListCatalogueResponse,
+  type ListEvalPlacesResponse,
+  RunStatus,
+} from '@vibesys/orchestrator-proto';
 import {Chip, type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {HistoryStatus, RunHistoryStatus} from '../../core/index.js';
+import type {HistoryStatus, ProvisionExample, RunHistoryStatus} from '../../core/index.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
@@ -18,6 +23,8 @@ import {
   type IdeaWindow,
   type NavigationAction,
   type OrchestratorState,
+  type ProvisionProgress,
+  type Remote,
   type RepositoryChecked,
   type Route,
   runReport,
@@ -55,6 +62,12 @@ export interface HostSnapshot {
   readonly repositoryChecked: RepositoryChecked | undefined;
   /** The host's listing of each folder the Start form has asked for, by `listingKey`. */
   readonly directories: ReadonlyMap<string, FolderListing>;
+  /** The host's catalogue of example tasks, as of its last read. */
+  readonly catalogue: Remote<ListCatalogueResponse>;
+  /** The host's eval places, as of their last read. */
+  readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** Where the repository being made from an example stands. */
+  readonly provision: ProvisionProgress;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
@@ -84,6 +97,16 @@ export interface AppCommands {
    * the host listed before is dropped first, so the folder is read again: the field was entered.
    */
   readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
+  /** The New run screen is open on `host`: read its catalogue and eval places. */
+  readonly loadNewRun: (host: string) => void;
+  /** Make the repository of an example on `host`, then start in it; `request` names no repository yet. */
+  readonly startFromExample: (
+    host: string,
+    example: ProvisionExample,
+    request: StartRunRequest,
+  ) => void;
+  /** Forget what `host` said of the last copy of an example. */
+  readonly forgetProvision: (host: string) => void;
   readonly retryStart: () => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
@@ -213,18 +236,35 @@ export function OrchestratorApp(props: {
         retryHost={props.retryHost}
         newRun={
           <NewRun
-            hosts={hosts.map(({key, label, model, repositoryChecked, directories}) => ({
-              key,
-              label,
-              models: model.data.models,
-              repositoryChecked,
-              directories,
-            }))}
+            hosts={hosts.map(
+              ({
+                key,
+                label,
+                model,
+                repositoryChecked,
+                directories,
+                catalogue,
+                evalPlaces,
+                provision,
+              }) => ({
+                key,
+                label,
+                models: model.data.models,
+                repositoryChecked,
+                directories,
+                catalogue,
+                evalPlaces,
+                provision,
+              }),
+            )}
             progress={commands.start}
             start={commands.startRun}
             checkRepository={commands.checkRepository}
             listDirectory={commands.listDirectory}
             retry={commands.retryStart}
+            loadNewRun={commands.loadNewRun}
+            startFromExample={commands.startFromExample}
+            forgetProvision={commands.forgetProvision}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
         }

@@ -107,6 +107,9 @@ func cardOut(c *core.TaskCard) *cliv1.TaskCard {
 	return out
 }
 
+// TaskCardMessage is the card a client shows of a task; nil for none.
+func TaskCardMessage(c *core.TaskCard) *cliv1.TaskCard { return cardOut(c) }
+
 func cardIn(c *cliv1.TaskCard, errs *errorList) *core.TaskCard {
 	if c == nil {
 		return nil
@@ -262,6 +265,8 @@ func commandIn(m *pb.Command, errs *errorList) (core.CommandBody, bool) {
 			Run: core.RunID(s.GetRunId()), Task: s.GetTask(), MaxCostUSD: s.GetMaxCostUsd(), MaxTime: s.GetMaxTime().AsDuration(),
 			FanoutLimit: s.GetFanoutLimit(), Lead: specIn(s.GetLead(), errs), Brief: s.GetBrief(), EvalPlace: s.GetEvalPlace(),
 		}, true
+	case *pb.Command_DeclareTask:
+		return core.DeclareTask{Run: core.RunID(b.DeclareTask.GetRunId()), Task: b.DeclareTask.GetTask()}, true
 	}
 	return nil, false
 }

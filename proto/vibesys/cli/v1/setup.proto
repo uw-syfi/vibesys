@@ -1,0 +1,132 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/task.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// SetupCommitRelation is how a job's commit stands to the base: the commit the repository is at when
+// the setup facts are read, and the commit a run that starts there begins from.
+enum SetupCommitRelation {
+  SETUP_COMMIT_RELATION_UNSPECIFIED = 0;
+  // The job's commit is the base.
+  SETUP_COMMIT_RELATION_BASE = 1;
+  // The base is a proper ancestor of the job's commit: the base's code plus a change.
+  SETUP_COMMIT_RELATION_DESCENDANT = 2;
+  // The job's commit is a proper ancestor of the base.
+  SETUP_COMMIT_RELATION_ANCESTOR = 3;
+  // Neither commit is an ancestor of the other.
+  SETUP_COMMIT_RELATION_UNRELATED = 4;
+  // The commit object is gone (collected), so no relation can be read. It never counts.
+  SETUP_COMMIT_RELATION_UNKNOWN = 5;
+}
+
+// SetupBase is the head of the repository at the read, and the task as committed there.
+message SetupBase {
+  string commit = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  // The version of the task at that commit; empty when the task is not committed there.
+  string task_version = 2 [(buf.validate.field).string.max_len = 256];
+}
+
+// SetupObjective is one objective the draft task declares.
+message SetupObjective {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string unit = 3 [(buf.validate.field).string.max_bytes = 64];
+  // The noise floor the objective declares: its own, else the task's [pareto] one. Absent when the
+  // task declares none for it.
+  optional double noise_floor = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lt: 1
+  }];
+}
+
+// SetupDeclarations is what the draft task's files declare, read from the working tree.
+message SetupDeclarations {
+  repeated SetupObjective objectives = 1 [(buf.validate.field).repeated.max_items = 16];
+  // The task declares a correctness check: [accuracy], or [check] with a command.
+  bool check_declared = 2;
+  // The task declares a benchmark: [benchmark] with a command.
+  bool benchmark_declared = 3;
+}
+
+// SetupJob is a check or measure job of the task, as the setup checks read it. Command jobs are not
+// facts here.
+message SetupJob {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  JobKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [1, 3]
+  }];
+  JobState state = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string commit = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  // Job.task_version. A job with none never counts.
+  string task_version = 5 [(buf.validate.field).string.max_len = 256];
+  // Job.exit_code as stored.
+  optional int32 exit_code = 6;
+  // How `commit` stands to the base.
+  SetupCommitRelation relation = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Only for DESCENDANT: the change from the base to `commit` touches a path outside the task's
+  // directory, so it is a change of the code and not of the task.
+  bool code_changed = 8;
+  google.protobuf.Timestamp submitted_at = 9 [(buf.validate.field).required = true];
+  // Absent while the job is not final.
+  google.protobuf.Timestamp finished_at = 10;
+  // Job.failed_stage: which stage ended a failed job. A job that failed to build did not exercise the
+  // check, so only a failure at the check stage proves the check rejected the commit.
+  JobStage failed_stage = 11 [(buf.validate.field).enum.defined_only = true];
+}
+
+// SetupFacts is what the six setup checks are derived from: one consistent read of the working tree,
+// git and the store, taken by the daemon, which is the only reader of all three. It decides nothing.
+message SetupFacts {
+  option (buf.validate.message).cel = {
+    id: "setup_facts.relation_matches_base"
+    message: "a job's relation is BASE exactly when its commit is the base"
+    expression: "this.jobs.all(j, (j.relation == 1) == (j.commit == this.base.commit))"
+  };
+  option (buf.validate.message).cel = {
+    id: "setup_facts.code_changed_is_descendant"
+    message: "only a job of a descendant commit can have changed the code"
+    expression: "this.jobs.all(j, !j.code_changed || j.relation == 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "setup_facts.measurements_are_the_bases"
+    message: "every measurement is of the base commit at the working tree's task version"
+    expression: "this.measurements.all(m, m.commit == this.base.commit && m.task_version == this.task_version)"
+  };
+
+  string task = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // The version of the task in the WORKING TREE. Every fact is held against it.
+  string task_version = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  // The card, as DescribeTask answers it for the working tree.
+  TaskCard card = 3 [(buf.validate.field).required = true];
+  SetupDeclarations declarations = 4 [(buf.validate.field).required = true];
+  SetupBase base = 5 [(buf.validate.field).required = true];
+  // Newest submitted first.
+  repeated SetupJob jobs = 6 [(buf.validate.field).repeated.max_items = 200];
+  // The pooled measurements of the base commit, at the working tree's task version.
+  repeated Measurement measurements = 7 [(buf.validate.field).repeated.max_items = 8];
+  // More jobs exist than `jobs` holds.
+  bool jobs_truncated = 8;
+}

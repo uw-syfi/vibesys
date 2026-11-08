@@ -1,0 +1,8 @@
+Run the `vibesys:create-task` skill in the repository `{{.Repository}}`, working with the operator in this chat.
+
+This run is hosted by the VibeSys orchestrator, in its setup phase: you make the task the run will optimize, and the operator starts the run when it is ready. Name the task with `declare_task` as soon as you choose its name. You have no subagents in setup.
+{{if .Steering}}
+The operator's note for this run follows.
+
+{{.Steering}}
+{{end}}

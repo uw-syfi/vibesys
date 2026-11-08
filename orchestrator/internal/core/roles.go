@@ -35,6 +35,7 @@ const (
 	ActionUpdateRun     Action = "update_run"
 	ActionBeginSetup    Action = "begin_setup"
 	ActionCompleteSetup Action = "complete_setup"
+	ActionDeclareTask   Action = "declare_task"
 )
 
 var subagents = []Principal{PrincipalPlanner, PrincipalWorker, PrincipalJudge, PrincipalCombiner, PrincipalProfiler}
@@ -52,9 +53,9 @@ var permissions = map[Action][]Principal{
 
 	ActionRequestCatchUp: {PrincipalOperator},
 	ActionUpdateRun:      {PrincipalOperator},
-	// ActionBeginSetup and ActionCompleteSetup have no entry until their behavior is decided: nobody is
-	// permitted, so a Decide refuses them before it reaches the command switch. Whoever implements one
-	// adds its row here, for the operator.
+	// ActionBeginSetup, ActionCompleteSetup and ActionDeclareTask have no entry until their behavior is
+	// decided: nobody is permitted, so a Decide refuses them before it reaches the command switch.
+	// Whoever implements one adds its row here, for the operator.
 }
 
 // Allowed says whether a principal may do an action.

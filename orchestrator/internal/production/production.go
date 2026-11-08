@@ -25,6 +25,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
@@ -177,6 +178,9 @@ type Wiring struct {
 	// Catalogue serves the example tasks of the release. Nil means a host with no catalogue, whose
 	// ListCatalogue answers Unimplemented.
 	Catalogue daemon.CatalogueSource
+	// SetupReads reads the facts of a run in setup from the job tool's daemon. Nil means a host that
+	// reads none, whose runs in setup show their checks as not read.
+	SetupReads daemon.SetupReads
 }
 
 // Daemon is an opened daemon: it holds the state directory's lock and its database, and serves the
@@ -230,7 +234,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Models: wiring.Models,
+			Search: searchStore(wiring.Search), Setup: setup.NewStore(), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Models: wiring.Models,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {
@@ -240,7 +244,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 				}
 			},
 		},
-		Sidecars: wiring.Sidecars, Checkouts: checkoutsOf(wiring.Sidecars), Jobs: wiring.Jobs, Reconcile: reconcile(wiring.Search), JobLog: jobLog(wiring.Search), Authority: authority, Bounds: Timeouts{},
+		Sidecars: wiring.Sidecars, Checkouts: checkoutsOf(wiring.Sidecars), Jobs: wiring.Jobs, Reconcile: reconcile(wiring.Search), JobLog: jobLog(wiring.Search), SetupReads: wiring.SetupReads, Authority: authority, Bounds: Timeouts{},
 		AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
 	})
 	if err != nil {

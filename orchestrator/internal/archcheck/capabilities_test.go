@@ -14,6 +14,7 @@ func TestCapabilityRules(t *testing.T) {
 		bad                bool
 	}{
 		{"internal/wire/a.go", goFile("github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"), "cli-contract-importers", true},
+		{"internal/wire/setup_facts.go", goFile("github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"), "cli-contract-importers", false},
 		{"internal/clidaemon/a.go", goFile("github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"), "cli-contract-importers", false},
 		{"internal/clidaemon/clidaemontest/a.go", "package p\nimport x \"github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1\"\nvar _ x.DaemonServiceClient", "cli-stub", true},
 		{"internal/clidaemon/a.go", "package p\nimport x \"github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1\"\nvar _ x.DaemonServiceClient", "cli-stub", false},

@@ -269,12 +269,16 @@ type SetupView struct {
 	BaselineValue         *float64      `protobuf:"fixed64,5,opt,name=baseline_value,json=baselineValue,proto3,oneof" json:"baseline_value,omitempty"`
 	BaselineUnit          string        `protobuf:"bytes,6,opt,name=baseline_unit,json=baselineUnit,proto3" json:"baseline_unit,omitempty"`
 	BaselineSpreadPercent *float64      `protobuf:"fixed64,7,opt,name=baseline_spread_percent,json=baselineSpreadPercent,proto3,oneof" json:"baseline_spread_percent,omitempty"`
-	// What the setup phase has cost, in dollars: every turn of every agent of the run while it was in
-	// setup. Not counted toward the run's cost limit.
+	// What the setup phase has cost, in dollars: every turn of every agent of the run that started while
+	// it was in setup, also one that ends after the run left setup. Not counted toward the run's cost
+	// limit.
 	SpentUsd float64 `protobuf:"fixed64,8,opt,name=spent_usd,json=spentUsd,proto3" json:"spent_usd,omitempty"`
 	// How long the setup phase has lasted, or lasted when it ended. Not counted toward the run's time
 	// limit.
-	Elapsed       *durationpb.Duration `protobuf:"bytes,9,opt,name=elapsed,proto3" json:"elapsed,omitempty"`
+	Elapsed *durationpb.Duration `protobuf:"bytes,9,opt,name=elapsed,proto3" json:"elapsed,omitempty"`
+	// Why the host could not read the setup facts just now, in its words; empty when it could. While it
+	// is set the checks that need facts are PENDING, never FAILED.
+	ReadFailure   string `protobuf:"bytes,10,opt,name=read_failure,json=readFailure,proto3" json:"read_failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -383,6 +387,13 @@ func (x *SetupView) GetElapsed() *durationpb.Duration {
 	return nil
 }
 
+func (x *SetupView) GetReadFailure() string {
+	if x != nil {
+		return x.ReadFailure
+	}
+	return ""
+}
+
 type isSetupView_Draft interface {
 	isSetupView_Draft()
 }
@@ -414,7 +425,7 @@ const file_vibesys_orchestrator_v1_setup_proto_rawDesc = "" +
 	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\x06detail\":\n" +
 	"\x14SetupDraftUnreadable\x12\"\n" +
 	"\x06detail\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x10R\x06detail\"\xb9\x05\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x10R\x06detail\"\xe6\x05\n" +
 	"\tSetupView\x12\x1c\n" +
 	"\x04task\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x04task\x12.\n" +
 	"\x04card\x18\x02 \x01(\v2\x18.vibesys.cli.v1.TaskCardH\x00R\x04card\x12O\n" +
@@ -427,7 +438,9 @@ const file_vibesys_orchestrator_v1_setup_proto_rawDesc = "" +
 	"\rbaseline_unit\x18\x06 \x01(\tB\a\xbaH\x04r\x02(@R\fbaselineUnit\x12D\n" +
 	"\x17baseline_spread_percent\x18\a \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x02R\x15baselineSpreadPercent\x88\x01\x01\x12-\n" +
 	"\tspent_usd\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\bspentUsd\x12;\n" +
-	"\aelapsed\x18\t \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\aelapsedB\a\n" +
+	"\aelapsed\x18\t \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\aelapsed\x12+\n" +
+	"\fread_failure\x18\n" +
+	" \x01(\tB\b\xbaH\x05r\x03(\x80\bR\vreadFailureB\a\n" +
 	"\x05draftB\x11\n" +
 	"\x0f_baseline_valueB\x1a\n" +
 	"\x18_baseline_spread_percent*\xf3\x01\n" +

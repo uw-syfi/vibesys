@@ -1,4 +1,8 @@
-import type {ModelCatalog} from '@vibesys/orchestrator-proto';
+import type {
+  ListCatalogueResponse,
+  ListEvalPlacesResponse,
+  ModelCatalog,
+} from '@vibesys/orchestrator-proto';
 import {Button, Field, PathInput, Row, Select, Stack, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
@@ -7,6 +11,8 @@ import {
   type FolderListing,
   listingKey,
   type PathCompletion,
+  type ProvisionProgress,
+  type Remote,
   type RepositoryChecked,
   type RepositoryVerdict,
   repositoryVerdict,
@@ -38,6 +44,12 @@ export interface StartHost {
   readonly repositoryChecked: RepositoryChecked | undefined;
   /** What the host listed of each folder asked for, by `listingKey`. */
   readonly directories: ReadonlyMap<string, FolderListing>;
+  /** The host's catalogue of example tasks, with its verdict on each. */
+  readonly catalogue: Remote<ListCatalogueResponse>;
+  /** The host's eval places. */
+  readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** Where the repository being made from an example stands. */
+  readonly provision: ProvisionProgress;
 }
 
 const timeWord = (minutes: number): string =>
@@ -48,6 +60,16 @@ const modelOptions = (choices: ModelChoices) => [
   ...(choices.pinned ? [] : [{value: '', label: 'Default'}]),
   ...choices.models.map(id => ({value: id, label: id})),
 ];
+
+/** The catalogue half of New run, in place of the repository and task fields. */
+export interface StartExample {
+  /** What the person picks the example, its place and its folder with. */
+  readonly picker: JSX.Element;
+  /** Why no example can be started yet, or null. */
+  readonly blocked: string | null;
+  /** Make the example's repository and start in it; the request names no repository yet. */
+  readonly start: (host: string, request: StartRunRequest) => void;
+}
 
 /** The run's bounds: how long it may take and what it may cost, each none unless set. */
 function LimitFields(props: {
@@ -167,79 +189,16 @@ function pathCompletion(
   };
 }
 
-/**
- * Start a run: the host, the repository and task, how many agents at most, the lead's tool, and
- * optional steering. The draft is the caller's, so it stays filled in after a press (a run that was
- * not accepted can be fixed and sent again) and after the form is put away; the progress of the last
- * press shows under the button.
- */
-export function StartRunForm(props: {
-  readonly hosts: readonly StartHost[];
+/** How many agents at most, the lead's tool, and its model. */
+function AgentFields(props: {
   readonly draft: StartDraft;
-  readonly setDraft: (draft: StartDraft) => void;
-  /** The key of the host picked, or null before the person picks one (the first host then). */
-  readonly chosen: string | null;
-  readonly choose: (host: string) => void;
-  /** What the last press of Start came to, or undefined before any. */
-  readonly progress: CommandProgress | undefined;
-  readonly start: (host: string, request: StartRunRequest) => void;
-  /** The repository path in the field is now `repository` on `host`: ask the host about it. */
-  readonly checkRepository: (host: string, repository: string) => void;
-  /**
-   * Ask `host` for the entries of `folder` (the host lists it once), hidden ones too when `hidden`;
-   * with `fresh`, read again what it listed before.
-   */
-  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
-  /** Send the last Start again, under the id it already has. */
-  readonly retry: () => void;
-  /** Show the run a Start created. */
-  readonly openRun: (host: string, runId: string) => void;
+  readonly set: (change: Partial<StartDraft>) => void;
+  readonly choices: ModelChoices;
+  readonly model: string;
 }): JSX.Element {
-  const {draft} = props;
-  const host = props.hosts.find(candidate => candidate.key === props.chosen) ?? props.hosts[0];
-  const set = (change: Partial<StartDraft>): void => props.setDraft({...draft, ...change});
-  const choices = host === undefined ? NO_CATALOG : modelChoices(host.models, LEADS[draft.lead]);
-  const model = startModel(draft.model, choices);
-  const missing = host === undefined ? 'No host is connected.' : missingFrom(draft, choices);
-  const verdict = repositoryVerdict(draft.repository, host?.repositoryChecked);
-  const block = startBlock(props.progress?._tag === 'Sending', missing, verdict);
-  const askAbout = (repository: string): void => {
-    if (host !== undefined) props.checkRepository(host.key, repository);
-  };
-  const path = pathCompletion(host, draft.repository, props.listDirectory);
+  const {draft, set, choices, model} = props;
   return (
-    <Stack gap="space-3">
-      {props.hosts.length > 1 ? (
-        <Field label="Host">
-          <Select
-            value={host?.key ?? ''}
-            options={props.hosts.map(option => ({value: option.key, label: option.label}))}
-            change={key => {
-              props.choose(key);
-              props.checkRepository(key, draft.repository);
-              path.list(key, draft.repository, true);
-            }}
-            mono
-          />
-        </Field>
-      ) : null}
-      <RepositoryField
-        value={draft.repository}
-        verdict={verdict}
-        completions={path.completions}
-        midName={path.midName}
-        change={repository => {
-          set({repository});
-          askAbout(repository);
-          if (host !== undefined) path.list(host.key, repository, false);
-        }}
-        enter={() => {
-          if (host !== undefined) path.list(host.key, draft.repository, true);
-        }}
-      />
-      <Field label="Task" help="The task to optimize, as named in the repository.">
-        <TextInput value={draft.task} change={task => set({task})} placeholder="task" mono />
-      </Field>
+    <>
       <Field label="Fanout" help="The most agents the run may have at once.">
         <Select
           value={String(draft.fanout)}
@@ -271,6 +230,129 @@ export function StartRunForm(props: {
           mono
         />
       </Field>
+    </>
+  );
+}
+
+/** The person's own repository: its path (completed from the host's folders), its task, and its eval place. */
+function RepositoryTarget(props: {
+  readonly host: StartHost | undefined;
+  readonly draft: StartDraft;
+  readonly set: (change: Partial<StartDraft>) => void;
+  readonly verdict: RepositoryVerdict;
+  readonly path: ReturnType<typeof pathCompletion>;
+  readonly askAbout: (repository: string) => void;
+  readonly placeField: JSX.Element | undefined;
+}): JSX.Element {
+  const {host, draft, set, path} = props;
+  return (
+    <>
+      <RepositoryField
+        value={draft.repository}
+        verdict={props.verdict}
+        completions={path.completions}
+        midName={path.midName}
+        change={repository => {
+          set({repository});
+          props.askAbout(repository);
+          if (host !== undefined) path.list(host.key, repository, false);
+        }}
+        enter={() => {
+          if (host !== undefined) path.list(host.key, draft.repository, true);
+        }}
+      />
+      <Field label="Task" help="The task to optimize, as named in the repository.">
+        <TextInput value={draft.task} change={task => set({task})} placeholder="task" mono />
+      </Field>
+      {props.placeField}
+    </>
+  );
+}
+
+/**
+ * Start a run: the host, the repository and task, how many agents at most, the lead's tool, and
+ * optional steering. The draft is the caller's, so it stays filled in after a press (a run that was
+ * not accepted can be fixed and sent again) and after the form is put away; the progress of the last
+ * press shows under the button.
+ */
+export function StartRunForm(props: {
+  readonly hosts: readonly StartHost[];
+  readonly draft: StartDraft;
+  readonly setDraft: (draft: StartDraft) => void;
+  /** The key of the host picked, or null before the person picks one (the first host then). */
+  readonly chosen: string | null;
+  readonly choose: (host: string) => void;
+  /** What the last press of Start came to, or undefined before any. */
+  readonly progress: CommandProgress | undefined;
+  readonly start: (host: string, request: StartRunRequest) => void;
+  /** The repository path in the field is now `repository` on `host`: ask the host about it. */
+  readonly checkRepository: (host: string, repository: string) => void;
+  /**
+   * Ask `host` for the entries of `folder` (the host lists it once), hidden ones too when `hidden`;
+   * with `fresh`, read again what it listed before.
+   */
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
+  /** Send the last Start again, under the id it already has. */
+  readonly retry: () => void;
+  /** Show the run a Start created. */
+  readonly openRun: (host: string, runId: string) => void;
+  /** Start from an example of the catalogue, not from a repository the person names. */
+  readonly example?: StartExample;
+  /** The control for the eval place of a run in the person's own repository. */
+  readonly placeField?: JSX.Element;
+}): JSX.Element {
+  const {draft, example} = props;
+  const host = props.hosts.find(candidate => candidate.key === props.chosen) ?? props.hosts[0];
+  const set = (change: Partial<StartDraft>): void => props.setDraft({...draft, ...change});
+  const choices = host === undefined ? NO_CATALOG : modelChoices(host.models, LEADS[draft.lead]);
+  const model = startModel(draft.model, choices);
+  const missing =
+    host === undefined
+      ? 'No host is connected.'
+      : missingFrom(draft, choices, example === undefined ? 'repository' : 'example');
+  const verdict =
+    example === undefined
+      ? repositoryVerdict(draft.repository, host?.repositoryChecked)
+      : ({_tag: 'Empty'} as const);
+  const block = startBlock(
+    props.progress?._tag === 'Sending',
+    missing ?? example?.blocked ?? null,
+    verdict,
+  );
+  const askAbout = (repository: string): void => {
+    if (host !== undefined) props.checkRepository(host.key, repository);
+  };
+  const path = pathCompletion(host, draft.repository, props.listDirectory);
+  return (
+    <Stack gap="space-3">
+      {props.hosts.length > 1 ? (
+        <Field label="Host">
+          <Select
+            value={host?.key ?? ''}
+            options={props.hosts.map(option => ({value: option.key, label: option.label}))}
+            change={key => {
+              props.choose(key);
+              props.checkRepository(key, draft.repository);
+              path.list(key, draft.repository, true);
+            }}
+            mono
+          />
+        </Field>
+      ) : null}
+      {example === undefined ? (
+        <RepositoryTarget
+          host={host}
+          draft={draft}
+          set={set}
+          verdict={verdict}
+          path={path}
+          askAbout={askAbout}
+          placeField={props.placeField}
+        />
+      ) : (
+        example.picker
+      )}
+      <AgentFields draft={draft} set={set} choices={choices} model={model} />
       <LimitFields draft={draft} set={set} />
       <Field label="Steering (optional)" help="Anything the lead should know or prefer.">
         <TextInput
@@ -286,8 +368,8 @@ export function StartRunForm(props: {
           label="Start run"
           variant="primary"
           press={() => {
-            if (host !== undefined && block === null)
-              props.start(host.key, startRunRequest(draft, choices));
+            if (host === undefined || block !== null) return;
+            (example?.start ?? props.start)(host.key, startRunRequest(draft, choices));
           }}
           {...(block === null ? {} : {disabledReason: block.reason, quietReason: block.quiet})}
         />

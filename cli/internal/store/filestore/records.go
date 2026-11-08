@@ -324,6 +324,9 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		j.Needs = append(j.Needs, kind)
 	}
 	j.TaskVersion = m.GetTaskVersion()
+	if j.FailedStage, err = wire.ToJobStage("failed_stage", m.GetFailedStage()); err != nil {
+		return fail(err)
+	}
 	return j, nil
 }
 

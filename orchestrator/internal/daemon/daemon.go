@@ -33,8 +33,11 @@ type Config struct {
 	Jobs jobs.JobSource
 	// JobLog reads the job log afresh for the facts of a check-in on a live run. Nil means there is no
 	// way to: the facts are worked out from the view the host holds, which is as current as its last read.
-	JobLog    JobLog
-	Authority Authority
+	JobLog JobLog
+	// SetupReads reads the facts of a run's setup. Nil means there is no way to: a run in setup shows
+	// its checks as not read.
+	SetupReads SetupReads
+	Authority  Authority
 	// Bounds limits every call the daemon makes outside itself. It is required.
 	Bounds Bounds
 	// AgentSocket is the path of the agent-only socket, told to every session the daemon launches. The
@@ -52,10 +55,17 @@ type Config struct {
 type Daemon struct {
 	*Engine
 	searchPublished map[core.RunID]uint64
-	cfg             Config
-	conns           map[core.Session]Sidecar
-	follows         map[core.Session]*follow
-	polled          time.Time
+	// setupWatches, setupSeq, setupInbox and setupPublished are the observation of runs in setup (see
+	// setup_observe.go): the schedule of each, the number of the last read started, the ends of reads
+	// not yet seen by the loop, and the revision of each run's observation the hub was told of.
+	setupWatches   map[core.RunID]*setupWatch
+	setupSeq       uint64
+	setupInbox     *setupInbox
+	setupPublished map[core.RunID]uint64
+	cfg            Config
+	conns          map[core.Session]Sidecar
+	follows        map[core.Session]*follow
+	polled         time.Time
 	// toAttach holds the sessions of a previous daemon whose sidecar this one has not found yet. A
 	// live session in neither conns nor toAttach is waiting for its launch, which is in the outbox.
 	toAttach map[core.Session]bool
@@ -95,6 +105,7 @@ func Open(cfg Config) (*Daemon, error) {
 	}
 	return &Daemon{
 		Engine: engine, cfg: cfg, searchPublished: map[core.RunID]uint64{},
+		setupWatches: map[core.RunID]*setupWatch{}, setupInbox: new(setupInbox), setupPublished: map[core.RunID]uint64{},
 		conns: map[core.Session]Sidecar{}, follows: map[core.Session]*follow{},
 		toAttach: map[core.Session]bool{}, deltaThrough: map[core.Session]uint64{}, windowTries: map[core.CheckInID]int{},
 	}, nil
@@ -269,7 +280,7 @@ func (d *Daemon) Step(ctx context.Context) (progress bool, err error) {
 		d.cfg.Reconcile(ctx, d.State().Runs())
 	}
 	var errs []error
-	for _, part := range []func(context.Context) (bool, error){d.runEffects, d.pumpSidecars, d.pollJobs} {
+	for _, part := range []func(context.Context) (bool, error){d.runEffects, d.pumpSidecars, d.pollJobs, d.observeSetup} {
 		moved, err := part(ctx)
 		progress = progress || moved
 		if err != nil {
@@ -277,6 +288,7 @@ func (d *Daemon) Step(ctx context.Context) (progress bool, err error) {
 		}
 	}
 	progress = d.publishSearch() || progress
+	progress = d.publishSetup() || progress
 	return progress, errors.Join(errs...)
 }
 

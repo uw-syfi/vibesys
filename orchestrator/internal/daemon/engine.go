@@ -10,6 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -20,6 +21,8 @@ var ErrCommandConflict = errors.New("daemon: this command id was used for anothe
 // EngineDeps is what an Engine is made of.
 type EngineDeps struct {
 	Search *search.Store
+	// Setup holds what the host has read of each run in setup. Nil means none is read.
+	Setup  *setup.Store
 	Store  store.Store
 	Clock  Clock
 	Nonces Nonces
@@ -41,6 +44,9 @@ type Engine struct {
 	reports  reportCache
 	state    core.State
 	last     uint64
+	// touched is the sequence of the last event committed for each run, which the setup observation
+	// compares with the one it saw last. It is written in apply, under the lock, and does no I/O.
+	touched map[core.RunID]uint64
 }
 
 // OpenEngine recovers the state from the store. It is the whole of starting up: a daemon that
@@ -60,7 +66,7 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the last sequence: %w", err)
 	}
-	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: reportCache{}}
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: reportCache{}, touched: map[core.RunID]uint64{}}
 	return e, nil
 }
 
@@ -134,6 +140,9 @@ func (e *Engine) publish(seq uint64, ev core.Event) {
 		// The store accepted the event, so it encodes; a failure here is a bug in this build.
 		e.Log.Error("cannot show a committed event to watchers", "sequence", seq, "err", err)
 		return
+	}
+	if run := core.RunID(msg.GetRunId()); run != "" {
+		e.touched[run] = seq
 	}
 	st := hub.Stored{Change: msg}
 	switch b := ev.Body.(type) {
