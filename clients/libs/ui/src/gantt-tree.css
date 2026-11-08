@@ -155,9 +155,10 @@
     left var(--duration-base) var(--easing),
     width var(--duration-base) var(--easing);
 }
+/* A row or message draws in a step to the right, away from the left edge it is anchored to; never vertically. */
 @keyframes vs-enter {
   from {
     opacity: 0;
-    transform: translateY(calc(var(--space-2) * -1));
+    transform: translateX(calc(var(--space-2) * -1));
   }
 }
