@@ -27,6 +27,10 @@ const (
 	DefaultQueueTimeout = 24 * time.Hour
 	// CallTimeout bounds a call that should answer at once, such as a signal to a box.
 	CallTimeout = 2 * time.Minute
+	// StateOutage is how long the reads of a queued allocation's state may keep failing before
+	// the wait for it fails: a login node that refuses connections for a while, or a Slurm
+	// controller that does not answer, says nothing of the allocation, which keeps its place.
+	StateOutage = 15 * time.Minute
 )
 
 // DefaultConvertTimeout bounds the conversion of an image and the copy of its SIF when Config sets
@@ -681,35 +685,65 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 // start) goes to log when the wait begins and whenever it changes, and its node and the length of
 // the wait once it runs, so that the run's log says why nothing ran yet. A job that runs at once
 // writes nothing.
+//
+// A read of the state that fails as unavailable (the login node, or Slurm, did not answer) is no
+// news of the job, which still waits or runs where it is: the reads go on, the first failure said to
+// log, and only reads that keep failing for StateOutage fail the wait. A job that waited hours in
+// the queue is not cancelled because the login node refused connections for a minute.
 func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 	limit, stop := e.cfg.Timers.Timeout(ctx, e.cfg.QueueTimeout)
 	defer stop()
 	since := e.cfg.Clock.Now()
 	var said *JobState
+	var outage <-chan struct{} // fires once the reads have failed for StateOutage
+	stopOutage := func() {}
+	defer func() { stopOutage() }()
 	for {
 		st, err := e.cfg.Cluster.State(ctx, job)
-		if err != nil {
+		switch {
+		case err != nil && (ctx.Err() != nil || core.AsFailure(err).Kind != core.FailureUnavailable):
 			return err
-		}
-		switch st.Phase {
-		case Running:
+		case err != nil:
+			if outage == nil {
+				_, _ = fmt.Fprintf(log, "[apptainer] the state of the allocation %s could not be read (%v); "+
+					"it is read again every %v, for up to %v\n", job, err, e.cfg.Poll, StateOutage)
+				outage, stopOutage = e.cfg.Timers.Timeout(ctx, StateOutage)
+			}
+			// What was said of the job stands, and the wait goes on.
 			if said != nil {
-				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
-					job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
+				st = *said
+			} else {
+				st = JobState{Phase: Queued}
 			}
-			return nil
-		case Queued:
-			if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
-				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
-				said = &st
+		case outage != nil:
+			stopOutage()
+			outage, stopOutage = nil, func() {}
+			_, _ = fmt.Fprintf(log, "[apptainer] the state of the allocation %s is read again\n", job)
+		}
+		if err == nil {
+			switch st.Phase {
+			case Running:
+				if said != nil {
+					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
+						job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
+				}
+				return nil
+			case Queued:
+				if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
+					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
+					said = &st
+				}
+			case Ended:
+				return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 			}
-		case Ended:
-			return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 		}
 		pause, stopPause := e.cfg.Timers.Timeout(ctx, e.cfg.Poll)
 		select {
 		case <-pause:
 			stopPause()
+		case <-outage:
+			stopPause()
+			return unavailable("the state of the allocation %s could not be read for %v, so it is cancelled; the last read: %v", job, StateOutage, err)
 		case <-limit:
 			stopPause()
 			why := orUnknown(st.Name)

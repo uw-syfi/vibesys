@@ -93,8 +93,8 @@ func capabilities(name, source string) []string {
 			alias = imp.Name.Name
 		}
 		aliases[alias] = target
-		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && !strings.HasPrefix(rel, "release/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" && rel != "internal/wire/run_facts.go" {
-			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment, the job tool's answer, the wire mapping of a task card and the release builder's catalogue of cards, whose messages are the CLI's")
+		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && !strings.HasPrefix(rel, "release/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" && rel != "internal/wire/run_facts.go" && rel != "internal/fit/fit.go" {
+			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment, the job tool's answer, the wire mapping of a task card, the fit of a task card's need and the release builder's catalogue of cards, whose messages are the CLI's")
 		}
 		if target == "os/exec" && execFiles[rel] == "" {
 			report("exec-confined", "process execution belongs to listed production files")

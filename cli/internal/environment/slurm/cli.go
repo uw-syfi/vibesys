@@ -31,10 +31,10 @@ var _ Scheduler = CLI{}
 // only.
 const user = `"$(id -un)"`
 
+// run runs the script on the host, each attempt bounded by CallTimeout: a call that does not
+// reach the host is made again as remote.Reconnect says.
 func (c CLI) run(ctx context.Context, script string, args ...string) (string, error) {
-	bounded, done := remote.Bounded(ctx, c.Timers, CallTimeout)
-	defer done()
-	return remote.Output(bounded, c.Timers, c.Shell, append([]string{"sh", "-c", script, "vs-slurm"}, args...), "")
+	return remote.Within(ctx, c.Timers, c.Shell, CallTimeout, append([]string{"sh", "-c", script, "vs-slurm"}, args...), "")
 }
 
 // Jobs implements Scheduler.

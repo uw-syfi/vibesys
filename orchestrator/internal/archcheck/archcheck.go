@@ -30,7 +30,8 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/"},
+	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
+	"internal/fit":                     {"gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/protocol":                {"gen/vibesys/orchestrator/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "internal/core", "gen/vibesys/cli/"},
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "internal/wire", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
@@ -61,7 +62,7 @@ var rules = map[string][]string{
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
 	"internal/names":                   {"gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/cost", "internal/window", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/fit", "internal/protocol", "internal/search", "internal/core", "internal/cost", "internal/window", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/search", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
@@ -77,6 +78,7 @@ var testRules = map[string][]string{
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
 	"internal/production": {"release/releasetest", "release/assemble", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
+	"internal/fit":        {"internal/wire"},
 	"release":             {"release/releasetest"},
 	"release/assemble":    {"release/releasetest"},
 	"gatewayroot":         {"release/releasetest"},

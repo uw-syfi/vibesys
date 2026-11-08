@@ -13,6 +13,12 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
+var wantReach = map[core.Reach]cliv1.ReachState{
+	core.ReachReachable:   cliv1.ReachState_REACH_STATE_REACHABLE,
+	core.ReachUnreachable: cliv1.ReachState_REACH_STATE_UNREACHABLE,
+	core.ReachNotProbed:   cliv1.ReachState_REACH_STATE_NOT_PROBED,
+}
+
 // Every placement reading the daemon can make is a valid contract message, and the view says what
 // the reading says.
 func TestPlacementViewsOfAnyReadingAreValid(t *testing.T) {
@@ -23,11 +29,15 @@ func TestPlacementViewsOfAnyReadingAreValid(t *testing.T) {
 		core.VendorAMD:    {core.ModelOther, core.ModelMI210, core.ModelMI300A, core.ModelMI300X, core.ModelMI325X},
 	}
 	vendors := []core.AcceleratorVendor{core.VendorNVIDIA, core.VendorAMD}
+	reaches := []core.Reach{core.ReachReachable, core.ReachUnreachable, core.ReachNotProbed}
 	rng := rand.New(rand.NewPCG(3, 4))
 	for range 500 {
 		r := core.PlacementReading{
 			Name: fmt.Sprintf("place-%d", rng.IntN(100)), Kind: kinds[rng.IntN(len(kinds))], MaxJobs: uint32(1 + rng.IntN(8)),
-			Unknown: unknowns[rng.IntN(len(unknowns))], Reachable: rng.IntN(2) == 0,
+			Unknown: unknowns[rng.IntN(len(unknowns))], Reach: reaches[rng.IntN(len(reaches))],
+		}
+		if r.Reach == core.ReachUnreachable {
+			r.Reason = "place: unreachable"
 		}
 		if r.Unknown != core.OffersKnown {
 			r.Detail = "place: why"
@@ -48,7 +58,7 @@ func TestPlacementViewsOfAnyReadingAreValid(t *testing.T) {
 		if err := protovalidate.Validate(view); err != nil {
 			t.Fatalf("%+v: %v", r, err)
 		}
-		if view.GetName() != r.Name || view.GetMaxJobs() != r.MaxJobs || view.GetReach().GetReachable() != r.Reachable ||
+		if view.GetName() != r.Name || view.GetMaxJobs() != r.MaxJobs || view.GetReach().GetState() != wantReach[r.Reach] ||
 			(view.GetKnown() != nil) != (r.Unknown == core.OffersKnown) || len(view.GetKnown().GetOffers()) != len(r.Offers) ||
 			(view.GetKnown().GetProbedAt() != nil) != !r.ProbedAt.IsZero() {
 			t.Fatalf("%+v became %v", r, view)

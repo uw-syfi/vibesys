@@ -3,14 +3,18 @@ package remote_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"math/rand/v2"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
@@ -132,8 +136,8 @@ func TestSSHTakesOnlyAFailedConnectionForUnreached(t *testing.T) {
 }
 
 // A call that does not reach its machine is made again after waits that double from
-// ReconnectWait, up to ReconnectAttempts in all; one that reaches it, or fails otherwise, is made
-// no more.
+// ReconnectWait up to ReconnectMaxWait, adding up to ReconnectWindow, up to ReconnectAttempts in
+// all; one that reaches it, or fails otherwise, is made no more.
 func TestReconnectWaitsLongerEachTimeAndStops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
@@ -170,14 +174,125 @@ func TestReconnectWaitsLongerEachTimeAndStops(t *testing.T) {
 			if got.err != nil || got.n != unreached+1 {
 				t.Errorf("%d unreached: %+v, want the call after them", unreached, got)
 			}
-		} else if got.err == nil || !strings.Contains(got.err.Error(), "not reached in 5 attempts") || calls != remote.ReconnectAttempts {
+		} else if got.err == nil || !strings.Contains(got.err.Error(), fmt.Sprintf("not reached in %d attempts", remote.ReconnectAttempts)) || calls != remote.ReconnectAttempts {
 			t.Errorf("%d unreached: %+v after %d calls, want the last failure after %d", unreached, got, calls, remote.ReconnectAttempts)
 		}
+		var total time.Duration
 		for i, d := range waits {
-			if want := remote.ReconnectWait << i; d != want {
+			if want := min(remote.ReconnectWait<<i, remote.ReconnectMaxWait); d != want {
 				t.Errorf("%d unreached: wait %d is %v, want %v", unreached, i+1, d, want)
 			}
+			total += d
 		}
+		if unreached >= remote.ReconnectAttempts && total != remote.ReconnectWindow {
+			t.Errorf("the waits add up to %v, want %v", total, remote.ReconnectWindow)
+		}
+	}
+}
+
+// The window outlasts a login node that refuses new connections for a couple of minutes.
+func TestReconnectOutlastsALoginNodeThatThrottlesConnections(t *testing.T) {
+	if remote.ReconnectWindow < 4*time.Minute {
+		t.Errorf("the calls are made again for %v", remote.ReconnectWindow)
+	}
+}
+
+// An attempt that does not answer within its bound is a NoAnswer, a failure of its own kind, and is
+// not made again: it may have run. The bound is each attempt's, so the waits between attempts that
+// did not reach the machine do not use it up.
+func TestWithinBoundsEachAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	calls := 0
+	sh := scripted{run: func() string {
+		calls++
+		if calls == 1 {
+			return "echo 'kex_exchange_identification: Connection closed by remote host' >&2; exit 255"
+		}
+		return "exec sleep 600"
+	}}
+	timers := clock.NewManualTimers()
+	done := make(chan error, 1)
+	go func() {
+		_, err := remote.Within(ctx, timers, sh, time.Minute, []string{"x"}, "")
+		done <- err
+	}()
+	// The first attempt's bound, which does not fire; the wait after it; the second's bound.
+	for i, want := range []time.Duration{time.Minute, remote.ReconnectWait, time.Minute} {
+		select {
+		case d := <-timers.Armed():
+			if d != want {
+				t.Fatalf("timeout %d is %v, want %v", i+1, d, want)
+			}
+		case <-ctx.Done():
+			t.Fatal("hung")
+		}
+		if i > 0 {
+			timers.Fire()
+		}
+	}
+	err := <-done
+	var na *remote.NoAnswer
+	if !errors.As(err, &na) || na.Within != time.Minute || na.Where != "host-a" || calls != 2 {
+		t.Fatalf("%v after %d calls, want no answer after the second", err, calls)
+	}
+	if f := new(core.Failure); !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, "host-a did not answer within 1m0s") {
+		t.Errorf("the failure %+v", f)
+	}
+}
+
+// scripted is an ssh-like shell whose each call runs the shell script run returns, its 255 ssh's.
+type scripted struct{ run func() string }
+
+func (s scripted) Command(ctx context.Context, _ []string) *exec.Cmd {
+	return exec.CommandContext(ctx, "/bin/sh", "-c", s.run())
+}
+func (scripted) Lost(code int) bool { return code == 255 }
+func (scripted) Unreached(code int, stderr string) bool {
+	return (remote.SSH{}).Unreached(code, stderr)
+}
+func (scripted) Where() string { return "host-a" }
+
+// A copy whose ssh could not connect, which rsync reports with its own lines after ssh's, is made
+// again, and one that failed otherwise is made once.
+func TestARsyncCopyWhoseSSHCouldNotConnectIsMadeAgain(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	for _, c := range []struct {
+		name  string
+		fail  string
+		calls int
+		ok    bool
+	}{
+		{"could not connect", `echo 'kex_exchange_identification: Connection closed by remote host' >&2
+echo 'rsync: connection unexpectedly closed (0 bytes received so far) [Receiver]' >&2
+echo 'rsync error: unexplained error (code 255) at io.c(232) [Receiver=3.2.7]' >&2
+exit 255`, 3, true},
+		{"failed otherwise", `echo 'rsync: change_dir "/nowhere" failed: No such file or directory (2)' >&2; exit 23`, 1, false},
+		{"lost in the session", `echo 'Connection to host-a closed by remote host.' >&2; exit 255`, 1, false},
+	} {
+		dir := t.TempDir()
+		count := filepath.Join(dir, "calls")
+		script := "#!/bin/sh\necho x >> " + count + "\nif [ $(wc -l < " + count + ") -le 2 ]; then\n" + c.fail + "\nfi\nexit 0\n"
+		prog := filepath.Join(dir, "rsync")
+		if err := os.WriteFile(prog, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r := remote.Rsync{SSH: remote.SSH{Host: "host-a"}, Program: []string{prog}, Timers: clock.Immediate{Longest: remote.ReconnectMaxWait}}
+		err := r.Pull(ctx, "/remote", filepath.Join(dir, "local"), true)
+		data, _ := os.ReadFile(count)
+		if calls := strings.Count(string(data), "x"); calls != c.calls || (err == nil) != c.ok {
+			t.Errorf("%s: %v after %d copies, want %d", c.name, err, calls, c.calls)
+		}
+	}
+}
+
+// Every ssh call gives up on a connection that is not set up within a bound, so a login node that
+// leaves it waiting is a call that did not reach it, made again, and not one that hangs.
+func TestSSHGivesUpOnAConnectionNotSetUp(t *testing.T) {
+	args := strings.Join(remote.SSH{Host: "host-a", Program: []string{"ssh"}}.Command(context.Background(), []string{"true"}).Args, " ")
+	if !strings.Contains(args, "-o ConnectTimeout=") {
+		t.Errorf("args %q", args)
 	}
 }
 

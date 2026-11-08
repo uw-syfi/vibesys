@@ -39,8 +39,9 @@ func TestWaitOnARealDaemonTellsReportsApartAndSeesAStall(t *testing.T) {
 	}
 }
 
-// Against a whole daemon: a run that is going has started, a run its lead has reported has a report,
-// and a run that is stopped ends, each without a timer firing.
+// Against a whole daemon: a run that is going has started, and a run its lead has reported has a
+// report. A final report from a lead that then rests ends the run by itself (core's endFinished),
+// so the end is waited for and never raced by a stop.
 func TestWaitOnARealDaemonFollowsARunToItsEnd(t *testing.T) {
 	l := newLive(t, nil)
 	run, lead := l.startRun(t, "/work/repo", "alpha")
@@ -55,10 +56,24 @@ func TestWaitOnARealDaemonFollowsARunToItsEnd(t *testing.T) {
 		t.Fatalf("wait --until report: exit %d, stderr %q", got.code, got.stderr)
 	}
 	contains(t, "stdout", got.stdout, "plan 1 won")
+	got = w.run(context.Background(), "run", "wait", run, "--until", "ended", "--timeout", "1m")
+	if got.code != 0 {
+		t.Fatalf("wait --until ended: exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "ended")
+}
+
+// Against a whole daemon: a run that is stopped ends. No final report was given, so only the stop
+// ends the run, and the stop cannot meet a run that has already ended itself.
+func TestWaitOnARealDaemonFollowsAStoppedRunToItsEnd(t *testing.T) {
+	l := newLive(t, nil)
+	run, _ := l.startRun(t, "/work/repo", "alpha")
+	w := newWorld(t, l.Listener.Dial)
+
 	if stop := w.run(context.Background(), "run", "stop", "--yes"); stop.code != 0 {
 		t.Fatalf("stop: exit %d, stderr %q", stop.code, stop.stderr)
 	}
-	got = w.run(context.Background(), "run", "wait", run, "--until", "ended", "--timeout", "1m")
+	got := w.run(context.Background(), "run", "wait", run, "--until", "ended", "--timeout", "1m")
 	if got.code != 0 {
 		t.Fatalf("wait --until ended: exit %d, stderr %q", got.code, got.stderr)
 	}

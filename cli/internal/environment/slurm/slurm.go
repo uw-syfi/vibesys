@@ -214,14 +214,12 @@ var _ Builders = Buildx{}
 
 // Remove implements Builders.
 func (b Buildx) Remove(ctx context.Context) error {
-	bounded, done := remote.Bounded(ctx, b.Timers, CallTimeout)
-	defer done()
 	program := b.Program
 	if program == "" {
 		program = dockercli.DefaultProgram
 	}
 	script := `"$1" buildx inspect "$2" >/dev/null 2>&1 || exit 0; exec "$1" buildx rm --keep-state "$2"`
-	if _, err := remote.Output(bounded, b.Timers, b.Shell, []string{"sh", "-c", script, "vs-builder", program, b.Name}, ""); err != nil {
+	if _, err := remote.Within(ctx, b.Timers, b.Shell, CallTimeout, []string{"sh", "-c", script, "vs-builder", program, b.Name}, ""); err != nil {
 		return fmt.Errorf("removing the builder %s: %w", b.Name, err)
 	}
 	return nil

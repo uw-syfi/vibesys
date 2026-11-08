@@ -7,8 +7,9 @@
 // it for the program's: an exit status nobody saw is unknown, never a success.
 //
 // A call whose transport failed before its program started (Shell.Unreached), such as an ssh
-// connection a login node closed during its key exchange, never ran, so it is made again after a
-// short wait, as Reconnect says, before it is reported.
+// connection a login node closed during its key exchange, never ran, so it is made again, as
+// Reconnect says, for a few minutes before it is reported: long enough for a login node that
+// throttles new connections (sshd's MaxStartups) to take them again.
 package remote
 
 import (
@@ -76,9 +77,14 @@ var _ Shell = SSH{}
 // sshLost is the exit code ssh reports for its own failures.
 const sshLost = 255
 
-// options are what every ssh call adds: no prompts, and a dead connection noticed in about three
-// minutes.
-var options = []string{"-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=6"}
+// options are what every ssh call adds: no prompts, a connection that is not set up within 30
+// seconds given up on, and a dead connection noticed in about three minutes. A login node whose
+// sshd throttles new connections, or whose listen queue is full, can leave a connection waiting
+// for its banner, or its TCP handshake unanswered, for minutes; with ConnectTimeout ssh then says
+// so ("Connection timed out during banner exchange", "ssh: connect to host ...: Connection timed
+// out"), which is a call that did not reach the machine, made again as Reconnect says. An
+// operator's own -o ConnectTimeout in Program comes first, and ssh keeps the first value.
+var options = []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=6"}
 
 // argv is the ssh command line without the remote command.
 func (s SSH) argv() []string {
@@ -149,17 +155,23 @@ func quoteWord(w string) string {
 // The policy of Reconnect.
 const (
 	// ReconnectAttempts is how many times in all a call that does not reach its machine is made.
-	ReconnectAttempts = 5
+	ReconnectAttempts = 14
 	// ReconnectWait is the wait before the second attempt; each later wait is twice the one before,
-	// so the waits are 1s, 2s, 4s and 8s.
+	// up to ReconnectMaxWait, so the waits are 1s, 2s, 4s, 8s, 16s and then 30s eight times:
+	// ReconnectWindow in all, which outlasts a login node that refuses new connections for a
+	// minute or two (sshd's MaxStartups), as a busy one does.
 	ReconnectWait = time.Second
+	// ReconnectMaxWait is the longest wait between two attempts.
+	ReconnectMaxWait = 30 * time.Second
+	// ReconnectWindow is how long the waits between the attempts add up to.
+	ReconnectWindow = 4*time.Minute + 31*time.Second
 )
 
 // Reconnect calls try until it returns a call that reached the machine, and returns that call's
 // result: try reports with unreached that its call failed before its program started. Such a call
-// is made again after a wait, ReconnectWait and then twice the one before each time, up to
-// ReconnectAttempts in all; the last unreached call's result is returned, its error saying how many
-// were made. A wait that ctx ends returns the last result at once.
+// is made again after a wait, ReconnectWait and then twice the one before each time up to
+// ReconnectMaxWait, up to ReconnectAttempts in all; the last unreached call's result is returned,
+// its error saying how many were made. A wait that ctx ends returns the last result at once.
 func Reconnect[T any](ctx context.Context, timers clock.Timers, try func() (result T, unreached bool, err error)) (T, error) {
 	wait := ReconnectWait
 	for attempt := 1; ; attempt++ {
@@ -168,12 +180,12 @@ func Reconnect[T any](ctx context.Context, timers clock.Timers, try func() (resu
 			return res, err
 		}
 		if attempt == ReconnectAttempts {
-			return res, fmt.Errorf("%w (not reached in %d attempts)", err, attempt)
+			return res, fmt.Errorf("%w (not reached in %d attempts over %v)", err, attempt, ReconnectWindow)
 		}
 		if !clock.Sleep(ctx, timers, wait) {
 			return res, err
 		}
-		wait *= 2
+		wait = min(2*wait, ReconnectMaxWait)
 	}
 }
 
@@ -192,8 +204,49 @@ func Output(ctx context.Context, timers clock.Timers, sh Shell, argv []string, s
 	return Reconnect(ctx, timers, func() (string, bool, error) { return output(ctx, sh, argv, stdin) })
 }
 
+// Within is Output with each attempt bounded by d, on the timers: a call that should answer at once
+// is bounded so that a machine that does not answer cannot hold it forever, and the bound is each
+// attempt's, so the waits of Reconnect between attempts that did not reach the machine never use
+// it up. An attempt that d ends returns a *NoAnswer, and is not made again: it may have run.
+func Within(ctx context.Context, timers clock.Timers, sh Shell, d time.Duration, argv []string, stdin string) (string, error) {
+	return Reconnect(ctx, timers, func() (string, bool, error) {
+		bounded, done := Bounded(ctx, timers, d)
+		defer done()
+		out, unreached, err := output(bounded, sh, argv, stdin)
+		if err != nil && ctx.Err() == nil && bounded.Err() != nil {
+			return "", false, &NoAnswer{Where: sh.Where(), Within: d}
+		}
+		return out, unreached, err
+	})
+}
+
+// NoAnswer is the failure of a call whose machine did not answer within its bound. It is a
+// *core.Failure of kind FailureUnavailable, as errors.As finds it.
+type NoAnswer struct {
+	// Where names the machine.
+	Where string
+	// Within is the bound.
+	Within time.Duration
+}
+
+// Error implements error.
+func (n *NoAnswer) Error() string { return n.failure().Error() }
+
+// Unwrap makes the failure what errors.As finds.
+func (n *NoAnswer) Unwrap() error { return n.failure() }
+
+func (n *NoAnswer) failure() *core.Failure {
+	return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s did not answer within %v", n.Where, n.Within)}
+}
+
 // output makes one attempt of Output.
 func output(ctx context.Context, sh Shell, argv []string, stdin string) (string, bool, error) {
+	return run(ctx, sh, argv, stdin, func(err error, stderr string) bool { return Unreached(sh, err, stderr) })
+}
+
+// run runs argv on the machine once, as Output says, and reports with unreached whether it did not
+// reach it.
+func run(ctx context.Context, sh Shell, argv []string, stdin string, unreached func(err error, stderr string) bool) (string, bool, error) {
 	cmd := sh.Command(ctx, argv)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -215,9 +268,9 @@ func output(ctx context.Context, sh Shell, argv []string, stdin string) (string,
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit) && sh.Lost(exit.ExitCode()):
-		return "", Unreached(sh, err, errb.String()), &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}
+		return "", unreached(err, errb.String()), &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot reach %s to run %s: %s", sh.Where(), what, msg)}
 	case errors.As(err, &exit):
-		return "", false, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s on %s exited with %d: %s", what, sh.Where(), exit.ExitCode(), msg)}
+		return "", unreached(err, errb.String()), &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s on %s exited with %d: %s", what, sh.Where(), exit.ExitCode(), msg)}
 	}
 	return "", false, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("cannot run %s on %s: %v", what, sh.Where(), err)}
 }
@@ -230,11 +283,15 @@ func clip(s string) string {
 	return s
 }
 
-// Rsync copies directories, and files to the host, between this machine and an ssh host.
+// Rsync copies directories, and files to the host, between this machine and an ssh host. A copy
+// whose ssh could not connect is made again as Reconnect says: a copy makes its destination what
+// its source is, so making it again is safe however much of it the first made.
 type Rsync struct {
 	SSH SSH
 	// Program is rsync and any arguments of the operator's.
 	Program []string
+	// Timers makes the waits between the copies of one that did not connect.
+	Timers clock.Timers
 }
 
 // Push makes remote a copy of local. With mirror, files that local does not have are deleted.
@@ -259,8 +316,24 @@ func (r Rsync) copy(ctx context.Context, from, to string, mirror bool) error {
 		argv = append(argv, "--delete")
 	}
 	argv = append(argv, "--", from, to)
-	_, _, err := output(ctx, Local{}, argv, "")
+	_, err := Reconnect(ctx, r.Timers, func() (string, bool, error) { return run(ctx, Local{}, argv, "", rsyncUnreached) })
 	return err
+}
+
+// rsyncUnreached reports whether rsync failed because its ssh could not connect: rsync exits with
+// 255 when its remote shell did, and writes its own lines after ssh's, so any line of stderr may be
+// the one ssh ended with.
+func rsyncUnreached(err error, stderr string) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != sshLost {
+		return false
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if (SSH{}).Unreached(sshLost, line) {
+			return true
+		}
+	}
+	return false
 }
 
 // Bounded returns ctx limited to d by the timers, and the function that releases it. A call that
