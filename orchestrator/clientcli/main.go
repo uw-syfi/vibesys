@@ -193,10 +193,17 @@ func flags(name string) *flag.FlagSet {
 }
 
 // parse reads flags and positional arguments in any order, since `run steer TEXT --agent A` puts a
-// flag after a positional.
+// flag after a positional. It re-parses what is left after each positional so a later flag is still
+// found, which would otherwise let a "--" terminator's effect expire at the end of the fs.Parse call
+// that consumed it: a later positional that itself starts with "-" (such as steer text) would then be
+// misread as an unknown flag. So "--" is handled here, once, for the rest of args, however many
+// positionals come before it.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
+		if len(args) > 0 && args[0] == "--" {
+			return append(positional, args[1:]...), nil
+		}
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil, err

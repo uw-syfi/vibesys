@@ -32,6 +32,22 @@ func TestSteerSendsToTheLeadByDefaultAndSaysWhereItWent(t *testing.T) {
 	}
 }
 
+// A "--" before the run id protects every argument after it from being read as a flag, including
+// one naming a run by id and a steering text that itself starts with "-".
+func TestSteerADoubleDashProtectsEveryLaterArgumentFromLookingLikeAFlag(t *testing.T) {
+	l := newLive(t, nil)
+	run, lead := l.startRun(t, "/work/repo", "alpha")
+	w := newWorld(t, l.Listener.Dial)
+	l.awaitRun(t, run, hasStatus(pb.RunStatus_RUN_STATUS_RUNNING))
+
+	got := w.run(context.Background(), "run", "steer", "--", run, "- try the second plan")
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, lead)
+	l.awaitConsumed(t, "- try the second plan")
+}
+
 func TestSteerJSONPrintsTheReceiptAndAgentFlagTargetsAnAgent(t *testing.T) {
 	f := &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false,
 		[]*pb.Run{runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)})},
