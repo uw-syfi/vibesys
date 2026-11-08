@@ -31,6 +31,11 @@ const (
 	StageMeasure JobStage = "measure"
 )
 
+// Valid says whether the stage is one of the three, so the zero value (none) is not.
+func (s JobStage) Valid() bool {
+	return s == StageBuild || s == StageCheck || s == StageMeasure
+}
+
 // JobState is where a job is.
 type JobState string
 
@@ -372,6 +377,9 @@ type Transition struct {
 	CancelReason string
 	// CheckJob links a measure job to the check pass it relies on.
 	CheckJob JobID
+	// FailedStage is the stage that ended a check or measure job, set on the move to failed and only
+	// there; empty when no stage of the job's record ended it.
+	FailedStage JobStage
 	// Cut is set on the move from running back to queued, and only there: it says how the attempt
 	// that ran was cut off, and the job keeps it in Attempts.
 	Cut Cut

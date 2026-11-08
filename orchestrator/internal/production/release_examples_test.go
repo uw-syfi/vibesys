@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 	"github.com/uw-syfi/vibesys/orchestrator/release/assemble"
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
@@ -100,7 +101,7 @@ func TestTheExampleSourceReadsTheBuiltTreesAndPinsClones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cloned.Clone == nil || *cloned.Clone != (release.CloneSpec{URL: "https://example.invalid/vllm.git", Revision: examplePin}) {
+	if cloned.Clone == nil || *cloned.Clone != (daemon.CloneSpec{URL: "https://example.invalid/vllm.git", Revision: examplePin}) {
 		t.Fatalf("clone = %+v", cloned.Clone)
 	}
 	if _, err := fs.Stat(cloned.Vendored, "vllm/engine.py"); err == nil {
@@ -109,8 +110,8 @@ func TestTheExampleSourceReadsTheBuiltTreesAndPinsClones(t *testing.T) {
 	if _, err := fs.Stat(cloned.Vendored, ".vibesys/tasks/serve/vibesys.input.toml"); err != nil {
 		t.Fatal(err)
 	}
-	var gone *release.ExampleNotFoundError
-	if _, err := trees.Source(t.Context(), "db/nothing"); !errors.As(err, &gone) {
+	var gone *daemon.ExampleUnavailable
+	if _, err := trees.Source(t.Context(), "db/nothing"); !errors.As(err, &gone) || gone.Reason != daemon.ExampleNotFound || gone.Detail != "db/nothing" {
 		t.Fatalf("an example the release lacks: %v", err)
 	}
 }

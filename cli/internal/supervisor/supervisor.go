@@ -297,12 +297,12 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	case flow.NotAttempted:
 		return lifecycle.NotAttempted{Failure: v.Failure}
 	case flow.Rejected:
-		return lifecycle.Rejected{Reason: v.Reason}
+		return lifecycle.Rejected{Reason: v.Reason, Stage: flow.StageBenchmark.JobStage()}
 	case flow.Stopped:
 		// A step that ended unlike a pass: the job's output says which, and the settlement of the
 		// exit says the rest.
 		_, _ = fmt.Fprintf(writer{s}, "vibesys-cli: %s\n", v.Reason)
-		return lifecycle.Stopped{Exec: v.Exec}
+		return lifecycle.Stopped{Exec: v.Exec, Stage: v.Stage.JobStage()}
 	case flow.Lost:
 		_, _ = fmt.Fprintf(writer{s}, "vibesys-cli: %s\n", v.Reason)
 		return lifecycle.Lost{Failure: v.Failure}

@@ -92,7 +92,8 @@ _OperatorContextFields: TypeAlias = Literal["placement"]
 class OperatorContext(Message[_OperatorContextFields]):
     """
     OperatorContext is what an operator chooses for the jobs of the agents they start. The
-    orchestrator does not set it: an agent inherits it from the environment it was started in.
+    orchestrator sets placement to the run's eval place when the run names one; an unpinned run sets
+    nothing, and the agent keeps what the environment it was started in names.
 
     ```proto
     message vibesys.cli.v1.OperatorContext

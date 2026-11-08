@@ -99,7 +99,21 @@ func flowEnd(v lifecycle.Verdict) *cliv1.FlowEnd {
 	default:
 		// A verdict with no variant stays one: the receiver reads it as lost.
 	}
+	out.FailedStage = JobStage(failedStageOf(v))
 	return out
+}
+
+// failedStageOf is the stage a stopped or rejected ending belongs to, and none for any other.
+func failedStageOf(v lifecycle.Verdict) core.JobStage {
+	switch v := v.(type) {
+	case lifecycle.Stopped:
+		return v.Stage
+	case lifecycle.Rejected:
+		return v.Stage
+	default:
+		// Every other ending, passed or not, names no stage.
+		return ""
+	}
 }
 
 func execution(e core.ExecOutcome) *cliv1.ExecutionOutcome {
@@ -146,6 +160,10 @@ func toAttempt(c *cliv1.CommandEnd) core.Attempt {
 }
 
 func toVerdict(f *cliv1.FlowEnd) lifecycle.Verdict {
+	stage, err := ToJobStage("outcome.flow.failed_stage", f.GetFailedStage())
+	if err != nil {
+		return lifecycle.Lost{Failure: unread(err)}
+	}
 	switch v := f.GetVerdict().(type) {
 	case *cliv1.FlowEnd_Passed:
 		found, err := toResult("outcome.flow.passed", v.Passed)
@@ -158,11 +176,11 @@ func toVerdict(f *cliv1.FlowEnd) lifecycle.Verdict {
 		if err != nil {
 			return lifecycle.Lost{Failure: unread(err)}
 		}
-		return lifecycle.Stopped{Exec: exec}
+		return lifecycle.Stopped{Exec: exec, Stage: stage}
 	case *cliv1.FlowEnd_NotAttempted:
 		return lifecycle.NotAttempted{Failure: ToFailure(v.NotAttempted)}
 	case *cliv1.FlowEnd_Rejected:
-		return lifecycle.Rejected{Reason: v.Rejected}
+		return lifecycle.Rejected{Reason: v.Rejected, Stage: stage}
 	case *cliv1.FlowEnd_Lost:
 		return lifecycle.Lost{Failure: ToFailure(v.Lost)}
 	default:
