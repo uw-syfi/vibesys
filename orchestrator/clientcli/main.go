@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
@@ -194,16 +195,16 @@ func flags(name string) *flag.FlagSet {
 
 // parse reads flags and positional arguments in any order, since `run steer TEXT --agent A` puts a
 // flag after a positional. It re-parses what is left after each positional so a later flag is still
-// found, which would otherwise let a "--" terminator's effect expire at the end of the fs.Parse call
-// that consumed it: a later positional that itself starts with "-" (such as steer text) would then be
-// misread as an unknown flag. So "--" is handled here, once, for the rest of args, however many
-// positionals come before it.
+// found. A "--" protects the rest of args from being read as flags at all, however many positionals
+// come before or after it; fs.Parse already stops at one, but it also consumes it (fs.Args() no
+// longer has it), so by the time the loop below has peeled off the first positional past it, nothing
+// is left to say a "--" was ever there. Re-parsing the rest regardless would then let a later
+// positional that itself starts with "-" (such as steer text) be misread as an unknown flag. So each
+// fs.Parse call is checked for having done that, and once one has, every remaining argument is taken
+// as positional, unparsed, for the rest of this call.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
-		if len(args) > 0 && args[0] == "--" {
-			return append(positional, args[1:]...), nil
-		}
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil, err
@@ -216,9 +217,20 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 		if fs.NArg() == 0 {
 			return positional, nil
 		}
+		if sawDashDash(args, fs.Args()) {
+			return append(positional, fs.Args()...), nil
+		}
 		positional = append(positional, fs.Arg(0))
 		args = fs.Args()[1:]
 	}
+}
+
+// sawDashDash says a "--" that was somewhere in before is no longer anywhere in after: fs.Parse
+// removes the one it stops at, whether as a terminator or, rarely, as some flag's literal "--"
+// value, and either way nothing is left in after to say so. Both are treated alike here, as a line
+// this call will not scan past again for flags.
+func sawDashDash(before, after []string) bool {
+	return slices.Contains(before, "--") && !slices.Contains(after, "--")
 }
 
 // session is a connection with the stream of runs open and one run chosen.

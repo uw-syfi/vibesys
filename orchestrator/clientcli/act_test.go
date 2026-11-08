@@ -48,6 +48,24 @@ func TestSteerADoubleDashProtectsEveryLaterArgumentFromLookingLikeAFlag(t *testi
 	l.awaitConsumed(t, "- try the second plan")
 }
 
+// A flag before "--" must not make parse() forget the terminator once it falls out of the one
+// fs.Parse call that consumed it: steer has two positionals after "--" (RUN and TEXT), so the
+// second is only exposed by re-parsing what is left after the first is peeled off, and that
+// second re-parse must not read a TEXT starting with "-" as an unknown flag either.
+func TestSteerADoubleDashAfterAFlagStillProtectsBothPositionalsAfterIt(t *testing.T) {
+	l := newLive(t, nil)
+	run, lead := l.startRun(t, "/work/repo", "alpha")
+	w := newWorld(t, l.Listener.Dial)
+	l.awaitRun(t, run, hasStatus(pb.RunStatus_RUN_STATUS_RUNNING))
+
+	got := w.run(context.Background(), "run", "steer", "--agent", lead, "--", run, "- try the second plan")
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, lead)
+	l.awaitConsumed(t, "- try the second plan")
+}
+
 func TestSteerJSONPrintsTheReceiptAndAgentFlagTargetsAnAgent(t *testing.T) {
 	f := &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false,
 		[]*pb.Run{runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)})},
