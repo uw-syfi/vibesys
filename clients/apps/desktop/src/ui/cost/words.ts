@@ -21,6 +21,9 @@ export interface CostWords {
   readonly moment: (atMs: number) => string;
 }
 
+/** The mark of a cost that is a floor: turns without a price are behind it. */
+export const FLOOR = '≥ ';
+
 /** What a figure the host did not report is written as, never a zero. */
 export const NOT_REPORTED = '—';
 
