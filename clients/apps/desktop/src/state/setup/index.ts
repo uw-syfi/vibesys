@@ -1,0 +1,17 @@
+export {
+  type Baseline,
+  type CheckRow,
+  type CheckState,
+  type Draft,
+  followedAgent,
+  inSetup,
+  SETUP_CHECKS,
+  type SetupFacts,
+  type StartOutcome,
+  setupFacts,
+  setupLead,
+  setupOf,
+  startOutcome,
+  UNREAD_SETUP,
+  unmetOf,
+} from './setup.js';

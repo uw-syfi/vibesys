@@ -20,11 +20,19 @@ import type {
   NavigationAction,
   Route,
 } from '../../state/index.js';
-import {costTarget} from '../../state/index.js';
+import {costTarget, followedAgent} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
-import {sendIntent, startIntent, stopIntent, updateRunIntent} from './intents.js';
+import {
+  beginSetupIntent,
+  completeSetupIntent,
+  sendIntent,
+  startIntent,
+  stopIntent,
+  updateRunIntent,
+} from './intents.js';
 import type {RunUpdateRequest} from './run-settings/update-draft.js';
+import type {CompleteSetupRequest} from './setup/index.js';
 import type {StartRunRequest} from './start-draft.js';
 
 /** One host the window reads, by the `HostKey` its routes name. */
@@ -49,9 +57,16 @@ export interface Issues {
   readonly stops: Readonly<Record<string, Issued>>;
   readonly sends: Readonly<Record<string, Issued>>;
   readonly updates: Readonly<Record<string, Issued>>;
+  readonly completes: Readonly<Record<string, Issued>>;
 }
 
-export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}, updates: {}};
+export const NO_ISSUES: Issues = {
+  start: undefined,
+  stops: {},
+  sends: {},
+  updates: {},
+  completes: {},
+};
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
 const IDLE: HistoryStatus = {_tag: 'Idle'};
@@ -71,7 +86,9 @@ const watchOpen = (
   Atom.make(get => {
     const found = hosts.find(candidate => candidate.key === host);
     if (found === undefined) return;
-    if (agentId !== null && agentId !== undefined) get(found.session.agents.watch(agentId));
+    // A run in setup is its lead's conversation: that agent is followed with no route naming it.
+    const followed = followedAgent(get(found.session.model).data, runId, agentId);
+    if (followed !== null) get(found.session.agents.watch(followed));
     if (runId !== undefined) get(found.session.runHistory.watch(runId));
   });
 
@@ -110,6 +127,52 @@ const openAgentHistory = (
         wholes: get(session.history.wholes(agentId)),
       };
 
+/** What the route has open, as the snapshot of each host reads it. */
+interface OpenIn {
+  readonly openHost: string | undefined;
+  readonly openAgent: string | null | undefined;
+  readonly openRun: string | undefined;
+  readonly cost: CostTarget | null;
+}
+
+/** One host as the screens read it: its model and connection, and the streams of what is open on it. */
+const snapshotOfHost = (
+  get: Reader,
+  {key, label, session}: ConnectedHost,
+  open: OpenIn,
+): HostSnapshot => {
+  const model = get(session.model);
+  const here = open.openHost === key;
+  // A run in setup follows its lead as well, which no route names.
+  const agent = here ? followedAgent(model.data, open.openRun, open.openAgent) : null;
+  const {cost} = open;
+  return {
+    key,
+    label,
+    model,
+    connection: get(session.connection.state),
+    freshness: get(session.connection.freshness),
+    runsFeed: get(session.runs.status),
+    repositoryChecked: get(session.repositoryCheck.state),
+    directories: get(session.directories.state),
+    catalogue: get(session.newRun.catalogue),
+    evalPlaces: get(session.newRun.places),
+    provision: get(session.newRun.provision),
+    agentFeeds: agent === null ? {} : {[agent]: get(session.agents.status(agent)) ?? OPENING},
+    costFeeds:
+      cost?.host === key
+        ? {
+            [cost.runId]: {
+              status: get(session.costs.status(cost.runId)),
+              freshness: get(session.costs.freshness(cost.runId)),
+            } satisfies CostFeedSnapshot,
+          }
+        : {},
+    runHistory: openRunHistory(get, session, here ? open.openRun : undefined),
+    history: openAgentHistory(get, session, agent),
+  };
+};
+
 /** Everything the screens show, read from the sessions. */
 const snapshots = (
   hosts: readonly ConnectedHost[],
@@ -137,44 +200,18 @@ const snapshots = (
         }),
       );
     return {
-      hosts: hosts.map(({key, label, session}) => ({
-        key,
-        label,
-        model: get(session.model),
-        connection: get(session.connection.state),
-        freshness: get(session.connection.freshness),
-        runsFeed: get(session.runs.status),
-        repositoryChecked: get(session.repositoryCheck.state),
-        directories: get(session.directories.state),
-        catalogue: get(session.newRun.catalogue),
-        evalPlaces: get(session.newRun.places),
-        provision: get(session.newRun.provision),
-        agentFeeds:
-          openHost === key && openAgent !== null && openAgent !== undefined
-            ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
-            : {},
-        costFeeds:
-          cost?.host === key
-            ? {
-                [cost.runId]: {
-                  status: get(session.costs.status(cost.runId)),
-                  freshness: get(session.costs.freshness(cost.runId)),
-                } satisfies CostFeedSnapshot,
-              }
-            : {},
-        runHistory: openRunHistory(get, session, openHost === key ? openRun : undefined),
-        history: openAgentHistory(get, session, openHost === key ? openAgent : undefined),
-      })),
+      hosts: hosts.map(host => snapshotOfHost(get, host, {openHost, openAgent, openRun, cost})),
       progress: {
         start: progressOf(issues.start),
         stop: each(issues.stops),
         send: each(issues.sends),
         update: each(issues.updates),
+        complete: each(issues.completes),
       },
     };
   });
 
-type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send' | 'update'>;
+type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send' | 'update' | 'complete'>;
 
 /** What the route has open: the host, the agent and the run, and the run whose cost stream is followed. */
 function openOf(route: Route) {
@@ -264,6 +301,25 @@ function updateCommands(
   };
 }
 
+/** The commands of a run's setup: begin one, and complete it into an optimizing run. */
+function setupCommands(
+  issue: (host: string, intent: Intent, kept: (issued: Issued) => void) => void,
+  retry: (issued: Issued | undefined) => void,
+  issues: Issues,
+  setIssues: (update: (all: Issues) => Issues) => void,
+): Pick<AppCommands, 'beginSetup' | 'completeSetup' | 'retryComplete'> {
+  return {
+    // A begun setup is answered where a start is: the New run screen shows it and opens its run.
+    beginSetup: (host: string, request: StartRunRequest) =>
+      issue(host, beginSetupIntent(request), start => setIssues(all => ({...all, start}))),
+    completeSetup: (host: string, runId: string, request: CompleteSetupRequest) =>
+      issue(host, completeSetupIntent(runId, request), done =>
+        setIssues(all => ({...all, completes: {...all.completes, [runId]: done}})),
+      ),
+    retryComplete: runId => retry(issues.completes[runId]),
+  };
+}
+
 /**
  * The runs of every host, one open at a time. The run streams are followed by the window (the
  * shell mounts them), and where the person is comes from the shell's navigation.
@@ -332,6 +388,7 @@ export function ConnectedApp(props: {
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
     ...updateCommands(issue, retry, issues, setIssues),
+    ...setupCommands(issue, retry, issues, setIssues),
     loadEarlier: (host, agentId, before) =>
       on(host, session => session.history.loadEarlier(agentId, before)),
     expand: (host, agentId, ordinal) =>
