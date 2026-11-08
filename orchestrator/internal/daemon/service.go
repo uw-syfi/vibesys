@@ -60,6 +60,8 @@ type ServiceDeps struct {
 	Starts StartChecks
 	// Directories answers ListDirectory. Nil is a host that cannot list folders.
 	Directories Directories
+	// Provisioner answers ProvisionRepository. Nil is a host that cannot make repositories.
+	Provisioner Provisioner
 	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
 	// or replace the tool's daemon, so it is asked before the command reaches the engine, whose lock it
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means

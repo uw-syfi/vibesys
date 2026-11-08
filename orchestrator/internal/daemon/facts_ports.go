@@ -85,11 +85,6 @@ type Catalogue struct {
 	Entries []*pb.CatalogueEntry
 }
 
-// Provisioner makes a repository on the host. A refusal is the response's, not an error.
-type Provisioner interface {
-	Provision(ctx context.Context, req *pb.ProvisionRepositoryRequest) (*pb.ProvisionRepositoryResponse, error)
-}
-
 func unimplemented(rpc string) error {
 	return status.Errorf(codes.Unimplemented, "%s is not implemented by this host yet", rpc)
 }
@@ -103,10 +98,4 @@ func (s *Service) ListCatalogue(context.Context, *pb.ListCatalogueRequest) (*pb.
 // ListEvalPlaces implements OrchestratorService. It answers Unimplemented until the host reports places.
 func (s *Service) ListEvalPlaces(context.Context, *pb.ListEvalPlacesRequest) (*pb.ListEvalPlacesResponse, error) {
 	return nil, unimplemented("ListEvalPlaces")
-}
-
-// ProvisionRepository implements OrchestratorService. It answers Unimplemented until the host can
-// provision.
-func (s *Service) ProvisionRepository(context.Context, *pb.ProvisionRepositoryRequest) (*pb.ProvisionRepositoryResponse, error) {
-	return nil, unimplemented("ProvisionRepository")
 }

@@ -46,6 +46,7 @@ var boundaries = map[string]allowance{
 	"internal/production/holders.go":             {reason: "the holder's log, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 2, writes: 2, exec: 3},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
 	"internal/production/sidecars.go":            {reason: "where the holder is installed, its directory, and the listing of an agent's session directories; process-boundaries.md, host control", reads: 3, writes: 1},
+	"internal/production/provision.go":           {reason: "makes a new repository in a staging directory beside its place, commits it with git and renames it into the host's repositories directory; its steps are one interface so tests break each in turn", reads: 3, writes: 6, exec: 1},
 	"internal/production/sessionprocesses.go":    {reason: "the lock a session's process holds and the SessionProcesses record it keeps beside it, which the host reads only to end what a gone process left; process-boundaries.md, process identity", reads: 2, writes: 2},
 	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, reads the repository with git, and lists the task folders and the children of a folder an operator is typing a path into", reads: 2, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},
@@ -58,6 +59,7 @@ var execFiles = map[string]string{
 	"internal/production/checkouts.go":   "removing the git worktrees agents made, as holders.go made them, and keeping their commits under a ref",
 	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
 	"internal/production/holders.go":     "the lifetime of a session's process, ps for a group leader's start time, and git worktree creation",
+	"internal/production/provision.go":   "git init, commit and clone of a new repository",
 	"internal/production/startchecks.go": "start checks read the repository's history with git",
 }
 
