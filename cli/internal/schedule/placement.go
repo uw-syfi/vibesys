@@ -14,6 +14,12 @@ func PlacementOf(name string) ResourceID { return ResourceID("placement:" + name
 type Offered struct {
 	Resources []core.ResourceKind
 	Claims    []Claim
+	// Isolated says the placement already keeps a measure apart from its other jobs: each job runs
+	// in allocations of its own, and a measured container's holds a whole node that no other job
+	// shares. A measure of it then claims a slot of it and what its resources claim as any job
+	// does, so that up to max_jobs measures, and other jobs, run on it at once, each on its own
+	// node. Otherwise a measure holds the placement whole.
+	Isolated bool
 }
 
 // PlacementDemand is the demand of a daemon whose config names placements. Placements are
@@ -23,7 +29,8 @@ type Offered struct {
 // placement's resources claim. A job that runs on no placement, a host job, claims a slot of Host.
 // A measure job, whose benchmark samples must not be disturbed, claims each of them whole, so it
 // shares its placement and a cluster or GPUs its placement gives with no other job, while the jobs
-// of other placements run beside it.
+// of other placements run beside it; on a placement that is Isolated, where its node is already
+// its own, it claims them as any job does.
 type PlacementDemand struct {
 	// Placements are the placements of the operator config, by name.
 	Placements map[string]Offered
@@ -73,6 +80,9 @@ func (d PlacementDemand) Options(job core.Job) []Option {
 
 // on is the option of running on the placement: a slot of it, and what its resources claim.
 func (d PlacementDemand) on(name string, measure bool) Option {
+	if d.Placements[name].Isolated {
+		measure = false
+	}
 	claims := []Claim{{Resource: PlacementOf(name), Amount: 1, Exclusive: measure}}
 	for _, c := range d.Placements[name].Claims {
 		c.Exclusive = c.Exclusive || measure

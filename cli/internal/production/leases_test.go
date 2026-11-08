@@ -72,7 +72,8 @@ func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 }
 
 // Every resource a measure holds alone, as the scheduler of the config has it, is leased where
-// every daemon that uses it looks, but the GPUs, which the lease of their machine covers, and what
+// every daemon that uses it looks (a measure of an apptainer placement holds a node of its own in
+// Slurm instead, so nothing alone here), but the GPUs, which the lease of their machine covers, and what
 // a Slurm placement gives, which Slurm arbitrates: a placement's slots as the machine its engine
 // runs on, a host job's as this machine, and a cluster in the cluster.
 func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
@@ -92,13 +93,20 @@ func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
 			return options[0].Claims
 		}
 		jobs := map[string][]schedule.Claim{"a host job": measure(core.EnvironmentHost, "")}
-		for name := range op.GetPlacements() {
+		// A measure of an apptainer placement of [slurm] exclusive (the default) holds a node of
+		// its own in Slurm, so it holds nothing alone here.
+		ownNode := map[string]bool{}
+		for name, pl := range op.GetPlacements() {
 			jobs["a job of "+name] = measure(core.EnvironmentDocker, name)
+			ownNode["a job of "+name] = pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER
 		}
 		for job, cs := range jobs {
 			for _, c := range cs {
+				if c.Exclusive == ownNode[job] {
+					t.Fatalf("config %q: %s holds %s alone: %v", text, job, c.Resource, c.Exclusive)
+				}
 				if !c.Exclusive {
-					t.Fatalf("config %q: %s shares %s", text, job, c.Resource)
+					continue
 				}
 				got, ok := book.Place(string(c.Resource))
 				want, leased := wantPlace(t, text, string(c.Resource))
