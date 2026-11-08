@@ -78,10 +78,10 @@ func parseStart(args []string) (startArgs, error) {
 		a.summaryEvery = d
 		return nil
 	})
-	fs.Func("fanout", "how many subagents may be live at once (default 4)", func(v string) error {
+	fs.Func("fanout", "how many subagents may be live at once, at least 1 (default 4)", func(v string) error {
 		n, err := strconv.ParseUint(v, 10, 32)
-		if err != nil {
-			return fmt.Errorf("%q is not a number of agents", v)
+		if err != nil || n < 1 {
+			return fmt.Errorf("%q is not a number of agents, at least 1", v)
 		}
 		a.fanout = uint32(n)
 		return nil
