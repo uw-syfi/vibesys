@@ -123,6 +123,39 @@ func TestAnUnreadableTaskRefusesTheStartAndALostReadIsRetried(t *testing.T) {
 	}
 }
 
+// A task the job tool cannot run is refused at a start whatever its place, with the reason the job tool
+// gave, as one whose files are invalid is: no run and no receipt, so the same command can start once the
+// task is one the tool runs. The reader may say so as an unreadable task or in the card itself, and a
+// card that says so is never recorded, even where the place would fit it.
+func TestAStartIsRefusedForATaskTheJobToolCannotRun(t *testing.T) {
+	why := "vibesys.input.toml: [evaluator] tasks are not supported by this build"
+	unsupported := mi300x
+	unsupported.Unsupported = why
+	for name, set := range map[string]func(*daemontest.Rig){
+		"an invalid task": func(r *daemontest.Rig) {
+			r.Tasks.Fail("task", &daemon.TaskUnreadable{Reason: daemon.TaskInvalid, Detail: why})
+		},
+		"an unsupported task": func(r *daemontest.Rig) {
+			r.Tasks.Fail("task", &daemon.TaskUnreadable{Reason: daemon.TaskUnsupported, Detail: why})
+		},
+		"a card that says so": func(r *daemontest.Rig) { r.Tasks.Set("task", unsupported) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := rigWith(t, mi300x, []string{"cluster-a"})
+			set(r)
+			for _, place := range []string{"", "cluster-a", "nowhere"} {
+				_, err := r.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: startAt("c1", place)})
+				if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), why) {
+					t.Fatalf("place %q: got %v, want InvalidArgument with the reason", place, err)
+				}
+			}
+			if n := len(r.Daemon.State().Runs()); n != 0 {
+				t.Fatalf("%d runs, want none", n)
+			}
+		})
+	}
+}
+
 // A place that does not give what the task needs is refused with its own refusal, the fitting places
 // named, and no run. A named place the host lacks, and an unnamed choice among several, likewise.
 func TestAStartIsRefusedForAPlaceThatDoesNotFitOrIsNotThereOrIsAmbiguous(t *testing.T) {

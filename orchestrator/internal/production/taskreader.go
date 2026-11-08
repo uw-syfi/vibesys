@@ -20,7 +20,9 @@ type TaskDescriber interface {
 
 // TaskReader is a daemon.TaskReader over the CLI's DescribeTask. It parses no task file: the callee
 // owns the schema, so a new field of a card is the CLI's edit alone. What crosses the process is held to
-// its contract in both directions, and a card for another task than the one asked is refused.
+// its contract in both directions, and a card for another task than the one asked is refused. It
+// decides nothing of what the job tool supports either: a card of a task the tool cannot run is read
+// with the tool's reason in it (TaskCard.unsupported), and the daemon decides what a start does with it.
 type TaskReader struct{ Describer TaskDescriber }
 
 var _ daemon.TaskReader = TaskReader{}

@@ -737,7 +737,13 @@ type TaskCard struct {
 	WorkloadDescription string           `protobuf:"bytes,8,opt,name=workload_description,json=workloadDescription,proto3" json:"workload_description,omitempty"`
 	Objectives          []*CardObjective `protobuf:"bytes,9,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	// The first heading of the task's OBJECTIVE.md; empty without one.
-	Heading       string `protobuf:"bytes,10,opt,name=heading,proto3" json:"heading,omitempty"`
+	Heading string `protobuf:"bytes,10,opt,name=heading,proto3" json:"heading,omitempty"`
+	// Why this build's job tool cannot run the task, in its own words naming the file and the key;
+	// empty when it can. It is the refusal a job's reading of the task would make, so it is set both
+	// for what the tool does not run ([evaluator], an [environment.modal], a benchmark that names no
+	// result format) and for a manifest or objectives file it finds invalid. A task that sets it
+	// still has this card, and a client must never offer the task as one a run can start from.
+	Unsupported   string `protobuf:"bytes,11,opt,name=unsupported,proto3" json:"unsupported,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -838,6 +844,13 @@ func (x *TaskCard) GetObjectives() []*CardObjective {
 func (x *TaskCard) GetHeading() string {
 	if x != nil {
 		return x.Heading
+	}
+	return ""
+}
+
+func (x *TaskCard) GetUnsupported() string {
+	if x != nil {
+		return x.Unsupported
 	}
 	return ""
 }
@@ -1728,7 +1741,7 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x05maker\x18\x02 \x01(\x0e2\x1a.vibesys.cli.v1.ModelMakerB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x05maker\"f\n" +
 	"\x0fTaskWorkloadV02\x12!\n" +
 	"\x04name\x18\x01 \x01(\tB\r\xbaH\x06r\x04\x10\x01(P\xd0\xf3\x18\x02R\x04name\x120\n" +
-	"\vdescription\x18\x02 \x01(\tB\x0e\xbaH\ar\x05\x10\x01(\x90\x03\xd0\xf3\x18\x02R\vdescription\"\x9a\x04\n" +
+	"\vdescription\x18\x02 \x01(\tB\x0e\xbaH\ar\x05\x10\x01(\x90\x03\xd0\xf3\x18\x02R\vdescription\"\xc6\x04\n" +
 	"\bTaskCard\x12\x1e\n" +
 	"\x04task\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04task\x12<\n" +
@@ -1745,7 +1758,8 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"objectives\x18\t \x03(\v2\x1d.vibesys.cli.v1.CardObjectiveB\b\xbaH\x05\x92\x01\x02\x10\x10R\n" +
 	"objectives\x12\"\n" +
 	"\aheading\x18\n" +
-	" \x01(\tB\b\xbaH\x05r\x03(\xc8\x01R\aheading\"\x9b\x01\n" +
+	" \x01(\tB\b\xbaH\x05r\x03(\xc8\x01R\aheading\x12*\n" +
+	"\vunsupported\x18\v \x01(\tB\b\xbaH\x05r\x03(\x80\x10R\vunsupported\"\x9b\x01\n" +
 	"\rCardObjective\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12P\n" +
 	"\tdirection\x18\x02 \x01(\x0e2&.vibesys.cli.v1.TaskObjectiveDirectionB\n" +

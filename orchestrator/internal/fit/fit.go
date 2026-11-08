@@ -1,8 +1,13 @@
-// Package fit decides whether the hardware a task needs is given by an eval place. It is pure: the
-// same need and places always give the same answer, and nothing is read from outside.
+// Package fit decides whether a task can run on the host: whether this build's job tool can run it at
+// all, and whether the hardware it needs is given by an eval place. It is pure: the same card and
+// places always give the same answer, and nothing is read from outside.
 //
-// The rule is written once here and states the precedence of AcceleratorNeed and FitState:
+// The rule is written once here and states the precedence of the card's own word and of
+// AcceleratorNeed and FitState:
 //
+//  0. A task whose card says the job tool cannot run it (TaskCard.unsupported) fits nowhere, whatever
+//     the places are: no place can give what no job can use. The word is the job tool's own, from the
+//     loader every job reads the task through, so this package holds no list of what is supported.
 //  1. A place whose hardware is unknown or unreadable fits nothing, a CPU need included.
 //  2. A CPU need, or a task that states no hardware, fits every place with a known state.
 //  3. An offer whose model is OTHER fits nothing: a device with no registry entry cannot be shown to be
@@ -47,13 +52,18 @@ func offerFits(need *cli.AcceleratorNeed, offer *pb.EvalOffer) bool {
 	return need.GetModel() == cli.AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED || offer.GetModel() == need.GetModel()
 }
 
-// Of is the fit of a need over the places the host can evaluate on: the state, and the names of the
-// places that give the need, in the order of places, when the state is FITS.
+// Of is the fit of a task, by its card, over the places the host can evaluate on: the state, and the
+// names of the places that give the card's need, in the order of places, when the state is FITS.
 //
+//   - A card that says the job tool cannot run the task: UNSUPPORTED, with no place, whatever the places.
 //   - No place has a known state (none at all, or every one unreadable): PLACES_UNREADABLE.
 //   - A need whose model is OTHER, which names an accelerator the host has no entry for: UNKNOWN_ACCELERATOR.
 //   - Otherwise FITS when some place gives the need, else NO_ACCELERATOR.
-func Of(need *cli.AcceleratorNeed, places []*pb.EvalPlace) *pb.Fit {
+func Of(card *cli.TaskCard, places []*pb.EvalPlace) *pb.Fit {
+	if card.GetUnsupported() != "" {
+		return &pb.Fit{State: pb.FitState_FIT_STATE_UNSUPPORTED}
+	}
+	need := card.GetHardware()
 	readable := false
 	for _, place := range places {
 		if place.GetKnown() != nil {

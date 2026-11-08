@@ -90,6 +90,25 @@ func TestTheTaskReaderRefusesWhatTheContractDoesNotAllow(t *testing.T) {
 	}
 }
 
+// The job tool's word that it cannot run a task crosses the reader whole, whatever else the card says:
+// the reader reads it into the card and decides nothing, so the daemon, which decides what a start does
+// with it, sees exactly what the job tool said.
+func TestTheTaskReaderCarriesTheJobToolsReasonForATaskItCannotRun(t *testing.T) {
+	r := rand.New(rand.NewPCG(8, 9))
+	for i := range 200 {
+		task := "t" + someWord(r, 10)
+		card := &cliv1.TaskCard{Task: task, Heading: someWord(r, 30), HardwareName: someWord(r, 20), Unsupported: "vibesys.input.toml: " + someWord(r, 100)}
+		if r.IntN(2) == 0 {
+			card.Domain = cliv1.TaskDomain_TASK_DOMAIN_DATA_STRUCTURES
+			card.Hardware = &cliv1.AcceleratorNeed{Vendor: cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_CPU, Count: 1}
+		}
+		got, err := TaskReader{&fakeDescriber{resp: cardResponse(card)}}.Read(context.Background(), daemon.TaskRef{Source: daemon.TaskCommitted, Repository: "/repo", Task: task})
+		if err != nil || got.Unsupported != card.Unsupported || got.Task != task {
+			t.Fatalf("round %d: read %+v, %v; want the card saying %q", i, got, err, card.Unsupported)
+		}
+	}
+}
+
 // A card with a field this build does not know is refused, not read with the field dropped.
 func TestTheTaskReaderRefusesACardWithAnUnknownField(t *testing.T) {
 	card := &cliv1.TaskCard{Task: "t"}

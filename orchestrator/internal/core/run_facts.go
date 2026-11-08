@@ -102,6 +102,9 @@ type TaskCard struct {
 	WorkloadDescription string
 	Objectives          []CardObjective
 	Heading             string
+	// Unsupported is why the job tool cannot run the task, in its words, and empty when it can. A start
+	// on a task that sets it is refused before a run is made, so the card a run records holds it empty.
+	Unsupported string
 }
 
 // SetupCheckID names one of the checks a task passes before a run can optimize it.

@@ -49,7 +49,9 @@ func (s *Service) resolvePlace(ctx context.Context, card *core.TaskCard, chosen 
 
 // readCard reads the card of the task as committed at the reference. A host with no reader, and a task the reader
 // cannot find, give no card, which the run records as such. A task whose files are invalid or ask for
-// what the host cannot honor is refused with the reader's detail, which names the key or the path.
+// what the host cannot honor is refused with the reader's detail, which names the key or the path. So
+// is a task whose card says the job tool cannot run it (Unsupported, in the job tool's own words): a run
+// on it could make no job, so the start and a completed setup are refused as for any unreadable task.
 func (s *Service) readCard(ctx context.Context, ref TaskRef) (*core.TaskCard, error) {
 	if s.Tasks == nil {
 		return nil, nil
@@ -57,6 +59,8 @@ func (s *Service) readCard(ctx context.Context, ref TaskRef) (*core.TaskCard, er
 	card, err := bound(s.Bounds, ctx, func(c context.Context) (core.TaskCard, error) { return s.Tasks.Read(c, ref) })
 	var unreadable *TaskUnreadable
 	switch {
+	case err == nil && card.Unsupported != "":
+		return nil, status.Error(codes.InvalidArgument, (&TaskUnreadable{Reason: TaskUnsupported, Detail: card.Unsupported}).Error())
 	case err == nil:
 		return &card, nil
 	case errors.As(err, &unreadable) && unreadable.Reason == TaskNotFound:

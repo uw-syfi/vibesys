@@ -23,7 +23,8 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// FitState says whether a task's accelerator is given by any place the host can evaluate on.
+// FitState says whether a task can run on the host: first whether this build's job tool can run it at
+// all, then whether its accelerator is given by any place the host can evaluate on.
 type FitState int32
 
 const (
@@ -38,6 +39,10 @@ const (
 	FitState_FIT_STATE_UNKNOWN_ACCELERATOR FitState = 3
 	// No place's hardware could be read.
 	FitState_FIT_STATE_PLACES_UNREADABLE FitState = 4
+	// The task's card says this build's job tool cannot run it (TaskCard.unsupported), so no place gives
+	// it, whatever the places are: a state that comes before every other. A client shows it as a status
+	// word and never offers the task as one a run can start from.
+	FitState_FIT_STATE_UNSUPPORTED FitState = 5
 )
 
 // Enum value maps for FitState.
@@ -48,6 +53,7 @@ var (
 		2: "FIT_STATE_NO_ACCELERATOR",
 		3: "FIT_STATE_UNKNOWN_ACCELERATOR",
 		4: "FIT_STATE_PLACES_UNREADABLE",
+		5: "FIT_STATE_UNSUPPORTED",
 	}
 	FitState_value = map[string]int32{
 		"FIT_STATE_UNSPECIFIED":         0,
@@ -55,6 +61,7 @@ var (
 		"FIT_STATE_NO_ACCELERATOR":      2,
 		"FIT_STATE_UNKNOWN_ACCELERATOR": 3,
 		"FIT_STATE_PLACES_UNREADABLE":   4,
+		"FIT_STATE_UNSUPPORTED":         5,
 	}
 )
 
@@ -329,13 +336,14 @@ const file_vibesys_orchestrator_v1_catalogue_proto_rawDesc = "" +
 	"\x15ListCatalogueResponse\x12\"\n" +
 	"\arelease\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\arelease\x12I\n" +
 	"\x16repositories_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\x15repositoriesDirectory\x12L\n" +
-	"\aentries\x18\x03 \x03(\v2'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\aentries*\x9b\x01\n" +
+	"\aentries\x18\x03 \x03(\v2'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\aentries*\xb6\x01\n" +
 	"\bFitState\x12\x19\n" +
 	"\x15FIT_STATE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eFIT_STATE_FITS\x10\x01\x12\x1c\n" +
 	"\x18FIT_STATE_NO_ACCELERATOR\x10\x02\x12!\n" +
 	"\x1dFIT_STATE_UNKNOWN_ACCELERATOR\x10\x03\x12\x1f\n" +
-	"\x1bFIT_STATE_PLACES_UNREADABLE\x10\x04BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x1bFIT_STATE_PLACES_UNREADABLE\x10\x04\x12\x19\n" +
+	"\x15FIT_STATE_UNSUPPORTED\x10\x05BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_catalogue_proto_rawDescOnce sync.Once

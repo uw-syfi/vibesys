@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/catalogue.proto.
  */
 export const file_vibesys_orchestrator_v1_catalogue: GenFile = /*@__PURE__*/
-  fileDesc("Cid2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jYXRhbG9ndWUucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxImMKA0ZpdBI8CgVzdGF0ZRgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZpdFN0YXRlQgq6SAeCAQQQASAAEh4KBnBsYWNlcxgCIAMoCUIOukgLkgEIEEAiBHICEAEipQEKDkNhdGFsb2d1ZUVudHJ5EhsKB2V4YW1wbGUYASABKAlCCrpIB3IFEAEogAISLgoEY2FyZBgCIAEoCzIYLnZpYmVzeXMuY2xpLnYxLlRhc2tDYXJkQga6SAPIAQESEwoLbmVlZHNfY2xvbmUYAyABKAgSMQoDZml0GAQgASgLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRml0Qga6SAPIAQEiFgoUTGlzdENhdGFsb2d1ZVJlcXVlc3QiqwEKFUxpc3RDYXRhbG9ndWVSZXNwb25zZRIZCgdyZWxlYXNlGAEgASgJQgi6SAVyAyiAARIyChZyZXBvc2l0b3JpZXNfZGlyZWN0b3J5GAIgASgJQhK6SA9yDTILXi9bXlx4MDBdKiQSQwoHZW50cmllcxgDIAMoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNhdGFsb2d1ZUVudHJ5Qgm6SAaSAQMQ0A8qmwEKCEZpdFN0YXRlEhkKFUZJVF9TVEFURV9VTlNQRUNJRklFRBAAEhIKDkZJVF9TVEFURV9GSVRTEAESHAoYRklUX1NUQVRFX05PX0FDQ0VMRVJBVE9SEAISIQodRklUX1NUQVRFX1VOS05PV05fQUNDRUxFUkFUT1IQAxIfChtGSVRfU1RBVEVfUExBQ0VTX1VOUkVBREFCTEUQBEJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_cli_v1_task]);
+  fileDesc("Cid2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jYXRhbG9ndWUucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxImMKA0ZpdBI8CgVzdGF0ZRgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZpdFN0YXRlQgq6SAeCAQQQASAAEh4KBnBsYWNlcxgCIAMoCUIOukgLkgEIEEAiBHICEAEipQEKDkNhdGFsb2d1ZUVudHJ5EhsKB2V4YW1wbGUYASABKAlCCrpIB3IFEAEogAISLgoEY2FyZBgCIAEoCzIYLnZpYmVzeXMuY2xpLnYxLlRhc2tDYXJkQga6SAPIAQESEwoLbmVlZHNfY2xvbmUYAyABKAgSMQoDZml0GAQgASgLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRml0Qga6SAPIAQEiFgoUTGlzdENhdGFsb2d1ZVJlcXVlc3QiqwEKFUxpc3RDYXRhbG9ndWVSZXNwb25zZRIZCgdyZWxlYXNlGAEgASgJQgi6SAVyAyiAARIyChZyZXBvc2l0b3JpZXNfZGlyZWN0b3J5GAIgASgJQhK6SA9yDTILXi9bXlx4MDBdKiQSQwoHZW50cmllcxgDIAMoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNhdGFsb2d1ZUVudHJ5Qgm6SAaSAQMQ0A8qtgEKCEZpdFN0YXRlEhkKFUZJVF9TVEFURV9VTlNQRUNJRklFRBAAEhIKDkZJVF9TVEFURV9GSVRTEAESHAoYRklUX1NUQVRFX05PX0FDQ0VMRVJBVE9SEAISIQodRklUX1NUQVRFX1VOS05PV05fQUNDRUxFUkFUT1IQAxIfChtGSVRfU1RBVEVfUExBQ0VTX1VOUkVBREFCTEUQBBIZChVGSVRfU1RBVEVfVU5TVVBQT1JURUQQBUJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_cli_v1_task]);
 
 /**
  * Fit is advice computed per call from the current eval places; StartRun decides again.
@@ -126,7 +126,8 @@ export const ListCatalogueResponseSchema: GenMessage<ListCatalogueResponse> = /*
   messageDesc(file_vibesys_orchestrator_v1_catalogue, 3);
 
 /**
- * FitState says whether a task's accelerator is given by any place the host can evaluate on.
+ * FitState says whether a task can run on the host: first whether this build's job tool can run it at
+ * all, then whether its accelerator is given by any place the host can evaluate on.
  *
  * @generated from enum vibesys.orchestrator.v1.FitState
  */
@@ -165,6 +166,15 @@ export enum FitState {
    * @generated from enum value: FIT_STATE_PLACES_UNREADABLE = 4;
    */
   PLACES_UNREADABLE = 4,
+
+  /**
+   * The task's card says this build's job tool cannot run it (TaskCard.unsupported), so no place gives
+   * it, whatever the places are: a state that comes before every other. A client shows it as a status
+   * word and never offers the task as one a run can start from.
+   *
+   * @generated from enum value: FIT_STATE_UNSUPPORTED = 5;
+   */
+  UNSUPPORTED = 5,
 }
 
 /**

@@ -215,6 +215,21 @@ func TestAReadThatFailsOrFindsTheTaskUnreadableCompletesNothing(t *testing.T) {
 	}
 }
 
+// A setup whose checks all hold still completes nothing for a task the job tool cannot run at the commit
+// the run would start from: the card read is a start's, and refuses it with the job tool's reason.
+func TestACompletionIsRefusedForATaskTheJobToolCannotRun(t *testing.T) {
+	r := newCompletionRig(t, passingFacts("kv"))
+	why := "vibesys.input.toml: [environment.modal] cannot be honored on this machine"
+	r.Tasks.Set("kv", core.TaskCard{Task: "kv", Heading: "committed", Unsupported: why})
+	_, err := r.complete(t, "c1", "kv")
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), why) {
+		t.Fatalf("got %v, want InvalidArgument with the job tool's reason", err)
+	}
+	if run := r.state(); run.Phase != core.PhaseSetup {
+		t.Fatalf("a task the job tool cannot run completed the setup: %+v", run)
+	}
+}
+
 func TestAHostThatCannotReadSetupFactsCompletesNothing(t *testing.T) {
 	rig := daemontest.NewRig(t)
 	rig.Setup = setup.NewStore()

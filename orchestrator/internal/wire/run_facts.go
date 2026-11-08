@@ -99,7 +99,7 @@ func cardOut(c *core.TaskCard) *cliv1.TaskCard {
 	out := &cliv1.TaskCard{
 		Task: c.Task, Domain: taskDomains.out(c.Domain), Hardware: needOut(c.Hardware), HardwareName: c.HardwareName,
 		ModelName: c.ModelName, ModelMaker: modelMakers.out(c.ModelMaker), WorkloadName: c.WorkloadName,
-		WorkloadDescription: c.WorkloadDescription, Heading: c.Heading,
+		WorkloadDescription: c.WorkloadDescription, Heading: c.Heading, Unsupported: c.Unsupported,
 	}
 	for _, o := range c.Objectives {
 		out.Objectives = append(out.Objectives, &cliv1.CardObjective{Name: o.Name, Direction: cardDirections.out(o.Direction), Unit: o.Unit})
@@ -118,6 +118,7 @@ func cardIn(c *cliv1.TaskCard, errs *errorList) *core.TaskCard {
 		Task: c.GetTask(), Domain: taskDomains.in(c.GetDomain(), errs), Hardware: needIn(c.GetHardware(), errs),
 		HardwareName: c.GetHardwareName(), ModelName: c.GetModelName(), ModelMaker: modelMakers.in(c.GetModelMaker(), errs),
 		WorkloadName: c.GetWorkloadName(), WorkloadDescription: c.GetWorkloadDescription(), Heading: c.GetHeading(),
+		Unsupported: c.GetUnsupported(),
 	}
 	for _, o := range c.GetObjectives() {
 		out.Objectives = append(out.Objectives, core.CardObjective{Name: o.GetName(), Direction: cardDirections.in(o.GetDirection(), errs), Unit: o.GetUnit()})

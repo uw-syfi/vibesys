@@ -11,7 +11,14 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
+// cardCLIManifest is a task this build runs: a check, a benchmark and the facts of a card. Its card
+// carries no word of what it cannot run.
 const cardCLIManifest = `version = "0.2"
+[accuracy]
+command = ["true"]
+[benchmark]
+command = ["true"]
+result_protocol = 2
 [catalogue]
 domain = "llm-serving"
 [catalogue.hardware]
@@ -65,6 +72,39 @@ func TestTaskCardPrintsWhatAClientShows(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 		if card.GetHardware().GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_B200 || card.GetHardware().GetCount() != 8 || card.GetModelName() != "GLM 5.2" {
+			t.Errorf("%s: card %v", name, &card)
+		}
+	}
+}
+
+// A task this build cannot run still has a card, and the card says why in words and in the contract's
+// field, from every source: a client never offers a task that no job of this build could run.
+func TestTaskCardSaysWhyABuildCannotRunTheTask(t *testing.T) {
+	c := newCLI(t)
+	tree := cardCLITree("NVIDIA B200")
+	manifest := tree[".vibesys/tasks/glm/"+task.ManifestName]
+	// The single-image format is the one whose reader knows an [evaluator] and does not run it.
+	older := strings.Replace(string(manifest.Data), `version = "0.2"`, `version = "0.1"`, 1)
+	tree[".vibesys/tasks/glm/"+task.ManifestName] = task.File{Data: []byte(older + "[evaluator]\nname = \"queue\"\n")}
+	c.world.CardFiles.PutCommit("/repo", "HEAD", tree)
+	c.world.CardFiles.PutFolder("/examples/glm", tree)
+	for name, args := range map[string][]string{
+		"head":   {"task", "card", "glm"},
+		"folder": {"task", "card", "glm", "--folder", "/examples/glm"},
+	} {
+		r := c.run(args...)
+		if r.code != exitOK || !strings.Contains(r.stdout, "hardware\t8 x NVIDIA B200\n") || !strings.Contains(r.stdout, "unsupported\t"+task.ManifestName+": [evaluator] tasks are not supported by this build") {
+			t.Errorf("%s: exit %d, %q (%q)", name, r.code, r.stdout, r.stderr)
+		}
+		j := c.run(append(args, "--json")...)
+		var card cliv1.TaskCard
+		if err := protojson.Unmarshal([]byte(j.stdout), &card); err != nil || j.code != exitOK {
+			t.Fatalf("%s: --json %q: %v", name, j.stdout, err)
+		}
+		if err := protovalidate.Validate(&card); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if !strings.Contains(card.GetUnsupported(), "[evaluator]") || card.GetHardware().GetCount() != 8 {
 			t.Errorf("%s: card %v", name, &card)
 		}
 	}

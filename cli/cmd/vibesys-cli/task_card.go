@@ -32,7 +32,8 @@ func taskCommand(ctx context.Context, d deps, args []string) int {
 //   - --folder reads the task of a folder that is not a repository, such as an example's directory.
 //
 // A task with no card is an error that says why, naming the file and the key; with --json the
-// card is printed as the contract's TaskCard.
+// card is printed as the contract's TaskCard. A task this build cannot run still has one, and the
+// card's unsupported line says why.
 func taskCard(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("task card", d)
 	revision := fs.String("revision", "", "the commit, branch or tag to read the task at (default HEAD)")
@@ -144,5 +145,6 @@ func describeCard(card *cliv1.TaskCard) string {
 		direction := strings.ToLower(strings.TrimPrefix(o.GetDirection().String(), "TASK_OBJECTIVE_DIRECTION_"))
 		fmt.Fprintf(&b, "objective\t%s\t%s\t%s\n", o.GetName(), direction, o.GetUnit())
 	}
+	line("unsupported", card.GetUnsupported())
 	return b.String()
 }

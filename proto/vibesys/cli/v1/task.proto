@@ -262,6 +262,12 @@ message TaskCard {
   repeated CardObjective objectives = 9 [(buf.validate.field).repeated.max_items = 16];
   // The first heading of the task's OBJECTIVE.md; empty without one.
   string heading = 10 [(buf.validate.field).string.max_bytes = 200];
+  // Why this build's job tool cannot run the task, in its own words naming the file and the key;
+  // empty when it can. It is the refusal a job's reading of the task would make, so it is set both
+  // for what the tool does not run ([evaluator], an [environment.modal], a benchmark that names no
+  // result format) and for a manifest or objectives file it finds invalid. A task that sets it
+  // still has this card, and a client must never offer the task as one a run can start from.
+  string unsupported = 11 [(buf.validate.field).string.max_bytes = 2048];
 }
 
 // CardObjective is one objective of a task, as a client lists it.

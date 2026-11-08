@@ -6,7 +6,8 @@ import "vibesys/cli/v1/task.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
-// FitState says whether a task's accelerator is given by any place the host can evaluate on.
+// FitState says whether a task can run on the host: first whether this build's job tool can run it at
+// all, then whether its accelerator is given by any place the host can evaluate on.
 enum FitState {
   FIT_STATE_UNSPECIFIED = 0;
   // At least one place gives it: the task's model (any known model of the vendor when it names none) in
@@ -19,6 +20,10 @@ enum FitState {
   FIT_STATE_UNKNOWN_ACCELERATOR = 3;
   // No place's hardware could be read.
   FIT_STATE_PLACES_UNREADABLE = 4;
+  // The task's card says this build's job tool cannot run it (TaskCard.unsupported), so no place gives
+  // it, whatever the places are: a state that comes before every other. A client shows it as a status
+  // word and never offers the task as one a run can start from.
+  FIT_STATE_UNSUPPORTED = 5;
 }
 
 // Fit is advice computed per call from the current eval places; StartRun decides again.

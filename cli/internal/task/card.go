@@ -18,13 +18,18 @@ const DescriptionName = "OBJECTIVE.md"
 // maxHeadingBytes is the card's bound on a heading (TaskCard.heading).
 const maxHeadingBytes = 200
 
+// maxUnsupportedBytes is the card's bound on the reason a task cannot run (TaskCard.unsupported).
+const maxUnsupportedBytes = 2048
+
 // Card reads the task called name from a repository whose root is fsys and returns what a client
 // shows of it: the facts of [catalogue], the objectives, and the heading of OBJECTIVE.md.
 //
 // It reads those three files and no more, so a task that cannot run on this machine (an evaluator,
-// a modal environment) still has a card. A task without [catalogue] has the domain unspecified and
-// no hardware. A file that is invalid is a core.FailureInvalidInput naming the file and the key; a
-// task that is not there is core.FailureNotFound. The card it returns meets the rules of its message.
+// a modal environment) still has a card, and the card says so in Unsupported: the refusal Parse
+// makes of the same files, which is the one Read, and so every job, makes. A task without
+// [catalogue] has the domain unspecified and no hardware. A file that is invalid is a
+// core.FailureInvalidInput naming the file and the key; a task that is not there is
+// core.FailureNotFound. The card it returns meets the rules of its message.
 func Card(fsys fs.FS, name string) (*cliv1.TaskCard, error) {
 	if err := ValidName(name); err != nil {
 		return nil, err
@@ -65,7 +70,7 @@ func CardOf(name string, manifestTOML, objectivesTOML, description []byte) (*cli
 	if err != nil {
 		return nil, err
 	}
-	card := &cliv1.TaskCard{Task: name, Heading: Heading(description)}
+	card := &cliv1.TaskCard{Task: name, Heading: Heading(description), Unsupported: unsupportedReason(name, manifestTOML, objectivesTOML)}
 	for _, obj := range o.GetObjective() {
 		card.Objectives = append(card.Objectives, &cliv1.CardObjective{Name: obj.GetName(), Direction: obj.GetDirection(), Unit: obj.GetUnit()})
 	}
@@ -86,6 +91,20 @@ func CardOf(name string, manifestTOML, objectivesTOML, description []byte) (*cli
 		return nil, err
 	}
 	return card, nil
+}
+
+// unsupportedReason says why this build's job tool cannot run a task of these files, and is empty when
+// it can. It is not a second list of what the tool supports: it asks Parse, the function Read reads
+// a task through, so the card refuses exactly what a job refuses and a new refusal of the loader
+// reaches every card, and so every client's offer, with no other edit. It holds the manifest and
+// the objectives only, the files a card reads; what Read finds in the rest of the task's directory
+// (a Dockerfile a [service] needs, a link that leaves the directory) is for the first job.
+func unsupportedReason(name string, manifestTOML, objectivesTOML []byte) string {
+	_, err := Parse(name, manifestTOML, objectivesTOML)
+	if err == nil {
+		return ""
+	}
+	return clip(strings.ToValidUTF8(core.AsFailure(err).Message, ""), maxUnsupportedBytes)
 }
 
 func fillFromCatalogue(card *cliv1.TaskCard, c *cliv1.TaskCatalogueV02) error {

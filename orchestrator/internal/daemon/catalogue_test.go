@@ -121,6 +121,63 @@ func TestListCatalogueGroupsByDomainAndKeepsRegistryOrderWithinOne(t *testing.T)
 	}
 }
 
+// An example whose card says the job tool cannot run it is UNSUPPORTED over every set of places: places
+// that give what it needs, places that give nothing, places that cannot be read, and no place at all.
+// The state is the card's alone, so a host with a place that gives everything still offers no such
+// example as one a run can start from, and one that can run it is as before. The same table is the
+// class: for every entry of the catalogue, FITS implies that the card carries no refusal.
+func TestAnExampleTheJobToolCannotRunIsUnsupportedOverEveryPlace(t *testing.T) {
+	entries := exampleEntries()
+	for _, e := range entries {
+		e.Card.Unsupported = ""
+	}
+	// Every other entry cannot be run by this build.
+	for i, e := range entries {
+		if i%2 == 1 {
+			e.Card.Unsupported = "vibesys.input.toml: [evaluator] tasks are not supported by this build; their commands are run by an evaluator package"
+		}
+	}
+	worlds := map[string][]*pb.EvalPlace{
+		"every accelerator": {
+			place("local", pb.EvalPlaceKind_EVAL_PLACE_KIND_LOCAL),
+			place("host-a", pb.EvalPlaceKind_EVAL_PLACE_KIND_SSH, gpus(nvidia, cli.AcceleratorModel_ACCELERATOR_MODEL_H100, 8), gpus(nvidia, cli.AcceleratorModel_ACCELERATOR_MODEL_B200, 8)),
+			place("cluster-a", pb.EvalPlaceKind_EVAL_PLACE_KIND_SLURM, gpus(amd, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300X, 8), gpus(aws, cli.AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2, 8)),
+		},
+		"nothing":    {place("local", pb.EvalPlaceKind_EVAL_PLACE_KIND_LOCAL)},
+		"unreadable": {dark("host-b")},
+		"no place":   nil,
+	}
+	for name, places := range worlds {
+		t.Run(name, func(t *testing.T) {
+			r := daemontest.NewRig(t)
+			r.Catalogue.Set(daemon.Catalogue{Release: "r", RepositoriesDirectory: "/repos", Entries: entries})
+			r.Places.Set(places...)
+			resp := listCatalogue(t, r)
+			if len(resp.Entries) != len(entries) {
+				t.Fatalf("%d entries, want %d", len(resp.Entries), len(entries))
+			}
+			unsupported := 0
+			for _, e := range resp.Entries {
+				switch {
+				case e.Card.GetUnsupported() != "":
+					unsupported++
+					if !proto.Equal(e.Fit, &pb.Fit{State: pb.FitState_FIT_STATE_UNSUPPORTED}) {
+						t.Errorf("%s: fit %v, want UNSUPPORTED and no place", e.Example, e.Fit)
+					}
+				case e.Fit.State == pb.FitState_FIT_STATE_UNSUPPORTED:
+					t.Errorf("%s: UNSUPPORTED for a card that carries no refusal", e.Example)
+				}
+				if e.Fit.State == pb.FitState_FIT_STATE_FITS && e.Card.GetUnsupported() != "" {
+					t.Errorf("%s: offered as fitting a task the job tool refuses: %q", e.Example, e.Card.GetUnsupported())
+				}
+			}
+			if unsupported == 0 || unsupported == len(entries) {
+				t.Fatalf("%d of %d entries unsupported: the table has one side", unsupported, len(entries))
+			}
+		})
+	}
+}
+
 func TestListCatalogueGivesEachEntryItsFitOverThePlaces(t *testing.T) {
 	r := daemontest.NewRig(t)
 	r.Catalogue.Set(daemon.Catalogue{Release: "r", RepositoriesDirectory: "/repos", Entries: exampleEntries()})

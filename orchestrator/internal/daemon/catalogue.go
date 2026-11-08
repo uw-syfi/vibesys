@@ -72,12 +72,13 @@ func (s *Service) ListCatalogue(ctx context.Context, req *pb.ListCatalogueReques
 }
 
 // withFit copies the entries, grouped by domain, each with the fit of its card over the places. No
-// place at all, or a failure to ask, is the same as no readable place.
+// place at all, or a failure to ask, is the same as no readable place. A card that says the job tool
+// cannot run the task is UNSUPPORTED whatever the places are (package fit's rule 0).
 func withFit(entries []*pb.CatalogueEntry, places []*pb.EvalPlace) []*pb.CatalogueEntry {
 	out := make([]*pb.CatalogueEntry, len(entries))
 	for i, entry := range entries {
 		out[i] = proto.Clone(entry).(*pb.CatalogueEntry)
-		out[i].Fit = fit.Of(entry.GetCard().GetHardware(), places)
+		out[i].Fit = fit.Of(entry.GetCard(), places)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].GetCard().GetDomain() < out[j].GetCard().GetDomain() })
 	return out

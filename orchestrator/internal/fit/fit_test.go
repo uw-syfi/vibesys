@@ -90,6 +90,16 @@ func genPlaces(r *rand.Rand) []*pb.EvalPlace {
 	return places
 }
 
+// cardNeeding is the card of a task that the job tool can run and that needs the hardware.
+func cardNeeding(need *cli.AcceleratorNeed) *cli.TaskCard {
+	return &cli.TaskCard{Task: "t", Hardware: need}
+}
+
+// unsupportedCard is the card of a task the job tool cannot run, with any need: the job tool says why.
+func unsupportedCard(need *cli.AcceleratorNeed) *cli.TaskCard {
+	return &cli.TaskCard{Task: "t", Hardware: need, Unsupported: "vibesys.input.toml: [evaluator] tasks are not supported by this build"}
+}
+
 func forAll(t *testing.T, property func(r *rand.Rand)) {
 	t.Helper()
 	for seed := range cases {
@@ -237,7 +247,7 @@ func TestOfAgreesWithFitsPlaceByPlace(t *testing.T) {
 	forAll(t, func(r *rand.Rand) {
 		need := genNeed(r)
 		places := genPlaces(r)
-		got := fit.Of(need, places)
+		got := fit.Of(cardNeeding(need), places)
 		var want []string
 		readable := false
 		for _, p := range places {
@@ -274,7 +284,7 @@ func TestUnreadablePlacesNeverJoinAFit(t *testing.T) {
 	forAll(t, func(r *rand.Rand) {
 		need := genNeed(r)
 		places := genPlaces(r)
-		got := fit.Of(need, places)
+		got := fit.Of(cardNeeding(need), places)
 		for _, name := range got.Places {
 			for _, p := range places {
 				if p.Name == name && p.GetKnown() == nil {
@@ -284,8 +294,40 @@ func TestUnreadablePlacesNeverJoinAFit(t *testing.T) {
 		}
 		// Adding an unreadable place changes nothing but the all-unreadable case.
 		withUnreadable := append(slices.Clone(places), &pb.EvalPlace{Name: "z", Kind: pb.EvalPlaceKind_EVAL_PLACE_KIND_SSH, State: unreadable()})
-		if after := fit.Of(need, withUnreadable); after.State != got.State || !slices.Equal(after.Places, got.Places) {
+		if after := fit.Of(cardNeeding(need), withUnreadable); after.State != got.State || !slices.Equal(after.Places, got.Places) {
 			t.Errorf("an unreadable place moved the fit from %v to %v", got, after)
 		}
 	})
+}
+
+// A task the job tool cannot run fits nowhere, whatever it needs and whatever the places are: no place
+// gives what no job can use. It is the first rule, so even no place at all, every place unreadable, a need
+// of an unknown accelerator, and a place that gives everything the task asks for leave the state the same,
+// and it never names a place. Nothing here lists what is supported: the card's own word is all it reads.
+func TestATaskTheJobToolCannotRunFitsNowhere(t *testing.T) {
+	forAll(t, func(r *rand.Rand) {
+		need := genNeed(r)
+		places := genPlaces(r)
+		if r.Intn(5) == 0 {
+			need = &cli.AcceleratorNeed{Vendor: cli.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, Model: cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER, Count: 1}
+		}
+		if r.Intn(5) == 0 {
+			places = nil
+		}
+		got := fit.Of(unsupportedCard(need), places)
+		if got.State != pb.FitState_FIT_STATE_UNSUPPORTED || len(got.Places) != 0 {
+			t.Errorf("need %v over %d places: %v, want UNSUPPORTED with no place", need, len(places), got)
+		}
+		if err := wire.Validate(got); err != nil {
+			t.Errorf("the fit %v is not a valid message: %v", got, err)
+		}
+		// The same task, once the job tool can run it, fits as its need says, and is never UNSUPPORTED.
+		if again := fit.Of(cardNeeding(need), places); again.State == pb.FitState_FIT_STATE_UNSUPPORTED {
+			t.Errorf("a task the job tool runs is UNSUPPORTED: %v", again)
+		}
+	})
+	// No card at all is a task that states no hardware: it is not UNSUPPORTED either.
+	if got := fit.Of(nil, []*pb.EvalPlace{{Name: "p", State: known()}}); got.State != pb.FitState_FIT_STATE_FITS {
+		t.Errorf("no card: %v", got)
+	}
 }
