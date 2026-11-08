@@ -111,6 +111,9 @@
     "SessionProcesses.holder_pid",
     "SessionSkills.directory"
   ],
+  "proto/vibesys/orchestrator/v1/catalogue.proto": [
+    "ListCatalogueResponse.repositories_directory"
+  ],
   "proto/vibesys/orchestrator/v1/host_config.proto": [
     "HostConfig.skills_directory",
     "HostConfig.state_directory",
@@ -123,6 +126,9 @@
     "Harness.HARNESS_CLAUDE_CODE",
     "Harness.HARNESS_CODEX",
     "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE"
+  ],
+  "proto/vibesys/orchestrator/v1/provision.proto": [
+    "ProvisionRepositoryRequest.parent_directory"
   ],
   "proto/vibesys/orchestrator/v1/stored.proto": [
     "JobToolEndpoint.runtime_directory"
