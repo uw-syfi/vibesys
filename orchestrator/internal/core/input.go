@@ -71,6 +71,10 @@ type (
 		// EvalPlace is the eval place chosen, empty to let the host resolve it. The shell resolves it
 		// before the command is decided and sets the run's place; it is part of what the client sent.
 		EvalPlace string
+		// Facts is what the shell established before the command was decided: the task's card and the
+		// resolved eval place, or the refusal of the place (ResolveStartFacts). Like JobTool it is
+		// no part of what the client sent or of the command's digest. A run records it once.
+		Facts StartFacts
 		// JobTool is what the run's agents use. The shell sets it, as the tool answered it before the
 		// command was decided: it is no part of what the client sent, or of the command's digest.
 		JobTool JobToolEndpoint
