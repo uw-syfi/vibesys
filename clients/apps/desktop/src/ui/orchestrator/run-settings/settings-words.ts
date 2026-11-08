@@ -64,8 +64,8 @@ export function fanoutLine(settings: RunSettings): string {
     .join(' · ');
 }
 
-/** The line under the lead fields: the lead waiting to take over, as run state; else the lead now. */
-export function leadLine(settings: RunSettings): string {
-  const {pending, current} = settings.lead;
-  return pending === null ? leadWord(current) : `Pending · ${leadWord(pending)}`;
+/** The line under the lead field: the lead waiting to take over, as run state; none when none waits. */
+export function leadLine(settings: RunSettings): string | undefined {
+  const {pending} = settings.lead;
+  return pending === null ? undefined : `Pending · ${leadWord(pending)}`;
 }

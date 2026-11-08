@@ -149,7 +149,7 @@ function fleetRecording(spec: string): Recording {
       const daemon = new FakeDaemon(hostScenario);
       daemon.publishHostCost(servedHostCost(hostScenario.changes, nowMs));
       daemon.runsLeftOut = leftOut;
-      return [host.key, daemonRecording(daemon, {files: FIXTURE_FILES})] as const;
+      return [host.key, daemonRecording(daemon, {files: FIXTURE_FILES, live: true})] as const;
     }),
   );
   // The transport counts calls to a method across hosts; a host's own count says which call is its first.

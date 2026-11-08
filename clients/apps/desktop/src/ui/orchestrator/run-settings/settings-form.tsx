@@ -56,6 +56,7 @@ export function SettingsFields(props: {
   readonly costError: string | undefined;
 }): JSX.Element {
   const {settings, models, draft, set} = props;
+  const pending = leadLine(settings);
   return (
     <Grid min="field" gap="space-3">
       <Field
@@ -80,7 +81,7 @@ export function SettingsFields(props: {
           change={fanout => set({fanout})}
         />
       </Field>
-      <Field label="Lead" help={leadLine(settings)}>
+      <Field label="Lead" reserveLine {...(pending === undefined ? {} : {help: pending})}>
         <Select
           value={draft.lead}
           options={LEAD_CHOICES.map(choice => ({
@@ -90,7 +91,7 @@ export function SettingsFields(props: {
           change={(lead: LeadChoice) => set({lead, model: ''})}
         />
       </Field>
-      <Field label="Model">
+      <Field label="Model" reserveLine>
         <Select
           value={draft.model}
           options={modelOptions(models, draft)}
