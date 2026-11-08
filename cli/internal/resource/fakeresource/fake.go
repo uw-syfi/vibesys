@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -65,4 +66,10 @@ func (f *Fake) Attach(ctx context.Context) (resource.Attachment, error) {
 	a.Mounts = slices.Clone(a.Mounts)
 	a.Env = maps.Clone(a.Env)
 	return a, nil
+}
+
+// Offers implements resource.Resource.
+func (f *Fake) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+	_, err := f.Fingerprint(ctx)
+	return nil, err
 }

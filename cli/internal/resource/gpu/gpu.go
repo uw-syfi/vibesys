@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -23,6 +24,7 @@ const EnvVisibleDevices = "NVIDIA_VISIBLE_DEVICES"
 // cannot read them.
 type Facts interface {
 	GPUFacts(ctx context.Context) (map[string]string, error)
+	ProbeFacts(ctx context.Context) (map[string]string, error)
 }
 
 // Config configures New.
@@ -108,4 +110,23 @@ func (g *GPU) Attach(ctx context.Context) (resource.Attachment, error) {
 
 func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: "gpu: " + fmt.Sprintf(format, args...)}
+}
+
+// Offers implements resource.Resource using the same facts as the fingerprint.
+func (r *GPU) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	facts, err := r.cfg.Facts.ProbeFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	offer, err := resource.AcceleratorOffer(cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, facts["gpu_model"], facts["gpu_count"])
+	if err != nil {
+		return nil, err
+	}
+	if r.cfg.Devices != "all" {
+		return nil, fmt.Errorf("GPU selection %q cannot be counted from the fingerprint", r.cfg.Devices)
+	}
+	return []*cliv1.AcceleratorOffer{offer}, nil
 }

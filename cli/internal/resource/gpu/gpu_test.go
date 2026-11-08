@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
@@ -28,6 +29,8 @@ func (f *facts) GPUFacts(context.Context) (map[string]string, error) {
 	}
 	return maps.Clone(f.of), nil
 }
+
+func (f *facts) ProbeFacts(ctx context.Context) (map[string]string, error) { return f.GPUFacts(ctx) }
 
 func (f *facts) brk() {
 	f.mu.Lock()
@@ -90,6 +93,26 @@ func TestASettingThatCannotBeIsRefused(t *testing.T) {
 		var f *core.Failure
 		if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
 			t.Errorf("%s: %v, want invalid input", name, err)
+		}
+	}
+}
+
+func TestOffersReadTheFingerprintFactsAndDoNotOverstateADeviceSelection(t *testing.T) {
+	for _, tc := range []struct {
+		devices  string
+		readable bool
+	}{{"all", true}, {"device=0,1", false}} {
+		g, err := gpu.New(gpu.Config{Devices: tc.devices, Machine: "host-a", Facts: someGPU()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		offers, err := g.Offers(t.Context())
+		if tc.readable {
+			if err != nil || len(offers) != 1 || offers[0].GetCount() != 1 || offers[0].GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100 {
+				t.Fatalf("%s: %v, %v", tc.devices, offers, err)
+			}
+		} else if err == nil {
+			t.Fatalf("%s: got %v, want unreadable selection", tc.devices, offers)
 		}
 	}
 }

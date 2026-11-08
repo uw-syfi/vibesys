@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/resourcetest"
@@ -30,6 +31,8 @@ func (f *facts) GPUFacts(context.Context) (map[string]string, error) {
 	}
 	return maps.Clone(f.of), nil
 }
+
+func (f *facts) ProbeFacts(ctx context.Context) (map[string]string, error) { return f.GPUFacts(ctx) }
 
 func (f *facts) brk() {
 	f.mu.Lock()
@@ -85,5 +88,16 @@ func TestASettingThatCannotBeIsRefused(t *testing.T) {
 func TestTheCheckIsAShellScript(t *testing.T) {
 	if out, err := exec.Command("sh", "-n", "-c", rocm.CheckScript).CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v: %s", err, out)
+	}
+}
+
+func TestOffersReadTheFingerprintFacts(t *testing.T) {
+	r, err := rocm.New(rocm.Config{Machine: "host-a", Facts: mi210()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offers, err := r.Offers(t.Context())
+	if err != nil || len(offers) != 1 || offers[0].GetCount() != 1 || offers[0].GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210 {
+		t.Fatalf("offers %v, %v", offers, err)
 	}
 }

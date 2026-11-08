@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
@@ -37,6 +38,9 @@ type Resource interface {
 	// are the resource's contract: they never collide with another kind's. It fails with a
 	// *core.Failure of kind FailureUnavailable when the resource cannot be read.
 	Fingerprint(ctx context.Context) (map[string]string, error)
+
+	// Offers reports the accelerators given to a container, or an error when unreadable.
+	Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error)
 
 	// Attach returns what a container is given to use the resource. An Attachment is only data
 	// for the container's creation: a resource makes nothing outside the container, so removing
