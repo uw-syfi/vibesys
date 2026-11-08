@@ -2,7 +2,9 @@ package gitwork
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -91,6 +93,89 @@ func (CardFiles) Committed(ctx context.Context, repository, revision, name strin
 // WorkingTree implements task.CardFiles.
 func (c CardFiles) WorkingTree(ctx context.Context, repository, name string) (task.Tree, error) {
 	return readCardFiles(ctx, repository, name)
+}
+
+// maxWorkingTaskBytes and maxWorkingTaskFiles bound what WorkingTask reads of a task directory: a
+// task is scripts and a few data files, and a directory over these is not one the daemon takes into
+// memory to version.
+const (
+	maxWorkingTaskBytes = 256 << 20
+	maxWorkingTaskFiles = 20000
+)
+
+// WorkingTask implements task.CardFiles: every file under the task's directory, a link as a link,
+// without the files a tool generates (task.Generated).
+func (CardFiles) WorkingTask(ctx context.Context, repository, name string) (task.Tree, error) {
+	if err := task.ValidName(name); err != nil {
+		return nil, err
+	}
+	if info, err := os.Stat(repository); err != nil || !info.IsDir() {
+		return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s is not a directory", repository)}
+	}
+	dir := path.Join(task.TasksDir, name)
+	base := filepath.Join(repository, filepath.FromSlash(dir))
+	tree := task.Tree{}
+	var total int64
+	err := filepath.WalkDir(base, func(full string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		relOS, err := filepath.Rel(base, full)
+		if err != nil || relOS == "." {
+			return err
+		}
+		rel := filepath.ToSlash(relOS)
+		if d.IsDir() {
+			if task.Generated(rel) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if task.Generated(rel) {
+			return nil
+		}
+		p := path.Join(dir, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.Mode()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(full)
+			if err != nil {
+				return err
+			}
+			tree[p] = task.File{Link: target}
+		case info.Mode().IsRegular():
+			total += info.Size()
+			if total > maxWorkingTaskBytes || len(tree) >= maxWorkingTaskFiles {
+				return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("%s is over %d files or %d bytes", dir, maxWorkingTaskFiles, maxWorkingTaskBytes)}
+			}
+			data, err := os.ReadFile(full)
+			if err != nil {
+				return err
+			}
+			tree[p] = task.File{Data: data, Executable: info.Mode()&0o111 != 0}
+		default:
+			return &core.Failure{Kind: core.FailureInvalidInput, Message: p + " is not a regular file"}
+		}
+		return nil
+	})
+	var f *core.Failure
+	switch {
+	case err == nil:
+		return tree, nil
+	case errors.As(err, &f):
+		return nil, f
+	case errors.Is(err, fs.ErrNotExist) && len(tree) == 0:
+		return tree, nil
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	}
+	return nil, unavailable("reading the task %q in %s: %v", name, repository, err)
 }
 
 // Folder implements task.CardFiles.
