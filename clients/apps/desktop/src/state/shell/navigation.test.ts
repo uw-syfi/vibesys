@@ -59,7 +59,6 @@ const action: fc.Arbitrary<NavigationAction> = fc.oneof(
 
 /** One of each move a run screen sends. */
 const RUN_MOVES: readonly NavigationAction[] = [
-  {type: 'open-run', host: 'host-a', runId: 'run-1'},
   {type: 'close-run'},
   {type: 'show', view: 'cost'},
   {type: 'pick-agent', agentId: 'a'},

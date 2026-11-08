@@ -9,6 +9,8 @@
  * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
  * long, `down=<n>` has the host at that position lose its link after its first snapshot,
  * `leftOut=<n>` has each host say its snapshot left that many older runs out);
+ * Every host serves the cost its own runs add up to (`served-host-cost.ts`), so the Cost page and the Runs
+ * page agree; `fleet=0-0` is a host with no runs.
  * `report` has the lead post a report about the whole run, which the report screen sums the run up by
  * (a Catch me up answer, a window report, never replaces it);
  * `catchUp=<none|history|writing|written|pending|failed>` gives the viewer check-ins already made
@@ -72,6 +74,7 @@ import {
 } from '../orchestrator/index.js';
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
+import {servedHostCost} from '../orchestrator/served-host-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
 import {makeFakeTransport, type Recording} from '../transport/index.js';
 import {makeFakeViewerBridge} from '../viewer/fakes.js';
@@ -135,16 +138,16 @@ function fleetRecording(spec: string): Recording {
   const leftOut = Number(query.get('leftOut') ?? 0);
   const bases = new Map(
     shown.map((host, index) => {
-      const daemon = new FakeDaemon(
-        fleetScenario({
-          seed: 11 + index,
-          prefix: `h${index}`,
-          runs: Number(runs),
-          live: Number(live),
-          nowMs,
-          ...(query.has('long') ? {longEvery: 3} : {}),
-        }),
-      );
+      const hostScenario = fleetScenario({
+        seed: 11 + index,
+        prefix: `h${index}`,
+        runs: Number(runs),
+        live: Number(live),
+        nowMs,
+        ...(query.has('long') ? {longEvery: 3} : {}),
+      });
+      const daemon = new FakeDaemon(hostScenario);
+      daemon.publishHostCost(servedHostCost(hostScenario.changes, nowMs));
       daemon.runsLeftOut = leftOut;
       return [host.key, daemonRecording(daemon, {files: FIXTURE_FILES})] as const;
     }),
@@ -204,6 +207,7 @@ const daemon = new FakeDaemon({
 });
 const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
+daemon.publishHostCost(servedHostCost(scenario.changes, NOW_MS));
 const shape = query.get('catchUp') ?? 'none';
 seedCheckIns(daemon, scenario, CATCH_UP_SHAPES.find(each => each === shape) ?? 'none');
 const served = daemonRecording(daemon, {live: true, files: FIXTURE_FILES});

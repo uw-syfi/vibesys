@@ -72,13 +72,16 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	// One per process, shared by its placements' engines and machines: a second one would wait on
 	// the lock the first holds for the same run.
 	runs := runtimedir.NewRuns(dir.PlacementRuns())
+	// One lock of the builds of each tag per Docker the placements build with, so that jobs of two
+	// placements that need one image build it once (engineBuilds).
+	builds := engineBuilds{}
 	providers := map[string]*docker.Provider{}
 	out := machines{claims: map[string][]core.Claim{}, probes: map[string]app.Placement{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
 	for _, name := range names {
-		provider, err := p.placement(clk, dir, containerKey, runs, local, name, op.GetPlacements()[name], grace)
+		provider, err := p.placement(clk, dir, containerKey, runs, builds, local, name, op.GetPlacements()[name], grace)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
@@ -150,8 +153,23 @@ func scopeOf(key, name string) string {
 	return docker.ScopeFor(key + "\x00placement\x00" + name)
 }
 
+// engineBuilds are the locks of the builds of each tag, by the Docker a placement builds with: this
+// machine's ("" names it) for a local placement and for every apptainer placement, whose images
+// this machine's Docker builds, and the remote host's for a remote placement.
+type engineBuilds map[string]*docker.Builds
+
+// of returns the lock of the builds on the Docker of the host, made on first use.
+func (e engineBuilds) of(host string) *docker.Builds {
+	b, ok := e[host]
+	if !ok {
+		b = docker.NewBuilds()
+		e[host] = b
+	}
+	return b
+}
+
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, runs docker.Runs, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
+func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
 	scope := scopeOf(dir.Path(), name)
 	cfg := docker.Config{
 		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
@@ -166,6 +184,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		cfg.Backend = local
 		cfg.Machine = machine.Local{CacheRoot: p.cacheRoot(), As: cfg.User}
 		cfg.Probe = p.probe()
+		cfg.Builds = builds.of("")
 	} else {
 		r := pl.GetRemote()
 		ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
@@ -175,10 +194,13 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 			Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: orDefault(r.GetRsyncCommand(), "rsync"), Timers: clk},
 			Root: r.GetRemoteWorkspaceRoot(), Scope: scope, Timers: clk,
 		}
+		cfg.Builds = builds.of(r.GetHost())
 		if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
 			// Each job's runs are a scope of their own, under the placement's.
 			cfg.Scope = scopeOf(containerKey, name)
 			staging.Run, staging.Runs = cfg.Scope, runs
+			// Its images are built by this machine's Docker.
+			cfg.Builds = builds.of("")
 		}
 		cfg.Machine = staging
 	}
