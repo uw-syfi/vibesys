@@ -59,7 +59,7 @@ func examples(ctx context.Context, args []string) error {
 		return err
 	}
 	cards := assemble.CLICardReader{Program: cli, Env: []string{
-		"HOME=" + work, "XDG_RUNTIME_DIR=" + work, "XDG_STATE_HOME=" + work, "XDG_CONFIG_HOME=" + work, "TMPDIR=" + work,
+		"HOME=" + work, "TMPDIR=" + work,
 	}}
 	catalogue, err := assemble.Catalogue(ctx, version, stage, staged, cards)
 	if stopErr := cards.Stop(ctx); err == nil && stopErr != nil {
