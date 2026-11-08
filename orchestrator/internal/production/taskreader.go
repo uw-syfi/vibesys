@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
@@ -74,4 +75,48 @@ func describeRequest(ref daemon.TaskRef) (*cliv1.DescribeTaskRequest, error) {
 		return &cliv1.DescribeTaskRequest{Source: &cliv1.DescribeTaskRequest_Folder{Folder: &cliv1.FolderTask{Root: ref.Repository, Task: ref.Task}}}, nil
 	}
 	return nil, errors.New("describe task: the reference names no source")
+}
+
+// TaskConnection is a TaskDescriber the caller closes.
+type TaskConnection interface {
+	TaskDescriber
+	Close() error
+}
+
+// CLITasks is the host's task reader over the job tool's daemon: each read asks the tool where its
+// daemon is, so a repaired or replaced install is used by the next read, then asks the daemon.
+type CLITasks struct {
+	// JobTool is the endpoint of the vibesys-cli the host's runs use.
+	JobTool func(context.Context) (core.JobToolEndpoint, error)
+	// Runner runs the tool.
+	Runner Runner
+	// Connect dials the socket the tool answered.
+	Connect func(context.Context, clidaemon.Socket) (TaskConnection, error)
+}
+
+var _ daemon.TaskReader = CLITasks{}
+
+// NewCLITasks is the reader of a real host.
+func NewCLITasks(jobTool func(context.Context) (core.JobToolEndpoint, error)) CLITasks {
+	return CLITasks{JobTool: jobTool, Runner: ExecRunner{}, Connect: func(_ context.Context, s clidaemon.Socket) (TaskConnection, error) {
+		return clidaemon.NewClient(s, CLIUnixDialer{})
+	}}
+}
+
+// Read implements daemon.TaskReader.
+func (t CLITasks) Read(ctx context.Context, ref daemon.TaskRef) (core.TaskCard, error) {
+	endpoint, err := t.JobTool(ctx)
+	if err != nil {
+		return core.TaskCard{}, err
+	}
+	socket, err := ExecEnsurerFor(endpoint, t.Runner).Ensure(ctx)
+	if err != nil {
+		return core.TaskCard{}, err
+	}
+	conn, err := t.Connect(ctx, socket)
+	if err != nil {
+		return core.TaskCard{}, err
+	}
+	defer conn.Close()
+	return TaskReader{conn}.Read(ctx, ref)
 }
