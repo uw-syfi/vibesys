@@ -182,6 +182,11 @@ func (p *Provisioner) parent(requested string) (string, error) {
 	if dir == "" {
 		dir = p.Default
 	}
+	for _, part := range strings.Split(filepath.ToSlash(dir), "/") {
+		if part == ".." { // Before ~ is expanded: joining would resolve it away.
+			return "", fmt.Errorf("%q goes up through ..", dir)
+		}
+	}
 	switch {
 	case dir == "~":
 		dir = p.Home
@@ -192,11 +197,6 @@ func (p *Provisioner) parent(requested string) (string, error) {
 	}
 	if !filepath.IsAbs(dir) {
 		return "", fmt.Errorf("%q is not an absolute path", dir)
-	}
-	for _, part := range strings.Split(filepath.ToSlash(dir), "/") {
-		if part == ".." {
-			return "", fmt.Errorf("%q goes up through ..", dir)
-		}
 	}
 	return filepath.Clean(dir), nil
 }
