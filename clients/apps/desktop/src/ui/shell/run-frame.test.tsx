@@ -28,9 +28,9 @@ import {CatchUpScreen} from '../catch-up/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
-import {COST_OVERVIEW_WORDS} from '../test-display-clock.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
+import {COST_OVERVIEW_WORDS} from '../test-display-clock.js';
 
 installDom();
 
