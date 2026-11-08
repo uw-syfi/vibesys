@@ -5,7 +5,7 @@
  */
 import {create} from '@bufbuild/protobuf';
 import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
-import {emptyState} from '../../state/index.js';
+import {emptyState, NOT_PROVISIONING, NOT_READ} from '../../state/index.js';
 import type {AppCommands, HostSnapshot} from '../../ui/orchestrator/app.js';
 
 /** A live, ready host with no data and no open streams, unless `overrides` say otherwise. */
@@ -19,6 +19,9 @@ export function hostSnapshotOf(overrides: Partial<HostSnapshot> = {}): HostSnaps
     runsFeed: {_tag: 'Live'},
     repositoryChecked: undefined,
     directories: new Map(),
+    catalogue: NOT_READ,
+    evalPlaces: NOT_READ,
+    provision: NOT_PROVISIONING,
     agentFeeds: {},
     costFeeds: {},
     runHistory: {_tag: 'Idle'},
@@ -36,6 +39,9 @@ export function appCommandsOf(overrides: Partial<AppCommands> = {}): AppCommands
     startRun: () => undefined,
     checkRepository: () => undefined,
     listDirectory: () => undefined,
+    loadNewRun: () => undefined,
+    startFromExample: () => undefined,
+    forgetProvision: () => undefined,
     retryStart: () => undefined,
     stopRun: () => undefined,
     retryStop: () => undefined,
