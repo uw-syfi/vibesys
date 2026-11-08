@@ -4,11 +4,15 @@ package vibesys.orchestrator.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/catalogue.proto";
 import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/cost.proto";
+import "vibesys/orchestrator/v1/eval_place.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/provision.proto";
 import "vibesys/orchestrator/v1/search.proto";
+import "vibesys/orchestrator/v1/setup.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 option (protocol_version) = 2;
@@ -52,6 +56,13 @@ service OrchestratorService {
   // What every run the host holds has cost, live and ended: the whole host cost view, then the whole
   // view again each time any run's cost changes. The host works it out, so the client sums nothing.
   rpc WatchHostCost(WatchHostCostRequest) returns (stream WatchHostCostResponse);
+  // The example tasks a run can start from, grouped by the card's domain by the client, each with
+  // whether the host's eval places fit it. Read-only; for the operator only.
+  rpc ListCatalogue(ListCatalogueRequest) returns (ListCatalogueResponse);
+  // The places the host can evaluate on and the hardware each gives. Read-only; for the operator only.
+  rpc ListEvalPlaces(ListEvalPlacesRequest) returns (ListEvalPlacesResponse);
+  // Makes a new git repository on the host, from a catalogue example or empty. For the operator only.
+  rpc ProvisionRepository(ProvisionRepositoryRequest) returns (ProvisionRepositoryResponse);
 }
 
 message CheckRepositoryRequest {
@@ -181,6 +192,9 @@ message RunSummary {
   // other field of the summary is whole. The next summary of the run after the host can read it again
   // has the report.
   bool report_unavailable = 7;
+  // Where the run's setup stands: the draft task, its checks and what setup has cost. Present exactly
+  // for a run that is in setup or had one.
+  SetupView setup = 8;
 }
 
 // RoleAgents counts the agents of one type in a run.

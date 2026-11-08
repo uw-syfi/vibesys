@@ -28,6 +28,16 @@ message DesktopHostSettings {
   reserved "run_transport_v2";
   // What an ssh command added beyond the destination; absent for an alias of the person's ssh config.
   optional DesktopSshOptions ssh = 3;
+  // Where this machine's new repositories are made, sent as ProvisionRepositoryRequest.parent_directory.
+  // Unset takes the host's own default (ListCatalogueResponse.repositories_directory).
+  string repositories_directory = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+      pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+    }
+  ];
 }
 
 // The options of a pasted ssh command, held beside the saved host: the host key names the

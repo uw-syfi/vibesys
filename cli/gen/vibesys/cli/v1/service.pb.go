@@ -258,7 +258,7 @@ type DescribeTaskRequest struct {
 	// Types that are valid to be assigned to Source:
 	//
 	//	*DescribeTaskRequest_Committed
-	//	*DescribeTaskRequest_Directory
+	//	*DescribeTaskRequest_Folder
 	//	*DescribeTaskRequest_WorkingTree
 	Source        isDescribeTaskRequest_Source `protobuf_oneof:"source"`
 	unknownFields protoimpl.UnknownFields
@@ -311,10 +311,10 @@ func (x *DescribeTaskRequest) GetCommitted() *CommittedTask {
 	return nil
 }
 
-func (x *DescribeTaskRequest) GetDirectory() *DirectoryTask {
+func (x *DescribeTaskRequest) GetFolder() *FolderTask {
 	if x != nil {
-		if x, ok := x.Source.(*DescribeTaskRequest_Directory); ok {
-			return x.Directory
+		if x, ok := x.Source.(*DescribeTaskRequest_Folder); ok {
+			return x.Folder
 		}
 	}
 	return nil
@@ -338,9 +338,9 @@ type DescribeTaskRequest_Committed struct {
 	Committed *CommittedTask `protobuf:"bytes,1,opt,name=committed,proto3,oneof"`
 }
 
-type DescribeTaskRequest_Directory struct {
-	// The task in a directory that is not a repository, such as the release's examples.
-	Directory *DirectoryTask `protobuf:"bytes,2,opt,name=directory,proto3,oneof"`
+type DescribeTaskRequest_Folder struct {
+	// The task in a folder that is not a repository, found under root, such as the release's examples.
+	Folder *FolderTask `protobuf:"bytes,2,opt,name=folder,proto3,oneof"`
 }
 
 type DescribeTaskRequest_WorkingTree struct {
@@ -350,7 +350,7 @@ type DescribeTaskRequest_WorkingTree struct {
 
 func (*DescribeTaskRequest_Committed) isDescribeTaskRequest_Source() {}
 
-func (*DescribeTaskRequest_Directory) isDescribeTaskRequest_Source() {}
+func (*DescribeTaskRequest_Folder) isDescribeTaskRequest_Source() {}
 
 func (*DescribeTaskRequest_WorkingTree) isDescribeTaskRequest_Source() {}
 
@@ -415,28 +415,28 @@ func (x *CommittedTask) GetTask() string {
 	return ""
 }
 
-type DirectoryTask struct {
+type FolderTask struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AbsolutePath  string                 `protobuf:"bytes,1,opt,name=absolute_path,json=absolutePath,proto3" json:"absolute_path,omitempty"`
+	Root          string                 `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
 	Task          string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DirectoryTask) Reset() {
-	*x = DirectoryTask{}
+func (x *FolderTask) Reset() {
+	*x = FolderTask{}
 	mi := &file_vibesys_cli_v1_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DirectoryTask) String() string {
+func (x *FolderTask) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DirectoryTask) ProtoMessage() {}
+func (*FolderTask) ProtoMessage() {}
 
-func (x *DirectoryTask) ProtoReflect() protoreflect.Message {
+func (x *FolderTask) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -448,19 +448,19 @@ func (x *DirectoryTask) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DirectoryTask.ProtoReflect.Descriptor instead.
-func (*DirectoryTask) Descriptor() ([]byte, []int) {
+// Deprecated: Use FolderTask.ProtoReflect.Descriptor instead.
+func (*FolderTask) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *DirectoryTask) GetAbsolutePath() string {
+func (x *FolderTask) GetRoot() string {
 	if x != nil {
-		return x.AbsolutePath
+		return x.Root
 	}
 	return ""
 }
 
-func (x *DirectoryTask) GetTask() string {
+func (x *FolderTask) GetTask() string {
 	if x != nil {
 		return x.Task
 	}
@@ -5342,10 +5342,10 @@ var File_vibesys_cli_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x1evibesys/cli/v1/placement.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x19vibesys/cli/v1/task.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\x1a\x1fvibesys/cli/v1/workstream.proto\"\xea\x01\n" +
+	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1avibesys/cli/v1/bound.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x1evibesys/cli/v1/placement.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x19vibesys/cli/v1/task.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\x1a\x1fvibesys/cli/v1/workstream.proto\"\xe1\x01\n" +
 	"\x13DescribeTaskRequest\x12=\n" +
-	"\tcommitted\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.CommittedTaskH\x00R\tcommitted\x12=\n" +
-	"\tdirectory\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.DirectoryTaskH\x00R\tdirectory\x12D\n" +
+	"\tcommitted\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.CommittedTaskH\x00R\tcommitted\x124\n" +
+	"\x06folder\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.FolderTaskH\x00R\x06folder\x12D\n" +
 	"\fworking_tree\x18\x03 \x01(\v2\x1f.vibesys.cli.v1.WorkingTreeTaskH\x00R\vworkingTreeB\x0f\n" +
 	"\x06source\x12\x05\xbaH\x02\b\x01\"\x97\x01\n" +
 	"\rCommittedTask\x122\n" +
@@ -5354,9 +5354,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"repository\x12(\n" +
 	"\brevision\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\brevision\x88\x01\x01\x12\x1b\n" +
 	"\x04task\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04taskB\v\n" +
-	"\t_revision\"e\n" +
-	"\rDirectoryTask\x127\n" +
-	"\rabsolute_path\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]+$R\fabsolutePath\x12\x1b\n" +
+	"\t_revision\"Q\n" +
+	"\n" +
+	"FolderTask\x12&\n" +
+	"\x04root\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]+$R\x04root\x12\x1b\n" +
 	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\"b\n" +
 	"\x0fWorkingTreeTask\x122\n" +
 	"\n" +
@@ -5773,7 +5774,7 @@ var file_vibesys_cli_v1_service_proto_goTypes = []any{
 	(AwayReason)(0),                  // 3: vibesys.cli.v1.AwayReason
 	(*DescribeTaskRequest)(nil),      // 4: vibesys.cli.v1.DescribeTaskRequest
 	(*CommittedTask)(nil),            // 5: vibesys.cli.v1.CommittedTask
-	(*DirectoryTask)(nil),            // 6: vibesys.cli.v1.DirectoryTask
+	(*FolderTask)(nil),               // 6: vibesys.cli.v1.FolderTask
 	(*WorkingTreeTask)(nil),          // 7: vibesys.cli.v1.WorkingTreeTask
 	(*DescribeTaskResponse)(nil),     // 8: vibesys.cli.v1.DescribeTaskResponse
 	(*TaskUnreadable)(nil),           // 9: vibesys.cli.v1.TaskUnreadable
@@ -5888,7 +5889,7 @@ var file_vibesys_cli_v1_service_proto_goTypes = []any{
 }
 var file_vibesys_cli_v1_service_proto_depIdxs = []int32{
 	5,   // 0: vibesys.cli.v1.DescribeTaskRequest.committed:type_name -> vibesys.cli.v1.CommittedTask
-	6,   // 1: vibesys.cli.v1.DescribeTaskRequest.directory:type_name -> vibesys.cli.v1.DirectoryTask
+	6,   // 1: vibesys.cli.v1.DescribeTaskRequest.folder:type_name -> vibesys.cli.v1.FolderTask
 	7,   // 2: vibesys.cli.v1.DescribeTaskRequest.working_tree:type_name -> vibesys.cli.v1.WorkingTreeTask
 	86,  // 3: vibesys.cli.v1.DescribeTaskResponse.card:type_name -> vibesys.cli.v1.TaskCard
 	9,   // 4: vibesys.cli.v1.DescribeTaskResponse.unreadable:type_name -> vibesys.cli.v1.TaskUnreadable
@@ -6088,7 +6089,7 @@ func file_vibesys_cli_v1_service_proto_init() {
 	file_vibesys_cli_v1_workstream_proto_init()
 	file_vibesys_cli_v1_service_proto_msgTypes[0].OneofWrappers = []any{
 		(*DescribeTaskRequest_Committed)(nil),
-		(*DescribeTaskRequest_Directory)(nil),
+		(*DescribeTaskRequest_Folder)(nil),
 		(*DescribeTaskRequest_WorkingTree)(nil),
 	}
 	file_vibesys_cli_v1_service_proto_msgTypes[1].OneofWrappers = []any{}

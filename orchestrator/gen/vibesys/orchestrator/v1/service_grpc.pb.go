@@ -19,16 +19,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OrchestratorService_Hello_FullMethodName           = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
-	OrchestratorService_Dispatch_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
-	OrchestratorService_WatchRuns_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
-	OrchestratorService_WatchAgent_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
-	OrchestratorService_ListItems_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
-	OrchestratorService_GetItem_FullMethodName         = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
-	OrchestratorService_GetRunHistory_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
-	OrchestratorService_WatchRunCost_FullMethodName    = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
-	OrchestratorService_CheckRepository_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/CheckRepository"
-	OrchestratorService_WatchHostCost_FullMethodName   = "/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost"
+	OrchestratorService_Hello_FullMethodName               = "/vibesys.orchestrator.v1.OrchestratorService/Hello"
+	OrchestratorService_Dispatch_FullMethodName            = "/vibesys.orchestrator.v1.OrchestratorService/Dispatch"
+	OrchestratorService_WatchRuns_FullMethodName           = "/vibesys.orchestrator.v1.OrchestratorService/WatchRuns"
+	OrchestratorService_WatchAgent_FullMethodName          = "/vibesys.orchestrator.v1.OrchestratorService/WatchAgent"
+	OrchestratorService_ListItems_FullMethodName           = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
+	OrchestratorService_GetItem_FullMethodName             = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
+	OrchestratorService_GetRunHistory_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
+	OrchestratorService_WatchRunCost_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
+	OrchestratorService_CheckRepository_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/CheckRepository"
+	OrchestratorService_WatchHostCost_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost"
+	OrchestratorService_ListCatalogue_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/ListCatalogue"
+	OrchestratorService_ListEvalPlaces_FullMethodName      = "/vibesys.orchestrator.v1.OrchestratorService/ListEvalPlaces"
+	OrchestratorService_ProvisionRepository_FullMethodName = "/vibesys.orchestrator.v1.OrchestratorService/ProvisionRepository"
 )
 
 // OrchestratorServiceClient is the client API for OrchestratorService service.
@@ -65,6 +68,13 @@ type OrchestratorServiceClient interface {
 	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
 	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
 	WatchHostCost(ctx context.Context, in *WatchHostCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchHostCostResponse], error)
+	// The example tasks a run can start from, grouped by the card's domain by the client, each with
+	// whether the host's eval places fit it. Read-only; for the operator only.
+	ListCatalogue(ctx context.Context, in *ListCatalogueRequest, opts ...grpc.CallOption) (*ListCatalogueResponse, error)
+	// The places the host can evaluate on and the hardware each gives. Read-only; for the operator only.
+	ListEvalPlaces(ctx context.Context, in *ListEvalPlacesRequest, opts ...grpc.CallOption) (*ListEvalPlacesResponse, error)
+	// Makes a new git repository on the host, from a catalogue example or empty. For the operator only.
+	ProvisionRepository(ctx context.Context, in *ProvisionRepositoryRequest, opts ...grpc.CallOption) (*ProvisionRepositoryResponse, error)
 }
 
 type orchestratorServiceClient struct {
@@ -211,6 +221,36 @@ func (c *orchestratorServiceClient) WatchHostCost(ctx context.Context, in *Watch
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type OrchestratorService_WatchHostCostClient = grpc.ServerStreamingClient[WatchHostCostResponse]
 
+func (c *orchestratorServiceClient) ListCatalogue(ctx context.Context, in *ListCatalogueRequest, opts ...grpc.CallOption) (*ListCatalogueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCatalogueResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_ListCatalogue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) ListEvalPlaces(ctx context.Context, in *ListEvalPlacesRequest, opts ...grpc.CallOption) (*ListEvalPlacesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListEvalPlacesResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_ListEvalPlaces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orchestratorServiceClient) ProvisionRepository(ctx context.Context, in *ProvisionRepositoryRequest, opts ...grpc.CallOption) (*ProvisionRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProvisionRepositoryResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_ProvisionRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrchestratorServiceServer is the server API for OrchestratorService service.
 // All implementations must embed UnimplementedOrchestratorServiceServer
 // for forward compatibility.
@@ -245,6 +285,13 @@ type OrchestratorServiceServer interface {
 	// What every run the host holds has cost, live and ended: the whole host cost view, then the whole
 	// view again each time any run's cost changes. The host works it out, so the client sums nothing.
 	WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error
+	// The example tasks a run can start from, grouped by the card's domain by the client, each with
+	// whether the host's eval places fit it. Read-only; for the operator only.
+	ListCatalogue(context.Context, *ListCatalogueRequest) (*ListCatalogueResponse, error)
+	// The places the host can evaluate on and the hardware each gives. Read-only; for the operator only.
+	ListEvalPlaces(context.Context, *ListEvalPlacesRequest) (*ListEvalPlacesResponse, error)
+	// Makes a new git repository on the host, from a catalogue example or empty. For the operator only.
+	ProvisionRepository(context.Context, *ProvisionRepositoryRequest) (*ProvisionRepositoryResponse, error)
 	mustEmbedUnimplementedOrchestratorServiceServer()
 }
 
@@ -284,6 +331,15 @@ func (UnimplementedOrchestratorServiceServer) CheckRepository(context.Context, *
 }
 func (UnimplementedOrchestratorServiceServer) WatchHostCost(*WatchHostCostRequest, grpc.ServerStreamingServer[WatchHostCostResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchHostCost not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) ListCatalogue(context.Context, *ListCatalogueRequest) (*ListCatalogueResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCatalogue not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) ListEvalPlaces(context.Context, *ListEvalPlacesRequest) (*ListEvalPlacesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEvalPlaces not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) ProvisionRepository(context.Context, *ProvisionRepositoryRequest) (*ProvisionRepositoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProvisionRepository not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) mustEmbedUnimplementedOrchestratorServiceServer() {}
 func (UnimplementedOrchestratorServiceServer) testEmbeddedByValue()                             {}
@@ -458,6 +514,60 @@ func _OrchestratorService_WatchHostCost_Handler(srv interface{}, stream grpc.Ser
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type OrchestratorService_WatchHostCostServer = grpc.ServerStreamingServer[WatchHostCostResponse]
 
+func _OrchestratorService_ListCatalogue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCatalogueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).ListCatalogue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_ListCatalogue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).ListCatalogue(ctx, req.(*ListCatalogueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_ListEvalPlaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEvalPlacesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).ListEvalPlaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_ListEvalPlaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).ListEvalPlaces(ctx, req.(*ListEvalPlacesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrchestratorService_ProvisionRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).ProvisionRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_ProvisionRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).ProvisionRepository(ctx, req.(*ProvisionRepositoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrchestratorService_ServiceDesc is the grpc.ServiceDesc for OrchestratorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -488,6 +598,18 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CheckRepository",
 			Handler:    _OrchestratorService_CheckRepository_Handler,
+		},
+		{
+			MethodName: "ListCatalogue",
+			Handler:    _OrchestratorService_ListCatalogue_Handler,
+		},
+		{
+			MethodName: "ListEvalPlaces",
+			Handler:    _OrchestratorService_ListEvalPlaces_Handler,
+		},
+		{
+			MethodName: "ProvisionRepository",
+			Handler:    _OrchestratorService_ProvisionRepository_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

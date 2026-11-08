@@ -1,0 +1,84 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "vibesys/cli/v1/task.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// SetupCheckId names one of the six checks a task passes before a run can optimize it.
+enum SetupCheckId {
+  SETUP_CHECK_ID_UNSPECIFIED = 0;
+  SETUP_CHECK_ID_OBJECTIVE = 1;
+  SETUP_CHECK_ID_CORRECTNESS_CHECK = 2;
+  SETUP_CHECK_ID_BENCHMARK = 3;
+  SETUP_CHECK_ID_BASE_PASSES = 4;
+  SETUP_CHECK_ID_BROKEN_FAILS = 5;
+  SETUP_CHECK_ID_NUMBER_STABLE = 6;
+}
+
+enum SetupCheckState {
+  SETUP_CHECK_STATE_UNSPECIFIED = 0;
+  SETUP_CHECK_STATE_PENDING = 1;
+  SETUP_CHECK_STATE_RUNNING = 2;
+  SETUP_CHECK_STATE_PASSED = 3;
+  SETUP_CHECK_STATE_FAILED = 4;
+}
+
+// SetupCheck is one check as the host derived it from facts, never from an agent's account.
+message SetupCheck {
+  SetupCheckId id = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  SetupCheckState state = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 3 [(buf.validate.field).string.max_bytes = 1024];
+}
+
+// SetupDraftUnreadable says why the draft task has no card yet, in the reader's words naming the key
+// or the path.
+message SetupDraftUnreadable {
+  string detail = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 2048
+  }];
+}
+
+// SetupView is what a client shows of a run's setup phase. The host derives all of it, and sends it in
+// RunSummary each time it changes.
+//
+// Setup is accounted apart from the run: its spend and its time are not counted toward the run's cost
+// or time limits, which start at zero when the run leaves setup. They are carried here, live while the
+// run is in setup and frozen after, so a client shows them beside the run's and never adds them in.
+message SetupView {
+  // As declared; empty until the setup agent names the task.
+  string task = 1 [(buf.validate.field).string.max_bytes = 256];
+  oneof draft {
+    // DescribeTask of the working tree.
+    vibesys.cli.v1.TaskCard card = 2;
+    SetupDraftUnreadable unreadable = 3;
+  }
+  // One of each id, in id order.
+  repeated SetupCheck checks = 4 [(buf.validate.field).repeated = {
+    min_items: 6
+    max_items: 6
+  }];
+  optional double baseline_value = 5 [(buf.validate.field).double.finite = true];
+  string baseline_unit = 6 [(buf.validate.field).string.max_bytes = 64];
+  optional double baseline_spread_percent = 7 [(buf.validate.field).double.finite = true];
+  // All six checks passed, and CompleteSetup agrees.
+  bool can_start = 8;
+  // What the setup phase has cost, in dollars: every turn of every agent of the run while it was in
+  // setup. Not counted toward the run's cost limit.
+  double spent_usd = 9 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // How long the setup phase has lasted, or lasted when it ended. Not counted toward the run's time
+  // limit.
+  google.protobuf.Duration elapsed = 10 [(buf.validate.field).required = true];
+}

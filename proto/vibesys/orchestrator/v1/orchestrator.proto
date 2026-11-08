@@ -4,6 +4,7 @@ package vibesys.orchestrator.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/task.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
@@ -18,6 +19,16 @@ enum RunStatus {
   RUN_STATUS_STOPPING = 3;
   RUN_STATUS_ENDED = 4;
   RUN_STATUS_FAILED = 5;
+}
+
+// RunPhase is which part of its life a run is in. A run recorded before phases existed reads as
+// OPTIMIZE.
+enum RunPhase {
+  RUN_PHASE_UNSPECIFIED = 0;
+  // The run is making its task with the operator: a chat with the lead, no subagents, no limits.
+  RUN_PHASE_SETUP = 1;
+  // The run optimizes its task.
+  RUN_PHASE_OPTIMIZE = 2;
 }
 
 // RunStopReason says why a run left RUNNING. The final status follows from it.
@@ -223,9 +234,16 @@ enum JobOutcome {
 }
 
 message Run {
+  option (buf.validate.message).cel = {
+    id: "run.task_unless_setup"
+    message: "a run that is not in setup has a task"
+    expression: "this.phase == 1 || this.task != ''"
+  };
+
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string repository = 2 [(buf.validate.field).string.min_len = 1];
-  string task = 3 [(buf.validate.field).string.min_len = 1];
+  // Empty while the run is in setup and has not yet named its task.
+  string task = 3;
   RunStatus status = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
@@ -290,6 +308,22 @@ message Run {
   // Absent otherwise: a quiet run is not asked, so the age of its latest report is the time that
   // passed since it, however long.
   google.protobuf.Timestamp next_summary_at = 26;
+  // What a client shows of the run's task, read by the host when the run started (or when setup
+  // completed) and never changed. Absent for a run recorded before it existed, and in setup.
+  vibesys.cli.v1.TaskCard task_card = 27;
+  // The eval place the run's evaluations go to, by name, resolved when the run started. Empty when the
+  // task needs no accelerator and the start chose none.
+  string eval_place = 28;
+  // Number 29 is held for the lead change that waits for the lead's turn to end (UpdateRun), which
+  // needs AgentSpec, defined beside the commands.
+  reserved 29;
+  RunPhase phase = 30 [(buf.validate.field).enum.defined_only = true];
+  // When the run left setup. Absent while it is in setup and for runs that never had one. The run's
+  // time limit and its cost limit count from here for a run that had a setup.
+  google.protobuf.Timestamp optimize_started_at = 31;
+  // What the setup phase cost, frozen when the run left setup. Absent before that and for runs that
+  // never had a setup. The run's cost limit is counted against `usage` less this.
+  Usage setup_usage = 32;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing

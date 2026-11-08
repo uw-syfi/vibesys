@@ -106,8 +106,8 @@ message DescribeTaskRequest {
     option (buf.validate.oneof).required = true;
     // The task as committed in a repository: what a run that starts there would use.
     CommittedTask committed = 1;
-    // The task in a directory that is not a repository, such as the release's examples.
-    DirectoryTask directory = 2;
+    // The task in a folder that is not a repository, found under root, such as the release's examples.
+    FolderTask folder = 2;
     // The task as it stands in a repository's working tree, committed or not: a draft.
     WorkingTreeTask working_tree = 3;
   }
@@ -120,8 +120,8 @@ message CommittedTask {
   string task = 3 [(buf.validate.field).string.min_len = 1];
 }
 
-message DirectoryTask {
-  string absolute_path = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+message FolderTask {
+  string root = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
   string task = 2 [(buf.validate.field).string.min_len = 1];
 }
 
