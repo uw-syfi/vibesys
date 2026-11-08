@@ -33,6 +33,10 @@ const target: fc.Arbitrary<SshTarget> = fc
   )
   .map(record => record as SshTarget);
 
+/** The arguments read two at a time, as a flag and its value. */
+const flagValues = (args: readonly string[]): Map<string, string | undefined> =>
+  new Map(args.flatMap((arg, at) => (at % 2 === 0 ? [[arg, args[at + 1]] as const] : [])));
+
 const refusal = (text: string): string => {
   try {
     parseSshCommand(text);
@@ -67,10 +71,18 @@ describe('an ssh command', () => {
     fc.assert(
       fc.property(target, value => {
         const args = sshArgs(value);
-        expect(args.filter(arg => arg === '-p')).toHaveLength(value.port === undefined ? 0 : 1);
-        if (value.identityFile !== undefined) expect(args).toContain(value.identityFile);
-        expect(args).not.toContain(value.destination);
+        const options = new Map([
+          ...(value.port === undefined ? [] : [['-p', String(value.port)] as const]),
+          ...(value.jump === undefined ? [] : [['-J', value.jump] as const]),
+          ...(value.identityFile === undefined ? [] : [['-i', value.identityFile] as const]),
+        ]);
+        // Each option is its flag then its value as one argument, and nothing else is there. So
+        // the destination is not among the arguments even when its text is also an option's
+        // value (`9` with `-p 9`, `a` with `-J a`), which the examples pin.
+        expect(args).toHaveLength(2 * options.size);
+        expect(flagValues(args)).toEqual(options);
       }),
+      {examples: [[{destination: '9', port: 9}], [{destination: 'a', jump: 'a'}]]},
     );
   });
 
