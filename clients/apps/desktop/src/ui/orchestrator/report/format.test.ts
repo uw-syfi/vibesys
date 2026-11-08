@@ -2,7 +2,14 @@ import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
 import {timeTicks} from '../../../state/index.js';
 import {TEST_CLOCK} from '../../test-display-clock.js';
-import {clip, formatAge, formatDollars, formatElapsed, formatFigure} from './format.js';
+import {
+  clip,
+  formatAge,
+  formatDollars,
+  formatElapsed,
+  formatExact,
+  formatFigure,
+} from './format.js';
 
 const HOUR = 3_600_000;
 const {
@@ -102,6 +109,20 @@ describe('figures', () => {
         if (back !== 0) expect(Math.sign(back)).toBe(Math.sign(value));
       }),
       {seed: 34},
+    );
+  });
+
+  it('write a value whole on hover, rounding no digit of it away', () => {
+    expect(formatExact(11_076)).toBe('11,076');
+    expect(formatExact(1_000_001)).toBe('1,000,001');
+    expect(formatExact(12_345.67)).toBe('12,345.67');
+    fc.assert(
+      // Whatever its size, an integer's hover parses back to the same integer: a figure with more
+      // than six significant digits must keep every one, not round to six.
+      fc.property(fc.integer({min: -1e12, max: 1e12}), value => {
+        expect(Number(formatExact(value).replace(/,/g, ''))).toBe(value);
+      }),
+      {seed: 36},
     );
   });
 

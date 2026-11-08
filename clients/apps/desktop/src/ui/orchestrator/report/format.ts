@@ -10,7 +10,9 @@
  */
 export {ago as formatAge, span as formatElapsed} from '../fleet-words.js';
 
-const EXACT = new Intl.NumberFormat('en-US', {maximumSignificantDigits: 6});
+// A bound on fraction digits, not significant ones: the hover is the whole value, so no integer
+// digit is ever rounded away (the Runs list's own exact formatter in `fleet-words.ts` is the same).
+const EXACT = new Intl.NumberFormat('en-US', {maximumFractionDigits: 6});
 
 /** A number as a figure (`11.08k`, `118.4`, `0.5123`): the app's one rule, shared with every screen. */
 export {formatFigure} from '../../figures.js';
