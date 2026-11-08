@@ -77,9 +77,30 @@ message OffersUnknown {
   string detail = 2 [(buf.validate.field).string.max_bytes = 1024];
 }
 
-// PlacementReach is whether the daemon can reach the placement now.
+// ReachState is whether the daemon can reach a placement.
+enum ReachState {
+  REACH_STATE_UNSPECIFIED = 0;
+  // Reached when last asked. The placement's offers fit tasks.
+  REACH_STATE_REACHABLE = 1;
+  // Asked and not reached. Its offers fit nothing.
+  REACH_STATE_UNREACHABLE = 2;
+  // Never asked: the placement's kind is not probed, such as a declared Slurm or Apptainer placement.
+  // Its declared offers DO fit tasks; a client does not read this as unreachable.
+  REACH_STATE_NOT_PROBED = 3;
+}
+
+// PlacementReach is whether the daemon can reach the placement, in three states.
 message PlacementReach {
-  bool reachable = 1;
-  // Why not, when it is not reachable.
+  option (buf.validate.message).cel = {
+    id: "placement_reach.reason_only_when_unreachable"
+    message: "a reason is given exactly when the placement is unreachable"
+    expression: "(this.state == 2) == (this.reason != '')"
+  };
+
+  ReachState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Why not, when the state is UNREACHABLE; empty otherwise.
   string reason = 2 [(buf.validate.field).string.max_bytes = 1024];
 }

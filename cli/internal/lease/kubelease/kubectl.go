@@ -3,6 +3,7 @@ package kubelease
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -54,15 +55,13 @@ func (k Kubectl) run(ctx context.Context, stdin string, args ...string) (string,
 	}
 	argv = append(argv, "--namespace", k.namespace(), "--request-timeout", "20s")
 	argv = append(argv, args...)
-	bounded, done := remote.Bounded(ctx, k.Timers, CallTimeout)
-	defer done()
-	out, err := remote.Output(bounded, k.Timers, k.Shell, argv, stdin)
+	out, err := remote.Within(ctx, k.Timers, k.Shell, CallTimeout, argv, stdin)
 	switch {
 	case err == nil:
 		return out, nil
 	case ctx.Err() != nil:
 		return "", ctx.Err()
-	case bounded.Err() != nil:
+	case errors.As(err, new(*remote.NoAnswer)):
 		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("lease: kubectl on %s did not answer within %s", k.Shell.Where(), CallTimeout)}
 	}
 	return "", err
