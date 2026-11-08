@@ -13,6 +13,8 @@
  * - a spawn or join row appears once per child and per result, after the divider of the last turn
  *   that began before it (the first turn, when none had), and never between the entries of a turn
  *   out of time order;
+ * - a join of a child that did not hand back says how the host settled it (idle, ended, failed or
+ *   lost) and carries the host's reason;
  * - nothing is shown for a thought or a said text with no words, and a thought has no span when the
  *   host did not say when it started.
  */
@@ -96,8 +98,14 @@ export type Entry =
       readonly key: string;
       readonly atMs: number;
       readonly childId: string;
-      readonly result: 'handed-back' | 'failed' | 'ended';
+      /** How the child came back: with a handoff, or settled without one, as the host said it did. */
+      readonly result: 'handed-back' | Settled;
+      /** The host's reason a child settled; empty when it gave none, and for a handoff. */
+      readonly detail: string;
     };
+
+/** How a child stopped working without a handoff. */
+type Settled = 'idle' | 'ended' | 'failed' | 'lost';
 
 export interface Crumb {
   readonly agentId: string;
@@ -126,6 +134,18 @@ const STATE: Readonly<Record<AgentStatus, SpawnState | 'live'>> = {
   [AgentStatus.ENDED]: 'done',
   [AgentStatus.FAILED]: 'failed',
   [AgentStatus.LOST]: 'failed',
+};
+
+/** The host settles a child as idle, ended, failed or lost; a status it does not send reads as ended. */
+const SETTLED: Readonly<Record<AgentStatus, Settled>> = {
+  [AgentStatus.UNSPECIFIED]: 'ended',
+  [AgentStatus.LAUNCHING]: 'ended',
+  [AgentStatus.ACTIVE]: 'ended',
+  [AgentStatus.WAITING]: 'ended',
+  [AgentStatus.IDLE]: 'idle',
+  [AgentStatus.ENDED]: 'ended',
+  [AgentStatus.FAILED]: 'failed',
+  [AgentStatus.LOST]: 'lost',
 };
 
 const OUTCOME: Readonly<Record<TurnStatus, TurnOutcome>> = {
@@ -314,6 +334,7 @@ function spawnEvents(
           atMs,
           childId: message.fromAgentId,
           result: 'handed-back',
+          detail: '',
         },
       });
     }
@@ -323,7 +344,6 @@ function spawnEvents(
     if (note.kind !== 'settled' || !known.has(note.agentId) || handedBack.has(note.agentId))
       continue;
     const atMs = ms(message.at) ?? 0;
-    const failed = STATE[note.status] === 'failed';
     events.push({
       atMs,
       entry: {
@@ -331,7 +351,8 @@ function spawnEvents(
         key: `join:${message.id}`,
         atMs,
         childId: note.agentId,
-        result: failed ? 'failed' : 'ended',
+        result: SETTLED[note.status],
+        detail: note.detail,
       },
     });
   }

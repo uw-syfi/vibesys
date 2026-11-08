@@ -70,6 +70,8 @@ export type ConversationItem =
       readonly title: string;
       readonly chip?: {readonly label: string; readonly tone: StatusTone};
       readonly trail: string;
+      /** A few lines under the title, such as the reason behind its chip; the pointer shows all of it. */
+      readonly note?: string;
       readonly press: () => void;
     };
 
@@ -84,10 +86,19 @@ function LinkRow(props: {readonly item: Extract<ConversationItem, {kind: 'link'}
   const {item} = props;
   return (
     <div className="vs-conversation-link">
-      <Icon name={item.icon} />
-      <Button variant="quiet" size="sm" text={item.title} press={item.press} />
-      {item.chip === undefined ? null : <Chip label={item.chip.label} tone={item.chip.tone} />}
-      <span className="vs-conversation-trail">{item.trail}</span>
+      <div className="vs-conversation-link-head">
+        <Icon name={item.icon} />
+        <Button variant="quiet" size="sm" text={item.title} press={item.press} />
+        {item.chip === undefined ? null : <Chip label={item.chip.label} tone={item.chip.tone} />}
+        <span className="vs-conversation-trail">{item.trail}</span>
+      </div>
+      {item.note === undefined ? null : (
+        <div className="vs-conversation-link-note">
+          <Text variant="small" tone="muted" title={item.note}>
+            {item.note}
+          </Text>
+        </div>
+      )}
     </div>
   );
 }

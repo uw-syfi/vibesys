@@ -204,4 +204,25 @@ describe('a conversation', () => {
     await act(async () => (title as HTMLElement).click());
     expect(log).toEqual(['go']);
   });
+
+  test('draws a link row note under the title with all of it on pointing, and no note when there is none', async () => {
+    const note = `The session did not open within 2m0s.\n${'and more '.repeat(60)}`;
+    const link = {
+      kind: 'link',
+      icon: 'arrow-up',
+      title: 'Worker 2 joined',
+      trail: '2:10 AM',
+      press: () => undefined,
+    } as const;
+    const {container} = await mounted({
+      items: [
+        {...link, id: 'with', note},
+        {...link, id: 'without'},
+      ],
+    });
+    const notes = [...container.querySelectorAll('.vs-conversation-link-note')];
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.textContent).toBe(note);
+    expect(notes[0]?.querySelector('[title]')?.getAttribute('title')).toBe(note);
+  });
 });

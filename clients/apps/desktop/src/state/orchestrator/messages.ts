@@ -60,8 +60,16 @@ export type MessageNote =
       readonly outcome: JobOutcome;
       readonly detail: string;
     }
-  /** A child stopped without handing anything back. */
-  | {readonly kind: 'settled'; readonly agentId: string; readonly status: AgentStatus}
+  /**
+   * A child stopped working without handing anything back: it went idle, ended, failed or was lost.
+   * `detail` is the host's reason, empty when it gave none.
+   */
+  | {
+      readonly kind: 'settled';
+      readonly agentId: string;
+      readonly status: AgentStatus;
+      readonly detail: string;
+    }
   /** The host nudging an agent. */
   | {readonly kind: 'reminder'}
   /** The host asking the lead for a progress report: on its schedule, or because a viewer pressed Catch me up. */
@@ -91,7 +99,12 @@ export function noteOf(message: Message): MessageNote {
         detail: body.value.detail,
       };
     case 'subagentSettled':
-      return {kind: 'settled', agentId: body.value.agentId, status: body.value.status};
+      return {
+        kind: 'settled',
+        agentId: body.value.agentId,
+        status: body.value.status,
+        detail: body.value.detail,
+      };
     case 'handoffReminder':
     case 'leadIdleReminder':
     case 'leadHandover':
