@@ -1,4 +1,4 @@
-import {Card, Chip, KeyValue, Row, Stack, Text} from '@vibesys/ui';
+import {Card, Chip, KeyValue, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
 import {withShortCommits} from '../../commit-text.js';
@@ -12,8 +12,9 @@ const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
 };
 
 /**
- * The lead's latest report as the run's summary, with how long ago it was written. A run whose lead
- * has not reported says only that. What the lead wrote is its own words and wraps.
+ * The lead's latest report as the run's summary: a compact card whose heading line carries how long
+ * ago it was written, over the lead's own words (the headline, then the parts it filled in). A run
+ * whose lead has not reported says only that. What the lead wrote is its own words and wraps.
  */
 export function LeadSummary(props: {
   readonly summary: SummaryView | undefined;
@@ -26,20 +27,29 @@ export function LeadSummary(props: {
     value: withShortCommits(text),
   }));
   return (
-    <Card section="Lead summary">
+    <Card
+      dense
+      section="Lead summary"
+      {...(summary === undefined
+        ? {}
+        : {
+            action: (
+              <Row gap="space-3">
+                {summary.final ? <Chip label="Final" tone="ok" /> : null}
+                <Text variant="small" tone="muted" title={clock.reportMoment(summary.atMs)}>
+                  {`Updated ${formatAge(props.nowMs - summary.atMs)}`}
+                </Text>
+              </Row>
+            ),
+          })}
+    >
       {summary === undefined ? (
         <Text tone="muted">No report yet</Text>
       ) : (
-        <Stack gap="space-3">
-          <Row gap="space-3" wrap>
-            <Text variant="small" tone="muted" title={clock.reportMoment(summary.atMs)}>
-              {`Updated ${formatAge(props.nowMs - summary.atMs)}`}
-            </Text>
-            {summary.final ? <Chip label="Final" tone="ok" /> : null}
-          </Row>
+        <>
           <Text as="p">{withShortCommits(summary.headline)}</Text>
           {rest.length === 0 ? null : <KeyValue items={rest} />}
-        </Stack>
+        </>
       )}
     </Card>
   );

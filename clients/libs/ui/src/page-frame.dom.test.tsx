@@ -206,7 +206,7 @@ describe('tiles and charts on one set of tracks', () => {
     const tiles =
       /\.vs-tiles\[data-track="chart"\] \{[^}]*repeat\(auto-fit, minmax\(min\(100%, var\(--chart-min\)\), 1fr\)\)[^}]*gap: var\(--space-6\)/s;
     expect(frame).toMatch(chart);
-    expect(frame).toMatch(tiles);
+    expect(css('tiles.css')).toMatch(tiles);
   });
 
   test('columns of cards can be as tall as their own content', async () => {

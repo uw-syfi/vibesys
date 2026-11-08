@@ -49,7 +49,7 @@ export function CostCard(props: {
   return (
     <Stack gap="space-5">
       {model === undefined ? (
-        <Card section="Cost" action={details}>
+        <Card dense section="Cost" action={details}>
           <Stack gap="space-3">
             {feed.status._tag === 'Failed' ? null : <Text tone="muted">Reading cost</Text>}
             <FeedProblem feed={feed} retry={props.retry} />
@@ -57,9 +57,9 @@ export function CostCard(props: {
         </Card>
       ) : (
         <>
-          <SpendCard spend={model.spend} runOver={props.runOver} action={details} />
+          <SpendCard spend={model.spend} runOver={props.runOver} action={details} dense />
           {model.empty ? null : (
-            <Card section="By agent type">
+            <Card dense section="By agent type">
               <BarRows
                 label="Cost by agent type"
                 nameHeader="Type"

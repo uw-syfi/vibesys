@@ -42,7 +42,7 @@ export function ObjectiveTiles(props: {
 }): JSX.Element | null {
   if (props.objectives.length === 0) return null;
   return (
-    <MetricTiles label="Objectives" count={props.objectives.length} track="chart">
+    <MetricTiles label="Objectives" count={props.objectives.length} dense>
       {props.objectives.map(objective => {
         const value = objective.bestValue;
         const percent = objective.bestPercentOfBound;

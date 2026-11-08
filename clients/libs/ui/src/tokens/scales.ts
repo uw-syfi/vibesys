@@ -51,6 +51,8 @@ export type SizeToken =
   | 'chart-min'
   | 'chart-min-across'
   | 'chart-height'
+  | 'pareto-height'
+  | 'pareto-height-min'
   | 'pane-list'
   | 'pane-outline'
   | 'pane-master'
@@ -94,6 +96,8 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'chart-min': 360,
   'chart-min-across': 290,
   'chart-height': 48,
+  'pareto-height': 380,
+  'pareto-height-min': 200,
   'pane-list': 380,
   'pane-outline': 340,
   'pane-master': 480,

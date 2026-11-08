@@ -879,6 +879,8 @@ export function ChartColumns(props: {
   readonly across?: number;
   /** `start`: each is as tall as its own content, not as the tallest beside it (cards, not charts). */
   readonly align?: 'start';
+  /** The closer gap of a page of dense cards (`Card` `dense`). */
+  readonly dense?: boolean;
 }): JSX.Element {
   const style: StyleWithVars | undefined =
     props.across === undefined ? undefined : {'--across': props.across};
@@ -887,6 +889,7 @@ export function ChartColumns(props: {
       className="vs-chart-columns"
       data-across={props.across}
       data-align={props.align}
+      data-dense={props.dense === true || undefined}
       style={style}
     >
       {props.children}

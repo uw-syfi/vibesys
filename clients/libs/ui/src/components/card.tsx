@@ -11,13 +11,16 @@ export function Card(props: {
   readonly section?: string;
   readonly action?: ReactNode;
   readonly flush?: boolean;
+  /** Less padding and a closer gap, for a page that packs many cards; the default is for the rest. */
+  readonly dense?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const titleId = useId();
   const flush = props.flush === true || undefined;
+  const dense = props.dense === true || undefined;
   if (props.section === undefined) {
     return (
-      <div className="vs-card" data-flush={flush}>
+      <div className="vs-card" data-flush={flush} data-dense={dense}>
         {props.children}
       </div>
     );
@@ -28,7 +31,7 @@ export function Card(props: {
     </h2>
   );
   return (
-    <section className="vs-card" data-flush={flush} aria-labelledby={titleId}>
+    <section className="vs-card" data-flush={flush} data-dense={dense} aria-labelledby={titleId}>
       {props.action === undefined ? (
         title
       ) : (

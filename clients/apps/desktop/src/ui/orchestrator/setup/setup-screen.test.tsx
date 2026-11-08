@@ -94,7 +94,7 @@ function openSetup(flavor: SetupFlavor) {
   const start = (): void => mounted.press(mounted.control('Start run'));
   const startDisabled = (): boolean =>
     mounted.control('Start run').getAttribute('aria-disabled') === 'true';
-  const rows = (): number => mounted.container.querySelectorAll('[data-even]').length;
+  const rows = (): number => mounted.container.querySelectorAll('.vs-fact[data-shrink]').length;
   const run = () => stateOf(daemon).runs[runId];
   const refresh = (): void => mounted.render(app());
   return {
