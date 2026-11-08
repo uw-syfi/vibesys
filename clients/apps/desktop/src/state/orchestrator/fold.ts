@@ -300,6 +300,9 @@ export function applyChange(state: OrchestratorState, change: RunChange): Orches
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
     case 'checkIn':
       return withCheckIn(next, body.value);
+    case 'runUpdated':
+      // The run's own change carries the new settings; the timeline folds this one (run settings item).
+      return next;
     case undefined:
       return next;
     default:

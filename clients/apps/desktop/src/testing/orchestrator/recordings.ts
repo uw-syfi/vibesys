@@ -44,6 +44,7 @@ import type {CallTarget} from '../../core/transport/gateway-transport.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from '../transport/index.js';
 import type {FakeDaemon} from './fake-daemon.js';
+import {newRunSteps} from './new-run-steps.js';
 
 /** What happens to the `nth` Dispatch call. */
 export type DispatchFate =
@@ -127,6 +128,7 @@ function agentFrameOf(
       message: true,
       receipt: true,
       checkIn: true,
+      runUpdated: true,
     }) &&
     body.value.agentId === agentId
   ) {
@@ -141,6 +143,7 @@ function agentFrameOf(
       message: true,
       receipt: true,
       checkIn: true,
+      runUpdated: true,
     }) &&
     body.value.agentId === agentId
   ) {
@@ -368,6 +371,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     return [...steps, ...tail];
   };
 
+  const newRun = newRunSteps(new Set<string>());
+
   return {
     respond: (target, nth) => {
       const ahead = aheadOfLog(daemon, target);
@@ -389,6 +394,10 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return runHistorySteps(daemon, target, options.historyPageMessages);
         case methodPathOf('CheckRepository'):
           return checkRepositorySteps(options, target);
+        case methodPathOf('ListCatalogue'):
+        case methodPathOf('ListEvalPlaces'):
+        case methodPathOf('ProvisionRepository'):
+          return newRun(target.method.slice(PREFIX.length), target.request);
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):

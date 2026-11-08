@@ -75,6 +75,9 @@ const refusedStart = (parts: HostParts, command: Command) =>
     postHandoff: true,
     postReport: true,
     requestCatchUp: true,
+    updateRun: true,
+    beginSetup: true,
+    completeSetup: true,
   })
     ? parts.connection.blocked
     : Effect.succeed(undefined);
