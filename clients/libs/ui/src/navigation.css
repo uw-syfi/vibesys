@@ -308,18 +308,20 @@
   min-height: 0;
 }
 /*
- * A screen arriving: the page fades in and settles a step down into place, the one motion that says
- * the screen changed. The app gives each screen its own key, so a new screen is a new page and
- * plays it; the same screen updating plays nothing. Reduced motion zeroes the duration.
+ * A screen arriving: the page fades in and settles a step to the right into place, away from the
+ * rail it is anchored beside, the one motion that says the screen changed. Motion goes away from the
+ * edge its content is anchored to and never vertically. The app gives each screen its own key, so a
+ * new screen is a new page and plays it; the same screen updating plays nothing. Reduced motion
+ * zeroes the duration.
  */
 @keyframes vs-arrive {
   from {
     opacity: 0;
-    transform: translateY(calc(var(--space-2) * -1));
+    transform: translateX(calc(var(--space-2) * -1));
   }
 }
 .vs-app-content > * {
-  animation: vs-arrive var(--duration-slow) var(--easing-enter);
+  animation: vs-arrive var(--duration-fast) var(--easing-enter);
 }
 /*
  * A narrow window never stacks the column above the page: the rail always stays beside the page
