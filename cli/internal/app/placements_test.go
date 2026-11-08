@@ -64,7 +64,7 @@ func TestPlacementReaderReportsEveryConfiguredPlacementAndOnlySuccessfulOffers(t
 			}
 			seen[v.Name] = true
 			success := !p.Probe.(placementProbe).fail
-			if (v.Unknown == core.OffersKnown) != success || v.Reachable != success || (success && len(v.Offers) != 1) || (!success && (len(v.Offers) != 0 || v.Detail == "")) {
+			if (v.Unknown == core.OffersKnown) != success || (v.Reach == core.ReachReachable) != success || (v.Reach == core.ReachUnreachable) != (v.Reason != "") || (success && len(v.Offers) != 1) || (!success && (len(v.Offers) != 0 || v.Detail == "")) {
 				t.Fatalf("%s: %v", v.Name, v)
 			}
 		}
@@ -163,10 +163,10 @@ func TestDeclaredPlacementsReportTheirOffersAsDeclaredAndNoneAsNotProbeable(t *t
 		t.Fatal(err)
 	}
 	a, b := got[0], got[1]
-	if a.Unknown != core.OffersKnown || a.Source != core.OfferDeclared || len(a.Offers) != 1 || !a.ProbedAt.IsZero() {
+	if a.Unknown != core.OffersKnown || a.Source != core.OfferDeclared || len(a.Offers) != 1 || !a.ProbedAt.IsZero() || a.Reach != core.ReachNotProbed || a.Reason != "" {
 		t.Errorf("declared: %v", a)
 	}
-	if b.Unknown != core.OffersNotProbeable || !strings.Contains(b.Detail, "no declared accelerators") {
+	if b.Unknown != core.OffersNotProbeable || !strings.Contains(b.Detail, "no declared accelerators") || b.Reach != core.ReachNotProbed || b.Reason != "" {
 		t.Errorf("none declared: %v", b)
 	}
 }

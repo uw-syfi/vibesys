@@ -90,6 +90,17 @@ const (
 	OffersNotProbeable OffersUnknownReason = "not_probeable"
 )
 
+// Reach is whether the daemon can reach a placement, in three states. The zero value is no state.
+type Reach uint8
+
+// The states of reach. A placement that was never asked is not unreachable: its declared offers
+// still fit tasks.
+const (
+	ReachReachable Reach = iota + 1
+	ReachUnreachable
+	ReachNotProbed
+)
+
 // PlacementKind is where a placement's engine runs containers.
 type PlacementKind uint8
 
@@ -116,7 +127,8 @@ type PlacementReading struct {
 	Source OfferSource
 	// ProbedAt is when the offers were probed; zero for declared offers.
 	ProbedAt time.Time
-	// Reachable is whether the placement answered; Reason says why not when it did not.
-	Reachable bool
-	Reason    string
+	// Reach is whether the daemon reached the placement when last asked. Reason says why not,
+	// exactly when Reach is ReachUnreachable.
+	Reach  Reach
+	Reason string
 }

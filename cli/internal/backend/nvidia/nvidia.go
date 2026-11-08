@@ -55,13 +55,11 @@ func (g *GPUs) GPUFacts(ctx context.Context) (map[string]string, error) {
 
 // ProbeFacts reads a fresh observation without changing the fingerprint cache.
 func (g *GPUs) ProbeFacts(ctx context.Context) (map[string]string, error) {
-	bounded, done := remote.Bounded(ctx, g.Timers, Timeout)
-	defer done()
-	list, err := remote.Output(bounded, g.Timers, g.Shell, []string{"nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"}, "")
+	list, err := remote.Within(ctx, g.Timers, g.Shell, Timeout, []string{"nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"}, "")
 	if err != nil {
 		return nil, fmt.Errorf("reading the GPUs: %w", err)
 	}
-	header, err := remote.Output(bounded, g.Timers, g.Shell, []string{"nvidia-smi"}, "")
+	header, err := remote.Within(ctx, g.Timers, g.Shell, Timeout, []string{"nvidia-smi"}, "")
 	if err != nil {
 		return nil, fmt.Errorf("reading the GPUs: %w", err)
 	}

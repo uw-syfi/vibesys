@@ -261,6 +261,66 @@ func TestARunWaitsInTheQueue(t *testing.T) {
 	nothingLeft(t, cluster)
 }
 
+// unanswered fails the first n reads of a job's state as the login node's outage does, and counts
+// the reads.
+func unanswered(cluster *clusterfake.Cluster, n int64) *atomic.Int64 {
+	reads := &atomic.Int64{}
+	cluster.SetFaults(func(op string) error {
+		if op == "state" && reads.Add(1) <= n {
+			return &core.Failure{Kind: core.FailureUnavailable, Message: "apptainer: host-a did not answer within 2m0s"}
+		}
+		return nil
+	})
+	return reads
+}
+
+// Regression: a login node that did not answer for a while failed every job whose allocation waited
+// in Slurm's queue, and cancelled the allocation with its place in the queue: one read of its state
+// that failed ended the wait. A read that fails is no news of the allocation, which keeps waiting
+// and runs the command once Slurm starts it, asked for once.
+func TestAQueuedAllocationOutlastsALoginNodeThatDoesNotAnswer(t *testing.T) {
+	for _, n := range []int64{1, 3, 50} {
+		w := fakeworld.New()
+		cluster := clusterfake.New(w.MemoryGates)
+		cluster.Queue(3, false)
+		reads := unanswered(cluster, n)
+		r := newRig(t, w, cluster, setup{engineTimers: clock.Immediate{Longest: apptainer.DefaultPoll}})
+		a, out := run(t, r.env, "print", "hello")
+		exited(t, a, 0)
+		if !strings.HasSuffix(out, "hello\n") || !strings.Contains(out, "could not be read") {
+			t.Errorf("%d failed reads: output %q; want the failed reads said, then the command's", n, out)
+		}
+		if got := len(cluster.Submitted()); got != 1 {
+			t.Errorf("%d failed reads: %d allocations asked for, want the one", n, got)
+		}
+		if reads.Load() <= n {
+			t.Errorf("%d failed reads: the state was read %d times", n, reads.Load())
+		}
+		nothingLeft(t, cluster)
+	}
+}
+
+// Reads of the state that keep failing for StateOutage fail the run before its command, saying so,
+// and its allocation is cancelled, as one whose wait failed otherwise.
+func TestAnAllocationWhoseStateCannotBeReadForLongIsCancelled(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	cluster.Queue(1_000_000, false)
+	unanswered(cluster, 1<<40)
+	// The outage's bound fires at once, a poll at once, and the queue's bound never.
+	timers := clock.Exactly{D: apptainer.StateOutage, Others: clock.Immediate{Longest: apptainer.DefaultPoll}}
+	r := newRig(t, w, cluster, setup{engineTimers: timers})
+	a, _ := run(t, r.env, "mark", "ran")
+	if f := failure(t, a); !strings.Contains(f.Message, "could not be read for 15m0s") || !strings.Contains(f.Message, "did not answer") {
+		t.Errorf("failure %q", f.Message)
+	}
+	if w.Marked("ran") {
+		t.Error("the command ran")
+	}
+	cluster.SetFaults(nil)
+	nothingLeft(t, cluster)
+}
+
 // A run whose allocation waits in Slurm's queue says so in its output before its command's: what
 // Slurm says of the allocation when the wait begins, again each time its state, its reason or its
 // estimate of the start changes and not at every read, and its node and the wait once it runs. A

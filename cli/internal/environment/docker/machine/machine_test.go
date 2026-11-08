@@ -42,7 +42,7 @@ func remoteMachine(t *testing.T) (*machine.Remote, string) {
 	}
 	root := filepath.Join(dir, "remote-root")
 	ssh := remote.SSH{Host: "host-a", Program: []string{program}}
-	return &machine.Remote{Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: []string{"rsync"}}, Root: root, Scope: "d1", Timers: clock.System{}}, dir
+	return &machine.Remote{Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: []string{"rsync"}, Timers: clock.System{}}, Root: root, Scope: "d1", Timers: clock.System{}}, dir
 }
 
 func write(t *testing.T, file, text string) {
