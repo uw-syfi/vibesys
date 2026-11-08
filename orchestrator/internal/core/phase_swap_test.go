@@ -311,6 +311,7 @@ func TestACompletionDuringATurnNeverCutsItAndTheTurnIsSetupSpend(t *testing.T) {
 func TestACompletionAfterASwitchOfLeadInSetupReplacesTheUnreadHandover(t *testing.T) {
 	w := newScript(t)
 	run, leadID := w.beginSetup("repo", noSteer)
+	w.declare(core.AgentCaller{Agent: leadID}, run, "kv-draft")
 	w.update(run, core.UpdateRun{Lead: &leadOn})
 	w.fact(leadID, core.SessionClosed{})
 	var handover core.LeadHandover
@@ -318,6 +319,9 @@ func TestACompletionAfterASwitchOfLeadInSetupReplacesTheUnreadHandover(t *testin
 		if h, ok := m.Body.(core.LeadHandover); ok {
 			handover = h
 		}
+	}
+	if handover.Task != "kv-draft" {
+		t.Fatalf("a setup handover names task %q, want the declared draft", handover.Task)
 	}
 	if handover.Phase != core.PhaseSetup || handover.Previous != lead {
 		t.Fatalf("a switch in setup hands over %+v, want phase setup", handover)

@@ -109,6 +109,10 @@ func (t *tx) handoverFor(run Run, lead agentState) LeadHandover {
 		Elapsed: t.in.At.Sub(run.limitClock()).Truncate(time.Second), Spent: run.optimizeUsage().CostUSD, MaxCost: run.MaxCostUSD,
 		LimitReached: run.LimitReached, ReportsPosted: run.ReportsPosted, ActiveJobs: run.ActiveJobs,
 	}
+	if run.inSetup() {
+		// A run in setup has no task yet: the lead is told the name the setup lead declared, if any.
+		h.Task = run.SetupTask
+	}
 	if total := run.totalTime(); total > 0 {
 		h.MaxTime = max(time.Second, total.Truncate(time.Second))
 	}
