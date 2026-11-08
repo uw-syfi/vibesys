@@ -13,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs/jobstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 )
 
@@ -61,6 +62,10 @@ type Rig struct {
 	// Search is the job log every daemon is given, read at each Restart: the one the host has read of
 	// each run's task. Nil is a host that reads none.
 	Search *search.Store
+	// Setup is the store of what the host has read of each run in setup, and SetupReads the way it reads
+	// it, both read at each Restart. Nil is a host that reads none.
+	Setup      *setup.Store
+	SetupReads daemon.SetupReads
 	// JobLog is how every daemon reads a live run's job log afresh, read at each Restart. Nil is a host with
 	// no such read, which works a check-in's facts out from Search.
 	JobLog daemon.JobLog
@@ -121,7 +126,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	}
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Search: r.Search, Models: r.Models,
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Search: r.Search, Setup: r.Setup, Models: r.Models,
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:
@@ -129,7 +134,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: host, Checkouts: r.Checkouts, Jobs: gatedJobs{r}, JobLog: r.JobLog, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
+		Sidecars: host, Checkouts: r.Checkouts, Jobs: gatedJobs{r}, JobLog: r.JobLog, SetupReads: r.SetupReads, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

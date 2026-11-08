@@ -46,6 +46,7 @@ func (e *Engine) runSummary(run core.Run, agents []core.Agent) *pb.RunSummary {
 		out.ReportUnavailable = true
 	}
 	out.Report = report
+	out.Setup = e.setupView(run)
 	out.AgentsTotal = uint32(len(agents))
 	roles := map[pb.AgentRole]*pb.RoleAgents{}
 	for _, a := range agents {

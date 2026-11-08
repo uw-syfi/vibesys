@@ -10,6 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -20,6 +21,8 @@ var ErrCommandConflict = errors.New("daemon: this command id was used for anothe
 // EngineDeps is what an Engine is made of.
 type EngineDeps struct {
 	Search *search.Store
+	// Setup holds what the host has read of each run in setup. Nil means none is read.
+	Setup  *setup.Store
 	Store  store.Store
 	Clock  Clock
 	Nonces Nonces

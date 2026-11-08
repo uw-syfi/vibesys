@@ -34,6 +34,9 @@ type watch[R any] struct {
 	change   func(*pb.RunChange) (R, bool)
 	delta    func(*pb.Delta) (R, bool)
 	latest   func(*pb.SearchState) (R, bool)
+	// setup is told that a run's setup observation moved. It sends nothing itself: a stream whose
+	// frames are whole views notes the run, and settle sends the view.
+	setup func(hub.SetupNote)
 	// current is what a client is owed after a snapshot or a replay, from the state at that instant, and
 	// says whether it was too much for one burst, so that only a prefix of it is returned.
 	current func(core.State) (frames []R, tooMany bool)
@@ -167,6 +170,8 @@ func (w *watch[R]) Poll() ([]R, error) {
 			if r, ok := w.latest(m.Search); ok {
 				out = append(out, r)
 			}
+		case m.Setup != nil && w.setup != nil:
+			w.setup(*m.Setup)
 		case m.Delta != nil:
 			if r, ok := w.delta(m.Delta); ok {
 				out = append(out, r)

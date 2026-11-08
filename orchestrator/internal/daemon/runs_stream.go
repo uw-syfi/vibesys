@@ -7,6 +7,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
@@ -55,7 +56,7 @@ func newRunsStream(s *Service, caller core.Caller, detail pb.SnapshotDetail) *ru
 func (st *runsStream) watch() *RunsWatch {
 	w := &RunsWatch{
 		e: st.s.e, run: st.run, maxBytes: MaxWatchFrameBytes,
-		snapshot: st.snapshot, change: st.change, latest: st.latest, current: st.current,
+		snapshot: st.snapshot, change: st.change, latest: st.latest, setup: st.setupNote, current: st.current,
 		delta: func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
 	}
 	if st.summaries {
@@ -96,6 +97,13 @@ func (st *runsStream) latest(search *pb.SearchState) (*pb.WatchRunsResponse, boo
 	}
 	st.seen[search.RunId] = search.Revision
 	return searchFrame(search), true
+}
+
+// setupNote notes that a run's setup observation moved, so its summary is worked out again.
+func (st *runsStream) setupNote(n hub.SetupNote) {
+	if st.listed(n.Run) {
+		st.touch(n.Run)
+	}
 }
 
 func searchFrame(search *pb.SearchState) *pb.WatchRunsResponse {
