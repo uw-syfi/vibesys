@@ -198,7 +198,7 @@ func ownOf(name string, role core.AgentRole) string {
 func TestArgumentsThatSatisfyTheDescriptorAreAcceptedAndSentWhole(t *testing.T) {
 	r := rand.New(rand.NewPCG(11, 12))
 	for name, md := range toolMessages(t) {
-		for range 300 {
+		for range thinnedUnderRace(300) {
 			role := callerFor(t, name, r)
 			args := valid(r, md, ownOf(name, role))
 			d := &fakeDaemon{}
@@ -254,7 +254,7 @@ func fieldAt(md protoreflect.MessageDescriptor, path []string) protoreflect.Fiel
 func TestEveryMissingNeededFieldAndEveryBadValueIsRefusedByName(t *testing.T) {
 	r := rand.New(rand.NewPCG(21, 22))
 	for name, md := range toolMessages(t) {
-		for range 60 {
+		for range thinnedUnderRace(60) {
 			role := callerFor(t, name, r)
 			base := valid(r, md, ownOf(name, role))
 			for _, path := range paths(base, nil) {

@@ -96,7 +96,7 @@ func seen(t *testing.T, rig *daemontest.Rig) map[core.RunID]counts {
 // than a count already seen, and equal to the truth whenever the service answered.
 func TestEndedRunsKeepTheirCountsAcrossRestartsInAnyOrder(t *testing.T) {
 	const runCount = 3
-	for seed := range uint64(40) {
+	for seed := range thinnedUnderRace(40) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, 7))

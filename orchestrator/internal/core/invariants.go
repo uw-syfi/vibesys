@@ -22,7 +22,7 @@ func (s State) Violations() []string {
 		if a.Status.Over() && (a.Stop != StopNone || len(a.queue) > 0) {
 			bad("agent %s is over with stop %s and queue %v", a.ID, a.Stop, a.queue)
 		}
-		if a.Stop == StopNone && a.Status.Resting() && len(a.queue) > 0 {
+		if a.Stop == StopNone && a.Status.Resting() && len(a.queue) > 0 && !s.briefWaits(a) {
 			bad("agent %s rests with mail waiting: %v", a.ID, a.queue)
 		}
 		if run, ok := s.runs[a.Run]; ok && !slices.Contains(run.Allowed, AgentChoice{Harness: a.Spec.Harness, Model: a.Spec.Model}) {
@@ -91,11 +91,13 @@ func (s State) Violations() []string {
 // is already closing, and the lead of a live run stops only to be replaced.
 func (s State) leadChangeBreaches(run Run, bad func(format string, args ...any)) {
 	lead, ok := s.agents[run.Lead]
+	// A lead whose brief is queued is replaced even by the spec it has: completing setup opens a new session.
+	_, fresh := s.queuedBrief(lead)
 	if run.PendingLead != nil {
 		switch {
 		case !run.Status.Live():
 			bad("run %s is %s and still waits to change its lead to %+v", run.ID, run.Status, *run.PendingLead)
-		case ok && lead.Spec == *run.PendingLead && lead.Stop == StopNone:
+		case ok && lead.Spec == *run.PendingLead && lead.Stop == StopNone && !fresh:
 			bad("run %s waits to change its lead to the spec it has: %+v", run.ID, lead.Spec)
 		case !slices.Contains(run.Allowed, AgentChoice{Harness: run.PendingLead.Harness, Model: run.PendingLead.Model}):
 			bad("run %s waits to change its lead to %+v, outside what it allows: %v", run.ID, *run.PendingLead, run.Allowed)

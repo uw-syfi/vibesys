@@ -3,6 +3,7 @@ import type {JSX} from 'react';
 import type {MachineRow} from '../../state/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import type {MachineControls} from './add-machine/machine-controls.js';
+import {type PlacesHost, PlacesPanel} from './places-panel.js';
 
 const COLUMNS: readonly TableColumn<MachineRow>[] = [
   {key: 'name', header: 'Name', lead: true, clip: row => row.label, cell: row => row.label},
@@ -39,8 +40,13 @@ export function MachinesScreen(props: {
   readonly rows: readonly MachineRow[];
   /** The Add machine and remove controls; a window without them lists the machines only. */
   readonly controls?: MachineControls;
+  /** Each machine's eval places and the refresh of one; without them the page lists the machines only. */
+  readonly places?: {
+    readonly hosts: readonly PlacesHost[];
+    readonly refresh: (key: string) => void;
+  };
 }): JSX.Element {
-  const {controls} = props;
+  const {controls, places} = props;
   const table = (
     <Table
       label="Machines"
@@ -54,14 +60,13 @@ export function MachinesScreen(props: {
   );
   return (
     <Page width="wide" state="ready" title="Machines">
-      {controls === undefined ? (
-        table
-      ) : (
-        <Stack gap="space-4">
-          {controls.bar}
-          {table}
-        </Stack>
-      )}
+      <Stack gap="space-4">
+        {controls?.bar}
+        {table}
+        {places === undefined ? null : (
+          <PlacesPanel hosts={places.hosts} refresh={places.refresh} />
+        )}
+      </Stack>
       {controls?.toasts}
     </Page>
   );

@@ -49,6 +49,23 @@ func (t *tx) queuedHandover(a agentState) (MessageID, bool) {
 	return "", false
 }
 
+// queuedBrief finds the optimize lead's brief, sent by completing setup and not yet started a turn on.
+// While it is queued the lead's next session is the first of the optimize phase, and the brief is the
+// whole of what it is told: a handover would only repeat it. The brief a start sends is not this one: a
+// run that began optimizing has no swap, and a lead replaced before it read that brief is handed over
+// as any other.
+func (s State) queuedBrief(a agentState) (MessageID, bool) {
+	if s.runs[a.Run].OptimizeStartedAt.IsZero() {
+		return "", false
+	}
+	for _, id := range a.queue {
+		if _, held := s.messages[id].Body.(LeadBrief); held {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 // beginHandover closes the session of a lead that is due to be replaced. The grace timer ends the wait
 // if the session never answers.
 func (t *tx) beginHandover(a agentState) { t.stopAgent(a.ID) }
@@ -63,9 +80,20 @@ func (t *tx) handOver(a agentState) {
 	// A fresh session: it has shown no failures and no capabilities yet, and has no token to resume.
 	a.SessionFailures, a.Capabilities = 0, Capabilities{}
 	t.reopen(a, to, "")
-	t.emit(run.ID, RunSettingsUpdated{Run: run.ID, Changes: []SettingChange{
-		{Lead: &LeadChange{From: handover.Previous, To: to, State: LeadChangeApplied}},
-	}})
+	brief, swap := t.s.queuedBrief(a)
+	if !swap || handover.Previous != to {
+		// Completing setup to the lead the run already has is no change of lead, and the timeline says none.
+		t.emit(run.ID, RunSettingsUpdated{Run: run.ID, Changes: []SettingChange{
+			{Lead: &LeadChange{From: handover.Previous, To: to, State: LeadChangeApplied}},
+		}})
+	}
+	if swap {
+		// The optimize lead's brief is its first message and its only briefing: it is queued again now that
+		// the session is opening, which puts it ahead of the mail that arrived while it waited.
+		m := t.s.messages[brief]
+		t.post(Message{ID: brief, Run: run.ID, To: a.ID, From: m.From, Body: m.Body})
+		return
+	}
 	// A lead that fell before it read the handover of an earlier change is handed the run as it stands now
 	// in the same message: one handover is read, never two.
 	unread, _ := t.queuedHandover(a)
@@ -76,10 +104,14 @@ func (t *tx) handOver(a agentState) {
 // anywhere but the state.
 func (t *tx) handoverFor(run Run, lead agentState) LeadHandover {
 	h := LeadHandover{
-		Task: run.Task, FanoutLimit: run.FanoutLimit, Previous: lead.Spec,
+		Task: run.Task, FanoutLimit: run.FanoutLimit, Previous: lead.Spec, Phase: run.Phase,
 		// Whole seconds, as the wire holds them, so the log replays the message that was posted.
 		Elapsed: t.in.At.Sub(run.limitClock()).Truncate(time.Second), Spent: run.optimizeUsage().CostUSD, MaxCost: run.MaxCostUSD,
 		LimitReached: run.LimitReached, ReportsPosted: run.ReportsPosted, ActiveJobs: run.ActiveJobs,
+	}
+	if run.inSetup() {
+		// A run in setup has no task yet: the lead is told the name the setup lead declared, if any.
+		h.Task = run.SetupTask
 	}
 	if total := run.totalTime(); total > 0 {
 		h.MaxTime = max(time.Second, total.Truncate(time.Second))

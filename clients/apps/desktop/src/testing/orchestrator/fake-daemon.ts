@@ -42,9 +42,11 @@ import {
   type RunCost,
   RunStatus,
   type RunSummary,
+  RunSummarySchema,
   type RunsSnapshot,
   RunsSnapshotSchema,
   type SearchState,
+  type SetupView,
   SnapshotDetail,
   type StartRun,
   type Turn,
@@ -59,6 +61,7 @@ import {emptyState, type OrchestratorState} from '../../state/orchestrator/state
 import {ms} from '../../state/orchestrator/time.js';
 import {invokeCallback} from '../callback-errors.js';
 import {applyPendingLead, decideUpdate} from './fake-run-settings.js';
+import type {Ledger, SetupHost} from './fake-setup.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
 import {servedSummary} from './served-summary.js';
@@ -148,6 +151,10 @@ export class FakeDaemon {
   readonly #hostCosts = new Map<string, HostCost>();
   readonly #started: StartRun[] = [];
   #models: ModelCatalog | undefined;
+  readonly #setupViews = new Map<string, SetupView>();
+
+  /** The setup world of this host (`FakeSetup`), when it has one: it answers BeginSetup and CompleteSetup. */
+  setup: SetupHost | undefined;
 
   constructor(
     readonly scenario: Scenario,
@@ -256,13 +263,27 @@ export class FakeDaemon {
   #summariesOf(state: OrchestratorState, searches: readonly SearchState[]): RunSummary[] {
     return Object.keys(state.runs)
       .sort()
-      .map(runId =>
-        servedSummary(
+      .map(runId => {
+        const summary = servedSummary(
           state,
           runId,
           searches.find(search => search.runId === runId),
-        ),
-      );
+        );
+        const setup = this.#setupViews.get(runId);
+        return setup === undefined ? summary : create(RunSummarySchema, {...summary, setup});
+      });
+  }
+
+  /** What a setup world needs of this host: to commit facts, read the state, and serve a run's setup view. */
+  ledger(): Ledger {
+    return {
+      record: (atMs, body) => this.#append(atMs, body),
+      state: () => this.#state(this.#visible),
+      publishSetup: (runId, view) => {
+        this.#setupViews.set(runId, view);
+        for (const watcher of this.#watchers) invokeCallback(watcher);
+      },
+    };
   }
 
   /**
@@ -398,6 +419,10 @@ export class FakeDaemon {
     if (oneofIs(body, 'startRun', COMMAND_KINDS)) return this.#startRun(command.id, body.value);
     if (oneofIs(body, 'updateRun', COMMAND_KINDS))
       return this.#updateRun(command.id, body.value, at);
+    if (this.setup !== undefined && oneofIs(body, 'beginSetup', COMMAND_KINDS))
+      return this.setup.begin(command.id, body.value, at);
+    if (this.setup !== undefined && oneofIs(body, 'completeSetup', COMMAND_KINDS))
+      return this.setup.complete(command.id, body.value, at);
     return this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
   }
 
@@ -759,6 +784,7 @@ export class FakeDaemon {
       sequence: BigInt(this.#log.length + 1),
     });
     this.#append(atMs, {case: 'receipt', value: receipt});
+    this.setup?.afterMessage(agent, text, atMs);
     return receipt;
   }
 

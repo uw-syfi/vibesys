@@ -34,6 +34,17 @@ import {runTitle} from '../fleet-words.js';
 import type {StartHost} from '../start-run-form.js';
 import {domainWord, fitTone, placeLabel, provisionLine} from './words.js';
 
+/** Where Copy to starts: the folder kept for the machine, else the host's own default. */
+function copyDefault(host: StartHost | undefined): string {
+  if (host === undefined) return '';
+  const kept = host.repositoriesDirectory ?? '';
+  return kept === '' ? (host.catalogue.data?.repositoriesDirectory ?? '') : kept;
+}
+
+/** The draft as sent: a folder the person left empty is the machine's kept Repositories folder. */
+export const withKeptParent = (host: StartHost | undefined, draft: ExampleDraft): ExampleDraft =>
+  draft.parent === '' ? {...draft, parent: host?.repositoriesDirectory ?? ''} : draft;
+
 /** The select's option for no place yet: it keeps the control's height before an example is picked. */
 const NO_PLACE: SelectOption<string> = {value: '', label: '—'};
 
@@ -124,7 +135,7 @@ export function ExamplePicker(props: {
     split === undefined
       ? []
       : completionsOf(split, host?.directories.get(listingKey(split.folder, split.hidden)));
-  const defaultParent = host?.catalogue.data?.repositoriesDirectory ?? '';
+  const defaultParent = copyDefault(host);
   return (
     <Stack gap="space-3">
       <Row gap="space-2" wrap>

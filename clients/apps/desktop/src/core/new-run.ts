@@ -46,6 +46,10 @@ export interface NewRun {
   readonly provision: Atom.Atom<ProvisionProgress>;
   /** Read the catalogue and the places (the screen was entered, or the host changed). Never fails. */
   readonly load: Effect.Effect<void>;
+  /** Read the places as the host last probed them (the Machines page was opened). Never fails. */
+  readonly loadPlaces: Effect.Effect<void>;
+  /** Ask the host to probe its places now and read the answer. Never fails. */
+  readonly refreshPlaces: Effect.Effect<void>;
   /**
    * Make `example`'s repository, then submit the run `startIn` builds for it. Answers the command's
    * id once it was submitted, or undefined when the repository could not be made (the progress says
@@ -80,11 +84,14 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
       Effect.catch(error => SubscriptionRef.update(ref, before => failedOf(before, why(error)))),
     );
 
+  const readPlaces = (refresh: boolean) =>
+    read(places, client.listEvalPlaces({refresh}), error => faultOf(error).detail);
+
   const load = Effect.fn('NewRun.load')(function* () {
     yield* Effect.all(
       [
         read(catalogue, client.listCatalogue({}), error => faultOf(error).detail),
-        read(places, client.listEvalPlaces({refresh: false}), error => faultOf(error).detail),
+        readPlaces(false),
       ],
       {concurrency: 'unbounded', discard: true},
     );
@@ -150,6 +157,8 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
     places: Atom.keepAlive(Atom.subscriptionRef(places)),
     provision: Atom.keepAlive(Atom.subscriptionRef(provision)),
     load: load(),
+    loadPlaces: readPlaces(false),
+    refreshPlaces: readPlaces(true),
     startFromExample,
     forgetProvision: SubscriptionRef.set(provision, NOT_PROVISIONING),
   } satisfies NewRun;

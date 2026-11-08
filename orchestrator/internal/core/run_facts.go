@@ -143,6 +143,9 @@ type (
 		Lead       AgentSpec
 		Brief      string
 		Allow      []AgentChoice
+		// JobTool is what the run's agents use, set by the shell as a start's is: no part of what the
+		// client sent or of the command's digest.
+		JobTool JobToolEndpoint
 	}
 	// CompleteSetup ends a run's setup phase and starts it optimizing the named task.
 	CompleteSetup struct {
@@ -154,6 +157,10 @@ type (
 		Lead        AgentSpec
 		Brief       string
 		EvalPlace   string
+		// Verified is what the shell established, afresh, before the command was decided: whether the
+		// task's checks hold, and its card and eval place. Like a start's facts it is host attested and
+		// no part of what the client sent or of the command's digest, so a retry gets its first receipt.
+		Verified SetupVerdict
 	}
 	// DeclareTask names the task the setup lead is making. It sets Run.SetupTask.
 	DeclareTask struct {
@@ -161,6 +168,26 @@ type (
 		Task string
 	}
 )
+
+// SetupVerdict is the shell's reading of a task at the moment its setup is completed. The zero value
+// is a command no shell verified, which completes nothing: it names no task, so none of its checks hold.
+type SetupVerdict struct {
+	// Task is the task the verdict is about, which must be the task completed.
+	Task string
+	// TaskVersion is the working tree's version of the task and BaseCommit the commit the run's result
+	// branch will start from. The core records neither: they say what the verdict was read at.
+	TaskVersion, BaseCommit string
+	// Unmet are the checks that do not hold, empty when all do.
+	Unmet []SetupCheckID
+	// Facts are the task's card as committed at BaseCommit and the eval place, resolved as a start's are
+	// (ResolveStartFacts), or the refusal of the place.
+	Facts StartFacts
+}
+
+// SetupChecks lists the six checks in order.
+var SetupChecks = []SetupCheckID{
+	CheckObjective, CheckCorrectnessCheck, CheckBenchmark, CheckBasePasses, CheckBrokenFails, CheckNumberStable,
+}
 
 func (UpdateRun) action() Action     { return ActionUpdateRun }
 func (BeginSetup) action() Action    { return ActionBeginSetup }

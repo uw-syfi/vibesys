@@ -41,6 +41,11 @@ export interface SavedHostsStore {
   readonly add: (host: SavedHost) => Effect.Effect<boolean, Error>;
   /** Forgets the host and returns what was kept for it; null when it was not saved. */
   readonly remove: (key: HostKey) => Effect.Effect<SavedHost | null, Error>;
+  /**
+   * Keeps `directory` as the repositories folder of a saved host (empty clears it). This machine is
+   * kept on first use; any other host must already be saved, else the call fails naming it.
+   */
+  readonly setRepositories: (key: HostKey, directory: string) => Effect.Effect<void, Error>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,14 +70,13 @@ type Held =
   | {readonly kind: 'hosts'; readonly hosts: DesktopHosts['hosts']; readonly source: string}
   | {readonly kind: 'unreadable'; readonly cause: string; readonly source: string};
 
-export function makeSavedHostsStore(
-  userData: string,
-  files: {readonly read: ReadFile; readonly write: WriteFile; readonly lock: FileLock},
-  log: (line: string) => void,
-): SavedHostsStore {
-  const binary = savedHostsPath(userData);
-  const json = join(userData, JSON_FILE);
-  const held: Effect.Effect<Held> = Effect.gen(function* () {
+/** What the files hold now: `hosts.pb`, else the older `hosts.json`, else nothing. */
+function heldHosts(
+  binary: string,
+  json: string,
+  files: {readonly read: ReadFile},
+): Effect.Effect<Held> {
+  return Effect.gen(function* () {
     const bytes = yield* files.read(binary);
     if (bytes !== null) {
       try {
@@ -101,6 +105,16 @@ export function makeSavedHostsStore(
       Effect.succeed({kind: 'unreadable', cause: error.message, source: binary} as const),
     ),
   );
+}
+
+export function makeSavedHostsStore(
+  userData: string,
+  files: {readonly read: ReadFile; readonly write: WriteFile; readonly lock: FileLock},
+  log: (line: string) => void,
+): SavedHostsStore {
+  const binary = savedHostsPath(userData);
+  const json = join(userData, JSON_FILE);
+  const held = heldHosts(binary, json, files);
   /** One save at a time in this process, and under the file's lock across processes. */
   const saving = Semaphore.makeUnsafe(1);
   const locked = <A>(save: Effect.Effect<A, Error>) =>
@@ -130,6 +144,7 @@ export function makeSavedHostsStore(
   const clean = (settings: DesktopHostSettings): DesktopHostSettings =>
     create(DesktopHostSettingsSchema, {
       checkout: settings.checkout,
+      repositoriesDirectory: settings.repositoriesDirectory,
       ...(settings.ssh === undefined ? {} : {ssh: settings.ssh}),
     });
   return {
@@ -167,6 +182,25 @@ export function makeSavedHostsStore(
           const {[key]: _removed, ...rest} = hosts;
           yield* save(rest);
           return {key, settings};
+        }),
+      ),
+    setRepositories: (key, directory) =>
+      locked(
+        Effect.gen(function* () {
+          const hosts = yield* beforeSave;
+          const settings = hosts[key];
+          if (settings === undefined && key !== hostKey({kind: 'local'}))
+            return yield* Effect.fail(new Error(`${key} is not saved`));
+          yield* save({
+            ...hosts,
+            [key]: clean(
+              create(DesktopHostSettingsSchema, {
+                checkout: settings?.checkout ?? '',
+                repositoriesDirectory: directory,
+                ...(settings?.ssh === undefined ? {} : {ssh: settings.ssh}),
+              }),
+            ),
+          });
         }),
       ),
   };

@@ -197,7 +197,9 @@ that host is named and left alone, and its pid is never signalled.
 
 A release folder holds a `ReleaseManifest` message: version, platform, the
 command that starts a session holder, the skills directory, the job tool, and
-the files that must exist. The builder writes it,
+the files that must exist. It also holds `catalogue.pb`, a `ReleaseCatalogue`
+that lists the example tasks, and an `examples/` folder with each example's
+files (see [Adding an example](examples.md)). The builder writes it,
 the host reads it through generated code, and `vibesys-client release verify`
 checks it. The installer asks that verb instead of keeping its own list of paths.
 A host that cannot find a manifest reports a typed part problem rather than a
@@ -360,6 +362,40 @@ and never lost. The mapping from a harness's tool and argument names is
 and not in agentshim because it needs no provider fact that is not already in the events agentshim
 emits (a tool's name and its arguments); moving it upstream later changes only that module.
 
+### Making a run
+
+The calls a client makes while its operator fills in a new run are read-only
+asks of the host, except provisioning. All are for the operator only; an agent
+never calls them.
+
+- `ListCatalogue` returns the example tasks of the release (from its
+  `catalogue.pb`), each with its card and a `Fit`. `ListEvalPlaces` returns the
+  places a run's candidates can be evaluated on and the hardware each gives. The
+  host asks the job tool's daemon for the places (`ListPlacements`) and for
+  every card (`DescribeTask`), so it reads no task file and no hardware itself.
+  A `Fit` is advice worked out per call from the current places; `StartRun`
+  decides again, and refuses a place that is unknown or does not give the
+  task's accelerator.
+- `ProvisionRepository` makes a git repository on the host, from a catalogue
+  example or empty, and never overwrites. It is idempotent on its request id. A
+  refusal is a typed `ProvisionRefusal`, not an error. `CheckRepository` and
+  `ListDirectory` let a client check and complete a typed repository path
+  before it sends `StartRun`.
+- `Dispatch` carries `UpdateRun`, which changes a live run's cost limit, time
+  limit, fanout limit or lead, all or none (a limit can be removed; lowering the
+  fanout stops no agent).
+- A run may begin in a setup phase: `BeginSetup` starts a chat with a lead that
+  makes the run's task, and the lead names the task with the `declare_task`
+  tool (the `DeclareTask` command, setup and lead only). The host never trusts
+  the lead's word that the task is ready: it reads the draft through the job
+  tool daemon's `DescribeSetup` (declarations, task version, head commit, jobs
+  and base measurements) and derives six checks from those facts, which clients
+  see in `RunSummary.setup`. `CompleteSetup` is refused with
+  `REFUSAL_SETUP_INCOMPLETE` unless the host's own derivation passes all six.
+  Setup spend and time are reported apart and do not count against the run's
+  limits; those start when the run leaves setup. A run recorded before phases
+  reads as optimizing.
+
 ### Benchmark results and job environment
 
 A benchmark's result records are a message whose protojson is the existing
@@ -423,6 +459,10 @@ validated message; the other rows are what the parts above replace.
 | run list output for scripts | `run get --json`, protojson | `service.proto` | typed |
 | client exit codes | 0 to 4 | `clientcli` | held by a test |
 | store | SQLite rows of `Event` and `Effect` bytes | `events.proto`, `effects.proto` | typed |
+| catalogue, eval places, fit | `ListCatalogue`, `ListEvalPlaces` | `catalogue.proto`, `eval_place.proto` | typed |
+| a new repository | `ProvisionRepository` | `provision.proto` | typed |
+| a typed repository path | `CheckRepository`, `ListDirectory` | `service.proto` | typed |
+| a live run's settings, and setup | `Dispatch` of `UpdateRun`, `BeginSetup`, `CompleteSetup` | `events.proto`, `setup.proto` | typed |
 
 ### Host and session holder
 
@@ -457,6 +497,8 @@ validated message; the other rows are what the parts above replace.
 | job tool to daemon | gRPC `DaemonService` | `cli/v1/service.proto` | typed; few validation rules |
 | daemon to supervisor | `launch.pb`, gRPC `SupervisorService`, `flock` on `alive` | `supervisor.proto` | typed; the model for process identity |
 | daemon store files | protojson of `store.proto`, one owner | `store.proto` | typed |
+| host to daemon, a task's card, a draft's setup facts, the places | gRPC `DescribeTask`, `DescribeSetup`, `ListPlacements` | `cli/v1/service.proto` | typed; the daemon is the only reader of task files and git |
+| the release's examples | `catalogue.pb` and `examples/` in the release folder | `release_catalogue.proto` | typed |
 | operator config and task manifest | TOML through `tomlproto` | `operator.proto`, `task.proto` | typed |
 | objectives | TOML through `tomlproto` | `task.proto` (`TaskObjectives`) | typed |
 | manifest 0.1 | hand TOML structs | `task` | untyped: manifest 0.1 |

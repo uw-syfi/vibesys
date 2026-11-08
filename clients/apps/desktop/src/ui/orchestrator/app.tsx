@@ -2,6 +2,7 @@ import {
   type Agent,
   type ListCatalogueResponse,
   type ListEvalPlacesResponse,
+  type Run,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
 import {Chip, type Crumb, Page, Text} from '@vibesys/ui';
@@ -14,6 +15,7 @@ import {
   type FleetHostInput,
   type FleetPlace,
   type FolderListing,
+  followedAgent,
   freshnessOf,
   type HostConnectionState,
   type HostFreshness,
@@ -21,6 +23,7 @@ import {
   type HostStatus,
   hostStatusOf,
   type IdeaWindow,
+  inSetup,
   type NavigationAction,
   type OrchestratorState,
   type ProvisionProgress,
@@ -30,7 +33,10 @@ import {
   runReport,
   runSettingsOf,
   settingsTimeline,
+  setupLead,
+  setupOf,
   staleForMs,
+  UNREAD_SETUP,
 } from '../../state/index.js';
 import {AgentPage} from '../agents/agent-page.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
@@ -47,6 +53,8 @@ import {ReportScreen} from './report/report-screen.js';
 import {isStoppable} from './report/report-title.js';
 import {PendingLead, RunSettingsControl} from './run-settings/index.js';
 import type {RunUpdateRequest} from './run-settings/update-draft.js';
+import type {CompleteSetupRequest} from './setup/index.js';
+import {SetupScreen, setupTitle} from './setup/index.js';
 import type {StartRunRequest} from './start-draft.js';
 
 const TITLE = 'Runs';
@@ -71,6 +79,8 @@ export interface HostSnapshot {
   readonly catalogue: Remote<ListCatalogueResponse>;
   /** The host's eval places, as of their last read. */
   readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** The Repositories folder kept for this machine (empty when none): where Copy to starts. */
+  readonly repositoriesDirectory: string;
   /** Where the repository being made from an example stands. */
   readonly provision: ProvisionProgress;
   /** The status of each agent's stream the screen has open, by agent id. */
@@ -96,6 +106,8 @@ export interface AppCommands {
   readonly send: Readonly<Record<string, CommandProgress>>;
   /** The last settings update of each run, by run id. */
   readonly update: Readonly<Record<string, CommandProgress>>;
+  /** The last press of Start on each run in setup, by run id. */
+  readonly complete: Readonly<Record<string, CommandProgress>>;
   readonly startRun: (host: string, request: StartRunRequest) => void;
   /** The repository path typed in the Start form is now `repository` on `host`. */
   readonly checkRepository: (host: string, repository: string) => void;
@@ -122,6 +134,11 @@ export interface AppCommands {
   /** Change settings of a live run: all of `request` or none of it. */
   readonly updateRun: (host: string, runId: string, request: RunUpdateRequest) => void;
   readonly retryUpdate: (runId: string) => void;
+  /** Begin a run in its setup phase: a chat with a lead that makes the task. The answer is `start`'s. */
+  readonly beginSetup: (host: string, request: StartRunRequest) => void;
+  /** Start optimizing the task of a run in setup; the host decides whether setup is complete. */
+  readonly completeSetup: (host: string, runId: string, request: CompleteSetupRequest) => void;
+  readonly retryComplete: (runId: string) => void;
   /** Read the page of items of an agent before ordinal `before`. */
   readonly loadEarlier: (host: string, agentId: string, before: number) => void;
   /** Read the item at `ordinal` of an agent whole. */
@@ -255,6 +272,7 @@ export function OrchestratorApp(props: {
                 directories,
                 catalogue,
                 evalPlaces,
+                repositoriesDirectory,
                 provision,
               }) => ({
                 key,
@@ -264,6 +282,7 @@ export function OrchestratorApp(props: {
                 directories,
                 catalogue,
                 evalPlaces,
+                repositoriesDirectory,
                 provision,
               }),
             )}
@@ -275,6 +294,7 @@ export function OrchestratorApp(props: {
             loadNewRun={commands.loadNewRun}
             startFromExample={commands.startFromExample}
             forgetProvision={commands.forgetProvision}
+            beginSetup={commands.beginSetup}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
         }
@@ -349,6 +369,36 @@ function AgentsDestination(props: {
   );
 }
 
+/** The state words beside a run's title: how its streams and history stand, and a report that is missing. */
+function runReading(props: {
+  readonly host: HostSnapshot;
+  readonly runId: string;
+  /** The agent whose steps the page follows, if any. */
+  readonly agent: Agent | undefined;
+  readonly nowMs: number;
+  readonly retryHost: (host: string) => void;
+}): JSX.Element {
+  const {host, runId, agent, nowMs} = props;
+  const state = host.model.data;
+  const names = agentNames(state, runId);
+  return (
+    <>
+      <ConnectionStatus
+        notes={[
+          runsNote(host, props.retryHost, nowMs),
+          ...(agent === undefined
+            ? []
+            : [agentNote(host, agent, names, {nowMs, retryHost: props.retryHost})]),
+        ]}
+      />
+      <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
+      {state.summaries[runId]?.reportUnavailable === true ? (
+        <Chip label="Report unavailable" tone="warn" dot />
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The page of a run that the route names, whichever it is: the report, the agents, one agent, the
  * cost. Every one is a `Page` of the same frame, with the trail from the Runs list down to it, and
@@ -371,35 +421,35 @@ function RunDestination(props: {
   const goRuns = (): void => go({type: 'close-run'});
   if (run === undefined) return <MissingRun goRuns={goRuns} />;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
-  const reading = (
-    <>
-      <ConnectionStatus
-        notes={[
-          runsNote(host, props.retryHost, nowMs),
-          ...(agent === undefined
-            ? []
-            : [
-                agentNote(host, agent, agentNames(state, runId), {
-                  nowMs,
-                  retryHost: props.retryHost,
-                }),
-              ]),
-        ]}
-      />
-      <HistoryStatusWord status={host.runHistory} retry={() => props.retryHost(host.key)} />
-      {state.summaries[runId]?.reportUnavailable === true ? (
-        <Chip label="Report unavailable" tone="warn" dot />
-      ) : null}
-    </>
-  );
+  const followed = followedAgent(state, runId, route.agentId);
+  const reading = runReading({
+    host,
+    runId,
+    agent: followed === null ? undefined : state.agents[followed],
+    nowMs,
+    retryHost: props.retryHost,
+  });
   const toRun: readonly Crumb[] = [
     {id: 'runs', label: TITLE, press: goRuns},
     {
       id: runId,
-      label: runTitle(run.taskCard ?? null, run.task),
+      label: inSetup(run) ? setupTitle(run.repository) : runTitle(run.taskCard ?? null, run.task),
       press: () => go({type: 'show', view: 'report'}),
     },
   ];
+  if (inSetup(run) && route.view === 'report') {
+    return (
+      <SetupDestination
+        state={state}
+        run={run}
+        host={host}
+        nowMs={nowMs}
+        reading={reading}
+        commands={commands}
+        go={go}
+      />
+    );
+  }
   if (route.view === 'cost') {
     const feed = host.costFeeds[runId] ?? OPENING_COST;
     return (
@@ -445,6 +495,60 @@ function RunDestination(props: {
       commands={commands}
       retryCost={props.retryCost}
       go={go}
+    />
+  );
+}
+
+/** The page of a run in its setup phase, bound to the commands of its host: the chat with its lead beside the draft task. */
+function SetupDestination(props: {
+  readonly state: OrchestratorState;
+  readonly run: Run;
+  readonly host: HostSnapshot;
+  readonly nowMs: number;
+  readonly reading: JSX.Element | null;
+  readonly commands: AppCommands;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {state, run, host, commands, go} = props;
+  const lead = setupLead(state, run.id);
+  return (
+    <SetupScreen
+      state={state}
+      run={run}
+      facts={setupOf(state, run.id) ?? UNREAD_SETUP}
+      lead={lead}
+      host={host.label}
+      nowMs={props.nowMs}
+      trail={[
+        {id: 'runs', label: TITLE, press: () => go({type: 'close-run'})},
+        {id: run.id, label: setupTitle(run.repository)},
+      ]}
+      reading={props.reading}
+      history={
+        lead === undefined
+          ? {
+              earlier: {_tag: 'Idle'},
+              wholes: {},
+              loadEarlier: () => undefined,
+              expand: () => undefined,
+            }
+          : {
+              ...host.history,
+              loadEarlier: before => commands.loadEarlier(host.key, lead.id, before),
+              expand: ordinal => commands.expand(host.key, lead.id, ordinal),
+            }
+      }
+      open={agentId => go({type: 'pick-agent', agentId})}
+      sendProgress={lead === undefined ? undefined : commands.send[lead.id]}
+      send={text => lead !== undefined && commands.sendMessage(host.key, lead.id, text)}
+      retrySend={() => lead !== undefined && commands.retrySend(lead.id)}
+      completeProgress={commands.complete[run.id]}
+      complete={(request: CompleteSetupRequest) =>
+        commands.completeSetup(host.key, run.id, request)
+      }
+      retryComplete={() => commands.retryComplete(run.id)}
+      stopProgress={commands.stop[run.id]}
+      stop={() => commands.stopRun(host.key, run.id)}
     />
   );
 }

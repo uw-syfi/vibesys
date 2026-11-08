@@ -244,6 +244,13 @@
 
 /* --- table ------------------------------------------------------------------------------------- */
 
+/* Rows read before and read again: quieter until the answer replaces them, once. */
+.vs-table {
+  transition: opacity var(--duration-fast) var(--easing);
+}
+.vs-table[data-dim] {
+  opacity: 0.45;
+}
 .vs-table-scroll {
   container-type: inline-size;
   min-width: 0;

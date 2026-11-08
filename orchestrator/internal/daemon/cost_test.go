@@ -289,7 +289,7 @@ func TestCostViewResyncsAWatcherThatFellBehind(t *testing.T) {
 // Whatever order turns end in, however often the stream is read, and whether the watcher falls behind,
 // the view a watcher holds is the view a new watcher is given, and its total is the run's usage.
 func TestCostViewConvergesWhateverTheScript(t *testing.T) {
-	for seed := range uint64(40) {
+	for seed := range thinnedUnderRace(40) {
 		rnd := rand.New(rand.NewPCG(seed, 5))
 		w := newCostWorld(t, hub.Limits{MaxItems: 1 + rnd.IntN(8), MaxBytes: 1 << 20})
 		w.next = func(core.AgentID) *pb.Usage {
@@ -344,6 +344,9 @@ func TestCostViewConvergesWhateverTheScript(t *testing.T) {
 // A view is read from the store in as many windows as the run's turns need, however many that is, and
 // counts every one of them.
 func TestCostViewCountsMoreTurnsThanAWindowHolds(t *testing.T) {
+	if underRace {
+		t.Skip("paging through a window is sequential, and its 2300 turns cost 17 s under the race detector for no interleaving")
+	}
 	w := newCostWorld(t, hub.Limits{MaxItems: 1 << 20, MaxBytes: 1 << 30})
 	w.next = func(core.AgentID) *pb.Usage { return dollars(0.5) }
 	const turns = store.MaxWindowTurns + 300

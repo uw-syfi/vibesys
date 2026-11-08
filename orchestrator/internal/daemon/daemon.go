@@ -55,11 +55,10 @@ type Config struct {
 type Daemon struct {
 	*Engine
 	searchPublished map[core.RunID]uint64
-	// setupWatches, setupSeq, setupInbox and setupPublished are the observation of runs in setup (see
-	// setup_observe.go): the schedule of each, the number of the last read started, the ends of reads
+	// setupWatches, setupInbox and setupPublished are the observation of runs in setup (see
+	// setup_observe.go): the schedule of each, the ends of reads
 	// not yet seen by the loop, and the revision of each run's observation the hub was told of.
 	setupWatches   map[core.RunID]*setupWatch
-	setupSeq       uint64
 	setupInbox     *setupInbox
 	setupPublished map[core.RunID]uint64
 	cfg            Config

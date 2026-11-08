@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/host_config.proto.
  */
 export const file_vibesys_orchestrator_v1_host_config: GenFile = /*@__PURE__*/
-  fileDesc("Cil2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbmZpZy5wcm90bxIXdmliZXN5cy5vcmNoZXN0cmF0b3IudjEi1wEKCkhvc3RDb25maWcSKAoPc3RhdGVfZGlyZWN0b3J5GAEgASgJQg+6SAzYAQFyByiAIDICXi8SKAoWc2Vzc2lvbl9ob2xkZXJfY29tbWFuZBgCIAEoCUIIukgFcgMogCASKQoQc2tpbGxzX2RpcmVjdG9yeRgDIAEoCUIPukgM2AEBcgcogCAyAl4vEiEKCGpvYl90b29sGAQgASgJQg+6SAzYAQFyByiAIDICXi8SJwoJdG9vbF9wYXRoGAUgAygJQhS6SBGSAQ4QgAIiCXIHKIAgMgJeL0JUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("Cil2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbmZpZy5wcm90bxIXdmliZXN5cy5vcmNoZXN0cmF0b3IudjEimgIKCkhvc3RDb25maWcSKAoPc3RhdGVfZGlyZWN0b3J5GAEgASgJQg+6SAzYAQFyByiAIDICXi8SKAoWc2Vzc2lvbl9ob2xkZXJfY29tbWFuZBgCIAEoCUIIukgFcgMogCASKQoQc2tpbGxzX2RpcmVjdG9yeRgDIAEoCUIPukgM2AEBcgcogCAyAl4vEiEKCGpvYl90b29sGAQgASgJQg+6SAzYAQFyByiAIDICXi8SJwoJdG9vbF9wYXRoGAUgAygJQhS6SBGSAQ4QgAIiCXIHKIAgMgJeLxJBChZyZXBvc2l0b3JpZXNfZGlyZWN0b3J5GAYgASgJQiG6SB7YAQFyGSiAIDIUXigvfH4oL3wkKSlbXlx4MDBdKiRCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate]);
 
 /**
  * HostConfig is everything an operator chooses about a host, as a typed record in the host's root
@@ -57,6 +57,15 @@ export type HostConfig = Message<"vibesys.orchestrator.v1.HostConfig"> & {
    * @generated from field: repeated string tool_path = 5;
    */
   toolPath: string[];
+
+  /**
+   * Where a repository the host provisions goes when the request names no parent: an absolute path,
+   * or "~" or "~/..." for the home of the user the host runs as, which the host expands. Empty means
+   * ~/.vibesys/repos.
+   *
+   * @generated from field: string repositories_directory = 6;
+   */
+  repositoriesDirectory: string;
 };
 
 /**

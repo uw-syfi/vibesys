@@ -74,6 +74,9 @@ type ServiceDeps struct {
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
 	// Tasks reads the card of a task at start. Nil is a host with no reader, whose runs record no card.
 	Tasks TaskReader
+	// SetupReads reads the facts of a run's setup, afresh, when the operator completes it. Nil is a host
+	// that cannot: it completes no setup.
+	SetupReads SetupReads
 	// HistoryPageBytes is the byte budget of one page of GetRunHistory. Zero is MaxHistoryPageBytes;
 	// a smaller one lets a test fill a page with a small fleet.
 	HistoryPageBytes int
@@ -217,6 +220,10 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	if err != nil {
 		return nil, err
 	}
+	cmd, err = s.checkSetup(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
 	answer, err := s.e.Command(cmd)
 	switch {
 	case errors.Is(err, ErrCommandConflict):
@@ -316,9 +323,7 @@ func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Comman
 		return cmd, nil
 	}
 	canonical, err := s.Starts.CheckStart(start.Repository, start.Task)
-	var refusal *StartRefusal
-	switch {
-	case err == nil:
+	if err == nil {
 		start.Repository = canonical
 		if start.Facts, err = s.startFacts(ctx, start); err != nil {
 			return cmd, err
@@ -331,12 +336,20 @@ func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Comman
 		}
 		cmd.Body = start
 		return cmd, nil
-	case errors.As(err, &refusal) && refusal.NotReady:
-		return cmd, status.Error(codes.FailedPrecondition, refusal.Reason)
-	case errors.As(err, &refusal):
-		return cmd, status.Error(codes.InvalidArgument, refusal.Reason)
 	}
-	return cmd, status.Error(codes.Unavailable, err.Error())
+	return cmd, startError(err)
+}
+
+// startError is the status a refused or failed start check answers with.
+func startError(err error) error {
+	var refusal *StartRefusal
+	switch {
+	case errors.As(err, &refusal) && refusal.NotReady:
+		return status.Error(codes.FailedPrecondition, refusal.Reason)
+	case errors.As(err, &refusal):
+		return status.Error(codes.InvalidArgument, refusal.Reason)
+	}
+	return status.Error(codes.Unavailable, err.Error())
 }
 
 // runOf is the run an agent caller belongs to.

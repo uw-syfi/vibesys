@@ -62,6 +62,8 @@ export function Table<Row>(props: {
   readonly rowKey: (row: Row) => string;
   readonly selected?: string;
   readonly middle?: boolean;
+  /** The rows are being read again: they stay, quieter, until the answer replaces them. */
+  readonly dim?: boolean;
   readonly select?: (key: string) => void;
   readonly rowKind?: (row: Row) => TableRowKind | undefined;
   /** A row that folds gets a chevron before its first cell; `'none'` keeps the slot empty. */
@@ -82,7 +84,12 @@ export function Table<Row>(props: {
       aria-label={props.label}
       tabIndex={0}
     >
-      <table className="vs-table" aria-label={props.label} data-middle={props.middle || undefined}>
+      <table
+        className="vs-table"
+        aria-label={props.label}
+        data-middle={props.middle || undefined}
+        data-dim={props.dim || undefined}
+      >
         <thead>
           <tr>
             {columns.map(column => (

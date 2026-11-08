@@ -416,7 +416,7 @@ func TestProvisionWithRealGitAndFiles(t *testing.T) {
 	}
 	var trees daemontest.FakeExampleTrees
 	trees.SetVendored("e", source)
-	p := &Provisioner{Trees: &trees, FS: OSProvisionFS{}, Git: ExecGit{}, Default: filepath.Join(root, "repos"), Home: root}
+	p := &Provisioner{Trees: &trees, FS: OSProvisionFS{}, Git: ExecGit{Bounds: GitTimeouts{}}, Default: filepath.Join(root, "repos"), Home: root}
 	req := exampleReq("q", "mine", "e", "")
 	res, err := p.Provision(context.Background(), req)
 	if err != nil || res.GetProvisioned() == nil {

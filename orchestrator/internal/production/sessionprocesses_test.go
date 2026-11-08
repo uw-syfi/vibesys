@@ -289,7 +289,7 @@ func (s *scene) check(t *testing.T, op string, err error) {
 }
 
 func TestNoProcessIsSignalledWithoutTheLockItNeedsWhateverTheFilesSay(t *testing.T) {
-	for seed := range uint64(200) {
+	for seed := range thinnedUnderRace(200) {
 		for lock := range locks {
 			for record := range records {
 				r := rand.New(rand.NewPCG(seed, uint64(lock*10+record)))

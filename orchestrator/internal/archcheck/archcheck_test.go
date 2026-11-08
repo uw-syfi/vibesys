@@ -141,7 +141,7 @@ func TestTypedWatchRunsReaders(t *testing.T) {
 	}
 	foundImport, foundGateway := false, false
 	for _, dir := range []string{"orchestrator", "gateway"} {
-		pkgs, err := packages.Load(&packages.Config{Dir: filepath.Join(root, dir), Tests: true, BuildFlags: []string{"-tags=e2e"}, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}, "./...")
+		pkgs, err := packages.Load(&packages.Config{Dir: filepath.Join(root, dir), Tests: true, BuildFlags: []string{"-tags=e2e"}, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports}, "./...")
 		if err != nil {
 			t.Fatal(err)
 		}

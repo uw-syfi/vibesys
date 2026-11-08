@@ -42,7 +42,8 @@ const MODEL_WORDS: Readonly<Record<AcceleratorModel, string>> = {
   [AcceleratorModel.OTHER]: '',
 };
 
-const offerWords = (offer: EvalOffer): string => {
+/** One offer as `8× H100`. */
+export const offerWords = (offer: EvalOffer): string => {
   const model = MODEL_WORDS[offer.model] || offer.deviceName || 'GPU';
   return `${offer.count}× ${model}`;
 };

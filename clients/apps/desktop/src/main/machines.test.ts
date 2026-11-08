@@ -145,6 +145,40 @@ describe('machines over the main process', () => {
     }),
   );
 
+  it.effect('keeps a Repositories folder per machine, through a remove and an undo', () =>
+    Effect.gen(function* () {
+      const {machines} = world();
+      yield* machines.add('host-a');
+      expect(yield* machines.repositories).toEqual({});
+      expect(yield* machines.setRepositories('ssh:host-a', '~/work')).toEqual({
+        'ssh:host-a': '~/work',
+      });
+      expect(yield* machines.setRepositories('local', '/data/repos')).toEqual({
+        'ssh:host-a': '~/work',
+        local: '/data/repos',
+      });
+      const undo = yield* machines.remove('ssh:host-a');
+      expect(yield* machines.repositories).toEqual({local: '/data/repos'});
+      yield* machines.restore(undo);
+      expect(yield* machines.repositories).toEqual({
+        'ssh:host-a': '~/work',
+        local: '/data/repos',
+      });
+      expect(yield* machines.setRepositories('ssh:host-a', '')).toEqual({local: '/data/repos'});
+    }),
+  );
+
+  it.effect('refuses a machine that is not saved and writes nothing', () =>
+    Effect.gen(function* () {
+      const {machines, files} = world();
+      yield* machines.add('host-a');
+      const before = files.written().length;
+      const unknown = yield* Effect.flip(machines.setRepositories('ssh:host-b', '/x'));
+      expect(unknown.detail).toContain('not saved');
+      expect(files.written().length).toBe(before);
+    }),
+  );
+
   it.effect('leaves a file it cannot read alone and says why', () =>
     Effect.gen(function* () {
       const {machines, files} = world({}, {'/data/hosts.pb': new Uint8Array([0xff, 0xff])});

@@ -59,10 +59,20 @@ func (o Observation) Derived(p Policy) Result {
 type Store struct {
 	mu   sync.Mutex
 	runs map[core.RunID]Observation
+	seq  uint64
 }
 
 // NewStore returns an empty store.
 func NewStore() *Store { return &Store{runs: map[core.RunID]Observation{}} }
+
+// Next numbers a read about to start: every number is higher than the one before, whoever starts the
+// read, so the later of two reads is the one a Put keeps.
+func (s *Store) Next() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	return s.seq
+}
 
 // Put records a read and reports whether the observation changed. A read numbered below the held one
 // is ignored, as is one that leaves the observation's content as it is: neither moves the revision.

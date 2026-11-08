@@ -236,6 +236,7 @@ export {
   withMode,
   withTheme,
 } from './settings/appearance.js';
+export {type Reach, reachOf, unreadableDetail} from './settings/eval-places.js';
 export {
   type MachineHost,
   type MachineRow,
@@ -247,6 +248,11 @@ export {
   addMachineStep,
   emptyAddMachine,
 } from './settings/machines.js';
+export {
+  checkRepositoriesFolder,
+  type FolderCheck,
+  REPOSITORIES_FIELD,
+} from './settings/repositories-folder.js';
 export {
   MATCH_LIMIT,
   matchAliases,
@@ -261,6 +267,23 @@ export {
   sshArgs,
   targetFromInput,
 } from './settings/ssh-target.js';
+export {
+  type Baseline,
+  type CheckRow,
+  type CheckState,
+  type Draft,
+  followedAgent,
+  inSetup,
+  SETUP_CHECKS,
+  type SetupFacts,
+  type StartOutcome,
+  setupFacts,
+  setupLead,
+  setupOf,
+  startOutcome,
+  UNREAD_SETUP,
+  unmetOf,
+} from './setup/index.js';
 export {isBack, type KeyPress} from './shell/keys.js';
 export {
   type Destination,

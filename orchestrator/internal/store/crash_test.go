@@ -181,6 +181,7 @@ func TestEveryWriteStepOfTheFirstCommitsIsKilledByASignal(t *testing.T) {
 		if commit+1 == 1 || commit+1 == 2 || commit+1 == 3 || commit+1 == 9 {
 			for step := first; step < first+n; step++ {
 				t.Run(fmt.Sprintf("commit-%d/step-%d", commit+1, step), func(t *testing.T) {
+					t.Parallel()
 					dirPath := t.TempDir()
 					returned := killChildAtStep(t, dirPath, seed, step, commits)
 					dir, err := localfs.Resolve(dirPath, localfstest.Fake{})

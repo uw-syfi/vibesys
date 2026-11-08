@@ -65,6 +65,16 @@ export const sshArgsFor =
       return [...explicitConfig, ...(saved === undefined ? [] : sshArgsOfSettings(saved.settings))];
     });
 
+/** The repositories folder of each saved machine that has one, by host key. */
+const folders = (store: SavedHostsStore): Effect.Effect<Record<string, string>> =>
+  Effect.map(store.list, hosts =>
+    Object.fromEntries(
+      hosts
+        .filter(host => host.settings.repositoriesDirectory !== '')
+        .map(host => [host.key, host.settings.repositoriesDirectory]),
+    ),
+  );
+
 const refused = (reason: string): MachineReply => ({kind: 'refused', reason});
 const reasonOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -114,6 +124,13 @@ export const serveMachines =
             reply = {kind: 'added', host: request.undo.host, created};
             break;
           }
+          case 'repositories':
+            reply = {kind: 'repositories', directories: yield* folders(store)};
+            break;
+          case 'set-repositories':
+            yield* store.setRepositories(request.host, request.directory);
+            reply = {kind: 'repositories', directories: yield* folders(store)};
+            break;
         }
       } catch (error) {
         reply = refused(reasonOf(error));

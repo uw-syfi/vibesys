@@ -145,7 +145,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Daemon = d
 	for audience, service := range map[daemon.Audience]**daemon.Service{daemon.AudienceOperator: &r.Service, daemon.AudienceAgent: &r.AgentService} {
 		if *service, err = daemon.NewService(d.Engine, daemon.ServiceDeps{
-			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, Directories: r.Dirs, Catalogue: r.Catalogue, Places: r.Places, Tasks: r.Tasks, JobTool: r.jobTool,
+			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, Directories: r.Dirs, Catalogue: r.Catalogue, Places: r.Places, Tasks: r.Tasks, SetupReads: r.SetupReads, JobTool: r.jobTool,
 		}); err != nil {
 			tb.Fatal(err)
 		}

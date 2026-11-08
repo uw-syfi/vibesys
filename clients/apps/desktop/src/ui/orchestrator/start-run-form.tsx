@@ -19,6 +19,7 @@ import {
   splitPath,
 } from '../../state/index.js';
 import {CommandLine} from './command-line.js';
+import {SetUpButton} from './setup/set-up-button.js';
 import {
   DEFAULT_FANOUT,
   FANOUT_CHOICES,
@@ -48,6 +49,8 @@ export interface StartHost {
   readonly catalogue: Remote<ListCatalogueResponse>;
   /** The host's eval places. */
   readonly evalPlaces: Remote<ListEvalPlacesResponse>;
+  /** The Repositories folder kept for this machine, empty when none: where Copy to starts. */
+  readonly repositoriesDirectory?: string;
   /** Where the repository being made from an example stands. */
   readonly provision: ProvisionProgress;
 }
@@ -300,6 +303,8 @@ export function StartRunForm(props: {
   readonly example?: StartExample;
   /** The control for the eval place of a run in the person's own repository. */
   readonly placeField?: JSX.Element;
+  /** Begin a setup chat in the repository named, which makes its task; for a run in the person's own repository. */
+  readonly setUp?: (host: string, request: StartRunRequest) => void;
 }): JSX.Element {
   const {draft, example} = props;
   const host = props.hosts.find(candidate => candidate.key === props.chosen) ?? props.hosts[0];
@@ -373,6 +378,15 @@ export function StartRunForm(props: {
           }}
           {...(block === null ? {} : {disabledReason: block.reason, quietReason: block.quiet})}
         />
+        {example === undefined && host !== undefined && props.setUp !== undefined ? (
+          <SetUpButton
+            draft={draft}
+            choices={choices}
+            verdict={verdict}
+            sending={props.progress?._tag === 'Sending'}
+            setUp={request => props.setUp?.(host.key, request)}
+          />
+        ) : null}
       </Row>
       <CommandLine progress={props.progress} done="Start" retry={props.retry} />
       {props.progress?._tag === 'Accepted' &&

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -976,10 +977,21 @@ func TestSimulation(t *testing.T) {
 		}
 		seeds = n
 	}
+	// The seeds are independent worlds, so they run side by side: the one thread of a single seed after
+	// another was the longest path of the orchestrator check, and cores sat idle beside it.
 	var total coverage
-	for seed := range seeds {
-		total.add(simulate(t, seed, steps).covered)
-	}
+	var mu sync.Mutex
+	t.Run("seeds", func(t *testing.T) {
+		for seed := range seeds {
+			t.Run(fmt.Sprint(seed), func(t *testing.T) {
+				t.Parallel()
+				covered := simulate(t, seed, steps).covered
+				mu.Lock()
+				defer mu.Unlock()
+				total.add(covered)
+			})
+		}
+	})
 	total.require(t)
 }
 

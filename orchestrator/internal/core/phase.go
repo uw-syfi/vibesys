@@ -39,7 +39,7 @@ func (t *tx) beginSetup(b BeginSetup, r *Receipt) RunID {
 		allow[i].Harness = c.Harness
 	}
 	run := Run{
-		ID: RunID(t.mint("run")), Repository: b.Repository, Status: RunStarting, Phase: PhaseSetup,
+		ID: RunID(t.mint("run")), Repository: b.Repository, Status: RunStarting, Phase: PhaseSetup, JobTool: b.JobTool,
 		Lead: AgentID(t.mint("agent")), CreatedAt: t.in.At, LastSummaryAt: t.in.At, Allowed: allowance(b.Lead, allow),
 	}
 	r.Run, r.Agent = run.ID, run.Lead

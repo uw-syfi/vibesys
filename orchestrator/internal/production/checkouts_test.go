@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,69 +60,70 @@ func leave(t *testing.T, s *ProcessSidecars, repository string, agent core.Agent
 // thing the run's end must not delete.
 func holdsWork(state left) bool { return state&(leftModified|leftStaged) != 0 }
 
-// For any mix of what agents left behind, a run's end removes every working copy without a change to
+// For every mix of what agents left behind, a run's end removes every working copy without a change to
 // a tracked file, whatever untracked or ignored output it holds, and keeps the others, named; the
 // repository is left with no new untracked file and lists only itself and the kept copies; a commit
 // made in a removed copy stays in the repository; and doing it again changes nothing. This is the
 // live finding: a benchmark always leaves build output, so every copy was kept and 5 stayed in the
 // user's repository after the run.
+//
+// The mixes are a closed set (five kinds, so 32, and the copy that was never made), so one agent holds
+// each of them in one repository, in one end, and nothing is sampled: a seeded draw of the same space
+// made a repository and a run's end for each of 40 seeds, 30 s of git processes.
 func TestReleasingCheckoutsRemovesEveryCopyWithoutTrackedChangesAndKeepsTheOthers(t *testing.T) {
-	for seed := range uint64(40) {
-		r := rand.New(rand.NewPCG(seed, 9))
-		repository := newRepository(t)
-		write(t, filepath.Join(repository, "tracked.txt"), "base\n")
-		write(t, filepath.Join(repository, ".git", "info", "exclude"), "*.log\n")
-		commitAll(t, repository)
-		s := &ProcessSidecars{Root: t.TempDir()}
-		var agents []core.AgentID
-		want := map[core.AgentID]left{}
-		for i := range 2 + r.IntN(6) {
-			agent := core.AgentID(fmt.Sprintf("agent-%d-%d", seed, i))
-			state := left(r.IntN(1 << leftKinds))
-			if r.IntN(8) == 0 {
-				state = leftNothingMade
-			}
-			leave(t, s, repository, agent, state)
-			agents = append(agents, agent)
-			want[agent] = state
-		}
+	repository := newRepository(t)
+	write(t, filepath.Join(repository, "tracked.txt"), "base\n")
+	write(t, filepath.Join(repository, ".git", "info", "exclude"), "*.log\n")
+	commitAll(t, repository)
+	s := &ProcessSidecars{Root: t.TempDir()}
+	var agents []core.AgentID
+	want := map[core.AgentID]left{}
+	states := []left{leftNothingMade}
+	for state := range left(1 << leftKinds) {
+		states = append(states, state)
+	}
+	for i, state := range states {
+		agent := core.AgentID(fmt.Sprintf("agent-%d", i))
+		leave(t, s, repository, agent, state)
+		agents = append(agents, agent)
+		want[agent] = state
+	}
 
-		kept, err := s.Release(context.Background(), repository, "run-1", agents)
-		if err != nil {
-			t.Fatalf("seed %d: %v", seed, err)
-		}
-		var wantKept []core.Checkout
-		for _, agent := range agents {
-			_, statErr := os.Stat(s.checkoutDir(agent))
-			switch {
-			case holdsWork(want[agent]):
-				wantKept = append(wantKept, core.Checkout{Agent: agent, Location: s.checkoutDir(agent)})
-				if statErr != nil {
-					t.Errorf("seed %d: the copy of %s with tracked changes (%05b) was removed", seed, agent, want[agent])
-				}
-			case statErr == nil:
-				t.Errorf("seed %d: the copy of %s (%05b) is still there", seed, agent, want[agent])
+	kept, err := s.Release(context.Background(), repository, "run-1", agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantKept []core.Checkout
+	for _, agent := range agents {
+		_, statErr := os.Stat(s.checkoutDir(agent))
+		switch {
+		case holdsWork(want[agent]):
+			wantKept = append(wantKept, core.Checkout{Agent: agent, Location: s.checkoutDir(agent)})
+			if statErr != nil {
+				t.Errorf("the copy of %s with tracked changes (%05b) was removed", agent, want[agent])
 			}
+		case statErr == nil:
+			t.Errorf("the copy of %s (%05b) is still there", agent, want[agent])
 		}
-		if !slices.Equal(kept, wantKept) {
-			t.Fatalf("seed %d: kept %v, want %v", seed, kept, wantKept)
-		}
-		again, err := s.Release(context.Background(), repository, "run-1", agents)
-		if err != nil || !slices.Equal(again, wantKept) {
-			t.Fatalf("seed %d: a second release gave %v, %v; want the same %v", seed, again, err, wantKept)
-		}
-		// What git lists is the repository itself and the copies that were kept, and the repository's
-		// own status shows nothing new.
-		out, err := exec.Command("git", "-C", repository, "worktree", "list", "--porcelain").Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if listed := strings.Count(string(out), "worktree "); listed != 1+len(wantKept) {
-			t.Fatalf("seed %d: git lists %d worktrees, want %d:\n%s", seed, listed, 1+len(wantKept), out)
-		}
-		if status, err := exec.Command("git", "-C", repository, "status", "--porcelain").Output(); err != nil || len(status) != 0 {
-			t.Fatalf("seed %d: the repository is not clean: %q, %v", seed, status, err)
-		}
+	}
+	if !slices.Equal(kept, wantKept) {
+		t.Fatalf("kept %v, want %v", kept, wantKept)
+	}
+	again, err := s.Release(context.Background(), repository, "run-1", agents)
+	if err != nil || !slices.Equal(again, wantKept) {
+		t.Fatalf("a second release gave %v, %v; want the same %v", again, err, wantKept)
+	}
+	// What git lists is the repository itself and the copies that were kept, and the repository's
+	// own status shows nothing new.
+	out, err := exec.Command("git", "-C", repository, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed := strings.Count(string(out), "worktree "); listed != 1+len(wantKept) {
+		t.Fatalf("git lists %d worktrees, want %d:\n%s", listed, 1+len(wantKept), out)
+	}
+	if status, err := exec.Command("git", "-C", repository, "status", "--porcelain").Output(); err != nil || len(status) != 0 {
+		t.Fatalf("the repository is not clean: %q, %v", status, err)
 	}
 }
 
