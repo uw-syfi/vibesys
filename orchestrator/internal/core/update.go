@@ -146,10 +146,11 @@ func (t *tx) wantLead(run *Run, want AgentSpec) (SettingChange, bool) {
 	lead := t.s.agents[run.Lead]
 	current, closing := lead.Spec, lead.Stop != StopNone
 	pending := run.PendingLead
+	_, fresh := t.s.queuedBrief(lead)
 	switch {
 	case want == current && pending == nil:
 		return SettingChange{}, false
-	case want == current && !closing:
+	case want == current && !closing && !fresh:
 		run.PendingLead = nil
 		return SettingChange{Lead: &LeadChange{From: *pending, To: current, State: LeadChangeApplied}}, true
 	case pending != nil && *pending == want:

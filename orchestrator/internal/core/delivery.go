@@ -33,7 +33,7 @@ func (t *tx) post(m Message) Message {
 // a turn is queued: sweep starts one turn at a time, so no path here can start a second.
 func (t *tx) route(m *Message, a agentState) {
 	switch {
-	case t.beingReplaced(a):
+	case t.beingReplaced(a), t.briefsNextSession(a, *m):
 		// The lead's session is closing to make way for the next, which has no mail of its own: what
 		// arrives now waits for it.
 		m.Delivery = DeliveryQueued
@@ -84,6 +84,10 @@ func (t *tx) sweep(id RunID) {
 			continue
 		case t.handoverDue(a):
 			t.beginHandover(a)
+		case t.s.briefWaits(a):
+			// The brief is for the lead that takes over: this session starts no turn on it, nor on what
+			// is queued behind it.
+			t.restStatus(a)
 		case len(a.queue) > 0:
 			t.startTurn(a)
 		case a.HandedOff && !t.steerPending(a.ID):

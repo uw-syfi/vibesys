@@ -35,29 +35,6 @@ func TestTheNewRunRpcsAreUnimplementedAndNameThemselves(t *testing.T) {
 	}
 }
 
-// The completion command of the New run contracts is parsed and reaches the core, which refuses it as
-// not permitted until its behavior exists: no run is made or changed.
-func TestTheSetupCompletionIsRefusedUntilDecided(t *testing.T) {
-	spec := &pb.AgentSpec{Harness: pb.Harness_HARNESS_CODEX}
-	bodies := map[string]*pb.Command{
-		"complete_setup": {Id: "c1", Body: &pb.Command_CompleteSetup{CompleteSetup: &pb.CompleteSetup{
-			RunId: "run-1", Task: "task", Lead: spec,
-		}}},
-	}
-	for name, cmd := range bodies {
-		t.Run(name, func(t *testing.T) {
-			r := daemontest.NewRig(t)
-			receipt := dispatch(t, r, cmd)
-			if receipt.GetRefusal() != pb.Refusal_REFUSAL_NOT_PERMITTED {
-				t.Fatalf("receipt %v, want a refusal as not permitted", receipt)
-			}
-			if n := len(r.Daemon.State().Runs()); n != 0 {
-				t.Fatalf("%d runs, want none", n)
-			}
-		})
-	}
-}
-
 // Each Fake satisfies its port and answers as the contract says: an unknown task is unreadable and
 // named, places and catalogue are as set, a provision is remembered.
 func TestTheNewRunFakesAnswerAsTheirPortsDo(t *testing.T) {

@@ -162,8 +162,12 @@ func (s *State) applyMessage(m Message, w *written) {
 	if a, ok := s.agents[m.To]; ok {
 		own(&s.agents, &w.agents)
 		queue := slices.DeleteFunc(slices.Clone(a.queue), func(id MessageID) bool { return id == m.ID })
-		if _, handover := m.Body.(LeadHandover); handover && m.Delivery == DeliveryQueued {
-			// A new lead's first turn is the handover, whatever is waiting behind it.
+		_, handover := m.Body.(LeadHandover)
+		_, brief := m.Body.(LeadBrief)
+		swap := brief && !s.runs[m.Run].OptimizeStartedAt.IsZero()
+		if m.Delivery == DeliveryQueued && (handover || swap) {
+			// A new lead's first turn is the handover, or the brief that opens it to optimize, whatever
+			// is waiting behind it. A run has one of the two: see queuedBrief.
 			queue = append([]MessageID{m.ID}, queue...)
 		} else if m.Delivery == DeliveryQueued {
 			queue = append(queue, m.ID)
