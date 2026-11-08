@@ -24,3 +24,17 @@ export function reachOf(place: EvalPlace): Reach {
       return 'not probed';
   }
 }
+
+/** What the host said of why it could not read the place; empty when it read it. */
+export function unreadableDetail(place: EvalPlace): string {
+  switch (place.state.case) {
+    case 'unreadable':
+      return place.state.value.detail;
+    case 'known':
+    case undefined:
+      return '';
+    default:
+      place.state satisfies never;
+      return '';
+  }
+}

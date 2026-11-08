@@ -236,7 +236,7 @@ export {
   withMode,
   withTheme,
 } from './settings/appearance.js';
-export {type Reach, reachOf} from './settings/eval-places.js';
+export {type Reach, reachOf, unreadableDetail} from './settings/eval-places.js';
 export {
   type MachineHost,
   type MachineRow,

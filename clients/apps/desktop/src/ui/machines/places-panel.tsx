@@ -1,7 +1,7 @@
 import type {EvalPlace, ListEvalPlacesResponse} from '@vibesys/orchestrator-proto';
 import {Button, Card, Chip, Reserve, Row, Spacer, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {type Reach, type Remote, reachOf} from '../../state/index.js';
+import {type Reach, type Remote, reachOf, unreadableDetail} from '../../state/index.js';
 import {offerWords} from '../orchestrator/new-run/words.js';
 
 /** One machine and what it reported of its eval places. */
@@ -24,7 +24,7 @@ const COLUMNS: readonly TableColumn<EvalPlace>[] = [
     header: 'Reach',
     cell: place => {
       const reach = reachOf(place);
-      const hint = place.state.case === 'unreadable' ? place.state.value.detail : '';
+      const hint = unreadableDetail(place);
       return <Chip label={reach} tone={REACH_TONE[reach]} even {...(hint === '' ? {} : {hint})} />;
     },
   },
