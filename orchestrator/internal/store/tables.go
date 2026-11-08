@@ -67,6 +67,8 @@ func (t *tables) apply(seq uint64, e core.Event, body []byte) error {
 		t.receipts[b.Command] = r
 	case core.CheckIn:
 		t.checkIns[b.ID] = r
+	case core.RunSettingsUpdated:
+		// Only in the log: a change of settings is no entity's row, and the run's own event holds the new values.
 	default:
 		return fmt.Errorf("store: unknown event body %T", e.Body)
 	}

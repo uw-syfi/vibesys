@@ -1,0 +1,43 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "leadHandover": {
+    "activeJobs": 2,
+    "agents": [
+      {
+        "agentId": "agent-w-1",
+        "planNumber": 2,
+        "role": "AGENT_ROLE_WORKER",
+        "status": "AGENT_STATUS_ACTIVE"
+      },
+      {
+        "agentId": "agent-j-1",
+        "role": "AGENT_ROLE_JUDGE",
+        "status": "AGENT_STATUS_IDLE"
+      }
+    ],
+    "agentsEnded": 5,
+    "elapsedSeconds": 5410,
+    "fanoutLimit": 3,
+    "latestReport": {
+      "changed": "promoted b",
+      "decisions": "kept Codex for volume",
+      "headline": "best score 17 at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "inFlight": "two workers",
+      "kind": "REPORT_KIND_PROGRESS",
+      "scope": "REPORT_SCOPE_RUN",
+      "sequence": 4
+    },
+    "maxCostUsd": 40,
+    "maxTimeSeconds": 28800,
+    "previousHarness": "HARNESS_CODEX",
+    "previousModel": "gpt-6",
+    "previousReasoningEffort": "high",
+    "reportsPosted": 4,
+    "spentUsd": 12.3456,
+    "task": "kv-store"
+  },
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

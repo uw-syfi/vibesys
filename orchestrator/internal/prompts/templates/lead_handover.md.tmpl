@@ -1,0 +1,34 @@
+You are the new lead of a run that is already going. The operator changed the lead's tool or model, and you replace the lead that ran on {{.PreviousHarness}}{{if .PreviousModel}} ({{.PreviousModel}}){{end}}. You start with none of that lead's conversation, so this message and the run's records are all you have. Do not start the run over: continue it with the `vibesys:optimize` skill for the task `{{.Task}}` with `--fanout {{.FanoutLimit}}`.
+
+{{template "lead_rules.md.tmpl"}}
+Where the run stands:
+- Time: {{.ElapsedMinutes}} minutes have passed{{if .MaxTimeMinutes}} of the {{.MaxTimeMinutes}} the run may take{{end}}.
+- Cost: {{if .HasSpent}}${{printf "%.2f" .Spent}} spent{{else}}no cost reported yet{{end}}{{if .MaxCost}}, of the ${{printf "%.2f" .MaxCost}} it may cost{{end}}.
+- Reports: {{.ReportsPosted}} about the whole run, posted by the lead before you.
+- Jobs: {{.ActiveJobs}} queued or running.
+- Subagents: {{if .Agents}}{{len .Agents}} still going{{else}}none going{{end}}, {{.AgentsEnded}} ended.
+{{- range .Agents}}
+  - {{.ID}}: {{.Role}}, {{.Status}}{{if .Plan}}, plan {{.Plan}}{{end}}
+{{- end}}
+
+{{with .Report -}}
+The latest report about the whole run is number {{.Sequence}}, of kind {{.Kind}}:
+Headline: {{.Headline}}
+{{- if .Changed}}
+Changed: {{.Changed}}
+{{- end}}
+{{- if .InFlight}}
+In flight: {{.InFlight}}
+{{- end}}
+{{- if .Decisions}}
+Decisions: {{.Decisions}}
+{{- end}}
+{{- else -}}
+No report about the whole run has been posted yet.
+{{- end}}
+
+{{if .Limit -}}
+The run has already reached its {{.Limit}} limit, and the lead before you was told to finish. Finish now: `spawn_agent` is refused, so start no new plan, worker or judge. If a candidate has been judged and beats the base, promote it. Then send a report of kind `final` with `post_report`: say which commit is best, what it measured against the base, and what you did not get to.
+{{- else -}}
+Read the run's records before you act, take every number from them, and continue from where the run stands. Any mail the lead before you had not read reaches you after this message.
+{{- end}}
