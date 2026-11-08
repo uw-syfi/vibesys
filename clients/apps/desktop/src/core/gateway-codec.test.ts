@@ -1,5 +1,6 @@
 import {create, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
+import {oneofIs} from '@vibesys/orchestrator-proto';
 import {DesktopGatewayKind, DesktopGatewayRequestSchema} from '@vibesys/proto';
 import fc from 'fast-check';
 import {
@@ -9,6 +10,8 @@ import {
   gatewayReply,
   parseGatewayRequest,
 } from './gateway-codec.js';
+
+const MAX_ERROR_BYTES = 65536;
 
 const REQUEST = {
   kind: 'stream' as const,
@@ -74,5 +77,33 @@ describe('the gateway codec', () => {
     });
     expect(() => decodeGatewayReply(new Uint8Array([255]))).toThrow();
     expect(() => gatewayEnd('x', 17)).toThrow();
+  });
+
+  it('bounds a failure message that overruns the end reply wire limit, instead of failing to build it', () => {
+    const over = 'x'.repeat(MAX_ERROR_BYTES + 1);
+    expect(() => gatewayEnd(over)).not.toThrow();
+    const reply = decodeGatewayReply(gatewayEnd(over));
+    if (!oneofIs(reply, 'end', {bytes: true, end: true})) throw new Error('not an end');
+    expect(reply.value.error).toBe('x'.repeat(MAX_ERROR_BYTES));
+  });
+
+  it('bounds any failure message to the wire limit without splitting the character at the cut', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('a', 'é', '中', '😀'),
+        fc.integer({min: MAX_ERROR_BYTES - 8, max: MAX_ERROR_BYTES + 8}),
+        (unit, length) => {
+          const message = unit.repeat(length);
+          const reply = decodeGatewayReply(gatewayEnd(message));
+          if (!oneofIs(reply, 'end', {bytes: true, end: true})) throw new Error('not an end');
+          const error = reply.value.error ?? '';
+          const messageBytes = new TextEncoder().encode(message).byteLength;
+          const errorBytes = new TextEncoder().encode(error).byteLength;
+          expect(errorBytes).toBeLessThanOrEqual(MAX_ERROR_BYTES);
+          if (messageBytes <= MAX_ERROR_BYTES) expect(error).toBe(message);
+          else expect(message.startsWith(error)).toBe(true);
+        },
+      ),
+    );
   });
 });
