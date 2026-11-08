@@ -19,7 +19,7 @@ func (p *placementProbe) Offers(context.Context) ([]*cliv1.AcceleratorOffer, err
 }
 func TestListPlacementsServesTheReaderAndRefreshes(t *testing.T) {
 	p := &placementProbe{}
-	reader := app.NewPlacementReader(map[string]app.Placement{"host-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SSH, MaxJobs: 1, Probe: p}}, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
+	reader := app.NewPlacementReader(map[string]app.Placement{"host-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SSH, MaxJobs: 1, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: p}}, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
 	srv := daemon.NewServer(nil, "test", daemon.Inherited{}).WithPlacements(reader)
 	for _, refresh := range []bool{false, false, true} {
 		got, err := srv.ListPlacements(t.Context(), &cliv1.ListPlacementsRequest{Refresh: refresh})

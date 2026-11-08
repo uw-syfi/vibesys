@@ -53,8 +53,6 @@ type Config struct {
 	// refused, and so is a task for an accelerator without GPUs. For a task of two images, the GPUs
 	// go to the candidate's container alone.
 	Resources []resource.Resource
-	// NodeFactsPending says the resource readers reach a login host, not the allocated node.
-	NodeFactsPending bool
 
 	// Candidates reads what builds a candidate's image, for a task of two images. Nil builds none.
 	Candidates CandidateSource

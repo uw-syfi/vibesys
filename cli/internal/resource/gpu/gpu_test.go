@@ -97,22 +97,28 @@ func TestASettingThatCannotBeIsRefused(t *testing.T) {
 	}
 }
 
-func TestOffersReadTheFingerprintFactsAndDoNotOverstateADeviceSelection(t *testing.T) {
+func TestOffersCountTheDevicesASelectionNames(t *testing.T) {
 	for _, tc := range []struct {
-		devices  string
-		readable bool
-	}{{"all", true}, {"device=0,1", false}} {
-		g, err := gpu.New(gpu.Config{Devices: tc.devices, Machine: "host-a", Facts: someGPU()})
+		devices, runtime string
+		want             uint32 // zero: unreadable
+	}{
+		{"all", "", 1}, {"device=0", "", 1}, {"device=0,0", "", 1}, {"0", "nvidia", 1}, {"GPU-1234", "nvidia", 1},
+		{"device=0,1", "", 0}, {"0", "", 0}, {"2", "", 0}, {"count=1", "", 0}, {"device=", "", 0},
+		{"device=0,", "", 0}, {"none", "nvidia", 0}, {"void", "nvidia", 0}, {"device=none", "", 0},
+	} {
+		g, err := gpu.New(gpu.Config{Devices: tc.devices, Runtime: tc.runtime, Machine: "host-a", Facts: someGPU()})
 		if err != nil {
 			t.Fatal(err)
 		}
 		offers, err := g.Offers(t.Context())
-		if tc.readable {
-			if err != nil || len(offers) != 1 || offers[0].GetCount() != 1 || offers[0].GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100 {
-				t.Fatalf("%s: %v, %v", tc.devices, offers, err)
+		if tc.want == 0 {
+			if err == nil {
+				t.Errorf("%s: got %v, want unreadable", tc.devices, offers)
 			}
-		} else if err == nil {
-			t.Fatalf("%s: got %v, want unreadable selection", tc.devices, offers)
+			continue
+		}
+		if err != nil || len(offers) != 1 || offers[0].GetCount() != tc.want || offers[0].GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100 {
+			t.Errorf("%s: %v, %v", tc.devices, offers, err)
 		}
 	}
 }

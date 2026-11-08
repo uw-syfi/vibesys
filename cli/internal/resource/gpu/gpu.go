@@ -112,7 +112,8 @@ func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: "gpu: " + fmt.Sprintf(format, args...)}
 }
 
-// Offers implements resource.Resource using the same facts as the fingerprint.
+// Offers implements resource.Resource: the machine's GPU model, counted by the selection. A
+// selection that does not list its devices, such as a count, is unreadable.
 func (r *GPU) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -125,8 +126,34 @@ func (r *GPU) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.cfg.Devices != "all" {
-		return nil, fmt.Errorf("GPU selection %q cannot be counted from the fingerprint", r.cfg.Devices)
+	selected, err := selectedDevices(r.cfg.Devices, r.cfg.Runtime != "", offer.GetCount())
+	if err != nil {
+		return nil, err
 	}
+	offer.Count = selected
 	return []*cliv1.AcceleratorOffer{offer}, nil
+}
+
+// selectedDevices counts the devices of a selection out of the machine's total: all of them for
+// "all", and the listed ones for "device=0,1" (for a runtime, the variable's list "0,1"). Any other
+// value, such as a count, does not say which devices.
+func selectedDevices(selection string, viaRuntime bool, total uint32) (uint32, error) {
+	if selection == "all" {
+		return total, nil
+	}
+	list, listed := strings.CutPrefix(selection, "device=")
+	if !listed && !viaRuntime {
+		return 0, fmt.Errorf("GPU selection %q does not list its devices", selection)
+	}
+	seen := map[string]bool{}
+	for id := range strings.SplitSeq(list, ",") {
+		if id == "" || id == "none" || id == "void" || strings.Contains(id, "=") {
+			return 0, fmt.Errorf("GPU selection %q does not list its devices", selection)
+		}
+		seen[id] = true
+	}
+	if uint32(len(seen)) > total {
+		return 0, fmt.Errorf("GPU selection %q lists more devices than the machine's %d", selection, total)
+	}
+	return uint32(len(seen)), nil
 }

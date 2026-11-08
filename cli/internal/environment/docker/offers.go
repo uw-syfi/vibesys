@@ -9,9 +9,6 @@ import (
 
 // Offers probes the placement's machine and the resources its containers receive.
 func (p *Provider) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
-	if p.cfg.NodeFactsPending {
-		return nil, fmt.Errorf("compute node hardware has not been probed")
-	}
 	if _, err := p.cfg.Engine.Containers(ctx, Labels{}); err != nil {
 		return nil, err
 	}

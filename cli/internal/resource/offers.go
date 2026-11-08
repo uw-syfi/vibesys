@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,4 +30,51 @@ func AcceleratorOffer(vendor cliv1.AcceleratorVendor, name, count string) (*cliv
 		}
 	}
 	return &cliv1.AcceleratorOffer{Vendor: vendor, Model: model, Count: uint32(n), DeviceName: name}, nil
+}
+
+// ErrNoDeclaredAccelerators says a placement declares no accelerator resource, so there is nothing to report.
+var ErrNoDeclaredAccelerators = errors.New("no declared accelerators")
+
+// DeclaredOffers reads what an operator config declares a placement gives, for a kind the daemon
+// cannot probe: the vendor comes from the accelerator resource ([resources.gpu] is NVIDIA,
+// [resources.rocm] is AMD) and the models and counts from the placement's gres, such as
+// "gpu:h100:8" or "gpu:4" (a gres with no model names the model OTHER).
+// Without an accelerator resource it fails with ErrNoDeclaredAccelerators.
+// This reading is temporary until the shared accelerator identity registry replaces it.
+func DeclaredOffers(slurm *cliv1.SlurmSettings, res *cliv1.Resources) ([]*cliv1.AcceleratorOffer, error) {
+	var vendor cliv1.AcceleratorVendor
+	switch {
+	case res.GetGpu() != nil && res.GetRocm() != nil:
+		return nil, errors.New("both a gpu and a rocm resource are declared: the accelerators cannot be told apart")
+	case res.GetGpu() != nil:
+		vendor = cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA
+	case res.GetRocm() != nil:
+		vendor = cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD
+	default:
+		return nil, ErrNoDeclaredAccelerators
+	}
+	var offers []*cliv1.AcceleratorOffer
+	for item := range strings.SplitSeq(slurm.GetGres(), ",") {
+		item, _, _ = strings.Cut(item, "(")
+		parts := strings.Split(item, ":")
+		if parts[0] != "gpu" || len(parts) < 2 || len(parts) > 3 {
+			continue
+		}
+		name := "gpu"
+		if len(parts) == 3 {
+			name = parts[1]
+		}
+		offer, err := AcceleratorOffer(vendor, name, parts[len(parts)-1])
+		if err != nil {
+			return nil, fmt.Errorf("gres %q: %w", item, err)
+		}
+		if len(parts) == 2 {
+			offer.DeviceName = ""
+		}
+		offers = append(offers, offer)
+	}
+	if len(offers) == 0 {
+		return nil, fmt.Errorf("the declared accelerator resource has no gpu count in gres %q", slurm.GetGres())
+	}
+	return offers, nil
 }
