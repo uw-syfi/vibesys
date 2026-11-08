@@ -405,6 +405,9 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 		if out.Objectives, err = objectivesFromMessage("objectives", o.Measure.GetObjectives()); err != nil {
 			return fail(err)
 		}
+		if out.Services, err = wire.ToSampleServices("sample_services", o.Measure.GetSampleServices(), len(out.Samples)); err != nil {
+			return fail(err)
+		}
 		r.Outcome = out
 	default:
 		return fail(fmt.Errorf("it says neither that it is a check nor a measurement"))

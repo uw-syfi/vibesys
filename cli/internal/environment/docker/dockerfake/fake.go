@@ -619,9 +619,9 @@ func (h *handle) Port(ctx context.Context, seed string) (int, error) {
 	return docker.PortOf(seed), nil
 }
 
-// probe is the probe program asking the server whose network the container joined: it answers
-// once a process of that container ran the `ready` step. A container without the program mounted
-// cannot run it, as a shell cannot (127).
+// probe is the probe program asking the server on the container's network: that of the container
+// it joined, or its own. It answers once a process of the container whose network it is ran the
+// `ready` step. A container without the program mounted cannot run it, as a shell cannot (127).
 func (h *handle) probe() environment.Process {
 	h.c.d.mu.Lock()
 	defer h.c.d.mu.Unlock()
@@ -629,8 +629,10 @@ func (h *handle) probe() environment.Process {
 	if !mounted {
 		return newExitedProcess(127)
 	}
-	joined, _ := strings.CutPrefix(h.b.spec.Network, "container:")
-	server := h.c.d.boxes[joined]
+	server := h.b
+	if joined, ok := strings.CutPrefix(h.b.spec.Network, "container:"); ok {
+		server = h.c.d.boxes[joined]
+	}
 	if server == nil || !server.running || !server.machine.Ready() {
 		return newExitedProcess(1)
 	}

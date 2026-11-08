@@ -63,6 +63,41 @@ func Validate(x core.Execution) error {
 	return nil
 }
 
+// ValidateService refuses a job-scoped server no environment can start, with a *core.Failure of
+// kind FailureInvalidInput that names what is wrong, as Validate does for an execution.
+func ValidateService(s core.JobService) error {
+	invalid := func(format string, args ...any) error {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "service: " + fmt.Sprintf(format, args...)}
+	}
+	switch {
+	case len(s.Argv) == 0 || s.Argv[0] == "":
+		return invalid("no command to run")
+	case s.Checkout.Dir == "" || s.Checkout.Dir[0] != '/':
+		return invalid("the checkout directory must be an absolute path, got %q", s.Checkout.Dir)
+	case s.Artifacts != "" && (s.Artifacts[0] != '/' || overlap(s.Checkout.Dir, s.Artifacts)):
+		return invalid("the artifacts directory %q must be an absolute path apart from the checkout", s.Artifacts)
+	case !strings.HasPrefix(s.Ready, "/") || strings.ContainsAny(s.Ready, " \t\n"):
+		return invalid("the readiness path %q is not an absolute HTTP path", s.Ready)
+	case s.StartupTimeout <= 0:
+		return invalid("the startup time must be positive, got %v", s.StartupTimeout)
+	case s.Lifetime <= 0:
+		return invalid("the lifetime must be positive, got %v", s.Lifetime)
+	}
+	return nil
+}
+
+// ValidateAgainst refuses an execution that cannot run against a job-scoped server: one that is
+// not valid, or names a service or a candidate of its own.
+func ValidateAgainst(x core.Execution) error {
+	if err := Validate(x); err != nil {
+		return err
+	}
+	if x.Service != nil || x.Candidate != nil {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "execution: a command that runs against the job's server has no service and no candidate of its own"}
+	}
+	return nil
+}
+
 // ResolvePort is the candidate's server command with the port it is to listen on.
 func ResolvePort(argv []string, port int) []string {
 	out := make([]string, len(argv))
@@ -121,6 +156,10 @@ type Events struct {
 	Startup <-chan struct{}
 	// Cancelled is closed when the caller cancels the execution.
 	Cancelled <-chan struct{}
+	// ServiceGone, for an execution that runs against a server started before it (Service.Run),
+	// is closed when that server has ended: the execution then ends with ExecServiceExited, as it
+	// does when its own service ends. Nil names no such server.
+	ServiceGone <-chan struct{}
 	// Pause returns a channel closed after the pause between two readiness probes, and the
 	// function that releases it.
 	Pause func() (fired <-chan struct{}, stop func())
@@ -196,21 +235,13 @@ func ExecuteBeside(x core.Execution, places Places, ev Events, out io.Writer) co
 	var running []Process // the groups a limit or a cancel asks to terminate
 	var svc Process
 	if s := x.Service; s != nil {
-		var err error
-		svc, err = places.Service.Start(s.Argv, out)
-		if err != nil {
-			return failed(err)
+		var ended core.Attempt
+		if svc, ended = StartService(*s, places, ev, out); ended != nil {
+			return ended
 		}
 		started = true
 		running = append(running, svc)
 		serviceExited = svc.Exited()
-		if len(s.Probe) > 0 {
-			if ended, err := awaitReady(l, s.Probe, svc, ev); err != nil {
-				return failed(err)
-			} else if ended != nil {
-				return core.Ended{Exec: *ended}
-			}
-		}
 	}
 	main, err := l.Start(x.Argv, out)
 	if err != nil {
@@ -236,6 +267,15 @@ func ExecuteBeside(x core.Execution, places Places, ev Events, out io.Writer) co
 		default:
 			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecServiceExited}}
 		}
+	case <-ev.ServiceGone:
+		// The same for the server the command runs against, which the command does not own: it is
+		// not asked to terminate, since the server is already gone.
+		select {
+		case st := <-main.Exited():
+			return exited(st)
+		default:
+			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecServiceExited}}
+		}
 	case <-ev.Limit:
 		ev.terminate(running...)
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecTimedOut}}
@@ -243,6 +283,75 @@ func ExecuteBeside(x core.Execution, places Places, ev Events, out io.Writer) co
 		ev.terminate(running...)
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
+}
+
+// StartService starts a service in places.Service and probes it from places.Command until it is
+// ready, and returns it running with a nil attempt. Otherwise it returns a nil process and how the
+// start ended: core.NotStarted when the service could not be started, core.Ended with
+// ExecServiceNotReady, ExecServiceExited or ExecCancelled when the events ended the wait (after
+// asking the service to terminate, given the grace), and core.Unobserved when a probe could not be
+// run or waited for. A service without a probe is ready at once. It ends nothing: ending the group
+// is the caller's, on every path.
+func StartService(s core.ServiceSpec, places Places, ev Events, out io.Writer) (Process, core.Attempt) {
+	svc, err := places.Service.Start(s.Argv, out)
+	if err != nil {
+		return nil, core.NotStarted{Failure: core.AsFailure(err)}
+	}
+	if len(s.Probe) > 0 {
+		if ended, err := awaitReady(places.Command, s.Probe, svc, ev); err != nil {
+			return nil, core.Unobserved{Failure: core.AsFailure(err)}
+		} else if ended != nil {
+			return nil, core.Ended{Exec: *ended}
+		}
+	}
+	return svc, nil
+}
+
+// Watched is a running service whose end is seen once, by a goroutine of its own, so that many may
+// ask whether it ended: a Process's Exited receives only once.
+type Watched struct {
+	p    Process
+	done chan struct{}
+}
+
+// Watch starts watching the process, which nothing else may receive from Exited afterwards.
+func Watch(p Process) *Watched {
+	w := &Watched{p: p, done: make(chan struct{})}
+	go func() {
+		<-p.Exited()
+		close(w.done)
+	}()
+	return w
+}
+
+// Gone is closed once the process has ended.
+func (w *Watched) Gone() <-chan struct{} { return w.done }
+
+// Alive reports whether the process has not ended yet. It does not block.
+func (w *Watched) Alive() bool {
+	select {
+	case <-w.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// Stop asks the process to terminate, waits until it has ended or the grace period of ev is over,
+// whichever is first, and then kills its whole group, as a limit or a cancel ends a command. It
+// returns once the group is ended. A process that already ended is only killed, which ends what it
+// left behind.
+func (w *Watched) Stop(ev Events) {
+	if w.Alive() && ev.Grace != nil {
+		w.p.Terminate()
+		fired, stop := ev.Grace()
+		select {
+		case <-w.done:
+		case <-fired:
+		}
+		stop()
+	}
+	w.p.Kill()
 }
 
 // exited is the end of a command whose leader was seen to end, or could not be waited for.

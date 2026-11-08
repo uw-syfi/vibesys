@@ -127,6 +127,9 @@ type Task struct {
 	// Profile is the standard profile load of a task of two images, when it declares one. It is
 	// never scored.
 	Profile *Command
+	// Service is set for a task of one image with a job-scoped server (a Schema02 manifest with
+	// [service]): a job starts it once and runs its samples against it.
+	Service *Service
 }
 
 // Declared is every objective the task declares, which way each improves: the scored metric first,
@@ -138,7 +141,7 @@ func (t Task) Declared() []core.Metric {
 
 // Setup is what the task declares that decides where its jobs run.
 func (t Task) Setup() core.TaskSetup {
-	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile, TwoImages: t.Candidate != nil}
+	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile, TwoImages: t.Candidate != nil, JobServer: t.Service != nil}
 }
 
 // ValidName says whether name is a task name: one path element, which cannot reach outside the
@@ -186,6 +189,9 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	tree, err := versioned(fsys, dir)
 	if err != nil {
 		return Task{}, err
+	}
+	if t.Service != nil && !t.HasDockerfile {
+		return Task{}, invalid("task %q: a task with a [service] needs a %s in %s: its server runs in a container of the task's image, beside the commands that run against it", name, dockerfile, dir)
 	}
 	if t.Candidate != nil && !t.HasDockerfile {
 		return Task{}, invalid("task %q: a task with a [candidate] needs a %s in %s, which builds the task's image; the candidate's image is built from %s", name, dockerfile, dir, t.Candidate.Build.Dockerfile)

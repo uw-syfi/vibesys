@@ -74,6 +74,66 @@ func (Direction) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{0}
 }
 
+// SampleService is the server a sample of a task with a job-scoped server ran on. A sample that is
+// the first command on its server ran on a server that nothing had used yet; any other ran on one
+// that earlier commands of the job used, after the task's reset.
+type SampleService int32
+
+const (
+	// The sample ran on no job-scoped server, or its result does not say.
+	SampleService_SAMPLE_SERVICE_UNSPECIFIED SampleService = 0
+	// The first command on the server the job started.
+	SampleService_SAMPLE_SERVICE_STARTED SampleService = 1
+	// A server an earlier command of the job used, after the task's reset.
+	SampleService_SAMPLE_SERVICE_REUSED SampleService = 2
+	// The first command on a server the job started again, because the one an earlier command used
+	// had ended.
+	SampleService_SAMPLE_SERVICE_RESTARTED SampleService = 3
+)
+
+// Enum value maps for SampleService.
+var (
+	SampleService_name = map[int32]string{
+		0: "SAMPLE_SERVICE_UNSPECIFIED",
+		1: "SAMPLE_SERVICE_STARTED",
+		2: "SAMPLE_SERVICE_REUSED",
+		3: "SAMPLE_SERVICE_RESTARTED",
+	}
+	SampleService_value = map[string]int32{
+		"SAMPLE_SERVICE_UNSPECIFIED": 0,
+		"SAMPLE_SERVICE_STARTED":     1,
+		"SAMPLE_SERVICE_REUSED":      2,
+		"SAMPLE_SERVICE_RESTARTED":   3,
+	}
+)
+
+func (x SampleService) Enum() *SampleService {
+	p := new(SampleService)
+	*p = x
+	return p
+}
+
+func (x SampleService) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SampleService) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_result_proto_enumTypes[1].Descriptor()
+}
+
+func (SampleService) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_result_proto_enumTypes[1]
+}
+
+func (x SampleService) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SampleService.Descriptor instead.
+func (SampleService) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{1}
+}
+
 type Metric struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -394,9 +454,14 @@ type MeasureResult struct {
 	// mean). The daemon computes it, so no reader recomputes it.
 	Value float64 `protobuf:"fixed64,5,opt,name=value,proto3" json:"value,omitempty"`
 	// Set for a measurement of a multi-objective task, and absent otherwise.
-	Objectives    *Objectives `protobuf:"bytes,6,opt,name=objectives,proto3" json:"objectives,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Objectives *Objectives `protobuf:"bytes,6,opt,name=objectives,proto3" json:"objectives,omitempty"`
+	// For a task with a job-scoped server ([service] in its manifest), the server each sample ran on,
+	// in the order of samples: one per sample. Empty for any other task, and in a result saved before
+	// this field; a measurement that pools both has SAMPLE_SERVICE_UNSPECIFIED for the samples of the
+	// results that recorded none.
+	SampleServices []SampleService `protobuf:"varint,7,rep,packed,name=sample_services,json=sampleServices,proto3,enum=vibesys.cli.v1.SampleService" json:"sample_services,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MeasureResult) Reset() {
@@ -467,6 +532,13 @@ func (x *MeasureResult) GetValue() float64 {
 func (x *MeasureResult) GetObjectives() *Objectives {
 	if x != nil {
 		return x.Objectives
+	}
+	return nil
+}
+
+func (x *MeasureResult) GetSampleServices() []SampleService {
+	if x != nil {
+		return x.SampleServices
 	}
 	return nil
 }
@@ -753,7 +825,7 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"D\n" +
 	"\vCheckResult\x125\n" +
-	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\x8e\x02\n" +
+	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xed\x04\n" +
 	"\rMeasureResult\x12.\n" +
 	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x12\x18\n" +
 	"\asamples\x18\x02 \x03(\x01R\asamples\x12?\n" +
@@ -763,7 +835,10 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x05value\x18\x05 \x01(\x01R\x05value\x12:\n" +
 	"\n" +
 	"objectives\x18\x06 \x01(\v2\x1a.vibesys.cli.v1.ObjectivesR\n" +
-	"objectives\"\xe4\x01\n" +
+	"objectives\x12U\n" +
+	"\x0fsample_services\x18\a \x03(\x0e2\x1d.vibesys.cli.v1.SampleServiceB\r\xbaH\n" +
+	"\x92\x01\a\"\x05\x82\x01\x02\x10\x01R\x0esampleServices:\x85\x02\xbaH\x81\x02\x1a\xfe\x01\n" +
+	"\"measure.sample_services_per_sample\x1a\xd7\x01this.sample_services.size() == 0 || this.sample_services.size() == this.samples.size() ? '' : 'sample_services has ' + string(this.sample_services.size()) + ' entries for ' + string(this.samples.size()) + ' samples'\"\xe4\x01\n" +
 	"\vMeasurement\x12\x16\n" +
 	"\x06commit\x18\x01 \x01(\tR\x06commit\x12!\n" +
 	"\ftask_version\x18\x02 \x01(\tR\vtaskVersion\x12H\n" +
@@ -790,7 +865,12 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12DIRECTION_MAXIMIZE\x10\x01\x12\x16\n" +
-	"\x12DIRECTION_MINIMIZE\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x12DIRECTION_MINIMIZE\x10\x02*\x84\x01\n" +
+	"\rSampleService\x12\x1e\n" +
+	"\x1aSAMPLE_SERVICE_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16SAMPLE_SERVICE_STARTED\x10\x01\x12\x19\n" +
+	"\x15SAMPLE_SERVICE_REUSED\x10\x02\x12\x1c\n" +
+	"\x18SAMPLE_SERVICE_RESTARTED\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_result_proto_rawDescOnce sync.Once
@@ -804,45 +884,47 @@ func file_vibesys_cli_v1_result_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_result_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_result_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_cli_v1_result_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(Direction)(0),                 // 0: vibesys.cli.v1.Direction
-	(*Metric)(nil),                 // 1: vibesys.cli.v1.Metric
-	(*Observation)(nil),            // 2: vibesys.cli.v1.Observation
-	(*Objectives)(nil),             // 3: vibesys.cli.v1.Objectives
-	(*ObjectiveNoise)(nil),         // 4: vibesys.cli.v1.ObjectiveNoise
-	(*CheckResult)(nil),            // 5: vibesys.cli.v1.CheckResult
-	(*MeasureResult)(nil),          // 6: vibesys.cli.v1.MeasureResult
-	(*Measurement)(nil),            // 7: vibesys.cli.v1.Measurement
-	(*Result)(nil),                 // 8: vibesys.cli.v1.Result
-	(*durationpb.Duration)(nil),    // 9: google.protobuf.Duration
-	(*EnvironmentFingerprint)(nil), // 10: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 11: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 12: vibesys.cli.v1.MachineLoad
-	(*timestamppb.Timestamp)(nil),  // 13: google.protobuf.Timestamp
+	(SampleService)(0),             // 1: vibesys.cli.v1.SampleService
+	(*Metric)(nil),                 // 2: vibesys.cli.v1.Metric
+	(*Observation)(nil),            // 3: vibesys.cli.v1.Observation
+	(*Objectives)(nil),             // 4: vibesys.cli.v1.Objectives
+	(*ObjectiveNoise)(nil),         // 5: vibesys.cli.v1.ObjectiveNoise
+	(*CheckResult)(nil),            // 6: vibesys.cli.v1.CheckResult
+	(*MeasureResult)(nil),          // 7: vibesys.cli.v1.MeasureResult
+	(*Measurement)(nil),            // 8: vibesys.cli.v1.Measurement
+	(*Result)(nil),                 // 9: vibesys.cli.v1.Result
+	(*durationpb.Duration)(nil),    // 10: google.protobuf.Duration
+	(*EnvironmentFingerprint)(nil), // 11: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 12: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 13: vibesys.cli.v1.MachineLoad
+	(*timestamppb.Timestamp)(nil),  // 14: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_result_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.Metric.direction:type_name -> vibesys.cli.v1.Direction
-	1,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
-	4,  // 2: vibesys.cli.v1.Objectives.noise:type_name -> vibesys.cli.v1.ObjectiveNoise
-	9,  // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
-	1,  // 4: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
-	2,  // 5: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
-	3,  // 6: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
-	10, // 7: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	6,  // 8: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
-	10, // 9: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	11, // 10: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
-	12, // 11: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
-	13, // 12: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
-	5,  // 13: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
-	6,  // 14: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	2,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
+	5,  // 2: vibesys.cli.v1.Objectives.noise:type_name -> vibesys.cli.v1.ObjectiveNoise
+	10, // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
+	2,  // 4: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
+	3,  // 5: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
+	4,  // 6: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
+	1,  // 7: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
+	11, // 8: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	7,  // 9: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
+	11, // 10: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	12, // 11: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
+	13, // 12: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
+	14, // 13: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
+	6,  // 14: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
+	7,  // 15: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_result_proto_init() }
@@ -861,7 +943,7 @@ func file_vibesys_cli_v1_result_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_result_proto_rawDesc), len(file_vibesys_cli_v1_result_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,

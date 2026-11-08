@@ -24,6 +24,7 @@ var unfuzzedDecoders = map[string]string{
 	"ToSubmitter":          "decoded inside ToJob, which FuzzDecodeJob fuzzes",
 	"ToResourceKind":       "decoded inside ToJob, which FuzzDecodeJob fuzzes; TestAResourceKindIsItsContractValueAndBack holds it total over every contract value",
 	"ToCutCause":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToSampleServices":     "the filestore's reading of a result; the same translation runs inside ToOutcome, which FuzzDecodeOutcome fuzzes",
 	"ToVersions":           "copies three integers and refuses nothing; a copy has no input to fuzz",
 	"ToFailure":            "decoded inside FailureOf, which FuzzFailureFromStatus fuzzes",
 	"ToJobState":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
