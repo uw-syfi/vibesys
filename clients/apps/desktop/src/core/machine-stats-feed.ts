@@ -292,7 +292,8 @@ const heard = (ports: Ports, course: Course, response: SubscribeResponse) =>
     if (frame._tag === 'End') return over(frame.why, course.syncedAt);
     const receipts = received(course.receipts, frame.receipt, now);
     if (frame.event === null) return on({...course, receipts});
-    const syncedAt = frame.event._tag === 'Synced' ? now : course.syncedAt;
+    // A stream syncs once: the fold ignores a later `Synced`, and so does the time it held.
+    const syncedAt = course.syncedAt ?? (frame.event._tag === 'Synced' ? now : null);
     const model = yield* apply(ports, frame.event);
     // The fold ends a stream that broke the bound on keys.
     if (model.ended !== null && !model.open) return over(model.ended, syncedAt);
