@@ -648,8 +648,10 @@ func concurrent(t *testing.T, h *Harness) {
 	go func() {
 		defer wg.Done()
 		// A store that hands out an effect twice would never run dry, so the loop is bounded by
-		// what could ever be claimed: far more than one writer commits.
-		for rounds := 0; rounds < 100000; rounds++ {
+		// what could ever be handed out: far more than one writer commits. Only rounds that hand
+		// something out count: an empty round while the writer is still committing says nothing about
+		// the store, and on a slow machine there can be any number of them before the writer is done.
+		for handed := 0; handed < 100000; {
 			finished := done.Load()
 			got, err := s.Claim(farFuture, 10)
 			if err != nil {
@@ -657,6 +659,7 @@ func concurrent(t *testing.T, h *Harness) {
 				return
 			}
 			var ids []store.OutboxID
+			handed += len(got)
 			mu.Lock()
 			for _, c := range got {
 				claimed[c.Effect.ID()]++
