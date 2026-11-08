@@ -46,8 +46,8 @@ import type {CallTarget} from '../../core/transport/gateway-transport.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from '../transport/index.js';
 import type {FakeDaemon} from './fake-daemon.js';
-import {newRunSteps} from './new-run-steps.js';
 import type {FakeFiles} from './fake-files.js';
+import {newRunSteps} from './new-run-steps.js';
 
 /** What happens to the `nth` Dispatch call. */
 export type DispatchFate =
