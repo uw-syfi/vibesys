@@ -14,9 +14,15 @@ export function valueTicks(low: number, high: number, wanted: number): readonly 
   const step = (STEPS.find(each => each * power >= raw * (1 - 1e-12)) ?? 10) * power;
   const first = Math.ceil(low / step);
   const last = Math.floor(high / step);
-  return Array.from({length: Math.max(0, last - first + 1)}, (_, at) =>
-    Number(((first + at) * step).toPrecision(12)),
-  ).filter(tick => tick >= low && tick <= high);
+  const ticks: number[] = [];
+  for (let at = first; at <= last; at += 1) {
+    const tick = Number((at * step).toPrecision(12));
+    // Rounding to 12 figures can make two distinct multiples of `step` the same value when `step`
+    // is many orders of magnitude smaller than `low`; drop a tick that did not move, so "increasing"
+    // holds for every tick this function returns, as it does for `timeTicks`.
+    if (tick >= low && tick <= high && tick !== ticks[ticks.length - 1]) ticks.push(tick);
+  }
+  return ticks;
 }
 
 const SECOND = 1000;
