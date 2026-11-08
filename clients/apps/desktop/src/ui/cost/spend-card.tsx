@@ -15,11 +15,17 @@ export function SpendCard(props: {
   readonly runOver: boolean;
   /** The link that opens the whole screen, at the end of the card's heading. */
   readonly action?: ReactNode;
+  /** The packed card, for a page of dense cards (the run report). */
+  readonly dense?: boolean;
 }): JSX.Element {
   const {spend} = props;
   const figure = `${spend.floor ? FLOOR : ''}${spend.figure ?? NOT_REPORTED}`;
   return (
-    <Card section="Spend" {...(props.action === undefined ? {} : {action: props.action})}>
+    <Card
+      section="Spend"
+      {...(props.dense === true ? {dense: true} : {})}
+      {...(props.action === undefined ? {} : {action: props.action})}
+    >
       <Stack gap="space-4">
         <Row gap="space-4" align="baseline" wrap>
           <Text variant="hero" tone={spend.figure === null ? 'muted' : 'default'}>

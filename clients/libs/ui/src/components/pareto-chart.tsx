@@ -1,6 +1,6 @@
 import {type JSX, useState} from 'react';
-import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
-import {useInlineSize} from './label-fit.js';
+import {MONO_ADVANCE, SIZE, TYPE} from '../tokens/index.js';
+import {placeLabels, useBoxSize} from './label-fit.js';
 import {type Direction, frontierAt, type Tradeoff, toward} from './pareto-frontier.js';
 import {Text} from './text.js';
 
@@ -35,15 +35,18 @@ type Role = 'input' | 'frontier' | 'dominated' | 'failed';
 
 /**
  * The drawing is in pixels: its width is its container's, measured, so its text keeps its size
- * whatever the width (`FALLBACK_WIDTH` until measured), and `HEIGHT` is fixed.
+ * whatever the width (`FALLBACK_WIDTH` until measured). A `strip` or `compact` chart has a fixed
+ * height; a `default` one is as tall as the window allows, between `--pareto-height-min` and
+ * `--pareto-height` (the stylesheet sizes its box and the chart draws to it; `HEIGHT.default` is
+ * the height where nothing is measured).
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 288;
-const HEIGHT = {default: 380, strip: 260, compact: 136} as const;
+const HEIGHT = {default: SIZE['pareto-height'], strip: 260, compact: 136} as const;
 export type ParetoSize = keyof typeof HEIGHT;
 /** Bands for the axis titles, above and below the plot, and the gutter around it. */
 const TOP_BAND = 28;
-const BOTTOM_BAND = 54;
+const BOTTOM_BAND = 58;
 const MARGIN_RIGHT = 16;
 const EDGE = 4;
 const LABEL_GAP = 8;
@@ -52,15 +55,20 @@ const PAD = 0.07;
 /** About this many ticks along the long, horizontal axis and the short, vertical one. */
 const X_TICKS = 6;
 const Y_TICKS = 4;
-/** Where `Better ↗` sits inside the frame's top right corner. */
-const BETTER_INSET = 4;
+/** The air between the words of the top band: the y axis' title and `Better ↗`. */
+const TITLE_GAP = 12;
 /** The gap between the input's mark and its name. */
 const INPUT_GAP = 4;
-const BETTER_DROP = 16;
 const R = 6;
 const R_SMALL = 4;
 const R_RING = 10;
 const GLYPH = TYPE.section.size * MONO_ADVANCE;
+/** One glyph of a tracked `section` label, which every word on the chart's axes is set in. */
+const LABEL_GLYPH = TYPE.section.size * (MONO_ADVANCE + TYPE.section.tracking);
+const BETTER = 'Better ↗';
+/** What a y axis' title starts with, before its words. */
+const ARROW = '↑ ';
+const ELLIPSIS = '…';
 const KEY_ORDER: readonly Role[] = ['input', 'frontier', 'dominated', 'failed'];
 
 interface Plot {
@@ -147,7 +155,7 @@ function frameFor(
   );
   const widest = Math.max(0, ...vertical.ticks.map(t => t.label.length));
   const plot: Plot = {
-    left: EDGE + Math.ceil(widest * GLYPH) + LABEL_GAP,
+    left: EDGE + Math.ceil(widest * LABEL_GLYPH) + LABEL_GAP,
     right: width - MARGIN_RIGHT,
     top: TOP_BAND,
     bottom: height - BOTTOM_BAND,
@@ -161,18 +169,15 @@ function frameFor(
   };
 }
 
-/** The frontier as a staircase: from the left edge across at the first point's y, down to each next. */
-function staircase(
-  frontier: readonly {readonly px: number; readonly py: number}[],
-  plot: Plot,
-): string {
-  const [first] = frontier;
-  if (first === undefined) return '';
-  const steps = frontier.map((point, index) => {
-    const next = frontier[index + 1];
-    return `H${point.px} V${next === undefined ? plot.bottom : next.py}`;
-  });
-  return [`M${plot.left} ${first.py}`, ...steps].join(' ');
+/**
+ * The frontier as a staircase between its points: from each, across to the next point's x, then
+ * down to its y. It starts at the first point and ends at the last, so no part of it reaches out to
+ * the frame; fewer than two points have nothing to join.
+ */
+function staircase(frontier: readonly {readonly px: number; readonly py: number}[]): string {
+  const [first, ...rest] = frontier;
+  if (first === undefined || rest.length === 0) return '';
+  return [`M${first.px} ${first.py}`, ...rest.map(point => `H${point.px} V${point.py}`)].join(' ');
 }
 
 function roleOf(point: ParetoPoint, onFrontier: ReadonlySet<string>): Role {
@@ -194,10 +199,24 @@ function describe(point: ParetoPoint, x: ParetoAxis, y: ParetoAxis): string {
   return `${point.label ?? point.id} · ${value(x, point.x)} · ${value(y, point.y)}`;
 }
 
-/** An axis' title: its name and unit, and which way is better. */
-function axisTitle(axis: ParetoAxis): string {
-  const unit = axis.unit === '' ? '' : ` (${axis.unit})`;
-  return `${axis.name}${unit}, ${axis.direction} is better`;
+/** An axis' name with its unit: `Latency (ms)`. */
+function nameOf(axis: ParetoAxis): string {
+  return axis.unit === '' ? axis.name : `${axis.name} (${axis.unit})`;
+}
+
+/**
+ * An axis' title: its name and unit, and which way is better. Where `room` pixels cannot hold that
+ * it drops the direction (the arrow and `Better` say it), and where they cannot hold the name and
+ * unit it ends in an ellipsis; it is never wider than `room`.
+ */
+function axisTitle(axis: ParetoAxis, room: number): string {
+  const fits = (text: string): boolean => text.length * LABEL_GLYPH <= room;
+  const whole = `${nameOf(axis)}, ${axis.direction} is better`;
+  if (fits(whole)) return whole;
+  const short = nameOf(axis);
+  if (fits(short)) return short;
+  const keep = Math.max(0, Math.floor(room / LABEL_GLYPH) - ELLIPSIS.length);
+  return `${short.slice(0, keep)}${ELLIPSIS}`;
 }
 
 /**
@@ -234,10 +253,11 @@ export function ParetoChart(props: {
   readonly hover?: (id: string | null) => void;
 }): JSX.Element {
   const {points, x, y} = props;
-  const height = HEIGHT[props.size ?? 'default'];
+  const size = props.size ?? 'default';
   const [hovered, setHovered] = useState<string | null>(null);
-  const [measure, measured] = useInlineSize();
-  const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
+  const [measure, box] = useBoxSize();
+  const width = Math.max(MIN_WIDTH, box?.width ?? FALLBACK_WIDTH);
+  const height = size === 'default' && box !== null ? box.height : HEIGHT[size];
   const frame = frameFor(points, x, y, width, height);
   const {plot, px, py} = frame;
 
@@ -267,34 +287,36 @@ export function ParetoChart(props: {
   };
 
   return (
-    <div className="vs-pareto" ref={measure}>
-      <svg
-        className="vs-chart"
-        viewBox={`0 0 ${width} ${height}`}
-        role={props.pick === undefined ? 'img' : 'group'}
-        aria-label={`${props.label}. ${frontier.length} of ${competing.length} passed points are on the frontier.`}
-      >
-        <Axes frame={frame} x={x} y={y} height={height} />
-        {props.joined !== false && frontier.some(point => point.state !== 'input') ? (
-          <path className="vs-pareto-frontier" d={staircase(placed, plot)} />
-        ) : null}
-        {drawn.map(point => (
-          <PointMark
-            key={point.id}
-            point={point}
-            role={roleOf(point, onFrontier)}
-            at={{x: px(point.x), y: py(point.y)}}
-            text={describe(point, x, y)}
-            ringed={lit.has(point.id)}
-            stop={point.id === stop}
-            pick={props.pick}
-            enter={enter}
-          />
-        ))}
-        {named === undefined ? null : (
-          <Hover text={describe(named, x, y)} at={{x: px(named.x), y: py(named.y)}} plot={plot} />
-        )}
-      </svg>
+    <div className="vs-pareto">
+      <div className="vs-pareto-plot" data-size={size} ref={measure}>
+        <svg
+          className="vs-chart"
+          viewBox={`0 0 ${width} ${height}`}
+          role={props.pick === undefined ? 'img' : 'group'}
+          aria-label={`${props.label}. ${frontier.length} of ${competing.length} passed points are on the frontier.`}
+        >
+          <Axes frame={frame} x={x} y={y} height={height} />
+          {props.joined !== false && frontier.some(point => point.state !== 'input') ? (
+            <path className="vs-pareto-frontier" d={staircase(placed)} />
+          ) : null}
+          {drawn.map(point => (
+            <PointMark
+              key={point.id}
+              point={point}
+              role={roleOf(point, onFrontier)}
+              at={{x: px(point.x), y: py(point.y)}}
+              text={describe(point, x, y)}
+              ringed={lit.has(point.id)}
+              stop={point.id === stop}
+              pick={props.pick}
+              enter={enter}
+            />
+          ))}
+          {named === undefined ? null : (
+            <Hover text={describe(named, x, y)} at={{x: px(named.x), y: py(named.y)}} plot={plot} />
+          )}
+        </svg>
+      </div>
       {props.legend === false ? null : (
         <ul className="vs-dotlegend vs-serieslegend" aria-label="Points">
           {KEY_ORDER.map(role => (
@@ -424,6 +446,24 @@ function Axes(props: {
   readonly height: number;
 }): JSX.Element {
   const {plot, horizontal, vertical, px, py} = props.frame;
+  const across = plot.right - plot.left;
+  // The tick words along the x axis: each centred on its tick and kept inside the plot's width,
+  // and one that would touch its neighbour is left out.
+  const placed = placeLabels(
+    horizontal.ticks.map(tick => ({
+      share: (px(tick.value) - plot.left) / across,
+      text: tick.label,
+    })),
+    across,
+    LABEL_GLYPH,
+  );
+  // The top band holds the y axis' title at its left and `Better ↗` at its right, outside the
+  // frame, so no point is ever under the word: it is there while the short title leaves it room.
+  const betterWidth = BETTER.length * LABEL_GLYPH;
+  const roomWithBetter = across - betterWidth - TITLE_GAP;
+  const showBetter = (ARROW.length + nameOf(props.y).length) * LABEL_GLYPH <= roomWithBetter;
+  const yTitle = `${ARROW}${axisTitle(props.y, (showBetter ? roomWithBetter : across) - ARROW.length * LABEL_GLYPH)}`;
+  const xTitle = `${axisTitle(props.x, across - ARROW.length * LABEL_GLYPH)} →`;
   return (
     <>
       {vertical.ticks.map(tick => (
@@ -446,15 +486,14 @@ function Axes(props: {
           </text>
         </g>
       ))}
-      {horizontal.ticks.map(tick => (
+      {placed.map(({index, left}) => (
         <text
-          key={`x${tick.value}`}
+          key={`x${horizontal.ticks[index]?.value}`}
           className="vs-chart-label"
-          x={px(tick.value)}
+          x={plot.left + left}
           y={plot.bottom + 18}
-          textAnchor="middle"
         >
-          {tick.label}
+          {horizontal.ticks[index]?.label}
         </text>
       ))}
       <rect
@@ -464,19 +503,16 @@ function Axes(props: {
         width={plot.right - plot.left}
         height={plot.bottom - plot.top}
       />
-      <text
-        className="vs-pareto-better"
-        x={plot.right - BETTER_INSET}
-        y={plot.top + BETTER_DROP}
-        textAnchor="end"
-      >
-        Better ↗
-      </text>
+      {showBetter ? (
+        <text className="vs-pareto-better" x={plot.right} y={TOP_BAND - 12} textAnchor="end">
+          {BETTER}
+        </text>
+      ) : null}
       <text className="vs-chart-label" x={plot.left} y={TOP_BAND - 12}>
-        {`↑ ${axisTitle(props.y)}`}
+        {yTitle}
       </text>
-      <text className="vs-chart-label" x={plot.right} y={props.height - 6} textAnchor="end">
-        {`${axisTitle(props.x)} →`}
+      <text className="vs-chart-label" x={plot.right} y={props.height - 8} textAnchor="end">
+        {xTitle}
       </text>
     </>
   );

@@ -1,4 +1,16 @@
-import {Button, Chip, KeyValue, MiddleText, Pane, Reserve, Row, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  Chip,
+  Fact,
+  FactLine,
+  KeyValue,
+  MiddleText,
+  Pane,
+  Reserve,
+  Row,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CheckRow, SetupFacts, StartOutcome} from '../../../state/index.js';
 import {runTitle} from '../fleet-words.js';
@@ -17,8 +29,8 @@ const NOTHING = '—';
 const BLANK = ' ';
 
 /**
- * One check: its name, its status in a slot as wide as the longest word so the word never moves its
- * line, and the host's short detail under it. The detail line is always there (blank when the host
+ * One check: its name on one line (cut with an ellipsis, whole in its hover, when the pane is too
+ * narrow), its status word at the line's end, and the host's short detail under it. The detail line is always there (blank when the host
  * said nothing), so a detail arriving moves nothing. A stale read keeps the rows and quiets them.
  */
 function CheckLine(props: {readonly row: CheckRow; readonly dim: boolean}): JSX.Element {
@@ -27,10 +39,16 @@ function CheckLine(props: {readonly row: CheckRow; readonly dim: boolean}): JSX.
   return (
     <Stack gap="space-1">
       <Row justify="between" gap="space-3">
-        <Text variant="body-strong" tone={dim ? 'muted' : 'default'}>
-          {CHECK_LABEL[row.id]}
-        </Text>
-        <Chip label={word.label} tone={dim ? 'neutral' : word.tone} dot even />
+        <Row grow>
+          <FactLine fit="parent" wrap={false}>
+            <Fact shrink title={CHECK_LABEL[row.id]}>
+              <Text variant="body-strong" tone={dim ? 'muted' : 'default'}>
+                {CHECK_LABEL[row.id]}
+              </Text>
+            </Fact>
+          </FactLine>
+        </Row>
+        <Chip label={word.label} tone={dim ? 'neutral' : word.tone} dot />
       </Row>
       <Text variant="small" tone="muted">
         {row.detail === '' ? BLANK : <MiddleText text={row.detail} />}

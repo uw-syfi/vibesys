@@ -1,0 +1,109 @@
+/* Metric tiles: the dashboard row and its packed variant. Imported by components.css. */
+
+/* --- metric tiles -------------------------------------------------------------------------------- */
+
+/* A dashboard row: tiles of one size on one grid, as wide as the tiles up to the container. The
+   width is a size, never a share of the parent, so what sits beside the row never moves. */
+.vs-tiles {
+  --tile-width: var(--column-metric);
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
+  gap: var(--space-4);
+  width: calc(var(--tile-count) * var(--tile-width) + (var(--tile-count) - 1) * var(--space-4));
+  max-width: 100%;
+}
+.vs-tiles[data-stacked] {
+  grid-template-columns: 1fr;
+  width: var(--tile-width);
+}
+/* The tracks of `ChartColumns`, exactly: a tile is a chart's width, and a lone tile fills the row as a lone chart does. */
+.vs-tiles[data-track="chart"] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--chart-min)), 1fr));
+  gap: var(--space-6);
+  width: 100%;
+}
+.vs-tiles[data-stacked] .vs-tile-trend {
+  display: none;
+}
+/* Packed tiles, on the tracks `denseTilesPerRow` counts: as many as keep the tile's least width. */
+.vs-tiles[data-dense] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-tile)), 1fr));
+  gap: var(--space-4);
+  width: 100%;
+}
+/* The name and its detail share one line (the name gives way to the detail), the figure and its
+   unit follow, and a thin bar closes the tile. */
+.vs-tiles[data-dense] .vs-tile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name detail"
+    "figure figure"
+    "trend trend";
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.vs-tiles[data-dense] .vs-tile-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-tiles[data-dense] .vs-tile-figure {
+  grid-area: figure;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-tiles[data-dense] .vs-tile-detail {
+  grid-area: detail;
+  min-width: 0;
+}
+.vs-tiles[data-dense] .vs-tile-trend {
+  grid-area: trend;
+  height: var(--space-2);
+  margin-top: var(--space-1);
+}
+.vs-tiles[data-dense] .vs-tile-trend .vs-meter {
+  height: var(--space-2);
+}
+.vs-tile {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-tile-figure {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+/* A value is one token: it never breaks inside itself (a `Text` breaks anywhere by default), and
+   the note beside it breaks only between words. */
+.vs-tile-figure > .vs-text {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.vs-tile-figure > .vs-text:not(:first-child) {
+  white-space: normal;
+}
+.vs-tile-detail {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-tile-trend {
+  height: var(--space-7);
+  margin-top: auto;
+}
+

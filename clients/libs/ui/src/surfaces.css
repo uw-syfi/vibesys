@@ -18,6 +18,11 @@
   gap: 0;
   overflow: hidden;
 }
+/* The same card, packed: the padding and the gap one step down the space scale. */
+.vs-card[data-dense]:not([data-flush]) {
+  padding: var(--space-4);
+  gap: var(--space-3);
+}
 .vs-card-title {
   margin: 0;
   display: flex;
