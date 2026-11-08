@@ -5,16 +5,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 )
-
-// SetupReadRef names what a read is for: the run's job tool, its repository and the draft task.
-type SetupReadRef struct {
-	JobTool    core.JobToolEndpoint
-	Repository string
-	Task       string
-}
 
 // FakeSetupReads answers setup reads from plain facts a test edits, the way the CLI would answer
 // from the working tree, git and the job store. A read sees the facts as they were when it started,
@@ -27,7 +20,7 @@ type FakeSetupReads struct {
 	failure error
 	blocked bool
 	held    []held
-	calls   []SetupReadRef
+	calls   []daemon.SetupRef
 }
 
 type held struct {
@@ -35,12 +28,14 @@ type held struct {
 	done func(setup.Read)
 }
 
+var _ daemon.SetupReads = (*FakeSetupReads)(nil)
+
 // NewFakeSetupReads starts from facts.
 func NewFakeSetupReads(facts setup.Facts) *FakeSetupReads { return &FakeSetupReads{facts: facts} }
 
 // Start takes a snapshot of the facts for ref and completes the read with it, or holds it while
 // blocked. A failure set with Fail completes it as a failed read.
-func (f *FakeSetupReads) Start(_ context.Context, ref SetupReadRef, done func(setup.Read)) {
+func (f *FakeSetupReads) Start(_ context.Context, ref daemon.SetupRef, done func(setup.Read)) {
 	f.mu.Lock()
 	f.calls = append(f.calls, ref)
 	read := setup.Read{Task: ref.Task, Kind: setup.ReadFacts, Facts: clone(f.facts)}
@@ -67,7 +62,7 @@ func clone(f setup.Facts) setup.Facts {
 }
 
 // Calls lists the reads started, in order.
-func (f *FakeSetupReads) Calls() []SetupReadRef {
+func (f *FakeSetupReads) Calls() []daemon.SetupRef {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.calls)

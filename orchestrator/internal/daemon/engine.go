@@ -41,6 +41,9 @@ type Engine struct {
 	reports  reportCache
 	state    core.State
 	last     uint64
+	// touched is the sequence of the last event committed for each run, which the setup observation
+	// compares with the one it saw last. It is written in apply, under the lock, and does no I/O.
+	touched map[core.RunID]uint64
 }
 
 // OpenEngine recovers the state from the store. It is the whole of starting up: a daemon that
@@ -60,7 +63,7 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the last sequence: %w", err)
 	}
-	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: reportCache{}}
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}, reports: reportCache{}, touched: map[core.RunID]uint64{}}
 	return e, nil
 }
 
@@ -134,6 +137,9 @@ func (e *Engine) publish(seq uint64, ev core.Event) {
 		// The store accepted the event, so it encodes; a failure here is a bug in this build.
 		e.Log.Error("cannot show a committed event to watchers", "sequence", seq, "err", err)
 		return
+	}
+	if run := core.RunID(msg.GetRunId()); run != "" {
+		e.touched[run] = seq
 	}
 	st := hub.Stored{Change: msg}
 	switch b := ev.Body.(type) {

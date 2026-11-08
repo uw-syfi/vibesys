@@ -9,6 +9,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 )
 
 // MergeWindow is how often the daemon ends the hub's merge window. Run ticks at this rate.
@@ -240,3 +241,23 @@ type StartRefusal struct {
 }
 
 func (r *StartRefusal) Error() string { return r.Reason }
+
+// SetupRef names what a setup read is for: the job tool of the run, its repository and the task the
+// setup lead declared.
+type SetupRef struct {
+	JobTool    core.JobToolEndpoint
+	Repository string
+	Task       string
+}
+
+// SetupReads reads the facts the setup checks are derived from, in one call to the job tool's daemon
+// (the working tree, git and the job store). The daemon starts a read and goes on: it never waits for
+// one, so a read that hangs costs one run's panel its freshness and nothing else.
+type SetupReads interface {
+	// Start begins one read and returns at once. done runs exactly once, from any goroutine, with
+	// the facts, with ReadUnreadable when the task is there but cannot be read, or with ReadFailure
+	// when the read itself failed, which includes a bound that ended and a job tool too old to
+	// answer; a failure never reads as a pass. The context is the bound the daemon gave the call.
+	// The Seq of the result is the daemon's to set.
+	Start(ctx context.Context, ref SetupRef, done func(setup.Read))
+}
