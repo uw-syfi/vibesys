@@ -74,8 +74,9 @@ func candidateTag(taskName, key string) string {
 
 // Candidate implements environment.Environment: the candidate's image, built from the target's
 // commit when the engine has no image of the same build key: the digest of the candidate's files,
-// and the engine's local image of each base its Dockerfile builds on. A build that fails says why, with the
-// end of its output.
+// and the engine's local image of each base its Dockerfile builds on. A build of the key by another
+// provider of the engine is waited for and its image used (Config.Builds). A build that fails says
+// why, with the end of its output.
 func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Writer) (core.CandidateImage, error) {
 	p := e.p
 	if p.cfg.Candidates == nil {
@@ -106,6 +107,11 @@ func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Write
 		return core.CandidateImage{}, err
 	}
 	tag := candidateTag(e.target.Task, buildKey([]byte(files.Digest), bases))
+	release, err := p.cfg.Builds.lock(ctx, tag, "[candidate]", log)
+	if err != nil {
+		return core.CandidateImage{}, err
+	}
+	defer release()
 	img, ok, err := p.cfg.Engine.Image(ctx, tag)
 	if err == nil && !ok {
 		_, _ = fmt.Fprintf(log, "[candidate] building %s from %s\n", tag, b.Dockerfile)
