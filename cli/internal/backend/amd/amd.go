@@ -167,9 +167,7 @@ func (g *GPUs) GPUFacts(ctx context.Context) (map[string]string, error) {
 	if g.facts != nil {
 		return maps.Clone(g.facts), nil
 	}
-	bounded, done := remote.Bounded(ctx, g.Timers, Timeout)
-	defer done()
-	out, err := remote.Output(bounded, g.Timers, g.Shell, []string{"sh", "-c", Script}, "")
+	out, err := remote.Within(ctx, g.Timers, g.Shell, Timeout, []string{"sh", "-c", Script}, "")
 	if err != nil {
 		return nil, fmt.Errorf("reading the GPUs: %w", err)
 	}

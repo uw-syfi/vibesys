@@ -87,11 +87,10 @@ type Remote struct {
 
 var _ docker.Machine = (*Remote)(nil)
 
-// run runs a short shell script on the machine, bounded.
+// run runs a short shell script on the machine, each attempt bounded: a call that does not reach
+// the machine is made again as remote.Reconnect says.
 func (r *Remote) run(ctx context.Context, script string, args ...string) (string, error) {
-	bounded, done := remote.Bounded(ctx, r.Timers, CallTimeout)
-	defer done()
-	return remote.Output(bounded, r.Timers, r.Shell, append([]string{"sh", "-c", script, "vs-machine"}, args...), "")
+	return remote.Within(ctx, r.Timers, r.Shell, CallTimeout, append([]string{"sh", "-c", script, "vs-machine"}, args...), "")
 }
 
 // base is the directory of a staged checkout: one per checkout, so a job's commands share it and
