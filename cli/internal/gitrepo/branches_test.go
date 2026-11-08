@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,6 +24,9 @@ type history struct {
 	s          core.Commit
 	// stranger is a well-formed commit the repository does not have.
 	stranger core.Commit
+	// head is the commit the repository's own checkout is at.
+	head core.Commit
+	// The files: c2 adds a.txt, c3 changes a.txt and adds dir/b.txt, s adds s.txt, and c1 has none.
 	// branchAt reads where a branch is, without the interface under test.
 	branchAt func(branch string) core.Commit
 }
@@ -46,6 +51,35 @@ func testBranchesContract(t *testing.T, h history) {
 		}
 		_, err := b.Head(ctx, h.repository, "no-such-branch")
 		wantKind(t, "a missing branch", err, core.FailureNotFound)
+	})
+
+	t.Run("checkout head", func(t *testing.T) {
+		if got, err := b.CheckoutHead(ctx, h.repository); err != nil || got != h.head {
+			t.Fatalf("CheckoutHead = %q, %v; want %q", got, err, h.head)
+		}
+		_, err := b.CheckoutHead(ctx, h.repository+"-with-no-commit")
+		wantKind(t, "a repository with no commit", err, core.FailureNotFound)
+	})
+
+	t.Run("changed paths", func(t *testing.T) {
+		cases := []struct {
+			base, commit core.Commit
+			want         []string
+		}{
+			{h.c1, h.c1, nil}, {h.c1, h.c2, []string{"a.txt"}}, {h.c2, h.c3, []string{"a.txt", "dir/b.txt"}},
+			{h.c1, h.c3, []string{"a.txt", "dir/b.txt"}}, {h.c3, h.c1, []string{"a.txt", "dir/b.txt"}},
+			{h.c3, h.s, []string{"a.txt", "dir/b.txt", "s.txt"}}, {h.c1, h.s, []string{"s.txt"}},
+		}
+		for _, tc := range cases {
+			got, err := b.ChangedPaths(ctx, h.repository, tc.base, tc.commit)
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Errorf("ChangedPaths(%.7s, %.7s) = %v, %v; want %v", tc.base, tc.commit, got, err, tc.want)
+			}
+		}
+		_, err := b.ChangedPaths(ctx, h.repository, h.stranger, h.c3)
+		wantKind(t, "a base the repository lacks", err, core.FailureNotFound)
+		_, err = b.ChangedPaths(ctx, h.repository, h.c3, h.stranger)
+		wantKind(t, "a commit the repository lacks", err, core.FailureNotFound)
 	})
 
 	t.Run("ancestry", func(t *testing.T) {
@@ -98,6 +132,11 @@ func TestFakeBranchesPassTheContract(t *testing.T) {
 	f.AddCommit("/repo", h.c2, h.c1)
 	f.AddCommit("/repo", h.c3, h.c2)
 	f.AddCommit("/repo", h.s, h.c1)
+	f.SetFiles("/repo", h.c2, map[string]string{"a.txt": "1"})
+	f.SetFiles("/repo", h.c3, map[string]string{"a.txt": "2", "dir/b.txt": "1"})
+	f.SetFiles("/repo", h.s, map[string]string{"s.txt": "1"})
+	f.SetHead("/repo", h.c3)
+	h.head = h.c3
 	f.AddBranch("/repo", "best", h.c1)
 	h.branchAt = func(branch string) core.Commit { got, _ := f.At("/repo", branch); return got }
 	testBranchesContract(t, h)
@@ -109,15 +148,30 @@ func TestSystemBranchesPassTheContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitIn(t, repo, "init", "-q", "-b", "main")
+	write := func(name, text string) {
+		full := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, repo, "add", name)
+	}
 	commit := func(msg string) core.Commit {
 		gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", msg)
 		return core.Commit(strings.TrimSpace(gitIn(t, repo, "rev-parse", "HEAD")))
 	}
 	h := history{b: gitrepo.System{}, repository: repo, stranger: core.Commit(strings.Repeat("ab", 20))}
 	h.c1 = commit("c1")
+	write("a.txt", "1")
 	h.c2 = commit("c2")
+	write("a.txt", "2")
+	write("dir/b.txt", "1")
 	h.c3 = commit("c3")
+	h.head = h.c3
 	gitIn(t, repo, "checkout", "-q", "-b", "side", string(h.c1))
+	write("s.txt", "1")
 	h.s = commit("side")
 	gitIn(t, repo, "checkout", "-q", "main")
 	gitIn(t, repo, "branch", "best", string(h.c1))

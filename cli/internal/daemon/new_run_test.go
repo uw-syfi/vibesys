@@ -21,14 +21,18 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // describeRig is a daemon over memory card files, reached through an in-memory connection.
 type describeRig struct {
-	client cliv1.DaemonServiceClient
-	files  *task.MemoryCardFiles
+	client   cliv1.DaemonServiceClient
+	files    *task.MemoryCardFiles
+	branches *gitrepo.FakeBranches
+	stores   *memstores.Stores
+	tasks    *task.MemorySource
 }
 
 func newDescribeRig(t *testing.T, withFiles bool) *describeRig {
@@ -36,9 +40,9 @@ func newDescribeRig(t *testing.T, withFiles bool) *describeRig {
 	env := fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates())
 	envs := fakeenv.Environments{core.EnvironmentHost: env}
 	survivors := supervisor.NewSurvivors()
-	files := task.NewMemoryCardFiles()
+	files, branches, stores, tasks := task.NewMemoryCardFiles(), gitrepo.NewFakeBranches(), memstores.New(app.Rules(5)), task.NewMemorySource()
 	a := app.New(app.Config{
-		Clock: clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond), Stores: memstores.New(app.Rules(5)),
+		Clock: clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond), Stores: stores, Branches: branches, Tasks: tasks,
 		Environments: envs, Supervisors: supervisor.NewInProcess(envs, &fakeenv.Checkouts{}, survivors), Repositories: repos(),
 	})
 	if err := a.Start(ctxFor(t)); err != nil {
@@ -65,7 +69,7 @@ func newDescribeRig(t *testing.T, withFiles bool) *describeRig {
 		a.Close()
 		survivors.Close()
 	})
-	return &describeRig{client: cliv1.NewDaemonServiceClient(conn), files: files}
+	return &describeRig{client: cliv1.NewDaemonServiceClient(conn), files: files, branches: branches, stores: stores, tasks: tasks}
 }
 
 const describedManifest = `version = "0.2"
@@ -165,15 +169,5 @@ func TestDescribeTaskRefusesWhatItCannotAnswer(t *testing.T) {
 	bare := newDescribeRig(t, false)
 	if _, err := bare.client.DescribeTask(ctxFor(t), sources()["folder"]); status.Code(err) != codes.Unavailable {
 		t.Errorf("no reader: got %v, want Unavailable", err)
-	}
-}
-
-// DescribeSetup answers Unimplemented, naming itself, until the setup facts are read: never an empty
-// success a client would read as "nothing to derive".
-func TestDescribeSetupIsUnimplementedAndNamesItself(t *testing.T) {
-	r := newDescribeRig(t, true)
-	_, err := r.client.DescribeSetup(ctxFor(t), &cliv1.DescribeSetupRequest{})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "DescribeSetup") {
-		t.Errorf("got %v, want Unimplemented naming the call", err)
 	}
 }

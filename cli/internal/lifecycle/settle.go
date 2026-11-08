@@ -76,11 +76,15 @@ func settleVerdict(t core.Transition, v Verdict, o Outcome) Settlement {
 			t.To = core.JobLost
 			return Settlement{Transition: t, Log: "vibesys-cli: the supervisor said a step stopped the job and exited 0, which is no ending"}
 		}
-		return settleRan(t, v.Exec, o)
+		s := settleRan(t, v.Exec, o)
+		if s.Transition.To == core.JobFailed {
+			s.Transition.FailedStage = v.Stage
+		}
+		return s
 	case NotAttempted:
 		return notStarted(t, v.Failure)
 	case Rejected:
-		t.To = core.JobFailed
+		t.To, t.FailedStage = core.JobFailed, v.Stage
 		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job's result was rejected: %s", v.Reason)}
 	case Lost:
 		return unobserved(t, v.Failure)

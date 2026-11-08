@@ -284,11 +284,11 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 		case 3:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Passed{Result: aResult()}}
 		case 4:
-			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: exec()}}
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: exec(), Stage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure)}}
 		case 5:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.NotAttempted{Failure: failure()}}
 		case 6:
-			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Rejected{Reason: pick(r, "", "no result")}}
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Rejected{Reason: pick(r, "", "no result"), Stage: pick(r, core.JobStage(""), core.StageMeasure)}}
 		case 7:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Lost{Failure: failure()}}
 		default:

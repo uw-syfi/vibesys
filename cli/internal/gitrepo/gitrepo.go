@@ -134,6 +134,17 @@ func (System) Commit(ctx context.Context, dir, revision string) (core.Commit, er
 	return commit, nil
 }
 
+// runRaw is run without trimming the output, for output whose bytes are all data.
+func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.quotepath=off"}, args...)...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return stdout.String(), nil
+}
+
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stdout bytes.Buffer

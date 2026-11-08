@@ -3,6 +3,8 @@ package gitrepo
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -20,6 +22,10 @@ type FakeBranches struct {
 type fakeRepo struct {
 	branches map[string]core.Commit
 	parents  map[core.Commit][]core.Commit
+	// files are the files of each commit, by path to a content label: what ChangedPaths compares.
+	files map[core.Commit]map[string]string
+	// head is the commit the repository's own checkout is detached at, when SetHead set one.
+	head core.Commit
 	// checkouts are the work trees by path. A clean one holds the files of its branch's head.
 	checkouts map[string]*fakeCheckout
 }
@@ -39,7 +45,7 @@ func NewFakeBranches() *FakeBranches { return &FakeBranches{repos: map[string]*f
 func (f *FakeBranches) repo(path string) *fakeRepo {
 	r, ok := f.repos[path]
 	if !ok {
-		r = &fakeRepo{branches: map[string]core.Commit{}, parents: map[core.Commit][]core.Commit{}, checkouts: map[string]*fakeCheckout{}}
+		r = &fakeRepo{branches: map[string]core.Commit{}, files: map[core.Commit]map[string]string{}, parents: map[core.Commit][]core.Commit{}, checkouts: map[string]*fakeCheckout{}}
 		f.repos[path] = r
 	}
 	return r
@@ -57,6 +63,21 @@ func (f *FakeBranches) AddCommit(repository string, commit core.Commit, parents 
 			r.parents[p] = nil
 		}
 	}
+}
+
+// SetFiles sets the files of a commit: each path with a label standing for its content. A commit
+// never given files has none.
+func (f *FakeBranches) SetFiles(repository string, commit core.Commit, files map[string]string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repo(repository).files[commit] = maps.Clone(files)
+}
+
+// SetHead detaches the repository's own checkout at a commit, which the repository must have.
+func (f *FakeBranches) SetHead(repository string, commit core.Commit) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repo(repository).head = commit
 }
 
 // AddBranch makes a branch at a commit, adding the commit if the repository lacks it.
@@ -118,6 +139,47 @@ func (f *FakeBranches) Head(_ context.Context, repository, branch string) (core.
 		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s has no branch %q", repository, branch)}
 	}
 	return c, nil
+}
+
+// CheckoutHead implements Branches. The checkout is the work tree added at the repository's own path,
+// or else the commit SetHead gave.
+func (f *FakeBranches) CheckoutHead(_ context.Context, repository string) (core.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repo(repository)
+	if c, ok := r.checkouts[repository]; ok && c.at != "" {
+		return c.at, nil
+	}
+	if r.head != "" {
+		return r.head, nil
+	}
+	return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s has no commit checked out", repository)}
+}
+
+// ChangedPaths implements Branches.
+func (f *FakeBranches) ChangedPaths(_ context.Context, repository string, base, commit core.Commit) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repo(repository)
+	for _, c := range []core.Commit{base, commit} {
+		if _, ok := r.parents[c]; !ok {
+			return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s lacks commit %s", repository, c)}
+		}
+	}
+	var out []string
+	a, b := r.files[base], r.files[commit]
+	for p, label := range a {
+		if got, ok := b[p]; !ok || got != label {
+			out = append(out, p)
+		}
+	}
+	for p := range b {
+		if _, ok := a[p]; !ok {
+			out = append(out, p)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // IsAncestor implements Branches.

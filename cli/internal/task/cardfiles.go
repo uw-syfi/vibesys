@@ -25,6 +25,12 @@ type CardFiles interface {
 	WorkingTree(ctx context.Context, repository, name string) (Tree, error)
 	// Folder reads the task of a folder that need not be a repository.
 	Folder(ctx context.Context, root, name string) (Tree, error)
+	// WorkingTask reads every file of the task's directory as it stands in the repository's working
+	// tree (links as links, nothing generated), which is what the task's version names. It is the
+	// one method that reads more than the card's files, and DraftOf is what reads its tree. It
+	// fails as WorkingTree does, and for a file that is neither a regular file nor a link with
+	// core.FailureInvalidInput.
+	WorkingTask(ctx context.Context, repository, name string) (Tree, error)
 }
 
 // MemoryCardFiles is a CardFiles over trees described in memory. It is safe for concurrent use.
@@ -78,6 +84,23 @@ func (m *MemoryCardFiles) WorkingTree(ctx context.Context, repository, name stri
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return cardOnly(ctx, m.working[repository], name, "the working tree of "+repository)
+}
+
+// WorkingTask implements CardFiles.
+func (m *MemoryCardFiles) WorkingTask(ctx context.Context, repository, name string) (Tree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := ValidName(name); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tree, ok := m.working[repository]
+	if !ok {
+		return nil, &core.Failure{Kind: core.FailureNotFound, Message: "the working tree of " + repository + " does not exist"}
+	}
+	return tree.Under([]string{path.Join(TasksDir, name)}), nil
 }
 
 // Folder implements CardFiles.
