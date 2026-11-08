@@ -22,6 +22,7 @@ family that silently diverge from a required variable set.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -128,9 +129,17 @@ def filter_skip_marked(
     Shared by :class:`TemplateContract` and by callers checking
     :meth:`~vs_prompts.renderer.TemplateRenderer.unused_kwargs` results, so
     both directions honor the same marker.
+
+    The marked name is matched at a word boundary, so a marker for one name
+    never suppresses a different required name that shares its prefix (a
+    marker for ``profile_execution`` must not silence a required ``profile``).
     """
     text = path.read_text()
-    return frozenset(name for name in names if f"{skip_marker}: {name}" not in text)
+    return frozenset(
+        name
+        for name in names
+        if not re.search(rf"{re.escape(skip_marker)}: {re.escape(name)}\b", text)
+    )
 
 
 @dataclass(frozen=True)
