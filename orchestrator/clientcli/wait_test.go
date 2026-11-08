@@ -250,6 +250,28 @@ func TestWaitAfterRefusesANegativeNumber(t *testing.T) {
 	contains(t, "stderr", got.stderr, "--after", "-3")
 }
 
+// A report number is a uint32, and --after is cast down to one. A value past uint32 would wrap --
+// 4294967296 to 0 -- and so be treated as "count every report" instead of a number no report can
+// reach, silently ending a wait that should never complete. It is refused as a usage error naming
+// the value, the same as a negative one, and nothing is waited on.
+func TestWaitAfterRefusesANumberTooLargeToBeAReportNumber(t *testing.T) {
+	messages := []*pb.Message{
+		reportOf("run-1", "m1", "one", 1, 1, pb.ReportKind_REPORT_KIND_PROGRESS),
+		reportOf("run-1", "m2", "two", 2, 2, pb.ReportKind_REPORT_KIND_PROGRESS),
+	}
+	frame := snapshotFrame(5, false, []*pb.Run{reported("run-1", 2)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}, messages...)
+	// 4294967296 is 1<<32: cast to uint32 it is 0, which would make a wait for a report above it return
+	// the newest report at once instead of waiting. 4294967297 would wrap to 1, and so on.
+	for _, value := range []string{"4294967296", "4294967297", "9999999999"} {
+		w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+		got := w.run(context.Background(), append(waitArgs("progress"), "--after", value)...)
+		if got.code != 2 {
+			t.Fatalf("--after %s: exit %d, want 2; stderr %q", value, got.code, got.stderr)
+		}
+		contains(t, "stderr", got.stderr, "--after", value)
+	}
+}
+
 // With only progress notes so far there is no final report to return, so a wait for one waits.
 func TestWaitForAReportWaitsWhenARunHasOnlyProgressNotes(t *testing.T) {
 	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
