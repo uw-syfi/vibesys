@@ -5,6 +5,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 var placementKinds = []struct {
@@ -33,44 +34,11 @@ var reachStates = map[core.Reach]cliv1.ReachState{
 	core.ReachNotProbed:   cliv1.ReachState_REACH_STATE_NOT_PROBED,
 }
 
-var acceleratorVendors = []struct {
-	domain core.AcceleratorVendor
-	wire   cliv1.AcceleratorVendor
-}{
-	{core.VendorNVIDIA, cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA},
-	{core.VendorAMD, cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD},
-}
-
-var acceleratorModels = []struct {
-	domain core.AcceleratorModel
-	wire   cliv1.AcceleratorModel
-}{
-	{core.ModelOther, cliv1.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
-	{core.ModelH100, cliv1.AcceleratorModel_ACCELERATOR_MODEL_H100},
-	{core.ModelB200, cliv1.AcceleratorModel_ACCELERATOR_MODEL_B200},
-	{core.ModelL4, cliv1.AcceleratorModel_ACCELERATOR_MODEL_L4},
-	{core.ModelA100, cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100},
-	{core.ModelMI210, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210},
-	{core.ModelMI300A, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300A},
-	{core.ModelMI300X, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X},
-	{core.ModelMI325X, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI325X},
-}
-
 // AcceleratorOffer returns the contract's offer for an accelerator, or unspecified vendor and
 // model for values it does not name: the contract's validation then refuses the message.
 func AcceleratorOffer(a core.Accelerator) *cliv1.AcceleratorOffer {
-	out := &cliv1.AcceleratorOffer{Count: a.Count, DeviceName: a.DeviceName}
-	for _, p := range acceleratorVendors {
-		if p.domain == a.Vendor {
-			out.Vendor = p.wire
-		}
-	}
-	for _, p := range acceleratorModels {
-		if p.domain == a.Model {
-			out.Model = p.wire
-		}
-	}
-	return out
+	vendor, model := task.WireAccelerator(a.Vendor, a.Model)
+	return &cliv1.AcceleratorOffer{Vendor: vendor, Model: model, Count: a.Count, DeviceName: a.DeviceName}
 }
 
 // PlacementView returns the contract's view of a placement reading.

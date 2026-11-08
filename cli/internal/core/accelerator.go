@@ -1,6 +1,7 @@
 package core
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -9,35 +10,43 @@ import (
 // AcceleratorVendor is who makes an accelerator.
 type AcceleratorVendor uint8
 
-// The vendors of accelerators a placement can give. The zero value is no vendor.
+// The vendors of accelerators. The zero value is no vendor. VendorCPU is the vendor of the registry's
+// "CPU" identity, which no placement offers as an accelerator.
 const (
 	VendorNVIDIA AcceleratorVendor = iota + 1
 	VendorAMD
+	VendorAWS
+	VendorApple
+	VendorCPU
 )
 
-// AcceleratorModel is a device model the CLI names. ModelOther is a device of the vendor that has no
-// name here; the device's own name says which.
+// AcceleratorModel is a device model the CLI names. The empty value is any model of a vendor (the
+// registry's "NVIDIA GPU"). ModelOther is a device of the vendor that has no name in the registry:
+// the device's own name, kept in Accelerator.DeviceName, says which.
 type AcceleratorModel string
 
-// The models the CLI names. This list is temporary until the shared accelerator identity registry
-// replaces it.
+// The models of the registry, one per row of it.
 const (
-	ModelOther  AcceleratorModel = "other"
-	ModelH100   AcceleratorModel = "h100"
-	ModelB200   AcceleratorModel = "b200"
-	ModelL4     AcceleratorModel = "l4"
-	ModelA100   AcceleratorModel = "a100"
-	ModelMI210  AcceleratorModel = "mi210"
-	ModelMI300A AcceleratorModel = "mi300a"
-	ModelMI300X AcceleratorModel = "mi300x"
-	ModelMI325X AcceleratorModel = "mi325x"
+	ModelOther        AcceleratorModel = "other"
+	ModelH100         AcceleratorModel = "h100"
+	ModelB200         AcceleratorModel = "b200"
+	ModelL4           AcceleratorModel = "l4"
+	ModelA100         AcceleratorModel = "a100"
+	ModelMI210        AcceleratorModel = "mi210"
+	ModelMI300A       AcceleratorModel = "mi300a"
+	ModelMI300X       AcceleratorModel = "mi300x"
+	ModelMI325X       AcceleratorModel = "mi325x"
+	ModelTrainium2    AcceleratorModel = "trainium2"
+	ModelAppleSilicon AcceleratorModel = "apple_silicon"
 )
 
 // Accelerator is what a placement gives: Count devices of one model.
 type Accelerator struct {
 	Vendor AcceleratorVendor
-	Model  AcceleratorModel
-	Count  uint32
+	// Model is ModelOther, with DeviceName holding the raw text, for a device the registry does not
+	// name: an unknown device is never read as a near match.
+	Model AcceleratorModel
+	Count uint32
 	// DeviceName is the device as it reported itself.
 	DeviceName string
 }
@@ -45,28 +54,91 @@ type Accelerator struct {
 // MaxAccelerators is the most devices of one model an Accelerator names.
 const MaxAccelerators = 4096
 
-// modelNames maps the upper-case token of a device name to its model, by vendor.
-var modelNames = map[AcceleratorVendor]map[string]AcceleratorModel{
-	VendorNVIDIA: {"H100": ModelH100, "B200": ModelB200, "L4": ModelL4, "A100": ModelA100},
-	VendorAMD:    {"MI210": ModelMI210, "MI300A": ModelMI300A, "MI300X": ModelMI300X, "MI325X": ModelMI325X},
+// AcceleratorIdentity is one row of the accelerator registry: what a display name of a device names,
+// and the probe aliases that name the same device on a machine.
+type AcceleratorIdentity struct {
+	Vendor AcceleratorVendor
+	// Model is empty for a row that stands for any device of the vendor ("NVIDIA GPU") or for a CPU.
+	Model AcceleratorModel
+	// Display is the name a task authors, matched exactly.
+	Display string
+	// Aliases are the whole tokens, lower case, by which a probed device name or a gres names the
+	// device: "h100" in "NVIDIA H100 80GB HBM3" and in "gpu:h100:8". A row with no model has none, and
+	// so has a model no machine is probed for yet.
+	Aliases []string
 }
 
-// ParseAccelerator reads a device name and a count as a fingerprint or a gres states them. It fails
-// with FailureInvalidInput for a count that is not 1 to MaxAccelerators, and for an empty or over-long name.
+// accelerators is the registry: the one table of accelerator names. A task's display name and a
+// machine's probe aliases both resolve through it, so the two cannot drift apart. It is closed: a
+// new accelerator is a new row here, a new value of the contract's AcceleratorModel and a row of
+// the contract mapping, together.
+var accelerators = []AcceleratorIdentity{
+	{VendorCPU, "", "CPU", nil},
+	{VendorAMD, ModelMI210, "AMD MI210", []string{"mi210"}},
+	{VendorAMD, ModelMI300A, "AMD MI300A", []string{"mi300a"}},
+	{VendorAMD, ModelMI300X, "AMD MI300X", []string{"mi300x"}},
+	{VendorAMD, ModelMI325X, "AMD MI325X", []string{"mi325x"}},
+	{VendorNVIDIA, "", "NVIDIA GPU", nil},
+	{VendorNVIDIA, ModelH100, "NVIDIA H100", []string{"h100"}},
+	{VendorNVIDIA, ModelB200, "NVIDIA B200", []string{"b200"}},
+	{VendorNVIDIA, ModelL4, "NVIDIA L4", []string{"l4"}},
+	{VendorNVIDIA, ModelA100, "NVIDIA A100", []string{"a100"}},
+	{VendorAWS, ModelTrainium2, "AWS Trainium2", nil},
+	{VendorApple, ModelAppleSilicon, "Apple Silicon", nil},
+}
+
+// Accelerators returns the registry's rows, in a fixed order.
+func Accelerators() []AcceleratorIdentity {
+	out := make([]AcceleratorIdentity, len(accelerators))
+	for i, a := range accelerators {
+		a.Aliases = slices.Clone(a.Aliases)
+		out[i] = a
+	}
+	return out
+}
+
+// LookupAccelerator returns the row a display name names, and false for a name the registry does not
+// have.
+func LookupAccelerator(display string) (AcceleratorIdentity, bool) {
+	for _, a := range Accelerators() {
+		if a.Display == display {
+			return a, true
+		}
+	}
+	return AcceleratorIdentity{}, false
+}
+
+// ResolveAccelerator names the model of a vendor that a probed device name or a gres model token
+// states, and returns ModelOther when the registry has no device of the vendor by it. The text is
+// split into tokens at every character that is not a letter or digit and each token is matched whole
+// against the vendor's aliases, in any case: "L40" is not "L4", and a device of another vendor is
+// not read as this one. Text that names two models is no model.
+func ResolveAccelerator(vendor AcceleratorVendor, text string) AcceleratorModel {
+	found := ModelOther
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') }) {
+		for _, a := range accelerators {
+			if a.Vendor != vendor || !slices.Contains(a.Aliases, word) {
+				continue
+			}
+			if found != ModelOther && found != a.Model {
+				return ModelOther
+			}
+			found = a.Model
+		}
+	}
+	return found
+}
+
+// ParseAccelerator reads a device name and a count as a fingerprint or a gres states them, through
+// the registry. A name the registry does not know gives ModelOther and the raw name in DeviceName.
+// It fails with FailureInvalidInput for a count that is not 1 to MaxAccelerators, and for an empty
+// or over-long name.
 func ParseAccelerator(vendor AcceleratorVendor, name, count string) (Accelerator, error) {
 	n, err := strconv.ParseUint(count, 10, 32)
 	if err != nil || n == 0 || n > MaxAccelerators || name == "" || len(name) > 128 {
 		return Accelerator{}, failf(FailureInvalidInput, "unreadable accelerator model %q or count %q", name, count)
 	}
-	model := ModelOther
-	// Match whole tokens rather than substrings: L40 must not be reported as L4.
-	for _, word := range strings.FieldsFunc(strings.ToUpper(name), func(r rune) bool { return !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') }) {
-		if m, ok := modelNames[vendor][word]; ok {
-			model = m
-			break
-		}
-	}
-	return Accelerator{Vendor: vendor, Model: model, Count: uint32(n), DeviceName: name}, nil
+	return Accelerator{Vendor: vendor, Model: ResolveAccelerator(vendor, name), Count: uint32(n), DeviceName: name}, nil
 }
 
 // OfferSource says how the daemon learned what a placement gives.

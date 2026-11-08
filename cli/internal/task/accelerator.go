@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
 // Accelerator is what a display name of a device names: its vendor and, unless the name is of a
@@ -15,41 +16,53 @@ type Accelerator struct {
 	Model cliv1.AcceleratorModel
 }
 
-// accelerators is the registry: the one list of the display names a task may author and what each
-// names. It is closed. A name that is not in it is an error, not a model of OTHER, so a typo in a
-// task is found where the task is read and no task is quietly given a device that fits nothing. A
-// new accelerator is a new row here and a new value of cliv1.AcceleratorModel, together.
-//
-// It is new: before it, hardware was only the display string a task authored. It is seeded with the
-// names the repository's examples author, and the models the contract defines. A name is matched
-// exactly, as authored.
-var accelerators = map[string]Accelerator{
-	"CPU":           {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_CPU, cliv1.AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED},
-	"AMD MI210":     {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210},
-	"AMD MI300A":    {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300A},
-	"AMD MI300X":    {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X},
-	"AMD MI325X":    {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI325X},
-	"NVIDIA GPU":    {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cliv1.AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED},
-	"NVIDIA H100":   {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cliv1.AcceleratorModel_ACCELERATOR_MODEL_H100},
-	"NVIDIA B200":   {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cliv1.AcceleratorModel_ACCELERATOR_MODEL_B200},
-	"NVIDIA L4":     {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cliv1.AcceleratorModel_ACCELERATOR_MODEL_L4},
-	"NVIDIA A100":   {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100},
-	"AWS Trainium2": {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AWS, cliv1.AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2},
-	"Apple Silicon": {cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_APPLE, cliv1.AcceleratorModel_ACCELERATOR_MODEL_APPLE_SILICON},
+var wireVendors = map[core.AcceleratorVendor]cliv1.AcceleratorVendor{
+	core.VendorNVIDIA: cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA,
+	core.VendorAMD:    cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
+	core.VendorAWS:    cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AWS,
+	core.VendorApple:  cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_APPLE,
+	core.VendorCPU:    cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_CPU,
 }
 
-// LookupAccelerator returns what a display name names, and false for a name the registry does not
-// have.
+var wireModels = map[core.AcceleratorModel]cliv1.AcceleratorModel{
+	"":                     cliv1.AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED,
+	core.ModelOther:        cliv1.AcceleratorModel_ACCELERATOR_MODEL_OTHER,
+	core.ModelH100:         cliv1.AcceleratorModel_ACCELERATOR_MODEL_H100,
+	core.ModelB200:         cliv1.AcceleratorModel_ACCELERATOR_MODEL_B200,
+	core.ModelL4:           cliv1.AcceleratorModel_ACCELERATOR_MODEL_L4,
+	core.ModelA100:         cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100,
+	core.ModelMI210:        cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210,
+	core.ModelMI300A:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300A,
+	core.ModelMI300X:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X,
+	core.ModelMI325X:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI325X,
+	core.ModelTrainium2:    cliv1.AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2,
+	core.ModelAppleSilicon: cliv1.AcceleratorModel_ACCELERATOR_MODEL_APPLE_SILICON,
+}
+
+// WireAccelerator is the contract's vendor and model of a domain vendor and model, the one mapping
+// between the two. A value the contract does not name is unspecified, which its validation refuses.
+func WireAccelerator(vendor core.AcceleratorVendor, model core.AcceleratorModel) (cliv1.AcceleratorVendor, cliv1.AcceleratorModel) {
+	return wireVendors[vendor], wireModels[model]
+}
+
+// LookupAccelerator returns what a display name names, and false for a name the accelerator registry
+// (core.Accelerators) does not have. The registry is closed: a name that is not in it is an error, not
+// a model of OTHER, so a typo in a task is found where the task is read and no task is quietly given a
+// device that fits nothing.
 func LookupAccelerator(name string) (Accelerator, bool) {
-	a, ok := accelerators[name]
-	return a, ok
+	row, ok := core.LookupAccelerator(name)
+	if !ok {
+		return Accelerator{}, false
+	}
+	vendor, model := WireAccelerator(row.Vendor, row.Model)
+	return Accelerator{Vendor: vendor, Model: model}, true
 }
 
 // AcceleratorNames lists the registry's display names, sorted.
 func AcceleratorNames() []string {
-	names := make([]string, 0, len(accelerators))
-	for n := range accelerators {
-		names = append(names, n)
+	var names []string
+	for _, a := range core.Accelerators() {
+		names = append(names, a.Display)
 	}
 	slices.Sort(names)
 	return names
