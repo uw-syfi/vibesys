@@ -190,7 +190,7 @@ describe('the report as a page of the run', () => {
     screen.unmount();
   });
 
-  it('packs the page: dense objective tiles first, then a dense summary, then the charts', () => {
+  it('packs the page as the prototype orders it: a dense summary, dense objective tiles, then the charts', () => {
     const {screen} = render({});
     const tiles = screen.container.querySelector('section.vs-tiles[aria-label="Objectives"]');
     expect(tiles?.hasAttribute('data-dense')).toBe(true);
@@ -200,8 +200,8 @@ describe('the report as a page of the run', () => {
     ];
     const summary = order.find(each => each.textContent?.startsWith('Lead summary'));
     expect(summary?.hasAttribute('data-dense')).toBe(true);
-    expect(order.indexOf(tiles as Element)).toBeLessThan(order.indexOf(summary as Element));
-    expect(order.indexOf(summary as Element)).toBeLessThan(
+    expect(order.indexOf(summary as Element)).toBeLessThan(order.indexOf(tiles as Element));
+    expect(order.indexOf(tiles as Element)).toBeLessThan(
       order.findIndex(each => each.classList.contains('vs-chart-columns')),
     );
     const roomy = [...screen.container.querySelectorAll('section.vs-card')].filter(

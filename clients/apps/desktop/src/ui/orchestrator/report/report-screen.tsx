@@ -107,8 +107,8 @@ export function ReportScreen(props: {
           done="Stop"
           retry={props.retryStop}
         />
-        <ObjectiveTiles objectives={report.objectives} />
         <LeadSummary summary={report.summary} nowMs={props.nowMs} />
+        <ObjectiveTiles objectives={report.objectives} />
         <ChartColumns dense>
           {report.tradeoff === undefined ? null : (
             <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
