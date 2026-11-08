@@ -70,14 +70,13 @@ type Held =
   | {readonly kind: 'hosts'; readonly hosts: DesktopHosts['hosts']; readonly source: string}
   | {readonly kind: 'unreadable'; readonly cause: string; readonly source: string};
 
-export function makeSavedHostsStore(
-  userData: string,
-  files: {readonly read: ReadFile; readonly write: WriteFile; readonly lock: FileLock},
-  log: (line: string) => void,
-): SavedHostsStore {
-  const binary = savedHostsPath(userData);
-  const json = join(userData, JSON_FILE);
-  const held: Effect.Effect<Held> = Effect.gen(function* () {
+/** What the files hold now: `hosts.pb`, else the older `hosts.json`, else nothing. */
+function heldHosts(
+  binary: string,
+  json: string,
+  files: {readonly read: ReadFile},
+): Effect.Effect<Held> {
+  return Effect.gen(function* () {
     const bytes = yield* files.read(binary);
     if (bytes !== null) {
       try {
@@ -106,6 +105,16 @@ export function makeSavedHostsStore(
       Effect.succeed({kind: 'unreadable', cause: error.message, source: binary} as const),
     ),
   );
+}
+
+export function makeSavedHostsStore(
+  userData: string,
+  files: {readonly read: ReadFile; readonly write: WriteFile; readonly lock: FileLock},
+  log: (line: string) => void,
+): SavedHostsStore {
+  const binary = savedHostsPath(userData);
+  const json = join(userData, JSON_FILE);
+  const held = heldHosts(binary, json, files);
   /** One save at a time in this process, and under the file's lock across processes. */
   const saving = Semaphore.makeUnsafe(1);
   const locked = <A>(save: Effect.Effect<A, Error>) =>
