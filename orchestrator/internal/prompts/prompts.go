@@ -83,6 +83,11 @@ type (
 		Steering    string
 	}
 
+	setupBriefData struct {
+		Repository string
+		Steering   string
+	}
+
 	// handoffData holds the fields of every kind of handoff; Kind says which the template reads.
 	handoffData struct {
 		From                                                 core.AgentID
@@ -186,6 +191,8 @@ func dataOf(m core.Message, records Records) (string, any, error) {
 		return "brief", textData{Text: b.Text}, nil
 	case core.LeadBrief:
 		return "lead_brief", leadBriefData(b), nil
+	case core.SetupBrief:
+		return "setup_brief", setupBriefData(b), nil
 	case core.Handoff:
 		return "handoff", handoffDataOf(m.From, b), nil
 	case core.Report:

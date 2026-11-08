@@ -77,12 +77,17 @@ type Run struct {
 	// OptimizeStartedAt is when the run left setup, the zero time while in setup and for a run that
 	// never had one. A run's limits count from here for a run that had a setup.
 	OptimizeStartedAt time.Time
-	// SetupUsage is what the setup phase cost, frozen when it ended; nil before that and for a run
-	// that never had a setup. The cost limit counts Usage less this.
+	// SetupUsage is what the setup phase cost, complete once the setup session is over (a turn that
+	// started in setup counts when it ends); nil before the run leaves setup and for a run that never
+	// had a setup. The cost limit counts Usage less this.
 	SetupUsage *Usage
 	// PendingLead is the lead a change of the lead waits to apply when the lead's current turn ends;
 	// nil when none waits. It is durable, so a restart in the middle of a handover finds it.
 	PendingLead *AgentSpec
+	// SetupTask is the name the setup lead declared for the task it is making; empty until it
+	// declares one, and in a run with no setup. It is not Task, which is immutable and names the
+	// run's jobs.
+	SetupTask string
 }
 
 // Checkout is a working copy of a run's repository that one agent made.
@@ -314,6 +319,12 @@ type (
 	Text struct{ Text string }
 	// Brief is a subagent's first prompt, as data a template renders.
 	Brief struct{ Text string }
+	// SetupBrief is the first prompt of a run's lead in setup, as data a template renders: the
+	// repository and the operator's steering text, empty when there is none. It names no task.
+	SetupBrief struct {
+		Repository string
+		Steering   string
+	}
 	// LeadBrief is a run's lead's first prompt, as data a template renders: the task, how many
 	// subagents may be live at once, and the operator's steering text, empty when there is none.
 	LeadBrief struct {
@@ -423,9 +434,10 @@ type (
 	}
 )
 
-func (Text) messageBody()      {}
-func (Brief) messageBody()     {}
-func (LeadBrief) messageBody() {}
+func (Text) messageBody()       {}
+func (Brief) messageBody()      {}
+func (LeadBrief) messageBody()  {}
+func (SetupBrief) messageBody() {}
 
 // Role is the role the handoff's body belongs to, empty for a handoff with no body.
 func (h Handoff) Role() AgentRole {
@@ -472,7 +484,7 @@ type Message struct {
 // trigger says what kind of turn the message starts.
 func (m Message) trigger() TurnTrigger {
 	switch m.Body.(type) {
-	case Brief, LeadBrief:
+	case Brief, LeadBrief, SetupBrief:
 		return TriggerBrief
 	case Handoff:
 		return TriggerHandoff

@@ -18,7 +18,8 @@ func TestTheNewRunCallsAreUnimplementedAndNameThemselves(t *testing.T) {
 	ctx := context.Background()
 	_, describe := srv.DescribeTask(ctx, &cliv1.DescribeTaskRequest{})
 	_, list := srv.ListPlacements(ctx, &cliv1.ListPlacementsRequest{})
-	for name, err := range map[string]error{"DescribeTask": describe, "ListPlacements": list} {
+	_, setup := srv.DescribeSetup(ctx, &cliv1.DescribeSetupRequest{})
+	for name, err := range map[string]error{"DescribeTask": describe, "ListPlacements": list, "DescribeSetup": setup} {
 		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s: got %v, want Unimplemented naming the call", name, err)
 		}
