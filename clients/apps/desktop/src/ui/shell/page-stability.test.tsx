@@ -39,6 +39,7 @@ const TASK = live.runs[scenario.runId]?.task ?? '';
 const hostOf = (data: OrchestratorState): HostSnapshot => ({
   key: 'local',
   label: 'This machine',
+  repositoryChecked: undefined,
   model: {data, agentCursors: {}},
   connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
   freshness: {status: 'live', lastUpdateMs: null},
@@ -76,6 +77,7 @@ function Window(props: {
           retrySend: () => undefined,
           loadEarlier: () => undefined,
           expand: () => undefined,
+          checkRepository: () => undefined,
         }}
         retryHost={() => undefined}
         retryCost={() => undefined}
