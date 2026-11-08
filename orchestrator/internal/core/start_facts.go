@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"slices"
-	"strings"
 )
 
 // The start facts of a run: what the host establishes before a run starts and the run then records,
@@ -60,7 +59,11 @@ func listOrNone(names []string) string {
 	if len(names) == 0 {
 		return "none"
 	}
-	return strings.Join(names, ", ")
+	out := names[0]
+	for _, n := range names[1:] {
+		out += ", " + n
+	}
+	return out
 }
 
 // String says the need as a task states it: a count, then the vendor and the model if it names one.
@@ -68,11 +71,11 @@ func (n *AcceleratorNeed) String() string {
 	if n == nil {
 		return "no accelerator"
 	}
-	words := []string{fmt.Sprint(n.Count), string(n.Vendor)}
+	out := fmt.Sprintf("%d %s", n.Count, n.Vendor)
 	if n.Model != "" {
-		words = append(words, string(n.Model))
+		out += " " + string(n.Model)
 	}
-	return strings.Join(words, " ")
+	return out
 }
 
 // ResolveStartFacts decides the facts of a start. chosen is the place the client named, empty to let

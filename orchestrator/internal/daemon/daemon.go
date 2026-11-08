@@ -462,7 +462,7 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 		return d.lose(l.Session, fmt.Sprintf("the host does not allow the model %q", l.Spec.Model), core.StartModelNotAllowed)
 	}
 	start := SessionStart{
-		Launch: l, Repository: run.Repository, Task: run.Task, JobTool: run.JobTool,
+		Launch: l, Repository: run.Repository, Task: run.Task, JobTool: run.JobTool, EvalPlace: run.EvalPlace,
 		Tools: &pb.ToolServerCredentials{
 			Endpoint: d.cfg.AgentSocket, Agent: string(l.Session.Agent), Session: l.Session.N,
 			Token: d.cfg.Authority.Token(l.Session), Run: string(l.Run), Role: wire.RoleOut(l.Role),

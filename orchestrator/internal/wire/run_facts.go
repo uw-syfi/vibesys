@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"errors"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -270,6 +271,21 @@ func pendingLeadOut(s *core.AgentSpec) *pb.PendingLead {
 		return nil
 	}
 	return &pb.PendingLead{Harness: harnesses.out(s.Harness), Model: string(s.Model), ReasoningEffort: string(s.Effort)}
+}
+
+// TaskCardFromMessage reads a card the CLI's daemon answered, as the core holds it. The message is
+// held to its contract first, so a card with an unknown field or a value out of its bounds is an
+// error that names it.
+func TaskCardFromMessage(m *cliv1.TaskCard) (core.TaskCard, error) {
+	if m == nil {
+		return core.TaskCard{}, errors.New("the task card is missing")
+	}
+	if err := Validate(m); err != nil {
+		return core.TaskCard{}, err
+	}
+	var errs errorList
+	card := cardIn(m, &errs)
+	return *card, errs.err()
 }
 
 func pendingLeadIn(s *pb.PendingLead, errs *errorList) *core.AgentSpec {
