@@ -12,6 +12,8 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
 )
 
 // VibeSys is fully autonomous: the lead decides every open question itself, records it under
@@ -84,15 +86,23 @@ func TestLeadPromptsNeverHandADecisionToTheOperator(t *testing.T) {
 	}
 }
 
-// The lead brief states the rule itself, so the check above is not satisfied by silence.
-func TestLeadBriefStatesTheLeadDecides(t *testing.T) {
-	text, err := os.ReadFile(filepath.Join("templates", "lead_brief.md.tmpl"))
-	if err != nil {
-		t.Fatal(err)
+// The prompts a lead starts from, its brief and the handover that opens a replacement lead, state the
+// rule themselves, so the check above is not satisfied by silence. They are read as rendered, since the
+// words are shared by a template both include.
+func TestTheLeadsFirstPromptsStateTheLeadDecides(t *testing.T) {
+	leadPrompts := map[string]core.MessageBody{
+		"lead brief":    core.LeadBrief{Task: "kv-store", FanoutLimit: 2},
+		"lead handover": core.LeadHandover{Task: "kv-store", FanoutLimit: 2, Previous: core.AgentSpec{Harness: core.Codex}},
 	}
-	for _, want := range []string{"decide every open question yourself", "never hand a decision to the operator", "external factor you cannot fix"} {
-		if !strings.Contains(string(text), want) {
-			t.Errorf("lead brief lacks %q", want)
+	for name, body := range leadPrompts {
+		text, err := prompts.Render(core.Message{ID: "m1", Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"decide every open question yourself", "never hand a decision to the operator", "external factor you cannot fix"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
 		}
 	}
 }

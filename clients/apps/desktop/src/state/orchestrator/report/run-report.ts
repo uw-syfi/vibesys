@@ -3,7 +3,7 @@
  * facts, the report the host sums the run up by, the objectives with their history and bounds, the
  * trade-off and the agents by type. A pure function of the state and the time the caller passes.
  */
-import type {RunStatus, RunStopReason, SearchState} from '@vibesys/orchestrator-proto';
+import type {RunStatus, RunStopReason, SearchState, TaskCard} from '@vibesys/orchestrator-proto';
 import {oneofIs} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
@@ -16,6 +16,8 @@ import {type TradeoffReport, tradeoffReport} from './tradeoff.js';
 export interface ReportHeader {
   /** What the run is called: its task. */
   readonly name: string;
+  /** The task card the host stored on the run; null for a run recorded before cards. */
+  readonly card: TaskCard | null;
   readonly status: RunStatus;
   readonly stopReason: RunStopReason;
   readonly startedMs: number;
@@ -71,6 +73,7 @@ export function runReport(
     runId,
     header: {
       name: run.task,
+      card: run.taskCard ?? null,
       status: run.status,
       stopReason: run.stopReason,
       startedMs,

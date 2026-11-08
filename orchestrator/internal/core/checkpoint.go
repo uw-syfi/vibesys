@@ -86,6 +86,13 @@ func (s State) Checkpoint() []Event {
 	for _, id := range slices.Sorted(maps.Keys(s.checkIns)) {
 		emit(s.checkIns[id].Run, s.checkIns[id])
 	}
+	// The newest report of each run, as the message that was posted: a lead's report to the operator is
+	// settled when it is posted and kept only here.
+	for _, id := range slices.Sorted(maps.Keys(s.reports)) {
+		emit(id, Message{
+			ID: MessageID(checkpointID + "/report/" + string(id)), Run: id, Delivery: DeliveryConsumed, At: checkpointAt, Body: s.reports[id],
+		})
+	}
 	for _, told := range slices.SortedFunc(maps.Keys(s.jobs), func(a, b toldJob) int {
 		return cmp.Or(cmp.Compare(a.run, b.run), cmp.Compare(a.job, b.job))
 	}) {
@@ -110,7 +117,7 @@ func (s State) Equal(o State) bool {
 func (s State) canonical() State {
 	out := State{
 		runs: nilIfEmpty(s.runs), messages: nilIfEmpty(s.messages), receipts: nilIfEmpty(s.receipts), checkIns: nilIfEmpty(s.checkIns),
-		jobs: nilIfEmpty(s.jobs), agents: nilIfEmpty(maps.Clone(s.agents)),
+		jobs: nilIfEmpty(s.jobs), agents: nilIfEmpty(maps.Clone(s.agents)), reports: nilIfEmpty(s.reports),
 	}
 	for id, a := range out.agents {
 		a.current, a.queue = nilIfEmpty(a.current), slices.Clip(a.queue)

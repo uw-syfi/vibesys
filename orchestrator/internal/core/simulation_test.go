@@ -204,6 +204,11 @@ func (w *sim) crash() {
 	w.t.Helper()
 	w.note("%d crash", w.inputs)
 	live := w.state
+	for _, run := range live.Runs() {
+		if run.PendingLead != nil {
+			w.monitor.covered.updates.crashedPending++
+		}
+	}
 	w.state = core.Replay(core.State{}, w.decodeLog())
 	if !reflect.DeepEqual(live, w.state) {
 		w.fail("the replayed state differs from the live one\nlive:   %+v\nreplay: %+v", live, w.state)
@@ -812,7 +817,7 @@ func (w *sim) drawPlan() []action {
 	w.slowStarts = w.r.IntN(2) == 0
 	return []action{
 		{40, w.finishStart}, {20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs}, {20, w.report},
-		{fault(10), w.pause}, {fault(8), w.lull}, {40, w.press},
+		{fault(10), w.pause}, {fault(8), w.lull}, {40, w.press}, {fault(30), w.update},
 		{fault(10), w.stopSubagent}, {fault(2), w.stopRun}, {fault(15), w.retry}, {fault(5), w.crash},
 		{fault(20), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
 		{200, w.work}, {160, w.act}, {230, func() { w.readSidecar() }},

@@ -11,6 +11,7 @@ import {type JSX, useMemo} from 'react';
 import {type Route, type RouteAction, rewind} from '../../state/index.js';
 import {type CatchUpPageWords, CatchUpScreen} from '../catch-up/index.js';
 import type {ConnectedHost, Dispatch} from '../orchestrator/connected.js';
+import {runTitle} from '../orchestrator/fleet-words.js';
 
 type RunRoute = Extract<Route, {readonly screen: 'run'}>;
 
@@ -52,7 +53,7 @@ export function ConnectedCatchUp(props: {
   const {session} = host;
   return (
     <CatchUpScreen
-      run={run.task}
+      run={runTitle(run.taskCard ?? null, run.task)}
       rows={viewerId === null ? [] : rewind(view.state, runId, viewerId)}
       history={view.history}
       retryHistory={() => dispatch(session.runHistory.retry(runId), () => undefined)}

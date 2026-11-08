@@ -357,6 +357,8 @@ func messageOut(m core.Message) *pb.Message {
 		out.Body = &pb.Message_Brief{Brief: b.Text}
 	case core.LeadBrief:
 		out.Body = &pb.Message_LeadBrief{LeadBrief: &pb.LeadBrief{Task: b.Task, FanoutLimit: b.FanoutLimit, Steering: b.Steering}}
+	case core.LeadHandover:
+		out.Body = &pb.Message_LeadHandover{LeadHandover: leadHandoverOut(b)}
 	case core.SetupBrief:
 		out.Body = &pb.Message_SetupBrief{SetupBrief: &pb.SetupBrief{Repository: b.Repository, Steering: b.Steering}}
 	case core.Handoff:
@@ -404,6 +406,8 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 		out.Body = core.Brief{Text: b.Brief}
 	case *pb.Message_LeadBrief:
 		out.Body = core.LeadBrief{Task: b.LeadBrief.GetTask(), FanoutLimit: b.LeadBrief.GetFanoutLimit(), Steering: b.LeadBrief.GetSteering()}
+	case *pb.Message_LeadHandover:
+		out.Body = leadHandoverIn(b.LeadHandover, errs)
 	case *pb.Message_SetupBrief:
 		out.Body = core.SetupBrief{Repository: b.SetupBrief.GetRepository(), Steering: b.SetupBrief.GetSteering()}
 	case *pb.Message_Handoff:

@@ -33,6 +33,10 @@ func (t *tx) post(m Message) Message {
 // a turn is queued: sweep starts one turn at a time, so no path here can start a second.
 func (t *tx) route(m *Message, a agentState) {
 	switch {
+	case t.beingReplaced(a):
+		// The lead's session is closing to make way for the next, which has no mail of its own: what
+		// arrives now waits for it.
+		m.Delivery = DeliveryQueued
 	case a.Stop != StopNone:
 		m.Delivery, m.Rejection = DeliveryRejected, RejectAgentStopping
 	case a.Status == AgentActive && a.Capabilities.Steers && !m.ownTurn():
@@ -46,18 +50,22 @@ func (t *tx) route(m *Message, a agentState) {
 		m.Delivery, m.Rejection = DeliveryRejected, RejectFanoutLimit
 	default:
 		m.Delivery = DeliveryQueued
-		t.resume(a)
+		t.reopen(a, a.Spec, a.ResumeToken)
 	}
 }
 
-// resume opens a new session on an agent whose last one is over.
-func (t *tx) resume(a agentState) {
+// reopen opens a new session on an agent whose last one is over, on spec. A session that continues the
+// old conversation names its token, which is the agent's own. One that starts afresh, as a lead does
+// on another tool or model, has none, and the agent forgets the old token with it, so that no later
+// resume carries one session's conversation into a session on another spec.
+func (t *tx) reopen(a agentState, spec AgentSpec, token string) {
 	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff, a.EndDetail, a.StartFailure = AgentLaunching, StopNone, a.Session+1, time.Time{}, false, "", ""
 	a.HandoffReminded = false
+	a.Spec, a.ResumeToken = spec, token
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
-		Session: Session{a.ID, a.Session}, Run: run.ID, Role: a.Role, Spec: a.Spec, ResumeToken: a.ResumeToken,
+		Session: Session{a.ID, a.Session}, Run: run.ID, Role: a.Role, Spec: spec, ResumeToken: token,
 	})
 	t.armLaunchDeadline(run.ID, Session{a.ID, a.Session})
 }
@@ -74,6 +82,8 @@ func (t *tx) sweep(id RunID) {
 			t.closeSession(a)
 		case a.Stop != StopNone || !a.Status.Resting():
 			continue
+		case t.handoverDue(a):
+			t.beginHandover(a)
 		case len(a.queue) > 0:
 			t.startTurn(a)
 		case a.HandedOff && !t.steerPending(a.ID):
@@ -154,6 +164,8 @@ func (t *tx) closeSession(a agentState) {
 // beginStop moves a live run to stopping and stops its agents.
 func (t *tx) beginStop(run Run, reason RunStopReason) {
 	run.Status, run.StopReason = RunStopping, reason
+	// A run that is stopping needs no new lead, so the one that waited to take over never does.
+	run.PendingLead = nil
 	run = run.unscheduled()
 	t.emit(run.ID, run)
 	for _, a := range t.sortedAgents(run.ID) {
@@ -276,9 +288,16 @@ func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string, start St
 
 	run := t.s.runs[a.Run]
 	if a.Role == RoleLead && run.Status.Live() {
+		if run.PendingLead != nil {
+			// The lead ended while another waited to take over, whether it was closed for that or fell
+			// on its own: either way the next session is the new lead's.
+			t.requeueSteers(a)
+			t.handOver(t.s.agents[id])
+			return
+		}
 		if a.Capabilities.Resumes && a.ResumeToken != "" && a.SessionFailures <= MaxLeadResumes {
 			t.requeueSteers(a)
-			t.resume(t.s.agents[id])
+			t.reopen(t.s.agents[id], a.Spec, a.ResumeToken)
 			return
 		}
 		t.rejectMail(a.ID)

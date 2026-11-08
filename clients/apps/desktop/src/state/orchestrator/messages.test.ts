@@ -4,6 +4,7 @@ import {
   HandoffSchema,
   JobFinishedSchema,
   LeadBriefSchema,
+  LeadHandoverSchema,
   type Message,
   MessageSchema,
   ReportDueSchema,
@@ -38,6 +39,7 @@ const BODIES: readonly (readonly [Kind, Message['body']])[] = [
     'handoffReminder',
     {case: 'handoffReminder', value: {$typeName: 'vibesys.orchestrator.v1.HandoffReminder'}},
   ],
+  ['leadHandover', {case: 'leadHandover', value: create(LeadHandoverSchema, {task: 'faster'})}],
   ['reportDue', {case: 'reportDue', value: create(ReportDueSchema, {everySeconds: 60})}],
   [
     'runLimitReached',

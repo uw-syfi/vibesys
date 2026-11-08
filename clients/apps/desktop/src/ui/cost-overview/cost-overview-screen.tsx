@@ -47,6 +47,8 @@ export interface CostOverviewHost {
   readonly feed: FeedStatus;
   /** What the host served; undefined until it has. */
   readonly view: HostCostView | undefined;
+  /** What each run the client holds a card for is called, by run id; other runs keep the host's name. */
+  readonly titles: Readonly<Record<string, string>>;
 }
 
 function Problem(props: {
@@ -216,7 +218,7 @@ export function CostOverviewScreen(props: {
           {host.view === undefined ? null : (
             <Served
               host={host}
-              model={hostCostModel(host.key, host.view, words)}
+              model={hostCostModel(host.key, host.view, words, host.titles)}
               words={words}
               open={props.open}
             />
