@@ -23,6 +23,7 @@ const EnvVisibleDevices = "NVIDIA_VISIBLE_DEVICES"
 // cannot read them.
 type Facts interface {
 	GPUFacts(ctx context.Context) (map[string]string, error)
+	ProbeFacts(ctx context.Context) (map[string]string, error)
 }
 
 // Config configures New.
@@ -108,4 +109,50 @@ func (g *GPU) Attach(ctx context.Context) (resource.Attachment, error) {
 
 func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: "gpu: " + fmt.Sprintf(format, args...)}
+}
+
+// Offers implements resource.Resource: the machine's GPU model, counted by the selection. A
+// selection that does not list its devices, such as a count, is unreadable.
+func (r *GPU) Offers(ctx context.Context) ([]core.Accelerator, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	facts, err := r.cfg.Facts.ProbeFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	offer, err := core.ParseAccelerator(core.VendorNVIDIA, facts["gpu_model"], facts["gpu_count"])
+	if err != nil {
+		return nil, err
+	}
+	selected, err := selectedDevices(r.cfg.Devices, r.cfg.Runtime != "", offer.Count)
+	if err != nil {
+		return nil, err
+	}
+	offer.Count = selected
+	return []core.Accelerator{offer}, nil
+}
+
+// selectedDevices counts the devices of a selection out of the machine's total: all of them for
+// "all", and the listed ones for "device=0,1" (for a runtime, the variable's list "0,1"). Any other
+// value, such as a count, does not say which devices.
+func selectedDevices(selection string, viaRuntime bool, total uint32) (uint32, error) {
+	if selection == "all" {
+		return total, nil
+	}
+	list, listed := strings.CutPrefix(selection, "device=")
+	if !listed && !viaRuntime {
+		return 0, fmt.Errorf("GPU selection %q does not list its devices", selection)
+	}
+	seen := map[string]bool{}
+	for id := range strings.SplitSeq(list, ",") {
+		if id == "" || id == "none" || id == "void" || strings.Contains(id, "=") {
+			return 0, fmt.Errorf("GPU selection %q does not list its devices", selection)
+		}
+		seen[id] = true
+	}
+	if uint32(len(seen)) > total {
+		return 0, fmt.Errorf("GPU selection %q lists more devices than the machine's %d", selection, total)
+	}
+	return uint32(len(seen)), nil
 }

@@ -72,6 +72,8 @@ type ServiceDeps struct {
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
 	// a host with no job tool, and its runs record none.
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
+	// Tasks reads the card of a task at start. Nil is a host with no reader, whose runs record no card.
+	Tasks TaskReader
 	// HistoryPageBytes is the byte budget of one page of GetRunHistory. Zero is MaxHistoryPageBytes;
 	// a smaller one lets a test fill a page with a small fleet.
 	HistoryPageBytes int
@@ -318,7 +320,10 @@ func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Comman
 	switch {
 	case err == nil:
 		start.Repository = canonical
-		if s.JobTool != nil {
+		if start.Facts, err = s.startFacts(ctx, start); err != nil {
+			return cmd, err
+		}
+		if start.Facts.Refused == nil && s.JobTool != nil {
 			start.JobTool, err = s.JobTool(ctx)
 			if err != nil {
 				return cmd, status.Error(codes.FailedPrecondition, err.Error())

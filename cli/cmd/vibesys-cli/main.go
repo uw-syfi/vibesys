@@ -88,6 +88,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"plan":       planCommand,
 	"bound":      boundCommand,
 	"workstream": workstreamCommand,
+	"task":       taskCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
@@ -126,6 +127,9 @@ commands:
                                                  state the best an objective can reach; a revision is
                                                  a new entry, and nothing is replaced
   bound list [--objective <name>]                every declared bound, oldest first, the current one marked
+  task card <task> [--revision rev | --working-tree | --folder dir]
+                                                 print what a client shows of a task: domain,
+                                                 hardware, model, objectives and heading
   daemon status|stop|restart [--force]           manage the daemon
   upgrade                                        replace this binary with the newest release
 

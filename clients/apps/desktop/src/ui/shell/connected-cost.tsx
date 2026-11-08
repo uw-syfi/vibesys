@@ -13,6 +13,7 @@ import {useDisplayClock} from '../display-clock.js';
 import {nowMs} from '../orchestrator/clock.js';
 import type {ConnectedHost, Dispatch} from '../orchestrator/connected.js';
 import {costOverviewWords} from '../orchestrator/cost-words.js';
+import {runTitle} from '../orchestrator/fleet-words.js';
 
 /** The cost streams of every host, followed while this is mounted. */
 const watchCosts = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
@@ -25,12 +26,16 @@ const hostsOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly CostOvervi
   Atom.make(get => {
     const clock = get(nowMs);
     return hosts.map(({key, label, session}): CostOverviewHost => {
-      const view = get(session.model).data.hostCosts.all;
+      const data = get(session.model).data;
+      const view = data.hostCosts.all;
       const feed = get(session.hostCosts.status('all'));
       return {
         key,
         label,
         view,
+        titles: Object.fromEntries(
+          Object.values(data.runs).map(run => [run.id, runTitle(run.taskCard ?? null, run.task)]),
+        ),
         feed,
         status: hostStatusOf({
           connection: get(session.connection.state),

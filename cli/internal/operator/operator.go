@@ -91,6 +91,9 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	grace := c.StopGraceSeconds
 	legacy := c.GetDocker() != nil || c.GetRemote() != nil || c.GetSlurm() != nil
 	named := len(c.GetPlacements()) > 0
+	if n := len(c.GetPlacements()); n > MaxPlacements {
+		return nil, invalid("placements: %d placements, at most %d (the most ListPlacements reports)", n, MaxPlacements)
+	}
 	switch {
 	case legacy && named:
 		return nil, invalid("the config has [placements.*] and the earlier [docker], [remote] or [slurm] sections; name every placement under [placements.<name>]")
@@ -130,6 +133,9 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	}
 	return c, nil
 }
+
+// MaxPlacements is the most placements a config names: the bound of ListPlacementsResponse.
+const MaxPlacements = 64
 
 // DefaultPolicy is the scheduling policy of a config that names none: the oldest job first.
 const DefaultPolicy = "fifo"

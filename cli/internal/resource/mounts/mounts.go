@@ -90,3 +90,6 @@ func (m *Mounts) Attach(ctx context.Context) (resource.Attachment, error) {
 func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: "mounts: " + fmt.Sprintf(format, args...)}
 }
+
+// Offers implements resource.Resource: this resource gives no accelerators.
+func (*Mounts) Offers(ctx context.Context) ([]core.Accelerator, error) { return nil, ctx.Err() }
