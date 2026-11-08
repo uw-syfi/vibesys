@@ -141,7 +141,7 @@ func TestARunEndsShowingEverythingItShowedWhicheverWayItEnds(t *testing.T) {
 	const runCount = 5
 	// The runs of a repository follow one another, in this order.
 	repository := [runCount]string{"/repo-a", "/repo-b", "/repo-a", "/repo-b", "/repo-a"}
-	for seed := range uint64(24) {
+	for seed := range thinnedUnderRace(24) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, 5))

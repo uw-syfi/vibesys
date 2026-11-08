@@ -137,7 +137,7 @@ func TestARunThatIsOverShowsEverythingItsTaskHeldWhenItEnded(t *testing.T) {
 	// The runs of a repository follow one another, in this order.
 	repository := [...]string{"/repo-a", "/repo-b", "/repo-a", "/repo-b", "/repo-a", "/repo-a"}
 	runCount := len(repository)
-	for seed := range uint64(60) {
+	for seed := range thinnedUnderRace(60) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, 11))
