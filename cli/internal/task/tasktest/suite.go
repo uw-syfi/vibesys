@@ -165,6 +165,7 @@ func Run(t *testing.T, rig Rig) {
 			{"absolute", map[string]string{"k8s/deployed.yaml": "/tmp/hotel-k8s-deploy/manifest.yaml"}, "k8s/deployed.yaml", "absolute"},
 			{"escaping", map[string]string{"k8s/deployed.yaml": "../../../../src/main.c"}, "k8s/deployed.yaml", "outside the task directory"},
 			{"escaping through a link", map[string]string{"k8s/deployed.yaml": "../src/main.c", "src": "../../../src"}, "src", "outside the task directory"},
+			{"escaping by composing a link with ..", map[string]string{"k8s/up": "..", "k8s/deployed.yaml": "up/.."}, "k8s/deployed.yaml", "outside the task directory"},
 			{"dangling", map[string]string{"k8s/deployed.yaml": "generated.yaml"}, "k8s/deployed.yaml", "points at nothing"},
 			{"a cycle", map[string]string{"a": "b", "b": "a"}, "a", "cycle"},
 		} {
