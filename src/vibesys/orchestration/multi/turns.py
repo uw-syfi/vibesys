@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -43,6 +46,7 @@ from vibesys.orchestration.profilers import (
 )
 from vibesys.orchestration.review import Verdict
 from vs_agent.api import AgentUsageLimitError
+from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     ResolvedSkillResources,
@@ -51,6 +55,8 @@ from vs_runtime.api import (
     SkillResourceRequest,
     StructuredResponseError,
 )
+
+from pydantic import BaseModel as _PydanticBaseModel
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -186,6 +192,143 @@ async def _resolve_skills(
     return portable, list(result.resolved)
 
 
+# When this variable is set, each new plan is a draft: one fresh implementer-role session
+# runs the workspace's microbench phase on the draft, then the same orchestrator
+# conversation revises the plan from the measured answers. Only the revised plan reaches
+# the implementer.
+MICROBENCH_PHASE_ENV = "VIBESYS_MICROBENCH_PHASE"
+MICROBENCH_MINUTES_ENV = "VIBESYS_MICROBENCH_MINUTES"
+# Rounds up to this number run the full microbench phase. A later round runs it only for
+# the open questions of its draft that a timeline of the current kernel cannot settle, and
+# skips it when there are none. Unset: every round runs the full phase.
+MICROBENCH_FULL_ROUNDS_ENV = "VIBESYS_MICROBENCH_FULL_ROUNDS"
+# When set, a round past the full microbench rounds (two when the count is unset) is a phase
+# round: the implementer coordinates one subagent per target phase of the plan.
+PHASE_AGENTS_ENV = "VIBESYS_PHASE_AGENTS"
+
+_PHASE_ROUND_IMPLEMENTER = """
+
+This is a phase round. Follow the "Phase table and phase rounds" section of the objective
+(`{objective}`): give each target phase of the plan to a `phase` subagent, all at once, and
+coordinate them. Do not edit phase code yourself before they return. Then merge, check and
+time the merged build as that section says.
+"""
+
+_PHASE_ROUND_PLAN = """
+
+This is a phase round: name the target phases and the boundary items of the plan from the
+phase windows of the latest timeline, largest gaps first.
+"""
+
+MEASUREMENT_DIR_ENV = "VIBESYS_MEASUREMENT_DIR"
+
+
+def _phase_round(round_number: int) -> bool:
+    """True when phase agents are on and this round is past the full microbench rounds."""
+    if not os.environ.get(PHASE_AGENTS_ENV):
+        return False
+    raw = os.environ.get(MICROBENCH_FULL_ROUNDS_ENV, "").strip()
+    try:
+        return round_number > (int(raw) if raw else 2)
+    except ValueError:
+        return False
+
+_MEASURE_BEFORE_RETURN = """Your turn returned `continue`, but no new measurement file appeared in `{directory}`
+during this round. A round that ends without a measurement gives the next round nothing to
+act on. If a GPU command that you started is still running, wait for it in the foreground
+and read its result. If no measurement was started, run the check now. Then return the
+structured response again, with the measured outcome.
+"""
+
+
+def _measurements(root: object, directory: str) -> set[str]:
+    """Names of the files under *directory* of the workspace at *root*."""
+    base = Path(str(root)) / directory
+    if not base.is_dir():
+        return set()
+    return {str(path.relative_to(base)) for path in base.rglob("*")}
+
+
+_MICROBENCH_DEADLINE = """
+The phase has a time limit. Write `deadline: {deadline}` as the first line of the request
+file, so that the subagent fits its measurements to it. At the deadline, the answers settle
+what the rows settle, and the rest stays open in the ledger for a later round.
+"""
+
+_MICROBENCH_ONLY = """
+This round measures only the open questions below. The timeline of the current kernel and
+the existing rows settle the other choices of the draft, so do not request benches for them.
+
+{questions}
+"""
+
+_MICROBENCH_PROMPT = """You run the microbench phase of round {round_name} before its plan is final.
+The orchestrator wrote a draft plan at `{plan_location}`. The implementer will not see it:
+the orchestrator revises it from your answers, and the implementer builds the revised plan.
+
+Do steps 1-3 of the Microbench phase section of the objective (`{objective}`) for this draft:
+run `./microbench_items`, write `progress/microbench/requests/{round_name}.md`, and give it to
+the `microbench` subagent (Agent tool, `subagent_type: microbench`, `run_in_background:
+false`). Ask for each choice that the draft makes or rejects and that a measurement could
+change: the engine, decomposition and data path of each phase it writes, and the costs it
+assumes. Then run `./microbench_check`. If it fails, give its message to the subagent and
+wait again, until it passes.
+
+Do not edit the submission or any file outside `progress/`. Return a short summary: for each
+choice of the draft, what the answers measured and whether they confirm or contradict it,
+with row ids.
+"""
+
+_REVISE_PROMPT = """The microbench phase measured the questions of your draft plan for round
+{round_name}. Its summary:
+
+{summary}
+
+Read `progress/microbench/answers/{round_name}.md`, `progress/microbench/open.md`, the
+`{round_name}` status entry of `progress/engine-map.md` and `progress/design-space.md`.
+Then revise the plan. For each choice of the draft (engine, decomposition, data path,
+target), keep it, change it or replace it as the measured rows decide, and cite the row ids
+in the plan. If the rows show a larger gain than the draft's target, retarget the round.
+The implementer receives only the revised plan and builds what it says.
+Name one design for each phase that the round writes: the design that the matched rows rank
+fastest, with no fallback to a design that they rank slower and no condition on how hard it
+is to build. A measurement of the phase inside the candidate kernel ranks designs above the
+proxy rows: where the per-phase timeline of the parent shows that the design the rows prefer
+is slower inside the kernel, name the design that the timeline shows faster, cite both
+measurements, and keep the gap between proxy and kernel open in the microbench ledger.
+
+Return the complete plan for this round as the same JSON object. You may keep the
+hypothesis_id of the draft.
+"""
+
+
+_OPEN_QUESTIONS_PROMPT = """Before the microbench phase of round {round_name}: the opening rounds
+measured the engine, decomposition and data-path choices. From this round on, the per-phase
+timeline of the current kernel (`./timeline_candidate`) is the default evidence, and the
+microbench phase runs only for questions that the timeline cannot settle.
+
+Read `progress/microbench/open.md` and the latest timeline in `reports/`. List the choices of
+your draft that depend on a measurement that neither the timeline of the current kernel nor
+existing rows (`./primdb`) gives: for example a design that the kernel does not contain yet
+and that no matched row prices. For each, say what measurement would settle it and why the
+timeline cannot. Return an empty list when the timeline and the existing rows settle every
+choice of the draft.
+"""
+
+
+class OpenQuestionsResponse(_PydanticBaseModel):
+    """Questions of a draft plan that only a new microbenchmark can settle."""
+
+    questions: list[str]
+    reason: str
+
+
+class MicrobenchPhaseResponse(_PydanticBaseModel):
+    """Summary of one pre-plan microbench phase."""
+
+    summary: str
+
+
 class MultiAgentTurns:
     """Render policy prompts and own the explicit conversation topology."""
 
@@ -309,7 +452,11 @@ class MultiAgentTurns:
         self.search.validate_updates(state, plan.hypothesis_updates)
 
     async def plan(self, request: PlanRequest) -> OrchestratorPlan:
-        """Return one normalized, state-valid plan after at most one correction."""
+        """Return one normalized, state-valid plan after at most one correction.
+
+        With MICROBENCH_PHASE_ENV set, that plan is a draft: the microbench phase measures
+        it, and the same conversation returns the revised plan.
+        """
         context = self._plan_context(request)
         session = await self.run.agents.create_session(
             DESIGNER,
@@ -318,48 +465,160 @@ class MultiAgentTurns:
         )
         try:
             try:
-                plan = await session.turn(render_plan_prompt(context), response=OrchestratorPlan)
+                prompt = render_plan_prompt(context)
+                if _phase_round(request.round_number):
+                    prompt += _PHASE_ROUND_PLAN
+                plan = await session.turn(prompt, response=OrchestratorPlan)
             except StructuredResponseError:
                 plan = _fallback_plan()
-            for attempt in range(2):
-                plan.hypothesis_id = (
-                    plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
-                )
-                plan.title = normalize_hypothesis_title(plan.title)
-                try:
-                    self._validate_plan(plan, request.state)
-                except ValueError as error:
-                    if attempt:
-                        raise
-                    rejected = ", ".join(
-                        sorted({item.hypothesis_id for item in plan.hypothesis_updates})
-                    )
-                    feedback = (
-                        f"Your previous plan was rejected: {error}. It proposed "
-                        f"hypothesis_id {plan.hypothesis_id!r} and named "
-                        f"{rejected or '(no)'} in hypothesis_updates. A hypothesis_id "
-                        "names one investigation permanently: never reuse an identifier "
-                        "used earlier in this run. hypothesis_updates may name each prior "
-                        "hypothesis at most once, and never the new one. Produce a corrected "
-                        "plan for this round. Return only the JSON object."
-                    )
-                    self.run.observations.warning(
-                        f"[orchestrator] plan rejected ({error}); reprompting once"
-                    )
-                    try:
-                        plan = await session.turn(feedback, response=OrchestratorPlan)
-                    except StructuredResponseError:
-                        plan = _fallback_plan()
-                    continue
-                portable, _ = await _resolve_skills(self.run, plan.recommended_skills)
-                plan.recommended_skills = portable
-                self.files.write_plan(request.round_number, plan)
-                self.files.note_plan(request.round_number, plan)
+            plan = await self._settle_plan(session, plan, request)
+            if not os.environ.get(MICROBENCH_PHASE_ENV):
                 return plan
-            message = "designer correction loop exited without a validated plan"
-            raise RuntimeError(message)
+            round_name = f"round-{request.round_number:04d}"
+            questions: list[str] | None = None
+            if self._microbench_on_demand(request.round_number):
+                questions, reason = await self._open_questions(session, round_name)
+                if not questions:
+                    self.files.write_plan(request.round_number, plan)
+                    skipped = self.files.artifact_root / "microbench" / "skipped" / f"{round_name}.md"
+                    skipped.parent.mkdir(parents=True, exist_ok=True)
+                    skipped.write_text(
+                        f"# {round_name}: microbench phase skipped\n\n"
+                        "The planning session found no open question of the draft that the "
+                        "timeline of the current kernel and the existing rows do not settle.\n\n"
+                        f"{reason.strip()}\n")
+                    self.run.observations.note(
+                        f"[microbench] {round_name}: no open question needs a new "
+                        "microbenchmark; skipping the phase")
+                    return plan
+            summary = await self._microbench_phase(request, plan, round_name, questions)
+            self.run.observations.note(f"[microbench] {round_name} draft measured; revising plan")
+            try:
+                revised = await session.turn(
+                    _REVISE_PROMPT.format(round_name=round_name, summary=summary),
+                    response=OrchestratorPlan,
+                )
+            except StructuredResponseError:
+                self.run.observations.warning("[microbench] no revised plan; keeping the draft")
+                return plan
+            try:
+                return await self._settle_plan(session, revised, request)
+            except ValueError as error:
+                self.run.observations.warning(
+                    f"[microbench] revised plan rejected ({error}); keeping the draft")
+                self.files.write_plan(request.round_number, plan)
+                return plan
         finally:
             await session.close()
+
+    @staticmethod
+    def _microbench_on_demand(round_number: int) -> bool:
+        """True when this round is past the rounds that run the full microbench phase."""
+        raw = os.environ.get(MICROBENCH_FULL_ROUNDS_ENV, "").strip()
+        if not raw:
+            return False
+        try:
+            return round_number > int(raw)
+        except ValueError:
+            return False
+
+    async def _open_questions(
+        self, session: AgentSession, round_name: str
+    ) -> tuple[list[str], str]:
+        """Ask the planning session which questions of its draft need a new microbenchmark."""
+        try:
+            response = await session.turn(
+                _OPEN_QUESTIONS_PROMPT.format(round_name=round_name),
+                response=OpenQuestionsResponse,
+            )
+        except StructuredResponseError:
+            self.run.observations.warning(
+                f"[microbench] {round_name}: no open-question list; running the full phase")
+            return ["(no list returned: measure the choices of the draft)"], ""
+        return [q for q in response.questions if q.strip()], response.reason
+
+    async def _microbench_phase(
+        self,
+        request: PlanRequest,
+        request_plan: OrchestratorPlan,
+        round_name: str,
+        questions: list[str] | None = None,
+    ) -> str:
+        """Run the workspace's microbench phase on the draft plan in a fresh session."""
+        plan_location = self.files.write_plan(request.round_number, request_plan)
+        prompt = _MICROBENCH_PROMPT.format(
+            round_name=round_name,
+            plan_location=plan_location,
+            objective=self.run.facts.objective_location,
+        )
+        if questions is not None:
+            prompt += _MICROBENCH_ONLY.format(
+                questions="\n".join(f"- {q}" for q in questions))
+        minutes = os.environ.get(MICROBENCH_MINUTES_ENV, "").strip()
+        if minutes:
+            end = datetime.now(timezone.utc) + timedelta(minutes=float(minutes))
+            prompt += _MICROBENCH_DEADLINE.format(
+                deadline=end.strftime("%Y-%m-%dT%H:%M UTC"))
+        session = await self.run.agents.create_session(
+            IMPLEMENTER,
+            workspace=request.workspace,
+            member_id=f"microbench-{request.round_number:04d}",
+        )
+        try:
+            try:
+                response = await session.turn(prompt, response=MicrobenchPhaseResponse)
+                return response.summary
+            except StructuredResponseError:
+                return "The microbench phase returned no summary; read its answer file."
+        except AgentUsageLimitError:
+            raise
+        except Exception as error:  # noqa: BLE001  # the draft still stands if measuring fails
+            self.run.observations.warning(f"[microbench] phase failed: {error}")
+            return f"The microbench phase failed ({error}); read whatever answers exist."
+        finally:
+            await session.close()
+
+    async def _settle_plan(
+        self, session: AgentSession, plan: OrchestratorPlan, request: PlanRequest
+    ) -> OrchestratorPlan:
+        """Normalize and validate *plan*, reprompting once; persist and return it."""
+        for attempt in range(2):
+            plan.hypothesis_id = (
+                plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
+            )
+            plan.title = normalize_hypothesis_title(plan.title)
+            try:
+                self._validate_plan(plan, request.state)
+            except ValueError as error:
+                if attempt:
+                    raise
+                rejected = ", ".join(
+                    sorted({item.hypothesis_id for item in plan.hypothesis_updates})
+                )
+                feedback = (
+                    f"Your previous plan was rejected: {error}. It proposed "
+                    f"hypothesis_id {plan.hypothesis_id!r} and named "
+                    f"{rejected or '(no)'} in hypothesis_updates. A hypothesis_id "
+                    "names one investigation permanently: never reuse an identifier "
+                    "used earlier in this run. hypothesis_updates may name each prior "
+                    "hypothesis at most once, and never the new one. Produce a corrected "
+                    "plan for this round. Return only the JSON object."
+                )
+                self.run.observations.warning(
+                    f"[orchestrator] plan rejected ({error}); reprompting once"
+                )
+                try:
+                    plan = await session.turn(feedback, response=OrchestratorPlan)
+                except StructuredResponseError:
+                    plan = _fallback_plan()
+                continue
+            portable, _ = await _resolve_skills(self.run, plan.recommended_skills)
+            plan.recommended_skills = portable
+            self.files.write_plan(request.round_number, plan)
+            self.files.note_plan(request.round_number, plan)
+            return plan
+        message = "designer correction loop exited without a validated plan"
+        raise RuntimeError(message)
 
     def _profiler_campaign_context(self, artifact: str) -> str:
         return f"""
@@ -537,8 +796,25 @@ production path cannot be measured safely.
             if isinstance(context, ImplementerContinuationContext)
             else render_implementer_prompt(context)
         )
+        if _phase_round(request.round_number):
+            prompt += _PHASE_ROUND_IMPLEMENTER.format(
+                objective=self.run.facts.objective_location)
+        directory = os.environ.get(MEASUREMENT_DIR_ENV, "").strip()
+        root = getattr(request.workspace, "path", None)
+        before = _measurements(root, directory) if directory and root is not None else None
         try:
             response = await session.turn(prompt, response=ImplementerResponse)
+            if (
+                before is not None
+                and response.hypothesis_outcome == HypothesisOutcome.CONTINUE
+                and _measurements(root, directory) <= before
+            ):
+                self.run.observations.warning(
+                    "[implementer] continue without a new measurement; resuming once")
+                response = await session.turn(
+                    _MEASURE_BEFORE_RETURN.format(directory=directory),
+                    response=ImplementerResponse,
+                )
         except StructuredResponseError:
             response = _fallback_implementer()
         except AgentTurnTimeoutError as error:
