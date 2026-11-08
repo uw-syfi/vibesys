@@ -167,6 +167,9 @@ type Wiring struct {
 	// answers with. It is asked when a run starts, so a repaired install is used by the next run with
 	// no restart.
 	JobTool func(context.Context) (core.JobToolEndpoint, error)
+	// Provisioner answers ProvisionRepository. Nil is a host with no examples tree to make one from, and
+	// the rpc answers Unimplemented.
+	Provisioner daemon.Provisioner
 	// Parts says whether a run can be started now.
 	Parts PartsCheck
 	// Models is the host's model policy. Nil means the host has none, which every test of the daemon
@@ -255,7 +258,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
-		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool,
+		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool, Provisioner: x.wiring.Provisioner,
 		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool),
 	})
 }
