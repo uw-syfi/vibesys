@@ -50,6 +50,9 @@ type MeasureOutcome struct {
 	// Objectives is what a measurement of a multi-objective task is judged on, and the zero value
 	// for any other task.
 	Objectives Objectives
+	// Services is the server each sample ran on, for a task with a job-scoped server: nil, or one
+	// per sample, in the order of Samples.
+	Services []SampleService
 }
 
 func (CheckOutcome) outcome()   {}

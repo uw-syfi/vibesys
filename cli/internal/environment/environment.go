@@ -61,6 +61,49 @@ type Environment interface {
 	// with core.FailureInvalidInput for an environment that runs no images, such as the host: a
 	// task of two images runs only where images do.
 	Candidate(ctx context.Context, build core.CandidateBuild, log io.Writer) (core.CandidateImage, error)
+
+	// Serve starts a job-scoped server and waits until it is ready, and returns it running, with a
+	// nil attempt; it outlives the call, and every Run of the Service runs against it. Otherwise it
+	// returns a nil Service and how the start ended, as Run says it: core.NotStarted when nothing
+	// started (an invalid service, or an environment that runs no images, such as the host, which
+	// refuses with core.FailureInvalidInput), core.Ended with ExecServiceNotReady, ExecServiceExited
+	// or ExecCancelled, with the server's last lines, and core.Unobserved when it cannot vouch for
+	// what started. Nothing of a start that failed outlives the call.
+	//
+	// The server's output goes to out for as long as it runs, so out must take writes from it while
+	// a Run of the Service writes to its own.
+	Serve(ctx context.Context, s core.JobService, out io.Writer) (Service, core.Attempt)
+}
+
+// Service is a job-scoped server an Environment started: it runs until Close, across the commands
+// that run against it. Its methods are safe for concurrent use.
+type Service interface {
+	// Run runs one command against the server, as Environment.Run does, with the server's address
+	// in the job environment's VIBESYS_SERVICE_URL. The execution names no service and no candidate
+	// of its own. The server ending while the command runs ends the run with ExecServiceExited, and
+	// a server that ended before the run runs nothing: core.NotStarted, with ServiceEnded. Run ends
+	// the command's processes on every path and never the server's.
+	Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt
+
+	// Alive reports whether the server still runs, as far as the environment saw: false once its
+	// process ended or was lost. It does not block.
+	Alive() bool
+
+	// Close ends the server and everything of it on every path, whatever the caller's context, after
+	// asking it to terminate and giving it the grace period, and reports what it could not clean
+	// up. It is idempotent: a later call reports nothing.
+	Close() error
+}
+
+// ServiceEnded is the failure of a Run of a Service whose server has ended.
+func ServiceEnded() core.Failure {
+	return core.Failure{Kind: core.FailureUnavailable, Message: "the job's server has ended, so no command runs against it"}
+}
+
+// NoService is what an environment that runs no job-scoped server answers Serve with.
+func NoService(kind core.EnvironmentKind) core.Attempt {
+	return core.NotStarted{Failure: core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+		"the %s environment runs no job-scoped server: a task's [service] runs in a container of its image, beside the commands that run against it; run it in docker", kind)}}
 }
 
 // NoImages is what an environment that runs no images answers Candidate with.

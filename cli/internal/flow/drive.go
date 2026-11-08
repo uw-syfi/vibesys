@@ -13,8 +13,9 @@ type Shell interface {
 // between two commands ends the job as a cancel and not as whatever the next command would have
 // done. It fails only for a plan that is not valid.
 //
-// It takes at most five steps and two for each sample, whatever the shell answers: an answer that
-// fits the request advances the machine and one that does not ends it.
+// It takes at most six steps and three for each sample (two without a job-scoped server), whatever
+// the shell answers: an answer that fits the request advances the machine and one that does not
+// ends it.
 func Drive(ctx context.Context, p Plan, sh Shell) (Verdict, error) {
 	state, req, err := Start(p)
 	if err != nil {

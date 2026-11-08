@@ -114,6 +114,11 @@ message TaskManifestV02 {
   google.protobuf.Struct plan = 16 [(task_schema_since_minor) = 2];
   google.protobuf.Struct catalogue = 17 [(task_schema_since_minor) = 2];
   repeated google.protobuf.Struct comparison = 18 [(task_schema_since_minor) = 2];
+  // A server of the task's own image that a job starts once and runs its samples against, instead
+  // of each sample starting it. Optional: a manifest without it starts nothing between commands.
+  // Only a task of one image has it: a task with [candidate] starts its candidate's server for
+  // each command.
+  TaskServiceV02 service = 19 [(task_schema_since_minor) = 2];
 }
 
 // TaskCandidateV02 is how the candidate's image is built from its commit, and how its server starts.
@@ -156,7 +161,47 @@ message TaskCandidateV02 {
   ];
 }
 
-// TaskCommandV02 is a command of the task container, run from the checkout's root.
+// TaskServiceV02 is [service]: the job-scoped server of a task of one image. A measure job starts it
+// once, in a container of the task's image of its own, after the check, and runs every sample in a
+// container beside it, which reaches it over HTTP at VIBESYS_SERVICE_URL. Before every sample that
+// runs on a server an earlier command of the job used, the reset runs; a reset that fails fails the
+// sample. A server that ended between two samples is started again, and the result records which
+// samples ran on a server that was started for them, reused or restarted. The server ends with the
+// job, however the job ends.
+message TaskServiceV02 {
+  // The server, run in the task's image from the checkout's root. ${PROJECT_ROOT} is the checkout's
+  // root and ${PORT} the port the CLI chose for it, which the command must name.
+  repeated string command = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  // The HTTP path polled on 127.0.0.1:${PORT} until it answers 2xx.
+  string ready = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.pattern = "^/[^\\s]*$"
+  ];
+  // How long the server may take to become ready.
+  uint32 startup_timeout_seconds = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 86400
+    }
+  ];
+  // The reset: a command of the task container, run against the server before every sample that
+  // reuses it, which flushes what an earlier command left (such as a prefix cache) and confirms the
+  // server is idle and healthy. Exit 0 lets the sample run.
+  TaskCommandV02 reset = 4 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).required = true
+  ];
+  // Whether the check runs against the server too. False, the default, runs the check as a task
+  // without [service] runs it, and the server starts after it. True starts the server before the
+  // check, in a check job as in a measure job, and a measure job's samples then reuse the server the
+  // check ran against.
+  bool share_with_accuracy = 5 [(task_schema_since_minor) = 2];
+}
 
 // TaskCommandV02 is a command of the task container, run from the checkout's root.
 message TaskCommandV02 {
