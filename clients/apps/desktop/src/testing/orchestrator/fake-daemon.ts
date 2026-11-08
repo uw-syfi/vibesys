@@ -637,12 +637,13 @@ export class FakeDaemon {
   /**
    * The session of an agent being stopped closes, as the host hears once the stop reached it
    * (`sessionOver`, which ends a running turn with `endTurn`, then `rejectMail`):
-   * - a turn still running ends interrupted, and first every item still running in it fails;
-   * - the message that started that turn was not delivered, so it is rejected: as out of attempts
-   *   when the host has started as many turns for it as it ever will, else as the rest of its mail;
+   * - a turn still running ends interrupted: first every item still running in it fails, then the
+   *   message that started it is settled -- out of attempts and rejected for good when the host has
+   *   started as many turns for it as it ever will, else put back in line with the rest of its mail;
    * - the agent ends and its stop stage is cleared;
-   * - what was still on its way to it is rejected, as gone while its run is live, else as the run
-   *   stopping.
+   * - everything still owed to the agent -- the turn's message, put back above, along with the rest
+   *   of its mail -- is rejected together, in message-id order as the host sends them, as gone while
+   *   its run is live, else as the run stopping.
    *
    * Only a stop ends a session here, so an agent that is not being stopped is a mistake in the test.
    */
@@ -652,15 +653,10 @@ export class FakeDaemon {
     if (agent === undefined || FINAL.has(agent.status) || !STOPPING.has(agent.stopStage))
       throw new Error(`the fake host is not stopping an agent ${agentId}`);
     const at = this.#now();
-    const run = state.runs[agent.runId];
-    const gone =
-      run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
-        ? Rejection.AGENT_GONE
-        : Rejection.RUN_STOPPING;
     const running = Object.values(state.turns).filter(
       turn => turn.agentId === agentId && turn.status === TurnStatus.RUNNING,
     );
-    for (const turn of running) this.#interrupt(state, turn, at, gone);
+    for (const turn of running) this.#endInterruptedTurn(state, turn, at);
     this.#append(at, {
       case: 'agent',
       value: create(AgentSchema, {
@@ -670,22 +666,24 @@ export class FakeDaemon {
         endedAt: timestampFromMs(at),
       }),
     });
-    const triggers = new Set(running.map(turn => turn.triggerMessageId));
-    for (const message of Object.values(state.messages))
-      if (
-        message.toAgentId === agentId &&
-        IN_TRANSIT.has(message.delivery) &&
-        !triggers.has(message.id)
-      )
-        this.reject(message.id, gone);
+    const run = state.runs[agent.runId];
+    const gone =
+      run?.status === RunStatus.STARTING || run?.status === RunStatus.RUNNING
+        ? Rejection.AGENT_GONE
+        : Rejection.RUN_STOPPING;
+    const owed = Object.values(this.#state(this.#visible).messages)
+      .filter(message => message.toAgentId === agentId && IN_TRANSIT.has(message.delivery))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const message of owed) this.reject(message.id, gone);
   }
 
   /**
-   * A running turn ends interrupted (`endTurn`): first every item still running in it fails, and
-   * the message that started it was not delivered, so it is rejected, as out of attempts once the
-   * host has started as many turns for it as it ever will.
+   * A running turn ends interrupted (`endTurn`): first every item still running in it fails. The
+   * message that started it is then out of attempts and rejected for good, once the host has
+   * started as many turns for it as it ever will; otherwise it goes back in line, to be swept up
+   * with the rest of the agent's mail once the session closes.
    */
-  #interrupt(state: OrchestratorState, turn: Turn, at: number, gone: Rejection): void {
+  #endInterruptedTurn(state: OrchestratorState, turn: Turn, at: number): void {
     const endedAt = timestampFromMs(at);
     for (const item of Object.values(state.items))
       if (item.turnId === turn.id && item.status === ItemStatus.RUNNING)
@@ -698,11 +696,14 @@ export class FakeDaemon {
       value: create(TurnSchema, {...turn, status: TurnStatus.INTERRUPTED, endedAt}),
     });
     const trigger = state.messages[turn.triggerMessageId];
-    if (trigger !== undefined)
-      this.reject(
-        trigger.id,
-        trigger.attempts >= MAX_DELIVERY_ATTEMPTS ? Rejection.ATTEMPTS_EXHAUSTED : gone,
-      );
+    if (trigger === undefined) return;
+    if (trigger.attempts >= MAX_DELIVERY_ATTEMPTS)
+      this.reject(trigger.id, Rejection.ATTEMPTS_EXHAUSTED);
+    else
+      this.#append(at, {
+        case: 'message',
+        value: create(MessageSchema, {...trigger, delivery: Delivery.QUEUED}),
+      });
   }
 
   /**
