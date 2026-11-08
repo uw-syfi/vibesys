@@ -89,8 +89,10 @@ parent rows unless concrete drift or comparability evidence requires otherwise.
 - Give each retained row a reproducible production selector. Official
   evaluation must activate that arm; absent a selector, make it default.
 - Compare the same candidate/workload/offered load/selected row. Forecast error
-  calibrates the model; the justified minimum decides causal retention; classify
-  Pareto retention separately.
+  calibrates the model. The plan's bar decides only the idea's outcome, which the
+  framework derives: make the arm that beats its control beyond noise in a same-job
+  comparison the production default even when it misses the bar, so the framework
+  measures it, and restore the base only when no arm beats it.
 - Fail closed on controller gates: save diagnostics, make no downstream paid
   calls, and release resources. Relate only same-scope/owner counters; cheaply
   test positive, zero, and mixed cases pre-target.

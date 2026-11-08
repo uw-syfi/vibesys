@@ -109,7 +109,8 @@ validation-input hashes.
 Relate only custom-gate counters with the same scope/owner; cheaply test positive,
 zero, mixed cases. Preserve valid rows, workload/accounting/admission, cleanup.
 Give each retained row a production selector; official evaluation must activate
-that arm, or it must be the default.
+that arm, or it must be the default. Make the arm that beats its control beyond noise
+the default even when it misses the plan's bar; the bar decides only the outcome.
 {{ reply.next_step }} is bounded same-mechanism work, never a framework gate; otherwise
 empty. Reuse unchanged-input validation PASSes. New/changed local/static
 checks require a conforming {{ reply.validation_recipe_artifact }} (see the contract below); exclude

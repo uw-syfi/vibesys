@@ -66,7 +66,7 @@ class ImplementerResponse(RevisionReply):
         description="Workspace-relative canonical evaluation artifact.",
     )
     candidate_disposition: Annotated[
-        CandidateDisposition, DecidedFrom("plan.minimum_ratio", "pareto_archive_conflict")
+        CandidateDisposition, DecidedFrom("pareto_archive_conflict")
     ] = Field(
         default=CandidateDisposition.UNASSESSED,
         description=(

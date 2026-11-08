@@ -73,8 +73,10 @@ and (3) terminal completion by one point satisfying every objective at once.
 
 Expected effect is a forecast, not a rejection threshold. {{ reply.minimum_ratio }} is the
 bar: the smallest ratio of the candidate's headline metric over its base's, in the metric's
-own direction, that justifies keeping the change. Derive it from noise, cost, complexity, and
-allowed tradeoffs, never from the forecast. The framework measures the candidate against its
+own direction, that the idea is expected to reach. Derive it from noise, cost, complexity, and
+allowed tradeoffs, never from the forecast. It decides the idea's outcome, not which code is
+kept: never tell the implementer to make an arm the default, or to restore the base, only
+when the bar is met; a candidate that beats its base beyond noise is kept by measurement. The framework measures the candidate against its
 base and derives the verdict (supported, within noise or disproven) from the bar; no agent
 states or judges it, so keep thresholds out of {{ reply.pass_criteria }}. A stronger
 hypothesis diagnostic may block causal support but cannot erase a genuine

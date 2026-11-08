@@ -240,8 +240,10 @@ class OrchestratorPlan(BaseModel):
         allow_inf_nan=False,
         description=(
             "The expected-effect bar: the smallest ratio of the candidate's headline metric "
-            "over its base's, in the metric's own direction, that justifies keeping the "
-            "change. Above 1 for a metric where more is better (1.05 asks for 5% more), "
+            "over its base's, in the metric's own direction, that the idea is expected to "
+            "reach. It decides the idea's outcome, not which code is kept: a candidate that "
+            "beats its base beyond noise is measured and can be retained even when it misses "
+            "the bar. Above 1 for a metric where more is better (1.05 asks for 5% more), "
             "below 1 for one where less is better (0.95 asks for 5% less); 1 asks for any "
             "gain beyond noise. Derive it separately from forecast uncertainty, benchmark "
             "noise and implementation cost. The framework measures the candidate and derives "
