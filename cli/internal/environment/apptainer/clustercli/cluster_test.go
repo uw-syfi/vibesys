@@ -85,16 +85,18 @@ echo "$*" >> "$(dirname "$0")/scancel.log"
 // transport's when lost255 is set, as ssh's is, and what ssh says of it as ssh does. With exit set,
 // every program reads its input and exits with that code instead, as a connection that drops does.
 // While drops is above zero, each call takes one from it and, instead of its program, writes the
-// lines dropped to standard error and exits with 255, as ssh does when it cannot connect. calls
-// counts the calls.
+// lines dropped to standard error and exits with 255, as ssh does when it cannot connect, and so
+// does each call while refusing, when set, says the login node refuses connections. calls counts
+// the calls.
 type shell struct {
-	bin     string
-	lost255 bool
-	env     []string
-	exit    string
-	drops   *atomic.Int32
-	dropped string
-	calls   *atomic.Int32
+	bin      string
+	lost255  bool
+	env      []string
+	exit     string
+	drops    *atomic.Int32
+	dropped  string
+	calls    *atomic.Int32
+	refusing func() bool
 }
 
 // kexDropped is what ssh wrote when a login node closed its connection during the key exchange.
@@ -102,7 +104,7 @@ const kexDropped = "kex_exchange_identification: Connection closed by remote hos
 
 func (s shell) Command(ctx context.Context, argv []string) *exec.Cmd {
 	s.calls.Add(1)
-	if s.drops.Add(-1) >= 0 {
+	if s.drops.Add(-1) >= 0 || (s.refusing != nil && s.refusing()) {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", `printf "$1" >&2; exit 255`, "vs-ssh", s.dropped)
 	}
 	if s.exit != "" {
