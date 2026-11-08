@@ -110,7 +110,8 @@ func (x *AgentContext) GetAgent() string {
 }
 
 // OperatorContext is what an operator chooses for the jobs of the agents they start. The
-// orchestrator does not set it: an agent inherits it from the environment it was started in.
+// orchestrator sets placement to the run's eval place when the run names one; an unpinned run sets
+// nothing, and the agent keeps what the environment it was started in names.
 type OperatorContext struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The one placement of the operator config a docker job may run on (--placement), or empty for

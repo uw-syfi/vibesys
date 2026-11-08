@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"errors"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -37,19 +38,35 @@ func (c ReleaseCatalogue) Catalogue(context.Context) (daemon.Catalogue, error) {
 }
 
 // ReleaseExamples serves the source of an example from the trees the release carries. It is the
-// real implementation behind the provisioner's example port: once that port (daemon.ExampleTrees)
-// is in this tree, Source returns its ExampleSource and ExampleUnavailable, which are these types
-// and errors with the daemon's names.
+// real implementation behind the provisioner's example port, daemon.ExampleTrees.
 type ReleaseExamples struct {
 	Find release.Finder
 }
 
-// Source is the source of the example with the id, or an *release.ExampleNotFoundError when the
-// release does not carry it. A failure to find or read the release is returned as it is.
-func (e ReleaseExamples) Source(_ context.Context, example string) (release.ExampleSource, error) {
+var _ daemon.ExampleTrees = ReleaseExamples{}
+
+// Source is the source of the example with the id. An example the release does not carry, or an
+// external one the registry records no pin for, is a *daemon.ExampleUnavailable; a failure to find or
+// read the release is returned as it is.
+func (e ReleaseExamples) Source(_ context.Context, example string) (daemon.ExampleSource, error) {
 	rel, err := e.Find()
 	if err != nil {
-		return release.ExampleSource{}, err
+		return daemon.ExampleSource{}, err
 	}
-	return rel.ExampleSource(example)
+	src, err := rel.ExampleSource(example)
+	var missing *release.ExampleNotFoundError
+	if errors.As(err, &missing) {
+		return daemon.ExampleSource{}, &daemon.ExampleUnavailable{Reason: daemon.ExampleNotFound, Detail: missing.Example}
+	}
+	if err != nil {
+		return daemon.ExampleSource{}, err
+	}
+	out := daemon.ExampleSource{Vendored: src.Vendored}
+	if src.Clone != nil {
+		if src.Clone.Revision == "" {
+			return daemon.ExampleSource{}, &daemon.ExampleUnavailable{Reason: daemon.ExampleUnpinned, Detail: example}
+		}
+		out.Clone = &daemon.CloneSpec{URL: src.Clone.URL, Revision: src.Clone.Revision}
+	}
+	return out, nil
 }
