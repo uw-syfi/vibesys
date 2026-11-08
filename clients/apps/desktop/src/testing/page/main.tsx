@@ -37,6 +37,7 @@ import {
   Ids,
   makeAppearance,
   makeHostSession,
+  makeMachineFolders,
   makeNavigation,
   preferencesOver,
   Viewer,
@@ -76,6 +77,7 @@ import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {servedHostCost} from '../orchestrator/served-host-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
+import {memoryFolders} from '../settings/machine-folders.js';
 import {makeFakeTransport, type Recording} from '../transport/index.js';
 import {makeFakeViewerBridge} from '../viewer/fakes.js';
 
@@ -249,6 +251,7 @@ Effect.runFork(
     const appearance = yield* makeAppearance().pipe(Scope.provide(scope));
     const navigation = yield* makeNavigation().pipe(Scope.provide(scope));
     const viewer = (yield* (yield* Viewer).whoami).id;
+    const folders = yield* makeMachineFolders(memoryFolders().actions);
     const hosts: ConnectedHost[] = [];
     for (const {key, label} of shown) {
       const session = yield* makeHostSession(key).pipe(Scope.provide(scope));
@@ -262,6 +265,7 @@ Effect.runFork(
             navigation={navigation}
             appearance={appearance}
             viewerId={viewer}
+            folders={folders}
             dispatch={(effect, then) => {
               Effect.runFork(Effect.map(effect, then));
             }}
