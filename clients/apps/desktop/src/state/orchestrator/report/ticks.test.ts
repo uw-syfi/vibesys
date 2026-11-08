@@ -24,7 +24,10 @@ describe('value ticks', () => {
           }
         },
       ),
-      {seed: 21},
+      // Pinned: when `step` is many orders of magnitude smaller than `low`, rounding two distinct
+      // multiples of `step` to 12 significant figures can land on the same value, which the default
+      // run count rarely draws (found only by stress-running this property past 100 draws).
+      {seed: 21, examples: [[99999.99999920001, 0.000001, 5]]},
     );
   });
 
