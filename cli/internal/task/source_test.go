@@ -56,3 +56,33 @@ func TestATreeIsAFileSystem(t *testing.T) {
 		t.Error("a link out of the tree was followed")
 	}
 }
+
+// A link is followed element by element, as a real filesystem does, so a "link/.." leads to the
+// parent of what the link resolved to, not lexically back to the link's own directory. A
+// composition that leaves the root is refused even when each link in it, on its own, stays inside.
+func TestALinkIsFollowedBeforeADotDotSoAComposedEscapeIsNotFollowed(t *testing.T) {
+	files := task.Tree{
+		"sub/keep": task.File{Data: []byte("x")},
+		"sub/x":    task.File{Link: ".."},   // -> the root: inside the tree on its own.
+		"sub/l":    task.File{Link: "x/.."}, // -> follow x to the root, then "..": above the root.
+	}
+	// The valid link on its own opens (it leads to the root directory).
+	if _, err := files.Open("sub/x"); err != nil {
+		t.Errorf("a link to the root was not followed: %v", err)
+	}
+	// The composition leaves the root and is refused, not silently read as the in-tree "sub".
+	if _, err := files.Open("sub/l"); err == nil {
+		t.Error("a link that composes a link with .. to leave the root was followed")
+	}
+
+	// A composition that stays inside the tree is still followed: p -> d/.. with d -> b resolves to
+	// the directory holding b, so a file under it is read through p.
+	inside := task.Tree{
+		"a/b/main.c": task.File{Data: []byte("int main(){}")},
+		"a/d":        task.File{Link: "b"},    // -> a/b
+		"a/p":        task.File{Link: "d/.."}, // -> follow d to a/b, then "..": a
+	}
+	if data, err := fs.ReadFile(inside, "a/p/b/main.c"); err != nil || string(data) != "int main(){}" {
+		t.Errorf("reading through a link that composes a link with .. inside the tree: %q, %v", data, err)
+	}
+}

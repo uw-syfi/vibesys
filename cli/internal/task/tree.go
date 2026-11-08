@@ -111,8 +111,31 @@ func (t Tree) resolveFrom(name string, hops *int) (string, error) {
 	if name == "." {
 		return ".", nil
 	}
-	cur := "."
-	for _, elem := range strings.Split(name, "/") {
+	return t.walk(".", strings.Split(name, "/"), hops)
+}
+
+// errAboveRoot is returned by walk when a ".." would leave the tree's root. The link whose target
+// led there turns it into a *linkError that names the link; a valid path (fs.ValidPath) never
+// reaches it directly, because only a link's target holds a "..".
+var errAboveRoot = errors.New("path leaves the tree's root")
+
+// walk resolves elems from cur, a path already resolved to at or under the root, the way a real
+// filesystem does: it follows a link before applying a later "..", so "link/.." leads to the
+// parent of what the link resolved to, not lexically back to the link's own directory. Collapsing
+// "link/.." with path.Join instead would drop the link, letting a target that leaves the root read
+// as one that stays inside it.
+func (t Tree) walk(cur string, elems []string, hops *int) (string, error) {
+	for _, elem := range elems {
+		switch elem {
+		case "", ".":
+			continue
+		case "..":
+			if cur == "." {
+				return "", errAboveRoot
+			}
+			cur = path.Dir(cur)
+			continue
+		}
 		next := path.Join(cur, elem)
 		f, ok := t[next]
 		if !ok || !f.IsLink() {
@@ -125,12 +148,11 @@ func (t Tree) resolveFrom(name string, hops *int) (string, error) {
 		if path.IsAbs(f.Link) {
 			return "", &linkError{Path: next, Target: f.Link, Fault: linkAbsolute}
 		}
-		target := path.Join(cur, f.Link)
-		if target == ".." || strings.HasPrefix(target, "../") {
-			return "", &linkError{Path: next, Target: f.Link, Fault: linkEscapes}
-		}
-		resolved, err := t.resolveFrom(target, hops)
+		resolved, err := t.walk(cur, strings.Split(f.Link, "/"), hops)
 		if err != nil {
+			if errors.Is(err, errAboveRoot) {
+				return "", &linkError{Path: next, Target: f.Link, Fault: linkEscapes}
+			}
 			return "", err
 		}
 		if !t.has(resolved) {
