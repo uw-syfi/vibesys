@@ -8,6 +8,7 @@ import {
   type FeedStatus,
   type FleetHostInput,
   type FleetPlace,
+  type FolderListing,
   freshnessOf,
   type HostConnectionState,
   type HostFreshness,
@@ -17,6 +18,7 @@ import {
   type IdeaWindow,
   type NavigationAction,
   type OrchestratorState,
+  type RepositoryChecked,
   type Route,
   runReport,
   staleForMs,
@@ -24,8 +26,9 @@ import {
 import {AgentPage} from '../agents/agent-page.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
 import {CostScreen} from '../cost/index.js';
+import {useDisplayClock} from '../display-clock.js';
 import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
-import {COST_WORDS} from './cost-words.js';
+import {costWords} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
@@ -47,6 +50,10 @@ export interface HostSnapshot {
   readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
+  /** The host's latest answer about the repository path typed in the Start form. */
+  readonly repositoryChecked: RepositoryChecked | undefined;
+  /** The host's listing of each folder the Start form has asked for, by `listingKey`. */
+  readonly directories: ReadonlyMap<string, FolderListing>;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
@@ -69,6 +76,13 @@ export interface AppCommands {
   /** The last Send to each agent, by agent id. */
   readonly send: Readonly<Record<string, CommandProgress>>;
   readonly startRun: (host: string, request: StartRunRequest) => void;
+  /** The repository path typed in the Start form is now `repository` on `host`. */
+  readonly checkRepository: (host: string, repository: string) => void;
+  /**
+   * Ask `host` for the entries of `folder` (once), hidden ones too when `hidden`. With `fresh` what
+   * the host listed before is dropped first, so the folder is read again: the field was entered.
+   */
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
   readonly retryStart: () => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
@@ -198,9 +212,17 @@ export function OrchestratorApp(props: {
         retryHost={props.retryHost}
         newRun={
           <NewRun
-            hosts={hosts.map(({key, label, model}) => ({key, label, models: model.data.models}))}
+            hosts={hosts.map(({key, label, model, repositoryChecked, directories}) => ({
+              key,
+              label,
+              models: model.data.models,
+              repositoryChecked,
+              directories,
+            }))}
             progress={commands.start}
             start={commands.startRun}
+            checkRepository={commands.checkRepository}
+            listDirectory={commands.listDirectory}
             retry={commands.retryStart}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
@@ -291,6 +313,7 @@ function RunDestination(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {route, host, commands, go, nowMs} = props;
+  const clock = useDisplayClock();
   const state = host.model.data;
   const {runId} = route;
   const run = state.runs[runId];
@@ -335,7 +358,7 @@ function RunDestination(props: {
         })}
         feed={feed.status}
         runOver={run.status === RunStatus.ENDED || run.status === RunStatus.FAILED}
-        words={COST_WORDS}
+        words={costWords(clock)}
         trail={[...toRun, {id: 'cost', label: 'Cost'}]}
         reading={reading}
         retry={() => props.retryCost(host.key, runId)}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/localsif"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
@@ -35,11 +36,18 @@ grep -q '^a docker archive$' "$src" || { echo "FATAL: not a docker archive" >&2;
 // onPath puts a fake apptainer first on PATH and returns the converter that finds it.
 func onPath(t *testing.T) *localsif.Converter {
 	t.Helper()
+	return withProgram(t, fakeApptainer, envtest.NewTimers(), 0)
+}
+
+// withProgram puts the script first on PATH as apptainer and returns the converter that finds it,
+// with the timers and the grace given.
+func withProgram(t *testing.T, script string, timers clock.Timers, grace time.Duration) *localsif.Converter {
+	t.Helper()
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte(fakeApptainer), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c, err := localsif.New("relative" + string(os.PathListSeparator) + bin)
+	c, err := localsif.New("relative"+string(os.PathListSeparator)+bin, timers, grace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +164,7 @@ func TestNoApptainerOnPathSaysToInstallIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(notProgram, "apptainer"), []byte("not a program"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := localsif.New(empty + string(os.PathListSeparator) + notProgram)
+	_, err := localsif.New(empty+string(os.PathListSeparator)+notProgram, envtest.NewTimers(), 0)
 	if err == nil || !strings.Contains(err.Error(), "install Apptainer") {
 		t.Errorf("new: %v", err)
 	}
@@ -193,5 +201,75 @@ func TestALockIsHeldByOneAtATime(t *testing.T) {
 		if _, err := c.Lock(ctx(t), dir, name); err == nil || errors.Is(err, apptainer.ErrConverting) {
 			t.Errorf("the lock name %q: %v, want it refused", name, err)
 		}
+	}
+}
+
+// apptainerOf is a fake apptainer whose build runs the world's program.
+func apptainerOf(w *envtest.ShellWorld, p envtest.Program) string {
+	return "#!/bin/sh\n[ \"$1\" = build ] || exit 64\n" + w.Argv(p)[2]
+}
+
+// Regression: a conversion cut short by its bound, or cancelled, sent SIGTERM to the build's
+// process group and then, after the grace, killed only the shell that led it, so an apptainer that
+// did not end on SIGTERM, and the mksquashfs it ran, went on writing to the scratch directory for as
+// long as they liked, and the build's directory stayed. Now once the grace is over the whole group
+// is killed before Build returns, and the build's directory is removed.
+func TestACancelledBuildEndsEveryProcessOfItAndLeavesNothing(t *testing.T) {
+	w := envtest.NewShellWorld(t)
+	// An apptainer that ignores SIGTERM, and a child of it (mksquashfs) that does too.
+	stubborn := envtest.Program{
+		envtest.Alive("apptainer"), envtest.IgnoreTerm(),
+		envtest.Child(envtest.Alive("mksquashfs"), envtest.Hold(envtest.Forever)),
+		envtest.Mark("up"), envtest.Hold(envtest.Forever),
+	}
+	timers := envtest.NewTimers()
+	c := withProgram(t, apptainerOf(w, stubborn), timers, time.Minute)
+	dir := t.TempDir()
+	buildCtx, cancel := context.WithCancel(ctx(t))
+	defer cancel()
+	built := make(chan error, 1)
+	go func() { built <- c.Build(buildCtx, dir, strings.NewReader("a docker archive\n"), "image.sif") }()
+	if !w.Reached(ctx(t), "up") || !w.Reached(ctx(t), envtest.AliveMark("mksquashfs")) {
+		t.Fatal("the fake apptainer never started")
+	}
+	cancel()
+	grace := timers.Await(ctx(t), 1)
+	if grace == nil || grace.Duration != time.Minute {
+		t.Fatalf("the grace armed: %+v, want the converter's minute", grace)
+	}
+	grace.Fire()
+	select {
+	case err := <-built:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("a cancelled build: %v, want context.Canceled", err)
+		}
+	case <-ctx(t).Done():
+		t.Fatal("a cancelled build did not return")
+	}
+	for _, name := range []string{"apptainer", "mksquashfs"} {
+		if !w.Gone(ctx(t), name) {
+			t.Errorf("the %s of the cancelled build is still running", name)
+		}
+	}
+	entries, _ := os.ReadDir(dir)
+	if names := entryNames(entries); !slices.Equal(names, []string{"sif"}) {
+		t.Errorf("left in the scratch directory: %v", names)
+	}
+}
+
+// A build that ends by itself has what it left of its process group killed too: no process of it
+// outlives Build.
+func TestABuildThatEndsLeavesNoProcessBehind(t *testing.T) {
+	w := envtest.NewShellWorld(t)
+	// A child that does not hold the build's output, which the build does not wait for.
+	left := w.Argv(envtest.Program{envtest.Child(envtest.Alive("left"), envtest.Hold(envtest.Forever))})[2]
+	script := "#!/bin/sh\n[ \"$1\" = build ] || exit 64\nexec >/dev/null 2>&1 </dev/null\n" + left +
+		`cat "${4#docker-archive:}" > "$3"` + "\n"
+	c := withProgram(t, script, envtest.NewTimers(), 0)
+	if err := c.Build(ctx(t), t.TempDir(), strings.NewReader("a docker archive\n"), "image.sif"); err != nil {
+		t.Fatal(err)
+	}
+	if !w.Gone(ctx(t), "left") {
+		t.Error("the process the build left is still running")
 	}
 }

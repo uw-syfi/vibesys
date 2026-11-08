@@ -109,3 +109,52 @@ func TestOnlyTheOperatorsStartRunIsChecked(t *testing.T) {
 		t.Fatalf("%d checks, want %d: only the operator's StartRun is asked", n, checks)
 	}
 }
+
+// CheckRepository answers with the refusal's words and its NotReady mark, and leaves nothing behind:
+// no run, no event, no receipt. Once the cause is fixed it answers with none.
+func TestCheckRepositoryAnswersTheRefusalAndMakesNothing(t *testing.T) {
+	r := daemontest.NewRig(t)
+	last := r.Daemon.Last()
+	ask := func() *pb.CheckRepositoryResponse {
+		t.Helper()
+		got, err := r.Service.CheckRepository(context.Background(), &pb.CheckRepositoryRequest{Repository: "/repo"})
+		if err != nil {
+			t.Fatalf("CheckRepository: %v", err)
+		}
+		return got
+	}
+	for _, refusal := range []*daemon.StartRefusal{
+		{Reason: "repository /repo is not a git work tree: it has no .git"},
+		{Reason: "no agent can be launched: no session holder", NotReady: true},
+	} {
+		r.Starts.Refuse(refusal)
+		got := ask().GetRefusal()
+		if got.GetReason() != refusal.Reason || got.GetNotReady() != refusal.NotReady {
+			t.Fatalf("answered %v, want %+v", got, refusal)
+		}
+	}
+	r.Starts.Refuse(nil)
+	if got := ask().GetRefusal(); got != nil {
+		t.Fatalf("answered %v, want no refusal", got)
+	}
+	r.Settle(t)
+	if n := len(r.Daemon.State().Runs()); n != 0 || r.Daemon.Last() != last {
+		t.Fatalf("%d runs and last event %d (was %d), want none made", n, r.Daemon.Last(), last)
+	}
+	if _, err := r.Service.CheckRepository(context.Background(), &pb.CheckRepositoryRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("an empty repository gave %v, want InvalidArgument", err)
+	}
+}
+
+// An agent has no start to check: its socket refuses the call.
+func TestAnAgentMayNotCheckARepository(t *testing.T) {
+	r := daemontest.NewRig(t)
+	receipt := dispatch(t, r, startRun("c1"))
+	r.Settle(t)
+	run, _ := r.Daemon.State().Run(core.RunID(receipt.GetRunId()))
+	lead, _ := r.Daemon.State().Agent(run.Lead)
+	ctx := agentContext(lead.ID, lead.Session, r.Auth.Token(core.Session{Agent: lead.ID, N: lead.Session}))
+	if _, err := r.AgentService.CheckRepository(ctx, &pb.CheckRepositoryRequest{Repository: "/repo"}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("an agent's CheckRepository gave %v, want PermissionDenied", err)
+	}
+}

@@ -2,6 +2,7 @@
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
+import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -236,6 +237,78 @@ describe('PathInput', () => {
     await press(input, 'ArrowDown');
     expect(input.getAttribute('aria-expanded')).toBe('false');
     expect(input.getAttribute('aria-controls')).toBeNull();
+  });
+
+  test('Tab takes the highlighted completion, the first one only with tabCompletes, else moves on', async () => {
+    const taken: string[] = [];
+    const tab = async (props: {readonly tabCompletes?: boolean; readonly highlight?: boolean}) => {
+      const container = await mount(
+        <Field label="Folder">
+          <PathInput
+            value=""
+            change={() => undefined}
+            completions={COMPLETIONS}
+            pick={completion => taken.push(completion.value)}
+            {...(props.tabCompletes === true ? {tabCompletes: true} : {})}
+          />
+        </Field>,
+      );
+      const input = one(container, 'input');
+      if (props.highlight === true) {
+        await press(input, 'ArrowDown');
+        await press(input, 'ArrowDown');
+      }
+      const event = new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, cancelable: true});
+      await act(async () => {
+        input.dispatchEvent(event);
+      });
+      return event.defaultPrevented;
+    };
+    expect(await tab({highlight: true})).toBe(true);
+    expect(await tab({tabCompletes: true})).toBe(true);
+    expect(await tab({})).toBe(false);
+    expect(taken).toEqual(['/srv/beta', '/srv/alpha']);
+  });
+
+  test('tells its owner when it takes the focus', async () => {
+    let focused = 0;
+    const container = await mount(
+      <Field label="Folder">
+        <PathInput value="" change={() => undefined} completions={[]} focus={() => focused++} />
+      </Field>,
+    );
+    await act(async () => one(container, 'input').focus());
+    expect(focused).toBe(1);
+  });
+
+  test('the list floats in a scroll region of its own, so it adds nothing to the layout', async () => {
+    const container = await mount(<ControlledPath completions={COMPLETIONS} />);
+    const list = one(container, '[role="listbox"]');
+    expect(list.getAttribute('data-scroll')).toBe('feed');
+    expect(list.classList.contains('vs-completions')).toBe(true);
+  });
+});
+
+describe('Field reserveLine', () => {
+  test('keeps one hidden line under the control when there is neither help nor error', async () => {
+    const lines = async (props: {readonly help?: string; readonly reserve?: boolean}) => {
+      const container = await mount(
+        <Field
+          label="Path"
+          {...(props.reserve === true ? {reserveLine: true} : {})}
+          {...(props.help === undefined ? {} : {help: props.help})}
+        >
+          <TextInput value="" />
+        </Field>,
+      );
+      return [...container.querySelectorAll('.vs-help')].map(line =>
+        line.getAttribute('aria-hidden'),
+      );
+    };
+    expect(await lines({})).toEqual([]);
+    expect(await lines({reserve: true})).toEqual(['true']);
+    // With help to show, that line is the one under the control.
+    expect(await lines({reserve: true, help: 'Tasks: a'})).toEqual([null]);
   });
 });
 
@@ -1233,6 +1306,47 @@ describe('BarRows', () => {
       [...container.querySelectorAll('.vs-bar-rows-label')].map(each => each.getAttribute('title')),
     ).toEqual(['builder', 'planner', 'profiler']);
     expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('By type');
+  });
+
+  test('reads a row as its name, a space and its note, whatever the two say', async () => {
+    const word = fc.stringMatching(/^[A-Za-z][A-Za-z0-9-]{0,15}$/);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.record({name: word, note: fc.option(word, {nil: undefined})}), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        async entries => {
+          const container = await mount(
+            <BarRows
+              label="By type"
+              nameHeader="Type"
+              barLabel="Share"
+              columns={columns}
+              rows={entries.map(
+                (entry, at): BarRow<2> => ({
+                  key: String(at),
+                  name: entry.name,
+                  value: null,
+                  figures: ['1', null],
+                  ...(entry.note === undefined ? {} : {note: entry.note}),
+                }),
+              )}
+            />,
+          );
+          const heads = [...container.querySelectorAll('tbody th[scope="row"]')].map(
+            each => each.textContent,
+          );
+          expect(heads).toEqual(
+            entries.map(entry =>
+              entry.note === undefined ? entry.name : `${entry.name} ${entry.note}`,
+            ),
+          );
+        },
+      ),
+      // The row the live Cost screen drew as "ReviewerNo price".
+      {numRuns: 25, examples: [[[{name: 'Reviewer', note: 'No price'}]]]},
+    );
   });
 
   test('gives the figure columns the same room whenever the same figures are drawn', async () => {

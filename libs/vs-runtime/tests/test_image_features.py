@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from vs_agent.api.images import AGENT_USER
 from vs_runtime.api.infrastructure import RUN_ENVIRONMENT_FEATURES_PROJECT, image_features
 from vs_sandbox.api import KNOWN_TOOLCHAINS, LocalFeature, feature_project_problems
+from vs_sandbox.api.evaluator_helpers import MODAL_CLIENT_REQUIREMENT
 
 _toolchains = st.lists(st.sampled_from(KNOWN_TOOLCHAINS), max_size=6)
 _requirements = st.lists(
@@ -62,6 +63,20 @@ def test_pip_requirements_are_passed_sorted_and_deduplicated(extras: list[str]) 
     (feature,) = image_features((), [*extras, *extras])
 
     assert feature.options["requirements"].split() == sorted(set(extras))
+
+
+def test_the_pip_extras_default_is_the_client_the_modal_evaluator_needs() -> None:
+    """The Feature's default mirrors the requirement the Modal run environment selects."""
+    metadata = json.loads(
+        (
+            RUN_ENVIRONMENT_FEATURES_PROJECT
+            / "src"
+            / "vibesys-pip-extras"
+            / "devcontainer-feature.json"
+        ).read_text()
+    )
+
+    assert metadata["options"]["requirements"]["default"] == MODAL_CLIENT_REQUIREMENT
 
 
 def test_the_agent_user_joins_the_docker_group_with_the_container_runtime() -> None:

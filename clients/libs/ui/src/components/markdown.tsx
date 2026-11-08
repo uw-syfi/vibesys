@@ -1,6 +1,7 @@
 import {createContext, type JSX, type ReactNode, useContext} from 'react';
 import ReactMarkdown, {type Components} from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {ScrollArea} from './scroll-area.js';
 
 const OpenLinkContext = createContext<((url: string) => void) | null>(null);
 
@@ -75,26 +76,14 @@ function Heading(props: {
 }
 
 function CodeBlock(props: {readonly children?: ReactNode}): JSX.Element {
-  return (
-    <pre
-      className="vs-markdown-pre"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
-      tabIndex={0}
-    >
-      {props.children}
-    </pre>
-  );
+  return <pre className="vs-markdown-pre">{props.children}</pre>;
 }
 
 function ScrollingTable(props: {readonly children?: ReactNode}): JSX.Element {
   return (
-    <div
-      className="vs-markdown-scroll"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: as the code block: a wide table scrolls inside this box, which a keyboard must be able to reach.
-      tabIndex={0}
-    >
+    <ScrollArea kind="table" className="vs-markdown-scroll" tabIndex={0}>
       <table>{props.children}</table>
-    </div>
+    </ScrollArea>
   );
 }
 

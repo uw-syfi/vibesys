@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -23,6 +25,11 @@ type Tree interface {
 	// HasCommit says the git work tree at repository has a commit at HEAD. A branch that was created
 	// and never committed to has none. A detached HEAD that names a commit counts.
 	HasCommit(repository string) (bool, error)
+	// ReadDirNames returns the names of the children of the directory path, in no order, and an error
+	// that wraps fs.ErrNotExist or fs.ErrPermission when that is why it cannot.
+	ReadDirNames(path string) ([]string, error)
+	// Home is the home directory of the user the daemon runs as.
+	Home() (string, error)
 	// CommittedDir says dir, a slash-separated path from the root of the work tree, is a directory
 	// at the commit HEAD names. The files of the working tree do not count.
 	CommittedDir(repository, dir string) (bool, error)
@@ -55,6 +62,19 @@ func (OSTree) HasCommit(repository string) (bool, error) {
 	}
 	return err == nil, err
 }
+
+// ReadDirNames implements Tree.
+func (OSTree) ReadDirNames(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
+// Home implements Tree.
+func (OSTree) Home() (string, error) { return os.UserHomeDir() }
 
 // CommittedDir implements Tree.
 func (OSTree) CommittedDir(repository, dir string) (bool, error) {
@@ -91,20 +111,20 @@ type StartChecks struct {
 // PartsCheck is nil when every part can be used now, and otherwise says which cannot and why.
 type PartsCheck interface{ Check() error }
 
-// CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
-// repository path that is not absolute, does not exist or is not the root of a git work tree, a
-// task name that is not one plain folder name, a task the repository does not hold under
-// .vibesys/tasks, and a repository whose latest commit cannot feed the subagents: they work in
-// copies made from it, so it must exist and hold the task. Edits to the task's files that are not
-// committed are the lead's to judge, as its skill says. It returns the repository with its
-// symbolic links resolved.
-func (c StartChecks) CheckStart(repository, task string) (string, error) {
+// ready is nil when the daemon can launch agents at all, whatever the repository holds.
+func (c StartChecks) ready() error {
 	if _, none := c.Sidecars.(NoSidecars); none {
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
+		return &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
 	}
 	if err := c.Parts.Check(); err != nil {
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + err.Error(), NotReady: true}
+		return &daemon.StartRefusal{Reason: "no agent can be launched: " + err.Error(), NotReady: true}
 	}
+	return nil
+}
+
+// path refuses a repository path that is not absolute, does not exist or is not the root of a git
+// work tree, and returns the path with its symbolic links resolved.
+func (c StartChecks) path(repository string) (string, error) {
 	refuse := func(format string, args ...any) (string, error) {
 		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
 	}
@@ -118,7 +138,66 @@ func (c StartChecks) CheckStart(repository, task string) (string, error) {
 		return refuse("repository %s cannot be found: %v", given, err)
 	case !c.Tree.Exists(filepath.Join(repository, ".git")):
 		return refuse("repository %s is not a git work tree: it has no .git", repository)
-	case !validTaskName(task):
+	}
+	return repository, nil
+}
+
+// CheckRepository implements daemon.StartChecks: the part of a start's check that needs the
+// repository alone, for a path still being typed. It refuses what is wrong with the path first, so
+// an operator sees it even on a host that cannot launch agents yet, and then a daemon that cannot
+// launch. It returns the repository with its symbolic links resolved.
+func (c StartChecks) CheckRepository(repository string) (string, error) {
+	repository, err := c.path(repository)
+	if err != nil {
+		return "", err
+	}
+	return repository, c.ready()
+}
+
+// Tasks implements daemon.StartChecks: the folders under the repository's .vibesys/tasks, sorted.
+func (c StartChecks) Tasks(repository string) ([]string, error) {
+	return taskNames(c.Tree, repository)
+}
+
+// taskNames lists the task folders of repository. A repository with no .vibesys/tasks holds none.
+func taskNames(tree Tree, repository string) ([]string, error) {
+	dir := filepath.Join(repository, ".vibesys", "tasks")
+	names, err := tree.ReadDirNames(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("tasks of %s: %w", repository, err)
+	}
+	var tasks []string
+	for _, name := range names {
+		if tree.IsDir(filepath.Join(dir, name)) {
+			tasks = append(tasks, name)
+		}
+	}
+	slices.Sort(tasks)
+	return tasks, nil
+}
+
+// CheckStart implements daemon.StartChecks. In order it refuses: a daemon with no launcher, a
+// repository path that is not absolute, does not exist or is not the root of a git work tree, a task
+// name that is not one plain folder name, a task the repository does not hold under
+// .vibesys/tasks, and a repository whose latest commit cannot feed the subagents: they work in
+// copies made from it, so it must exist and hold the task. Edits to the task's files that are not
+// committed are the lead's to judge, as its skill says. It returns the repository with its
+// symbolic links resolved.
+func (c StartChecks) CheckStart(repository, task string) (string, error) {
+	if err := c.ready(); err != nil {
+		return "", err
+	}
+	repository, err := c.path(repository)
+	if err != nil {
+		return "", err
+	}
+	refuse := func(format string, args ...any) (string, error) {
+		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}
+	}
+	if !validTaskName(task) {
 		return refuse("task %q is not a task name: it must be one folder name under .vibesys/tasks, with no path separators and not . or ..", task)
 	}
 	dir := filepath.Join(repository, ".vibesys", "tasks", task)

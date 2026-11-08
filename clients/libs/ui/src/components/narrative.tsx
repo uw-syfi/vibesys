@@ -5,6 +5,7 @@ import {Markdown} from './markdown.js';
 import {markdownToPlain} from './markdown-plain.js';
 import type {ToolState} from './message.js';
 import {NewBelow} from './new-below.js';
+import {ScrollArea} from './scroll-area.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
@@ -38,7 +39,9 @@ export function Narrative(props: {
   });
   return (
     <div className="vs-narrative-wrap" data-size={props.size ?? 'default'}>
-      <section
+      <ScrollArea
+        as="section"
+        kind="feed"
         ref={win.scroller}
         className="vs-narrative"
         data-size={props.size ?? 'default'}
@@ -55,7 +58,7 @@ export function Narrative(props: {
           </InSlot>
         ))}
         <div aria-hidden="true" style={{height: win.after}} />
-      </section>
+      </ScrollArea>
       {win.behind ? (
         <span className="vs-narrative-jump">
           <NewBelow text="New below" press={win.jump} />

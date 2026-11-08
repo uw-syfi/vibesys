@@ -8,7 +8,7 @@ import {
   NO_TURNS,
   PRICED_AND_UNPRICED,
 } from '../../testing/orchestrator/cost-views.js';
-import {COST_WORDS} from '../orchestrator/cost-words.js';
+import {COST_WORDS} from '../test-display-clock.js';
 import {
   type CostScreenModel,
   costScreenModel,

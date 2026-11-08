@@ -1,5 +1,6 @@
 import type {JSX, KeyboardEvent, ReactNode, SyntheticEvent} from 'react';
 import {Icon} from './icon.js';
+import {ScrollArea} from './scroll-area.js';
 
 /** One column: its header, how a row fills its cell, and how the cell is set. */
 export interface TableColumn<Row> {
@@ -74,10 +75,11 @@ export function Table<Row>(props: {
     select?.(key);
   };
   return (
-    <section
+    <ScrollArea
+      as="section"
+      kind="table"
       className="vs-table-scroll"
       aria-label={props.label}
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: a box that scrolls sideways must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls a table.
       tabIndex={0}
     >
       <table className="vs-table" aria-label={props.label} data-middle={props.middle || undefined}>
@@ -143,7 +145,7 @@ export function Table<Row>(props: {
           })}
         </tbody>
       </table>
-    </section>
+    </ScrollArea>
   );
 }
 

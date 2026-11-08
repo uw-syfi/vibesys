@@ -18,6 +18,17 @@ describe('gateway recovery policy', () => {
     );
   });
 
+  it('redials a stalled dial after the first step only, whatever the count', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 1, max: MAX_DIALS - 1}), failures => {
+        expect(afterFailure(failures, {code: 4, refused: false})).toEqual({
+          _tag: 'redial',
+          afterMs: 500,
+        });
+      }),
+    );
+  });
+
   it('goes offline at once on a status a redial cannot change', () => {
     for (const code of [9, 13, 15])
       fc.assert(

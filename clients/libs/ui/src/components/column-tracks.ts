@@ -47,7 +47,7 @@ const TIGHT_WIDTH = 560;
 /** The gap between columns while every column shows. */
 const WIDE_GAP = SPACE['space-3'];
 /** What a row keeps to its sides: its padding, its marker bar and its border. */
-const ROW_INSET = 2 * SPACE['space-3'] + SIZE['focus-ring'] + SIZE.hairline;
+const ROW_INSET = 2 * SPACE['space-3'] + 2 * SIZE['focus-ring'];
 /** The room a scrollbar may take from the rows. */
 const SCROLLBAR = SPACE['space-5'];
 

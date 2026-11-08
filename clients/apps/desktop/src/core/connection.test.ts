@@ -118,6 +118,22 @@ describe('the host connection', () => {
     }),
   );
 
+  itQuiet('retries a host whose Hello stalled after the first step, however often it stalled', () =>
+    Effect.gen(function* () {
+      const {connection, state} = yield* connect({helloFails: () => RpcStatus.DEADLINE_EXCEEDED});
+      yield* Effect.forkChild(connection.ready());
+      for (let attempt = 1; attempt <= 8; attempt += 1) {
+        const waiting: HostConnectionState = yield* state;
+        if (waiting._tag !== 'Waiting') throw new Error(`expected Waiting, got ${waiting._tag}`);
+        expect(waiting.attempt).toBe(attempt);
+        const wait = waiting.retryAtMs - (yield* Clock.currentTimeMillis);
+        // A stall already waited out its window: no longer than the first step, never 30 s.
+        expect(wait).toBeLessThanOrEqual(defaultReconnect.baseMs);
+        yield* TestClock.adjust(wait);
+      }
+    }),
+  );
+
   itQuiet(
     'leaves Ready when a feed suspects the epoch, and a stale suspicion changes nothing',
     () =>

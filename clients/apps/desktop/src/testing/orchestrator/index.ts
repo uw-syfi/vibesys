@@ -6,6 +6,7 @@ export {
   FakeDaemon,
   NO_VIEWER_REFUSAL,
 } from './fake-daemon.js';
+export {FIXTURE_FILES} from './fake-files.js';
 export {fleetScenario} from './fleet.js';
 export {faultsOn, type HostHarness, hostHarness} from './harness.js';
 export {

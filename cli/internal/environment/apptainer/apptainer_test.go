@@ -58,6 +58,8 @@ type setup struct {
 	runtime apptainer.Runtime
 	// idle and allocationLimit make the allocations reusable.
 	idle, allocationLimit time.Duration
+	// maxTime caps every allocation's time limit.
+	maxTime time.Duration
 	// runs, when set, makes the rig's runs a scope of their own, run, under the rig's scope, which
 	// is then the placement's, as a placement whose jobs run at once has them.
 	runs *dockerfake.Runs
@@ -101,7 +103,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
 		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
 		NodeScripts: o.scripts, Runtime: o.runtime, Converter: converter, LocalDir: dir,
-		Idle: o.idle, AllocationLimit: o.allocationLimit,
+		Idle: o.idle, AllocationLimit: o.allocationLimit, MaxTime: o.maxTime,
 	}
 	runScope := o.scope
 	if o.runs != nil {

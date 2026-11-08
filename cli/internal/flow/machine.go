@@ -30,7 +30,28 @@ type Run struct {
 	// Candidate, for a task of two images, is the candidate's image and the server the command runs
 	// against. The Timeout covers the server's startup time as well as the command's own limit.
 	Candidate *core.CandidateRun
+	// OnService says the command runs against the job-scoped server the last Serve started.
+	OnService bool
 }
+
+// Serve asks for the job-scoped server to be started and waited for until it is ready. A server
+// the job started before has ended, when Again says so, and is to be ended first.
+type Serve struct {
+	// Argv is the server's command, with the checkout's root resolved and the port not.
+	Argv []string
+	// Ready is the HTTP path that answers 2xx once the server is ready.
+	Ready string
+	// StartupTimeout bounds the wait.
+	StartupTimeout time.Duration
+	// Lifetime is the longest the job may still use the server: its startup and every command
+	// still to run against it.
+	Lifetime time.Duration
+	// Again says the job's earlier server ended, and this one replaces it.
+	Again bool
+}
+
+// ProbeService asks whether the job-scoped server still runs.
+type ProbeService struct{}
 
 // Observe asks for the machine's facts and its load now.
 type Observe struct{}
@@ -43,6 +64,8 @@ func (Checkout) request()       {}
 func (Run) request()            {}
 func (Observe) request()        {}
 func (BuildCandidate) request() {}
+func (Serve) request()          {}
+func (ProbeService) request()   {}
 
 // Event is the answer to the last request, or news the shell has: a cancel.
 type Event interface{ event() }
@@ -88,6 +111,14 @@ type Observed struct {
 // task does not allow, is answered with NotRan.
 type CandidateBuilt struct{ Image core.CandidateImage }
 
+// Serving answers Serve: the server runs and is ready. A server that could not be started, or was
+// not ready, is answered as Run is when a command did not pass: with Ran and how the start ended,
+// NotRan or Unseen.
+type Serving struct{}
+
+// ServiceState answers ProbeService: whether the server still runs.
+type ServiceState struct{ Alive bool }
+
 // Cancelled says the job was cancelled while no command was running: the shell stopped before
 // its next request. A command that was running when the cancel came answers with Ran and
 // ExecCancelled instead; the machine treats both alike.
@@ -100,6 +131,8 @@ func (NotRan) event()         {}
 func (Unseen) event()         {}
 func (Observed) event()       {}
 func (CandidateBuilt) event() {}
+func (Serving) event()        {}
+func (ServiceState) event()   {}
 func (Cancelled) event()      {}
 
 // Verdict is how the job ended: Passed, NotAttempted, Rejected, Stopped or Lost. The set is closed, so a
@@ -176,6 +209,9 @@ const (
 	phaseCheck     phase = "check"
 	phaseBefore    phase = "observe-before"
 	phaseSample    phase = "sample"
+	phaseServe     phase = "serve"
+	phaseProbe     phase = "probe-service"
+	phaseReset     phase = "reset"
 	phaseAfter     phase = "observe-after"
 	phaseDone      phase = "done"
 )
@@ -195,6 +231,16 @@ type State struct {
 	samples   []float64
 	others    []core.Observation
 	verdict   Verdict
+
+	// The job-scoped server, for a plan with one. serving says one was started and is taken to
+	// run; used that a command of the job ran against it; restarted that it replaced one that
+	// ended. then is the phase a Serve leads to, and pending the server of the sample that runs.
+	serving   bool
+	used      bool
+	restarted bool
+	then      phase
+	pending   core.SampleService
+	services  []core.SampleService
 }
 
 // Start returns the machine for a plan and its first request. It fails for a plan that is not
@@ -267,6 +313,7 @@ func Step(s State, e Event) (State, Request) {
 		}
 	case phaseCheck:
 		if r, ok := e.(Ran); ok {
+			s.used = s.used || s.serving
 			if v, ended := s.commandEnded(StageCheck, r); ended {
 				return s.end(v), nil
 			}
@@ -286,6 +333,7 @@ func Step(s State, e Event) (State, Request) {
 		}
 	case phaseSample:
 		if r, ok := e.(Ran); ok {
+			s.used = s.used || s.serving
 			return s.sampled(r)
 		}
 		if v, ok := s.unrun(StageBenchmark, e); ok {
@@ -295,6 +343,43 @@ func Step(s State, e Event) (State, Request) {
 		if o, ok := e.(Observed); ok {
 			s.observe(o)
 			return s.passed(o), nil
+		}
+	case phaseServe:
+		switch e := e.(type) {
+		case Serving:
+			s.serving, s.used = true, false
+			return s.afterServe()
+		case Ran:
+			if v, ended := s.commandEnded(StageService, e); ended {
+				return s.end(v), nil
+			}
+			// A start that ran to an exit of 0 is no answer to Serve: refused below.
+		default:
+			if v, ok := s.unrun(StageService, e); ok {
+				return s.end(v), nil
+			}
+		}
+	case phaseProbe:
+		if st, ok := e.(ServiceState); ok {
+			if !st.Alive {
+				return s.serve(phaseSample, true)
+			}
+			s.phase = phaseReset
+			return s, s.run(StageReset, s.plan.Service.Reset, "")
+		}
+	case phaseReset:
+		if r, ok := e.(Ran); ok {
+			if v, ended := s.commandEnded(StageReset, r); ended {
+				if stopped, ok := v.(Stopped); ok {
+					stopped.Reason += fmt.Sprintf(", before sample %d, which it fails", len(s.samples)+1)
+					v = stopped
+				}
+				return s.end(v), nil
+			}
+			return s.runSample()
+		}
+		if v, ok := s.unrun(StageReset, e); ok {
+			return s.end(v), nil
 		}
 	}
 	return s.refuse(fmt.Sprintf("the answer %T does not fit the %s step", e, s.phase)), nil
@@ -318,10 +403,45 @@ func (s State) afterBuild() (State, Request) {
 
 func (s State) afterCandidate() (State, Request) {
 	if s.plan.RunsCheck() {
+		if s.plan.serves() && s.plan.Service.ShareWithCheck {
+			return s.serve(phaseCheck, false)
+		}
 		s.phase = phaseCheck
 		return s, s.run(StageCheck, s.plan.Check, "")
 	}
 	return s.afterCheck()
+}
+
+// serve asks for the job-scoped server, which then leads to the phase then: the check or a sample.
+// again says it replaces one that ended.
+func (s State) serve(then phase, again bool) (State, Request) {
+	s.phase, s.then = phaseServe, then
+	s.serving, s.used, s.restarted = false, false, again
+	sv := s.plan.Service
+	return s, Serve{Argv: sv.ServeAt(s.dir), Ready: sv.Ready, StartupTimeout: sv.StartupTimeout, Lifetime: s.lifetime(then), Again: again}
+}
+
+// lifetime is the longest the job may use a server it starts now, which leads to the phase then:
+// its startup, the check when it is next, and every sample still to take with the reset before it.
+func (s State) lifetime(then phase) time.Duration {
+	sv := s.plan.Service
+	d := sv.StartupTimeout
+	if then == phaseCheck {
+		d += s.plan.Check.Timeout
+	}
+	if left := int64(s.plan.Samples) - int64(len(s.samples)); left > 0 {
+		d += time.Duration(left) * (s.plan.Benchmark.Timeout + sv.Reset.Timeout)
+	}
+	return d
+}
+
+// afterServe goes on with what the server was started for.
+func (s State) afterServe() (State, Request) {
+	if s.then == phaseCheck {
+		s.phase = phaseCheck
+		return s, s.run(StageCheck, s.plan.Check, "")
+	}
+	return s.runSample()
 }
 
 func (s State) afterCheck() (State, Request) {
@@ -333,8 +453,36 @@ func (s State) afterCheck() (State, Request) {
 	return s, Observe{}
 }
 
+// nextSample asks for what the next sample needs first: for a job with a job-scoped server, the
+// server when none runs, and whether it still runs when a command used it, which the reset then
+// precedes; and otherwise the sample's benchmark itself.
 func (s State) nextSample() (State, Request) {
+	switch {
+	case !s.plan.serves():
+		return s.runSample()
+	case !s.serving:
+		return s.serve(phaseSample, false)
+	case s.used:
+		s.phase = phaseProbe
+		return s, ProbeService{}
+	}
+	return s.runSample()
+}
+
+// runSample asks for one run of the benchmark.
+func (s State) runSample() (State, Request) {
 	s.phase = phaseSample
+	s.pending = core.SampleServiceNone
+	if s.serving {
+		switch {
+		case s.used:
+			s.pending = core.SampleServiceReused
+		case s.restarted:
+			s.pending = core.SampleServiceRestarted
+		default:
+			s.pending = core.SampleServiceStarted
+		}
+	}
 	out := path.Join(s.scratch, fmt.Sprintf("sample-%d.out", len(s.samples)))
 	c := s.plan.Benchmark
 	r := s.run(StageBenchmark, c, out)
@@ -342,10 +490,11 @@ func (s State) nextSample() (State, Request) {
 	return s, r
 }
 
-// run is the request to run a command of the task: against the candidate's server, for a task of
-// two images, whose startup time the limit then covers too.
+// run is the request to run a command of the task: against the job-scoped server when one runs,
+// and against the candidate's server, for a task of two images, whose startup time the limit then
+// covers too. The answer to a command against the job-scoped server makes the server used.
 func (s State) run(stage Stage, c task.Command, read string) Run {
-	r := Run{Stage: stage, Argv: c.Resolve(s.dir), Timeout: c.Timeout, Read: read}
+	r := Run{Stage: stage, Argv: c.Resolve(s.dir), Timeout: c.Timeout, Read: read, OnService: s.serving}
 	if cand := s.plan.Candidate; cand != nil {
 		serve := cand.ServeAt(s.dir, nil)
 		r.Candidate = &core.CandidateRun{Image: s.candidate.ID, Serve: &serve}
@@ -386,6 +535,9 @@ func (s State) sampled(r Ran) (State, Request) {
 		return s.end(Rejected{Reason: fmt.Sprintf("sample %d: the benchmark reported no value of the objective %q, and a multi-objective task judges every sample on every objective", n+1, missing)}), nil
 	}
 	s.samples = append(slices.Clip(s.samples), got.Value)
+	if s.plan.serves() {
+		s.services = append(slices.Clip(s.services), s.pending)
+	}
 	for _, o := range got.Others {
 		s.others = addObservation(s.others, o)
 	}
@@ -465,6 +617,10 @@ func (s State) commandEnded(stage Stage, r Ran) (Verdict, bool) {
 		return stopped(fmt.Sprintf("the %s step ran past its time limit and was ended", stage))
 	case r.Exec.Kind == core.ExecCancelled:
 		return stopped("the job was cancelled during the " + string(stage) + " step")
+	case r.Exec.Kind == core.ExecServiceNotReady && s.plan.Service != nil:
+		return stopped(withLog(fmt.Sprintf("the job's server was not ready at %s within %v, in the %s step", s.plan.Service.Ready, s.plan.Service.StartupTimeout, stage), r.ServiceLog))
+	case r.Exec.Kind == core.ExecServiceExited && s.plan.Service != nil:
+		return stopped(withLog(fmt.Sprintf("the job's server exited during the %s step", stage), r.ServiceLog))
 	case r.Exec.Kind == core.ExecServiceNotReady && s.plan.Candidate != nil:
 		return stopped(withLog(fmt.Sprintf("the candidate's server was not ready at %s within %v, in the %s step", s.plan.Candidate.Ready, s.plan.Candidate.StartupTimeout, stage), r.ServiceLog))
 	case r.Exec.Kind == core.ExecServiceExited && s.plan.Candidate != nil:
@@ -502,6 +658,9 @@ func (s State) passed(o Observed) State {
 	if s.plan.Kind == core.JobMeasure {
 		f.Samples = slices.Clone(s.samples)
 		f.Observations = s.others
+		if s.plan.serves() {
+			f.Services = slices.Clone(s.services)
+		}
 	}
 	return s.end(Passed{Findings: f})
 }
@@ -529,6 +688,10 @@ func (s State) stage() Stage {
 		return StageCheck
 	case phaseSample:
 		return StageBenchmark
+	case phaseServe, phaseProbe:
+		return StageService
+	case phaseReset:
+		return StageReset
 	}
 	return StageObserve
 }
@@ -536,6 +699,6 @@ func (s State) stage() Stage {
 func (s State) end(v Verdict) State {
 	s.phase = phaseDone
 	s.verdict = v
-	s.samples, s.others = nil, nil
+	s.samples, s.others, s.services = nil, nil, nil
 	return s
 }

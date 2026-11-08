@@ -121,6 +121,63 @@ server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
 such as a profiler's command line, and drives it with `[profile]`; it is a
 command job, never cached or scored, and its artifacts are kept with it.
 
+### A server kept for the job (schema 0.2, `[service]`)
+
+A task of one image whose system under test is a server that takes long to
+start (an inference server that loads its weights for most of an hour) can
+declare it, so that a measure job starts it once and runs every sample against
+it, instead of each sample's script starting and stopping it:
+
+```toml
+version = "0.2"
+
+[service]
+command = ["python3", "${PROJECT_ROOT}/.vibesys/tasks/t/_server.py", "--port", "${PORT}"]
+ready = "/health"                  # polled on 127.0.0.1:${PORT} until it answers 2xx
+startup_timeout_seconds = 3600
+share_with_accuracy = false        # the default
+
+[service.reset]
+command = ["python3", "${PROJECT_ROOT}/.vibesys/tasks/t/reset.py"]
+timeout_seconds = 300
+```
+
+The schema is `TaskServiceV02` in `task.proto`. The command must name
+`${PORT}`; the reset is required. A task with `[candidate]` refuses `[service]`
+(its candidate's server is started for each command), and so does a task with
+no `Dockerfile`, since the server runs in a container of the task's image.
+
+A measure job runs the check as it would without `[service]`, then starts the
+server in a container of the task's image of its own, which gets every resource
+of the placement (the GPUs among them) and the whole machine, and waits until
+`ready` answers. Each sample then runs in a container of its own beside it,
+joined to its network namespace, with `VIBESYS_SERVICE_URL` and without the
+GPUs, as the task container of a task of two images runs. Before every sample
+that runs on a server an earlier command of the job used, the job asks whether
+the server still runs: a server that ended is started again, never reused; one
+that runs gets the reset, in a container beside it like a sample's, and a reset
+that does not exit 0 fails the sample, and the job with it, naming the sample.
+A server that ends while a sample runs fails that sample with the server's last
+lines. With `share_with_accuracy = true` the server starts before the check,
+which runs against it (in a check job too), and the first sample reuses it.
+
+The server's container is removed when the job ends, however it ends: Close of
+the job's shell (`flowrun`) ends it, on a pass, a failure and a cancel alike,
+after SIGTERM and the grace period. If the job's supervisor dies instead, the
+container stops by itself, as every container of a run does when its caller's
+end of its input closes, and the next run of the scope removes it. Under
+`apptainer` the server's container holds the allocation (or the claim of a
+reused one) for as long as the job may use it, its startup and every command
+still to run, and each sample's container joins it: the server is one
+`srun --overlap` step of the allocation and every sample another, and the
+allocation, or the claim, ends with the job.
+
+Each measurement records, per sample, the server it ran on in
+`MeasureResult.sample_services`: `STARTED` (the first command on the server the
+job started), `REUSED` (after the reset, on a server an earlier command used)
+or `RESTARTED` (the first command on a server started again). The job's output
+says when the server starts, is ready, and is started again.
+
 ## What a job's commands are told
 
 A command of a job, on the host and in a container alike, finds the job it runs in
@@ -133,7 +190,7 @@ Go one, each small). One corpus
 | --- | --- | --- |
 | `artifacts` | `VIBESYS_ARTIFACTS_DIR` | where the job keeps files that stay with it |
 | `cache` | `VIBESYS_CACHE_DIR` | files kept between runs of the same task image (containers) |
-| `service_url` | `VIBESYS_SERVICE_URL` | the candidate's server, for a task of two images |
+| `service_url` | `VIBESYS_SERVICE_URL` | the candidate's server, for a task of two images, or the job's server, for a task with `[service]` |
 | `timeout_seconds` | `VIBESYS_JOB_TIMEOUT_SECONDS` | the longest the job may run, in whole seconds, rounded up |
 | `mounts` | `VIBESYS_MOUNTS` | the names of the read-only data sets, separated by commas |
 
@@ -269,6 +326,40 @@ cost is a container start (about a second) and, under Slurm, one allocation per
 sample (under `apptainer`, unless allocations are reused; see below): another job may run between two samples, which does not touch a
 measurement because each sample holds the whole node while it runs. The
 candidate's build is not repeated: it lives in the cache directory.
+
+A task with `[service]` opts out of this for its server, and only for it: each
+sample still runs in a container of its own, while the server outlives them
+(next section).
+
+### A job-scoped server is opted into, and each sample says which server it ran on
+
+A server that loads its weights for most of an hour, measured by a benchmark
+of a quarter of that, spends most of a measure job starting. Keeping it for
+the job trades each sample's fresh start for that time, so it is a choice the
+task makes, never a default: a sample on a reused server may differ from one
+on a fresh server (a warm cache, a fragmented allocator), which the task's
+reset is there to undo, and which the result records so that nobody reads one
+for the other.
+
+It is the two-image design with the server's lifetime moved from the command
+to the job: the same container topology (`--network container:<server>`), the
+same probe (`vibesys-cli probe-ready`, here run in the server's own container),
+the same `VIBESYS_SERVICE_URL`, and the same server endings
+(`ExecServiceNotReady`, `ExecServiceExited`). The environment gives it as
+`Environment.Serve`, which returns a `Service` whose `Run` runs one command
+against the server, `Alive` says whether it still runs, and `Close` ends it.
+The pure flow decides the lifecycle (`flow.Serve`, `flow.ProbeService`, the
+`reset` stage), so restarting a server that ended and resetting one that runs
+are decided once, for every environment. The host environment refuses `Serve`,
+naming `[service]`, as it refuses a task of two images.
+
+Whether a sample ran on a reused server is recorded per sample, not in the
+environment's fingerprint. The fingerprint is the environment's identity, which
+the samples of one job share; a job's samples are a mix (the first on a fresh
+server, the rest on the reused one), so no one fingerprint describes them.
+Adding or removing `[service]` already changes the task's version, which is
+part of every result's key and of what `compare` pools, so the samples of the
+two modes are never compared with each other.
 
 ### Large machine-local inputs are operator mounts
 
@@ -536,6 +627,17 @@ while idle, which other users of the partition pay for.
   allocations alone, since cancelling them would undo the reuse.
 - A container claims only an allocation with its limit and the stop's margin
   left, the one with the least time left first.
+- Sites cap a job's time (one QOS refuses anything over 12 hours), and an
+  `sbatch` refusal deep in a job is a poor error. `[slurm] max_time_seconds`
+  states the cap, and the engine keeps every allocation under it: a reused
+  one's limit defaults to it and may not exceed it, and a container whose limit
+  and stop margin do not fit is refused before anything is submitted, naming
+  the key. A container with no limit (the environment gives every container
+  the run's limit, the server of a task of two images too; only a direct
+  caller of the engine gives none) no longer counts as a day: it claims the
+  allocation with the most time left, or asks for the reused allocations'
+  limit, and runs as long as that lasts. The key is refused on the `slurm`
+  kind, whose `srun` jobs it does not cap yet.
 
 ### Pyxis and Enroot: a runtime of the apptainer kind, not a kind of its own
 
@@ -680,6 +782,9 @@ later; until then the check covers 1.0 and every later schema.
 
 ## What is not done
 
+- A job-scoped server (`[service]`) on the host, and on `ssh` and `slurm`
+  placements, which have no probe program: they refuse such tasks. A task of
+  two images cannot keep its candidate's server for the job.
 - Tasks of two images on `ssh` and `slurm` placements: they have no probe
   program and refuse such tasks. The `apptainer` placement has one (the binary
   is copied to the cluster) and runs both containers in one allocation.

@@ -28,16 +28,10 @@ import {
   valueTicks,
 } from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
+import {useDisplayClock} from '../../display-clock.js';
+import type {DisplayClock} from '../../display-time.js';
 import {nameOf} from '../names.js';
-import {
-  axisMoment,
-  clip,
-  formatExact,
-  formatFigure,
-  seattleMoment,
-  seattleOffsetMs,
-  withUnit,
-} from './format.js';
+import {clip, formatExact, formatFigure, withUnit} from './format.js';
 
 /** The longest note of a bound a hover writes whole; the agent's own words go on after it in its store. */
 const NOTE_LIMIT = 600;
@@ -73,12 +67,13 @@ function planWords(plans: readonly number[] | undefined): string {
 function boundReference(
   objective: ObjectiveReport,
   names: ReadonlyMap<string, string>,
+  clock: DisplayClock,
 ): ChartReference | undefined {
   const bound = objective.bound?.current;
   if (bound === undefined) return undefined;
   const who = [
     bound.agent === '' ? '' : nameOf(names, bound.agent),
-    bound.atMs === null ? '' : seattleMoment(bound.atMs),
+    bound.atMs === null ? '' : clock.reportMoment(bound.atMs),
   ]
     .filter(part => part !== '')
     .join(' · ');
@@ -119,6 +114,7 @@ function ObjectiveChart(props: {
   readonly links: PointLinks;
 }): JSX.Element | null {
   const {objective, span} = props;
+  const clock = useDisplayClock();
   if (objective.points.length === 0) return null;
   const length = span.toMs - span.fromMs;
   const domain = valueDomain(objective);
@@ -148,11 +144,11 @@ function ObjectiveChart(props: {
     ...objective.bestPath.map(point => ({x: point.atMs, y: point.value})),
     ...(last === undefined ? [] : [{x: Math.max(span.toMs, last.atMs), y: last.value}]),
   ];
-  const xTicks: ChartTick[] = timeTicks(span.fromMs, span.toMs, X_LABELS, seattleOffsetMs).map(
-    value => ({value, label: axisMoment(value, length)}),
+  const xTicks: ChartTick[] = timeTicks(span.fromMs, span.toMs, X_LABELS, clock.offsetMs).map(
+    value => ({value, label: clock.reportAxis(value, length)}),
   );
   const yTicks = valueLabels(objective);
-  const reference = boundReference(objective, props.names);
+  const reference = boundReference(objective, props.names, clock);
   const best =
     objective.bestValue === undefined
       ? undefined

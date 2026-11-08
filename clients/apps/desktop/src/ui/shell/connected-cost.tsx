@@ -9,9 +9,10 @@ import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
 import {hostStatusOf, staleForMs} from '../../state/index.js';
 import {type CostOverviewHost, CostOverviewScreen} from '../cost-overview/index.js';
+import {useDisplayClock} from '../display-clock.js';
 import {nowMs} from '../orchestrator/clock.js';
 import type {ConnectedHost, Dispatch} from '../orchestrator/connected.js';
-import {COST_OVERVIEW_WORDS} from '../orchestrator/cost-words.js';
+import {costOverviewWords} from '../orchestrator/cost-words.js';
 
 /** The cost streams of every host, followed while this is mounted. */
 const watchCosts = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
@@ -51,10 +52,12 @@ export function ConnectedCost(props: {
   const {hosts, dispatch} = props;
   useAtomMount(useMemo(() => watchCosts(hosts), [hosts]));
   const rows = useAtomValue(useMemo(() => hostsOf(hosts), [hosts]));
+  const clock = useDisplayClock();
+  const words = useMemo(() => costOverviewWords(clock), [clock]);
   return (
     <CostOverviewScreen
       hosts={rows}
-      words={COST_OVERVIEW_WORDS}
+      words={words}
       open={props.open}
       retry={key => {
         const session = hosts.find(candidate => candidate.key === key)?.session;

@@ -190,6 +190,10 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"a negative idle release":                   {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nidle_release_seconds = -1", 1), "idle_release_seconds"},
 		"an unknown runtime":                        {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"docker\"", 1), "runtime"},
 		"an apptainer program under pyxis":          {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nprogram = \"apptainer\"", 1), "program"},
+		"a negative cap":                            {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = -60", 1), "max_time_seconds"},
+		"a cap of part of a minute":                 {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 43170", 1), "max_time_seconds = 43170"},
+		"a reuse limit over the cap":                {strings.Replace(strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 43200", 1), "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nidle_release_seconds = 900\nallocation_limit_seconds = 86400", 1), "allocation_limit_seconds = 86400 is longer than [placements.mi210.slurm] max_time_seconds = 43200"},
+		"a cap on a slurm placement":                {strings.Replace(placementsConfig, "[placements.a100.slurm]", "[placements.a100.slurm]\nmax_time_seconds = 43200", 1), "[placements.a100.slurm] max_time_seconds"},
 		"a local scratch directory under pyxis":     {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nlocal_scratch_dir = \"/scratch/me\"", 1), "local_scratch_dir"},
 	}
 	for name, c := range cases {
@@ -252,6 +256,12 @@ func TestAnApptainerPlacementIsRead(t *testing.T) {
 	c, err = operator.Parse([]byte(text))
 	if a := c.GetPlacements()["mi210"].GetApptainer(); err != nil || a.GetIdleReleaseSeconds() != 1800 || a.GetAllocationLimitSeconds() != 86400 {
 		t.Errorf("the reuse of allocations: %v, %v", a, err)
+	}
+	text = strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 42600", 1)
+	text = strings.Replace(text, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nidle_release_seconds = 900", 1)
+	c, err = operator.Parse([]byte(text))
+	if s := c.GetPlacements()["mi210"].GetSlurm(); err != nil || s.GetMaxTimeSeconds() != 42600 {
+		t.Errorf("the cap on an allocation's time: %v, %v", s, err)
 	}
 	// Each job of an apptainer placement has allocations and staged directories of its own, so it
 	// may run several at once.

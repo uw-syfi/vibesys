@@ -9,8 +9,9 @@ import type {AgentRole, ObjectiveDirection, Report, WindowFacts} from '@vibesys/
 import {ObjectiveDirection as Direction} from '@vibesys/orchestrator-proto';
 import type {BarRow} from '@vibesys/ui';
 import type {CheckInRead, Summary} from '../../state/index.js';
-import {formatDayTime, formatSpan} from '../agents/time.js';
+import {formatSpan} from '../agents/time.js';
 import {formatCount, formatUsd, NOT_REPORTED, precisionOf} from '../cost/words.js';
+import type {DisplayClock} from '../display-time.js';
 import {formatFigure} from '../figures.js';
 
 /** The words of the run's own vocabulary this page needs, so it imports nothing from the feature that shows it. */
@@ -174,12 +175,16 @@ function summaryOf(summary: Summary): SummaryModel {
 }
 
 /** The page's model of one check-in. */
-export function catchUpModel(read: CheckInRead, words: CatchUpWords): CatchUpModel {
+export function catchUpModel(
+  read: CheckInRead,
+  words: CatchUpWords,
+  clock: DisplayClock,
+): CatchUpModel {
   const {facts} = read;
   return {
     id: read.checkIn.id,
-    title: `Since ${formatDayTime(read.sinceMs)}`,
-    until: `Until ${formatDayTime(read.atMs)}`,
+    title: `Since ${clock.dayTime(read.sinceMs)}`,
+    until: `Until ${clock.dayTime(read.atMs)}`,
     span: formatSpan(read.atMs - read.sinceMs),
     standing:
       facts.kind === 'pending'

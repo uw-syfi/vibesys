@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/result.proto.
  */
 export const file_vibesys_cli_v1_result: GenFile = /*@__PURE__*/
-  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIlsKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbhIVCgR1bml0GAMgASgJQge6SARyAihAImAKC09ic2VydmF0aW9uEgwKBG5hbWUYASABKAkSDgoGdmFsdWVzGAIgAygBEhIKBXZhbHVlGAMgASgBSACIAQESFQoEdW5pdBgEIAEoCUIHukgEcgIoQEIICgZfdmFsdWUifAoKT2JqZWN0aXZlcxInCgdtZXRyaWNzGAEgAygLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEhYKDnJlbGF0aXZlX25vaXNlGAIgASgBEi0KBW5vaXNlGAMgAygLMh4udmliZXN5cy5jbGkudjEuT2JqZWN0aXZlTm9pc2UiNgoOT2JqZWN0aXZlTm9pc2USDAoEbmFtZRgBIAEoCRIWCg5yZWxhdGl2ZV9ub2lzZRgCIAEoASI6CgtDaGVja1Jlc3VsdBIrCghkdXJhdGlvbhgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiLQAQoNTWVhc3VyZVJlc3VsdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDwoHc2FtcGxlcxgCIAMoARIxCgxvYnNlcnZhdGlvbnMYAyADKAsyGy52aWJlc3lzLmNsaS52MS5PYnNlcnZhdGlvbhIUCgxjaGVja19qb2JfaWQYBCABKAkSDQoFdmFsdWUYBSABKAESLgoKb2JqZWN0aXZlcxgGIAEoCzIaLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZXMisQEKC01lYXN1cmVtZW50Eg4KBmNvbW1pdBgBIAEoCRIUCgx0YXNrX3ZlcnNpb24YAiABKAkSOwoLZW52aXJvbm1lbnQYAyABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50Eg8KB2pvYl9pZHMYBCADKAkSLgoHbWVhc3VyZRgFIAEoCzIdLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVSZXN1bHQivQMKBlJlc3VsdBIOCgZqb2JfaWQYASABKAkSCwoDa2V5GAIgASgJEgwKBHRhc2sYAyABKAkSFAoMdGFza192ZXJzaW9uGAQgASgJEg4KBmNvbW1pdBgFIAEoCRIWCg5zY2hlbWFfdmVyc2lvbhgGIAEoDRI7CgtlbnZpcm9ubWVudBgHIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoHbWFjaGluZRgIIAEoCzIcLnZpYmVzeXMuY2xpLnYxLk1hY2hpbmVGYWN0cxIpCgRsb2FkGAkgASgLMhsudmliZXN5cy5jbGkudjEuTWFjaGluZUxvYWQSLwoLcmVjb3JkZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBWNoZWNrGAsgASgLMhsudmliZXN5cy5jbGkudjEuQ2hlY2tSZXN1bHRIABIwCgdtZWFzdXJlGAwgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdEgAEhcKD2NhbmRpZGF0ZV9pbWFnZRgNIAEoCUIJCgdvdXRjb21lKlYKCURpcmVjdGlvbhIZChVESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIWChJESVJFQ1RJT05fTUFYSU1JWkUQARIWChJESVJFQ1RJT05fTUlOSU1JWkUQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIlsKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbhIVCgR1bml0GAMgASgJQge6SARyAihAImAKC09ic2VydmF0aW9uEgwKBG5hbWUYASABKAkSDgoGdmFsdWVzGAIgAygBEhIKBXZhbHVlGAMgASgBSACIAQESFQoEdW5pdBgEIAEoCUIHukgEcgIoQEIICgZfdmFsdWUifAoKT2JqZWN0aXZlcxInCgdtZXRyaWNzGAEgAygLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEhYKDnJlbGF0aXZlX25vaXNlGAIgASgBEi0KBW5vaXNlGAMgAygLMh4udmliZXN5cy5jbGkudjEuT2JqZWN0aXZlTm9pc2UiNgoOT2JqZWN0aXZlTm9pc2USDAoEbmFtZRgBIAEoCRIWCg5yZWxhdGl2ZV9ub2lzZRgCIAEoASI6CgtDaGVja1Jlc3VsdBIrCghkdXJhdGlvbhgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiKfBAoNTWVhc3VyZVJlc3VsdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDwoHc2FtcGxlcxgCIAMoARIxCgxvYnNlcnZhdGlvbnMYAyADKAsyGy52aWJlc3lzLmNsaS52MS5PYnNlcnZhdGlvbhIUCgxjaGVja19qb2JfaWQYBCABKAkSDQoFdmFsdWUYBSABKAESLgoKb2JqZWN0aXZlcxgGIAEoCzIaLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZXMSRQoPc2FtcGxlX3NlcnZpY2VzGAcgAygOMh0udmliZXN5cy5jbGkudjEuU2FtcGxlU2VydmljZUINukgKkgEHIgWCAQIQATqFArpIgQIa/gEKIm1lYXN1cmUuc2FtcGxlX3NlcnZpY2VzX3Blcl9zYW1wbGUa1wF0aGlzLnNhbXBsZV9zZXJ2aWNlcy5zaXplKCkgPT0gMCB8fCB0aGlzLnNhbXBsZV9zZXJ2aWNlcy5zaXplKCkgPT0gdGhpcy5zYW1wbGVzLnNpemUoKSA/ICcnIDogJ3NhbXBsZV9zZXJ2aWNlcyBoYXMgJyArIHN0cmluZyh0aGlzLnNhbXBsZV9zZXJ2aWNlcy5zaXplKCkpICsgJyBlbnRyaWVzIGZvciAnICsgc3RyaW5nKHRoaXMuc2FtcGxlcy5zaXplKCkpICsgJyBzYW1wbGVzJyKxAQoLTWVhc3VyZW1lbnQSDgoGY29tbWl0GAEgASgJEhQKDHRhc2tfdmVyc2lvbhgCIAEoCRI7CgtlbnZpcm9ubWVudBgDIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSDwoHam9iX2lkcxgEIAMoCRIuCgdtZWFzdXJlGAUgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdCK9AwoGUmVzdWx0Eg4KBmpvYl9pZBgBIAEoCRILCgNrZXkYAiABKAkSDAoEdGFzaxgDIAEoCRIUCgx0YXNrX3ZlcnNpb24YBCABKAkSDgoGY29tbWl0GAUgASgJEhYKDnNjaGVtYV92ZXJzaW9uGAYgASgNEjsKC2Vudmlyb25tZW50GAcgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBItCgdtYWNoaW5lGAggASgLMhwudmliZXN5cy5jbGkudjEuTWFjaGluZUZhY3RzEikKBGxvYWQYCSABKAsyGy52aWJlc3lzLmNsaS52MS5NYWNoaW5lTG9hZBIvCgtyZWNvcmRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFY2hlY2sYCyABKAsyGy52aWJlc3lzLmNsaS52MS5DaGVja1Jlc3VsdEgAEjAKB21lYXN1cmUYDCABKAsyHS52aWJlc3lzLmNsaS52MS5NZWFzdXJlUmVzdWx0SAASFwoPY2FuZGlkYXRlX2ltYWdlGA0gASgJQgkKB291dGNvbWUqVgoJRGlyZWN0aW9uEhkKFURJUkVDVElPTl9VTlNQRUNJRklFRBAAEhYKEkRJUkVDVElPTl9NQVhJTUlaRRABEhYKEkRJUkVDVElPTl9NSU5JTUlaRRACKoQBCg1TYW1wbGVTZXJ2aWNlEh4KGlNBTVBMRV9TRVJWSUNFX1VOU1BFQ0lGSUVEEAASGgoWU0FNUExFX1NFUlZJQ0VfU1RBUlRFRBABEhkKFVNBTVBMRV9TRVJWSUNFX1JFVVNFRBACEhwKGFNBTVBMRV9TRVJWSUNFX1JFU1RBUlRFRBADQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.Metric
@@ -219,6 +219,16 @@ export type MeasureResult = Message<"vibesys.cli.v1.MeasureResult"> & {
    * @generated from field: vibesys.cli.v1.Objectives objectives = 6;
    */
   objectives?: Objectives | undefined;
+
+  /**
+   * For a task with a job-scoped server ([service] in its manifest), the server each sample ran on,
+   * in the order of samples: one per sample. Empty for any other task, and in a result saved before
+   * this field; a measurement that pools both has SAMPLE_SERVICE_UNSPECIFIED for the samples of the
+   * results that recorded none.
+   *
+   * @generated from field: repeated vibesys.cli.v1.SampleService sample_services = 7;
+   */
+  sampleServices: SampleService[];
 };
 
 /**
@@ -396,4 +406,48 @@ export enum Direction {
  */
 export const DirectionSchema: GenEnum<Direction> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_result, 0);
+
+/**
+ * SampleService is the server a sample of a task with a job-scoped server ran on. A sample that is
+ * the first command on its server ran on a server that nothing had used yet; any other ran on one
+ * that earlier commands of the job used, after the task's reset.
+ *
+ * @generated from enum vibesys.cli.v1.SampleService
+ */
+export enum SampleService {
+  /**
+   * The sample ran on no job-scoped server, or its result does not say.
+   *
+   * @generated from enum value: SAMPLE_SERVICE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The first command on the server the job started.
+   *
+   * @generated from enum value: SAMPLE_SERVICE_STARTED = 1;
+   */
+  STARTED = 1,
+
+  /**
+   * A server an earlier command of the job used, after the task's reset.
+   *
+   * @generated from enum value: SAMPLE_SERVICE_REUSED = 2;
+   */
+  REUSED = 2,
+
+  /**
+   * The first command on a server the job started again, because the one an earlier command used
+   * had ended.
+   *
+   * @generated from enum value: SAMPLE_SERVICE_RESTARTED = 3;
+   */
+  RESTARTED = 3,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.SampleService.
+ */
+export const SampleServiceSchema: GenEnum<SampleService> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_result, 1);
 

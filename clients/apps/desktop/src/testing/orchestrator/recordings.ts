@@ -8,6 +8,8 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {timestampMs} from '@bufbuild/protobuf/wkt';
 import {
   BuildVersionsSchema,
+  CheckRepositoryRequestSchema,
+  CheckRepositoryResponseSchema,
   Compatibility,
   DispatchRequestSchema,
   DispatchResponseSchema,
@@ -20,6 +22,8 @@ import {
   type IdentifyResponse,
   IdentifyResponseSchema,
   ItemsPageSchema,
+  ListDirectoryRequestSchema,
+  ListDirectoryResponseSchema,
   ListItemsRequestSchema,
   ListItemsResponseSchema,
   OrchestratorService,
@@ -42,6 +46,7 @@ import type {CallTarget} from '../../core/transport/gateway-transport.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from '../transport/index.js';
 import type {FakeDaemon} from './fake-daemon.js';
+import type {FakeFiles} from './fake-files.js';
 
 /** What happens to the `nth` Dispatch call. */
 export type DispatchFate =
@@ -70,6 +75,20 @@ export interface DaemonOptions {
   readonly live?: boolean;
   /** What the host's control service answers to Identify; with none it is not served (UNIMPLEMENTED). */
   readonly identify?: () => IdentifyResponse;
+  /**
+   * The host's refusal of a repository path for a start (its reason, and whether it is the host's
+   * fault rather than the path's), or undefined to accept it; every path is accepted by default.
+   * `unserved` makes the method unknown, as an older host's is.
+   */
+  readonly checkRepository?:
+    | ((repository: string) => {readonly reason: string; readonly notReady?: boolean} | undefined)
+    | 'unserved';
+  /**
+   * The host's file system. With it the host serves `ListDirectory` and answers `CheckRepository`
+   * from it (its refusals, and the tasks of a repository that passes), unless `checkRepository` says
+   * otherwise; without it `ListDirectory` is unknown, as an older host's is, and no path has tasks.
+   */
+  readonly files?: FakeFiles;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -80,7 +99,7 @@ const FAKE_DAEMON = {binaryVersion: 'fake', protocolVersion: 1, minProtocolVersi
 export const methodPathOf = (method: string): string => `${PREFIX}${method}`;
 
 /** The one call of the host's control service that a session makes. */
-const IDENTIFY = `/${HostControlService.typeName}/Identify`;
+const IDENTIFY = `/${HostControlService.typeName}/${HostControlService.method.identify.name}`;
 
 const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVAILABLE}});
 
@@ -285,6 +304,51 @@ function runsSteps(
   return [...steps, ...(live ? [followRuns(daemon, summaries)] : tail)];
 }
 
+/** What a `CheckRepository` call answers: the host's refusal of the path, or none, and its tasks. */
+function checkRepositorySteps(options: DaemonOptions, target: CallTarget): ReadonlyArray<Step> {
+  const {repository} = fromBinary(CheckRepositoryRequestSchema, target.request);
+  const check = options.checkRepository;
+  if (check === 'unserved')
+    return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+  const refusal =
+    check !== undefined
+      ? invokeCallback(() => check(repository))
+      : refusalOf(options.files?.refusal(repository));
+  const answer =
+    refusal === undefined
+      ? {tasks: [...(options.files?.tasksOf(repository) ?? [])]}
+      : {refusal: {reason: refusal.reason, notReady: refusal.notReady === true}};
+  return [
+    {
+      frame: toBinary(CheckRepositoryResponseSchema, create(CheckRepositoryResponseSchema, answer)),
+    },
+  ];
+}
+
+const refusalOf = (reason: string | undefined) =>
+  reason === undefined ? undefined : {reason, notReady: false};
+
+/** What a `ListDirectory` call answers: the folder's entries, or the fault of listing it. */
+function listDirectorySteps(options: DaemonOptions, target: CallTarget): ReadonlyArray<Step> {
+  const {files} = options;
+  if (files === undefined)
+    return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+  const {path, includeHidden} = fromBinary(ListDirectoryRequestSchema, target.request);
+  const listed = files.list(path, includeHidden);
+  if (!('entries' in listed)) return [{end: {message: listed.message, status: listed.status}}];
+  return [
+    {
+      frame: toBinary(
+        ListDirectoryResponseSchema,
+        create(ListDirectoryResponseSchema, {
+          entries: listed.entries.map(entry => ({...entry})),
+          truncated: listed.truncated,
+        }),
+      ),
+    },
+  ];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -359,6 +423,10 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return getItemSteps(daemon, target);
         case methodPathOf('GetRunHistory'):
           return runHistorySteps(daemon, target, options.historyPageMessages);
+        case methodPathOf('CheckRepository'):
+          return checkRepositorySteps(options, target);
+        case methodPathOf('ListDirectory'):
+          return listDirectorySteps(options, target);
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):

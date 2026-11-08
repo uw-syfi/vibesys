@@ -27,6 +27,7 @@ from tests.support import run_test_command
 from vs_agent.api import CONTAINER_PYTHON
 from vs_agent.api.images import agent_image, build_task_image
 from vs_runtime.api.infrastructure import image_features
+from vs_sandbox.api.evaluator_helpers import MODAL_CLIENT_REQUIREMENT
 from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
@@ -98,10 +99,14 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
     reason=f"set {ENABLE_ENV}=1 with docker on PATH to build and run the agent image",
 )
 def test_container_runtime_and_pip_extras_features_install_everything_they_use() -> None:
-    """The opt-in Features add their tools, and the agent user can use the ``docker`` group."""
+    """The opt-in Features add their tools, and the agent user can use the ``docker`` group.
+
+    The Modal evaluator helper runs on ``python`` and drives its own Modal commands with
+    ``python -I -m modal``, so that client must have the flags those commands use.
+    """
     image_id = agent_image(
         "python:3.12-bookworm",
-        features=image_features(("container-runtime",), ("modal>=0.66",)),
+        features=image_features(("container-runtime",), (MODAL_CLIENT_REQUIREMENT,)),
         timeout=_BUILD_TIMEOUT_S,
         clock=MonotonicClock(),
         output=DISCARD,
@@ -116,7 +121,9 @@ def test_container_runtime_and_pip_extras_features_install_everything_they_use()
             "bash",
             "-lc",
             "set -e; id -nG | tr ' ' '\\n' | grep -x docker; docker --version; "
-            "kind version; kubectl version --client; python3 -c 'import modal'",
+            "kind version; kubectl version --client; python3 -c 'import modal'; "
+            "python -I -m modal app stop --help | grep -q -- --yes; "
+            "python -I -m modal app logs --help | grep -q -- --since",
         ),
         capture_output=True,
         check=False,

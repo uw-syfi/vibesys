@@ -16,6 +16,7 @@ import {makeClient} from './client/make-client.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';
 import {type CostFeed, makeCostFeed} from './cost-feed.js';
+import {type DirectoryListings, makeDirectoryListings} from './directory-listing.js';
 import {makeHostReadiness} from './host-control.js';
 import {type HostCostFeed, makeHostCostFeed} from './host-cost-feed.js';
 import {makeHostStore} from './host-store.js';
@@ -23,6 +24,7 @@ import type {Ids} from './ids.js';
 import {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
+import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
 import type {GatewayTransport} from './transport/gateway-transport.js';
@@ -43,6 +45,10 @@ export interface HostSession {
   /** The CPU, memory and GPUs of the machine the host runs on. */
   readonly machine: MachineStatsFeed;
   readonly commands: Commands;
+  /** The host's answer about the repository path being typed in the Start form. */
+  readonly repositoryCheck: RepositoryCheck;
+  /** The host's folder listings, for completing the repository path as it is typed. */
+  readonly directories: DirectoryListings;
   /** The press of Catch me up, over `commands`. */
   readonly catchUp: CatchUp;
 }
@@ -72,6 +78,8 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
       ambient,
     }),
     commands,
+    repositoryCheck: yield* makeRepositoryCheck(parts),
+    directories: yield* makeDirectoryListings(parts),
     catchUp: yield* makeCatchUp(commands),
   };
 });

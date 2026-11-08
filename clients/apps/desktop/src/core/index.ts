@@ -15,6 +15,7 @@ export {
   makeHostConnection,
 } from './connection.js';
 export {type CostFeed, makeCostFeed} from './cost-feed.js';
+export {type DirectoryListings, makeDirectoryListings} from './directory-listing.js';
 export {
   type AppError,
   AuthenticationFailed,
@@ -76,6 +77,7 @@ export {
   daemonTooOldText,
   PROTOCOL_VERSION,
 } from './protocol.js';
+export {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 export {makeRunHistory, type RunHistory, type RunHistoryStatus} from './run-history.js';
 export {makeRunsView, type RunsView} from './runs-view.js';
 export {type AppearanceStore, makeAppearance} from './settings/appearance.js';

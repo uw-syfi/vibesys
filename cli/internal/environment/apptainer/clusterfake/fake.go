@@ -61,6 +61,7 @@ type Cluster struct {
 	submitted []apptainer.Allocation
 	now       time.Duration // how long the cluster has run, which Advance moves
 	linger    bool          // a dead claim leaves its containers' processes running
+	maxTime   time.Duration // the longest time limit a job may ask for, as a site's QOS caps it; zero is none
 }
 
 // job is a batch allocation.
@@ -108,6 +109,14 @@ func (c *Cluster) QueueSaying(states ...apptainer.JobState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queued, c.saying, c.ends = len(states), slices.Clone(states), false
+}
+
+// SetMaxTime makes the cluster refuse to submit a job whose time limit, in whole minutes as
+// sbatch rounds it up, is longer than d, as a site's QOS refuses one; zero refuses none.
+func (c *Cluster) SetMaxTime(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.maxTime = d
 }
 
 // NodeName is the name Slurm gives the node of every running job of the fake.
@@ -412,6 +421,10 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	c := cl.c
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if minutes := (a.Limit + time.Minute - 1) / time.Minute; c.maxTime > 0 && minutes*time.Minute > c.maxTime {
+		return "", fmt.Errorf("sbatch: error: requested timelimit of %d minutes exceeds max of %v; "+
+			"Batch job submission failed: Job violates accounting/QOS policy", minutes, c.maxTime)
+	}
 	c.ids++
 	id := strconv.Itoa(1000 + c.ids)
 	j := &job{
@@ -707,16 +720,17 @@ func (n *node) Start(spec apptainer.Box, argv []string, sink io.Writer) (environ
 	}
 	c.started = append(c.started, spec)
 	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
-		// The probe asks a port the node chose in this allocation, which another box's server
-		// answers on once it is ready: the node's network is the boxes' one network.
+		// The probe asks a port the node chose in this allocation, which a box's server answers on
+		// once it is ready, its own box's as another's: the node's network is the boxes' one
+		// network.
 		code := 1
 		mounted := slices.ContainsFunc(spec.Mounts, func(m docker.Mount) bool { return m.Container == docker.ProbeMount })
 		asked := slices.ContainsFunc(j.ports, func(p int) bool {
 			rest, ok := strings.CutPrefix(argv[2], fmt.Sprintf("http://127.0.0.1:%d", p))
 			return ok && (rest == "" || strings.HasPrefix(rest, "/"))
 		})
-		for name, other := range j.boxes {
-			if name != spec.Name && other.machine.Ready() && asked {
+		for _, other := range j.boxes {
+			if other.machine.Ready() && asked {
 				code = 0
 			}
 		}

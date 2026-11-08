@@ -21,6 +21,15 @@ export {
   refusalCauseOf,
 } from './connection.js';
 export {
+  completionsOf,
+  type FolderEntry,
+  type FolderListing,
+  listingKey,
+  type PathCompletion,
+  type PathSplit,
+  splitPath,
+} from './directory-listing.js';
+export {
   FAULT_KINDS,
   type Fault,
   type FaultKind,
@@ -184,6 +193,12 @@ export {
   runAgents,
   unbrokenFrom,
 } from './orchestrator/views.js';
+export {
+  type RepositoryAnswer,
+  type RepositoryChecked,
+  type RepositoryVerdict,
+  repositoryVerdict,
+} from './repository-check.js';
 export {
   type CostTarget,
   costTarget,

@@ -11,6 +11,7 @@ import {
   type MachineStatsSchema,
   SubscribeResponseSchema,
   type TopicFailureCode,
+  topicPolicies,
 } from '@vibesys/proto';
 import type {Recording, Step} from './transport/index.js';
 
@@ -115,17 +116,14 @@ export const refusedFrame = (code: TopicFailureCode): Step =>
   frame({case: 'failed', value: {code, detail: 'refused'}});
 
 /**
- * A stream that keeps its cadence: the snapshot, then for each of `values` a heartbeat half a
- * period in and the next value at the period, then nothing more until it is given up on.
+ * A stream that keeps the topic's cadence: the snapshot, then for each of `values` a heartbeat half
+ * a period in and the next value at the period, then nothing more until it is given up on.
  */
-export const steadyStream = (
-  figures: (nth: number) => MachineFigures,
-  values: number,
-  periodMs = 10_000,
-): Step[] => {
+export const steadyStream = (figures: (nth: number) => MachineFigures, values: number): Step[] => {
+  const half = topicPolicies.machineStats.cadenceMs / 2;
   const steps: Step[] = [statsFrame(figures(0)), SYNCED_FRAME];
   for (let nth = 1; nth <= values; nth += 1) {
-    steps.push({sleep: periodMs / 2}, HEARTBEAT_FRAME, {sleep: periodMs / 2});
+    steps.push({sleep: half}, HEARTBEAT_FRAME, {sleep: half});
     steps.push(statsFrame(figures(nth)));
   }
   return [...steps, {hang: true}];

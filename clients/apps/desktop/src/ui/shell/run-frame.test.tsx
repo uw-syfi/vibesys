@@ -6,7 +6,7 @@
  */
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {BuildVersionsSchema, RunSummarySchema} from '@vibesys/orchestrator-proto';
+import {RunSummarySchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {JSX} from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   type Route,
   type RunView,
 } from '../../state/index.js';
+import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {PRICED_AND_UNPRICED} from '../../testing/orchestrator/cost-views.js';
 import {generateScenario, measuredSearch, SERVING} from '../../testing/orchestrator/index.js';
@@ -27,7 +28,7 @@ import {CatchUpScreen} from '../catch-up/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
-import {COST_OVERVIEW_WORDS} from '../orchestrator/cost-words.js';
+import {COST_OVERVIEW_WORDS} from '../test-display-clock.js';
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 
@@ -40,18 +41,7 @@ function hostOf(
   state: OrchestratorState,
   runHistory: HostSnapshot['runHistory'] = {_tag: 'Idle'},
 ): HostSnapshot {
-  return {
-    runHistory,
-    key: 'local',
-    label: 'This machine',
-    model: {data: state, agentCursors: {}},
-    connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
-    freshness: {status: 'live', lastUpdateMs: null},
-    runsFeed: {_tag: 'Live'},
-    agentFeeds: {},
-    costFeeds: {},
-    history: {earlier: {_tag: 'Idle'}, wholes: {}},
-  };
+  return hostSnapshotOf({runHistory, model: {data: state, agentCursors: {}}});
 }
 
 function world(seed: number, subagents: number, live: boolean) {
@@ -81,19 +71,7 @@ function app(
     <OrchestratorApp
       hosts={[hostOf(state, runHistory)]}
       nowMs={nowMs}
-      commands={{
-        start: undefined,
-        stop: {},
-        send: {},
-        startRun: () => undefined,
-        retryStart: () => undefined,
-        stopRun: () => undefined,
-        retryStop: () => undefined,
-        sendMessage: () => undefined,
-        retrySend: () => undefined,
-        loadEarlier: () => undefined,
-        expand: () => undefined,
-      }}
+      commands={appCommandsOf()}
       retryHost={() => undefined}
       retryCost={() => undefined}
       route={route}

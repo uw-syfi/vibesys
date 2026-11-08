@@ -44,9 +44,65 @@ service OrchestratorService {
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
+  // Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+  // makes that needs the repository alone (an absolute path that exists and is the root of a git work
+  // tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
+  // client can ask while its operator is still filling in the rest.
+  rpc CheckRepository(CheckRepositoryRequest) returns (CheckRepositoryResponse);
+  // The entries of one folder of the host's file system, for a path being typed: the client asks for
+  // the folder the path has reached and narrows the answer by what is typed after it. Only the
+  // folder's own children are read, never what is below them. For the operator only.
+  rpc ListDirectory(ListDirectoryRequest) returns (ListDirectoryResponse);
   // What every run the host holds has cost, live and ended: the whole host cost view, then the whole
   // view again each time any run's cost changes. The host works it out, so the client sums nothing.
   rpc WatchHostCost(WatchHostCostRequest) returns (stream WatchHostCostResponse);
+}
+
+message CheckRepositoryRequest {
+  // The repository path as the operator typed it, which the check resolves as StartRun's does.
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message CheckRepositoryResponse {
+  // Why a StartRun in this repository would be refused, in the words its refusal has; unset when the
+  // repository passes this part of the check.
+  StartRefusal refusal = 1;
+  // The names of the tasks the repository holds (the folders under .vibesys/tasks), sorted; empty
+  // when the repository fails the check or holds none.
+  repeated string tasks = 2 [(buf.validate.field).repeated.max_items = 1000];
+}
+
+message ListDirectoryRequest {
+  // The folder, as an absolute path or one that starts with ~ (the host's home), resolved on the
+  // host. The same folder with or without a trailing slash is the same folder.
+  string path = 1 [(buf.validate.field).string.min_len = 1, (buf.validate.field).string.max_len = 4096];
+  // Also list the entries whose names start with a dot, which are left out otherwise.
+  bool include_hidden = 2;
+}
+
+message ListDirectoryResponse {
+  // The folder's children sorted by name, at most the host's cap.
+  repeated DirectoryEntry entries = 1 [(buf.validate.field).repeated.max_items = 500];
+  // The folder holds more entries than the cap, so the later names in the order are missing.
+  bool truncated = 2;
+}
+
+message DirectoryEntry {
+  string name = 1 [(buf.validate.field).string.min_len = 1, (buf.validate.field).string.max_len = 4096];
+  // A directory, or a link to one.
+  bool is_directory = 2;
+  // A directory that holds a .git.
+  bool is_git_repository = 3;
+  // A directory with at least one task folder under .vibesys/tasks.
+  bool has_tasks = 4;
+}
+
+// StartRefusal is a refusal of a start by the host's own check.
+message StartRefusal {
+  string reason = 1 [(buf.validate.field).string.min_len = 1];
+  // The host cannot start any run now (no way to launch agents) whatever the repository: not a fault
+  // of what the operator typed.
+  bool not_ready = 2;
 }
 
 message DispatchRequest {

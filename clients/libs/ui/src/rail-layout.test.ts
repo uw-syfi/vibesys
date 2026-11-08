@@ -29,8 +29,8 @@ describe('the rail', () => {
     expect(px('rail') - 2 * side - 2).toBeGreaterThanOrEqual(longest);
   });
 
-  test('holds its foot group at the end with a spacer, and scrolls rather than squeeze or overlap', () => {
-    expect(declarations('rail.css', '.vs-rail')).toContain('overflow-y: auto;');
+  test('holds its foot group at the end with a spacer, and never scrolls: the window opens no shorter than its groups', () => {
+    expect(declarations('rail.css', '.vs-rail')).not.toContain('overflow');
     expect(declarations('rail.css', '.vs-rail')).not.toContain('justify-content');
     expect(declarations('rail.css', '.vs-rail-group')).toContain('flex: none;');
     // The spacer grows into the free room and never shrinks below one step.
