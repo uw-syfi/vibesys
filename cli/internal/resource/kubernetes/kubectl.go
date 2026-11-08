@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -25,17 +26,15 @@ var _ Cluster = Kubectl{}
 
 // Identify implements Cluster.
 func (k Kubectl) Identify(ctx context.Context, kubeconfig string) (Identity, error) {
-	bounded, done := remote.Bounded(ctx, k.Timers, Timeout)
-	defer done()
 	run := func(args ...string) (string, error) {
 		argv := append([]string{"kubectl", "--kubeconfig", kubeconfig}, args...)
-		out, err := remote.Output(bounded, k.Timers, k.Shell, argv, "")
+		out, err := remote.Within(ctx, k.Timers, k.Shell, Timeout, argv, "")
 		switch {
 		case err == nil:
 			return out, nil
 		case ctx.Err() != nil:
 			return "", ctx.Err()
-		case bounded.Err() != nil:
+		case errors.As(err, new(*remote.NoAnswer)):
 			return "", unavailable("kubectl on %s did not answer within %s", k.Shell.Where(), Timeout)
 		}
 		return "", unavailable("reading the cluster of %s with kubectl on %s: %s", kubeconfig, k.Shell.Where(), core.AsFailure(err).Message)

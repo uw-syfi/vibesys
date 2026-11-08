@@ -99,13 +99,18 @@ func unavailable(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureUnavailable, Message: "apptainer: " + fmt.Sprintf(format, args...)}
 }
 
-// sh runs the script with /bin/sh on the login node, bounded by d, with args as $1 and on.
+// sh runs the script with /bin/sh on the login node, each attempt bounded by d, with args as $1
+// and on. A call that does not reach the login node is made again as remote.Reconnect says, so a
+// login node that refuses new connections for a minute or two fails no call.
 func (c *Cluster) sh(ctx context.Context, d time.Duration, script string, args ...string) (string, error) {
-	bounded, done := remote.Bounded(ctx, c.cfg.Timers, d)
-	defer done()
-	out, err := remote.Output(bounded, c.cfg.Timers, c.cfg.Shell, append([]string{"/bin/sh", "-c", script, "vs-apptainer"}, args...), "")
-	if err != nil && ctx.Err() == nil && bounded.Err() != nil {
-		return "", unavailable("%s did not answer within %v", c.cfg.Shell.Where(), d)
+	return c.within(ctx, d, append([]string{"/bin/sh", "-c", script, "vs-apptainer"}, args...))
+}
+
+// within runs argv on the login node as remote.Within does, saying so when it did not answer.
+func (c *Cluster) within(ctx context.Context, d time.Duration, argv []string) (string, error) {
+	out, err := remote.Within(ctx, c.cfg.Timers, c.cfg.Shell, d, argv, "")
+	if na := (*remote.NoAnswer)(nil); errors.As(err, &na) {
+		return "", unavailable("%s did not answer within %v", na.Where, na.Within)
 	}
 	return out, err
 }
@@ -291,9 +296,7 @@ func (c *Cluster) Squash(ctx context.Context, p, content string, rootfs io.Reade
 // or its time limit; Slurm writes no file of it.
 func (c *Cluster) Submit(ctx context.Context, a apptainer.Allocation) (string, error) {
 	argv := append(slices.Clone(c.cfg.Submit), SubmitArgs(a)...)
-	bounded, done := remote.Bounded(ctx, c.cfg.Timers, CallTimeout)
-	defer done()
-	out, err := remote.Output(bounded, c.cfg.Timers, c.cfg.Shell, argv, "")
+	out, err := c.within(ctx, CallTimeout, argv)
 	if err != nil {
 		return "", fmt.Errorf("submitting the allocation %s: %w", a.Name, err)
 	}
