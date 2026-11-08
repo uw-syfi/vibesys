@@ -35,6 +35,13 @@ const (
 	DefaultCommandTimeout        = 30 * time.Minute
 )
 
+// MaxCommandTimeoutSeconds is the longest a command's timeout_seconds may ask for: one week. It
+// matches the proto cap on TaskCommandV02.timeout_seconds (buf.validate uint32.lte = 604800), so a
+// schema 0.1 manifest is held to the same bound the schema 0.2 reader enforces. A larger value
+// also overflows time.Duration once scaled to nanoseconds, yielding a negative or tiny timeout, so
+// it is refused here rather than silently accepted.
+const MaxCommandTimeoutSeconds = 604800
+
 // ProjectRoot is the placeholder a command spells the checkout's root with.
 const ProjectRoot = core.ProjectRootPlaceholder
 
@@ -693,6 +700,9 @@ func makeCommand(section string, argv []string, seconds int) (Command, error) {
 	}
 	if seconds < 0 {
 		return Command{}, invalid("%s: [%s] timeout_seconds must be positive, got %d", ManifestName, section, seconds)
+	}
+	if seconds > MaxCommandTimeoutSeconds {
+		return Command{}, invalid("%s: [%s] timeout_seconds must be at most %d (one week), got %d", ManifestName, section, MaxCommandTimeoutSeconds, seconds)
 	}
 	timeout := DefaultCommandTimeout
 	if seconds > 0 {
