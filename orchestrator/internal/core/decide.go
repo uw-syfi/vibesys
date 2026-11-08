@@ -160,6 +160,11 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		r.Run, r.Refusal = busy, RefuseRepositoryInUse
 		return ""
 	}
+	facts := startFacts(b)
+	if facts.Refused != nil {
+		r.Refusal, r.EvalPlaces = facts.Refused.Refusal, facts.Refused.Places
+		return ""
+	}
 	lead, ok := t.resolveChoice(r, b.Lead.Harness, b.Lead.Model)
 	if !ok {
 		return ""
@@ -177,6 +182,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, MaxCostUSD: b.MaxCostUSD, CreatedAt: t.in.At,
 		JobTool: b.JobTool, Allowed: allowance(b.Lead, b.Allow), SummaryEvery: b.SummaryEvery, LastSummaryAt: t.in.At,
+		TaskCard: facts.Card, EvalPlace: facts.EvalPlace,
 	}
 	if run.SummaryEvery == 0 {
 		run.SummaryEvery = DefaultSummaryEvery
