@@ -22,7 +22,12 @@ from vibesys.orchestration.hypothesis import (
     build_round_record,
 )
 from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
+from vibesys.orchestration.hypothesis.transitions import headline_measurement
+from vibesys.orchestration.metrics import (
+    FrameworkBenchmarkOutcome,
+    Measurement,
+    MetricComparison,
+)
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (
@@ -395,11 +400,14 @@ class _MultiRun:
     async def _run_attempts(self, selected: _SelectedRound) -> None:
         first = self._first_attempt(selected)
         if first > self.options.max_retries_per_round:
-            message = (
-                f"round {self.round_number} exhausted its "
-                f"{self.options.max_retries_per_round} paid attempts"
+            # A crash during the last paid attempt: the resume has no attempt left. The round
+            # closes as failed (no implementation) so that the run goes on; raising here made
+            # every resume fail in the same place.
+            self.run.observations.warning(
+                f"round {self.round_number} used its {self.options.max_retries_per_round} paid "
+                "attempts before the restart; closing it as failed"
             )
-            raise RuntimeError(message)
+            return
         for retry in range(first, self.options.max_retries_per_round + 1):
             attempt = selected.attempt
             attempt.retry = retry
@@ -753,6 +761,9 @@ class _MultiRun:
             self.search.archive_summary(self.records, space=self.state.search.metrics)
         )
         winner = self.search.best(self.records, space=self.state.search.metrics)
+        newer = await self._newer_approved(winner)
+        if newer is not None:
+            winner = newer
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:
@@ -772,6 +783,54 @@ class _MultiRun:
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self.label_prefix}: select round {winner.round_number}")
         self.run.observations.note(f"selected trusted winner from round {winner.round_number}")
+
+    async def _newer_approved(self, winner: RoundRecord | None) -> RoundRecord | None:
+        """The newest judge-approved round after *winner* without an official evaluation on
+        which the official gates pass now (newest first), when it beats *winner*.
+
+        Only rounds with an official evaluation can win, so without this a failed final round
+        loses the approved work of the rounds before it.
+        """
+        floor = winner.round_number if winner is not None else 0
+        approved = [
+            record
+            for record in self.records
+            if record.round_number > floor
+            and record.commit
+            and record.passed
+            and record.reviewed
+            and not record.official_evaluation
+            and record.candidate_retained is True
+        ]
+        for record in reversed(approved):
+            if not await self.workspace.try_restore(record.commit, clean=True):
+                continue
+            accuracy = await self.run.evaluation.accuracy(self.workspace, reuse=None)
+            if not accuracy.passed:
+                self.run.observations.note(
+                    f"approved round {record.round_number} failed accuracy at the end of the run")
+                continue
+            benchmark = await self.run.evaluation.benchmark(
+                self.workspace, objectives=_benchmark_objectives(self.options))
+            if not benchmark.passed or benchmark.metric_value is None:
+                continue
+            if winner is not None:
+                reading = Measurement(
+                    metric=benchmark.metric_name or "",
+                    value=benchmark.metric_value,
+                    direction=(benchmark.metric_direction.value
+                               if benchmark.metric_direction is not None else None),
+                )
+                comparison = self.state.search.metrics.compare(
+                    reading, headline_measurement(winner))
+                if comparison is not MetricComparison.BETTER:
+                    # An older approved round builds on less work than this one.
+                    return None
+            self.run.observations.note(
+                f"approved round {record.round_number} passed the official gates at the end "
+                "of the run and replaces the official winner")
+            return record
+        return None
 
     def _focus_state(self) -> ProfileFocusState | None:
         if self.profile_focus is None:

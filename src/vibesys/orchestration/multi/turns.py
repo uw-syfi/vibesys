@@ -547,6 +547,12 @@ class MultiAgentTurns:
     ) -> str:
         """Run the workspace's microbench phase on the draft plan in a fresh session."""
         plan_location = self.files.write_plan(request.round_number, request_plan)
+        # The gate tells the draft's claims from claims that only the revised plan makes.
+        draft = self.files.artifact_root / "microbench" / "draft" / f"{round_name}.json"
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        written = self.files.artifact_root / "plans" / f"{round_name}.json"
+        draft.write_text(written.read_text() if written.is_file()
+                         else request_plan.model_dump_json())
         prompt = _MICROBENCH_PROMPT.format(
             round_name=round_name,
             plan_location=plan_location,
@@ -575,6 +581,7 @@ class MultiAgentTurns:
                     session.turn(prompt, response=MicrobenchPhaseResponse), hard_limit)
                 return response.summary
             except StructuredResponseError:
+                self._mark_stopped(round_name, "returned no structured summary")
                 return "The microbench phase returned no summary; read its answer file."
             except asyncio.TimeoutError:
                 marker = self.files.artifact_root / "microbench" / "deadline" / f"{round_name}.md"
@@ -594,9 +601,21 @@ class MultiAgentTurns:
             raise
         except Exception as error:  # noqa: BLE001  # the draft still stands if measuring fails
             self.run.observations.warning(f"[microbench] phase failed: {error}")
+            self._mark_stopped(round_name, f"failed ({error})")
             return f"The microbench phase failed ({error}); read whatever answers exist."
         finally:
             await session.close()
+
+    def _mark_stopped(self, round_name: str, how: str) -> None:
+        """Without its answers file, a phase that ended early must not block the round's gate."""
+        root = self.files.artifact_root / "microbench"
+        if (root / "answers" / f"{round_name}.md").is_file():
+            return
+        marker = root / "stopped" / f"{round_name}.md"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            f"# {round_name}: microbench phase {how} before it wrote its answers\n\n"
+            "Plan claims and carried questions stay open in the ledger for a later round.\n")
 
     async def _settle_plan(
         self, session: AgentSession, plan: OrchestratorPlan, request: PlanRequest
