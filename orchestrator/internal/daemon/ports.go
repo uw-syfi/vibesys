@@ -96,6 +96,9 @@ type SessionStart struct {
 	Repository string
 	Task       string
 	JobTool    core.JobToolEndpoint
+	// EvalPlace is the run's eval place, resolved when it started; empty for an unpinned run. The
+	// session's jobs default to it.
+	EvalPlace string
 	// Tools is what the session's tool server is told: who it speaks for and how to reach the
 	// daemon as that agent. It holds the session's token, which goes to the tool server and nowhere else.
 	Tools *pb.ToolServerCredentials
