@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -555,10 +556,14 @@ class MultiAgentTurns:
             prompt += _MICROBENCH_ONLY.format(
                 questions="\n".join(f"- {q}" for q in questions))
         minutes = os.environ.get(MICROBENCH_MINUTES_ENV, "").strip()
+        hard_limit: float | None = None
         if minutes:
             end = datetime.now(timezone.utc) + timedelta(minutes=float(minutes))
             prompt += _MICROBENCH_DEADLINE.format(
                 deadline=end.strftime("%Y-%m-%dT%H:%M UTC"))
+            # The deadline in the prompt is advisory; this one is not. The grace lets the
+            # agents write the answers they have.
+            hard_limit = 60 * (float(minutes) + max(5.0, 0.25 * float(minutes)))
         session = await self.run.agents.create_session(
             IMPLEMENTER,
             workspace=request.workspace,
@@ -566,10 +571,25 @@ class MultiAgentTurns:
         )
         try:
             try:
-                response = await session.turn(prompt, response=MicrobenchPhaseResponse)
+                response = await asyncio.wait_for(
+                    session.turn(prompt, response=MicrobenchPhaseResponse), hard_limit)
                 return response.summary
             except StructuredResponseError:
                 return "The microbench phase returned no summary; read its answer file."
+            except asyncio.TimeoutError:
+                marker = self.files.artifact_root / "microbench" / "deadline" / f"{round_name}.md"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(
+                    f"# {round_name}: microbench phase stopped at its hard time limit\n\n"
+                    "Plan claims and carried questions without answers stay open in the "
+                    "ledger for a later round.\n")
+                self.run.observations.warning(
+                    f"[microbench] {round_name}: hard time limit "
+                    f"({hard_limit / 60:.0f} min) reached; the plan is revised from the "
+                    "answers written so far")
+                return ("The microbench phase reached its hard time limit and was stopped. "
+                        f"Read `progress/microbench/answers/{round_name}.md` for what it "
+                        "measured; questions without answers stay open in the ledger.")
         except AgentUsageLimitError:
             raise
         except Exception as error:  # noqa: BLE001  # the draft still stands if measuring fails
