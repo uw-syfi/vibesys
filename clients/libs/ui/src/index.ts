@@ -37,6 +37,7 @@ export {
 export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {ChoiceTiles, type TileOption} from './components/choice-tiles.js';
+export {ClipRow} from './components/clip-row.js';
 export {Collapsible} from './components/collapsible.js';
 export {
   CellInline,
@@ -155,6 +156,7 @@ export {
 } from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
 export {withoutPaths} from './components/paths.js';
+export {PickCard, PickCards} from './components/pick-card.js';
 export {
   type HeaderColumn,
   type ListHeader,
@@ -191,8 +193,6 @@ export {
   type StackedBar,
   StackedBars,
 } from './components/stacked-bars.js';
-export {PickCard, PickCards} from './components/pick-card.js';
-export {ClipRow} from './components/clip-row.js';
 export {Stale} from './components/stale.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';

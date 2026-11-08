@@ -75,6 +75,18 @@ export interface NewRun {
   readonly forgetProvision: Effect.Effect<void>;
 }
 
+/** One read into `ref`: the previous data stays until the answer swaps it in. */
+const read = <A, E>(
+  ref: SubscriptionRef.SubscriptionRef<Remote<A>>,
+  ask: Effect.Effect<A, E>,
+  why: (error: E) => string,
+) =>
+  SubscriptionRef.update(ref, readingOf).pipe(
+    Effect.andThen(ask),
+    Effect.flatMap(answer => SubscriptionRef.set(ref, readOf(answer))),
+    Effect.catch(error => SubscriptionRef.update(ref, before => failedOf(before, why(error)))),
+  );
+
 export const makeNewRun = Effect.fn('NewRun.make')(function* (
   {client}: HostParts,
   commands: Commands,
@@ -84,18 +96,6 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
   const catalogue = yield* SubscriptionRef.make<Remote<ListCatalogueResponse>>(NOT_READ);
   const places = yield* SubscriptionRef.make<Remote<ListEvalPlacesResponse>>(NOT_READ);
   const provision = yield* SubscriptionRef.make<ProvisionProgress>(NOT_PROVISIONING);
-
-  /** One read into `ref`: the previous data stays until the answer swaps it in. */
-  const read = <A, E>(
-    ref: SubscriptionRef.SubscriptionRef<Remote<A>>,
-    ask: Effect.Effect<A, E>,
-    why: (error: E) => string,
-  ) =>
-    SubscriptionRef.update(ref, readingOf).pipe(
-      Effect.andThen(ask),
-      Effect.flatMap(answer => SubscriptionRef.set(ref, readOf(answer))),
-      Effect.catch(error => SubscriptionRef.update(ref, before => failedOf(before, why(error)))),
-    );
 
   const readPlaces = (refresh: boolean) =>
     read(places, client.listEvalPlaces({refresh}), error => faultOf(error).detail);
@@ -176,7 +176,10 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
     made: {readonly name: string; readonly parent: string},
     startIn: (repository: string) => Intent,
   ) {
-    const repository = yield* provisioned(made, {case: 'empty', value: create(EmptyRepositorySchema)});
+    const repository = yield* provisioned(made, {
+      case: 'empty',
+      value: create(EmptyRepositorySchema),
+    });
     return repository === undefined ? undefined : yield* commands.submit(startIn(repository));
   });
 

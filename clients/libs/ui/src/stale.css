@@ -22,7 +22,7 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  mask-image: linear-gradient(to right, #000 92%, transparent);
+  mask-image: linear-gradient(to right, var(--text) 92%, transparent);
 }
 .vs-clip-row > * {
   flex: none;

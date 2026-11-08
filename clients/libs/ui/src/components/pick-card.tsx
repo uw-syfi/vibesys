@@ -55,8 +55,8 @@ export function PickCards(props: {
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="vs-pick-cards" role="group" aria-label={props.label} data-columns={props.columns}>
+    <fieldset className="vs-pick-cards" aria-label={props.label} data-columns={props.columns}>
       {props.children}
-    </div>
+    </fieldset>
   );
 }

@@ -559,13 +559,11 @@ export const BASIC_ENTRIES = {
   },
   ClipRow: {
     render: () => (
-      <div style={{width: 240}}>
-        <ClipRow>
-          {['first', 'second', 'third', 'fourth', 'fifth'].map(word => (
-            <Chip key={word} label={word} />
-          ))}
-        </ClipRow>
-      </div>
+      <ClipRow>
+        {['first', 'second', 'third', 'fourth', 'fifth'].map(word => (
+          <Chip key={word} label={word} />
+        ))}
+      </ClipRow>
     ),
   },
   Slider: {render: () => <SliderDemo />},

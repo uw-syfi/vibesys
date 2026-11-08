@@ -150,10 +150,9 @@ describe('navigation', () => {
   });
 
   it('the New run page opens in the runs destination, and back from it is the list', () => {
-    const page = navigationReducer(
-      navigationReducer(initialNavigation, {type: 'open-settings'}),
-      {type: 'open-new-run'},
-    );
+    const page = navigationReducer(navigationReducer(initialNavigation, {type: 'open-settings'}), {
+      type: 'open-new-run',
+    });
     expect(page).toMatchObject({destination: 'runs', runs: {screen: 'new-run'}});
     expect(navigationReducer(page, {type: 'back'}).runs).toEqual({screen: 'runs'});
     expect(navigationReducer(page, {type: 'open-runs'}).runs).toEqual({screen: 'runs'});

@@ -56,6 +56,7 @@ import type {RunUpdateRequest} from './run-settings/update-draft.js';
 import type {CompleteSetupRequest} from './setup/index.js';
 import {SetupScreen, setupTitle} from './setup/index.js';
 import type {StartRunRequest} from './start-draft.js';
+import type {StartHost} from './start-run-form.js';
 
 const TITLE = 'Runs';
 
@@ -242,24 +243,9 @@ function agentNote(
   };
 }
 
-/** The orchestrator window: every connected host's runs, and one run open at a time. */
-export function OrchestratorApp(props: {
-  readonly hosts: readonly HostSnapshot[];
-  /** Milliseconds since the epoch; the caller owns the clock. */
-  readonly nowMs: number;
-  readonly commands: AppCommands;
-  /** The person pressed Retry on a host's connection or feed. */
-  readonly retryHost: (host: string) => void;
-  /** The person pressed Retry on a run's cost stream. */
-  readonly retryCost: (host: string, runId: string) => void;
-  /** Where the person is; the caller owns it so it can watch what that screen needs. */
-  readonly route: Route;
-  /** The run list's filters and selected row, which the caller keeps while a run is open. */
-  readonly fleet: FleetPlace;
-  readonly go: (action: NavigationAction) => void;
-}): JSX.Element {
-  const {hosts, commands, route, go} = props;
-  const startHosts = hosts.map(
+/** The hosts as the New run page reads them. */
+const startHostsOf = (hosts: readonly HostSnapshot[]): readonly StartHost[] =>
+  hosts.map(
     ({
       key,
       label,
@@ -282,6 +268,77 @@ export function OrchestratorApp(props: {
       provision,
     }),
   );
+
+/** The Runs page's way to New run: it reads every machine's catalogue, places and Repositories folder, for the page's tabs. */
+function NewRunButton(props: {
+  readonly hosts: readonly HostSnapshot[];
+  readonly commands: AppCommands;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  return (
+    <Button
+      text="New run"
+      icon="plus"
+      variant="primary"
+      press={() => {
+        for (const host of props.hosts) {
+          props.commands.loadNewRun(host.key);
+          if (host.repositoriesDirectory !== '') {
+            const folder = host.repositoriesDirectory.replace(/\/+$/, '');
+            props.commands.listDirectory(host.key, `${folder}/`, false, false);
+          }
+        }
+        props.go({type: 'open-new-run'});
+      }}
+    />
+  );
+}
+
+/** The page that starts a run, bound to the commands of the window. */
+function NewRunPage(props: {
+  readonly hosts: readonly HostSnapshot[];
+  readonly commands: AppCommands;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {commands, go} = props;
+  return (
+    <NewRun
+      hosts={startHostsOf(props.hosts)}
+      progress={commands.start}
+      start={commands.startRun}
+      checkRepository={commands.checkRepository}
+      listDirectory={commands.listDirectory}
+      retry={commands.retryStart}
+      loadNewRun={commands.loadNewRun}
+      startFromExample={commands.startFromExample}
+      forgetProvision={commands.forgetProvision}
+      beginSetup={commands.beginSetup}
+      setUpInNewRepository={commands.setUpInNewRepository}
+      openRun={(host, runId) => go({type: 'open-run', host, runId})}
+      openRuns={() => go({type: 'open-runs'})}
+      editMachines={() => go({type: 'open-machines'})}
+    />
+  );
+}
+
+/** The orchestrator window: every connected host's runs, and one run open at a time. */
+export function OrchestratorApp(props: {
+  readonly hosts: readonly HostSnapshot[];
+  /** Milliseconds since the epoch; the caller owns the clock. */
+  readonly nowMs: number;
+  readonly commands: AppCommands;
+  /** The person pressed Retry on a host's connection or feed. */
+  readonly retryHost: (host: string) => void;
+  /** The person pressed Retry on a run's cost stream. */
+  readonly retryCost: (host: string, runId: string) => void;
+  /** Where the person is; the caller owns it so it can watch what that screen needs. */
+  readonly route: Route;
+  /** The run list's filters and selected row, which the caller keeps while a run is open. */
+  readonly fleet: FleetPlace;
+  readonly go: (action: NavigationAction) => void;
+}): JSX.Element {
+  const {hosts, commands, route, go} = props;
+  if (route.screen === 'new-run') return <NewRunPage hosts={hosts} commands={commands} go={go} />;
   if (route.screen === 'runs') {
     return (
       <FleetScreen
@@ -290,48 +347,7 @@ export function OrchestratorApp(props: {
         nowMs={props.nowMs}
         go={go}
         retryHost={props.retryHost}
-        newRun={
-          <Button
-            text="New run"
-            icon="plus"
-            variant="primary"
-            press={() => {
-              // The page reads every machine's catalogue and places as it opens, for its tabs.
-              for (const host of startHosts) {
-                commands.loadNewRun(host.key);
-                if (host.repositoriesDirectory !== '') {
-                  commands.listDirectory(
-                    host.key,
-                    `${host.repositoriesDirectory.replace(/\/+$/, '')}/`,
-                    false,
-                    false,
-                  );
-                }
-              }
-              go({type: 'open-new-run'});
-            }}
-          />
-        }
-      />
-    );
-  }
-  if (route.screen === 'new-run') {
-    return (
-      <NewRun
-        hosts={startHosts}
-        progress={commands.start}
-        start={commands.startRun}
-        checkRepository={commands.checkRepository}
-        listDirectory={commands.listDirectory}
-        retry={commands.retryStart}
-        loadNewRun={commands.loadNewRun}
-        startFromExample={commands.startFromExample}
-        forgetProvision={commands.forgetProvision}
-        beginSetup={commands.beginSetup}
-        setUpInNewRepository={commands.setUpInNewRepository}
-        openRun={(host, runId) => go({type: 'open-run', host, runId})}
-        openRuns={() => go({type: 'open-runs'})}
-        editMachines={() => go({type: 'open-machines'})}
+        newRun={<NewRunButton hosts={hosts} commands={commands} go={go} />}
       />
     );
   }

@@ -21,7 +21,6 @@ import type {JSX} from 'react';
 import {
   completionsOf,
   type ExampleDraft,
-  type ExampleTarget,
   entryKey,
   fitsHere,
   folderName,
@@ -37,8 +36,8 @@ import {
 } from '../../../state/index.js';
 import {acceleratorName, runTitle} from '../fleet-words.js';
 import type {StartDraft} from '../start-draft.js';
-import {LimitFields, MoreOptions, type StartHost} from '../start-run-form.js';
 import type {ModelChoices} from '../start-models.js';
+import {LimitFields, MoreOptions, type StartHost} from '../start-run-form.js';
 import {domainWord, placeLabel, provisionLine} from './words.js';
 
 /** Where Copy to starts: the folder kept for the machine, else the host's own default. */
@@ -109,7 +108,6 @@ function Selected(props: {
   readonly draft: StartDraft;
   readonly set: (change: Partial<StartDraft>) => void;
   readonly choices: ModelChoices;
-  readonly target: ExampleTarget;
   /** Why Start cannot be pressed, and whether that is said aloud, or null. */
   readonly block: {readonly reason: string; readonly quiet: boolean} | null;
   readonly start: () => void;
@@ -224,7 +222,6 @@ export function CatalogStep(props: {
   readonly draft: StartDraft;
   readonly set: (change: Partial<StartDraft>) => void;
   readonly choices: ModelChoices;
-  readonly target: ExampleTarget;
   readonly block: {readonly reason: string; readonly quiet: boolean} | null;
   readonly start: () => void;
   readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
@@ -296,7 +293,6 @@ export function CatalogStep(props: {
             draft={props.draft}
             set={props.set}
             choices={props.choices}
-            target={props.target}
             block={props.block}
             start={props.start}
             listDirectory={props.listDirectory}

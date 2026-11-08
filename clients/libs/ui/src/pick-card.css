@@ -1,5 +1,9 @@
 /* Pick cards: one button per card, in a grid. Every value is a token. */
 .vs-pick-cards {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
   display: grid;
   gap: var(--space-3);
   align-items: stretch;
