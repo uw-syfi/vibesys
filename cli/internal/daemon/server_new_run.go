@@ -28,6 +28,12 @@ func (s *Server) DescribeTask(ctx context.Context, req *cliv1.DescribeTaskReques
 	return resp, nil
 }
 
+// DescribeSetup implements cliv1.DaemonServiceServer. It answers Unimplemented until the daemon reads
+// the setup facts.
+func (s *Server) DescribeSetup(context.Context, *cliv1.DescribeSetupRequest) (*cliv1.DescribeSetupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "DescribeSetup is not implemented by this daemon yet")
+}
+
 // ListPlacements implements cliv1.DaemonServiceServer.
 func (s *Server) ListPlacements(ctx context.Context, req *cliv1.ListPlacementsRequest) (*cliv1.ListPlacementsResponse, error) {
 	if s.placements == nil {

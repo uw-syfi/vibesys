@@ -49,6 +49,7 @@ const (
 	DaemonService_DeclareBound_FullMethodName     = "/vibesys.cli.v1.DaemonService/DeclareBound"
 	DaemonService_ListBounds_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListBounds"
 	DaemonService_DescribeTask_FullMethodName     = "/vibesys.cli.v1.DaemonService/DescribeTask"
+	DaemonService_DescribeSetup_FullMethodName    = "/vibesys.cli.v1.DaemonService/DescribeSetup"
 	DaemonService_ListPlacements_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListPlacements"
 )
 
@@ -127,6 +128,12 @@ type DaemonServiceClient interface {
 	// DescribeTask reads one task's files and answers the card a client shows of it, or why the files
 	// cannot be read. The daemon is the only reader of task files.
 	DescribeTask(ctx context.Context, in *DescribeTaskRequest, opts ...grpc.CallOption) (*DescribeTaskResponse, error)
+	// DescribeSetup reads, in one pass, what the setup checks of a draft task are derived from: the
+	// task's declarations and version in the working tree, the head of the repository, and the task's
+	// check and measure jobs and base measurements in the store. It decides nothing. Git is read before
+	// the store, so a job newer than the head shows on the next read. An older daemon answers
+	// Unimplemented, which a caller reads as a failure to read, not as an empty answer.
+	DescribeSetup(ctx context.Context, in *DescribeSetupRequest, opts ...grpc.CallOption) (*DescribeSetupResponse, error)
 	// ListPlacements reports every placement and the hardware it gives.
 	ListPlacements(ctx context.Context, in *ListPlacementsRequest, opts ...grpc.CallOption) (*ListPlacementsResponse, error)
 }
@@ -475,6 +482,16 @@ func (c *daemonServiceClient) DescribeTask(ctx context.Context, in *DescribeTask
 	return out, nil
 }
 
+func (c *daemonServiceClient) DescribeSetup(ctx context.Context, in *DescribeSetupRequest, opts ...grpc.CallOption) (*DescribeSetupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeSetupResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DescribeSetup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) ListPlacements(ctx context.Context, in *ListPlacementsRequest, opts ...grpc.CallOption) (*ListPlacementsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListPlacementsResponse)
@@ -560,6 +577,12 @@ type DaemonServiceServer interface {
 	// DescribeTask reads one task's files and answers the card a client shows of it, or why the files
 	// cannot be read. The daemon is the only reader of task files.
 	DescribeTask(context.Context, *DescribeTaskRequest) (*DescribeTaskResponse, error)
+	// DescribeSetup reads, in one pass, what the setup checks of a draft task are derived from: the
+	// task's declarations and version in the working tree, the head of the repository, and the task's
+	// check and measure jobs and base measurements in the store. It decides nothing. Git is read before
+	// the store, so a job newer than the head shows on the next read. An older daemon answers
+	// Unimplemented, which a caller reads as a failure to read, not as an empty answer.
+	DescribeSetup(context.Context, *DescribeSetupRequest) (*DescribeSetupResponse, error)
 	// ListPlacements reports every placement and the hardware it gives.
 	ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
@@ -661,6 +684,9 @@ func (UnimplementedDaemonServiceServer) ListBounds(context.Context, *ListBoundsR
 }
 func (UnimplementedDaemonServiceServer) DescribeTask(context.Context, *DescribeTaskRequest) (*DescribeTaskResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DescribeTask not implemented")
+}
+func (UnimplementedDaemonServiceServer) DescribeSetup(context.Context, *DescribeSetupRequest) (*DescribeSetupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeSetup not implemented")
 }
 func (UnimplementedDaemonServiceServer) ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListPlacements not implemented")
@@ -1198,6 +1224,24 @@ func _DaemonService_DescribeTask_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_DescribeSetup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeSetupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DescribeSetup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DescribeSetup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DescribeSetup(ctx, req.(*DescribeSetupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_ListPlacements_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListPlacementsRequest)
 	if err := dec(in); err != nil {
@@ -1326,6 +1370,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DescribeTask",
 			Handler:    _DaemonService_DescribeTask_Handler,
+		},
+		{
+			MethodName: "DescribeSetup",
+			Handler:    _DaemonService_DescribeSetup_Handler,
 		},
 		{
 			MethodName: "ListPlacements",

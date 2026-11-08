@@ -188,7 +188,10 @@ message Job {
   google.protobuf.Timestamp finished_at = 10;
   // Set when state is CANCELLED.
   string cancel_reason = 11;
-  // Set when state is FAILED or SUCCEEDED for a command job.
+  // The exit status of the job's step, set for any job whose step ran to an exit, whatever its kind:
+  // a command job, and a check or measure job whose build, check or benchmark step exited. Absent for
+  // a job that never reached an exit: one that was cancelled or lost, or that failed before a step
+  // could run (checkout, image, a result the step did not write).
   optional int32 exit_code = 12;
   // The result a check or measure job saved. Empty when it saved none.
   string result_job_id = 13;
@@ -219,6 +222,22 @@ message Job {
   // task is still at it when the job starts. Empty for a command job, and for a job saved before
   // this field was, which runs the task as it is when it starts.
   string task_version = 19 [(buf.validate.field).string.max_len = 256];
+  // The stage a check or measure job failed in. Set when state is FAILED and a stage ended it;
+  // unspecified for a job that did not fail, a command job, a failure outside every stage (checkout,
+  // image) and a job saved before this field was. A reader that must tell a candidate that did not
+  // build from one the check rejected reads this and not exit_code, which both leave nonzero.
+  JobStage failed_stage = 20 [(buf.validate.field).enum.defined_only = true];
+}
+
+// JobStage is the step of a check or measure job that ended it.
+enum JobStage {
+  JOB_STAGE_UNSPECIFIED = 0;
+  // The candidate or the task's image did not build.
+  JOB_STAGE_BUILD = 1;
+  // The task's correctness check ran and rejected the candidate, or could not complete.
+  JOB_STAGE_CHECK = 2;
+  // The benchmark that takes the samples of a measure job failed.
+  JOB_STAGE_MEASURE = 3;
 }
 
 // WaitKind is why a queued job has not started.
