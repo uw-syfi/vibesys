@@ -60,6 +60,11 @@ type ServiceDeps struct {
 	Starts StartChecks
 	// Directories answers ListDirectory. Nil is a host that cannot list folders.
 	Directories Directories
+	// Catalogue answers ListCatalogue. Nil is a host with no catalogue.
+	Catalogue CatalogueSource
+	// Places answers ListEvalPlaces and gives ListCatalogue the places it works the fit out from. Nil is
+	// a host that cannot report places.
+	Places PlaceSource
 	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
 	// or replace the tool's daemon, so it is asked before the command reaches the engine, whose lock it
 	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
