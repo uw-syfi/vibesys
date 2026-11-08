@@ -22,8 +22,6 @@ func TestTheNewRunRpcsAreUnimplementedAndNameThemselves(t *testing.T) {
 	r := daemontest.NewRig(t)
 	ctx := context.Background()
 	calls := map[string]func() error{
-		"ListCatalogue":  func() error { _, err := r.Service.ListCatalogue(ctx, &pb.ListCatalogueRequest{}); return err },
-		"ListEvalPlaces": func() error { _, err := r.Service.ListEvalPlaces(ctx, &pb.ListEvalPlacesRequest{}); return err },
 		"ProvisionRepository": func() error {
 			_, err := r.Service.ProvisionRepository(ctx, &pb.ProvisionRepositoryRequest{})
 			return err

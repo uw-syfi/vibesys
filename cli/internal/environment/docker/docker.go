@@ -56,6 +56,9 @@ type Config struct {
 
 	// Candidates reads what builds a candidate's image, for a task of two images. Nil builds none.
 	Candidates CandidateSource
+	// Builds is the lock of the builds of each tag on the engine, shared by the providers of every
+	// placement whose engine is the same Docker. Nil gives the provider one of its own.
+	Builds *Builds
 	// Probe is the absolute path, on the engine's machine, of a program for the engine's platform
 	// that asks a URL once and exits 0 for a 2xx answer, when called with ProbeCommand and the URL:
 	// this binary, which is static. It is mounted read-only at ProbeMount in the container of a
@@ -64,8 +67,9 @@ type Config struct {
 }
 
 // Provider makes the docker environments of one process. They share what must be one per
-// process: the record of which containers live runs own, and the lock that lets one image be
-// built at a time. Create it with New.
+// process: the record of which containers live runs own, and the token that lets it build one
+// image at a time. Builds of one tag by providers that share an engine are one at a time through
+// Config.Builds. Create it with New.
 type Provider struct {
 	cfg Config
 
@@ -118,6 +122,9 @@ func New(cfg Config) (*Provider, error) {
 	}
 	if cfg.Grace <= 0 {
 		cfg.Grace = environment.DefaultGrace
+	}
+	if cfg.Builds == nil {
+		cfg.Builds = NewBuilds()
 	}
 	return &Provider{cfg: cfg, build: make(chan struct{}, 1), active: map[string]struct{}{}}, nil
 }
@@ -217,8 +224,10 @@ func (e *env) Machine(ctx context.Context) (core.MachineFacts, error) {
 func (e *env) Load(ctx context.Context) (core.MachineLoad, error) { return e.p.cfg.Backend.Load(ctx) }
 
 // image returns the image the task's files build on the engine's local images of its bases. An
-// image the engine already has under their tag (buildKey) is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
-// the same image build it once; the build's progress goes to log.
+// image the engine already has under their tag (buildKey) is not built again. Builds are one at a
+// time, and a build of the tag waits for one by another provider of the engine (Config.Builds), so
+// that a Fingerprint and a Run, or jobs of two placements, that ask for the same image build it
+// once; the build's progress goes to log.
 func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, error) {
 	select {
 	case p.build <- struct{}{}:
@@ -235,6 +244,11 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 		return Image{}, err
 	}
 	tag := imageTag(buildKey(buildContext, bases))
+	release, err := p.cfg.Builds.lock(ctx, tag, "[docker]", log)
+	if err != nil {
+		return Image{}, err
+	}
+	defer release()
 	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
 		return checked(img, err)
 	}

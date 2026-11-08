@@ -34,6 +34,8 @@ export interface SpendFigures {
   /** How far along the cap the spend is, for the meter's width; null where there is none to draw. */
   readonly capShare: number | null;
   readonly lastHour: string | null;
+  /** How many runs the figures count, for a screen that sums more than one run. */
+  readonly runs?: string;
   readonly turns: string;
   readonly unpricedTurns: string;
 }
@@ -52,6 +54,18 @@ const KINDS = [
   {key: 'output', label: 'Output', of: (usage: CostUsage) => usage.outputTokens},
   {key: 'reasoning', label: 'Reasoning', of: (usage: CostUsage) => usage.reasoningTokens},
 ] as const;
+
+/** What the splits and the chart are drawn from: the lists a run's cost view and a host's both carry. */
+export type CostSplitSource = Pick<CostView, 'total' | 'roles' | 'models' | 'series'>;
+
+/** The chart and the two splits every cost screen draws, from the lists of a served view. */
+export interface CostSplits {
+  readonly chart: SpendChart | null;
+  /** By agent type: agents, turns, tokens, cost. */
+  readonly types: readonly BarRow<4>[];
+  /** By model: turns, tokens, cost. */
+  readonly models: readonly BarRow<3>[];
+}
 
 export interface CostScreenModel {
   /** No turn has finished: there is nothing to split yet. */
@@ -76,7 +90,7 @@ function noteOf(usage: CostUsage, unpricedTurns: number): string | undefined {
  * The slot of the palette each model draws in. It follows the models' names, not their cost, so a
  * model keeps its color while the run goes on and another overtakes it.
  */
-function slotsOf(view: CostView): ReadonlyMap<string, number> {
+function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
   const keys = new Set<string>(view.models.map(each => modelKey(each.model)));
   for (const bucket of view.series.buckets) {
     for (const spend of bucket.byModel) keys.add(modelKey(spend.model));
@@ -113,7 +127,7 @@ function bucketTitle(
 }
 
 function chartOf(
-  view: CostView,
+  view: CostSplitSource,
   slots: ReadonlyMap<string, number>,
   words: CostWords,
 ): SpendChart | null {
@@ -170,7 +184,7 @@ export const KIND_COLUMNS = [
   {header: 'Tokens', strong: true},
 ] as const satisfies readonly BarColumn[];
 
-const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRow<4>[] =>
+const typeRows = (view: CostSplitSource, precision: Precision, words: CostWords): BarRow<4>[] =>
   view.roles.map(role => ({
     key: `role-${role.role}`,
     name: words.role(role.role),
@@ -185,7 +199,7 @@ const typeRows = (view: CostView, precision: Precision, words: CostWords): BarRo
   }));
 
 const modelRows = (
-  view: CostView,
+  view: CostSplitSource,
   precision: Precision,
   slots: ReadonlyMap<string, number>,
   words: CostWords,
@@ -217,6 +231,17 @@ const kindRows = (view: CostView): BarRow<1>[] =>
 /** `{note}` when there is one, so a row without a note has no `note` key at all. */
 const optionalNote = (note: string | undefined): {readonly note?: string} =>
   note === undefined ? {} : {note};
+
+/** The chart and the splits of any served view that has the lists (a run's, or a host's). */
+export function costSplits(view: CostSplitSource, words: CostWords): CostSplits {
+  const precision = precisionOf(view.total.costUsd);
+  const slots = slotsOf(view);
+  return {
+    chart: chartOf(view, slots, words),
+    types: typeRows(view, precision, words),
+    models: modelRows(view, precision, slots, words),
+  };
+}
 
 /** The screen's model of one run's cost view. */
 export function costScreenModel(view: CostView, words: CostWords): CostScreenModel {

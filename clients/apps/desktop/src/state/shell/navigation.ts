@@ -91,14 +91,14 @@ const onList = (navigation: Navigation): boolean =>
 export function navigationReducer(navigation: Navigation, action: NavigationAction): Navigation {
   switch (action.type) {
     case 'open-run':
-      // The row opened is the one to find again on the way back.
-      return navigation.destination === 'runs'
-        ? {
-            ...navigation,
-            runs: routeReducer(navigation.runs, action),
-            fleet: {...navigation.fleet, selected: fleetKey(action.host, action.runId)},
-          }
-        : navigation;
+      // A run opens from the list and from the Cost page's rows: the runs destination shows it. The
+      // row opened is the one to find again on the way back.
+      return {
+        ...navigation,
+        destination: 'runs',
+        runs: routeReducer(navigation.runs, action),
+        fleet: {...navigation.fleet, selected: fleetKey(action.host, action.runId)},
+      };
     case 'close-run':
     case 'show':
     case 'show-ideas':
