@@ -22,6 +22,8 @@ import {
   type IdentifyResponse,
   IdentifyResponseSchema,
   ItemsPageSchema,
+  ListDirectoryRequestSchema,
+  ListDirectoryResponseSchema,
   ListItemsRequestSchema,
   ListItemsResponseSchema,
   OrchestratorService,
@@ -45,6 +47,7 @@ import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from '../transport/index.js';
 import type {FakeDaemon} from './fake-daemon.js';
 import {newRunSteps} from './new-run-steps.js';
+import type {FakeFiles} from './fake-files.js';
 
 /** What happens to the `nth` Dispatch call. */
 export type DispatchFate =
@@ -81,6 +84,12 @@ export interface DaemonOptions {
   readonly checkRepository?:
     | ((repository: string) => {readonly reason: string; readonly notReady?: boolean} | undefined)
     | 'unserved';
+  /**
+   * The host's file system. With it the host serves `ListDirectory` and answers `CheckRepository`
+   * from it (its refusals, and the tasks of a repository that passes), unless `checkRepository` says
+   * otherwise; without it `ListDirectory` is unknown, as an older host's is, and no path has tasks.
+   */
+  readonly files?: FakeFiles;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -298,20 +307,47 @@ function runsSteps(
   return [...steps, ...(live ? [followRuns(daemon, summaries)] : tail)];
 }
 
-/** What a `CheckRepository` call answers: the host's refusal of the path, or none. */
+/** What a `CheckRepository` call answers: the host's refusal of the path, or none, and its tasks. */
 function checkRepositorySteps(options: DaemonOptions, target: CallTarget): ReadonlyArray<Step> {
   const {repository} = fromBinary(CheckRepositoryRequestSchema, target.request);
   const check = options.checkRepository;
   if (check === 'unserved')
     return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
-  const refusal = check === undefined ? undefined : invokeCallback(() => check(repository));
+  const refusal =
+    check !== undefined
+      ? invokeCallback(() => check(repository))
+      : refusalOf(options.files?.refusal(repository));
   const answer =
     refusal === undefined
-      ? {}
+      ? {tasks: [...(options.files?.tasksOf(repository) ?? [])]}
       : {refusal: {reason: refusal.reason, notReady: refusal.notReady === true}};
   return [
     {
       frame: toBinary(CheckRepositoryResponseSchema, create(CheckRepositoryResponseSchema, answer)),
+    },
+  ];
+}
+
+const refusalOf = (reason: string | undefined) =>
+  reason === undefined ? undefined : {reason, notReady: false};
+
+/** What a `ListDirectory` call answers: the folder's entries, or the fault of listing it. */
+function listDirectorySteps(options: DaemonOptions, target: CallTarget): ReadonlyArray<Step> {
+  const {files} = options;
+  if (files === undefined)
+    return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+  const {path, includeHidden} = fromBinary(ListDirectoryRequestSchema, target.request);
+  const listed = files.list(path, includeHidden);
+  if (!('entries' in listed)) return [{end: {message: listed.message, status: listed.status}}];
+  return [
+    {
+      frame: toBinary(
+        ListDirectoryResponseSchema,
+        create(ListDirectoryResponseSchema, {
+          entries: listed.entries.map(entry => ({...entry})),
+          truncated: listed.truncated,
+        }),
+      ),
     },
   ];
 }
@@ -398,6 +434,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('ListEvalPlaces'):
         case methodPathOf('ProvisionRepository'):
           return newRun(target.method.slice(PREFIX.length), target.request);
+        case methodPathOf('ListDirectory'):
+          return listDirectorySteps(options, target);
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):

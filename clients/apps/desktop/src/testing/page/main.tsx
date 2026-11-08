@@ -61,6 +61,7 @@ import {
 import {
   FAKE_VIEWER,
   FakeDaemon,
+  FIXTURE_FILES,
   fleetScenario,
   generateScenario,
   measuredSearch,
@@ -145,7 +146,7 @@ function fleetRecording(spec: string): Recording {
         }),
       );
       daemon.runsLeftOut = leftOut;
-      return [host.key, daemonRecording(daemon)] as const;
+      return [host.key, daemonRecording(daemon, {files: FIXTURE_FILES})] as const;
     }),
   );
   // The transport counts calls to a method across hosts; a host's own count says which call is its first.
@@ -205,7 +206,7 @@ const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
 const shape = query.get('catchUp') ?? 'none';
 seedCheckIns(daemon, scenario, CATCH_UP_SHAPES.find(each => each === shape) ?? 'none');
-const served = daemonRecording(daemon, {live: true});
+const served = daemonRecording(daemon, {live: true, files: FIXTURE_FILES});
 /** A host that predates the cost stream answers every other method and not this one. */
 const withoutCostStream = {
   respond: (...call: Parameters<typeof served.respond>) =>

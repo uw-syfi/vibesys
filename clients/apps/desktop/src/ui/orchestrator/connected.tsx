@@ -143,6 +143,7 @@ const snapshots = (
         freshness: get(session.connection.freshness),
         runsFeed: get(session.runs.status),
         repositoryChecked: get(session.repositoryCheck.state),
+        directories: get(session.directories.state),
         agentFeeds:
           openHost === key && openAgent !== null && openAgent !== undefined
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
@@ -257,6 +258,8 @@ export function ConnectedApp(props: {
       issue(host, startIntent(request), start => setIssues(all => ({...all, start}))),
     checkRepository: (host, repository) =>
       on(host, session => session.repositoryCheck.ask(repository)),
+    listDirectory: (host, folder, hidden, fresh) =>
+      on(host, session => session.directories.want(folder, hidden, fresh)),
     retryStart: () => retry(issues.start),
     stopRun: (host, runId) =>
       issue(host, stopIntent(runId), stop =>

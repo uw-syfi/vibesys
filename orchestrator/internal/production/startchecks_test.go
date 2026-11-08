@@ -2,8 +2,11 @@ package production
 
 import (
 	"errors"
+	"io/fs"
+	"maps"
 	"math/rand/v2"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,8 +22,25 @@ func (t fakeTree) IsDir(path string) bool  { return t[path] }
 
 // A fakeTree has no links and every repository in it is committed, task included, so that only the
 // rules about paths can refuse; osTree_test.go runs the history rules against real repositories.
-func (t fakeTree) RealPath(path string) (string, error)      { return path, nil }
-func (t fakeTree) HasCommit(string) (bool, error)            { return true, nil }
+func (t fakeTree) RealPath(path string) (string, error) { return path, nil }
+func (t fakeTree) HasCommit(string) (bool, error)       { return true, nil }
+func (t fakeTree) Home() (string, error)                { return "/home/u", nil }
+
+// ReadDirNames names the first path component below path of every entry under it, as a directory
+// listing does, though the tree names only the entries a test cares about.
+func (t fakeTree) ReadDirNames(path string) ([]string, error) {
+	seen := map[string]bool{}
+	for entry := range t {
+		if rest, ok := strings.CutPrefix(entry, strings.TrimSuffix(path, "/")+"/"); ok {
+			name, _, _ := strings.Cut(rest, "/")
+			seen[name] = true
+		}
+	}
+	if len(seen) == 0 && !t[path] {
+		return nil, fs.ErrNotExist
+	}
+	return slices.Sorted(maps.Keys(seen)), nil
+}
 func (t fakeTree) CommittedDir(string, string) (bool, error) { return true, nil }
 
 // readyLauncher is a launcher that is wired in; what it launches does not matter here.
@@ -44,6 +64,8 @@ func (everythingIsADir) IsDir(string) bool  { return true }
 
 func (everythingIsADir) RealPath(path string) (string, error)      { return path, nil }
 func (everythingIsADir) HasCommit(string) (bool, error)            { return true, nil }
+func (everythingIsADir) Home() (string, error)                     { return "/home/u", nil }
+func (everythingIsADir) ReadDirNames(string) ([]string, error)     { return nil, nil }
 func (everythingIsADir) CommittedDir(string, string) (bool, error) { return true, nil }
 
 func refusal(t *testing.T, err error) *daemon.StartRefusal {

@@ -8,7 +8,13 @@ import {
   Refusal,
 } from '@vibesys/orchestrator-proto';
 import {act, useState} from 'react';
-import type {CommandProgress, RepositoryAnswer, RepositoryChecked} from '../../state/index.js';
+import {
+  type CommandProgress,
+  type FolderListing,
+  listingKey,
+  type RepositoryAnswer,
+  type RepositoryChecked,
+} from '../../state/index.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
 import {NewRun} from './new-run.js';
 import type {StartRunRequest} from './start-draft.js';
@@ -30,12 +36,24 @@ const catalog = (allowedModels: string[]) =>
 
 const PASSED: RepositoryChecked = {
   repository: '/work/decode-service',
-  answer: {_tag: 'Passed'},
+  answer: {_tag: 'Passed', tasks: []},
 };
 
 const HOSTS: readonly StartHost[] = [
-  {key: 'local', label: 'This Mac', models: null, repositoryChecked: undefined},
-  {key: 'ssh:gpu-cluster-1', label: 'gpu-cluster-1', models: null, repositoryChecked: undefined},
+  {
+    key: 'local',
+    label: 'This Mac',
+    models: null,
+    repositoryChecked: undefined,
+    directories: new Map(),
+  },
+  {
+    key: 'ssh:gpu-cluster-1',
+    label: 'gpu-cluster-1',
+    models: null,
+    repositoryChecked: undefined,
+    directories: new Map(),
+  },
 ];
 
 const open = (
@@ -50,6 +68,7 @@ const open = (
       progress={progress}
       start={(host, request) => started.push({host, request})}
       checkRepository={() => undefined}
+      listDirectory={() => undefined}
       retry={() => undefined}
       openRun={(host, runId) => opened.push({host, runId})}
     />,
@@ -153,6 +172,7 @@ describe('the Start run form’s model control', () => {
         label: 'This Mac',
         models: catalog(['model-b', 'model-d', 'model-a']),
         repositoryChecked: undefined,
+        directories: new Map(),
       },
     ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
@@ -173,6 +193,7 @@ describe('the Start run form’s model control', () => {
         label: 'This Mac',
         models: catalog(['model-b', 'model-d', 'model-a']),
         repositoryChecked: undefined,
+        directories: new Map(),
       },
     ]);
     choose(fieldOf<HTMLSelectElement>(screen, 'Lead tool'), 'codex');
@@ -187,7 +208,13 @@ describe('the Start run form’s model control', () => {
 
   it('offers the tool’s own models and its default on a host that allows all, and starts on none', () => {
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: catalog([]), repositoryChecked: undefined},
+      {
+        key: 'local',
+        label: 'This Mac',
+        models: catalog([]),
+        repositoryChecked: undefined,
+        directories: new Map(),
+      },
     ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
     expect(optionsOf(model)).toEqual(['', 'model-c', 'model-d']);
@@ -199,7 +226,13 @@ describe('the Start run form’s model control', () => {
 
   it('cannot start when the host allows no model for the tool, and says so', () => {
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: catalog(['model-a']), repositoryChecked: undefined},
+      {
+        key: 'local',
+        label: 'This Mac',
+        models: catalog(['model-a']),
+        repositoryChecked: undefined,
+        directories: new Map(),
+      },
     ]);
     const start = screen.control('Start run');
     expect(start.getAttribute('aria-disabled') ?? String(start.hasAttribute('disabled'))).toBe(
@@ -214,7 +247,13 @@ describe('the Start run form’s model control', () => {
   it('cannot start when the host’s settings cannot be read', () => {
     const unreadable = create(ModelCatalogSchema, {unreadablePolicy: true});
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: unreadable, repositoryChecked: undefined},
+      {
+        key: 'local',
+        label: 'This Mac',
+        models: unreadable,
+        repositoryChecked: undefined,
+        directories: new Map(),
+      },
     ]);
     screen.press(screen.control('Start run'));
     expect(started).toEqual([]);
@@ -279,6 +318,7 @@ const withHostAnswers = (answers: Readonly<Record<string, RepositoryAnswer>>) =>
     return (
       <NewRun
         hosts={HOSTS.map(host => ({...host, repositoryChecked: checked}))}
+        listDirectory={() => undefined}
         progress={undefined}
         start={(_host, request) => started.push(request)}
         checkRepository={(host, repository) => {
@@ -334,7 +374,7 @@ describe('the Start run form’s repository path as it is typed', () => {
   });
 
   it('keeps Start disabled until the host has answered for the path now in the field', () => {
-    const {screen, started} = withHostAnswers({'/work/ok': {_tag: 'Passed'}});
+    const {screen, started} = withHostAnswers({'/work/ok': {_tag: 'Passed', tasks: []}});
     type(repository(screen), '/work/o');
     screen.press(screen.control('Start run'));
     expect(started).toEqual([]);
@@ -352,7 +392,7 @@ describe('the Start run form’s repository path as it is typed', () => {
   it('clears the error once the path is corrected, and then starts', () => {
     const {screen, started} = withHostAnswers({
       '/plain': {_tag: 'Refused', reason: NOT_A_TREE},
-      '/repo': {_tag: 'Passed'},
+      '/repo': {_tag: 'Passed', tasks: []},
     });
     type(repository(screen), '/plain');
     expect(screen.text()).toContain(NOT_A_TREE);
@@ -369,6 +409,147 @@ describe('the Start run form’s repository path as it is typed', () => {
     type(repository(screen), '/work/x');
     screen.press(screen.control('Start run'));
     expect(started).toHaveLength(1);
+    screen.unmount();
+  });
+});
+
+/** The folders a host lists, by the folder asked for, as the host would list them. */
+const FOLDERS: Readonly<Record<string, FolderListing>> = {
+  '/home/dev/': {
+    _tag: 'Listed',
+    truncated: false,
+    entries: [
+      {name: 'code', isDirectory: true, isGitRepository: false, hasTasks: false},
+      {name: 'codex-notes.md', isDirectory: false, isGitRepository: false, hasTasks: false},
+      {name: 'docs', isDirectory: true, isGitRepository: false, hasTasks: false},
+    ],
+  },
+  '/home/dev/code/': {
+    _tag: 'Listed',
+    truncated: false,
+    entries: [
+      {name: 'decode-service', isDirectory: true, isGitRepository: true, hasTasks: true},
+      {name: 'serving-bench', isDirectory: true, isGitRepository: true, hasTasks: false},
+    ],
+  },
+};
+
+/** The form over a host that lists `FOLDERS` when asked, keeping what it listed as the app does. */
+const withHostFolders = (checks: Readonly<Record<string, RepositoryAnswer>> = {}) => {
+  const listed: {host: string; folder: string; hidden: boolean; fresh: boolean}[] = [];
+  function Connected(): ReturnType<typeof NewRun> {
+    const [directories, setDirectories] = useState<ReadonlyMap<string, FolderListing>>(new Map());
+    const [checked, setChecked] = useState<RepositoryChecked | undefined>(undefined);
+    return (
+      <NewRun
+        hosts={HOSTS.map(host => ({...host, repositoryChecked: checked, directories}))}
+        progress={undefined}
+        start={() => undefined}
+        checkRepository={(_host, repository) => {
+          const answer = checks[repository.trim()];
+          if (answer !== undefined) setChecked({repository: repository.trim(), answer});
+        }}
+        listDirectory={(host, folder, hidden, fresh) => {
+          listed.push({host, folder, hidden, fresh});
+          const listing = FOLDERS[folder];
+          if (listing !== undefined && !hidden)
+            setDirectories(all =>
+              new Map(fresh ? [] : all).set(listingKey(folder, hidden), listing),
+            );
+        }}
+        retry={() => undefined}
+        openRun={() => undefined}
+      />
+    );
+  }
+  const screen = mount(<Connected />);
+  screen.press(screen.control('New run'));
+  return {screen, listed};
+};
+
+function key(field: HTMLInputElement, name: string): void {
+  const View = field.ownerDocument.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent};
+  act(() => {
+    field.dispatchEvent(
+      new View.KeyboardEvent('keydown', {key: name, bubbles: true, cancelable: true}),
+    );
+  });
+}
+
+const options = (screen: Screen): string[] =>
+  [...screen.container.querySelectorAll('[role="option"]')].map(option => option.textContent ?? '');
+
+describe('the Start run form’s completion of the repository path', () => {
+  it('lists the folder the path has reached, narrows it by the typed name, and offers folders only', () => {
+    const {screen, listed} = withHostFolders();
+    type(repository(screen), '/home/dev/');
+    expect(options(screen)).toEqual(['code', 'docs'].map(name => `/home/dev/${name}/`));
+    type(repository(screen), '/home/dev/co');
+    expect(options(screen)).toEqual(['/home/dev/code/']);
+    type(repository(screen), '/home/dev/x');
+    expect(options(screen)).toEqual([]);
+    // Typing within a folder names the same folder every time: the host lists it once.
+    expect(new Set(listed.map(each => each.folder))).toEqual(new Set(['/home/dev/']));
+    screen.unmount();
+  });
+
+  it('marks repositories and ones with tasks by a word', () => {
+    const {screen} = withHostFolders();
+    type(repository(screen), '/home/dev/code/');
+    expect(options(screen)).toEqual([
+      '/home/dev/code/decode-service/tasks',
+      '/home/dev/code/serving-bench/git',
+    ]);
+    screen.unmount();
+  });
+
+  it('takes the highlighted folder with Enter, appends a slash and lists the folder it names', () => {
+    const {screen, listed} = withHostFolders();
+    type(repository(screen), '/home/dev/');
+    key(repository(screen), 'ArrowDown');
+    key(repository(screen), 'ArrowDown');
+    key(repository(screen), 'Enter');
+    expect(repository(screen).value).toBe('/home/dev/docs/');
+    expect(listed.at(-1)).toMatchObject({folder: '/home/dev/docs/', hidden: false});
+    screen.unmount();
+  });
+
+  it('finishes a name with Tab, and lets Tab move on when no name is begun', () => {
+    const {screen} = withHostFolders();
+    type(repository(screen), '/home/dev/co');
+    key(repository(screen), 'Tab');
+    expect(repository(screen).value).toBe('/home/dev/code/');
+    key(repository(screen), 'Tab');
+    // The path ends at a slash and none is highlighted: Tab is not taken.
+    expect(repository(screen).value).toBe('/home/dev/code/');
+    screen.unmount();
+  });
+
+  it('asks for hidden entries only once a dot is typed, and reads afresh when the field is entered', () => {
+    const {screen, listed} = withHostFolders();
+    type(repository(screen), '/home/dev/');
+    type(repository(screen), '/home/dev/.');
+    expect(listed.map(each => each.hidden)).toEqual([false, true]);
+    const field = repository(screen);
+    const View = field.ownerDocument.defaultView as unknown as {FocusEvent: typeof FocusEvent};
+    act(() => {
+      field.dispatchEvent(new View.FocusEvent('focusin', {bubbles: true}));
+    });
+    expect(listed.at(-1)).toMatchObject({folder: '/home/dev/', hidden: true, fresh: true});
+    screen.unmount();
+  });
+
+  it('names the tasks of a repository that passes, and keeps a line for them either way', () => {
+    const {screen} = withHostFolders({
+      '/home/dev/code/decode-service/': {_tag: 'Passed', tasks: ['kv-cache', 'sampler']},
+    });
+    const before = screen.container.querySelectorAll('.vs-help').length;
+    type(repository(screen), '/home/dev/code/decode-service/');
+    expect(screen.text()).toContain('Tasks: kv-cache, sampler');
+    type(repository(screen), '/home/dev/');
+    expect(screen.text()).not.toContain('Tasks:');
+    // The line under the field is there before, during and after an answer.
+    expect(screen.container.querySelectorAll('.vs-help').length).toBeGreaterThanOrEqual(before);
     screen.unmount();
   });
 });

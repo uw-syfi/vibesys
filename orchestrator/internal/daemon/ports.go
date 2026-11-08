@@ -177,7 +177,59 @@ type StartChecks interface {
 	// while the task is still being typed: it refuses a daemon that cannot launch and a repository
 	// that is not an absolute path to the root of a git work tree, and returns the canonical form.
 	CheckRepository(repository string) (canonical string, err error)
+	// Tasks names the tasks a repository holds, sorted: the folders under its .vibesys/tasks. It is
+	// asked of the canonical form CheckRepository returned.
+	Tasks(repository string) ([]string, error)
 }
+
+// Directories lists one folder of the host's file system for a path being typed. It reads the
+// folder's own children and never what is below them.
+type Directories interface {
+	// List returns the entries of the folder path names (absolute, or starting with ~ for the host's
+	// home), sorted by name, with the entries whose names start with a dot only when hidden. A folder
+	// with more entries than the cap, or one still being read when ctx ends, comes back with what was
+	// read and Truncated set. A path that cannot be listed is a *DirectoryError.
+	List(ctx context.Context, path string, hidden bool) (Listing, error)
+}
+
+// Listing is the answer of Directories.List.
+type Listing struct {
+	Entries   []DirectoryEntry
+	Truncated bool
+}
+
+// DirectoryEntry is one child of a listed folder.
+type DirectoryEntry struct {
+	Name string
+	// IsDirectory is a directory, or a link to one.
+	IsDirectory bool
+	// IsGitRepository is a directory that holds a .git.
+	IsGitRepository bool
+	// HasTasks is a directory with at least one task folder under .vibesys/tasks.
+	HasTasks bool
+}
+
+// DirectoryFault says why a folder could not be listed.
+type DirectoryFault int
+
+const (
+	// DirectoryNotAbsolute is a path that is neither absolute nor starts with ~/.
+	DirectoryNotAbsolute DirectoryFault = iota + 1
+	// DirectoryNotFound is a path that names nothing.
+	DirectoryNotFound
+	// DirectoryNotADirectory is a path that names a file.
+	DirectoryNotADirectory
+	// DirectoryDenied is a folder the daemon may not read.
+	DirectoryDenied
+)
+
+// DirectoryError is a path that cannot be listed, in words that name it.
+type DirectoryError struct {
+	Fault  DirectoryFault
+	Reason string
+}
+
+func (e *DirectoryError) Error() string { return e.Reason }
 
 // StartRefusal says why a start was refused, in words that name the offending path or setting.
 type StartRefusal struct {

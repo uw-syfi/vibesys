@@ -17,6 +17,7 @@ type StartChecks struct {
 	refusal *daemon.StartRefusal
 	calls   []StartCall
 	links   map[string]string
+	tasks   map[string][]string
 }
 
 // Link makes the repository name from a symbolic link to the repository to, which is what a start
@@ -66,4 +67,22 @@ func (s *StartChecks) CheckStart(repository, task string) (string, error) {
 		repository = to
 	}
 	return "", &daemon.StartRefusal{Reason: "repository " + repository + " is a link that leads back to itself"}
+}
+
+// SetTasks makes Tasks answer with names for the repository, which is the canonical name a start
+// of it runs in.
+func (s *StartChecks) SetTasks(repository string, names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tasks == nil {
+		s.tasks = map[string][]string{}
+	}
+	s.tasks[repository] = names
+}
+
+// Tasks implements daemon.StartChecks.
+func (s *StartChecks) Tasks(repository string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.tasks[repository]...), nil
 }
