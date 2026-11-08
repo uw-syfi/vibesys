@@ -5,10 +5,13 @@
  * once. Starting from an example is one step for the person: the repository is made, then the run is
  * started in it, and the run's own progress is the command's, like any Start.
  */
+import {create} from '@bufbuild/protobuf';
 import {
+  EmptyRepositorySchema,
   type ListCatalogueResponse,
   type ListEvalPlacesResponse,
   ProvisionRefusal,
+  type ProvisionRepositoryRequest,
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Atom from 'effect/reactivity/Atom';
@@ -23,6 +26,7 @@ import {
   readOf,
 } from '../state/index.js';
 import type {Commands, Intent} from './commands.js';
+import type {DirectoryListings} from './directory-listing.js';
 import {faultOf} from './fault.js';
 import type {HostParts} from './host-store.js';
 import {Ids} from './ids.js';
@@ -59,6 +63,14 @@ export interface NewRun {
     example: ProvisionExample,
     startIn: (repository: string) => Intent,
   ) => Effect.Effect<string | undefined>;
+  /**
+   * Make an empty repository `name` in `parent`, then submit the setup `startIn` builds for it, with
+   * the same answer as `startFromExample`.
+   */
+  readonly startInNewRepository: (
+    repository: {readonly name: string; readonly parent: string},
+    startIn: (repository: string) => Intent,
+  ) => Effect.Effect<string | undefined>;
   /** Forget the outcome of the last provision (another example was picked). */
   readonly forgetProvision: Effect.Effect<void>;
 }
@@ -66,6 +78,7 @@ export interface NewRun {
 export const makeNewRun = Effect.fn('NewRun.make')(function* (
   {client}: HostParts,
   commands: Commands,
+  directories: DirectoryListings,
 ) {
   const ids = yield* Ids;
   const catalogue = yield* SubscriptionRef.make<Remote<ListCatalogueResponse>>(NOT_READ);
@@ -87,25 +100,32 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
   const readPlaces = (refresh: boolean) =>
     read(places, client.listEvalPlaces({refresh}), error => faultOf(error).detail);
 
-  const load = Effect.fn('NewRun.load')(function* () {
-    yield* Effect.all(
-      [
-        read(catalogue, client.listCatalogue({}), error => faultOf(error).detail),
-        readPlaces(false),
-      ],
-      {concurrency: 'unbounded', discard: true},
-    );
+  /** The catalogue, then the folder it names for repositories: the page counts what is in it. */
+  const readCatalogue = Effect.fn('NewRun.readCatalogue')(function* () {
+    yield* read(catalogue, client.listCatalogue({}), error => faultOf(error).detail);
+    const folder = (yield* SubscriptionRef.get(catalogue)).data?.repositoriesDirectory ?? '';
+    if (folder !== '') yield* directories.want(`${folder}/`, false, false);
   });
 
-  const provisioned = Effect.fn('NewRun.provision')(function* (example: ProvisionExample) {
+  const load = Effect.fn('NewRun.load')(function* () {
+    yield* Effect.all([readCatalogue(), readPlaces(false)], {
+      concurrency: 'unbounded',
+      discard: true,
+    });
+  });
+
+  const provisioned = Effect.fn('NewRun.provision')(function* (
+    made: {readonly name: string; readonly parent: string},
+    source: ProvisionRepositoryRequest['source'],
+  ) {
     yield* SubscriptionRef.set(provision, {_tag: 'Working'});
     const requestId = yield* ids.next;
     const reply = yield* client
       .provisionRepository({
         requestId,
-        name: example.name,
-        source: {case: 'example', value: example.example},
-        parentDirectory: example.parent,
+        name: made.name,
+        source,
+        parentDirectory: made.parent,
       })
       .pipe(Effect.result);
     if (reply._tag === 'Failure') {
@@ -148,7 +168,15 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
     example: ProvisionExample,
     startIn: (repository: string) => Intent,
   ) {
-    const repository = yield* provisioned(example);
+    const repository = yield* provisioned(example, {case: 'example', value: example.example});
+    return repository === undefined ? undefined : yield* commands.submit(startIn(repository));
+  });
+
+  const startInNewRepository = Effect.fn('NewRun.startInNewRepository')(function* (
+    made: {readonly name: string; readonly parent: string},
+    startIn: (repository: string) => Intent,
+  ) {
+    const repository = yield* provisioned(made, {case: 'empty', value: create(EmptyRepositorySchema)});
     return repository === undefined ? undefined : yield* commands.submit(startIn(repository));
   });
 
@@ -160,6 +188,7 @@ export const makeNewRun = Effect.fn('NewRun.make')(function* (
     loadPlaces: readPlaces(false),
     refreshPlaces: readPlaces(true),
     startFromExample,
+    startInNewRepository,
     forgetProvision: SubscriptionRef.set(provision, NOT_PROVISIONING),
   } satisfies NewRun;
 });

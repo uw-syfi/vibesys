@@ -21,3 +21,20 @@ export {
 export {autoPick, type PlaceWord, placeChoice, placeFits, placeWord, readable} from './places.js';
 export {defaultName, NOT_PROVISIONING, type ProvisionProgress, parentOf} from './provision.js';
 export {failedOf, NOT_READ, type Remote, readingOf, readOf} from './remote.js';
+export {
+  firstPage,
+  type FolderEntryFacts,
+  fitsHere,
+  leaves,
+  type MachineFacts,
+  type NewRunPage,
+  type NewRunStep,
+  type OwnCase,
+  objectiveChip,
+  offeredPlaces,
+  type PageAction,
+  pageReducer,
+  placesFor,
+  machineFacts,
+  variantOf,
+} from './page.js';

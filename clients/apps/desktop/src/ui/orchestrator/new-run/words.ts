@@ -3,6 +3,7 @@ import {
   AcceleratorModel,
   type EvalOffer,
   type EvalPlace,
+  EvalPlaceKind,
   TaskDomain,
 } from '@vibesys/orchestrator-proto';
 import {
@@ -49,12 +50,31 @@ export const offerWords = (offer: EvalOffer): string => {
 };
 
 /** What an eval place gives, as a short figure: `8× H100`; `CPU` for a place with no accelerator. */
-const hardwareWords = (place: EvalPlace): string =>
+export const hardwareWords = (place: EvalPlace): string =>
   place.offers.length === 0 ? 'CPU' : place.offers.map(offerWords).join(', ');
+
+/** What a place is called on screen: the machine's own Docker is never called "here". */
+export const placeName = (place: EvalPlace): string =>
+  place.kind === EvalPlaceKind.LOCAL ? 'Local Docker' : place.name;
+
+const KIND_WORDS: Readonly<Record<EvalPlaceKind, string>> = {
+  [EvalPlaceKind.UNSPECIFIED]: '',
+  [EvalPlaceKind.LOCAL]: 'local',
+  [EvalPlaceKind.SSH]: 'Docker over ssh',
+  [EvalPlaceKind.SLURM]: 'Slurm',
+  [EvalPlaceKind.APPTAINER]: 'Slurm · Apptainer',
+  [EvalPlaceKind.CLOUD]: 'cloud',
+};
+
+/** What a place is and gives, for its chip: `local · 8× H100`, or `unreadable` for hardware the host could not read. */
+export const placeDetail = (place: EvalPlace): string =>
+  [KIND_WORDS[place.kind], readable(place) ? hardwareWords(place) : 'unreadable']
+    .filter(part => part !== '')
+    .join(' · ');
 
 /** A place in the select: its name, its hardware, and the host's word for it on this entry. */
 export const placeLabel = (place: EvalPlace, word: PlaceWord | null): string =>
-  [place.name, readable(place) ? hardwareWords(place) : null, word]
+  [placeName(place), readable(place) ? hardwareWords(place) : null, word]
     .filter((part): part is string => part !== null && part !== '')
     .join(' · ');
 

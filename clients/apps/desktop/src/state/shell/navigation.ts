@@ -49,6 +49,7 @@ export type NavigationKind = NavigationAction['type'];
 
 /** Every kind of `NavigationAction`; the type makes a kind added to the union a compile error here. */
 const KINDS = {
+  'open-new-run': true,
   'open-run': true,
   'close-run': true,
   show: true,
@@ -79,6 +80,7 @@ export const initialNavigation: Navigation = {
  */
 function stepBack(route: Route): Route {
   if (route.screen === 'runs') return route;
+  if (route.screen === 'new-run') return routeReducer(route, {type: 'close-run'});
   if (route.agentId !== null) return routeReducer(route, {type: 'close-agent'});
   if (route.view !== 'report') return routeReducer(route, {type: 'show', view: 'report'});
   return routeReducer(route, {type: 'close-run'});
@@ -99,6 +101,9 @@ export function navigationReducer(navigation: Navigation, action: NavigationActi
         runs: routeReducer(navigation.runs, action),
         fleet: {...navigation.fleet, selected: fleetKey(action.host, action.runId)},
       };
+    case 'open-new-run':
+      // The list's New run: the runs destination shows the page that starts one.
+      return {...navigation, destination: 'runs', runs: routeReducer(navigation.runs, action)};
     case 'close-run':
     case 'show':
     case 'show-ideas':

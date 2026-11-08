@@ -5,7 +5,7 @@ import {
   type Run,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
-import {Chip, type Crumb, Page, Text} from '@vibesys/ui';
+import {Button, Chip, type Crumb, Page, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus, ProvisionExample, RunHistoryStatus} from '../../core/index.js';
 import {
@@ -122,6 +122,12 @@ export interface AppCommands {
   readonly startFromExample: (
     host: string,
     example: ProvisionExample,
+    request: StartRunRequest,
+  ) => void;
+  /** Make an empty repository on `host`, then begin a setup chat in it; `request` names no repository yet. */
+  readonly setUpInNewRepository: (
+    host: string,
+    repository: {readonly name: string; readonly parent: string},
     request: StartRunRequest,
   ) => void;
   /** Forget what `host` said of the last copy of an example. */
@@ -253,6 +259,29 @@ export function OrchestratorApp(props: {
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {hosts, commands, route, go} = props;
+  const startHosts = hosts.map(
+    ({
+      key,
+      label,
+      model,
+      repositoryChecked,
+      directories,
+      catalogue,
+      evalPlaces,
+      repositoriesDirectory,
+      provision,
+    }) => ({
+      key,
+      label,
+      models: model.data.models,
+      repositoryChecked,
+      directories,
+      catalogue,
+      evalPlaces,
+      repositoriesDirectory,
+      provision,
+    }),
+  );
   if (route.screen === 'runs') {
     return (
       <FleetScreen
@@ -262,42 +291,47 @@ export function OrchestratorApp(props: {
         go={go}
         retryHost={props.retryHost}
         newRun={
-          <NewRun
-            hosts={hosts.map(
-              ({
-                key,
-                label,
-                model,
-                repositoryChecked,
-                directories,
-                catalogue,
-                evalPlaces,
-                repositoriesDirectory,
-                provision,
-              }) => ({
-                key,
-                label,
-                models: model.data.models,
-                repositoryChecked,
-                directories,
-                catalogue,
-                evalPlaces,
-                repositoriesDirectory,
-                provision,
-              }),
-            )}
-            progress={commands.start}
-            start={commands.startRun}
-            checkRepository={commands.checkRepository}
-            listDirectory={commands.listDirectory}
-            retry={commands.retryStart}
-            loadNewRun={commands.loadNewRun}
-            startFromExample={commands.startFromExample}
-            forgetProvision={commands.forgetProvision}
-            beginSetup={commands.beginSetup}
-            openRun={(host, runId) => go({type: 'open-run', host, runId})}
+          <Button
+            text="New run"
+            icon="plus"
+            variant="primary"
+            press={() => {
+              // The page reads every machine's catalogue and places as it opens, for its tabs.
+              for (const host of startHosts) {
+                commands.loadNewRun(host.key);
+                if (host.repositoriesDirectory !== '') {
+                  commands.listDirectory(
+                    host.key,
+                    `${host.repositoriesDirectory.replace(/\/+$/, '')}/`,
+                    false,
+                    false,
+                  );
+                }
+              }
+              go({type: 'open-new-run'});
+            }}
           />
         }
+      />
+    );
+  }
+  if (route.screen === 'new-run') {
+    return (
+      <NewRun
+        hosts={startHosts}
+        progress={commands.start}
+        start={commands.startRun}
+        checkRepository={commands.checkRepository}
+        listDirectory={commands.listDirectory}
+        retry={commands.retryStart}
+        loadNewRun={commands.loadNewRun}
+        startFromExample={commands.startFromExample}
+        forgetProvision={commands.forgetProvision}
+        beginSetup={commands.beginSetup}
+        setUpInNewRepository={commands.setUpInNewRepository}
+        openRun={(host, runId) => go({type: 'open-run', host, runId})}
+        openRuns={() => go({type: 'open-runs'})}
+        editMachines={() => go({type: 'open-machines'})}
       />
     );
   }

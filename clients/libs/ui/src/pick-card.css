@@ -1,0 +1,82 @@
+/* Pick cards: one button per card, in a grid. Every value is a token. */
+.vs-pick-cards {
+  display: grid;
+  gap: var(--space-3);
+  align-items: stretch;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--column-field)), 1fr));
+}
+.vs-pick-cards[data-columns='fit'] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
+}
+.vs-pick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-pick-card:hover {
+  border-color: var(--muted);
+}
+.vs-pick-card[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+.vs-pick-card:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-pick-card[data-unavailable] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.vs-pick-card[data-unavailable]:hover {
+  border-color: var(--line);
+}
+.vs-pick-card-title {
+  font-family: var(--text-item-family);
+  font-size: var(--text-item-size);
+  line-height: var(--text-item-line);
+  font-weight: var(--text-item-weight);
+  overflow-wrap: anywhere;
+}
+.vs-pick-card-tag {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  font-weight: var(--text-small-weight);
+  white-space: nowrap;
+}
+.vs-pick-card-id {
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  overflow-wrap: anywhere;
+}
+.vs-pick-card-note {
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+.vs-pick-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}

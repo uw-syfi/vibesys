@@ -15,9 +15,8 @@ const Arrival = pageArrival.Provider;
 export function placeOf(navigation: Navigation): string {
   if (navigation.destination !== 'runs') return navigation.destination;
   const {runs} = navigation;
-  return runs.screen === 'runs'
-    ? 'runs'
-    : `${runs.host}/${runs.runId}/${runs.view}/${runs.agentId ?? ''}`;
+  if (runs.screen !== 'run') return runs.screen;
+  return `${runs.host}/${runs.runId}/${runs.view}/${runs.agentId ?? ''}`;
 }
 
 /** What names an element to a person: its label, or the text it is labelled by, or its own text. */

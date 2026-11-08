@@ -191,6 +191,9 @@ export {
   type StackedBar,
   StackedBars,
 } from './components/stacked-bars.js';
+export {PickCard, PickCards} from './components/pick-card.js';
+export {ClipRow} from './components/clip-row.js';
+export {Stale} from './components/stale.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';

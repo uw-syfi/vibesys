@@ -66,6 +66,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const ambient = yield* Effect.context<never>();
   const parts = {client, connection, store, ambient};
   const commands = yield* makeCommands(parts);
+  const directories = yield* makeDirectoryListings(parts);
   return {
     connection,
     model: store.atom,
@@ -82,8 +83,8 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     }),
     commands,
     repositoryCheck: yield* makeRepositoryCheck(parts),
-    directories: yield* makeDirectoryListings(parts),
+    directories,
     catchUp: yield* makeCatchUp(commands),
-    newRun: yield* makeNewRun(parts, commands),
+    newRun: yield* makeNewRun(parts, commands, directories),
   };
 });

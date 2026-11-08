@@ -240,7 +240,10 @@ function newRunCommands(
   sessionOf: (host: string) => HostSession | undefined,
   dispatch: Dispatch,
   setIssues: (update: (all: Issues) => Issues) => void,
-): Pick<AppCommands, 'loadNewRun' | 'startFromExample' | 'forgetProvision'> {
+): Pick<
+  AppCommands,
+  'loadNewRun' | 'startFromExample' | 'setUpInNewRepository' | 'forgetProvision'
+> {
   return {
     loadNewRun: host => {
       const session = sessionOf(host);
@@ -252,6 +255,18 @@ function newRunCommands(
       dispatch(
         session.newRun.startFromExample(example, repository =>
           startIntent({...request, repository}),
+        ),
+        id => {
+          if (id !== undefined) setIssues(all => ({...all, start: {host, id}}));
+        },
+      );
+    },
+    setUpInNewRepository: (host, repository, request) => {
+      const session = sessionOf(host);
+      if (session === undefined) return;
+      dispatch(
+        session.newRun.startInNewRepository(repository, made =>
+          beginSetupIntent({...request, repository: made}),
         ),
         id => {
           if (id !== undefined) setIssues(all => ({...all, start: {host, id}}));

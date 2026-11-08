@@ -44,6 +44,7 @@ export function appCommandsOf(overrides: Partial<AppCommands> = {}): AppCommands
     listDirectory: () => undefined,
     loadNewRun: () => undefined,
     startFromExample: () => undefined,
+    setUpInNewRepository: () => undefined,
     forgetProvision: () => undefined,
     retryStart: () => undefined,
     stopRun: () => undefined,
