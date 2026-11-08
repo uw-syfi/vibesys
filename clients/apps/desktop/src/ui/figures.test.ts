@@ -19,4 +19,41 @@ describe('a measured value', () => {
     expect(formatFigure(17)).toBe('17');
     expect(formatFigure(118.4)).toBe('118.4');
   });
+
+  it('rounds into the next unit before picking a suffix, so it never writes 1000 of one', () => {
+    expect(formatFigure(999_999)).toBe('1M');
+    expect(formatFigure(999.96)).toBe('1k');
+    expect(formatFigure(999_950)).toBe('1M');
+    expect(formatFigure(-999_999)).toBe('-1M');
+  });
+
+  it('never writes 1000 or more of a unit that has a bigger one above it', () => {
+    // Values this close to zero are outside the rollover this test pins: `toPrecision` itself
+    // writes them in exponential notation, same as before this fix, for any value or none.
+    const notTooSmall = (value: number) => value === 0 || Math.abs(value) >= 1e-5;
+    // A uniform double over the whole domain almost never lands in the narrow band right below a
+    // seam (999,950 to 1,000,000; 999.95M to 1,000M) where the rollover bug lived, so half the
+    // runs are drawn from those bands directly.
+    const nearASeam = fc
+      .tuple(fc.constantFrom(1e6, 1e9), fc.double({min: 0, max: 50, noNaN: true}))
+      .map(([seam, below]) => seam - below);
+    fc.assert(
+      fc.property(
+        fc
+          .oneof(
+            fc.double({min: -999.9499e9, max: 999.9499e9, noNaN: true}),
+            nearASeam,
+            nearASeam.map(value => -value),
+          )
+          .filter(notTooSmall),
+        value => {
+          const text = formatFigure(value);
+          const match = /^-?(\d+(?:\.\d+)?)([kMG]?)$/.exec(text);
+          if (match === null) throw new Error(`"${text}" does not look like a figure`);
+          expect(Math.abs(Number(match[1]))).toBeLessThan(1000);
+        },
+      ),
+      {seed: 51},
+    );
+  });
 });

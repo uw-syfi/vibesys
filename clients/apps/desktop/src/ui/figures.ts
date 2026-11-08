@@ -6,9 +6,12 @@
 
 /** A number as a figure: four significant digits and a suffix for thousands. */
 export function formatFigure(value: number): string {
-  const size = Math.abs(value);
+  // Rounded to its four figures first, so a value that rounds up into the next unit (999,999 is
+  // 1.000M, not 1000k) picks that unit's suffix rather than the one its unrounded size suggests.
+  const rounded = Number(value.toPrecision(4));
+  const size = Math.abs(rounded);
   const [divisor, suffix] =
     size >= 1e9 ? [1e9, 'G'] : size >= 1e6 ? [1e6, 'M'] : size >= 1e3 ? [1e3, 'k'] : [1, ''];
-  const scaled = Number((value / divisor).toPrecision(4));
+  const scaled = Number((rounded / divisor).toPrecision(4));
   return `${scaled === 0 ? 0 : scaled}${suffix}`;
 }
