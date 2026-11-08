@@ -6,8 +6,6 @@
  */
 import {createHash, randomUUID} from 'node:crypto';
 import type {Writable} from 'node:stream';
-import {promisify} from 'node:util';
-import {gzip} from 'node:zlib';
 import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -27,8 +25,6 @@ import type {SshLink} from './ssh-link.js';
 /** Host executable name, pinned across languages by the host-program golden. */
 export const HOST_PROGRAM = 'vibesys-host';
 
-const compress = promisify(gzip);
-
 /** Where a host keeps the gateway for this build, relative to its home directory. */
 export const GATEWAY_DIRECTORY = `.vibesys/gateway/${API_SCHEMA_HASH.slice(0, 16)}`;
 
@@ -43,6 +39,12 @@ export class GatewayArtifacts extends Context.Service<
     readonly read: (
       target: GatewayTarget,
     ) => Effect.Effect<Uint8Array, GatewayFailed | GatewayRefused>;
+    /**
+     * The gzip stream the upload carries. A service of its own because compressing is real work
+     * on another thread, which no virtual clock waits for: a test supplies one that finishes
+     * where it is called, so that the time a dial takes is the clock's alone.
+     */
+    readonly pack: (bytes: Uint8Array) => Effect.Effect<Uint8Array, GatewayFailed>;
   }
 >()('app/GatewayArtifacts') {}
 
@@ -180,11 +182,7 @@ export const provisionGateway = (
     // fail the install with an exit code, which reads as a lost link and is redialed for ever.
     yield* requirePrerequisites;
     const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.${HOST_PROGRAM}-${randomUUID()}"`;
-    const packed = yield* Effect.tryPromise({
-      try: () => compress(bytes),
-      catch: cause =>
-        new GatewayFailed({message: `could not compress the gateway: ${String(cause)}`}),
-    });
+    const packed = yield* artifacts.pack(bytes);
     yield* run(
       `umask 077; mkdir -p "$HOME/${GATEWAY_DIRECTORY}" && ` +
         `trap 'rm -f ${temporary}' EXIT HUP INT TERM; ` +

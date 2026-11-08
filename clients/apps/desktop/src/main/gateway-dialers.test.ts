@@ -7,13 +7,17 @@ import {hostKey} from '../state/host.js';
 import {commandOf} from '../state/remote-command.js';
 import {untilTrue} from '../testing/main/drive.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
+import {packInPlace} from '../testing/main/fake-pack.js';
 import {fakeSpawner, type Started} from '../testing/main/fake-process.js';
 import {makeGatewayDialers} from './gateway-dialers.js';
 import {GATEWAY_CONNECT_SCRIPT, GatewayArtifacts} from './gateway-provision.js';
 import {makeLinkPool} from './link-pool.js';
 
 const ARTIFACT = new TextEncoder().encode('gateway');
-const artifacts = Layer.succeed(GatewayArtifacts, {read: () => Effect.succeed(ARTIFACT)});
+const artifacts = Layer.succeed(GatewayArtifacts, {
+  read: () => Effect.succeed(ARTIFACT),
+  pack: packInPlace,
+});
 const scriptOf = (started: Started): string | null => commandOf(started.args.at(-1) ?? '');
 
 /** An ssh host that is up and already holds the gateway; `connect` is the bridge to it. */

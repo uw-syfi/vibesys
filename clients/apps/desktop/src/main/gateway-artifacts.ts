@@ -1,4 +1,6 @@
 /** The gateway executables the build ships, found under the app's resources by schema hash. */
+import {promisify} from 'node:util';
+import {gzip} from 'node:zlib';
 import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
@@ -8,6 +10,8 @@ import {nodeReadFile, type ReadFile} from './files.js';
 import {GatewayArtifacts, HOST_PROGRAM} from './gateway-provision.js';
 
 const VERSION = API_SCHEMA_HASH.slice(0, 16);
+
+const compress = promisify(gzip);
 
 /**
  * Artifacts under `resources`, read with `read`: the host programs this build of the app ships (a
@@ -27,6 +31,12 @@ export const gatewayArtifactsFrom = (
     ),
   ).pipe(Effect.map(found => found.flat()));
   return Layer.succeed(GatewayArtifacts, {
+    pack: bytes =>
+      Effect.tryPromise({
+        try: () => compress(bytes),
+        catch: cause =>
+          new GatewayFailed({message: `could not compress the gateway: ${String(cause)}`}),
+      }),
     read: target =>
       read(pathOf(target)).pipe(
         Effect.mapError(

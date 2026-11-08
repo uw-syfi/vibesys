@@ -8,12 +8,16 @@ import hostProgram from '../../../../../proto/testdata/host_program.golden.json'
 };
 import {untilTrue} from '../testing/main/drive.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
+import {packInPlace} from '../testing/main/fake-pack.js';
 import {fakeSpawner} from '../testing/main/fake-process.js';
 import {GatewayArtifacts} from './gateway-provision.js';
 import {dialLocalGateway} from './local-gateway.js';
 
 const ARTIFACT = new Uint8Array([1, 2, 3]);
-const artifacts = Layer.succeed(GatewayArtifacts, {read: () => Effect.succeed(ARTIFACT)});
+const artifacts = Layer.succeed(GatewayArtifacts, {
+  read: () => Effect.succeed(ARTIFACT),
+  pack: packInPlace,
+});
 const BINARY = `/home/user/.vibesys/gateway/0123456789abcdef/${hostProgram.program}`;
 
 describe('local gateway dial', () => {

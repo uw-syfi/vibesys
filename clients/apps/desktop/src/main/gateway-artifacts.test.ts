@@ -1,3 +1,4 @@
+import {gunzipSync} from 'node:zlib';
 import {describe, expect, it} from '@effect/vitest';
 import {API_SCHEMA_HASH, DesktopRefusal} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
@@ -51,6 +52,20 @@ describe('gateway artifacts', () => {
         );
         expect((yield* Effect.flip(broken.read('linux-arm64'))).message).toContain('EACCES');
       }),
+  );
+});
+
+describe('the packer of the upload', () => {
+  it.effect('gzips any bytes so that the host gets them back', () =>
+    Effect.gen(function* () {
+      const artifacts = yield* read({}).pipe(
+        Effect.provide(gatewayArtifactsFrom('/app/gateway', () => Effect.succeed(null))),
+      );
+      for (const bytes of [new Uint8Array(0), Uint8Array.of(7), new Uint8Array(100_000).fill(3)]) {
+        const packed = yield* artifacts.pack(bytes);
+        expect(new Uint8Array(gunzipSync(packed))).toEqual(bytes);
+      }
+    }),
   );
 });
 
