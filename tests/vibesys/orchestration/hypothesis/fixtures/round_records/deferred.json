@@ -30,6 +30,7 @@
   "perf_baseline_metric": null,
   "perf_delta_pct": null,
   "perf_comparison": "incomparable",
+  "perf_gain": null,
   "perf_provenance": "implementer",
   "implementer_provider": null,
   "implementer_model": null,

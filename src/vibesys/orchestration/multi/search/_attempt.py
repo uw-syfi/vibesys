@@ -27,7 +27,9 @@ from vibesys.hypothesis import (
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
+    MeasuredEffect,
     OrchestratorPlan,
+    measure_effect,
     reviewed,
     rounds,
 )
@@ -54,7 +56,6 @@ from vs_core.api.search import (
     LocalValidationReport,
     RevisionRef,
     Settlement,
-    effect_verdict,
     terms_policy,
 )
 
@@ -64,7 +65,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
     from vibesys.orchestration.multi.search._config import MultiConfig
     from vibesys.serial_search.api import GateResult
-    from vs_core.api.search import EffectVerdict, TaskTerms
+    from vs_core.api.search import TaskTerms
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """Implementer outcomes that make a candidate ineligible however well it measures."""
@@ -168,8 +169,8 @@ class Evaluated:
 
     revision: RevisionRef
     readings: tuple[AcceptedReading, ...]
-    effect: EffectVerdict | None
-    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    effect: MeasuredEffect | None
+    """What the framework's comparison says of the plan's bar and of any gain; None without one."""
 
 
 @dataclass
@@ -200,8 +201,8 @@ class MultiAttempt:
     judge_invocation: InvocationRef | None = None
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
-    effect: EffectVerdict | None = None
-    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    effect: MeasuredEffect | None = None
+    """What the framework's comparison says of the plan's bar and of any gain; None without one."""
     measurement_noise: serial.MeasurementNoise | None = None
     """The noise the latest trusted comparison stated, which the next designer is shown."""
     evaluated: Evaluated | None = None
@@ -392,7 +393,7 @@ class MultiAttempt:
                 self.effect = (
                     None
                     if comparison is None
-                    else effect_verdict(
+                    else measure_effect(
                         comparison, self.plan.minimum_ratio, terms_policy(self.terms)
                     )
                 )
@@ -449,7 +450,7 @@ class MultiAttempt:
             readings=result.readings,
             effect=None
             if comparison is None
-            else effect_verdict(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
+            else measure_effect(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
         )
 
     def _gate_failed(self, feedback: str) -> None:

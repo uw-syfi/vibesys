@@ -18,12 +18,42 @@ from vibesys.hypothesis.transitions import (
     unmeasured_candidate_retained,
 )
 from vibesys.metrics import Measurement, MetricComparison
-from vs_core.api import EffectVerdict
+from vs_core.api import EffectVerdict, effect_verdict
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.attempts import AttemptState, PerformanceProjection
     from vibesys.hypothesis.plan import OrchestratorPlan
     from vibesys.hypothesis.state import Hypothesis, HypothesisState
+    from vs_core.api import Comparison, ComparisonPolicy
+
+
+_ANY_GAIN = 1.0
+"""The bar that asks only for a gain beyond noise (`OrchestratorPlan.minimum_ratio`'s default)."""
+
+
+@dataclass(frozen=True)
+class MeasuredEffect:
+    """What the framework's comparison of a candidate with its base says, asked two ways.
+
+    ``bar`` answers the plan: did the idea clear the ratio its designer expected? ``gain``
+    answers the candidate: is it better than its base beyond noise at all? They differ only
+    for a candidate that beats its base by less than the plan expected, which is a real gain
+    that missed its forecast, not an idea that did nothing; the designer needs both to tell
+    the two apart.
+    """
+
+    bar: EffectVerdict
+    gain: EffectVerdict
+
+
+def measure_effect(
+    comparison: Comparison, minimum_ratio: float, policy: ComparisonPolicy
+) -> MeasuredEffect:
+    """Both verdicts of one comparison: against the plan's bar and against no bar at all."""
+    return MeasuredEffect(
+        bar=effect_verdict(comparison, minimum_ratio, policy),
+        gain=effect_verdict(comparison, _ANY_GAIN, policy),
+    )
 
 
 @dataclass(frozen=True)
@@ -54,8 +84,8 @@ class RecordInput:
     # whose last paid attempt was interrupted): unknown attribution is never official.
     implementer: AgentAttribution | None
     # What the framework's own comparison of the candidate with its base says of the plan's
-    # typed bar (`vs_core.api.effect_verdict`); None when it had no comparison to derive it from.
-    effect: EffectVerdict | None = None
+    # typed bar and of any gain (`measure_effect`); None when it had no comparison.
+    effect: MeasuredEffect | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +110,7 @@ class MeasurementEvidence:
     parent_record: RoundRecord | None
     baseline_metric: float | None
     comparison: MetricComparison | None
+    gain: MetricComparison | None
     delta_pct: float | None
     trusted: bool
 
@@ -160,18 +191,21 @@ def _measurement(
         if metric_name is not None and official_metric is not None
         else None
     )
-    comparison = (
-        _EFFECT_COMPARISON[data.effect]
-        if data.effect is not None and official and trusted
-        else data.state.metrics.compare(
+    effect = data.effect if official and trusted else None
+    # Without core's comparison the record orders the reading against its causal baseline
+    # within the run's metric space, which asks for any gain: the bar and the gain coincide.
+    against_base = (
+        data.state.metrics.compare(
             reading,
             Measurement(metric=metric_name, value=baseline, direction=direction)
             if metric_name is not None and baseline is not None
             else None,
         )
-        if official and official_metric is not None and trusted
+        if effect is None and official and official_metric is not None and trusted
         else None
     )
+    comparison = against_base if effect is None else _EFFECT_COMPARISON[effect.bar]
+    gain = against_base if effect is None else _EFFECT_COMPARISON[effect.gain]
     delta = (
         (official_metric - baseline) / abs(baseline) * 100
         if trusted and official_metric is not None and baseline not in {None, 0}
@@ -185,6 +219,7 @@ def _measurement(
         parent,
         baseline,
         comparison,
+        gain,
         delta,
         trusted,
     )
@@ -309,6 +344,7 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         perf_baseline_metric=metrics.baseline_metric,
         perf_delta_pct=metrics.delta_pct,
         perf_comparison=metrics.comparison,
+        perf_gain=metrics.gain,
         perf_provenance=projection.provenance,
         implementer_provider=data.implementer.provider if data.implementer else None,
         implementer_model=data.implementer.model if data.implementer else None,

@@ -69,9 +69,11 @@ from vibesys.hypothesis.plan import (
 from vibesys.hypothesis.record import (
     AgentAttribution,
     CandidateEvidence,
+    MeasuredEffect,
     MeasurementEvidence,
     RecordInput,
     build_round_record,
+    measure_effect,
 )
 from vibesys.hypothesis.results import (
     AttemptBudget,
@@ -135,6 +137,7 @@ __all__ = [
     "JudgeSkipReason",
     "JudgeSkipped",
     "JudgeVerdict",
+    "MeasuredEffect",
     "MeasurementEvidence",
     "NewHypothesis",
     "NextRoundDecision",
@@ -164,6 +167,7 @@ __all__ = [
     "derive_hypothesis_title",
     "ending_of",
     "has_trusted_reading",
+    "measure_effect",
     "normalize_hypothesis_title",
     "parse_round_record",
     "recorded_judge_verdict",
