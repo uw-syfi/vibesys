@@ -107,6 +107,9 @@ func cardOut(c *core.TaskCard) *cliv1.TaskCard {
 	return out
 }
 
+// TaskCardMessage is the card a client shows of a task; nil for none.
+func TaskCardMessage(c *core.TaskCard) *cliv1.TaskCard { return cardOut(c) }
+
 func cardIn(c *cliv1.TaskCard, errs *errorList) *core.TaskCard {
 	if c == nil {
 		return nil

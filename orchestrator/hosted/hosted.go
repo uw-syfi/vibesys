@@ -88,7 +88,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	sidecars.Place = layout.State.Place
 	searches := production.SearchFor()
 	catalog := &production.SidecarCatalog{Parts: parts, Runner: production.ExecRunner{}, Environ: hostconfig.Environ(o.Config, o.Home, o.Getenv)}
-	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, JobTool: parts.JobToolEndpoint, Parts: parts, Root: o.Root, Models: production.HostModels{Home: o.Home, Catalog: catalog, Log: o.Log}}
+	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, JobTool: parts.JobToolEndpoint, Parts: parts, Root: o.Root, Models: production.HostModels{Home: o.Home, Catalog: catalog, Log: o.Log}, SetupReads: production.NewCLISetupReads()}
 	d, err := production.AwaitHandOver(ctx, o.Root, time.After, func() (*production.Daemon, error) { return production.Open(layout, wiring, o.Log) })
 	if err != nil {
 		var held *production.HeldError
