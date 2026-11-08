@@ -18,7 +18,6 @@ import {
   FitSchema,
   FitState,
   ListCatalogueResponseSchema,
-  ListEvalPlacesResponseSchema,
   ModelMaker,
   OffersSource,
   oneofIs,
@@ -68,9 +67,6 @@ export const fixturePlaces = (): ReadonlyArray<EvalPlace> => [
     offer(AcceleratorModel.MI300X, AcceleratorVendor.AMD, 8, 'AMD Instinct MI300X'),
   ]),
 ];
-
-export const fixturePlacesResponse = () =>
-  create(ListEvalPlacesResponseSchema, {places: [...fixturePlaces()]});
 
 /** Whether any place gives the card's accelerator, and which: the host's fit rule. */
 export function fitOf(card: TaskCard, places: ReadonlyArray<EvalPlace>): Fit {
