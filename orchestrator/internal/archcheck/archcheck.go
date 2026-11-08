@@ -52,7 +52,7 @@ var rules = map[string][]string{
 	"release":                          {"gen/vibesys/orchestrator/"},
 	"hostlock":                         {"gen/vibesys/orchestrator/"},
 	"privatesocket":                    {},
-	"release/releasetest":              {"release"},
+	"release/releasetest":              {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
 	"cmd/release-manifest":             {"release"},
 	"clientcli":                        {"clientcli/attachview", "internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
 	"clientcli/attachview":             {"gen/vibesys/orchestrator/"},
