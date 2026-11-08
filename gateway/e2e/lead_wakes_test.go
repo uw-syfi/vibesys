@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -21,10 +22,11 @@ import (
 const fixtureJobs = 8
 
 // awaitLeadDeliveries waits until the run is over, then reads the typed mailbox of its snapshot as
-// `run get` serves it (it holds the messages of a run that is over) and returns how many job notices
-// woke the lead. Every message to the lead must have been consumed: the run ends only when nothing is in
-// transit, so a message that is not consumed was lost. The bound only guards against a run that never ends.
-func (r *rig) awaitLeadDeliveries(run, lead string) (jobNotices int) {
+// `run get` serves it (it holds the messages of a run that is over) and returns the ids of the jobs
+// the lead was told of. Every message to the lead must have been consumed: the run ends only when
+// nothing is in transit, so a message that is not consumed was lost. The bound only guards against a
+// run that never ends.
+func (r *rig) awaitLeadDeliveries(run, lead string) (told []string) {
 	r.t.Helper()
 	deadline := time.Now().Add(bound)
 	for {
@@ -43,11 +45,11 @@ func (r *rig) awaitLeadDeliveries(run, lead string) (jobNotices int) {
 }
 
 // leadDeliveries checks what woke the lead: one brief, three handoffs, and job notices of at most
-// fixtureJobs jobs, each job at most once, all consumed. It returns the number of job notices.
-func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
+// fixtureJobs jobs, each job at most once, all consumed. It returns the ids of the jobs told, in order.
+func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) []string {
 	t.Helper()
 	briefs, handoffs := 0, 0
-	jobs := map[string]bool{}
+	var jobs []string
 	for _, m := range messages {
 		if m.ToAgentId != lead {
 			continue
@@ -58,10 +60,10 @@ func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
 		case *pb.Message_Handoff:
 			handoffs++
 		case *pb.Message_JobFinished:
-			if jobs[b.JobFinished.JobId] {
+			if slices.Contains(jobs, b.JobFinished.JobId) {
 				t.Fatalf("job %s woke the lead twice", b.JobFinished.JobId)
 			}
-			jobs[b.JobFinished.JobId] = true
+			jobs = append(jobs, b.JobFinished.JobId)
 		default:
 			t.Fatalf("unexpected lead wake: %T", m.Body)
 		}
@@ -72,5 +74,5 @@ func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
 	if briefs != 1 || handoffs != 3 || len(jobs) > fixtureJobs {
 		t.Errorf("lead wakes: %d briefs, %d handoffs, %d job notices; want 1, 3 and at most %d", briefs, handoffs, len(jobs), fixtureJobs)
 	}
-	return len(jobs)
+	return jobs
 }
