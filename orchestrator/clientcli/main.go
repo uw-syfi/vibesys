@@ -155,7 +155,7 @@ type call struct {
 type verb func(ctx context.Context, c *call, args []string) error
 
 var verbs = map[string]verb{
-	"start": start, "list": list, "attach": attach, "get": get, "wait": wait, "steer": steer, "stop": stop,
+	"start": start, "list": list, "attach": attach, "get": get, "wait": wait, "steer": steer, "stop": stop, "update": update,
 }
 
 // open reaches the service, having decided what to do with what it finds there for a verb that only
