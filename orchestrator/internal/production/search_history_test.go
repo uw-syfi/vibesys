@@ -21,7 +21,7 @@ import (
 // test-isolation: compose the private production adapter with the real follower,
 // reconciler and daemon. Only durable events, not internal maps, are the oracle.
 func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
-	for seed := range uint64(30) {
+	for seed := range thinnedUnderRace(30) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, 42))

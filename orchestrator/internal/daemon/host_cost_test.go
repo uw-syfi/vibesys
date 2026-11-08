@@ -186,7 +186,7 @@ func total(u *pb.Usage) uint64 {
 // tokens by kind, the turns and the unpriced turns are sums too, a cost that no run has is absent and
 // not zero, and each run's line in the list is its own view's figures.
 func TestHostCostIsTheSumOfEveryRunsCost(t *testing.T) {
-	for seed := range uint64(40) {
+	for seed := range thinnedUnderRace(40) {
 		rnd := rand.New(rand.NewPCG(seed, 5))
 		w := newHostWorld(t, hub.Limits{})
 		w.next = func(core.AgentID) *pb.Usage {
@@ -460,7 +460,7 @@ func TestHostCostFollowsTheClockWhileARunLivesAndStopsWhenNoneDoes(t *testing.T)
 // and whether the watcher falls behind, the view a watcher holds is the view a new watcher is given,
 // and its total is the sum of the runs' own usage.
 func TestHostCostConvergesWhateverTheScript(t *testing.T) {
-	for seed := range uint64(40) {
+	for seed := range thinnedUnderRace(40) {
 		rnd := rand.New(rand.NewPCG(seed, 8))
 		w := newHostWorld(t, hub.Limits{MaxItems: 1 + rnd.IntN(8), MaxBytes: 1 << 20})
 		w.next = func(core.AgentID) *pb.Usage {
