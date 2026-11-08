@@ -36,6 +36,7 @@ export function appCommandsOf(overrides: Partial<AppCommands> = {}): AppCommands
   return {
     start: undefined,
     stop: {},
+    agentStop: {},
     send: {},
     update: {},
     complete: {},
@@ -50,6 +51,8 @@ export function appCommandsOf(overrides: Partial<AppCommands> = {}): AppCommands
     retryStart: () => undefined,
     stopRun: () => undefined,
     retryStop: () => undefined,
+    stopAgent: () => undefined,
+    retryStopAgent: () => undefined,
     sendMessage: () => undefined,
     retrySend: () => undefined,
     updateRun: () => undefined,

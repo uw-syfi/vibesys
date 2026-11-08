@@ -93,6 +93,9 @@ function page(state: OrchestratorState, agent: Agent, sendProgress?: CommandProg
       sendProgress={sendProgress}
       send={() => undefined}
       retrySend={() => undefined}
+      stopProgress={undefined}
+      stop={() => undefined}
+      retryStop={() => undefined}
     />,
   );
 }

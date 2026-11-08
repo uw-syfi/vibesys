@@ -28,6 +28,7 @@ import {
   completeSetupIntent,
   sendIntent,
   startIntent,
+  stopAgentIntent,
   stopIntent,
   updateRunIntent,
 } from './intents.js';
@@ -55,6 +56,7 @@ interface Issued {
 export interface Issues {
   readonly start: Issued | undefined;
   readonly stops: Readonly<Record<string, Issued>>;
+  readonly stopAgents: Readonly<Record<string, Issued>>;
   readonly sends: Readonly<Record<string, Issued>>;
   readonly updates: Readonly<Record<string, Issued>>;
   readonly completes: Readonly<Record<string, Issued>>;
@@ -63,6 +65,7 @@ export interface Issues {
 export const NO_ISSUES: Issues = {
   start: undefined,
   stops: {},
+  stopAgents: {},
   sends: {},
   updates: {},
   completes: {},
@@ -214,6 +217,7 @@ const snapshots = (
       progress: {
         start: progressOf(issues.start),
         stop: each(issues.stops),
+        agentStop: each(issues.stopAgents),
         send: each(issues.sends),
         update: each(issues.updates),
         complete: each(issues.completes),
@@ -221,7 +225,10 @@ const snapshots = (
     };
   });
 
-type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send' | 'update' | 'complete'>;
+type AppCommandsProgress = Pick<
+  AppCommands,
+  'start' | 'stop' | 'agentStop' | 'send' | 'update' | 'complete'
+>;
 
 /** What the route has open: the host, the agent and the run, and the run whose cost stream is followed. */
 function openOf(route: Route) {
@@ -410,6 +417,11 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, stops: {...all.stops, [runId]: stop}})),
       ),
     retryStop: runId => retry(issues.stops[runId]),
+    stopAgent: (host, agentId) =>
+      issue(host, stopAgentIntent(agentId), stop =>
+        setIssues(all => ({...all, stopAgents: {...all.stopAgents, [agentId]: stop}})),
+      ),
+    retryStopAgent: agentId => retry(issues.stopAgents[agentId]),
     sendMessage: (host, agentId, text) =>
       issue(host, sendIntent(agentId, text), send =>
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),

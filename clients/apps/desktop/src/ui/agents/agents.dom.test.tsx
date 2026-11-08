@@ -121,6 +121,7 @@ describe('an agent page', () => {
         trail={[{id: 'runs', label: 'Runs'}]}
         reading={null}
         sendProgress={undefined}
+        stopProgress={undefined}
         history={{
           earlier: {_tag: 'Idle'},
           wholes: {},
@@ -129,6 +130,8 @@ describe('an agent page', () => {
         }}
         send={() => undefined}
         retrySend={() => undefined}
+        stop={() => undefined}
+        retryStop={() => undefined}
         open={() => undefined}
       />,
     );
@@ -182,6 +185,7 @@ describe('an agent page', () => {
           trail={[{id: 'runs', label: 'Runs'}]}
           reading={null}
           sendProgress={undefined}
+          stopProgress={undefined}
           history={{
             earlier: {_tag: 'Idle'},
             wholes: {},
@@ -190,6 +194,8 @@ describe('an agent page', () => {
           }}
           send={() => undefined}
           retrySend={() => undefined}
+          stop={() => undefined}
+          retryStop={() => undefined}
           open={() => undefined}
         />,
       );
