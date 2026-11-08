@@ -3,14 +3,10 @@ import {
   AcceleratorModel,
   type EvalOffer,
   type EvalPlace,
+  EvalPlaceKind,
   TaskDomain,
 } from '@vibesys/orchestrator-proto';
-import {
-  type FitWord,
-  type PlaceWord,
-  type ProvisionProgress,
-  readable,
-} from '../../../state/index.js';
+import {type PlaceWord, type ProvisionProgress, readable} from '../../../state/index.js';
 
 export const domainWord = (domain: TaskDomain): string => {
   switch (domain) {
@@ -52,14 +48,30 @@ export const offerWords = (offer: EvalOffer): string => {
 const hardwareWords = (place: EvalPlace): string =>
   place.offers.length === 0 ? 'CPU' : place.offers.map(offerWords).join(', ');
 
-/** A place in the select: its name, its hardware, and the host's word for it on this entry. */
-export const placeLabel = (place: EvalPlace, word: PlaceWord | null): string =>
-  [place.name, readable(place) ? hardwareWords(place) : null, word]
-    .filter((part): part is string => part !== null && part !== '')
+/** What a place is called on screen: the machine's own Docker is never called "here". */
+export const placeName = (place: EvalPlace): string =>
+  place.kind === EvalPlaceKind.LOCAL ? 'Local Docker' : place.name;
+
+const KIND_WORDS: Readonly<Record<EvalPlaceKind, string>> = {
+  [EvalPlaceKind.UNSPECIFIED]: '',
+  [EvalPlaceKind.LOCAL]: 'local',
+  [EvalPlaceKind.SSH]: 'Docker over ssh',
+  [EvalPlaceKind.SLURM]: 'Slurm',
+  [EvalPlaceKind.APPTAINER]: 'Slurm · Apptainer',
+  [EvalPlaceKind.CLOUD]: 'cloud',
+};
+
+/** What a place is and gives, for its chip: `local · 8× H100`, or `unreadable` for hardware the host could not read. */
+export const placeDetail = (place: EvalPlace): string =>
+  [KIND_WORDS[place.kind], readable(place) ? hardwareWords(place) : 'unreadable']
+    .filter(part => part !== '')
     .join(' · ');
 
-export const fitTone = (word: FitWord): 'ok' | 'warn' | 'err' =>
-  word === 'Fits' ? 'ok' : word === 'Places unreadable' ? 'warn' : 'err';
+/** A place in the select: its name, its hardware, and the host's word for it on this entry. */
+export const placeLabel = (place: EvalPlace, word: PlaceWord | null): string =>
+  [placeName(place), readable(place) ? hardwareWords(place) : null, word]
+    .filter((part): part is string => part !== null && part !== '')
+    .join(' · ');
 
 const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   NAME_TAKEN: 'Name taken',

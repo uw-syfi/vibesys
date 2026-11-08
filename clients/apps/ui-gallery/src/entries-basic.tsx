@@ -8,12 +8,16 @@ import {
   Checkbox,
   Chip,
   ChoiceTiles,
+  ClipRow,
   type Completion,
   Field,
   Grid,
   ICON_NAMES,
   Icon,
+  Measure,
   PathInput,
+  PickCard,
+  PickCards,
   Row,
   SectionLayout,
   SegmentedControl,
@@ -22,6 +26,7 @@ import {
   Slider,
   Split,
   Stack,
+  Stale,
   StatusDot,
   type StatusTone,
   StepList,
@@ -511,6 +516,66 @@ export const BASIC_ENTRIES = {
     ),
   },
   PathInput: {render: () => <PathDemo />},
+  Measure: {
+    render: () => (
+      <Measure>
+        <Field label="Name">
+          <TextInput value="ring-buffer" mono readOnly />
+        </Field>
+      </Measure>
+    ),
+  },
+  PickCards: {
+    render: () => (
+      <PickCards label="Examples" columns="fill">
+        <PickCard
+          title="Model 40B · 1× GPU"
+          tag="variant"
+          id="model / task"
+          chips={<Chip label="↑ output tok/s" />}
+          press={() => undefined}
+        />
+        <PickCard title="Model 40B · 4× GPU" id="model / four" selected press={() => undefined} />
+        <PickCard
+          title="Model 70B · 8× GPU"
+          id="model / big"
+          unavailable="No GPU"
+          press={() => undefined}
+        />
+      </PickCards>
+    ),
+  },
+  PickCard: {
+    render: () => (
+      <PickCard
+        kicker="Catalog"
+        title="Start from an example"
+        note="Ready to run."
+        press={() => undefined}
+      />
+    ),
+  },
+  Stale: {
+    render: () => (
+      <Stack gap="space-3">
+        <Stale stale={false}>
+          <Text>Current</Text>
+        </Stale>
+        <Stale stale>
+          <Text>Read again</Text>
+        </Stale>
+      </Stack>
+    ),
+  },
+  ClipRow: {
+    render: () => (
+      <ClipRow>
+        {['first', 'second', 'third', 'fourth', 'fifth'].map(word => (
+          <Chip key={word} label={word} />
+        ))}
+      </ClipRow>
+    ),
+  },
   Slider: {render: () => <SliderDemo />},
   Checkbox: {render: () => <Toggles kind="checkbox" />},
   Switch: {render: () => <Toggles kind="switch" />},

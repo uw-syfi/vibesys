@@ -148,6 +148,23 @@ export const FIXTURE_FILES = new FakeFiles('/home/dev', {
   folders: {
     home: {
       folders: {
+        // Where the fake host keeps the repositories it makes from examples.
+        user: {
+          folders: {
+            '.vibesys': {
+              folders: {
+                repos: {
+                  folders: {
+                    'flint-serve': {repository: true, tasks: ['mi300x', 'mi300x-agentx']},
+                    'ring-buffer': {repository: true},
+                    'kv-bench': {repository: true},
+                    notes: {},
+                  },
+                },
+              },
+            },
+          },
+        },
         dev: {
           folders: {
             code: {

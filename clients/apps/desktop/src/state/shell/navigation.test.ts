@@ -14,6 +14,7 @@ import {
 const generators: {
   readonly [K in NavigationKind]: fc.Arbitrary<Extract<NavigationAction, {type: K}>>;
 } = {
+  'open-new-run': fc.constant({type: 'open-new-run' as const}),
   'open-run': fc.record({
     type: fc.constant('open-run' as const),
     host: fc.constantFrom('host-a', 'host-b'),
@@ -146,6 +147,15 @@ describe('navigation', () => {
     const run = navigationReducer(agents, {type: 'back'});
     expect(run.runs).toMatchObject({screen: 'run', runId: 'run-1', view: 'report', agentId: null});
     expect(navigationReducer(run, {type: 'back'}).runs).toEqual({screen: 'runs'});
+  });
+
+  it('the New run page opens in the runs destination, and back from it is the list', () => {
+    const page = navigationReducer(navigationReducer(initialNavigation, {type: 'open-settings'}), {
+      type: 'open-new-run',
+    });
+    expect(page).toMatchObject({destination: 'runs', runs: {screen: 'new-run'}});
+    expect(navigationReducer(page, {type: 'back'}).runs).toEqual({screen: 'runs'});
+    expect(navigationReducer(page, {type: 'open-runs'}).runs).toEqual({screen: 'runs'});
   });
 
   it('back from a screen of the run goes to its report, and from the report to the runs', () => {

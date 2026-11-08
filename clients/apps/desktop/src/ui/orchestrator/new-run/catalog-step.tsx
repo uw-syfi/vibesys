@@ -1,0 +1,309 @@
+import type {CatalogueEntry, EvalPlace} from '@vibesys/orchestrator-proto';
+import {
+  Button,
+  Card,
+  Chip,
+  Field,
+  PathInput,
+  PickCard,
+  PickCards,
+  Row,
+  SearchBox,
+  SegmentedControl,
+  Select,
+  Split,
+  Stack,
+  Stale,
+  Text,
+  TextInput,
+} from '@vibesys/ui';
+import type {JSX} from 'react';
+import {
+  completionsOf,
+  type ExampleDraft,
+  entryKey,
+  fitsHere,
+  folderName,
+  groupByDomain,
+  listingKey,
+  nameOfExample,
+  objectiveChip,
+  placeChoice,
+  placesFor,
+  splitPath,
+  variantOf,
+  visibleEntries,
+} from '../../../state/index.js';
+import {acceleratorName, runTitle} from '../fleet-words.js';
+import type {StartDraft} from '../start-draft.js';
+import type {ModelChoices} from '../start-models.js';
+import {LimitFields, MoreOptions, type StartHost} from '../start-run-form.js';
+import {domainWord, placeLabel, provisionLine} from './words.js';
+
+/** Where Copy to starts: the folder kept for the machine, else the host's own default. */
+function copyDefault(host: StartHost | undefined): string {
+  if (host === undefined) return '';
+  const kept = host.repositoriesDirectory ?? '';
+  return kept === '' ? (host.catalogue.data?.repositoriesDirectory ?? '') : kept;
+}
+
+/** The draft as sent: a folder the person left empty is the machine's kept Repositories folder. */
+export const withKeptParent = (host: StartHost | undefined, draft: ExampleDraft): ExampleDraft =>
+  draft.parent === '' ? {...draft, parent: host?.repositoriesDirectory ?? ''} : draft;
+
+/** The id line of a card: the example's folder and the task in it. */
+const idLine = (entry: CatalogueEntry): string =>
+  `${folderName(entry)} / ${entry.card?.task ?? ''}`;
+
+/** What a card that does not fit says in place of a place: the accelerator it needs. */
+const lacking = (entry: CatalogueEntry): string => {
+  const name = acceleratorName(entry.card?.hardwareName ?? '');
+  return name === '' ? 'No place' : `No ${name}`;
+};
+
+function Cards(props: {
+  readonly entries: readonly CatalogueEntry[];
+  readonly places: readonly EvalPlace[];
+  readonly picked: string | null;
+  readonly pick: (example: string) => void;
+}): JSX.Element {
+  return (
+    <>
+      {props.entries.map(entry => {
+        const variant = variantOf(entry);
+        return (
+          <PickCard
+            key={entryKey(entry)}
+            title={runTitle(entry.card ?? null, folderName(entry))}
+            id={idLine(entry)}
+            selected={props.picked === entryKey(entry)}
+            press={() => props.pick(entryKey(entry))}
+            {...(variant === undefined ? {} : {tag: variant})}
+            {...(fitsHere(entry, props.places) ? {} : {unavailable: lacking(entry)})}
+            chips={(entry.card?.objectives ?? []).map(objective => {
+              const {text, hint} = objectiveChip(objective);
+              return <Chip key={objective.name} label={text} hint={hint} />;
+            })}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** The Field props of the copy's status line: an error carries the host's detail on the pointer. */
+function statusOf(line: ReturnType<typeof provisionLine>) {
+  if (line === null) return {};
+  if (!line.failed) return {help: line.text};
+  return {error: line.text, ...(line.title === undefined ? {} : {errorHint: line.title})};
+}
+
+/** The picked example: where it evaluates, its limits, and Start; the repository it is copied to is under More options. */
+function Selected(props: {
+  readonly host: StartHost | undefined;
+  readonly entry: CatalogueEntry | undefined;
+  readonly places: readonly EvalPlace[];
+  readonly example: ExampleDraft;
+  readonly setExample: (draft: ExampleDraft) => void;
+  readonly draft: StartDraft;
+  readonly set: (change: Partial<StartDraft>) => void;
+  readonly choices: ModelChoices;
+  /** Why Start cannot be pressed, and whether that is said aloud, or null. */
+  readonly block: {readonly reason: string; readonly quiet: boolean} | null;
+  readonly start: () => void;
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
+  readonly status: JSX.Element | null;
+}): JSX.Element {
+  const {host, entry, example, places} = props;
+  if (entry === undefined) {
+    return (
+      <Stack gap="space-3">
+        <Text variant="section">Selected</Text>
+        <Text tone="muted">Pick a task</Text>
+      </Stack>
+    );
+  }
+  const set = (change: Partial<ExampleDraft>): void => props.setExample({...example, ...change});
+  const fitting = placesFor(entry, places);
+  const chosen = placeChoice(example.place, fitting, entry.fit);
+  const line = provisionLine(host?.provision ?? {_tag: 'Idle'});
+  const split = splitPath(example.parent);
+  const completions =
+    split === undefined
+      ? []
+      : completionsOf(split, host?.directories.get(listingKey(split.folder, split.hidden)));
+  const defaultParent = copyDefault(host);
+  return (
+    <Stack gap="space-3">
+      <Stack gap="space-1">
+        <Text variant="section">Task</Text>
+        <Text variant="item">{runTitle(entry.card ?? null, folderName(entry))}</Text>
+        <Text tone="muted">{entry.card?.heading ?? ''}</Text>
+      </Stack>
+      <Field label="Evals on">
+        <Select
+          value={chosen ?? ''}
+          options={fitting.map(place => ({value: place.name, label: placeLabel(place, null)}))}
+          change={place => set({place})}
+          mono
+        />
+      </Field>
+      <LimitFields draft={props.draft} set={props.set} />
+      <Row>
+        <Button
+          text="Start run"
+          label="Start run"
+          variant="primary"
+          press={() => {
+            if (props.block === null) props.start();
+          }}
+          {...(props.block === null
+            ? {}
+            : {disabledReason: props.block.reason, quietReason: props.block.quiet})}
+        />
+      </Row>
+      {/* The copy's outcome has a line of its own outside the disclosure, kept when empty: a refusal is never hidden. */}
+      <Text tone={line?.failed === true ? 'err' : 'muted'} title={line?.title ?? ''}>
+        {line?.text ?? ' '}
+      </Text>
+      <MoreOptions
+        draft={props.draft}
+        set={props.set}
+        choices={props.choices}
+        extra={
+          <>
+            <Field label="Repository name">
+              <TextInput
+                value={nameOfExample(example, entry)}
+                change={name => set({name})}
+                placeholder="name"
+                mono
+              />
+            </Field>
+            <Field label="Copy to" reserveLine {...statusOf(line)}>
+              <PathInput
+                value={example.parent}
+                change={parent => {
+                  set({parent});
+                  const reached = splitPath(parent);
+                  if (host !== undefined && reached !== undefined)
+                    props.listDirectory(host.key, reached.folder, reached.hidden, false);
+                }}
+                completions={completions.map(({value, detail}) => ({
+                  value,
+                  ...(detail === undefined ? {} : {detail}),
+                }))}
+                tabCompletes={split !== undefined && split.prefix !== ''}
+                focus={() => {
+                  const reached = splitPath(example.parent);
+                  if (host !== undefined && reached !== undefined)
+                    props.listDirectory(host.key, reached.folder, reached.hidden, true);
+                }}
+                placeholder={defaultParent === '' ? '~/' : defaultParent}
+              />
+            </Field>
+          </>
+        }
+      />
+      {props.status}
+    </Stack>
+  );
+}
+
+/**
+ * The catalogue step: a search and the machine's fit filter over the examples in a card grid per
+ * domain, and beside them the picked example. The cards are the machine on screen's (dimmed in place
+ * while another machine is read), so the grid and the filter keep their size.
+ */
+export function CatalogStep(props: {
+  /** The machine on screen. */
+  readonly host: StartHost | undefined;
+  readonly stale: boolean;
+  readonly places: readonly EvalPlace[];
+  readonly example: ExampleDraft;
+  readonly setExample: (draft: ExampleDraft) => void;
+  readonly pick: (example: string) => void;
+  readonly draft: StartDraft;
+  readonly set: (change: Partial<StartDraft>) => void;
+  readonly choices: ModelChoices;
+  readonly block: {readonly reason: string; readonly quiet: boolean} | null;
+  readonly start: () => void;
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
+  readonly status: JSX.Element | null;
+}): JSX.Element {
+  const {host, example, places} = props;
+  const entries = host?.catalogue.data?.entries ?? [];
+  const fitting = entries.filter(entry => fitsHere(entry, places)).length;
+  const shown = visibleEntries(entries, {query: example.query, fitsOnly: false}).filter(
+    entry => !example.fitsOnly || fitsHere(entry, places),
+  );
+  const picked = entries.find(entry => entryKey(entry) === example.picked);
+  // A pick the machine on screen does not fit is no pick: the card stays, the panel is empty.
+  const entry = picked !== undefined && fitsHere(picked, places) ? picked : undefined;
+  const set = (change: Partial<ExampleDraft>): void => props.setExample({...example, ...change});
+  return (
+    <Split
+      asideSticky
+      main={
+        <Stack gap="space-4">
+          <Row gap="space-3" wrap>
+            <SearchBox
+              label="Search"
+              value={example.query}
+              change={query => set({query})}
+              placeholder="Model, hardware, task"
+            />
+            <SegmentedControl
+              label="Show"
+              size="sm"
+              value={example.fitsOnly ? 'fits' : 'all'}
+              options={[
+                {value: 'fits', label: `Fits · ${fitting}`},
+                {value: 'all', label: `All · ${entries.length}`},
+              ]}
+              change={value => set({fitsOnly: value === 'fits'})}
+            />
+            <Text tone="muted">
+              {host?.catalogue.failure === null || host === undefined ? '' : 'Catalogue unreadable'}
+            </Text>
+          </Row>
+          <Stale stale={props.stale}>
+            <Stack gap="space-5">
+              {groupByDomain(shown).map(group => (
+                <Stack key={group.domain} gap="space-2">
+                  <Text variant="section">{`${domainWord(group.domain)} · ${group.entries.length}`}</Text>
+                  <PickCards label={domainWord(group.domain)} columns="fill">
+                    <Cards
+                      entries={group.entries}
+                      places={places}
+                      picked={entry === undefined ? null : example.picked}
+                      pick={props.pick}
+                    />
+                  </PickCards>
+                </Stack>
+              ))}
+            </Stack>
+          </Stale>
+        </Stack>
+      }
+      aside={
+        <Card>
+          <Selected
+            host={host}
+            entry={entry}
+            places={places}
+            example={example}
+            setExample={props.setExample}
+            draft={props.draft}
+            set={props.set}
+            choices={props.choices}
+            block={props.block}
+            start={props.start}
+            listDirectory={props.listDirectory}
+            status={props.status}
+          />
+        </Card>
+      }
+    />
+  );
+}

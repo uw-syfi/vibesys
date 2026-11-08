@@ -1,5 +1,5 @@
 /**
- * Where the user is: the run list, or one page of one run: its report, its agents, one agent's
+ * Where the user is: the run list, the page that starts a run, or one page of one run: its report, its agents, one agent's
  * transcript (the agents view with an agent open), its cost or its catch-up. A plain reducer, so
  * every move is a value and a test can walk any sequence of them.
  */
@@ -9,6 +9,8 @@ export type RunView = 'report' | 'agents' | 'cost' | 'catch-up';
 
 export type Route =
   | {readonly screen: 'runs'}
+  /** The page that starts a run: its own steps are the page's (`state/new-run`), not the route's. */
+  | {readonly screen: 'new-run'}
   | {
       readonly screen: 'run';
       readonly host: string;
@@ -21,6 +23,7 @@ export type Route =
     };
 
 export type RouteAction =
+  | {readonly type: 'open-new-run'}
   | {readonly type: 'open-run'; readonly host: string; readonly runId: string}
   | {readonly type: 'close-run'}
   | {readonly type: 'show'; readonly view: RunView}
@@ -32,6 +35,8 @@ export const initialRoute: Route = {screen: 'runs'};
 
 export function routeReducer(route: Route, action: RouteAction): Route {
   switch (action.type) {
+    case 'open-new-run':
+      return {screen: 'new-run'};
     case 'open-run':
       return {
         screen: 'run',

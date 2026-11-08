@@ -77,7 +77,7 @@ const VENDOR_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 /** The accelerator as a title says it: the authored name without its vendor words ("MI300X"). */
-const acceleratorName = (authored: string): string =>
+export const acceleratorName = (authored: string): string =>
   authored
     .split(/\s+/)
     .filter(word => word !== '' && !VENDOR_WORDS.has(word.toLowerCase()))
