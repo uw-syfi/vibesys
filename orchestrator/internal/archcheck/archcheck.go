@@ -30,7 +30,8 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/"},
+	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
+	"internal/fit":                     {"gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/protocol":                {"gen/vibesys/orchestrator/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "internal/core", "gen/vibesys/cli/"},
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "internal/wire", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
@@ -76,6 +77,7 @@ var testRules = map[string][]string{
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
 	"internal/production": {"release/releasetest", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
+	"internal/fit":        {"internal/wire"},
 	"release":             {"release/releasetest"},
 	"gatewayroot":         {"release/releasetest"},
 	// The store's tests run the contract suite, which depends on the store.
