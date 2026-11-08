@@ -245,15 +245,19 @@ func TestStartWithNoLimitSaysSoAndOneWithALimitDoesNot(t *testing.T) {
 	}
 }
 
-// A limit that is not a positive duration or a positive number of dollars is a usage error naming the
-// flag, and nothing is sent.
-func TestStartRefusesALimitThatIsNotPositive(t *testing.T) {
+// A limit the contract does not allow is a usage error naming the flag, caught by the client so
+// nothing is sent: a duration or number of dollars that is not positive, and a --summary-every below
+// the contract's five-minute least (StartRun.summary_every), which the client must refuse the same
+// way instead of letting the host reject the start after the client has already printed its notices
+// and opened a connection.
+func TestStartRefusesALimitTheContractDoesNotAllow(t *testing.T) {
 	f := &fakeService{}
 	w := newWorld(t, serveFake(t, f))
 	for _, args := range [][]string{
 		{"--max-time", "0"}, {"--max-time", "-5m"}, {"--max-time", "soon"}, {"--max-time", "30"},
 		{"--max-cost", "0"}, {"--max-cost", "-1"}, {"--max-cost", "abc"}, {"--max-cost", "NaN"}, {"--max-cost", "Inf"},
 		{"--summary-every", "0"}, {"--summary-every", "-5m"}, {"--summary-every", "hourly"}, {"--summary-every", "60"},
+		{"--summary-every", "1m"}, {"--summary-every", "4m59s"}, {"--summary-every", "299s"},
 	} {
 		got := w.run(context.Background(), append([]string{"run", "start", "--task", "toy"}, args...)...)
 		if got.code != 2 {
