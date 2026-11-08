@@ -20,7 +20,15 @@ import {COMMAND_DEADLINE} from './policy.js';
 /** What the user asked for: the body of a command, without an id. */
 export type Intent = Extract<
   Command['body'],
-  {readonly case: 'startRun' | 'stopRun' | 'stopAgent' | 'sendMessage' | 'requestCatchUp'}
+  {
+    readonly case:
+      | 'startRun'
+      | 'stopRun'
+      | 'stopAgent'
+      | 'sendMessage'
+      | 'requestCatchUp'
+      | 'updateRun';
+  }
 >;
 
 export interface Commands {

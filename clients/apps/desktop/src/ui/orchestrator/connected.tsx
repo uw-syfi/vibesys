@@ -23,7 +23,8 @@ import type {
 import {costTarget} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
-import {sendIntent, startIntent, stopIntent} from './intents.js';
+import {sendIntent, startIntent, stopIntent, updateRunIntent} from './intents.js';
+import type {RunUpdateRequest} from './run-settings/update-draft.js';
 import type {StartRunRequest} from './start-draft.js';
 
 /** One host the window reads, by the `HostKey` its routes name. */
@@ -47,9 +48,10 @@ export interface Issues {
   readonly start: Issued | undefined;
   readonly stops: Readonly<Record<string, Issued>>;
   readonly sends: Readonly<Record<string, Issued>>;
+  readonly updates: Readonly<Record<string, Issued>>;
 }
 
-export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}};
+export const NO_ISSUES: Issues = {start: undefined, stops: {}, sends: {}, updates: {}};
 
 const OPENING: FeedStatus = {_tag: 'Opening'};
 const IDLE: HistoryStatus = {_tag: 'Idle'};
@@ -164,11 +166,12 @@ const snapshots = (
         start: progressOf(issues.start),
         stop: each(issues.stops),
         send: each(issues.sends),
+        update: each(issues.updates),
       },
     };
   });
 
-type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send'>;
+type AppCommandsProgress = Pick<AppCommands, 'start' | 'stop' | 'send' | 'update'>;
 
 /** What the route has open: the host, the agent and the run, and the run whose cost stream is followed. */
 function openOf(route: Route) {
@@ -194,6 +197,22 @@ function retryFeeds(
   if (agentId !== null && agentId !== undefined)
     dispatch(session.agents.retry(agentId), () => undefined);
   if (runId !== undefined) dispatch(session.runHistory.retry(runId), () => undefined);
+}
+
+/** The commands that change a live run's settings, whose last outcome is kept by run id. */
+function updateCommands(
+  issue: (host: string, intent: Intent, kept: (issued: Issued) => void) => void,
+  retry: (issued: Issued | undefined) => void,
+  issues: Issues,
+  setIssues: (update: (all: Issues) => Issues) => void,
+): Pick<AppCommands, 'updateRun' | 'retryUpdate'> {
+  return {
+    updateRun: (host: string, runId: string, request: RunUpdateRequest) =>
+      issue(host, updateRunIntent(runId, request), update =>
+        setIssues(all => ({...all, updates: {...all.updates, [runId]: update}})),
+      ),
+    retryUpdate: runId => retry(issues.updates[runId]),
+  };
 }
 
 /**
@@ -271,6 +290,7 @@ export function ConnectedApp(props: {
         setIssues(all => ({...all, sends: {...all.sends, [agentId]: send}})),
       ),
     retrySend: agentId => retry(issues.sends[agentId]),
+    ...updateCommands(issue, retry, issues, setIssues),
     loadEarlier: (host, agentId, before) =>
       on(host, session => session.history.loadEarlier(agentId, before)),
     expand: (host, agentId, ordinal) =>

@@ -50,6 +50,7 @@ import {
   type Turn,
   TurnSchema,
   TurnStatus,
+  type UpdateRun,
   ViewerSchema,
   type WindowFacts,
 } from '@vibesys/orchestrator-proto';
@@ -57,6 +58,7 @@ import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
 import {ms} from '../../state/orchestrator/time.js';
 import {invokeCallback} from '../callback-errors.js';
+import {applyPendingLead, decideUpdate} from './fake-run-settings.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
 import {servedSummary} from './served-summary.js';
@@ -378,18 +380,24 @@ export class FakeDaemon {
   dispatch(command: Command, at: number = this.#now()): Receipt {
     const seen = this.#receipts.get(command.id);
     if (seen !== undefined) return seen;
-    const {body} = command;
-    const receipt = oneofIs(body, 'sendMessage', COMMAND_KINDS)
-      ? this.#sendMessage(command.id, body.value.agentId, body.value.text, at)
-      : oneofIs(body, 'stopAgent', COMMAND_KINDS)
-        ? this.#stopAgent(command.id, body.value.agentId, at)
-        : oneofIs(body, 'requestCatchUp', COMMAND_KINDS)
-          ? this.#catchUp(command.id, body.value.runId, at)
-          : oneofIs(body, 'startRun', COMMAND_KINDS)
-            ? this.#startRun(command.id, body.value)
-            : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
+    const receipt = this.#receiptFor(command, at);
     this.#receipts.set(command.id, receipt);
     return receipt;
+  }
+
+  /** What the host answers a command it has not answered before. */
+  #receiptFor(command: Command, at: number): Receipt {
+    const {body} = command;
+    if (oneofIs(body, 'sendMessage', COMMAND_KINDS))
+      return this.#sendMessage(command.id, body.value.agentId, body.value.text, at);
+    if (oneofIs(body, 'stopAgent', COMMAND_KINDS))
+      return this.#stopAgent(command.id, body.value.agentId, at);
+    if (oneofIs(body, 'requestCatchUp', COMMAND_KINDS))
+      return this.#catchUp(command.id, body.value.runId, at);
+    if (oneofIs(body, 'startRun', COMMAND_KINDS)) return this.#startRun(command.id, body.value);
+    if (oneofIs(body, 'updateRun', COMMAND_KINDS))
+      return this.#updateRun(command.id, body.value, at);
+    return this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
   }
 
   /** The fake clock: one second for each fact the log holds, from a fixed start. */
@@ -553,6 +561,35 @@ export class FakeDaemon {
       case: 'message',
       value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
     });
+  }
+
+  /** An update as the host decides it (`decideUpdate`): its facts committed, then its receipt. */
+  #updateRun(commandId: string, update: UpdateRun, atMs: number): Receipt {
+    const decision = decideUpdate(
+      this.#state(this.#visible),
+      update,
+      this.#models?.allowedModels ?? [],
+    );
+    for (const body of decision.bodies) this.#append(atMs, body);
+    const receipt = create(ReceiptSchema, {
+      commandId,
+      refusal: decision.refusal,
+      runId: update.runId,
+      model: decision.model,
+      allowedModels: [...decision.allowedModels],
+      sequence: BigInt(this.#log.length + 1),
+    });
+    this.#append(atMs, {case: 'receipt', value: receipt});
+    return receipt;
+  }
+
+  /**
+   * The lead's turn ended while a lead change waited: the change applies, as the host does in
+   * `turnEnded` for the lead. Commits nothing for a run with no change waiting.
+   */
+  finishLeadTurn(runId: string): void {
+    const at = this.#now();
+    for (const body of applyPendingLead(this.#state(this.#visible), runId)) this.#append(at, body);
   }
 
   /** A start: refused when its lead's model is outside the allowed list, taken otherwise. */
