@@ -38,7 +38,9 @@ type World struct {
 	// Tasks holds the repositories the daemons read tasks from: Put the files of a commit to give
 	// it a task. A benchmark's `emit` writes into Files, where the job reads its result from.
 	Tasks *task.MemorySource
-	Files *hostfs.Memory
+	// CardFiles holds the files DescribeTask reads a task's card from.
+	CardFiles *task.MemoryCardFiles
+	Files     *hostfs.Memory
 }
 
 // Machine is what the World's environment reads of the machine its commands run on.
@@ -54,7 +56,7 @@ func NewWorld(t testing.TB) *World {
 	w := &World{
 		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files), fakeenv.WithMachine(machine)), Checkouts: &fakeenv.Checkouts{},
 		Stores: memstores.New(app.Rules(task.DefaultSamples)), Survivors: supervisor.NewSurvivors(),
-		Branches: gitrepo.NewFakeBranches(), Git: gitrepo.NewFake(), Tasks: task.NewMemorySource(), Files: files,
+		Branches: gitrepo.NewFakeBranches(), Git: gitrepo.NewFake(), Tasks: task.NewMemorySource(), CardFiles: task.NewMemoryCardFiles(), Files: files,
 	}
 	t.Cleanup(func() {
 		w.Survivors.Close()
@@ -74,7 +76,7 @@ func (w *World) Runtime() daemon.Runtime {
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
 	host := supervisor.Host{Files: w.Files, Clock: clk}
 	return daemon.Runtime{
-		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks,
+		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks, CardFiles: w.CardFiles,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),
 	}
 }
