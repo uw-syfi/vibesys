@@ -215,7 +215,8 @@ func bridge(ctx context.Context, root string, startup time.Duration) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	startupCtx, cancel := context.WithTimeout(ctx, startup)
 	connection, err := connect.DialForAPI(startupCtx, lifecycle.SocketPath(root), launcher, connect.HoldingOf(root), buildinfo.Version, schema.APISchemaHash, func(id *hostconfig.IdentifyResponse) {
-		log.Warn("the running host speaks another API and has live runs, so it stays", "live_runs", id.GetLiveRuns(), "release", id.GetRelease())
+		message, attrs := stayedLog(id)
+		log.Warn(message, attrs...)
 	})
 	cancel()
 	if err != nil {
@@ -227,6 +228,26 @@ func bridge(ctx context.Context, root string, startup time.Duration) error {
 		return err
 	}
 	return pipe.Copy(ctx, streams, connection)
+}
+
+// stayedLog explains why a running host of another API kept the socket, for the
+// operator log, and names the decisive reason instead of always claiming live
+// runs. DialForAPI keeps such a host when it is a newer release, when it has
+// live runs, or when it has other clients connected; a host that declined to
+// stop after being asked raced to stay busy. The relation is checked first,
+// mirroring DialForAPI, so a newer host reports as newer even when it also has
+// runs or clients.
+func stayedLog(id *hostconfig.IdentifyResponse) (string, []any) {
+	switch {
+	case id.GetRelation() == hostconfig.ReleaseRelationHostNewer:
+		return "the running host speaks a newer release, so it stays", []any{"release", id.GetRelease()}
+	case id.GetLiveRuns() > 0:
+		return "the running host speaks another API and has live runs, so it stays", []any{"live_runs", id.GetLiveRuns(), "release", id.GetRelease()}
+	case id.GetConnectedClients() > 0:
+		return "the running host speaks another API and has other connected clients, so it stays", []any{"connected_clients", id.GetConnectedClients(), "release", id.GetRelease()}
+	default:
+		return "the running host speaks another API and declined to stop, so it stays", []any{"release", id.GetRelease()}
+	}
 }
 
 type streams struct{ input, output *os.File }
