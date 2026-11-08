@@ -29,7 +29,8 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   host stop [--if-no-live-runs] [--force]
   host restart
   host configure [--state-directory DIR] [--session-holder CMD] [--skills-directory DIR]
-                 [--job-tool PATH] [--tool-path DIR:DIR...] [--clear]
+                 [--job-tool PATH] [--tool-path DIR:DIR...]
+                 [--repositories-directory DIR] [--clear]
   release verify [--installed] DIR
   --version
 

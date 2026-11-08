@@ -73,7 +73,8 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	x := &Orchestrator{live: make(chan bool, 1), done: make(chan error, 1)}
 	// The parts are resolved when a run is started and when a session is launched, and when
 	// HostControlService is asked, never here: a part that is missing now is not missing for good.
-	parts := production.Parts{Config: o.Config, Find: release.FinderFor(o.Executable), Files: production.OSFiles{}, Home: o.Home, Runner: production.ExecRunner{}}
+	find := release.FinderFor(o.Executable)
+	parts := production.Parts{Config: o.Config, Find: find, Files: production.OSFiles{}, Home: o.Home, Runner: production.ExecRunner{}}
 	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash, BuildID: o.BuildID, Connected: o.Connected})
 	layout, err := production.LayoutFor(o.Config.GetStateDirectory(), gatewayroot.StateDirectory(o.Root, o.Home, o.Getenv))
 	if err != nil {
@@ -89,6 +90,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	searches := production.SearchFor()
 	catalog := &production.SidecarCatalog{Parts: parts, Runner: production.ExecRunner{}, Environ: hostconfig.Environ(o.Config, o.Home, o.Getenv)}
 	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, JobTool: parts.JobToolEndpoint, Parts: parts, Root: o.Root, Models: production.HostModels{Home: o.Home, Catalog: catalog, Log: o.Log}, SetupReads: production.NewCLISetupReads()}
+	wiring.Catalogue, wiring.Provisioner = production.ReleaseExampleSources(find, o.Config, o.Home)
 	d, err := production.AwaitHandOver(ctx, o.Root, time.After, func() (*production.Daemon, error) { return production.Open(layout, wiring, o.Log) })
 	if err != nil {
 		var held *production.HeldError

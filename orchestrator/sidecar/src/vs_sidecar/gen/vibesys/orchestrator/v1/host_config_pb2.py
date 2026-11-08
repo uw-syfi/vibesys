@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n)vibesys/orchestrator/v1/host_config.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\"\xa1\x02\n\nHostConfig\x12\x38\n\x0fstate_directory\x18\x01 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x0estateDirectory\x12>\n\x16session_holder_command\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x14sessionHolderCommand\x12:\n\x10skills_directory\x18\x03 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x0fskillsDirectory\x12*\n\x08job_tool\x18\x04 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x07jobTool\x12\x31\n\ttool_path\x18\x05 \x03(\tB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x02\"\tr\x07(\x80 2\x02^/R\x08toolPathBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n)vibesys/orchestrator/v1/host_config.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\"\xfb\x02\n\nHostConfig\x12\x38\n\x0fstate_directory\x18\x01 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x0estateDirectory\x12>\n\x16session_holder_command\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x14sessionHolderCommand\x12:\n\x10skills_directory\x18\x03 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x0fskillsDirectory\x12*\n\x08job_tool\x18\x04 \x01(\tB\x0f\xbaH\x0cr\x07(\x80 2\x02^/\xd8\x01\x01R\x07jobTool\x12\x31\n\ttool_path\x18\x05 \x03(\tB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x02\"\tr\x07(\x80 2\x02^/R\x08toolPath\x12X\n\x16repositories_directory\x18\x06 \x01(\tB!\xbaH\x1er\x19(\x80 2\x14^(/|~(/|$))[^\\x00]*$\xd8\x01\x01R\x15repositoriesDirectoryBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -43,6 +43,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HOSTCONFIG'].fields_by_name['job_tool']._serialized_options = b'\272H\014r\007(\200 2\002^/\330\001\001'
   _globals['_HOSTCONFIG'].fields_by_name['tool_path']._loaded_options = None
   _globals['_HOSTCONFIG'].fields_by_name['tool_path']._serialized_options = b'\272H\021\222\001\016\020\200\002\"\tr\007(\200 2\002^/'
+  _globals['_HOSTCONFIG'].fields_by_name['repositories_directory']._loaded_options = None
+  _globals['_HOSTCONFIG'].fields_by_name['repositories_directory']._serialized_options = b'\272H\036r\031(\200 2\024^(/|~(/|$))[^\\x00]*$\330\001\001'
   _globals['_HOSTCONFIG']._serialized_start=100
-  _globals['_HOSTCONFIG']._serialized_end=389
+  _globals['_HOSTCONFIG']._serialized_end=479
 # @@protoc_insertion_point(module_scope)

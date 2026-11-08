@@ -47,4 +47,14 @@ message HostConfig {
       }
     }
   }];
+  // Where a repository the host provisions goes when the request names no parent: an absolute path,
+  // or "~" or "~/..." for the home of the user the host runs as, which the host expands. Empty means
+  // ~/.vibesys/repos.
+  string repositories_directory = 6 [(buf.validate.field) = {
+    ignore: IGNORE_IF_ZERO_VALUE
+    string: {
+      pattern: "^(/|~(/|$))[^\\x00]*$"
+      max_bytes: 4096
+    }
+  }];
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -99,9 +100,27 @@ func (OSProvisionFS) Rename(from, to string) error { return os.Rename(from, to) 
 // RemoveAll implements ProvisionFS.
 func (OSProvisionFS) RemoveAll(p string) error { return os.RemoveAll(p) }
 
-// ExecGit is the git on the PATH, as a GitRunner, bounded by the context it is given. It keeps the
-// host's own git configuration (hooks, ignore files, line endings, signing) out of what it makes.
-type ExecGit struct{}
+// GitBound is how long one git command of a provision may take before the host gives up on it. A
+// clone is the slow one; the bound only guards against a hang, and a provision that outlives it is
+// refused and swept by the next request for the name.
+const GitBound = 10 * time.Minute
+
+// GitTimeouts bounds each git command by GitBound on the system clock.
+type GitTimeouts struct{}
+
+// Bound implements daemon.Bounds.
+func (GitTimeouts) Bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, GitBound)
+}
+
+// ExecGit is the git on the host's PATH, as a GitRunner. Each command runs as a process of its own
+// with its arguments as they are (no shell), under the context Bounds gives it. It keeps the host's
+// own git configuration (hooks, ignore files, line endings, signing) out of what it makes.
+type ExecGit struct {
+	// Bounds limits each command. A nil Bounds is an unbounded command, which only a test that holds
+	// the context itself leaves.
+	Bounds daemon.Bounds
+}
 
 var _ GitRunner = ExecGit{}
 
@@ -111,7 +130,12 @@ var execGitOptions = []string{
 }
 
 // Run implements GitRunner.
-func (ExecGit) Run(ctx context.Context, dir string, args ...string) (string, error) {
+func (g ExecGit) Run(ctx context.Context, dir string, args ...string) (string, error) {
+	if g.Bounds != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = g.Bounds.Bound(ctx)
+		defer cancel()
+	}
 	var stdout, stderr bytes.Buffer
 	full := append(append([]string{"-C", dir}, execGitOptions...), args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
