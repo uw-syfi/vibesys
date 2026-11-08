@@ -155,7 +155,7 @@ function frameFor(
   );
   const widest = Math.max(0, ...vertical.ticks.map(t => t.label.length));
   const plot: Plot = {
-    left: EDGE + Math.ceil(widest * GLYPH) + LABEL_GAP,
+    left: EDGE + Math.ceil(widest * LABEL_GLYPH) + LABEL_GAP,
     right: width - MARGIN_RIGHT,
     top: TOP_BAND,
     bottom: height - BOTTOM_BAND,

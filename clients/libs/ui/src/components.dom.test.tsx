@@ -943,10 +943,10 @@ describe('ParetoChart', () => {
     expect(Number(frame?.getAttribute('height'))).toBeGreaterThan(0);
     const better = root.querySelector('.vs-pareto-better');
     expect(better?.textContent).toBe('Better ↗');
-    // Inside the frame, at its top right.
+    // Above the frame, over its top right corner, so no point is under it.
     const right = Number(frame?.getAttribute('x')) + Number(frame?.getAttribute('width'));
-    expect(Number(better?.getAttribute('x'))).toBeLessThanOrEqual(right);
-    expect(Number(better?.getAttribute('y'))).toBeGreaterThan(Number(frame?.getAttribute('y')));
+    expect(Number(better?.getAttribute('x'))).toBe(right);
+    expect(Number(better?.getAttribute('y'))).toBeLessThan(Number(frame?.getAttribute('y')));
   });
 
   test('names its input on the chart, beside its mark, once', async () => {

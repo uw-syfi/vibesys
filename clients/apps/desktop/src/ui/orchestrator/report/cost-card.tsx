@@ -57,7 +57,7 @@ export function CostCard(props: {
         </Card>
       ) : (
         <>
-          <SpendCard spend={model.spend} runOver={props.runOver} action={details} />
+          <SpendCard spend={model.spend} runOver={props.runOver} action={details} dense />
           {model.empty ? null : (
             <Card dense section="By agent type">
               <BarRows
