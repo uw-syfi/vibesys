@@ -74,8 +74,10 @@ func TestProvisionRepositoryLeavesTildeToTheProvisioner(t *testing.T) {
 	if calls := fake.Calls(); len(calls) != 1 || calls[0].GetParentDirectory() != "~/work" {
 		t.Fatalf("calls %v, want the parent as sent", calls)
 	}
-	_, err := svc.ProvisionRepository(context.Background(), emptyRequest("mine", "relative/dir"))
-	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "parent_directory") {
-		t.Fatalf("a relative parent: %v, want InvalidArgument naming the field", err)
+	for _, parent := range []string{"relative/dir", "~someone/work"} {
+		_, err := svc.ProvisionRepository(context.Background(), emptyRequest("mine", parent))
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "parent_directory") {
+			t.Fatalf("parent %q: %v, want InvalidArgument naming the field", parent, err)
+		}
 	}
 }

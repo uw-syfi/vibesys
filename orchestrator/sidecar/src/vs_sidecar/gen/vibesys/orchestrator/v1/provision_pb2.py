@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'vibesys/orchestrator/v1/provision.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\"\xb9\x02\n\x1aProvisionRepositoryRequest\x12)\n\nrequest_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\trequestId\x12\x36\n\x04name\x18\x02 \x01(\tB\"\xbaH\x1fr\x1d\x32\x1b^[a-z0-9][a-z0-9._-]{0,62}$R\x04name\x12#\n\x07\x65xample\x18\x03 \x01(\tB\x07\xbaH\x04r\x02\x10\x01H\x00R\x07\x65xample\x12@\n\x05\x65mpty\x18\x04 \x01(\x0b\x32(.vibesys.orchestrator.v1.EmptyRepositoryH\x00R\x05\x65mpty\x12@\n\x10parent_directory\x18\x05 \x01(\tB\x15\xbaH\x12r\x10\x32\x0e^(/[^\\x00]*)?$R\x0fparentDirectoryB\x0f\n\x06source\x12\x05\xbaH\x02\x08\x01\"\x11\n\x0f\x45mptyRepository\"\xc0\x01\n\x1bProvisionRepositoryResponse\x12H\n\x0bprovisioned\x18\x01 \x01(\x0b\x32$.vibesys.orchestrator.v1.ProvisionedH\x00R\x0bprovisioned\x12\x45\n\x07refused\x18\x02 \x01(\x0b\x32).vibesys.orchestrator.v1.ProvisionRefusedH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"s\n\x0bProvisioned\x12\x32\n\nrepository\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]+$R\nrepository\x12\x30\n\x06\x63ommit\x18\x02 \x01(\tB\x18\xbaH\x15r\x13\x32\x11^[0-9a-f]{40,64}$R\x06\x63ommit\"\xcb\x01\n\x10ProvisionRefused\x12M\n\x06reason\x18\x01 \x01(\x0e\x32).vibesys.orchestrator.v1.ProvisionRefusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x10R\x06\x64\x65tail\x12\x46\n\x13\x65xisting_repository\x18\x03 \x01(\tB\x15\xbaH\x12r\x10\x32\x0e^(/[^\\x00]*)?$R\x12\x65xistingRepository*\x97\x02\n\x10ProvisionRefusal\x12!\n\x1dPROVISION_REFUSAL_UNSPECIFIED\x10\x00\x12 \n\x1cPROVISION_REFUSAL_NAME_TAKEN\x10\x01\x12\"\n\x1ePROVISION_REFUSAL_NAME_INVALID\x10\x02\x12)\n%PROVISION_REFUSAL_PARENT_NOT_WRITABLE\x10\x03\x12\'\n#PROVISION_REFUSAL_EXAMPLE_NOT_FOUND\x10\x04\x12#\n\x1fPROVISION_REFUSAL_NEEDS_NETWORK\x10\x05\x12!\n\x1dPROVISION_REFUSAL_COPY_FAILED\x10\x06\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'vibesys/orchestrator/v1/provision.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\"\xc7\x02\n\x1aProvisionRepositoryRequest\x12)\n\nrequest_id\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\trequestId\x12\x36\n\x04name\x18\x02 \x01(\tB\"\xbaH\x1fr\x1d\x32\x1b^[a-z0-9][a-z0-9._-]{0,62}$R\x04name\x12#\n\x07\x65xample\x18\x03 \x01(\tB\x07\xbaH\x04r\x02\x10\x01H\x00R\x07\x65xample\x12@\n\x05\x65mpty\x18\x04 \x01(\x0b\x32(.vibesys.orchestrator.v1.EmptyRepositoryH\x00R\x05\x65mpty\x12N\n\x10parent_directory\x18\x05 \x01(\tB#\xbaH r\x1e\x32\x1c^(/[^\\x00]*|~(/[^\\x00]*)?)?$R\x0fparentDirectoryB\x0f\n\x06source\x12\x05\xbaH\x02\x08\x01\"\x11\n\x0f\x45mptyRepository\"\xc0\x01\n\x1bProvisionRepositoryResponse\x12H\n\x0bprovisioned\x18\x01 \x01(\x0b\x32$.vibesys.orchestrator.v1.ProvisionedH\x00R\x0bprovisioned\x12\x45\n\x07refused\x18\x02 \x01(\x0b\x32).vibesys.orchestrator.v1.ProvisionRefusedH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"s\n\x0bProvisioned\x12\x32\n\nrepository\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]+$R\nrepository\x12\x30\n\x06\x63ommit\x18\x02 \x01(\tB\x18\xbaH\x15r\x13\x32\x11^[0-9a-f]{40,64}$R\x06\x63ommit\"\xcb\x01\n\x10ProvisionRefused\x12M\n\x06reason\x18\x01 \x01(\x0e\x32).vibesys.orchestrator.v1.ProvisionRefusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x10R\x06\x64\x65tail\x12\x46\n\x13\x65xisting_repository\x18\x03 \x01(\tB\x15\xbaH\x12r\x10\x32\x0e^(/[^\\x00]*)?$R\x12\x65xistingRepository*\x97\x02\n\x10ProvisionRefusal\x12!\n\x1dPROVISION_REFUSAL_UNSPECIFIED\x10\x00\x12 \n\x1cPROVISION_REFUSAL_NAME_TAKEN\x10\x01\x12\"\n\x1ePROVISION_REFUSAL_NAME_INVALID\x10\x02\x12)\n%PROVISION_REFUSAL_PARENT_NOT_WRITABLE\x10\x03\x12\'\n#PROVISION_REFUSAL_EXAMPLE_NOT_FOUND\x10\x04\x12#\n\x1fPROVISION_REFUSAL_NEEDS_NETWORK\x10\x05\x12!\n\x1dPROVISION_REFUSAL_COPY_FAILED\x10\x06\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -42,7 +42,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PROVISIONREPOSITORYREQUEST'].fields_by_name['example']._loaded_options = None
   _globals['_PROVISIONREPOSITORYREQUEST'].fields_by_name['example']._serialized_options = b'\272H\004r\002\020\001'
   _globals['_PROVISIONREPOSITORYREQUEST'].fields_by_name['parent_directory']._loaded_options = None
-  _globals['_PROVISIONREPOSITORYREQUEST'].fields_by_name['parent_directory']._serialized_options = b'\272H\022r\0202\016^(/[^\\x00]*)?$'
+  _globals['_PROVISIONREPOSITORYREQUEST'].fields_by_name['parent_directory']._serialized_options = b'\272H r\0362\034^(/[^\\x00]*|~(/[^\\x00]*)?)?$'
   _globals['_PROVISIONREPOSITORYRESPONSE'].oneofs_by_name['outcome']._loaded_options = None
   _globals['_PROVISIONREPOSITORYRESPONSE'].oneofs_by_name['outcome']._serialized_options = b'\272H\002\010\001'
   _globals['_PROVISIONED'].fields_by_name['repository']._loaded_options = None
@@ -55,16 +55,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PROVISIONREFUSED'].fields_by_name['detail']._serialized_options = b'\272H\005r\003(\200\020'
   _globals['_PROVISIONREFUSED'].fields_by_name['existing_repository']._loaded_options = None
   _globals['_PROVISIONREFUSED'].fields_by_name['existing_repository']._serialized_options = b'\272H\022r\0202\016^(/[^\\x00]*)?$'
-  _globals['_PROVISIONREFUSAL']._serialized_start=951
-  _globals['_PROVISIONREFUSAL']._serialized_end=1230
+  _globals['_PROVISIONREFUSAL']._serialized_start=965
+  _globals['_PROVISIONREFUSAL']._serialized_end=1244
   _globals['_PROVISIONREPOSITORYREQUEST']._serialized_start=98
-  _globals['_PROVISIONREPOSITORYREQUEST']._serialized_end=411
-  _globals['_EMPTYREPOSITORY']._serialized_start=413
-  _globals['_EMPTYREPOSITORY']._serialized_end=430
-  _globals['_PROVISIONREPOSITORYRESPONSE']._serialized_start=433
-  _globals['_PROVISIONREPOSITORYRESPONSE']._serialized_end=625
-  _globals['_PROVISIONED']._serialized_start=627
-  _globals['_PROVISIONED']._serialized_end=742
-  _globals['_PROVISIONREFUSED']._serialized_start=745
-  _globals['_PROVISIONREFUSED']._serialized_end=948
+  _globals['_PROVISIONREPOSITORYREQUEST']._serialized_end=425
+  _globals['_EMPTYREPOSITORY']._serialized_start=427
+  _globals['_EMPTYREPOSITORY']._serialized_end=444
+  _globals['_PROVISIONREPOSITORYRESPONSE']._serialized_start=447
+  _globals['_PROVISIONREPOSITORYRESPONSE']._serialized_end=639
+  _globals['_PROVISIONED']._serialized_start=641
+  _globals['_PROVISIONED']._serialized_end=756
+  _globals['_PROVISIONREFUSED']._serialized_start=759
+  _globals['_PROVISIONREFUSED']._serialized_end=962
 # @@protoc_insertion_point(module_scope)

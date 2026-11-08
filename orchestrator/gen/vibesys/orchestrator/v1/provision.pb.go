@@ -98,7 +98,8 @@ type ProvisionRepositoryRequest struct {
 	//	*ProvisionRepositoryRequest_Example
 	//	*ProvisionRepositoryRequest_Empty
 	Source isProvisionRepositoryRequest_Source `protobuf_oneof:"source"`
-	// Absolute, or empty for ListCatalogueResponse.repositories_directory.
+	// Absolute, or "~" or "~/..." for the home directory of the host's user, which the host expands, or
+	// empty for ListCatalogueResponse.repositories_directory. "~name" is not accepted.
 	ParentDirectory string `protobuf:"bytes,5,opt,name=parent_directory,json=parentDirectory,proto3" json:"parent_directory,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -435,15 +436,15 @@ var File_vibesys_orchestrator_v1_provision_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_provision_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/orchestrator/v1/provision.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\"\xb9\x02\n" +
+	"'vibesys/orchestrator/v1/provision.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\"\xc7\x02\n" +
 	"\x1aProvisionRepositoryRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\trequestId\x126\n" +
 	"\x04name\x18\x02 \x01(\tB\"\xbaH\x1fr\x1d2\x1b^[a-z0-9][a-z0-9._-]{0,62}$R\x04name\x12#\n" +
 	"\aexample\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\aexample\x12@\n" +
-	"\x05empty\x18\x04 \x01(\v2(.vibesys.orchestrator.v1.EmptyRepositoryH\x00R\x05empty\x12@\n" +
-	"\x10parent_directory\x18\x05 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x0fparentDirectoryB\x0f\n" +
+	"\x05empty\x18\x04 \x01(\v2(.vibesys.orchestrator.v1.EmptyRepositoryH\x00R\x05empty\x12N\n" +
+	"\x10parent_directory\x18\x05 \x01(\tB#\xbaH r\x1e2\x1c^(/[^\\x00]*|~(/[^\\x00]*)?)?$R\x0fparentDirectoryB\x0f\n" +
 	"\x06source\x12\x05\xbaH\x02\b\x01\"\x11\n" +
 	"\x0fEmptyRepository\"\xc0\x01\n" +
 	"\x1bProvisionRepositoryResponse\x12H\n" +

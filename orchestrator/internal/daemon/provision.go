@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
@@ -82,8 +80,7 @@ func RefuseProvision(reason pb.ProvisionRefusal, detail string) *pb.ProvisionRep
 
 // ProvisionRepository implements OrchestratorService. The name is judged here, so every bad name is
 // the typed refusal the screen shows beside its field and not a transport error. A parent that
-// begins with "~" is the host's to expand, so the rest of the request is checked with it stood in
-// for by the root.
+// begins with "~" is the host's to expand, and the contract accepts it as it is.
 func (s *Service) ProvisionRepository(ctx context.Context, req *pb.ProvisionRepositoryRequest) (*pb.ProvisionRepositoryResponse, error) {
 	if s.Provisioner == nil {
 		return nil, unimplemented("ProvisionRepository")
@@ -92,12 +89,7 @@ func (s *Service) ProvisionRepository(ctx context.Context, req *pb.ProvisionRepo
 		return RefuseProvision(pb.ProvisionRefusal_PROVISION_REFUSAL_NAME_INVALID,
 			fmt.Sprintf("name %q is not made of lowercase letters, digits and dashes, from 1 to 63 of them, beginning with a letter or digit", req.GetName())), nil
 	}
-	checked := req
-	if parent := req.GetParentDirectory(); strings.HasPrefix(parent, "~") {
-		checked = proto.Clone(req).(*pb.ProvisionRepositoryRequest)
-		checked.ParentDirectory = "/"
-	}
-	if err := wire.Validate(checked); err != nil {
+	if err := wire.Validate(req); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	return s.Provisioner.Provision(ctx, req)
