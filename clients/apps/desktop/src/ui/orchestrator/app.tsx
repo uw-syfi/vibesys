@@ -290,6 +290,7 @@ export function OrchestratorApp(props: {
             loadNewRun={commands.loadNewRun}
             startFromExample={commands.startFromExample}
             forgetProvision={commands.forgetProvision}
+            beginSetup={commands.beginSetup}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
         }

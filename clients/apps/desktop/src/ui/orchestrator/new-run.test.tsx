@@ -30,6 +30,7 @@ const NO_NEW_RUN_COMMANDS = {
   loadNewRun: () => undefined,
   startFromExample: () => undefined,
   forgetProvision: () => undefined,
+  beginSetup: () => undefined,
 };
 
 /** Opens the dialog and chooses the person's own repository, the half this file is about. */
@@ -90,9 +91,11 @@ const open = (
 ) => {
   const started: {host: string; request: StartRunRequest}[] = [];
   const opened: {host: string; runId: string}[] = [];
+  const begun: {host: string; request: StartRunRequest}[] = [];
   const screen = mount(
     <NewRun
       {...NO_NEW_RUN_COMMANDS}
+      beginSetup={(host, request) => begun.push({host, request})}
       hosts={hosts}
       progress={progress}
       start={(host, request) => started.push({host, request})}
@@ -102,7 +105,7 @@ const open = (
       openRun={(host, runId) => opened.push({host, runId})}
     />,
   );
-  return {screen, started, opened};
+  return {screen, started, opened, begun};
 };
 
 /**
@@ -189,6 +192,27 @@ describe('the New run entry', () => {
     expect(screen.container.querySelector('input[placeholder="/path/to/repository"]')).toBeNull();
     openRepository(screen);
     expect(repository(screen).value).toBe('/work/decode-service');
+    screen.unmount();
+  });
+});
+
+describe('Set up a task, for a repository that has none yet', () => {
+  it('is closed until a repository is named, and then begins a setup in it with no task named', () => {
+    const {screen, begun} = open(HOSTS.map(host => ({...host, repositoryChecked: PASSED})));
+    openRepository(screen);
+    expect(screen.control('Set up a task').getAttribute('aria-disabled')).toBe('true');
+    type(repository(screen), '/work/decode-service');
+    screen.press(screen.control('Set up a task'));
+    expect(begun.map(each => [each.host, each.request.repository])).toEqual([
+      ['local', '/work/decode-service'],
+    ]);
+    screen.unmount();
+  });
+
+  it('is not offered for an example, which has its task', () => {
+    const {screen} = open();
+    screen.press(screen.control('New run'));
+    expect(screen.controls('Set up a task')).toHaveLength(0);
     screen.unmount();
   });
 });
