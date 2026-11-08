@@ -1,0 +1,332 @@
+import {create} from '@bufbuild/protobuf';
+import {describe, expect, it} from '@effect/vitest';
+import {
+  EvalPlaceKind,
+  EvalPlaceSchema,
+  ListEvalPlacesResponseSchema,
+  ReceiptSchema,
+} from '@vibesys/orchestrator-proto';
+import {act, useState} from 'react';
+import {
+  initialNavigation,
+  type Navigation,
+  type NavigationAction,
+  navigationReducer,
+  type RepositoryChecked,
+  readOf,
+} from '../../state/index.js';
+import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
+import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
+import {richCatalogueResponse, richPlaces} from '../../testing/orchestrator/new-run-catalogue.js';
+import type {AppCommands, HostSnapshot} from './app.js';
+import {OrchestratorApp} from './app.js';
+
+installDom();
+
+const PLACES = create(ListEvalPlacesResponseSchema, {
+  places: [...richPlaces(), create(EvalPlaceSchema, {name: 'modal', kind: EvalPlaceKind.CLOUD})],
+});
+
+const read = (overrides: Partial<HostSnapshot> = {}) =>
+  hostSnapshotOf({
+    catalogue: readOf(richCatalogueResponse()),
+    evalPlaces: readOf(PLACES),
+    ...overrides,
+  });
+
+/** The app as a person has it: the route is the navigation's, and every move is applied to it. */
+function Window(props: {
+  readonly hosts: readonly HostSnapshot[];
+  readonly commands: AppCommands;
+  readonly seen: NavigationAction[];
+}) {
+  const [navigation, setNavigation] = useState<Navigation>(initialNavigation);
+  return (
+    <OrchestratorApp
+      hosts={props.hosts}
+      nowMs={0}
+      commands={props.commands}
+      retryHost={() => undefined}
+      retryCost={() => undefined}
+      route={navigation.runs}
+      fleet={navigation.fleet}
+      go={action => {
+        props.seen.push(action);
+        setNavigation(navigationReducer(navigation, action));
+      }}
+    />
+  );
+}
+
+/** Opens the page from the Runs list's New run button. */
+function open(
+  hosts: readonly HostSnapshot[] = [read()],
+  overrides: Partial<AppCommands> = {},
+): {readonly screen: Screen; readonly seen: NavigationAction[]} {
+  const seen: NavigationAction[] = [];
+  const screen = mount(<Window hosts={hosts} commands={appCommandsOf(overrides)} seen={seen} />);
+  screen.press(screen.control('New run'));
+  return {screen, seen};
+}
+
+/** A card, or any control, named by its text start: a card's name is all of its text. */
+function card(screen: Screen, start: string): HTMLElement {
+  const found = [...screen.container.querySelectorAll<HTMLElement>('button')].find(each =>
+    (each.textContent ?? '').startsWith(start),
+  );
+  if (found === undefined) throw new Error(`no card starting ${start}`);
+  return found;
+}
+
+/** The radio a segment's label names: a segmented control is native radios the harness does not list. */
+function segment(screen: Screen, label: string): HTMLInputElement {
+  const named = [...screen.container.querySelectorAll('label')].find(each =>
+    (each.textContent ?? '').trim().startsWith(label),
+  );
+  const radio = named?.querySelector('input');
+  if (radio === null || radio === undefined) throw new Error(`no segment ${label}`);
+  return radio;
+}
+
+/** Types into a field as a person does: focused, the native value setter, then input and change events. */
+function type(field: HTMLInputElement | HTMLTextAreaElement, text: string): void {
+  const prototype = Object.getPrototypeOf(field) as object;
+  const set = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  if (set === undefined) throw new Error('a text field has a value setter');
+  const View = field.ownerDocument.defaultView as unknown as {Event: typeof Event};
+  act(() => {
+    field.focus();
+    set.call(field, text);
+    for (const name of ['input', 'change', 'keyup'])
+      field.dispatchEvent(new View.Event(name, {bubbles: true}));
+  });
+}
+
+const field = (screen: Screen, placeholder: string): HTMLInputElement => {
+  const found = screen.container.querySelector<HTMLInputElement>(
+    `input[placeholder="${placeholder}"]`,
+  );
+  if (found === null) throw new Error(`no field ${placeholder}`);
+  return found;
+};
+
+const PASSED = (tasks: string[]): RepositoryChecked => ({
+  repository: '/work/decode-service',
+  answer: {_tag: 'Passed', tasks},
+});
+
+describe('the New run page', () => {
+  it('opens from the Runs list as a page with its trail, the machine strip and two entry cards', () => {
+    const loaded: string[] = [];
+    const {screen, seen} = open([read(), read({key: 'ssh:host-a', label: 'host-a'})], {
+      loadNewRun: host => loaded.push(host),
+    });
+    expect(seen).toEqual([{type: 'open-new-run'}]);
+    expect(loaded).toEqual(['local', 'ssh:host-a']);
+    const text = screen.text();
+    expect(text).toContain('New run');
+    expect(text).toContain('Start from an example');
+    expect(text).toContain('Bring a repository, or describe one');
+    // A tab per machine, each with its eval places: the cloud place is left out.
+    expect(text).toContain('This machine · 4 eval places');
+    expect(text).toContain('host-a · 4 eval places');
+    expect(text).toContain('Evals on');
+    expect(text).toContain('Local Docker');
+    expect(text).not.toContain('modal');
+    expect(screen.controls('Edit in Machines')).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('sends the Edit in Machines link to Machines, and the Runs crumb back to the list', () => {
+    const {screen, seen} = open();
+    screen.press(screen.control('Edit in Machines'));
+    expect(seen.at(-1)).toEqual({type: 'open-machines'});
+    screen.unmount();
+    const again = open();
+    again.screen.press(again.screen.control('Runs'));
+    expect(again.seen.at(-1)).toEqual({type: 'open-runs'});
+    again.screen.unmount();
+  });
+
+  it('picks another machine by its tab, and reads it', () => {
+    const loaded: string[] = [];
+    const {screen} = open([read(), read({key: 'ssh:host-a', label: 'host-a'})], {
+      loadNewRun: host => loaded.push(host),
+    });
+    loaded.length = 0;
+    act(() => segment(screen, 'host-a').click());
+    expect(loaded).toEqual(['ssh:host-a']);
+    screen.unmount();
+  });
+
+  it('keeps showing the machine before while the picked one is read, dimmed, and swaps once', () => {
+    const before = read({key: 'ssh:host-a', label: 'host-a'});
+    const reading = hostSnapshotOf({
+      key: 'ssh:host-b',
+      label: 'host-b',
+      catalogue: {data: null, reading: true, failure: null},
+      evalPlaces: {data: null, reading: true, failure: null},
+    });
+    const seen: NavigationAction[] = [];
+    const screen = mount(
+      <Window hosts={[before, reading]} commands={appCommandsOf()} seen={seen} />,
+    );
+    screen.press(screen.control('New run'));
+    act(() => segment(screen, 'host-b').click());
+    // host-b is being read: host-a's counts are still there, dimmed.
+    expect(screen.container.querySelector('[data-stale]')).not.toBeNull();
+    expect(screen.text()).toContain('catalog tasks fit');
+    screen.render(
+      <Window
+        hosts={[before, read({key: 'ssh:host-b', label: 'host-b'})]}
+        commands={appCommandsOf()}
+        seen={seen}
+      />,
+    );
+    expect(screen.container.querySelector('[data-stale]')).toBeNull();
+    screen.unmount();
+  });
+});
+
+describe('the catalog step', () => {
+  it('lists the examples by domain as cards with a title, an id line and objective chips', () => {
+    const {screen} = open();
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const text = screen.text();
+    expect(text).toContain('Start from an example');
+    expect(text).toContain('Catalog');
+    expect(text).toContain('Model serving');
+    expect(text).toContain('Data structures');
+    expect(text).toMatch(/Fits This machine · \d+/);
+    expect(text).toMatch(/All · \d+/);
+    // The id line is the example's folder and its task.
+    expect(text).toMatch(/\w+ \/ \w+/);
+    screen.unmount();
+  });
+
+  it('narrows by search and by the fit filter, and keeps a card that does not fit in All with what it lacks', () => {
+    const {screen} = open();
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const fitting = screen.container.querySelectorAll(
+      '.vs-pick-card:not([data-unavailable])',
+    ).length;
+    act(() => segment(screen, 'All').click());
+    const all = screen.container.querySelectorAll('.vs-pick-card').length;
+    expect(all).toBeGreaterThan(fitting);
+    expect(screen.container.querySelectorAll('.vs-pick-card[data-unavailable]').length).toBe(
+      all - fitting,
+    );
+    type(field(screen, 'Model, hardware, task'), 'zzz-no-such-example');
+    expect(screen.container.querySelectorAll('.vs-pick-card')).toHaveLength(0);
+    screen.unmount();
+  });
+
+  it('copies an example and starts in it: the example, a place it fits, the name and no variant', () => {
+    const calls: {host: string; example: string; name: string; place: string; task: string}[] = [];
+    const {screen} = open([read()], {
+      startFromExample: (host, example, request) =>
+        calls.push({
+          host,
+          example: example.example,
+          name: example.name,
+          place: request.evalPlace,
+          task: request.task,
+        }),
+    });
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const cards = [
+      ...screen.container.querySelectorAll<HTMLElement>('.vs-pick-card:not([data-unavailable])'),
+    ];
+    const first = cards[0];
+    if (first === undefined) throw new Error('the catalogue has a card that fits');
+    screen.press(first);
+    expect(screen.text()).toContain('Evals on');
+    screen.press(screen.control('Start run'));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.host).toBe('local');
+    expect(calls[0]?.place).not.toBe('modal');
+    expect(calls[0]?.example).not.toBe('');
+    screen.unmount();
+  });
+
+  it('goes back one step by the New run crumb', () => {
+    const {screen} = open();
+    screen.press(card(screen, 'CatalogStart from an example'));
+    screen.press(screen.control('New run'));
+    expect(screen.text()).toContain('Bring a repository, or describe one');
+    screen.unmount();
+  });
+});
+
+describe('the My own step', () => {
+  const ownHost = () => read({repositoryChecked: PASSED(['decode', 'prefill'])});
+  const toOwn = (overrides: Partial<AppCommands> = {}) => {
+    const opened = open([ownHost()], overrides);
+    opened.screen.press(card(opened.screen, 'My ownBring a repository'));
+    return opened;
+  };
+
+  it('offers the three cases', () => {
+    const {screen} = toOwn();
+    const text = screen.text();
+    expect(text).toContain('A repository with a task');
+    expect(text).toContain('A repository without a task');
+    expect(text).toContain('Nothing yet');
+    screen.unmount();
+  });
+
+  it('starts a task of a repository that has some', () => {
+    const started: {host: string; repository: string; task: string}[] = [];
+    const {screen} = toOwn({
+      startRun: (host, request) =>
+        started.push({host, repository: request.repository, task: request.task}),
+    });
+    screen.press(card(screen, 'A repository with a task'));
+    type(field(screen, 'Pick or type a path'), '/work/decode-service');
+    expect(screen.text()).toContain('Git repository, 2 tasks');
+    screen.press(card(screen, 'prefill'));
+    screen.press(screen.control('Start run'));
+    expect(started).toEqual([{host: 'local', repository: '/work/decode-service', task: 'prefill'}]);
+    screen.unmount();
+  });
+
+  it('begins a setup chat in a repository without a task', () => {
+    const begun: {host: string; repository: string}[] = [];
+    const {screen} = toOwn({
+      beginSetup: (host, request) => begun.push({host, repository: request.repository}),
+    });
+    screen.press(card(screen, 'A repository without a task'));
+    type(field(screen, '~/code/my-server'), '/work/decode-service');
+    screen.press(screen.control('Set up a task'));
+    expect(begun).toEqual([{host: 'local', repository: '/work/decode-service'}]);
+    screen.unmount();
+  });
+
+  it('makes the repository first when there is nothing yet, then begins the setup', () => {
+    const made: {host: string; name: string; parent: string}[] = [];
+    const {screen} = toOwn({
+      setUpInNewRepository: (host, repository) =>
+        made.push({host, name: repository.name, parent: repository.parent}),
+    });
+    screen.press(card(screen, 'Nothing yet'));
+    screen.press(screen.control('Set up a task'));
+    expect(made).toEqual([]);
+    type(field(screen, 'ring-buffer'), ' ring-buffer ');
+    screen.press(screen.control('Set up a task'));
+    expect(made).toEqual([{host: 'local', name: 'ring-buffer', parent: ''}]);
+    screen.unmount();
+  });
+
+  it('opens the run a start created', () => {
+    const seen: NavigationAction[] = [];
+    const accepted = appCommandsOf({
+      start: {_tag: 'Accepted', receipt: create(ReceiptSchema, {runId: 'run-9'})},
+    });
+    const screen = mount(<Window hosts={[ownHost()]} commands={accepted} seen={seen} />);
+    screen.press(screen.control('New run'));
+    screen.press(card(screen, 'My ownBring a repository'));
+    screen.press(screen.control('Open the run'));
+    expect(seen.at(-1)).toEqual({type: 'open-run', host: 'local', runId: 'run-9'});
+    screen.unmount();
+  });
+});
