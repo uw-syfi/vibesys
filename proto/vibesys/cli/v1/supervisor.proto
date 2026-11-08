@@ -209,6 +209,10 @@ message FlowEnd {
     // A step's command started and nobody can say how it ended, and this says what was lost.
     Failure lost = 5;
   }
+  // The stage that ended the job, for a stopped or rejected ending: BUILD for an image or the
+  // candidate that did not build, CHECK for the correctness check, MEASURE for the benchmark.
+  // Unspecified for every other ending and for a step outside those stages (checkout, a server).
+  JobStage failed_stage = 6 [(buf.validate.field).enum.defined_only = true];
 }
 
 // SupervisorOutcome is the one report a supervisor makes about its job.

@@ -52,7 +52,7 @@ func anyFlowOutcome(w *world, res core.Result) lifecycle.Outcome {
 	case 1:
 		v = lifecycle.Lost{Failure: f}
 	case 2:
-		v = lifecycle.Rejected{Reason: "the benchmark wrote no result"}
+		v = lifecycle.Rejected{Reason: "the benchmark wrote no result", Stage: core.StageMeasure}
 	case 3:
 		return withCancel(w, lifecycle.Outcome{})
 	case 4:
@@ -60,7 +60,7 @@ func anyFlowOutcome(w *world, res core.Result) lifecycle.Outcome {
 	case 5, 6:
 		v = lifecycle.Passed{Result: res}
 	default:
-		v = lifecycle.Stopped{Exec: anyExec(w)}
+		v = lifecycle.Stopped{Exec: anyExec(w), Stage: []core.JobStage{"", core.StageBuild, core.StageCheck, core.StageMeasure}[w.r.IntN(4)]}
 	}
 	return withCancel(w, lifecycle.Outcome{End: lifecycle.FlowEnded{Verdict: v}})
 }
@@ -202,6 +202,20 @@ func TestAPlanJobSavesAResultExactlyWhenItPassed(t *testing.T) {
 		}
 		if m, ok := res.Outcome.(core.MeasureOutcome); ok && passed && got.CheckJob != m.CheckJob {
 			t.Fatalf("a measure that passed links check %q, want %q", got.CheckJob, m.CheckJob)
+		}
+		// A stage is recorded exactly for a job that failed in a step that carries one.
+		wantStage := core.JobStage("")
+		switch v := verdict.(type) {
+		case lifecycle.Stopped:
+			wantStage = v.Stage
+		case lifecycle.Rejected:
+			wantStage = v.Stage
+		}
+		if got.State != core.JobFailed {
+			wantStage = ""
+		}
+		if got.FailedStage != wantStage {
+			t.Fatalf("outcome %+v settles as %q with failed stage %q, want %q", o, got.State, got.FailedStage, wantStage)
 		}
 		switch verdict.(type) {
 		case lifecycle.Rejected:

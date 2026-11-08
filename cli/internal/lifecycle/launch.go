@@ -77,13 +77,21 @@ type Passed struct{ Result core.Result }
 
 // Stopped says a step's command ended unlike a pass: an exit code other than 0, a time limit, a
 // cancel.
-type Stopped struct{ Exec core.ExecOutcome }
+type Stopped struct {
+	Exec core.ExecOutcome
+	// Stage is the stage the step belonged to, empty for a step outside the stages of a job's record.
+	Stage core.JobStage
+}
 
 // NotAttempted says a step's command never started, such as a checkout that failed.
 type NotAttempted struct{ Failure core.Failure }
 
 // Rejected says every command ran and the job has no acceptable result.
-type Rejected struct{ Reason string }
+type Rejected struct {
+	Reason string
+	// Stage is the stage that produced the output that was refused.
+	Stage core.JobStage
+}
 
 // Lost says a step's command started and nobody can say how it ended.
 type Lost struct{ Failure core.Failure }
