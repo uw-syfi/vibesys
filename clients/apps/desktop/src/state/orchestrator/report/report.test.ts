@@ -14,6 +14,7 @@ import {
   RunSummarySchema,
   SearchStateSchema,
   UnreadableReason,
+  UnreadableReasonSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {emptyState, type OrchestratorState} from '../state.js';
@@ -478,7 +479,45 @@ describe('the run report', () => {
       'r',
       20_000,
     );
-    expect(stale?.search).toEqual({state: 'unreadable', sinceMs: 5000});
+    expect(stale?.search).toEqual({
+      state: 'unreadable',
+      reason: UnreadableReason.STREAM_LOST,
+      detail: '',
+      sinceMs: 5000,
+    });
     expect(stale?.truncated).toBe(true);
+  });
+
+  it('carries why the search cannot be read, the host’s words and since when, or that it said no time', () => {
+    const reasons = UnreadableReasonSchema.values.map(value => value.number as UnreadableReason);
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...reasons),
+        fc.string({maxLength: 64}),
+        fc.option(fc.integer({min: 0, max: 4e12}), {nil: undefined}),
+        (reason, detail, sinceMs) => {
+          const search = create(SearchStateSchema, {
+            runId: 'r',
+            health: {
+              state: {
+                case: 'unreadable',
+                value: {
+                  reason,
+                  detail,
+                  ...(sinceMs === undefined ? {} : {since: timestampFromMs(sinceMs)}),
+                },
+              },
+            },
+          });
+          const report = runReport({...stateOf(), searches: {r: search}}, 'r', 20_000);
+          expect(report?.search).toEqual({
+            state: 'unreadable',
+            reason,
+            detail,
+            sinceMs: sinceMs ?? null,
+          });
+        },
+      ),
+    );
   });
 });

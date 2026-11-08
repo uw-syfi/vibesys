@@ -122,11 +122,6 @@ func (u *InputUpgrade) span(span *storev1.Span) {
 	u.inputs[span.Id] = span.GetLabel().GetKind() == "gate" && span.GetLabel().GetAttrs().GetTypeUrl() == "type.googleapis.com/vibesys.search.v1.GateAttrs" && proto.Unmarshal(span.GetLabel().GetAttrs().GetValue(), attrs) == nil && attrs.Subject == searchv1.GateSubject_GATE_SUBJECT_INPUT
 }
 
-// Measurement is the latest declaration's canonical fact after the read prefix.
-func (u *InputUpgrade) Measurement() *storev1.InputMeasurement {
-	return u.epoch.GetRun().GetInputMeasurement()
-}
-
 // Irrelevant bodies remain opaque, including bodies added by newer writers.
 func upgradeMetadata(payload []byte) []byte    { return filteredMetadata(payload, false) }
 func projectionMetadata(payload []byte) []byte { return filteredMetadata(payload, true) }

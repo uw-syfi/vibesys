@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"path"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -33,6 +34,13 @@ const (
 	DefaultSamples        uint32 = 5
 	DefaultCommandTimeout        = 30 * time.Minute
 )
+
+// MaxCommandTimeoutSeconds is the longest a command's timeout_seconds may ask for: one week. It
+// matches the proto cap on TaskCommandV02.timeout_seconds (buf.validate uint32.lte = 604800), so a
+// schema 0.1 manifest is held to the same bound the schema 0.2 reader enforces. A larger value
+// also overflows time.Duration once scaled to nanoseconds, yielding a negative or tiny timeout, so
+// it is refused here rather than silently accepted.
+const MaxCommandTimeoutSeconds = 604800
 
 // ProjectRoot is the placeholder a command spells the checkout's root with.
 const ProjectRoot = core.ProjectRootPlaceholder
@@ -453,27 +461,63 @@ type resultSection struct {
 	Metric       string `toml:"metric"`
 }
 
-// opaque lists the manifest sections held as data: the decoder reports the keys nested inside
-// them as undecoded, and they are accepted without being read.
-var opaque = map[string]bool{
-	"agent": true, "profile_guided": true, "profile": true, "resources": true, "workspace": true,
-	"plan": true, "catalogue": true, "comparison": true, "environment": true, "evaluator": true,
-}
-
 // decode decodes TOML into v and rejects every key v has no field for, naming it. A key nested
-// inside an opaque section is not checked.
-func decode(file string, data []byte, v any, skip map[string]bool) error {
+// inside a section v holds as data, a map, is not checked. A key is v's only as v's toml tag
+// spells it: the TOML decoder also fills a field whose name differs from the key only in case, so
+// it would read `[Accuracy]` as [accuracy], and of the two written together whichever it met last.
+func decode(file string, data []byte, v any) error {
 	meta, err := toml.Decode(string(data), v)
 	if err != nil {
 		return invalid("%s: %v", file, err)
 	}
-	for _, k := range meta.Undecoded() {
-		if len(k) > 0 && skip[k[0]] {
-			continue
+	for _, k := range meta.Keys() {
+		if !declares(reflect.TypeOf(v), k) {
+			return invalid("%s: unknown key %q", file, k.String())
 		}
-		return invalid("%s: unknown key %q", file, k.String())
 	}
 	return nil
+}
+
+// declares says whether the type t has a field for the key, spelled exactly as the field's toml
+// tag spells it. A map holds any key under it.
+func declares(t reflect.Type, key toml.Key) bool {
+	for _, elem := range key {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+			t = t.Elem()
+		}
+		switch t.Kind() {
+		case reflect.Map:
+			return true
+		case reflect.Struct:
+			f, ok := fieldTagged(t, elem)
+			if !ok {
+				return false
+			}
+			t = f.Type
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// fieldTagged is the field of the struct type t whose toml tag is name, looking into an embedded
+// struct without a tag as the decoder does.
+func fieldTagged(t reflect.Type, name string) (reflect.StructField, bool) {
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag, _, _ := strings.Cut(f.Tag.Get("toml"), ",")
+		if f.Anonymous && tag == "" && f.Type.Kind() == reflect.Struct {
+			if inner, ok := fieldTagged(f.Type, name); ok {
+				return inner, true
+			}
+			continue
+		}
+		if tag == name {
+			return f, true
+		}
+	}
+	return reflect.StructField{}, false
 }
 
 // Parse reads a manifest and an objectives file (nil when the task has none) without touching
@@ -497,7 +541,7 @@ func Parse(name string, manifestTOML, objectivesTOML []byte) (Task, error) {
 		return parseV02(name, table, o)
 	}
 	var m manifest
-	if err := decode(ManifestName, manifestTOML, &m, opaque); err != nil {
+	if err := decode(ManifestName, manifestTOML, &m); err != nil {
 		return Task{}, err
 	}
 	return build(name, m, o)
@@ -656,6 +700,9 @@ func makeCommand(section string, argv []string, seconds int) (Command, error) {
 	}
 	if seconds < 0 {
 		return Command{}, invalid("%s: [%s] timeout_seconds must be positive, got %d", ManifestName, section, seconds)
+	}
+	if seconds > MaxCommandTimeoutSeconds {
+		return Command{}, invalid("%s: [%s] timeout_seconds must be at most %d (one week), got %d", ManifestName, section, MaxCommandTimeoutSeconds, seconds)
 	}
 	timeout := DefaultCommandTimeout
 	if seconds > 0 {

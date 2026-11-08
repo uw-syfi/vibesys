@@ -10,9 +10,11 @@ import {
   DispatchRequestSchema,
   ItemStatus,
   MessageSchema,
+  oneofIs,
   Refusal,
   Rejection,
   RunChangeSchema,
+  RunSchema,
   RunStatus,
   SendMessageSchema,
   StopAgentSchema,
@@ -310,6 +312,42 @@ const withTriggersInTurn = (scenario: Scenario, attempts: number): Scenario => {
   };
 };
 
+/**
+ * `scenario` with its run already stopping, so a stop that reaches the host afterward rejects what
+ * it was owed as the run stopping, not as the agent itself being gone. A stop the host is still
+ * carrying out does not ask the run's status, so this changes nothing about what a press of Stop
+ * does up to that point; only what `finishStop` rejects once the session closes.
+ */
+const withRunStopping = (scenario: Scenario): Scenario => {
+  const whole = new FakeDaemon(scenario).snapshot();
+  const theRun = whole.runs[0];
+  if (theRun === undefined) throw new Error('the scenario has no run');
+  return {
+    ...scenario,
+    changes: [
+      ...scenario.changes,
+      create(RunChangeSchema, {
+        sequence: BigInt(scenario.changes.length + 1),
+        runId: theRun.id,
+        at: theRun.createdAt,
+        body: {case: 'run', value: create(RunSchema, {...theRun, status: RunStatus.STOPPING})},
+      }),
+    ],
+  };
+};
+
+/** Every kind of change a run's log carries, so one is read through `oneofIs` for the kind it is. */
+const RUN_CHANGE_KINDS = {
+  run: true,
+  agent: true,
+  turn: true,
+  item: true,
+  message: true,
+  receipt: true,
+  checkIn: true,
+  runUpdated: true,
+} as const;
+
 const beingStopped = (agent: Agent): boolean =>
   agent.stopStage === AgentStopStage.INTERRUPTING || agent.stopStage === AgentStopStage.CLOSING;
 
@@ -502,20 +540,81 @@ describe('stopping one agent (StopAgent, as the host decides it)', () => {
   );
 
   it.effect(
-    'a message that has started as many turns as the host allows is rejected as out of attempts when its turn is stopped',
+    "the turn's message is put back in line before the agent ends, and rejected for good only " +
+      'after, together with the rest of the agent mail the host owed (`endTurn` then `rejectMail`)',
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const daemon = new FakeDaemon(withTriggersInTurn(run, MAX_DELIVERY_ATTEMPTS));
+          const daemon = new FakeDaemon(withTriggersInTurn(run, 1));
           const h = yield* hostHarness(daemon);
           const working = workingIn(daemon);
           const trigger = triggerOf(daemon, working.id);
-          expect(trigger).toMatchObject({attempts: MAX_DELIVERY_ATTEMPTS});
+          if (trigger === undefined) throw new Error('the working agent has no trigger message');
+          expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
+          const before = daemon.sequence;
+          daemon.finishStop(working.id);
+          const changes = daemon.changesAfter(before);
+          const agentEnded = changes.findIndex(
+            change =>
+              oneofIs(change.body, 'agent', RUN_CHANGE_KINDS) &&
+              change.body.value.id === working.id,
+          );
+          const triggerRejected = changes.findIndex(
+            change =>
+              oneofIs(change.body, 'message', RUN_CHANGE_KINDS) &&
+              change.body.value.id === trigger.id &&
+              change.body.value.delivery === Delivery.REJECTED,
+          );
+          expect(agentEnded).toBeGreaterThanOrEqual(0);
+          expect(triggerRejected).toBeGreaterThanOrEqual(0);
+          // The host settles what it still owes the agent (`rejectMail`) only once the agent itself
+          // has ended, so the turn's message is rejected for good after that, not before it.
+          expect(triggerRejected).toBeGreaterThan(agentEnded);
+        }),
+      ),
+  );
+
+  it.effect.prop(
+    'the message behind a stopped turn is rejected as out of attempts exactly once the host has ' +
+      'started as many turns for it as it ever will, else as the agent being gone',
+    {attempts: between(1, MAX_DELIVERY_ATTEMPTS)},
+    ({attempts}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = new FakeDaemon(withTriggersInTurn(run, attempts));
+          const h = yield* hostHarness(daemon);
+          const working = workingIn(daemon);
+          const trigger = triggerOf(daemon, working.id);
+          expect(trigger).toMatchObject({attempts});
           expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
           daemon.finishStop(working.id);
           expect(
             daemon.snapshot().messages.find(message => message.id === trigger?.id),
-          ).toMatchObject({delivery: Delivery.REJECTED, rejection: Rejection.ATTEMPTS_EXHAUSTED});
+          ).toMatchObject({
+            delivery: Delivery.REJECTED,
+            rejection:
+              attempts >= MAX_DELIVERY_ATTEMPTS
+                ? Rejection.ATTEMPTS_EXHAUSTED
+                : Rejection.AGENT_GONE,
+          });
+        }),
+      ),
+  );
+
+  it.effect(
+    'a message behind a stopped turn is rejected as the run stopping once the run is no longer live',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = new FakeDaemon(withRunStopping(withTriggersInTurn(run, 1)));
+          const h = yield* hostHarness(daemon);
+          const working = workingIn(daemon);
+          const trigger = triggerOf(daemon, working.id);
+          expect(yield* press(h, working.id)).toMatchObject({_tag: 'Accepted'});
+          daemon.finishStop(working.id);
+          expect(
+            daemon.snapshot().messages.find(message => message.id === trigger?.id),
+          ).toMatchObject({delivery: Delivery.REJECTED, rejection: Rejection.RUN_STOPPING});
         }),
       ),
   );

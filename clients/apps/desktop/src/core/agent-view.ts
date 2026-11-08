@@ -16,6 +16,7 @@ import {
   type Freshness,
   freshnessOf,
   type HostFrame,
+  holdsSteps,
 } from '../state/index.js';
 import {type FeedSpec, runFeed} from './feeds.js';
 import type {HostParts} from './host-store.js';
@@ -26,6 +27,7 @@ export interface AgentView {
   /** Mount this to follow one agent; unmounting closes its stream. Mounting twice shares one. */
   readonly watch: (agentId: string) => Atom.Atom<AsyncResult.AsyncResult<never, never>>;
   readonly status: (agentId: string) => Atom.Atom<FeedStatus>;
+  /** Whether the agent's steps on screen are current; any held step counts as something shown. */
   readonly freshness: (agentId: string) => Atom.Atom<Freshness>;
   /** The user asked to retry this agent's failed stream. */
   readonly retry: (agentId: string) => Effect.Effect<void>;
@@ -93,7 +95,9 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
         freshnessOf(
           get(connection.state),
           get(status(agentId)),
-          get(store.atom).agentCursors[agentId] !== undefined,
+          // The steps held, not the stream's cursor: a host whose log ends before the cursor has
+          // it dropped (`rewindAgentStream`) while the steps stay on screen.
+          holdsSteps(get(store.atom).data, agentId),
         ),
       ),
     ),

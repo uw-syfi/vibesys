@@ -118,9 +118,11 @@ export class Rejected extends Data.TaggedError('Rejected')<{
 }> {}
 
 /**
- * Whether the host refused a stream because it asked to continue after a sequence the host's log has
- * not reached (status 11, the daemon's `ErrAheadOfLog`): the host lost the tail of its log or its
- * state was reset. The same cursor is refused again; the stream must start from the beginning.
+ * Whether the host answered status 11 (`OUT_OF_RANGE`): a cursor past the end of what it holds. On a
+ * stream that resumes after a sequence (the daemon's `ErrAheadOfLog`), the host lost the tail of its
+ * log or its state was reset, and the same cursor is refused again; the feed loop starts such a
+ * stream from the beginning only when its spec passes a `rewind` (`FeedSpec.rewind`). Elsewhere it is
+ * a refusal like any other: `GetRunHistory` answers it for a page cursor past a run's history.
  */
 export const isAheadOfLog = (error: AppError): boolean =>
   error._tag === 'Rejected' && error.status === RpcStatus.OUT_OF_RANGE;

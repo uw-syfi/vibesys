@@ -366,7 +366,16 @@ function boundsOf(
 export function measuredSearch(
   runId: string,
   options: MeasuredOptions,
-  health: {readonly stale?: boolean} = {},
+  health: {
+    readonly stale?: boolean;
+    /**
+     * Why the host cannot read the job log when `stale`: that its link to the job service broke,
+     * when absent.
+     */
+    readonly reason?: UnreadableReason;
+    /** The host's own words about it. */
+    readonly detail?: string;
+  } = {},
 ): SearchState {
   const candidates = candidatesOf(options);
   const [first] = options.objectives;
@@ -392,7 +401,11 @@ export function measuredSearch(
       state: health.stale
         ? {
             case: 'unreadable',
-            value: {reason: UnreadableReason.STREAM_LOST, since: timestampFromMs(options.endMs)},
+            value: {
+              reason: health.reason ?? UnreadableReason.STREAM_LOST,
+              since: timestampFromMs(options.endMs),
+              detail: health.detail ?? '',
+            },
           }
         : {case: 'liveSince', value: timestampFromMs(options.startMs)},
     },

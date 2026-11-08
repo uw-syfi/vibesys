@@ -127,6 +127,17 @@ func TestReadsAJSONFileTask(t *testing.T) {
 	}
 }
 
+func TestATimeoutAtTheWeekCapIsAccepted(t *testing.T) {
+	manifest := strings.Replace(jsonManifest, "timeout_seconds = 600", fmt.Sprintf("timeout_seconds = %d", task.MaxCommandTimeoutSeconds), 1)
+	got, err := task.Read(repo(taskFiles("t", manifest, objectives)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Build == nil || got.Build.Timeout != task.MaxCommandTimeoutSeconds*time.Second {
+		t.Errorf("build timeout %v, want %v", got.Build, time.Duration(task.MaxCommandTimeoutSeconds)*time.Second)
+	}
+}
+
 func TestReadsAProtocol2TaskWithShortFormSections(t *testing.T) {
 	got, err := task.Read(repo(taskFiles("p", protocol2Manifest, objectives2)), "p")
 	if err != nil {
@@ -361,6 +372,18 @@ func TestWhatItCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = -5", 1),
 			"timeout_seconds", core.FailureInvalidInput,
 		},
+		"a timeout past a week": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 604801", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
+		"a timeout that overflows the clock into a negative duration": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 9223372037", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
+		"a timeout that overflows the clock into a tiny duration": {
+			strings.Replace(jsonManifest, "timeout_seconds = 600", "timeout_seconds = 18446744074", 1),
+			"timeout_seconds", core.FailureInvalidInput,
+		},
 		"an option that is not one": {
 			strings.Replace(jsonManifest, `json_argument = "--output-json"`, `json_argument = "output"`, 1),
 			"json_argument", core.FailureInvalidInput,
@@ -416,6 +439,82 @@ func TestUnknownKeysAreRejectedByName(t *testing.T) {
 		}
 		if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, key) {
 			t.Fatalf("key %q in %q: error %q does not name it", key, section, f.Message)
+		}
+	}
+}
+
+// A key is read only as it is spelled. A key or a section of schema 0.1 written in another case is
+// refused naming it, as the product's reader refuses it, and never read as the key it resembles.
+// Every key and section header the reader decodes is re-cased in turn, in a manifest with a
+// result file and in one with a protocol 2 benchmark.
+func TestAKeyInAnotherCaseIsRefusedNamingIt(t *testing.T) {
+	r := rand.New(rand.NewPCG(3, 4))
+	recased := func(key string) string {
+		b := []byte(key)
+		for string(b) == key {
+			for i, c := range b {
+				if c >= 'a' && c <= 'z' && r.IntN(2) == 0 {
+					b[i] = c - 'a' + 'A'
+				}
+			}
+		}
+		return string(b)
+	}
+	opaque := []string{"agent", "catalogue"}
+	withEveryKey := strings.Replace(jsonManifest, "backends = [\"cpu\"]\n", "backends = [\"cpu\"]\nmetric = \"ops_per_sec\"\n", 1)
+	withEveryKey = strings.Replace(withEveryKey, "[benchmark.result]", "requires_accuracy = true\n\n[benchmark.result]", 1)
+	for _, m := range []struct{ manifest, objectives string }{{withEveryKey, objectives}, {protocol2Manifest, objectives2}} {
+		if _, err := task.Parse("t", []byte(m.manifest), []byte(m.objectives)); err != nil {
+			t.Fatalf("the manifest as written: %v", err)
+		}
+		lines := strings.Split(m.manifest, "\n")
+		section := ""
+		for i, line := range lines {
+			// The elements of the header or the key on this line that the reader decodes.
+			var elems []string
+			if header, ok := strings.CutPrefix(line, "["); ok {
+				elems = strings.Split(strings.TrimSuffix(header, "]"), ".")
+				section = elems[0]
+				if slices.Contains(opaque, section) {
+					elems = elems[:1]
+				}
+			} else if key, _, ok := strings.Cut(line, " = "); ok && key != "version" && !slices.Contains(opaque, section) {
+				elems = []string{key}
+			}
+			for j, elem := range elems {
+				variant := recased(elem)
+				spelled := slices.Clone(elems)
+				spelled[j] = variant
+				changed := slices.Clone(lines)
+				if strings.HasPrefix(line, "[") {
+					changed[i] = "[" + strings.Join(spelled, ".") + strings.TrimPrefix(line, "["+strings.Join(elems, "."))
+				} else {
+					changed[i] = strings.Replace(line, elem, variant, 1)
+				}
+				manifest := strings.Join(changed, "\n")
+				got, err := task.Parse("t", []byte(manifest), []byte(m.objectives))
+				if err == nil {
+					t.Errorf("%q in place of %q: accepted, with check %v", changed[i], line, got.Check.Argv)
+					continue
+				}
+				if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, variant) {
+					t.Errorf("%q in place of %q: %q (%s), want invalid input naming %q", changed[i], line, f.Message, f.Kind, variant)
+				}
+			}
+		}
+	}
+	// A section written twice, in two cases, was read as one of them, whichever the decoder met
+	// last.
+	twice := strings.Replace(jsonManifest, "[benchmark]", "[Accuracy]\ncommand = [\"./other-check\"]\n\n[benchmark]", 1)
+	twiceVersion := strings.Replace(jsonManifest, "version = \"0.1\"\n", "version = \"0.1\"\nVersion = \"0.2\"\n", 1)
+	for spelled, manifest := range map[string]string{"Accuracy": twice, "Version": twiceVersion} {
+		got, err := task.Parse("t", []byte(manifest), []byte(objectives))
+		if err == nil {
+			t.Errorf("%s beside its lower-case key: accepted, with check %v", spelled, got.Check.Argv)
+			continue
+		}
+		if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, fmt.Sprintf("%q", spelled)) {
+			t.Errorf("%s beside its lower-case key: %q (%s), want invalid input naming it", spelled, f.Message, f.Kind)
 		}
 	}
 }

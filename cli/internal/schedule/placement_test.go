@@ -193,3 +193,42 @@ func TestMeasuresSpreadOverIdlePlacements(t *testing.T) {
 		t.Fatalf("the third measure: %+v, want it to wait for the placement m1 holds alone", ds[2])
 	}
 }
+
+// On a placement that is Isolated, where each job's measured allocation is a node of its own, a
+// measure claims a slot of it and its resources' claims as any job does, never whole, so measures
+// fill its slots, while on a placement that is not, a measure holds it alone.
+func TestAMeasureOfAnIsolatedPlacementTakesASlot(t *testing.T) {
+	gpus := schedule.ResourceID("rocm:a")
+	d := schedule.PlacementDemand{Placements: map[string]schedule.Offered{
+		"a": {Isolated: true, Claims: []schedule.Claim{{Resource: gpus, Amount: 1}}},
+		"b": {Claims: []schedule.Claim{{Resource: "rocm:b", Amount: 1}}},
+	}, Host: "host"}
+	s := schedule.State{Resources: []schedule.Resource{
+		{ID: schedule.PlacementOf("a"), Capacity: 2}, {ID: gpus, Capacity: 2},
+		{ID: schedule.PlacementOf("b"), Capacity: 2}, {ID: "rocm:b", Capacity: 2},
+	}}
+	for _, placement := range []string{"a", "b"} {
+		measure := core.Job{Spec: core.JobSpec{Environment: core.EnvironmentDocker, Placement: placement, Settings: core.MeasureSettings{}}}
+		options := d.Options(measure)
+		if len(options) != 1 {
+			t.Fatalf("a measure on %s may run on %+v", placement, options)
+		}
+		for _, c := range options[0].Claims {
+			if c.Exclusive != (placement == "b") {
+				t.Fatalf("a measure on %s claims %+v, want it whole only off an isolated placement", placement, c)
+			}
+		}
+		for i := range 3 {
+			s.Waiting = append(s.Waiting, schedule.Candidate{ID: schedule.ID(fmt.Sprintf("%s%d", placement, i+1)), Options: options, Seq: uint64(len(s.Waiting))})
+		}
+	}
+	var started []schedule.ID
+	for _, d := range schedule.Step(s, schedule.Rules{}) {
+		if st, ok := d.(schedule.Start); ok {
+			started = append(started, st.ID)
+		}
+	}
+	if want := []schedule.ID{"a1", "a2", "b1"}; !slices.Equal(started, want) {
+		t.Fatalf("started %v, want %v", started, want)
+	}
+}

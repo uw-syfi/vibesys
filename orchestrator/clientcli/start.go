@@ -30,7 +30,7 @@ const noLimitNotice = "note: this run has no time or spending limit; --max-time 
 // startArgs are the flags of `run start`.
 type startArgs struct {
 	repository, task, brief, harness, model, effort string
-	fanout                                          uint
+	fanout                                          uint32
 	detach, json                                    bool
 	// maxTime and maxCost are the run's limits, zero for none.
 	maxTime time.Duration
@@ -42,7 +42,7 @@ type startArgs struct {
 }
 
 func parseStart(args []string) (startArgs, error) {
-	var a startArgs
+	a := startArgs{fanout: 4}
 	fs := flags("start")
 	fs.StringVar(&a.repository, "repository", "", "the repository the run works in (default: the git root of the current directory)")
 	fs.StringVar(&a.task, "task", "", "the task to optimize")
@@ -78,7 +78,14 @@ func parseStart(args []string) (startArgs, error) {
 		a.summaryEvery = d
 		return nil
 	})
-	fs.UintVar(&a.fanout, "fanout", 4, "how many subagents may be live at once")
+	fs.Func("fanout", "how many subagents may be live at once, at least 1 (default 4)", func(v string) error {
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil || n < 1 {
+			return fmt.Errorf("%q is not a number of agents, at least 1", v)
+		}
+		a.fanout = uint32(n)
+		return nil
+	})
 	fs.BoolVar(&a.detach, "detach", false, "return once the lead is live instead of attaching")
 	fs.BoolVar(&a.json, "json", false, "print the receipt as JSON")
 	positional, err := parse(fs, args)
@@ -100,7 +107,7 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 		return nil, usageError("--harness %q is not %s", a.harness, names.List[pb.Harness]())
 	}
 	start := &pb.StartRun{
-		Repository: repo, Task: a.task, FanoutLimit: uint32(a.fanout), Brief: a.brief,
+		Repository: repo, Task: a.task, FanoutLimit: a.fanout, Brief: a.brief,
 		Lead: &pb.AgentSpec{Harness: harness, Model: a.model, ReasoningEffort: a.effort},
 	}
 	for _, spec := range a.allow {

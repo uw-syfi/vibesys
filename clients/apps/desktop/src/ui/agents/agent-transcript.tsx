@@ -36,6 +36,21 @@ const LIMIT_WORD: Readonly<Record<RunLimit, string>> = {
 const bytesWord = (bytes: number): string =>
   bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`;
 
+/** What a child did when it settled without a handoff; the host settles one only as these four. */
+const SETTLED_WORD: Readonly<Record<AgentStatus, string>> = {
+  [AgentStatus.UNSPECIFIED]: 'stopped',
+  [AgentStatus.LAUNCHING]: 'stopped',
+  [AgentStatus.ACTIVE]: 'stopped',
+  [AgentStatus.WAITING]: 'stopped',
+  [AgentStatus.IDLE]: 'went idle',
+  [AgentStatus.ENDED]: 'ended',
+  [AgentStatus.FAILED]: 'failed',
+  [AgentStatus.LOST]: 'was lost',
+};
+
+/** The host's reason, after the words it explains; just a full stop when it gave none. */
+const because = (detail: string): string => (detail.trim() === '' ? '.' : `: ${detail.trim()}`);
+
 /** What a message that started a turn says, in words. */
 function noteWords(note: MessageNote, labelOf: (agentId: string) => string): string {
   switch (note.kind) {
@@ -49,7 +64,7 @@ function noteWords(note: MessageNote, labelOf: (agentId: string) => string): str
     case 'job':
       return `Job ${note.jobId}: ${jobWord(note.outcome).label}${note.detail === '' ? '' : `. ${note.detail}`}`;
     case 'settled':
-      return `${labelOf(note.agentId)} stopped: ${note.status === AgentStatus.FAILED ? 'failed' : 'finished'}.`;
+      return `${labelOf(note.agentId)} ${SETTLED_WORD[note.status]} without a handoff${because(note.detail)}`;
     case 'reminder':
       return 'A reminder to finish what it still owes.';
     case 'report-due':
@@ -142,12 +157,15 @@ function toolItem(entry: Of<'tool'>, context: Context): ConversationItem {
 }
 
 const JOINED = {
-  failed: {label: 'Failed', tone: 'err'},
-  ended: {label: 'Ended', tone: 'neutral'},
   'handed-back': {label: 'Done', tone: 'ok'},
+  idle: {label: 'Idle', tone: 'warn'},
+  ended: {label: 'Ended', tone: 'neutral'},
+  failed: {label: 'Failed', tone: 'err'},
+  lost: {label: 'Lost', tone: 'err'},
 } as const;
 
 function joinItem(entry: Of<'join'>, context: Context): ConversationItem {
+  const detail = entry.detail.trim();
   return {
     kind: 'link',
     id: entry.key,
@@ -155,6 +173,7 @@ function joinItem(entry: Of<'join'>, context: Context): ConversationItem {
     title: `${context.labelOf(entry.childId)} joined`,
     chip: JOINED[entry.result],
     trail: context.clock.time(entry.atMs),
+    ...(detail === '' ? {} : {note: detail}),
     press: () => context.open(entry.childId),
   };
 }

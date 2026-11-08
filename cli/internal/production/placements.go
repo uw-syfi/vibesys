@@ -206,12 +206,8 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 	}
 	s := pl.GetSlurm()
 	if s != nil {
-		exclusive := true
-		if s.Exclusive != nil {
-			exclusive = s.GetExclusive()
-		}
 		engineCfg.Allocator = slurm.Allocator{
-			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive, CPUs: int(s.GetCpus()),
+			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s), CPUs: int(s.GetCpus()),
 			Memory: s.GetMemory(), Arguments: s.GetSrunArguments(), Builder: slurm.BuilderName(scope),
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
@@ -234,6 +230,22 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		return nil, err
 	}
 	return docker.New(cfg)
+}
+
+// exclusiveOf says whether a measured container's allocation holds its whole node: [slurm]
+// exclusive, true by default.
+func exclusiveOf(s *cliv1.SlurmSettings) bool {
+	return s == nil || s.Exclusive == nil || s.GetExclusive()
+}
+
+// isolated says whether the placement keeps a measure apart from its other jobs by itself
+// (schedule.Offered.Isolated): an apptainer placement of [slurm] exclusive runs each job in
+// allocations of its own, and a measured container's holds its whole node, a reused one included
+// (apptainer.Engine sizes every reusable allocation for a measured container, and a claim of one
+// is its alone). An ssh or slurm placement runs its jobs' containers in one Docker daemon outside
+// Slurm's cgroups, and a local one on this machine, so a measure holds those whole.
+func isolated(pl *cliv1.Placement) bool {
+	return pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER && exclusiveOf(pl.GetSlurm())
 }
 
 // gpuScript names the node script whose output the rocm resource of an apptainer placement reads.
@@ -273,10 +285,6 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 	if err != nil {
 		return nil, err
 	}
-	exclusive := true
-	if s.Exclusive != nil {
-		exclusive = s.GetExclusive()
-	}
 	var scripts map[string]string
 	if pl.GetResources().GetRocm() != nil {
 		scripts = map[string]string{gpuScript: amd.Script}
@@ -286,7 +294,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
 		Sizing: apptainer.Sizing{
-			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
+			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s),
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 		},
 		NodeScripts: scripts, Runtime: runtime, Converter: converter, LocalDir: localDir,

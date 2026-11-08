@@ -238,6 +238,18 @@ func TestWaitAfterGoesOnlyWithReports(t *testing.T) {
 	contains(t, "stderr", got.stderr, "--after")
 }
 
+// --after names a report number, and reports are numbered from 1 (or 0 to count every report): a
+// negative number names none, so it is a usage error, the same as --after on a goal that is not a
+// report. -1 itself stays reserved to mean "--after was not given" and is covered by the default case.
+func TestWaitAfterRefusesANegativeNumber(t *testing.T) {
+	w := newWorld(t, serveFake(t, &fakeService{}))
+	got := w.run(context.Background(), append(waitArgs("report"), "--after", "-3")...)
+	if got.code != 2 {
+		t.Fatalf("exit %d, want 2", got.code)
+	}
+	contains(t, "stderr", got.stderr, "--after", "-3")
+}
+
 // With only progress notes so far there is no final report to return, so a wait for one waits.
 func TestWaitForAReportWaitsWhenARunHasOnlyProgressNotes(t *testing.T) {
 	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)

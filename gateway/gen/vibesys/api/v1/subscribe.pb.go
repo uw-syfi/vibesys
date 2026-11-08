@@ -212,7 +212,8 @@ type TopicPolicy struct {
 	// means the lease alone decides.
 	StaleAfterMs uint32 `protobuf:"varint,2,opt,name=stale_after_ms,json=staleAfterMs,proto3" json:"stale_after_ms,omitempty"`
 	// Client bound on each wait inside the snapshot once the stream is open: the wait for the first
-	// frame, and for each frame after it until `synced`. A frame renews the wait.
+	// entry, removal or `synced`, and for each one after it until `synced`. Each of them renews the
+	// wait; a heartbeat does not, because it proves the stream and not the source.
 	FirstFrameMs uint32 `protobuf:"varint,3,opt,name=first_frame_ms,json=firstFrameMs,proto3" json:"first_frame_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
 	MaxKeys uint32 `protobuf:"varint,4,opt,name=max_keys,json=maxKeys,proto3" json:"max_keys,omitempty"`

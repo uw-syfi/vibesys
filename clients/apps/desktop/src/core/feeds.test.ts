@@ -530,6 +530,72 @@ describe('a host whose log ends before the cursor', () => {
       ),
     {arbitrary: {runs: 20}},
   );
+
+  /** The atoms of the stream `method` names, for the agent `id` when it is an agent's. */
+  const feedOf = (h: HostHarness, method: 'WatchRuns' | 'WatchAgent', id: string) =>
+    method === 'WatchRuns'
+      ? {
+          watch: h.session.runs.watch,
+          status: h.session.runs.status,
+          fresh: h.session.runs.freshness,
+        }
+      : {
+          watch: h.session.agents.watch(id),
+          status: h.session.agents.status(id),
+          fresh: h.session.agents.freshness(id),
+        };
+
+  // What a stream read before stays on screen while it reads from the start again, so its freshness
+  // says what is shown is being caught up with, or is out of date once that read is refused: never
+  // that nothing has been read.
+  it.effect.prop(
+    'a stream that reads from the start again says what it holds is being caught up with',
+    {
+      ...losses,
+      method: Schema.Literals(['WatchRuns', 'WatchAgent']),
+      reread: Schema.Literals(['pending', 'refused']),
+    },
+    ({lost, method, reread}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const daemon = daemonAt();
+          const id = agentIdOf(daemon);
+          const restarted = restartLosing(method, daemon, lost);
+          const h = yield* hostHarness(daemon, {
+            // The read from the start, after the host refused the cursor, has not answered yet,
+            // or is refused for good.
+            wrap: base => {
+              const played = restarted(base);
+              return {
+                respond: (target, nth) =>
+                  target.method === methodPathOf(method) && nth >= 2
+                    ? [
+                        reread === 'pending'
+                          ? {hang: true}
+                          : {end: {message: 'no such stream', status: RpcStatus.NOT_FOUND}},
+                      ]
+                    : played.respond(target, nth),
+              };
+            },
+          });
+          const feed = feedOf(h, method, id);
+          h.mount(feed.watch);
+          yield* h.elapse(60, 5);
+          expect(requestedAfter(h, method)).toEqual([0n, BigInt(TOTAL), 0n]);
+          expect(yield* h.read(feed.status)).toMatchObject({
+            _tag: reread === 'pending' ? 'Restarting' : 'Failed',
+          });
+          const {data} = yield* h.model;
+          const held =
+            method === 'WatchRuns'
+              ? Object.keys(data.runs).length > 0
+              : Object.values(data.items).some(item => item.agentId === id);
+          expect(held).toBe(true);
+          expect(yield* h.read(feed.fresh)).toBe(reread === 'pending' ? 'catching-up' : 'stale');
+        }).pipe(Random.withSeed(SEED)),
+      ),
+    {arbitrary: {runs: 20}},
+  );
 });
 
 /**
