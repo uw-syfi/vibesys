@@ -171,7 +171,7 @@ function frameFor(
 
 /**
  * The frontier as a staircase between its points: from each, across to the next point's x, then
- * down to its y. It starts at the first point and ends at the last, so no part of it runs out to
+ * down to its y. It starts at the first point and ends at the last, so no part of it reaches out to
  * the frame; fewer than two points have nothing to join.
  */
 function staircase(frontier: readonly {readonly px: number; readonly py: number}[]): string {
