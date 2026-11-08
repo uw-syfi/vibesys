@@ -21,7 +21,19 @@ type Subscription struct {
 	Repository, Task string
 }
 
-func subscription(r core.Run) Subscription { return Subscription{r.JobTool, r.Repository, r.Task} }
+// subscription is the task stream a run follows: its task, or while it is in setup, the name its lead
+// has declared for the task it is making, which is empty until it declares one. A run with an empty
+// name follows nothing (see hasTask).
+func subscription(r core.Run) Subscription {
+	task := r.Task
+	if task == "" {
+		task = r.SetupTask
+	}
+	return Subscription{r.JobTool, r.Repository, task}
+}
+
+// hasTask says the run has a task to follow.
+func hasTask(r core.Run) bool { return subscription(r).Task != "" }
 
 // over says the run has ended or failed: nothing it did can still reach the job log. A run that is
 // stopping is not over, since its agents may yet record a result as they stop.
@@ -33,7 +45,7 @@ func Plan(runs []core.Run, followed []Subscription) (start, stop []Subscription)
 	wanted := map[Subscription]bool{}
 	current := map[Subscription]bool{}
 	for _, r := range runs {
-		if !over(r) {
+		if !over(r) && hasTask(r) {
 			wanted[subscription(r)] = true
 		}
 	}
@@ -124,7 +136,7 @@ func (r *Reconciler) Sync(ctx context.Context, runs []core.Run) {
 	starts, stops := Plan(runs, keys)
 	next := map[core.RunID]Subscription{}
 	for _, run := range runs {
-		if !over(run) {
+		if !over(run) && hasTask(run) {
 			next[run.ID] = subscription(run)
 		}
 	}
@@ -209,8 +221,9 @@ func (r *Reconciler) readOver(ctx context.Context, runs []core.Run) {
 			r.ended = map[core.RunID]bool{}
 		}
 		r.ended[run.ID] = true
-		if run.NeverOpened {
-			// Its lead never ran a turn, so nothing could have submitted a job: that is a read.
+		if run.NeverOpened || !hasTask(run) {
+			// Its lead never ran a turn, so nothing could have submitted a job, or it named no task, so
+			// no job of a task could be its own: that is a read.
 			r.Store.Put(run.ID, search.View{})
 			continue
 		}
@@ -300,6 +313,10 @@ func (r *Reconciler) startRead(ctx context.Context, k Subscription, runs []core.
 // which a view kept from a stream that may be behind does not promise. The stream closes when it has
 // answered. It returns the context's error when the context ends first.
 func (r *Reconciler) ReadJobLog(ctx context.Context, run core.Run) (search.View, error) {
+	if !hasTask(run) {
+		// A run in setup whose lead has named no task has no job log: that is a read, of nothing.
+		return search.View{}, nil
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	first := make(chan search.View, 1)
