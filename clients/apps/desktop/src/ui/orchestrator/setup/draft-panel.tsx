@@ -29,8 +29,8 @@ const NOTHING = '—';
 const BLANK = ' ';
 
 /**
- * One check: its name, its status in a slot as wide as the longest word so the word never moves its
- * line, and the host's short detail under it. The detail line is always there (blank when the host
+ * One check: its name on one line (cut with an ellipsis, whole in its hover, when the pane is too
+ * narrow), its status word at the line's end, and the host's short detail under it. The detail line is always there (blank when the host
  * said nothing), so a detail arriving moves nothing. A stale read keeps the rows and quiets them.
  */
 function CheckLine(props: {readonly row: CheckRow; readonly dim: boolean}): JSX.Element {
@@ -48,7 +48,7 @@ function CheckLine(props: {readonly row: CheckRow; readonly dim: boolean}): JSX.
             </Fact>
           </FactLine>
         </Row>
-        <Chip label={word.label} tone={dim ? 'neutral' : word.tone} dot even />
+        <Chip label={word.label} tone={dim ? 'neutral' : word.tone} dot />
       </Row>
       <Text variant="small" tone="muted">
         {row.detail === '' ? BLANK : <MiddleText text={row.detail} />}
