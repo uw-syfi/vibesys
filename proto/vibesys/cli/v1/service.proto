@@ -9,9 +9,11 @@ import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/machine.proto";
+import "vibesys/cli/v1/placement.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
 import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/task.proto";
 import "vibesys/cli/v1/verdict.proto";
 import "vibesys/cli/v1/version.proto";
 import "vibesys/cli/v1/workstream.proto";
@@ -91,6 +93,72 @@ service DaemonService {
   rpc DeclareBound(DeclareBoundRequest) returns (DeclareBoundResponse);
   // ListBounds lists every declared bound of the task, oldest first.
   rpc ListBounds(ListBoundsRequest) returns (ListBoundsResponse);
+  // DescribeTask reads one task's files and answers the card a client shows of it, or why the files
+  // cannot be read. The daemon is the only reader of task files.
+  rpc DescribeTask(DescribeTaskRequest) returns (DescribeTaskResponse);
+  // ListPlacements reports every placement and the hardware it gives.
+  rpc ListPlacements(ListPlacementsRequest) returns (ListPlacementsResponse);
+}
+
+// DescribeTaskRequest names a task and where to read it from.
+message DescribeTaskRequest {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    // The task as committed in a repository: what a run that starts there would use.
+    CommittedTask committed = 1;
+    // The task in a directory that is not a repository, such as the release's examples.
+    DirectoryTask directory = 2;
+    // The task as it stands in a repository's working tree, committed or not: a draft.
+    WorkingTreeTask working_tree = 3;
+  }
+}
+
+message CommittedTask {
+  string repository = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+  // Absent reads HEAD.
+  optional string revision = 2 [(buf.validate.field).string.min_len = 1];
+  string task = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message DirectoryTask {
+  string absolute_path = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+  string task = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkingTreeTask {
+  string repository = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+  string task = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message DescribeTaskResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    TaskCard card = 1;
+    TaskUnreadable unreadable = 2;
+  }
+}
+
+// TaskUnreadableReason says why a task has no card.
+enum TaskUnreadableReason {
+  TASK_UNREADABLE_REASON_UNSPECIFIED = 0;
+  // The repository, revision, directory or task does not exist.
+  TASK_UNREADABLE_REASON_NOT_FOUND = 1;
+  // A file is invalid: the detail names the key or the path.
+  TASK_UNREADABLE_REASON_INVALID = 2;
+  // The task asks for something this daemon cannot honor.
+  TASK_UNREADABLE_REASON_UNSUPPORTED = 3;
+}
+
+message TaskUnreadable {
+  TaskUnreadableReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The reader's own words, naming the key or the path at fault.
+  string detail = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 2048
+  }];
 }
 
 // CallContext identifies who is calling and about what. The daemon serves many repositories and

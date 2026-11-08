@@ -42,9 +42,11 @@ json_argument = "--output-json"
 metric = "ops_per_sec"
 
 [catalogue]
-title = "anything"
+domain = "databases"
 [catalogue.hardware]
-cpu = "any"
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
 `
 
 const protocol2Manifest = `

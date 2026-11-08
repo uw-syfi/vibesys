@@ -24,6 +24,131 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// TaskDomain is what an example task optimizes. A task names one as the value's name without its
+// prefix, in lower case, with a hyphen for each underscore (domain = "llm-serving").
+type TaskDomain int32
+
+const (
+	TaskDomain_TASK_DOMAIN_UNSPECIFIED     TaskDomain = 0
+	TaskDomain_TASK_DOMAIN_LLM_SERVING     TaskDomain = 1
+	TaskDomain_TASK_DOMAIN_DATA_STRUCTURES TaskDomain = 2
+	TaskDomain_TASK_DOMAIN_DATABASES       TaskDomain = 3
+	TaskDomain_TASK_DOMAIN_MICROSERVICES   TaskDomain = 4
+)
+
+// Enum value maps for TaskDomain.
+var (
+	TaskDomain_name = map[int32]string{
+		0: "TASK_DOMAIN_UNSPECIFIED",
+		1: "TASK_DOMAIN_LLM_SERVING",
+		2: "TASK_DOMAIN_DATA_STRUCTURES",
+		3: "TASK_DOMAIN_DATABASES",
+		4: "TASK_DOMAIN_MICROSERVICES",
+	}
+	TaskDomain_value = map[string]int32{
+		"TASK_DOMAIN_UNSPECIFIED":     0,
+		"TASK_DOMAIN_LLM_SERVING":     1,
+		"TASK_DOMAIN_DATA_STRUCTURES": 2,
+		"TASK_DOMAIN_DATABASES":       3,
+		"TASK_DOMAIN_MICROSERVICES":   4,
+	}
+)
+
+func (x TaskDomain) Enum() *TaskDomain {
+	p := new(TaskDomain)
+	*p = x
+	return p
+}
+
+func (x TaskDomain) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskDomain) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_task_proto_enumTypes[0].Descriptor()
+}
+
+func (TaskDomain) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_task_proto_enumTypes[0]
+}
+
+func (x TaskDomain) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskDomain.Descriptor instead.
+func (TaskDomain) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{0}
+}
+
+// ModelMaker is who made a served model; OTHER is a maker with no entry yet.
+type ModelMaker int32
+
+const (
+	ModelMaker_MODEL_MAKER_UNSPECIFIED ModelMaker = 0
+	ModelMaker_MODEL_MAKER_META        ModelMaker = 1
+	ModelMaker_MODEL_MAKER_QWEN        ModelMaker = 2
+	ModelMaker_MODEL_MAKER_DEEPSEEK    ModelMaker = 3
+	ModelMaker_MODEL_MAKER_ZHIPU       ModelMaker = 4
+	ModelMaker_MODEL_MAKER_MOONSHOT    ModelMaker = 5
+	ModelMaker_MODEL_MAKER_AI2         ModelMaker = 6
+	ModelMaker_MODEL_MAKER_OPENAI      ModelMaker = 7
+	ModelMaker_MODEL_MAKER_OTHER       ModelMaker = 8
+)
+
+// Enum value maps for ModelMaker.
+var (
+	ModelMaker_name = map[int32]string{
+		0: "MODEL_MAKER_UNSPECIFIED",
+		1: "MODEL_MAKER_META",
+		2: "MODEL_MAKER_QWEN",
+		3: "MODEL_MAKER_DEEPSEEK",
+		4: "MODEL_MAKER_ZHIPU",
+		5: "MODEL_MAKER_MOONSHOT",
+		6: "MODEL_MAKER_AI2",
+		7: "MODEL_MAKER_OPENAI",
+		8: "MODEL_MAKER_OTHER",
+	}
+	ModelMaker_value = map[string]int32{
+		"MODEL_MAKER_UNSPECIFIED": 0,
+		"MODEL_MAKER_META":        1,
+		"MODEL_MAKER_QWEN":        2,
+		"MODEL_MAKER_DEEPSEEK":    3,
+		"MODEL_MAKER_ZHIPU":       4,
+		"MODEL_MAKER_MOONSHOT":    5,
+		"MODEL_MAKER_AI2":         6,
+		"MODEL_MAKER_OPENAI":      7,
+		"MODEL_MAKER_OTHER":       8,
+	}
+)
+
+func (x ModelMaker) Enum() *ModelMaker {
+	p := new(ModelMaker)
+	*p = x
+	return p
+}
+
+func (x ModelMaker) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ModelMaker) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_task_proto_enumTypes[1].Descriptor()
+}
+
+func (ModelMaker) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_task_proto_enumTypes[1]
+}
+
+func (x ModelMaker) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ModelMaker.Descriptor instead.
+func (ModelMaker) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{1}
+}
+
 // TaskObjectiveDirection is the way an objective improves.
 type TaskObjectiveDirection int32
 
@@ -60,11 +185,11 @@ func (x TaskObjectiveDirection) String() string {
 }
 
 func (TaskObjectiveDirection) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_cli_v1_task_proto_enumTypes[0].Descriptor()
+	return file_vibesys_cli_v1_task_proto_enumTypes[2].Descriptor()
 }
 
 func (TaskObjectiveDirection) Type() protoreflect.EnumType {
-	return &file_vibesys_cli_v1_task_proto_enumTypes[0]
+	return &file_vibesys_cli_v1_task_proto_enumTypes[2]
 }
 
 func (x TaskObjectiveDirection) Number() protoreflect.EnumNumber {
@@ -73,7 +198,7 @@ func (x TaskObjectiveDirection) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TaskObjectiveDirection.Descriptor instead.
 func (TaskObjectiveDirection) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{0}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{2}
 }
 
 // TaskSchema is the schema version a manifest message is: its major version, and the newest minor
@@ -175,8 +300,10 @@ type TaskManifestV02 struct {
 	Resources     *structpb.Struct   `protobuf:"bytes,14,opt,name=resources,proto3" json:"resources,omitempty"`
 	Workspace     *structpb.Struct   `protobuf:"bytes,15,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	Plan          *structpb.Struct   `protobuf:"bytes,16,opt,name=plan,proto3" json:"plan,omitempty"`
-	Catalogue     *structpb.Struct   `protobuf:"bytes,17,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
 	Comparison    []*structpb.Struct `protobuf:"bytes,18,rep,name=comparison,proto3" json:"comparison,omitempty"`
+	// `[catalogue]`: what a client shows of the task. Field 17 held it as opaque data before it had a
+	// definition here.
+	Catalogue     *TaskCatalogueV02 `protobuf:"bytes,19,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -323,18 +450,444 @@ func (x *TaskManifestV02) GetPlan() *structpb.Struct {
 	return nil
 }
 
-func (x *TaskManifestV02) GetCatalogue() *structpb.Struct {
+func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
+	if x != nil {
+		return x.Comparison
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetCatalogue() *TaskCatalogueV02 {
 	if x != nil {
 		return x.Catalogue
 	}
 	return nil
 }
 
-func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
+// TaskCatalogueV02 is the `[catalogue]` table: the facts a client words a task by. A key it has no
+// field for is refused by name. There is no variant: a client shows the task's folder name.
+type TaskCatalogueV02 struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Domain   TaskDomain             `protobuf:"varint,1,opt,name=domain,proto3,enum=vibesys.cli.v1.TaskDomain" json:"domain,omitempty"`
+	Hardware *TaskHardwareV02       `protobuf:"bytes,2,opt,name=hardware,proto3" json:"hardware,omitempty"`
+	// Required for, and only for, llm-serving.
+	Model *TaskServedModelV02 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	// Required for, and only for, data-structures.
+	Workload      *TaskWorkloadV02 `protobuf:"bytes,4,opt,name=workload,proto3" json:"workload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCatalogueV02) Reset() {
+	*x = TaskCatalogueV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCatalogueV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCatalogueV02) ProtoMessage() {}
+
+func (x *TaskCatalogueV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[2]
 	if x != nil {
-		return x.Comparison
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCatalogueV02.ProtoReflect.Descriptor instead.
+func (*TaskCatalogueV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TaskCatalogueV02) GetDomain() TaskDomain {
+	if x != nil {
+		return x.Domain
+	}
+	return TaskDomain_TASK_DOMAIN_UNSPECIFIED
+}
+
+func (x *TaskCatalogueV02) GetHardware() *TaskHardwareV02 {
+	if x != nil {
+		return x.Hardware
 	}
 	return nil
+}
+
+func (x *TaskCatalogueV02) GetModel() *TaskServedModelV02 {
+	if x != nil {
+		return x.Model
+	}
+	return nil
+}
+
+func (x *TaskCatalogueV02) GetWorkload() *TaskWorkloadV02 {
+	if x != nil {
+		return x.Workload
+	}
+	return nil
+}
+
+// TaskHardwareV02 is the hardware a task targets: `count` of `accelerator`, as a person would say it.
+type TaskHardwareV02 struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The display name, for example "NVIDIA H100" or "CPU".
+	Accelerator   string            `protobuf:"bytes,1,opt,name=accelerator,proto3" json:"accelerator,omitempty"`
+	Count         uint32            `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	Vendor        AcceleratorVendor `protobuf:"varint,3,opt,name=vendor,proto3,enum=vibesys.cli.v1.AcceleratorVendor" json:"vendor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskHardwareV02) Reset() {
+	*x = TaskHardwareV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskHardwareV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskHardwareV02) ProtoMessage() {}
+
+func (x *TaskHardwareV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskHardwareV02.ProtoReflect.Descriptor instead.
+func (*TaskHardwareV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *TaskHardwareV02) GetAccelerator() string {
+	if x != nil {
+		return x.Accelerator
+	}
+	return ""
+}
+
+func (x *TaskHardwareV02) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *TaskHardwareV02) GetVendor() AcceleratorVendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return AcceleratorVendor_ACCELERATOR_VENDOR_UNSPECIFIED
+}
+
+// TaskServedModelV02 is the model an LLM-serving task serves.
+type TaskServedModelV02 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Maker         ModelMaker             `protobuf:"varint,2,opt,name=maker,proto3,enum=vibesys.cli.v1.ModelMaker" json:"maker,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskServedModelV02) Reset() {
+	*x = TaskServedModelV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskServedModelV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskServedModelV02) ProtoMessage() {}
+
+func (x *TaskServedModelV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskServedModelV02.ProtoReflect.Descriptor instead.
+func (*TaskServedModelV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TaskServedModelV02) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TaskServedModelV02) GetMaker() ModelMaker {
+	if x != nil {
+		return x.Maker
+	}
+	return ModelMaker_MODEL_MAKER_UNSPECIFIED
+}
+
+// TaskWorkloadV02 is the workload a data-structure task drives.
+type TaskWorkloadV02 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskWorkloadV02) Reset() {
+	*x = TaskWorkloadV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskWorkloadV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskWorkloadV02) ProtoMessage() {}
+
+func (x *TaskWorkloadV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskWorkloadV02.ProtoReflect.Descriptor instead.
+func (*TaskWorkloadV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TaskWorkloadV02) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TaskWorkloadV02) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+// TaskCard is what a client shows of a task. The daemon builds it from the task's files, which it
+// alone reads, so a card is attested by the host and never sent by a client. Without [catalogue] the
+// domain is unspecified and only the task, the heading and the objectives are set.
+type TaskCard struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The task's name, as `--task` and a run name it.
+	Task   string     `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	Domain TaskDomain `protobuf:"varint,2,opt,name=domain,proto3,enum=vibesys.cli.v1.TaskDomain" json:"domain,omitempty"`
+	// Absent without [catalogue.hardware].
+	Hardware *AcceleratorNeed `protobuf:"bytes,3,opt,name=hardware,proto3" json:"hardware,omitempty"`
+	// The hardware as the task authored it, for example "AMD MI300X"; shown when the model is OTHER.
+	HardwareName string `protobuf:"bytes,4,opt,name=hardware_name,json=hardwareName,proto3" json:"hardware_name,omitempty"`
+	// LLM-serving tasks: the served model.
+	ModelName  string     `protobuf:"bytes,5,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"`
+	ModelMaker ModelMaker `protobuf:"varint,6,opt,name=model_maker,json=modelMaker,proto3,enum=vibesys.cli.v1.ModelMaker" json:"model_maker,omitempty"`
+	// Data-structure tasks: the workload.
+	WorkloadName        string           `protobuf:"bytes,7,opt,name=workload_name,json=workloadName,proto3" json:"workload_name,omitempty"`
+	WorkloadDescription string           `protobuf:"bytes,8,opt,name=workload_description,json=workloadDescription,proto3" json:"workload_description,omitempty"`
+	Objectives          []*CardObjective `protobuf:"bytes,9,rep,name=objectives,proto3" json:"objectives,omitempty"`
+	// The first heading of the task's OBJECTIVE.md; empty without one.
+	Heading       string `protobuf:"bytes,10,opt,name=heading,proto3" json:"heading,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskCard) Reset() {
+	*x = TaskCard{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskCard) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskCard) ProtoMessage() {}
+
+func (x *TaskCard) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskCard.ProtoReflect.Descriptor instead.
+func (*TaskCard) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TaskCard) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *TaskCard) GetDomain() TaskDomain {
+	if x != nil {
+		return x.Domain
+	}
+	return TaskDomain_TASK_DOMAIN_UNSPECIFIED
+}
+
+func (x *TaskCard) GetHardware() *AcceleratorNeed {
+	if x != nil {
+		return x.Hardware
+	}
+	return nil
+}
+
+func (x *TaskCard) GetHardwareName() string {
+	if x != nil {
+		return x.HardwareName
+	}
+	return ""
+}
+
+func (x *TaskCard) GetModelName() string {
+	if x != nil {
+		return x.ModelName
+	}
+	return ""
+}
+
+func (x *TaskCard) GetModelMaker() ModelMaker {
+	if x != nil {
+		return x.ModelMaker
+	}
+	return ModelMaker_MODEL_MAKER_UNSPECIFIED
+}
+
+func (x *TaskCard) GetWorkloadName() string {
+	if x != nil {
+		return x.WorkloadName
+	}
+	return ""
+}
+
+func (x *TaskCard) GetWorkloadDescription() string {
+	if x != nil {
+		return x.WorkloadDescription
+	}
+	return ""
+}
+
+func (x *TaskCard) GetObjectives() []*CardObjective {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
+}
+
+func (x *TaskCard) GetHeading() string {
+	if x != nil {
+		return x.Heading
+	}
+	return ""
+}
+
+// CardObjective is one objective of a task, as a client lists it.
+type CardObjective struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Direction     TaskObjectiveDirection `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.TaskObjectiveDirection" json:"direction,omitempty"`
+	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CardObjective) Reset() {
+	*x = CardObjective{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CardObjective) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CardObjective) ProtoMessage() {}
+
+func (x *CardObjective) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CardObjective.ProtoReflect.Descriptor instead.
+func (*CardObjective) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CardObjective) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CardObjective) GetDirection() TaskObjectiveDirection {
+	if x != nil {
+		return x.Direction
+	}
+	return TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_UNSPECIFIED
+}
+
+func (x *CardObjective) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
 }
 
 // TaskCandidateV02 is how the candidate's image is built from its commit, and how its server starts.
@@ -360,7 +913,7 @@ type TaskCandidateV02 struct {
 
 func (x *TaskCandidateV02) Reset() {
 	*x = TaskCandidateV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +925,7 @@ func (x *TaskCandidateV02) String() string {
 func (*TaskCandidateV02) ProtoMessage() {}
 
 func (x *TaskCandidateV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +938,7 @@ func (x *TaskCandidateV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskCandidateV02.ProtoReflect.Descriptor instead.
 func (*TaskCandidateV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TaskCandidateV02) GetDockerfile() string {
@@ -442,7 +995,7 @@ type TaskCommandV02 struct {
 
 func (x *TaskCommandV02) Reset() {
 	*x = TaskCommandV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -454,7 +1007,7 @@ func (x *TaskCommandV02) String() string {
 func (*TaskCommandV02) ProtoMessage() {}
 
 func (x *TaskCommandV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -467,7 +1020,7 @@ func (x *TaskCommandV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskCommandV02.ProtoReflect.Descriptor instead.
 func (*TaskCommandV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TaskCommandV02) GetCommand() []string {
@@ -495,7 +1048,7 @@ type TaskBuildV02 struct {
 
 func (x *TaskBuildV02) Reset() {
 	*x = TaskBuildV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +1060,7 @@ func (x *TaskBuildV02) String() string {
 func (*TaskBuildV02) ProtoMessage() {}
 
 func (x *TaskBuildV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +1073,7 @@ func (x *TaskBuildV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskBuildV02.ProtoReflect.Descriptor instead.
 func (*TaskBuildV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TaskBuildV02) GetCommand() []string {
@@ -556,7 +1109,7 @@ type TaskBenchmarkV02 struct {
 
 func (x *TaskBenchmarkV02) Reset() {
 	*x = TaskBenchmarkV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +1121,7 @@ func (x *TaskBenchmarkV02) String() string {
 func (*TaskBenchmarkV02) ProtoMessage() {}
 
 func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +1134,7 @@ func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskBenchmarkV02.ProtoReflect.Descriptor instead.
 func (*TaskBenchmarkV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TaskBenchmarkV02) GetCommand() []string {
@@ -632,7 +1185,7 @@ type TaskResultV02 struct {
 
 func (x *TaskResultV02) Reset() {
 	*x = TaskResultV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -644,7 +1197,7 @@ func (x *TaskResultV02) String() string {
 func (*TaskResultV02) ProtoMessage() {}
 
 func (x *TaskResultV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -657,7 +1210,7 @@ func (x *TaskResultV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResultV02.ProtoReflect.Descriptor instead.
 func (*TaskResultV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TaskResultV02) GetJsonArgument() string {
@@ -691,7 +1244,7 @@ type TaskEnvironmentV02 struct {
 
 func (x *TaskEnvironmentV02) Reset() {
 	*x = TaskEnvironmentV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +1256,7 @@ func (x *TaskEnvironmentV02) String() string {
 func (*TaskEnvironmentV02) ProtoMessage() {}
 
 func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +1269,7 @@ func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEnvironmentV02.ProtoReflect.Descriptor instead.
 func (*TaskEnvironmentV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TaskEnvironmentV02) GetNeeds() []string {
@@ -753,7 +1306,7 @@ type TaskAgentV02 struct {
 
 func (x *TaskAgentV02) Reset() {
 	*x = TaskAgentV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -765,7 +1318,7 @@ func (x *TaskAgentV02) String() string {
 func (*TaskAgentV02) ProtoMessage() {}
 
 func (x *TaskAgentV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -778,7 +1331,7 @@ func (x *TaskAgentV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskAgentV02.ProtoReflect.Descriptor instead.
 func (*TaskAgentV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TaskAgentV02) GetDomain() string {
@@ -814,7 +1367,7 @@ type TaskObjectives struct {
 
 func (x *TaskObjectives) Reset() {
 	*x = TaskObjectives{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -826,7 +1379,7 @@ func (x *TaskObjectives) String() string {
 func (*TaskObjectives) ProtoMessage() {}
 
 func (x *TaskObjectives) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -839,7 +1392,7 @@ func (x *TaskObjectives) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskObjectives.ProtoReflect.Descriptor instead.
 func (*TaskObjectives) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TaskObjectives) GetObjective() []*TaskObjective {
@@ -877,7 +1430,7 @@ type TaskObjective struct {
 
 func (x *TaskObjective) Reset() {
 	*x = TaskObjective{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -889,7 +1442,7 @@ func (x *TaskObjective) String() string {
 func (*TaskObjective) ProtoMessage() {}
 
 func (x *TaskObjective) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -902,7 +1455,7 @@ func (x *TaskObjective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskObjective.ProtoReflect.Descriptor instead.
 func (*TaskObjective) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TaskObjective) GetName() string {
@@ -945,7 +1498,7 @@ type TaskPareto struct {
 
 func (x *TaskPareto) Reset() {
 	*x = TaskPareto{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -957,7 +1510,7 @@ func (x *TaskPareto) String() string {
 func (*TaskPareto) ProtoMessage() {}
 
 func (x *TaskPareto) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -970,7 +1523,7 @@ func (x *TaskPareto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPareto.ProtoReflect.Descriptor instead.
 func (*TaskPareto) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TaskPareto) GetRelativeNoise() float64 {
@@ -1022,11 +1575,11 @@ var File_vibesys_cli_v1_task_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
-	"\x19vibesys/cli/v1/task.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\"8\n" +
+	"\x19vibesys/cli/v1/task.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a vibesys/cli/v1/environment.proto\"8\n" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd1\b\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xe0\b\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
@@ -1045,11 +1598,51 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x0eprofile_guided\x18\r \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\rprofileGuided\x12;\n" +
 	"\tresources\x18\x0e \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tresources\x12;\n" +
 	"\tworkspace\x18\x0f \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tworkspace\x121\n" +
-	"\x04plan\x18\x10 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x04plan\x12;\n" +
-	"\tcatalogue\x18\x11 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tcatalogue\x12=\n" +
+	"\x04plan\x18\x10 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x04plan\x12=\n" +
 	"\n" +
 	"comparison\x18\x12 \x03(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\n" +
-	"comparison:\x06\xca\xf3\x18\x02\x10\x02\"\xbc\x02\n" +
+	"comparison\x12D\n" +
+	"\tcatalogue\x18\x13 \x01(\v2 .vibesys.cli.v1.TaskCatalogueV02B\x04\xd0\xf3\x18\x02R\tcatalogue:\x06\xca\xf3\x18\x02\x10\x02J\x04\b\x11\x10\x12\"\xd0\x04\n" +
+	"\x10TaskCatalogueV02\x12B\n" +
+	"\x06domain\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.TaskDomainB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x06domain\x12G\n" +
+	"\bhardware\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.TaskHardwareV02B\n" +
+	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\bhardware\x12>\n" +
+	"\x05model\x18\x03 \x01(\v2\".vibesys.cli.v1.TaskServedModelV02B\x04\xd0\xf3\x18\x02R\x05model\x12A\n" +
+	"\bworkload\x18\x04 \x01(\v2\x1f.vibesys.cli.v1.TaskWorkloadV02B\x04\xd0\xf3\x18\x02R\bworkload:\xab\x02\xbaH\xa7\x02\x1a\x8a\x01\n" +
+	"\x1ecatalogue.model_matches_domain\x1ah(this.domain == 1) == has(this.model) ? '' : 'domain: model is required for llm-serving and only for it'\x1a\x97\x01\n" +
+	"!catalogue.workload_matches_domain\x1ar(this.domain == 2) == has(this.workload) ? '' : 'domain: workload is required for data-structures and only for it'\"\xb3\x01\n" +
+	"\x0fTaskHardwareV02\x12/\n" +
+	"\vaccelerator\x18\x01 \x01(\tB\r\xbaH\x06r\x04\x10\x01(P\xd0\xf3\x18\x02R\vaccelerator\x12$\n" +
+	"\x05count\x18\x02 \x01(\rB\x0e\xbaH\a*\x05\x18\x80 (\x01\xd0\xf3\x18\x02R\x05count\x12I\n" +
+	"\x06vendor\x18\x03 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x06vendor\"y\n" +
+	"\x12TaskServedModelV02\x12!\n" +
+	"\x04name\x18\x01 \x01(\tB\r\xbaH\x06r\x04\x10\x01(P\xd0\xf3\x18\x02R\x04name\x12@\n" +
+	"\x05maker\x18\x02 \x01(\x0e2\x1a.vibesys.cli.v1.ModelMakerB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x05maker\"f\n" +
+	"\x0fTaskWorkloadV02\x12!\n" +
+	"\x04name\x18\x01 \x01(\tB\r\xbaH\x06r\x04\x10\x01(P\xd0\xf3\x18\x02R\x04name\x120\n" +
+	"\vdescription\x18\x02 \x01(\tB\x0e\xbaH\ar\x05\x10\x01(\x90\x03\xd0\xf3\x18\x02R\vdescription\"\x9a\x04\n" +
+	"\bTaskCard\x12\x1e\n" +
+	"\x04task\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x04task\x12<\n" +
+	"\x06domain\x18\x02 \x01(\x0e2\x1a.vibesys.cli.v1.TaskDomainB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06domain\x12;\n" +
+	"\bhardware\x18\x03 \x01(\v2\x1f.vibesys.cli.v1.AcceleratorNeedR\bhardware\x12,\n" +
+	"\rhardware_name\x18\x04 \x01(\tB\a\xbaH\x04r\x02(PR\fhardwareName\x12&\n" +
+	"\n" +
+	"model_name\x18\x05 \x01(\tB\a\xbaH\x04r\x02(PR\tmodelName\x12E\n" +
+	"\vmodel_maker\x18\x06 \x01(\x0e2\x1a.vibesys.cli.v1.ModelMakerB\b\xbaH\x05\x82\x01\x02\x10\x01R\n" +
+	"modelMaker\x12,\n" +
+	"\rworkload_name\x18\a \x01(\tB\a\xbaH\x04r\x02(PR\fworkloadName\x12;\n" +
+	"\x14workload_description\x18\b \x01(\tB\b\xbaH\x05r\x03(\x90\x03R\x13workloadDescription\x12G\n" +
+	"\n" +
+	"objectives\x18\t \x03(\v2\x1d.vibesys.cli.v1.CardObjectiveB\b\xbaH\x05\x92\x01\x02\x10\x10R\n" +
+	"objectives\x12\"\n" +
+	"\aheading\x18\n" +
+	" \x01(\tB\b\xbaH\x05r\x03(\xc8\x01R\aheading\"\x9b\x01\n" +
+	"\rCardObjective\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12P\n" +
+	"\tdirection\x18\x02 \x01(\x0e2&.vibesys.cli.v1.TaskObjectiveDirectionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12\x1b\n" +
+	"\x04unit\x18\x03 \x01(\tB\a\xbaH\x04r\x02(@R\x04unit\"\xbc\x02\n" +
 	"\x10TaskCandidateV02\x12+\n" +
 	"\n" +
 	"dockerfile\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\n" +
@@ -1098,7 +1691,25 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x0f_relative_noise\"N\n" +
 	"\n" +
 	"TaskPareto\x12@\n" +
-	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\x86\x01\n" +
+	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\xa1\x01\n" +
+	"\n" +
+	"TaskDomain\x12\x1b\n" +
+	"\x17TASK_DOMAIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17TASK_DOMAIN_LLM_SERVING\x10\x01\x12\x1f\n" +
+	"\x1bTASK_DOMAIN_DATA_STRUCTURES\x10\x02\x12\x19\n" +
+	"\x15TASK_DOMAIN_DATABASES\x10\x03\x12\x1d\n" +
+	"\x19TASK_DOMAIN_MICROSERVICES\x10\x04*\xe4\x01\n" +
+	"\n" +
+	"ModelMaker\x12\x1b\n" +
+	"\x17MODEL_MAKER_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10MODEL_MAKER_META\x10\x01\x12\x14\n" +
+	"\x10MODEL_MAKER_QWEN\x10\x02\x12\x18\n" +
+	"\x14MODEL_MAKER_DEEPSEEK\x10\x03\x12\x15\n" +
+	"\x11MODEL_MAKER_ZHIPU\x10\x04\x12\x18\n" +
+	"\x14MODEL_MAKER_MOONSHOT\x10\x05\x12\x13\n" +
+	"\x0fMODEL_MAKER_AI2\x10\x06\x12\x16\n" +
+	"\x12MODEL_MAKER_OPENAI\x10\a\x12\x15\n" +
+	"\x11MODEL_MAKER_OTHER\x10\b*\x86\x01\n" +
 	"\x16TaskObjectiveDirection\x12(\n" +
 	"$TASK_OBJECTIVE_DIRECTION_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cTASK_OBJECTIVE_DIRECTION_MAX\x10\x01\x12 \n" +
@@ -1119,55 +1730,76 @@ func file_vibesys_cli_v1_task_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_task_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_vibesys_cli_v1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_vibesys_cli_v1_task_proto_goTypes = []any{
-	(TaskObjectiveDirection)(0),         // 0: vibesys.cli.v1.TaskObjectiveDirection
-	(*TaskSchema)(nil),                  // 1: vibesys.cli.v1.TaskSchema
-	(*TaskManifestV02)(nil),             // 2: vibesys.cli.v1.TaskManifestV02
-	(*TaskCandidateV02)(nil),            // 3: vibesys.cli.v1.TaskCandidateV02
-	(*TaskCommandV02)(nil),              // 4: vibesys.cli.v1.TaskCommandV02
-	(*TaskBuildV02)(nil),                // 5: vibesys.cli.v1.TaskBuildV02
-	(*TaskBenchmarkV02)(nil),            // 6: vibesys.cli.v1.TaskBenchmarkV02
-	(*TaskResultV02)(nil),               // 7: vibesys.cli.v1.TaskResultV02
-	(*TaskEnvironmentV02)(nil),          // 8: vibesys.cli.v1.TaskEnvironmentV02
-	(*TaskAgentV02)(nil),                // 9: vibesys.cli.v1.TaskAgentV02
-	(*TaskObjectives)(nil),              // 10: vibesys.cli.v1.TaskObjectives
-	(*TaskObjective)(nil),               // 11: vibesys.cli.v1.TaskObjective
-	(*TaskPareto)(nil),                  // 12: vibesys.cli.v1.TaskPareto
-	(*structpb.Struct)(nil),             // 13: google.protobuf.Struct
-	(*descriptorpb.MessageOptions)(nil), // 14: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 15: google.protobuf.FieldOptions
+	(TaskDomain)(0),                     // 0: vibesys.cli.v1.TaskDomain
+	(ModelMaker)(0),                     // 1: vibesys.cli.v1.ModelMaker
+	(TaskObjectiveDirection)(0),         // 2: vibesys.cli.v1.TaskObjectiveDirection
+	(*TaskSchema)(nil),                  // 3: vibesys.cli.v1.TaskSchema
+	(*TaskManifestV02)(nil),             // 4: vibesys.cli.v1.TaskManifestV02
+	(*TaskCatalogueV02)(nil),            // 5: vibesys.cli.v1.TaskCatalogueV02
+	(*TaskHardwareV02)(nil),             // 6: vibesys.cli.v1.TaskHardwareV02
+	(*TaskServedModelV02)(nil),          // 7: vibesys.cli.v1.TaskServedModelV02
+	(*TaskWorkloadV02)(nil),             // 8: vibesys.cli.v1.TaskWorkloadV02
+	(*TaskCard)(nil),                    // 9: vibesys.cli.v1.TaskCard
+	(*CardObjective)(nil),               // 10: vibesys.cli.v1.CardObjective
+	(*TaskCandidateV02)(nil),            // 11: vibesys.cli.v1.TaskCandidateV02
+	(*TaskCommandV02)(nil),              // 12: vibesys.cli.v1.TaskCommandV02
+	(*TaskBuildV02)(nil),                // 13: vibesys.cli.v1.TaskBuildV02
+	(*TaskBenchmarkV02)(nil),            // 14: vibesys.cli.v1.TaskBenchmarkV02
+	(*TaskResultV02)(nil),               // 15: vibesys.cli.v1.TaskResultV02
+	(*TaskEnvironmentV02)(nil),          // 16: vibesys.cli.v1.TaskEnvironmentV02
+	(*TaskAgentV02)(nil),                // 17: vibesys.cli.v1.TaskAgentV02
+	(*TaskObjectives)(nil),              // 18: vibesys.cli.v1.TaskObjectives
+	(*TaskObjective)(nil),               // 19: vibesys.cli.v1.TaskObjective
+	(*TaskPareto)(nil),                  // 20: vibesys.cli.v1.TaskPareto
+	(*structpb.Struct)(nil),             // 21: google.protobuf.Struct
+	(AcceleratorVendor)(0),              // 22: vibesys.cli.v1.AcceleratorVendor
+	(*AcceleratorNeed)(nil),             // 23: vibesys.cli.v1.AcceleratorNeed
+	(*descriptorpb.MessageOptions)(nil), // 24: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 25: google.protobuf.FieldOptions
 }
 var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
-	3,  // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
-	4,  // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
-	6,  // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	4,  // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
-	8,  // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
-	5,  // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
-	4,  // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
-	6,  // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	9,  // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
-	13, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
-	13, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
-	13, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
-	13, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
-	13, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
-	13, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
-	7,  // 15: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
-	13, // 16: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
-	11, // 17: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
-	12, // 18: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
-	0,  // 19: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
-	14, // 20: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
-	15, // 21: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
-	1,  // 22: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	22, // [22:23] is the sub-list for extension type_name
-	20, // [20:22] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	11, // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
+	12, // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
+	14, // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	12, // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
+	16, // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
+	13, // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
+	12, // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
+	14, // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	17, // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
+	21, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
+	21, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
+	21, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
+	21, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
+	21, // 13: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
+	5,  // 14: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> vibesys.cli.v1.TaskCatalogueV02
+	0,  // 15: vibesys.cli.v1.TaskCatalogueV02.domain:type_name -> vibesys.cli.v1.TaskDomain
+	6,  // 16: vibesys.cli.v1.TaskCatalogueV02.hardware:type_name -> vibesys.cli.v1.TaskHardwareV02
+	7,  // 17: vibesys.cli.v1.TaskCatalogueV02.model:type_name -> vibesys.cli.v1.TaskServedModelV02
+	8,  // 18: vibesys.cli.v1.TaskCatalogueV02.workload:type_name -> vibesys.cli.v1.TaskWorkloadV02
+	22, // 19: vibesys.cli.v1.TaskHardwareV02.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	1,  // 20: vibesys.cli.v1.TaskServedModelV02.maker:type_name -> vibesys.cli.v1.ModelMaker
+	0,  // 21: vibesys.cli.v1.TaskCard.domain:type_name -> vibesys.cli.v1.TaskDomain
+	23, // 22: vibesys.cli.v1.TaskCard.hardware:type_name -> vibesys.cli.v1.AcceleratorNeed
+	1,  // 23: vibesys.cli.v1.TaskCard.model_maker:type_name -> vibesys.cli.v1.ModelMaker
+	10, // 24: vibesys.cli.v1.TaskCard.objectives:type_name -> vibesys.cli.v1.CardObjective
+	2,  // 25: vibesys.cli.v1.CardObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	15, // 26: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
+	21, // 27: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
+	19, // 28: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
+	20, // 29: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
+	2,  // 30: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	24, // 31: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
+	25, // 32: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
+	3,  // 33: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	33, // [33:34] is the sub-list for extension type_name
+	31, // [31:33] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_task_proto_init() }
@@ -1175,15 +1807,16 @@ func file_vibesys_cli_v1_task_proto_init() {
 	if File_vibesys_cli_v1_task_proto != nil {
 		return
 	}
-	file_vibesys_cli_v1_task_proto_msgTypes[5].OneofWrappers = []any{}
-	file_vibesys_cli_v1_task_proto_msgTypes[10].OneofWrappers = []any{}
+	file_vibesys_cli_v1_environment_proto_init()
+	file_vibesys_cli_v1_task_proto_msgTypes[11].OneofWrappers = []any{}
+	file_vibesys_cli_v1_task_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_task_proto_rawDesc), len(file_vibesys_cli_v1_task_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   12,
+			NumEnums:      3,
+			NumMessages:   18,
 			NumExtensions: 2,
 			NumServices:   0,
 		},

@@ -7,6 +7,7 @@
 package cliv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -131,6 +132,146 @@ func (BackendKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{1}
 }
 
+// AcceleratorVendor is who makes an accelerator. It is closed: a new vendor is a contract change, like
+// BackendKind. A task names one in vibesys.input.toml as the value's name without its prefix, in lower
+// case ([catalogue.hardware] vendor = "nvidia").
+type AcceleratorVendor int32
+
+const (
+	AcceleratorVendor_ACCELERATOR_VENDOR_UNSPECIFIED AcceleratorVendor = 0
+	AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA      AcceleratorVendor = 1
+	AcceleratorVendor_ACCELERATOR_VENDOR_AMD         AcceleratorVendor = 2
+	AcceleratorVendor_ACCELERATOR_VENDOR_AWS         AcceleratorVendor = 3
+	AcceleratorVendor_ACCELERATOR_VENDOR_APPLE       AcceleratorVendor = 4
+	// No accelerator: the task and the place need only a processor.
+	AcceleratorVendor_ACCELERATOR_VENDOR_CPU AcceleratorVendor = 5
+)
+
+// Enum value maps for AcceleratorVendor.
+var (
+	AcceleratorVendor_name = map[int32]string{
+		0: "ACCELERATOR_VENDOR_UNSPECIFIED",
+		1: "ACCELERATOR_VENDOR_NVIDIA",
+		2: "ACCELERATOR_VENDOR_AMD",
+		3: "ACCELERATOR_VENDOR_AWS",
+		4: "ACCELERATOR_VENDOR_APPLE",
+		5: "ACCELERATOR_VENDOR_CPU",
+	}
+	AcceleratorVendor_value = map[string]int32{
+		"ACCELERATOR_VENDOR_UNSPECIFIED": 0,
+		"ACCELERATOR_VENDOR_NVIDIA":      1,
+		"ACCELERATOR_VENDOR_AMD":         2,
+		"ACCELERATOR_VENDOR_AWS":         3,
+		"ACCELERATOR_VENDOR_APPLE":       4,
+		"ACCELERATOR_VENDOR_CPU":         5,
+	}
+)
+
+func (x AcceleratorVendor) Enum() *AcceleratorVendor {
+	p := new(AcceleratorVendor)
+	*p = x
+	return p
+}
+
+func (x AcceleratorVendor) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AcceleratorVendor) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_environment_proto_enumTypes[2].Descriptor()
+}
+
+func (AcceleratorVendor) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_environment_proto_enumTypes[2]
+}
+
+func (x AcceleratorVendor) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AcceleratorVendor.Descriptor instead.
+func (AcceleratorVendor) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{2}
+}
+
+// AcceleratorModel is which device of a vendor. It is closed. OTHER is a device with no entry yet: it
+// is shown by the name it reported, and it never fits a need that names a model.
+type AcceleratorModel int32
+
+const (
+	AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED   AcceleratorModel = 0
+	AcceleratorModel_ACCELERATOR_MODEL_MI210         AcceleratorModel = 1
+	AcceleratorModel_ACCELERATOR_MODEL_MI300A        AcceleratorModel = 2
+	AcceleratorModel_ACCELERATOR_MODEL_MI300X        AcceleratorModel = 3
+	AcceleratorModel_ACCELERATOR_MODEL_MI325X        AcceleratorModel = 4
+	AcceleratorModel_ACCELERATOR_MODEL_H100          AcceleratorModel = 5
+	AcceleratorModel_ACCELERATOR_MODEL_B200          AcceleratorModel = 6
+	AcceleratorModel_ACCELERATOR_MODEL_L4            AcceleratorModel = 7
+	AcceleratorModel_ACCELERATOR_MODEL_A100          AcceleratorModel = 8
+	AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2     AcceleratorModel = 9
+	AcceleratorModel_ACCELERATOR_MODEL_APPLE_SILICON AcceleratorModel = 10
+	AcceleratorModel_ACCELERATOR_MODEL_OTHER         AcceleratorModel = 99
+)
+
+// Enum value maps for AcceleratorModel.
+var (
+	AcceleratorModel_name = map[int32]string{
+		0:  "ACCELERATOR_MODEL_UNSPECIFIED",
+		1:  "ACCELERATOR_MODEL_MI210",
+		2:  "ACCELERATOR_MODEL_MI300A",
+		3:  "ACCELERATOR_MODEL_MI300X",
+		4:  "ACCELERATOR_MODEL_MI325X",
+		5:  "ACCELERATOR_MODEL_H100",
+		6:  "ACCELERATOR_MODEL_B200",
+		7:  "ACCELERATOR_MODEL_L4",
+		8:  "ACCELERATOR_MODEL_A100",
+		9:  "ACCELERATOR_MODEL_TRAINIUM2",
+		10: "ACCELERATOR_MODEL_APPLE_SILICON",
+		99: "ACCELERATOR_MODEL_OTHER",
+	}
+	AcceleratorModel_value = map[string]int32{
+		"ACCELERATOR_MODEL_UNSPECIFIED":   0,
+		"ACCELERATOR_MODEL_MI210":         1,
+		"ACCELERATOR_MODEL_MI300A":        2,
+		"ACCELERATOR_MODEL_MI300X":        3,
+		"ACCELERATOR_MODEL_MI325X":        4,
+		"ACCELERATOR_MODEL_H100":          5,
+		"ACCELERATOR_MODEL_B200":          6,
+		"ACCELERATOR_MODEL_L4":            7,
+		"ACCELERATOR_MODEL_A100":          8,
+		"ACCELERATOR_MODEL_TRAINIUM2":     9,
+		"ACCELERATOR_MODEL_APPLE_SILICON": 10,
+		"ACCELERATOR_MODEL_OTHER":         99,
+	}
+)
+
+func (x AcceleratorModel) Enum() *AcceleratorModel {
+	p := new(AcceleratorModel)
+	*p = x
+	return p
+}
+
+func (x AcceleratorModel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AcceleratorModel) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_environment_proto_enumTypes[3].Descriptor()
+}
+
+func (AcceleratorModel) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_environment_proto_enumTypes[3]
+}
+
+func (x AcceleratorModel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AcceleratorModel.Descriptor instead.
+func (AcceleratorModel) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{3}
+}
+
 // ResourceKind is something a placement can give a job's container, and a task can need. It is
 // closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
 // name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
@@ -178,11 +319,11 @@ func (x ResourceKind) String() string {
 }
 
 func (ResourceKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_cli_v1_environment_proto_enumTypes[2].Descriptor()
+	return file_vibesys_cli_v1_environment_proto_enumTypes[4].Descriptor()
 }
 
 func (ResourceKind) Type() protoreflect.EnumType {
-	return &file_vibesys_cli_v1_environment_proto_enumTypes[2]
+	return &file_vibesys_cli_v1_environment_proto_enumTypes[4]
 }
 
 func (x ResourceKind) Number() protoreflect.EnumNumber {
@@ -191,7 +332,141 @@ func (x ResourceKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResourceKind.Descriptor instead.
 func (ResourceKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{4}
+}
+
+// AcceleratorNeed is what a task wants of the place that evaluates it. A need fits an offer when the
+// vendor is the same, the offer has at least `count` devices, and the model is the same or the need
+// names none: a need of "NVIDIA GPU" (model unspecified) fits any device of that vendor.
+type AcceleratorNeed struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Vendor AcceleratorVendor      `protobuf:"varint,1,opt,name=vendor,proto3,enum=vibesys.cli.v1.AcceleratorVendor" json:"vendor,omitempty"`
+	// Unspecified: any model of the vendor.
+	Model         AcceleratorModel `protobuf:"varint,2,opt,name=model,proto3,enum=vibesys.cli.v1.AcceleratorModel" json:"model,omitempty"`
+	Count         uint32           `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceleratorNeed) Reset() {
+	*x = AcceleratorNeed{}
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceleratorNeed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceleratorNeed) ProtoMessage() {}
+
+func (x *AcceleratorNeed) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceleratorNeed.ProtoReflect.Descriptor instead.
+func (*AcceleratorNeed) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *AcceleratorNeed) GetVendor() AcceleratorVendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return AcceleratorVendor_ACCELERATOR_VENDOR_UNSPECIFIED
+}
+
+func (x *AcceleratorNeed) GetModel() AcceleratorModel {
+	if x != nil {
+		return x.Model
+	}
+	return AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED
+}
+
+func (x *AcceleratorNeed) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+// AcceleratorOffer is what a place gives: `count` devices of one model.
+type AcceleratorOffer struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Vendor AcceleratorVendor      `protobuf:"varint,1,opt,name=vendor,proto3,enum=vibesys.cli.v1.AcceleratorVendor" json:"vendor,omitempty"`
+	Model  AcceleratorModel       `protobuf:"varint,2,opt,name=model,proto3,enum=vibesys.cli.v1.AcceleratorModel" json:"model,omitempty"`
+	Count  uint32                 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	// The device as it reported itself, for a client to show beside an OTHER model.
+	DeviceName    string `protobuf:"bytes,4,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceleratorOffer) Reset() {
+	*x = AcceleratorOffer{}
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceleratorOffer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceleratorOffer) ProtoMessage() {}
+
+func (x *AcceleratorOffer) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceleratorOffer.ProtoReflect.Descriptor instead.
+func (*AcceleratorOffer) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AcceleratorOffer) GetVendor() AcceleratorVendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return AcceleratorVendor_ACCELERATOR_VENDOR_UNSPECIFIED
+}
+
+func (x *AcceleratorOffer) GetModel() AcceleratorModel {
+	if x != nil {
+		return x.Model
+	}
+	return AcceleratorModel_ACCELERATOR_MODEL_UNSPECIFIED
+}
+
+func (x *AcceleratorOffer) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *AcceleratorOffer) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
 }
 
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are
@@ -219,7 +494,7 @@ type EnvironmentFingerprint struct {
 
 func (x *EnvironmentFingerprint) Reset() {
 	*x = EnvironmentFingerprint{}
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[0]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -231,7 +506,7 @@ func (x *EnvironmentFingerprint) String() string {
 func (*EnvironmentFingerprint) ProtoMessage() {}
 
 func (x *EnvironmentFingerprint) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[0]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -244,7 +519,7 @@ func (x *EnvironmentFingerprint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnvironmentFingerprint.ProtoReflect.Descriptor instead.
 func (*EnvironmentFingerprint) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{0}
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *EnvironmentFingerprint) GetKind() EnvironmentKind {
@@ -290,7 +565,7 @@ type MachineFacts struct {
 
 func (x *MachineFacts) Reset() {
 	*x = MachineFacts{}
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[1]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -302,7 +577,7 @@ func (x *MachineFacts) String() string {
 func (*MachineFacts) ProtoMessage() {}
 
 func (x *MachineFacts) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[1]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -315,7 +590,7 @@ func (x *MachineFacts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MachineFacts.ProtoReflect.Descriptor instead.
 func (*MachineFacts) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MachineFacts) GetHostId() string {
@@ -375,7 +650,7 @@ type MachineLoad struct {
 
 func (x *MachineLoad) Reset() {
 	*x = MachineLoad{}
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +662,7 @@ func (x *MachineLoad) String() string {
 func (*MachineLoad) ProtoMessage() {}
 
 func (x *MachineLoad) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_environment_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +675,7 @@ func (x *MachineLoad) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MachineLoad.ProtoReflect.Descriptor instead.
 func (*MachineLoad) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MachineLoad) GetSampledAt() *timestamppb.Timestamp {
@@ -435,7 +710,21 @@ var File_vibesys_cli_v1_environment_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaa\x02\n" +
+	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbc\x01\n" +
+	"\x0fAcceleratorNeed\x12E\n" +
+	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
+	"\x05model\x18\x02 \x01(\x0e2 .vibesys.cli.v1.AcceleratorModelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n" +
+	"\x05count\x18\x03 \x01(\rB\n" +
+	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\"\xe8\x01\n" +
+	"\x10AcceleratorOffer\x12E\n" +
+	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
+	"\x05model\x18\x02 \x01(\x0e2 .vibesys.cli.v1.AcceleratorModelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n" +
+	"\x05count\x18\x03 \x01(\rB\n" +
+	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\x12)\n" +
+	"\vdevice_name\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\n" +
+	"deviceName\"\xaa\x02\n" +
 	"\x16EnvironmentFingerprint\x123\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1f.vibesys.cli.v1.EnvironmentKindR\x04kind\x125\n" +
 	"\abackend\x18\x02 \x01(\x0e2\x1b.vibesys.cli.v1.BackendKindR\abackend\x12!\n" +
@@ -468,7 +757,28 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x11BACKEND_KIND_CUDA\x10\x02\x12\x15\n" +
 	"\x11BACKEND_KIND_ROCM\x10\x03\x12\x16\n" +
 	"\x12BACKEND_KIND_METAL\x10\x04\x12\x19\n" +
-	"\x15BACKEND_KIND_TRAINIUM\x10\x05*\x94\x01\n" +
+	"\x15BACKEND_KIND_TRAINIUM\x10\x05*\xc8\x01\n" +
+	"\x11AcceleratorVendor\x12\"\n" +
+	"\x1eACCELERATOR_VENDOR_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19ACCELERATOR_VENDOR_NVIDIA\x10\x01\x12\x1a\n" +
+	"\x16ACCELERATOR_VENDOR_AMD\x10\x02\x12\x1a\n" +
+	"\x16ACCELERATOR_VENDOR_AWS\x10\x03\x12\x1c\n" +
+	"\x18ACCELERATOR_VENDOR_APPLE\x10\x04\x12\x1a\n" +
+	"\x16ACCELERATOR_VENDOR_CPU\x10\x05*\xfd\x02\n" +
+	"\x10AcceleratorModel\x12!\n" +
+	"\x1dACCELERATOR_MODEL_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17ACCELERATOR_MODEL_MI210\x10\x01\x12\x1c\n" +
+	"\x18ACCELERATOR_MODEL_MI300A\x10\x02\x12\x1c\n" +
+	"\x18ACCELERATOR_MODEL_MI300X\x10\x03\x12\x1c\n" +
+	"\x18ACCELERATOR_MODEL_MI325X\x10\x04\x12\x1a\n" +
+	"\x16ACCELERATOR_MODEL_H100\x10\x05\x12\x1a\n" +
+	"\x16ACCELERATOR_MODEL_B200\x10\x06\x12\x18\n" +
+	"\x14ACCELERATOR_MODEL_L4\x10\a\x12\x1a\n" +
+	"\x16ACCELERATOR_MODEL_A100\x10\b\x12\x1f\n" +
+	"\x1bACCELERATOR_MODEL_TRAINIUM2\x10\t\x12#\n" +
+	"\x1fACCELERATOR_MODEL_APPLE_SILICON\x10\n" +
+	"\x12\x1b\n" +
+	"\x17ACCELERATOR_MODEL_OTHER\x10c*\x94\x01\n" +
 	"\fResourceKind\x12\x1d\n" +
 	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RESOURCE_KIND_GPU\x10\x01\x12\x1c\n" +
@@ -488,28 +798,36 @@ func file_vibesys_cli_v1_environment_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_environment_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_environment_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_environment_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_vibesys_cli_v1_environment_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_vibesys_cli_v1_environment_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_cli_v1_environment_proto_goTypes = []any{
 	(EnvironmentKind)(0),           // 0: vibesys.cli.v1.EnvironmentKind
 	(BackendKind)(0),               // 1: vibesys.cli.v1.BackendKind
-	(ResourceKind)(0),              // 2: vibesys.cli.v1.ResourceKind
-	(*EnvironmentFingerprint)(nil), // 3: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 4: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 5: vibesys.cli.v1.MachineLoad
-	nil,                            // 6: vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
-	(*timestamppb.Timestamp)(nil),  // 7: google.protobuf.Timestamp
+	(AcceleratorVendor)(0),         // 2: vibesys.cli.v1.AcceleratorVendor
+	(AcceleratorModel)(0),          // 3: vibesys.cli.v1.AcceleratorModel
+	(ResourceKind)(0),              // 4: vibesys.cli.v1.ResourceKind
+	(*AcceleratorNeed)(nil),        // 5: vibesys.cli.v1.AcceleratorNeed
+	(*AcceleratorOffer)(nil),       // 6: vibesys.cli.v1.AcceleratorOffer
+	(*EnvironmentFingerprint)(nil), // 7: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 8: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 9: vibesys.cli.v1.MachineLoad
+	nil,                            // 10: vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
+	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_environment_proto_depIdxs = []int32{
-	0, // 0: vibesys.cli.v1.EnvironmentFingerprint.kind:type_name -> vibesys.cli.v1.EnvironmentKind
-	1, // 1: vibesys.cli.v1.EnvironmentFingerprint.backend:type_name -> vibesys.cli.v1.BackendKind
-	6, // 2: vibesys.cli.v1.EnvironmentFingerprint.facts:type_name -> vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
-	7, // 3: vibesys.cli.v1.MachineLoad.sampled_at:type_name -> google.protobuf.Timestamp
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	2,  // 0: vibesys.cli.v1.AcceleratorNeed.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	3,  // 1: vibesys.cli.v1.AcceleratorNeed.model:type_name -> vibesys.cli.v1.AcceleratorModel
+	2,  // 2: vibesys.cli.v1.AcceleratorOffer.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	3,  // 3: vibesys.cli.v1.AcceleratorOffer.model:type_name -> vibesys.cli.v1.AcceleratorModel
+	0,  // 4: vibesys.cli.v1.EnvironmentFingerprint.kind:type_name -> vibesys.cli.v1.EnvironmentKind
+	1,  // 5: vibesys.cli.v1.EnvironmentFingerprint.backend:type_name -> vibesys.cli.v1.BackendKind
+	10, // 6: vibesys.cli.v1.EnvironmentFingerprint.facts:type_name -> vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
+	11, // 7: vibesys.cli.v1.MachineLoad.sampled_at:type_name -> google.protobuf.Timestamp
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_environment_proto_init() }
@@ -522,8 +840,8 @@ func file_vibesys_cli_v1_environment_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_environment_proto_rawDesc), len(file_vibesys_cli_v1_environment_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   4,
+			NumEnums:      5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
