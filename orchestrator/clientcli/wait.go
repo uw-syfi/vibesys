@@ -3,6 +3,7 @@ package clientcli
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +83,11 @@ func wait(ctx context.Context, c *call, args []string) error {
 		return usageError("run wait needs --timeout, such as --timeout 30m")
 	case *after < -1:
 		return usageError("--after %d is not a report number: reports are numbered from 1, or 0 for every report", *after)
+	case int64(*after) > math.MaxUint32:
+		// A report number is a uint32 (Run.ReportsPosted), and reportBaseline casts --after down to one.
+		// A value past uint32 would wrap -- 4294967296 to 0, counting every report instead of none -- so
+		// it is refused rather than silently waited on for a report that cannot exist.
+		return usageError("--after %d is not a report number: reports are numbered from 1 and do not go that high", *after)
 	case *after >= 0 && !g.reports:
 		return usageError("--after goes with --until report or progress, not %s", *until)
 	}
