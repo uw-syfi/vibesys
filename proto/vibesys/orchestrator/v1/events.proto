@@ -309,6 +309,17 @@ message RequestCatchUp {
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
+// DeclareTask names the task the setup lead is making. Only the run's lead may send it, and only
+// while the run is in setup; the latest name wins, and naming the task it already names changes
+// nothing. It sets Run.setup_task, not Run.task.
+message DeclareTask {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"
+  ];
+}
+
 // Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
 // from the connection or the agent's session, so that a caller cannot claim to be someone else.
 message Command {
@@ -327,6 +338,7 @@ message Command {
     UpdateRun update_run = 18;
     BeginSetup begin_setup = 19;
     CompleteSetup complete_setup = 20;
+    DeclareTask declare_task = 21;
   }
 }
 

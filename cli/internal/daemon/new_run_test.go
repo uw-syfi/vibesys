@@ -167,3 +167,13 @@ func TestDescribeTaskRefusesWhatItCannotAnswer(t *testing.T) {
 		t.Errorf("no reader: got %v, want Unavailable", err)
 	}
 }
+
+// DescribeSetup answers Unimplemented, naming itself, until the setup facts are read: never an empty
+// success a client would read as "nothing to derive".
+func TestDescribeSetupIsUnimplementedAndNamesItself(t *testing.T) {
+	r := newDescribeRig(t, true)
+	_, err := r.client.DescribeSetup(ctxFor(t), &cliv1.DescribeSetupRequest{})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "DescribeSetup") {
+		t.Errorf("got %v, want Unimplemented naming the call", err)
+	}
+}

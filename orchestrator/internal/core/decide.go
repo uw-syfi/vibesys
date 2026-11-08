@@ -107,7 +107,7 @@ func (t *tx) command(c Command) {
 			run = t.requestCatchUp(c, b, &r)
 		case UpdateRun:
 			run = t.updateRun(b, &r)
-		case BeginSetup, CompleteSetup:
+		case BeginSetup, CompleteSetup, DeclareTask:
 			// permit refuses them until their behavior exists (see permissions), so none arrives here.
 			panic(fmt.Sprintf("core: %T is not decided yet", c.Body))
 		default:

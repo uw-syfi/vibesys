@@ -45,6 +45,39 @@ func ToJobState(field string, s cliv1.JobState) (core.JobState, error) {
 	return "", invalid("%s: %s is not a job state", field, s)
 }
 
+var jobStages = []struct {
+	domain core.JobStage
+	wire   cliv1.JobStage
+}{
+	{core.StageBuild, cliv1.JobStage_JOB_STAGE_BUILD},
+	{core.StageCheck, cliv1.JobStage_JOB_STAGE_CHECK},
+	{core.StageMeasure, cliv1.JobStage_JOB_STAGE_MEASURE},
+}
+
+// JobStage returns the contract's value for a stage, or unspecified for none.
+func JobStage(s core.JobStage) cliv1.JobStage {
+	for _, p := range jobStages {
+		if p.domain == s {
+			return p.wire
+		}
+	}
+	return cliv1.JobStage_JOB_STAGE_UNSPECIFIED
+}
+
+// ToJobStage returns the domain stage for the contract's value: none for unspecified, or invalid_input
+// naming field for a value it does not know.
+func ToJobStage(field string, s cliv1.JobStage) (core.JobStage, error) {
+	if s == cliv1.JobStage_JOB_STAGE_UNSPECIFIED {
+		return "", nil
+	}
+	for _, p := range jobStages {
+		if p.wire == s {
+			return p.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not a job stage", field, s)
+}
+
 var jobKinds = []struct {
 	domain core.JobKind
 	wire   cliv1.JobKind

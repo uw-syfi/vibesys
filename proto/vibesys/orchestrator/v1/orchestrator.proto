@@ -334,9 +334,14 @@ message Run {
   // When the run left setup. Absent while it is in setup and for runs that never had one. The run's
   // time limit and its cost limit count from here for a run that had a setup.
   google.protobuf.Timestamp optimize_started_at = 31;
-  // What the setup phase cost, frozen when the run left setup. Absent before that and for runs that
-  // never had a setup. The run's cost limit is counted against `usage` less this.
+  // What the setup phase cost, complete once the setup session is over. Absent before the run leaves
+  // setup and for runs that never had a setup. A turn that started in setup counts here when it ends,
+  // even if it ends after the run left setup. The run's cost limit is counted against `usage` less this.
   Usage setup_usage = 32;
+  // The name of the task the setup lead is working on, as it declared it (DeclareTask). Empty until it
+  // does, and in a run that had no setup or has left it. It is separate from `task`, which is immutable
+  // and names the run's jobs; a draft's name is neither.
+  string setup_task = 33 [(buf.validate.field).string.pattern = "^([A-Za-z0-9_-][A-Za-z0-9._-]{0,127})?$"];
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -851,6 +856,9 @@ message LeadHandover {
   uint32 agents_ended = 14;
   // How many of the run's jobs are queued or running.
   uint32 active_jobs = 15;
+  // The phase the run is in as the old lead leaves: SETUP for a lead switched during setup, which the
+  // words must not tell it is optimizing. Unspecified reads as OPTIMIZE.
+  RunPhase phase = 16 [(buf.validate.field).enum.defined_only = true];
 }
 
 message Message {
@@ -888,6 +896,8 @@ message Message {
     CatchUpRequest catch_up_request = 21;
     // The first prompt of a lead that replaces another mid-run, made from the run's state.
     LeadHandover lead_handover = 22;
+    // The first prompt of a run's lead in setup. Templates word it.
+    SetupBrief setup_brief = 23;
   }
 }
 
@@ -896,6 +906,14 @@ message LeadBrief {
   uint32 fanout_limit = 2;
   // Empty when the operator gave none.
   string steering = 3;
+}
+
+// SetupBrief is the first prompt of a run's lead in its setup phase: the repository it works in and the
+// operator's steering text. It carries no task: the lead makes one.
+message SetupBrief {
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+  // Empty when the operator gave none.
+  string steering = 2;
 }
 
 // BuildVersions is what one build carries.

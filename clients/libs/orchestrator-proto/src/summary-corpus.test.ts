@@ -30,6 +30,7 @@ const MESSAGE_KINDS = {
   reportDue: true,
   catchUpRequest: true,
   runLimitReached: true,
+  setupBrief: true,
 } as const;
 
 const read = (name: string) =>

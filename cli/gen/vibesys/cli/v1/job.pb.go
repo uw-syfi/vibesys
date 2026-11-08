@@ -196,6 +196,62 @@ func (CutCause) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
+// JobStage is the step of a check or measure job that ended it.
+type JobStage int32
+
+const (
+	JobStage_JOB_STAGE_UNSPECIFIED JobStage = 0
+	// The candidate or the task's image did not build.
+	JobStage_JOB_STAGE_BUILD JobStage = 1
+	// The task's correctness check ran and rejected the candidate, or could not complete.
+	JobStage_JOB_STAGE_CHECK JobStage = 2
+	// The benchmark that takes the samples of a measure job failed.
+	JobStage_JOB_STAGE_MEASURE JobStage = 3
+)
+
+// Enum value maps for JobStage.
+var (
+	JobStage_name = map[int32]string{
+		0: "JOB_STAGE_UNSPECIFIED",
+		1: "JOB_STAGE_BUILD",
+		2: "JOB_STAGE_CHECK",
+		3: "JOB_STAGE_MEASURE",
+	}
+	JobStage_value = map[string]int32{
+		"JOB_STAGE_UNSPECIFIED": 0,
+		"JOB_STAGE_BUILD":       1,
+		"JOB_STAGE_CHECK":       2,
+		"JOB_STAGE_MEASURE":     3,
+	}
+)
+
+func (x JobStage) Enum() *JobStage {
+	p := new(JobStage)
+	*p = x
+	return p
+}
+
+func (x JobStage) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (JobStage) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_job_proto_enumTypes[3].Descriptor()
+}
+
+func (JobStage) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_job_proto_enumTypes[3]
+}
+
+func (x JobStage) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use JobStage.Descriptor instead.
+func (JobStage) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{3}
+}
+
 // WaitKind is why a queued job has not started.
 type WaitKind int32
 
@@ -254,11 +310,11 @@ func (x WaitKind) String() string {
 }
 
 func (WaitKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_cli_v1_job_proto_enumTypes[3].Descriptor()
+	return file_vibesys_cli_v1_job_proto_enumTypes[4].Descriptor()
 }
 
 func (WaitKind) Type() protoreflect.EnumType {
-	return &file_vibesys_cli_v1_job_proto_enumTypes[3]
+	return &file_vibesys_cli_v1_job_proto_enumTypes[4]
 }
 
 func (x WaitKind) Number() protoreflect.EnumNumber {
@@ -267,7 +323,7 @@ func (x WaitKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WaitKind.Descriptor instead.
 func (WaitKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{4}
 }
 
 type CheckSettings struct {
@@ -1108,7 +1164,10 @@ type Job struct {
 	FinishedAt  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	// Set when state is CANCELLED.
 	CancelReason string `protobuf:"bytes,11,opt,name=cancel_reason,json=cancelReason,proto3" json:"cancel_reason,omitempty"`
-	// Set when state is FAILED or SUCCEEDED for a command job.
+	// The exit status of the job's step, set for any job whose step ran to an exit, whatever its kind:
+	// a command job, and a check or measure job whose build, check or benchmark step exited. Absent for
+	// a job that never reached an exit: one that was cancelled or lost, or that failed before a step
+	// could run (checkout, image, a result the step did not write).
 	ExitCode *int32 `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
 	// The result a check or measure job saved. Empty when it saved none.
 	ResultJobId string `protobuf:"bytes,13,opt,name=result_job_id,json=resultJobId,proto3" json:"result_job_id,omitempty"`
@@ -1130,7 +1189,12 @@ type Job struct {
 	// The version of the task a check or measure job was submitted for. The job runs only if the
 	// task is still at it when the job starts. Empty for a command job, and for a job saved before
 	// this field was, which runs the task as it is when it starts.
-	TaskVersion   string `protobuf:"bytes,19,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
+	TaskVersion string `protobuf:"bytes,19,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
+	// The stage a check or measure job failed in. Set when state is FAILED and a stage ended it;
+	// unspecified for a job that did not fail, a command job, a failure outside every stage (checkout,
+	// image) and a job saved before this field was. A reader that must tell a candidate that did not
+	// build from one the check rejected reads this and not exit_code, which both leave nonzero.
+	FailedStage   JobStage `protobuf:"varint,20,opt,name=failed_stage,json=failedStage,proto3,enum=vibesys.cli.v1.JobStage" json:"failed_stage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1296,6 +1360,13 @@ func (x *Job) GetTaskVersion() string {
 		return x.TaskVersion
 	}
 	return ""
+}
+
+func (x *Job) GetFailedStage() JobStage {
+	if x != nil {
+		return x.FailedStage
+	}
+	return JobStage_JOB_STAGE_UNSPECIFIED
 }
 
 // LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
@@ -1640,7 +1711,7 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\bended_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12D\n" +
 	"\x10cut_before_start\x18\x03 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\x0ecutBeforeStart\x12B\n" +
 	"\x0fcut_mid_command\x18\x04 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\rcutMidCommandB\x05\n" +
-	"\x03end\"\xe1\x06\n" +
+	"\x03end\"\xa8\a\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12.\n" +
@@ -1666,7 +1737,8 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"submitters\x18\x11 \x03(\v2\x19.vibesys.cli.v1.SubmitterR\n" +
 	"submitters\x12E\n" +
 	"\x05needs\x18\x12 \x03(\x0e2\x1c.vibesys.cli.v1.ResourceKindB\x11\xbaH\x0e\x92\x01\v\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x05needs\x12+\n" +
-	"\ftask_version\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vtaskVersionB\f\n" +
+	"\ftask_version\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vtaskVersion\x12E\n" +
+	"\ffailed_stage\x18\x14 \x01(\x0e2\x18.vibesys.cli.v1.JobStageB\b\xbaH\x05\x82\x01\x02\x10\x01R\vfailedStageB\f\n" +
 	"\n" +
 	"_exit_code\"\x90\x01\n" +
 	"\vLeaseHolder\x12\x12\n" +
@@ -1709,7 +1781,12 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\bCutCause\x12\x19\n" +
 	"\x15CUT_CAUSE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19CUT_CAUSE_SUPERVISOR_DIED\x10\x01\x12\x16\n" +
-	"\x12CUT_CAUSE_REBOOTED\x10\x02*\xc6\x01\n" +
+	"\x12CUT_CAUSE_REBOOTED\x10\x02*f\n" +
+	"\bJobStage\x12\x19\n" +
+	"\x15JOB_STAGE_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fJOB_STAGE_BUILD\x10\x01\x12\x13\n" +
+	"\x0fJOB_STAGE_CHECK\x10\x02\x12\x15\n" +
+	"\x11JOB_STAGE_MEASURE\x10\x03*\xc6\x01\n" +
 	"\bWaitKind\x12\x19\n" +
 	"\x15WAIT_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eWAIT_KIND_FULL\x10\x01\x12\x1e\n" +
@@ -1732,75 +1809,77 @@ func file_vibesys_cli_v1_job_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_job_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_vibesys_cli_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(JobKind)(0),                   // 0: vibesys.cli.v1.JobKind
 	(JobState)(0),                  // 1: vibesys.cli.v1.JobState
 	(CutCause)(0),                  // 2: vibesys.cli.v1.CutCause
-	(WaitKind)(0),                  // 3: vibesys.cli.v1.WaitKind
-	(*CheckSettings)(nil),          // 4: vibesys.cli.v1.CheckSettings
-	(*ServiceSpec)(nil),            // 5: vibesys.cli.v1.ServiceSpec
-	(*CommandSettings)(nil),        // 6: vibesys.cli.v1.CommandSettings
-	(*ProfileRequest)(nil),         // 7: vibesys.cli.v1.ProfileRequest
-	(*CandidateBuild)(nil),         // 8: vibesys.cli.v1.CandidateBuild
-	(*CandidateServe)(nil),         // 9: vibesys.cli.v1.CandidateServe
-	(*CandidateSetup)(nil),         // 10: vibesys.cli.v1.CandidateSetup
-	(*MeasureSettings)(nil),        // 11: vibesys.cli.v1.MeasureSettings
-	(*JobSpec)(nil),                // 12: vibesys.cli.v1.JobSpec
-	(*Note)(nil),                   // 13: vibesys.cli.v1.Note
-	(*Submitter)(nil),              // 14: vibesys.cli.v1.Submitter
-	(*Attempt)(nil),                // 15: vibesys.cli.v1.Attempt
-	(*Job)(nil),                    // 16: vibesys.cli.v1.Job
-	(*LeaseHolder)(nil),            // 17: vibesys.cli.v1.LeaseHolder
-	(*WaitHolder)(nil),             // 18: vibesys.cli.v1.WaitHolder
-	(*WaitReason)(nil),             // 19: vibesys.cli.v1.WaitReason
-	(*JobWait)(nil),                // 20: vibesys.cli.v1.JobWait
-	(*durationpb.Duration)(nil),    // 21: google.protobuf.Duration
-	(EnvironmentKind)(0),           // 22: vibesys.cli.v1.EnvironmentKind
-	(*timestamppb.Timestamp)(nil),  // 23: google.protobuf.Timestamp
-	(*EnvironmentFingerprint)(nil), // 24: vibesys.cli.v1.EnvironmentFingerprint
-	(ResourceKind)(0),              // 25: vibesys.cli.v1.ResourceKind
+	(JobStage)(0),                  // 3: vibesys.cli.v1.JobStage
+	(WaitKind)(0),                  // 4: vibesys.cli.v1.WaitKind
+	(*CheckSettings)(nil),          // 5: vibesys.cli.v1.CheckSettings
+	(*ServiceSpec)(nil),            // 6: vibesys.cli.v1.ServiceSpec
+	(*CommandSettings)(nil),        // 7: vibesys.cli.v1.CommandSettings
+	(*ProfileRequest)(nil),         // 8: vibesys.cli.v1.ProfileRequest
+	(*CandidateBuild)(nil),         // 9: vibesys.cli.v1.CandidateBuild
+	(*CandidateServe)(nil),         // 10: vibesys.cli.v1.CandidateServe
+	(*CandidateSetup)(nil),         // 11: vibesys.cli.v1.CandidateSetup
+	(*MeasureSettings)(nil),        // 12: vibesys.cli.v1.MeasureSettings
+	(*JobSpec)(nil),                // 13: vibesys.cli.v1.JobSpec
+	(*Note)(nil),                   // 14: vibesys.cli.v1.Note
+	(*Submitter)(nil),              // 15: vibesys.cli.v1.Submitter
+	(*Attempt)(nil),                // 16: vibesys.cli.v1.Attempt
+	(*Job)(nil),                    // 17: vibesys.cli.v1.Job
+	(*LeaseHolder)(nil),            // 18: vibesys.cli.v1.LeaseHolder
+	(*WaitHolder)(nil),             // 19: vibesys.cli.v1.WaitHolder
+	(*WaitReason)(nil),             // 20: vibesys.cli.v1.WaitReason
+	(*JobWait)(nil),                // 21: vibesys.cli.v1.JobWait
+	(*durationpb.Duration)(nil),    // 22: google.protobuf.Duration
+	(EnvironmentKind)(0),           // 23: vibesys.cli.v1.EnvironmentKind
+	(*timestamppb.Timestamp)(nil),  // 24: google.protobuf.Timestamp
+	(*EnvironmentFingerprint)(nil), // 25: vibesys.cli.v1.EnvironmentFingerprint
+	(ResourceKind)(0),              // 26: vibesys.cli.v1.ResourceKind
 }
 var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
-	5,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
-	21, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
-	7,  // 2: vibesys.cli.v1.CommandSettings.profile:type_name -> vibesys.cli.v1.ProfileRequest
-	10, // 3: vibesys.cli.v1.CommandSettings.candidate:type_name -> vibesys.cli.v1.CandidateSetup
-	21, // 4: vibesys.cli.v1.CandidateServe.startup_timeout:type_name -> google.protobuf.Duration
-	8,  // 5: vibesys.cli.v1.CandidateSetup.build:type_name -> vibesys.cli.v1.CandidateBuild
-	9,  // 6: vibesys.cli.v1.CandidateSetup.serve:type_name -> vibesys.cli.v1.CandidateServe
-	22, // 7: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
-	4,  // 8: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
-	6,  // 9: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
-	11, // 10: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
-	23, // 11: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
-	23, // 12: vibesys.cli.v1.Submitter.at:type_name -> google.protobuf.Timestamp
-	23, // 13: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
-	23, // 14: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
+	6,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
+	22, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
+	8,  // 2: vibesys.cli.v1.CommandSettings.profile:type_name -> vibesys.cli.v1.ProfileRequest
+	11, // 3: vibesys.cli.v1.CommandSettings.candidate:type_name -> vibesys.cli.v1.CandidateSetup
+	22, // 4: vibesys.cli.v1.CandidateServe.startup_timeout:type_name -> google.protobuf.Duration
+	9,  // 5: vibesys.cli.v1.CandidateSetup.build:type_name -> vibesys.cli.v1.CandidateBuild
+	10, // 6: vibesys.cli.v1.CandidateSetup.serve:type_name -> vibesys.cli.v1.CandidateServe
+	23, // 7: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
+	5,  // 8: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
+	7,  // 9: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
+	12, // 10: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
+	24, // 11: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
+	24, // 12: vibesys.cli.v1.Submitter.at:type_name -> google.protobuf.Timestamp
+	24, // 13: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
+	24, // 14: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
 	2,  // 15: vibesys.cli.v1.Attempt.cut_before_start:type_name -> vibesys.cli.v1.CutCause
 	2,  // 16: vibesys.cli.v1.Attempt.cut_mid_command:type_name -> vibesys.cli.v1.CutCause
-	12, // 17: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
+	13, // 17: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
 	1,  // 18: vibesys.cli.v1.Job.state:type_name -> vibesys.cli.v1.JobState
-	24, // 19: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	13, // 20: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
-	23, // 21: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
-	23, // 22: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	23, // 23: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	15, // 24: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
-	14, // 25: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
-	25, // 26: vibesys.cli.v1.Job.needs:type_name -> vibesys.cli.v1.ResourceKind
-	23, // 27: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
-	0,  // 28: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
-	3,  // 29: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
-	18, // 30: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
-	17, // 31: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
-	19, // 32: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	25, // 19: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	14, // 20: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
+	24, // 21: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
+	24, // 22: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	24, // 23: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	16, // 24: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
+	15, // 25: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
+	26, // 26: vibesys.cli.v1.Job.needs:type_name -> vibesys.cli.v1.ResourceKind
+	3,  // 27: vibesys.cli.v1.Job.failed_stage:type_name -> vibesys.cli.v1.JobStage
+	24, // 28: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
+	0,  // 29: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
+	4,  // 30: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
+	19, // 31: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
+	18, // 32: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
+	20, // 33: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_job_proto_init() }
@@ -1824,7 +1903,7 @@ func file_vibesys_cli_v1_job_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_job_proto_rawDesc), len(file_vibesys_cli_v1_job_proto_rawDesc)),
-			NumEnums:      4,
+			NumEnums:      5,
 			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,

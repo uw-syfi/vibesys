@@ -1,7 +1,7 @@
 // Package hub carries the daemon's live view to the clients watching it.
 //
-// Three kinds of thing pass through. A latest value is a whole search view with one
-// slot per run per subscription, outside lag accounting. A stored event has a sequence and is never lost: a client that
+// Three kinds of thing pass through. A latest value is a whole search view, or the note that a run's
+// setup observation moved, with one slot per run per subscription, outside lag accounting. A stored event has a sequence and is never lost: a client that
 // cannot keep up is told to start again from a fresh snapshot, which holds everything the events it
 // missed would have said. A delta is progress on a running item that is stored nowhere, so it may
 // be merged with the deltas next to it, dropped, or superseded, and the next stored version of its
@@ -60,11 +60,19 @@ type Interest struct {
 	Ticks bool
 }
 
+// SetupNote says a run's setup observation reached a revision. It carries no data: a stream that gets
+// one works the run's summary out again, which reads the observation itself.
+type SetupNote struct {
+	Run      core.RunID
+	Revision uint64
+}
+
 // Message is one thing for a client: exactly one field is set.
 type Message struct {
 	Stored *Stored
 	Delta  *pb.Delta
 	Search *pb.SearchState
+	Setup  *SetupNote
 	// size is what the message counts against its subscription's bounds.
 	size int
 }
@@ -89,6 +97,7 @@ func (h *Hub) Subscribe(in Interest) *Subscription {
 	s := &Subscription{
 		hub: h, interest: in, wake: make(chan struct{}, 1),
 		latest: map[core.RunID]*pb.SearchState{}, revisions: map[core.RunID]uint64{},
+		setups: map[core.RunID]uint64{}, setupSeen: map[core.RunID]uint64{},
 		pending: map[deltaKey]*pendingDelta{}, broken: newItemSet(), final: newItemSet(),
 	}
 	h.mu.Lock()
@@ -123,6 +132,23 @@ func (h *Hub) PublishLatest(run core.RunID, state *pb.SearchState) {
 		if s.interest.Everything && state.Revision > s.revisions[run] {
 			s.revisions[run] = state.Revision
 			s.latest[run] = proto.Clone(state).(*pb.SearchState)
+			s.signal()
+		}
+	}
+}
+
+// PublishSetup replaces a run's unread setup note only with a higher revision. Like PublishLatest it
+// never consumes queue capacity, even while lagged, and only run watchers receive it.
+func (h *Hub) PublishSetup(run core.RunID, revision uint64) {
+	if run == "" || revision == 0 {
+		panic("hub: invalid setup identity")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs {
+		if s.interest.Everything && revision > s.setupSeen[run] {
+			s.setupSeen[run] = revision
+			s.setups[run] = revision
 			s.signal()
 		}
 	}
@@ -176,6 +202,9 @@ type Subscription struct {
 	// The fields below are guarded by hub.mu.
 	latest    map[core.RunID]*pb.SearchState
 	revisions map[core.RunID]uint64
+	// setups is the unread setup note of each run, and setupSeen the highest revision published to it.
+	setups    map[core.RunID]uint64
+	setupSeen map[core.RunID]uint64
 	ready     []Message
 	pending   map[deltaKey]*pendingDelta
 	order     []deltaKey
@@ -214,6 +243,15 @@ func (s *Subscription) Take() (messages []Message, lagged bool) {
 	for _, run := range keys {
 		messages = append(messages, Message{Search: s.latest[run]})
 		delete(s.latest, run)
+	}
+	runs := make([]core.RunID, 0, len(s.setups))
+	for run := range s.setups {
+		runs = append(runs, run)
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i] < runs[j] })
+	for _, run := range runs {
+		messages = append(messages, Message{Setup: &SetupNote{Run: run, Revision: s.setups[run]}})
+		delete(s.setups, run)
 	}
 	return messages, false
 }

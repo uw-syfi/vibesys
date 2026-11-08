@@ -20,8 +20,9 @@ message ProvisionRepositoryRequest {
     string example = 3 [(buf.validate.field).string.min_len = 1];
     EmptyRepository empty = 4;
   }
-  // Absolute, or empty for ListCatalogueResponse.repositories_directory.
-  string parent_directory = 5 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+  // Absolute, or `~` or `~/...` (the host expands it to the home of the user it runs as), or empty
+  // for ListCatalogueResponse.repositories_directory.
+  string parent_directory = 5 [(buf.validate.field).string.pattern = "^(~?/[^\\x00]*|~)?$"];
 }
 
 // EmptyRepository is a repository with one initial commit and no task.

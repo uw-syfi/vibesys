@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/setup"
 )
@@ -13,7 +14,7 @@ func TestAHeldReadSeesTheFactsAsTheyWereWhenItStarted(t *testing.T) {
 	f := daemontest.NewFakeSetupReads(setup.Facts{Version: "v1"})
 	var got []setup.Read
 	collect := func(r setup.Read) { got = append(got, r) }
-	ref := daemontest.SetupReadRef{Repository: "/repo", Task: "t"}
+	ref := daemon.SetupRef{Repository: "/repo", Task: "t"}
 
 	f.Block()
 	f.Start(context.Background(), ref, collect)
@@ -37,13 +38,13 @@ func TestFailureAndUnreadableAreAnsweredAsReads(t *testing.T) {
 	f := daemontest.NewFakeSetupReads(setup.Facts{})
 	var got setup.Read
 	f.Fail(errors.New("away"))
-	f.Start(context.Background(), daemontest.SetupReadRef{Task: "t"}, func(r setup.Read) { got = r })
+	f.Start(context.Background(), daemon.SetupRef{Task: "t"}, func(r setup.Read) { got = r })
 	if got.Kind != setup.ReadFailure || got.Detail != "away" {
 		t.Fatalf("%+v", got)
 	}
 	f.Fail(nil)
 	f.Unreadable("half written")
-	f.Start(context.Background(), daemontest.SetupReadRef{Task: "t"}, func(r setup.Read) { got = r })
+	f.Start(context.Background(), daemon.SetupRef{Task: "t"}, func(r setup.Read) { got = r })
 	if got.Kind != setup.ReadUnreadable || got.Detail != "half written" {
 		t.Fatalf("%+v", got)
 	}

@@ -45,6 +45,7 @@ func anyJob(r *rand.Rand) core.Job {
 		ID:          core.JobID(fmt.Sprintf("j%d", r.IntN(100))),
 		State:       pick(r, core.JobStates()...),
 		SubmittedAt: epoch.Add(time.Duration(r.IntN(1e6)) * time.Millisecond),
+		FailedStage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure),
 	}
 	commit := core.Commit(fmt.Sprintf("%040x", r.Uint64()))
 	switch r.IntN(3) {
@@ -135,6 +136,15 @@ func TestEveryContractEnumValueIsTranslatedOrRefused(t *testing.T) {
 		if wire.JobState(s) == cliv1.JobState_JOB_STATE_UNSPECIFIED {
 			t.Fatalf("state %q has no contract value", s)
 		}
+	}
+	for n, name := range cliv1.JobStage_name {
+		stage, err := wire.ToJobStage("failed_stage", cliv1.JobStage(n))
+		if err != nil || wire.JobStage(stage) != cliv1.JobStage(n) {
+			t.Fatalf("%s: got %q, %v", name, stage, err)
+		}
+	}
+	if stage, err := wire.ToJobStage("failed_stage", cliv1.JobStage(99)); err == nil {
+		t.Fatalf("a stage from a newer build is %q, want it refused", stage)
 	}
 	for n, name := range cliv1.CutCause_name {
 		cause, err := wire.ToCutCause("cause", cliv1.CutCause(n))
