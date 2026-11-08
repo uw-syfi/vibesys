@@ -90,15 +90,23 @@ export function DraftPanel(props: {
       kicker="Task draft"
       title={title === '' ? 'Untitled' : title}
       width="outline"
-      fixed
       meta={
-        dim ? (
-          <Chip label={AS_OF_LAST_READ} tone="warn" dot hint={facts.readFailure ?? ''} />
-        ) : (
-          <Reserve>
-            <Chip label={AS_OF_LAST_READ} tone="warn" dot />
-          </Reserve>
-        )
+        <>
+          <Text
+            variant="small"
+            tone="muted"
+            title="Setup spend and time, apart from the run's limits"
+          >
+            {`Setup ${spendWords(facts.spentUsd)} \u00b7 ${timeWords(facts.elapsedSeconds)}`}
+          </Text>
+          {dim ? (
+            <Chip label={AS_OF_LAST_READ} tone="warn" dot hint={facts.readFailure ?? ''} />
+          ) : (
+            <Reserve>
+              <Chip label={AS_OF_LAST_READ} tone="warn" dot />
+            </Reserve>
+          )}
+        </>
       }
     >
       <KeyValue
@@ -109,8 +117,6 @@ export function DraftPanel(props: {
             key: 'Baseline',
             value: facts.baseline === null ? NOTHING : baselineWords(facts.baseline),
           },
-          {key: 'Setup spend', value: spendWords(facts.spentUsd)},
-          {key: 'Setup time', value: timeWords(facts.elapsedSeconds)},
         ]}
       />
       <Stack gap="space-2">

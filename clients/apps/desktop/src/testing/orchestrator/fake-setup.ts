@@ -413,6 +413,11 @@ export class FakeSetup implements SetupHost {
     const message = Object.values(this.ledger.state().messages)
       .filter(each => each.toAgentId === agent.id && each.fromAgentId === '')
       .at(-1);
+    if (message !== undefined)
+      this.ledger.record(atMs, {
+        case: 'message',
+        value: create(MessageSchema, {...message, delivery: Delivery.CONSUMED}),
+      });
     this.ledger.record(atMs, {
       case: 'turn',
       value: create(TurnSchema, {

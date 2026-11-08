@@ -107,9 +107,10 @@ export function SetupScreen(props: {
                 nowMs={props.nowMs}
                 agent={lead}
                 progress={props.sendProgress}
-                sent={messagesOf(state, lead.id).filter(
-                  message => message.fromAgentId === '' && messageIs(message, 'text'),
-                )}
+                // Only the last message sent: the box keeps one height as the chat goes on.
+                sent={messagesOf(state, lead.id)
+                  .filter(message => message.fromAgentId === '' && messageIs(message, 'text'))
+                  .slice(-1)}
                 send={props.send}
                 retry={props.retrySend}
               />

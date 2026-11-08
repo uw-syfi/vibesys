@@ -227,7 +227,7 @@ const daemon = new FakeDaemon({
 const world = new FakeSetup(daemon.ledger(), setupFlavor ?? 'ticks');
 daemon.setup = world;
 if (setupFlavor !== undefined) world.adopt(scenario.runId);
-const cost = COSTS[query.get('cost') ?? 'priced'];
+const cost = COSTS[query.get('cost') ?? (setupFlavor === undefined ? 'priced' : 'empty')];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
 daemon.publishHostCost(servedHostCost(scenario.changes, NOW_MS));
 const shape = query.get('catchUp') ?? 'none';

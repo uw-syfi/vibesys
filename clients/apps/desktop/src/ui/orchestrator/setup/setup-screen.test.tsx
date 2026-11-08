@@ -214,6 +214,33 @@ describe('the setup page', () => {
     expect(screen.text()).not.toContain('Task draft');
   });
 
+  it('is listed on Runs as Setting up with the repository name, and a run that started is listed as its task', () => {
+    const {daemon, say, start} = openSetup('ticks');
+    const list = () =>
+      mount(
+        <OrchestratorApp
+          hosts={[hostSnapshotOf({model: {data: stateOf(daemon), agentCursors: {}}})]}
+          nowMs={NOW}
+          commands={appCommandsOf()}
+          retryHost={() => undefined}
+          retryCost={() => undefined}
+          route={initialNavigation.runs}
+          fleet={initialNavigation.fleet}
+          go={() => undefined}
+        />,
+      );
+    const before = list();
+    expect(before.text()).toContain('Setting up \u00b7 decode-service');
+    expect(before.text()).toContain('Setting up');
+    before.unmount();
+    for (const message of ['a', 'b', 'c', 'd', 'e']) say(message);
+    start();
+    const after = list();
+    expect(after.text()).not.toContain('Setting up');
+    expect(after.text()).toContain('Ring buffer');
+    after.unmount();
+  });
+
   it('is stoppable', () => {
     const {screen, stops, run} = openSetup('ticks');
     screen.press(screen.control('Stop run'));
