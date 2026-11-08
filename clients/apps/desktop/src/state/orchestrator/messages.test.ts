@@ -70,9 +70,7 @@ describe('a message body', () => {
       'report-due',
     );
     expect(
-      noteOf(
-        messageOf({case: 'setupBrief', value: create(SetupBriefSchema, {steering: 'tune'})}),
-      ),
+      noteOf(messageOf({case: 'setupBrief', value: create(SetupBriefSchema, {steering: 'tune'})})),
     ).toEqual({kind: 'brief', text: 'tune'});
     expect(
       noteOf(messageOf({case: 'leadBrief', value: create(LeadBriefSchema, {task: 'x'})})),
