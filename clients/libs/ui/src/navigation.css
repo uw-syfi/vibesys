@@ -167,6 +167,8 @@
   position: relative;
   display: flex;
   height: 100%;
+  /* Under a parent of no set height `100%` is nothing, and a narrow window's floating column with it. */
+  min-height: var(--log-sm);
   background: var(--bg);
 }
 .vs-app-nav {
@@ -237,7 +239,6 @@
 .vs-app-nav-top {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
 }
 .vs-app-nav-resize {
   position: absolute;

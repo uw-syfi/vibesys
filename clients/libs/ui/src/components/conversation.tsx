@@ -7,6 +7,7 @@ import {Icon, type IconName} from './icon.js';
 import {ToolCall, type ToolState} from './message.js';
 import {Said, Thought} from './narrative.js';
 import {NewBelow} from './new-below.js';
+import {ScrollArea} from './scroll-area.js';
 import {Chip, type StatusTone} from './status.js';
 import {Text} from './text.js';
 import {useWindowed} from './windowing.js';
@@ -207,11 +208,12 @@ export function Conversation(props: {
   };
   return (
     <div className="vs-conversation" data-size={props.size ?? 'default'}>
-      <ul
+      <ScrollArea
+        as="ul"
+        kind="feed"
         ref={win.scroller}
         className="vs-conversation-pane"
         aria-label={props.label}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
         onScroll={scrolled}
         onWheel={win.touched}
@@ -249,7 +251,7 @@ export function Conversation(props: {
           );
         })}
         <li aria-hidden="true" className="vs-conversation-gap" style={{height: win.after}} />
-      </ul>
+      </ScrollArea>
       {win.behind ? (
         <span className="vs-conversation-jump">
           <NewBelow text="New below" press={win.jump} />

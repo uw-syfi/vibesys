@@ -14,6 +14,7 @@
 @import './sparkline.css';
 @import './middle-text.css';
 @import './conversation.css';
+@import './scroll.css';
 /*
  * The styles of the design system's components (the `.` entry). Every value is a token variable
  * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.

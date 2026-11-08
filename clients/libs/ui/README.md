@@ -16,3 +16,7 @@ component gallery covers visual states independently of the desktop.
 
 See [Clients architecture](../../../docs/contributing/clients-architecture.md)
 for runtime boundaries, design-system enforcement and verification roles.
+
+Nothing scrolls but a `ScrollArea`: a box that must scroll is rendered by it, with the `kind` that
+says what it is for, and every other box keeps `overflow` visible or `clip`. See "Scrolling" in
+[Clients architecture](../../../docs/contributing/clients-architecture.md).

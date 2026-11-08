@@ -13,6 +13,7 @@ import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
 import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
+import {ScrollArea} from './scroll-area.js';
 import {Sparkline} from './sparkline.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
@@ -258,7 +259,8 @@ export function ColumnList<Row>(props: {
       data-lines={props.lines === 2 ? 2 : undefined}
     >
       <Header columns={props.columns} id={headerId} watch={watch} />
-      <div
+      <ScrollArea
+        kind="feed"
         ref={win.scroller}
         className="vs-columnlist-rows"
         role="listbox"
@@ -289,7 +291,7 @@ export function ColumnList<Row>(props: {
           );
         })}
         <div aria-hidden="true" style={{height: win.after}} />
-      </div>
+      </ScrollArea>
     </div>
   );
 }

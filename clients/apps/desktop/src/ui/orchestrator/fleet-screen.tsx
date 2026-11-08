@@ -116,7 +116,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       key: 'status',
       header: 'Status',
       size: 'wide',
-
+      narrow: 'short',
       hint: row => whenHint(row, nowMs, clock) || undefined,
       cell: row => {
         const word = runWord(row.status);
@@ -200,6 +200,7 @@ function figureColumns(
       key: 'best',
       header: 'Best',
       size: 'wide',
+      narrow: 'short',
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
         const [first = '—', second] = resultLines(row);

@@ -63,6 +63,7 @@
     "src/threads.css",
     "src/gantt-tree.css",
     "src/conversation.css",
+    "src/scroll.css",
     "src/fonts"
   ],
   "scripts": {

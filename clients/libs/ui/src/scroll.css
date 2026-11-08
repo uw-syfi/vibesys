@@ -1,0 +1,18 @@
+/*
+ * The one place anything scrolls (imported by components.css). A box scrolls only when a
+ * `ScrollArea` renders it, and a `ScrollArea` states what it is for in `data-scroll`: a `column`
+ * (a page, pane or dialog body), a `feed` (a conversation, a log or a list of rows) or a `table`
+ * (a wide table that cannot wrap). Each scrolls along its one axis and clips the other, so a
+ * stray child can never put a bar on the wrong side. No other stylesheet declares `overflow`
+ * `auto`, `scroll` or `overlay`, nor one axis `hidden` alone (which turns the other axis into
+ * `auto`). Unenforced: no lint holds this yet.
+ */
+[data-scroll="column"],
+[data-scroll="feed"] {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+[data-scroll="table"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

@@ -157,6 +157,26 @@ token definitions. A custom-property check catches references to missing tokens.
 Accessibility, information hierarchy and whether a component belongs in the
 system still need human review.
 
+## Scrolling
+
+Only a declared `ScrollArea` scrolls. The design system's one scroll primitive renders every box
+that scrolls, and says what it is for (`kind`): a `column` (the main column of a page, a pane or a
+dialog), a `feed` (a conversation, a log or a list of rows) or a `table` (a wide table whose columns
+cannot wrap any narrower; the only sideways scroll). Each kind scrolls along its one axis and clips the other, so a
+stray child cannot put a bar on the wrong side. Every other box keeps `overflow` visible, or `clip`
+where it must cut what it holds, and never sets one axis `hidden` alone, which turns the other axis
+into `auto`.
+
+Content that can wrap wraps: a long line in a code block, a log or a conversation wraps instead of
+adding a sideways bar. A grid never gives a track a minimum wider than its container
+(`minmax(min(100%, X), 1fr)`), a list's fixed columns fit the narrowest window the app opens at
+(`MINIMUM_WINDOW`, 480 by 600; the rail fits it, so it never scrolls), and what a row lets out into the page gutter (`--bleed`) is room its
+scroll area keeps as padding.
+
+Unenforced: no lint or layout check holds the rule yet. A lint that rejects `overflow: auto|scroll`
+and a lone-axis `hidden` outside `scroll.css`, and a browser suite that measures every screen at
+each window size, are the checks to add.
+
 ## Components
 
 The design system owns component behavior and public component contracts.

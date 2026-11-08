@@ -33,7 +33,6 @@
 .vs-screen-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -255,11 +254,10 @@ button.vs-crumb:focus-visible {
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
-  overflow-y: auto;
 }
 /* A body whose view scrolls its own list: the tabs, chips and search above the list stay put. */
 .vs-pane-body[data-fixed] {
-  overflow-y: hidden;
+  overflow: clip;
 }
 .vs-log[data-size="fill"],
 .vs-thread[data-size="fill"] {
@@ -326,7 +324,6 @@ button.vs-crumb:focus-visible {
 }
 .vs-picklist-rows {
   max-height: var(--thread);
-  overflow-y: auto;
 }
 .vs-picklist[data-size="fill"] {
   flex: 1 1 auto;
@@ -730,7 +727,6 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-rows {
   max-height: var(--thread);
-  overflow-y: auto;
   /* The room of the scrollbar is kept whether or not there is one, and the axis row keeps it too. */
   scrollbar-gutter: stable;
 }
@@ -751,7 +747,6 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-rows {
   max-height: var(--thread);
-  overflow-y: auto;
   /* The room of the scrollbar is kept whether or not there is one, and the axis row keeps it too. */
   scrollbar-gutter: stable;
 }
@@ -766,7 +761,11 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-row {
   display: grid;
-  grid-template-columns: clamp(var(--gantt-label), 36%, var(--gantt-label-max)) 1fr var(--gantt-figure);
+  /* The name gives way before the bars do: a narrow row keeps a track wide enough to read. */
+  grid-template-columns:
+    minmax(0, clamp(var(--gantt-label), 36%, var(--gantt-label-max)))
+    minmax(calc(var(--space-8) * 3), 1fr)
+    var(--gantt-figure);
   align-items: center;
   column-gap: var(--space-3);
   min-height: var(--row-dense);
@@ -783,8 +782,11 @@ button.vs-crumb:focus-visible {
 .vs-gantt-row[data-axis] {
   min-height: var(--text-section-line);
   cursor: default;
-  /* Never scrolls; keeps the gutter the rows keep, so the axis and the bars share their columns. */
-  overflow-y: hidden;
+  /*
+   * Never scrolls; keeps the gutter the rows keep, so the axis and the bars share their columns.
+   * Both axes are hidden: `overflow-y: hidden` alone makes the other axis `auto`, a sideways bar.
+   */
+  overflow: hidden;
   scrollbar-gutter: stable;
 }
 .vs-gantt-row:not([data-axis]):hover {
@@ -1024,7 +1026,7 @@ button.vs-crumb:focus-visible {
    * the text of the header and of every row shares the left edge of the page's title and cards; only
    * the row's highlight reaches past it.
    */
-  margin-inline: calc(-1 * (var(--space-3) + var(--focus-ring))) calc(-1 * (var(--space-3) + var(--hairline)));
+  margin-inline: calc(-1 * var(--bleed));
 }
 .vs-columnlist-head,
 .vs-columnlist-row {
@@ -1034,7 +1036,7 @@ button.vs-crumb:focus-visible {
   column-gap: var(--space-3);
 }
 .vs-columnlist-head {
-  padding: 0 calc(var(--space-3) + var(--hairline)) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  padding: 0 var(--bleed) var(--space-1);
   border-bottom: var(--hairline) solid var(--line);
   color: var(--muted);
   font-family: var(--text-caption-family);
@@ -1087,7 +1089,6 @@ button.vs-crumb:focus-visible {
   flex: 0 1 auto;
   min-height: 0;
   max-height: calc(var(--row) * 16);
-  overflow-y: auto;
 }
 .vs-columnlist[data-size="fill"] > .vs-columnlist-rows {
   flex: 1 1 0;
@@ -1101,7 +1102,7 @@ button.vs-crumb:focus-visible {
   min-height: var(--row);
   padding: var(--space-3) var(--space-3);
   border: var(--hairline) solid transparent;
-  border-left: var(--focus-ring) solid transparent;
+  border-inline-width: var(--focus-ring);
   border-radius: var(--radius);
   cursor: pointer;
 }
@@ -1247,11 +1248,14 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-name.vs-listheader,
 .vs-gantt-figure.vs-listheader {
+  /* A block, so a name too long for its column ends in an ellipsis (a flex line cannot). */
+  display: block;
   padding: 0;
-  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .vs-gantt-figure.vs-listheader {
-  justify-content: flex-end;
+  text-align: right;
 }
 .vs-listheader-start {
   flex: 1;
@@ -1415,7 +1419,6 @@ button.vs-crumb:focus-visible {
   box-sizing: border-box;
   max-height: var(--thread);
   min-height: 0;
-  overflow-y: auto;
 }
 .vs-narrative[data-size="fill"] {
   flex: 1 1 auto;
@@ -1633,7 +1636,7 @@ button.vs-crumb:focus-visible {
 .vs-chart-columns {
   display: grid;
   gap: var(--space-6);
-  grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--chart-min)), 1fr));
 }
 .vs-chart-columns[data-align="start"] {
   align-items: start;
@@ -1643,7 +1646,10 @@ button.vs-crumb:focus-visible {
   grid-template-columns: repeat(
     auto-fit,
     minmax(
-      max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across))),
+      min(
+        100%,
+        max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across)))
+      ),
       1fr
     )
   );
@@ -1852,8 +1858,8 @@ button.vs-dotlegend-item:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A label before the shrinking part keeps its width. */
-.vs-fact[data-shrink] > .vs-text {
+/* A label before the shrinking part keeps its width; the last text is the part that shrinks. */
+.vs-fact[data-shrink] > .vs-text:not(:last-child) {
   flex: none;
 }
 .vs-fact[data-shrink] > .vs-button {

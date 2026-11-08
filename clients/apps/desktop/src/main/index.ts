@@ -42,7 +42,7 @@ import {quit} from './quit.js';
 import {makeSavedHostsStore, savedHostsPath} from './saved-hosts-store.js';
 import {makeSshConfigSource, SSH_CONFIG_ENV, sshConfigArgs} from './ssh-config.js';
 import {installViewerIpc, makeViewerStore} from './viewer.js';
-import {chromeCss, windowChrome, windowChromeOptions} from './window-chrome.js';
+import {chromeCss, MINIMUM_WINDOW, windowChrome, windowChromeOptions} from './window-chrome.js';
 import {trackWindow} from './window-lifetime.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
 
@@ -156,6 +156,7 @@ function openWindow(hosts: readonly string[]): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 860,
+    ...MINIMUM_WINDOW,
     title: 'VibeSys',
     show: false,
     ...windowChromeOptions(process.platform),

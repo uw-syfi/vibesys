@@ -3,6 +3,7 @@ import {Button} from './button.js';
 import {Collapsible} from './collapsible.js';
 import {Markdown} from './markdown.js';
 import {markdownToPlain} from './markdown-plain.js';
+import {ScrollArea} from './scroll-area.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
 
@@ -112,13 +113,9 @@ export function Code(props: {readonly label: string; readonly text: string}): JS
   return (
     <div className="vs-code-block">
       <Text variant="section">{props.label}</Text>
-      <pre
-        className="vs-code-block-body"
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
-        tabIndex={0}
-      >
+      <ScrollArea as="pre" kind="feed" className="vs-code-block-body" tabIndex={0}>
         {all || hiddenLines === 0 ? props.text : `${shown}\n…`}
-      </pre>
+      </ScrollArea>
       {all || hiddenLines === 0 ? null : (
         <span>
           <Button

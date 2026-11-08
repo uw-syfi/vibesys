@@ -162,7 +162,8 @@
 }
 .vs-bar-rows-label {
   display: inline-block;
-  max-width: 100%;
+  /* Its own margin comes out of the width it may take, so the pair is never wider than the cell. */
+  max-width: calc(100% - var(--space-3));
   margin-right: var(--space-3);
   overflow: hidden;
   text-overflow: ellipsis;

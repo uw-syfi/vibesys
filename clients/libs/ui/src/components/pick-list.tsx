@@ -16,6 +16,7 @@ import {type Guide, Guides} from './guides.js';
 import {Icon} from './icon.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Meter} from './meter.js';
+import {ScrollArea} from './scroll-area.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Swatch} from './swatch-legend.js';
 import {Text} from './text.js';
@@ -122,7 +123,8 @@ export function PickList(props: {
         data-wrap-summary={props.wrapSummary || undefined}
       >
         {props.header === undefined ? null : <Header header={props.header} id={headerId} />}
-        <div
+        <ScrollArea
+          kind="feed"
           ref={scroller}
           className="vs-picklist-rows"
           role="listbox"
@@ -140,7 +142,7 @@ export function PickList(props: {
             </InSlot>
           ))}
           <div aria-hidden="true" style={{height: win.after}} />
-        </div>
+        </ScrollArea>
       </div>
     </SelectedRow.Provider>
   );
