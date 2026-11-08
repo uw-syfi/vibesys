@@ -59,6 +59,37 @@ export function parseGatewayRequest(value: unknown): GatewayRequest {
   };
 }
 
+/**
+ * `DesktopGatewayEnd.error`'s wire limit (`proto/vibesys/desktop/v1/gateway.proto`). A failure's
+ * message is not bounded at its source (a schema violation can list every broken field of a large
+ * reply), so `gatewayEnd` must bound it itself: otherwise a long enough failure could never be
+ * reported, because building its own end reply is what would fail.
+ */
+const MAX_ERROR_BYTES = 65536;
+
+/** How many UTF-8 bytes one Unicode code point takes. */
+function utf8Width(codePoint: number): number {
+  if (codePoint < 0x80) return 1;
+  if (codePoint < 0x800) return 2;
+  if (codePoint < 0x10000) return 3;
+  return 4;
+}
+
+/**
+ * `value` cut to at most `limit` UTF-8 bytes, never splitting a character (`core` has no text
+ * encoder of its own, so this walks code points instead of measuring encoded bytes directly).
+ */
+function boundedUtf8(value: string, limit: number): string {
+  let bytes = 0;
+  let end = 0;
+  for (const char of value) {
+    bytes += utf8Width(char.codePointAt(0) ?? 0);
+    if (bytes > limit) return value.slice(0, end);
+    end += char.length;
+  }
+  return value;
+}
+
 /** One reply frame. */
 export function gatewayReply(bytes: Uint8Array): Uint8Array {
   const reply = toBinary(
@@ -85,7 +116,7 @@ export function gatewayEnd(
       body: {
         case: 'end',
         value: {
-          ...(error === undefined ? {} : {error}),
+          ...(error === undefined ? {} : {error: boundedUtf8(error, MAX_ERROR_BYTES)}),
           ...(status === undefined ? {} : {status}),
           ...(linkProblem === undefined ? {} : {linkProblem}),
           ...(refusal === undefined ? {} : {refusal}),

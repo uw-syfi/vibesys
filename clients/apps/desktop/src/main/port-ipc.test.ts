@@ -221,6 +221,18 @@ it('a call that fails ends with its failure, and a message with no port is ignor
   expect(started).toBe(0);
 });
 
+it('a failure whose message overruns the end reply wire limit still ends the call and closes the port', async () => {
+  const world = served();
+  world.open();
+  await settle();
+  world.log.settle[0]?.reject(new Error('x'.repeat(70_000)));
+  await settle();
+  const [end] = ends(world.port);
+  expect(end).toBeDefined();
+  expect(new TextEncoder().encode(end?.error ?? '').byteLength).toBeLessThanOrEqual(65536);
+  expect(world.port.closes).toBe(1);
+});
+
 const OWN_ID = 11;
 const APP_URL = 'app://vibesys/';
 const own = {
