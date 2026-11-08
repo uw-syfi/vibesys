@@ -148,6 +148,54 @@ describe('the New run page', () => {
     again.screen.unmount();
   });
 
+  it('opens fresh: it clears the last start and each machine’s copy, and lists the folder again', () => {
+    const cleared: string[] = [];
+    const listed: boolean[] = [];
+    const screen = mount(
+      <Window
+        hosts={[read({repositoriesDirectory: '/srv/repos'})]}
+        commands={appCommandsOf({
+          start: {_tag: 'Accepted', receipt: create(ReceiptSchema, {runId: 'run-9'})},
+          clearStart: () => cleared.push('start'),
+          forgetProvision: host => cleared.push(host),
+          listDirectory: (_host, _folder, _hidden, fresh) => listed.push(fresh),
+        })}
+        seen={[]}
+      />,
+    );
+    screen.press(screen.control('New run'));
+    expect(cleared).toEqual(['start', 'local']);
+    expect(listed).toEqual([true]);
+    screen.unmount();
+  });
+
+  it('shows a window that closes and opens again as a new page: the drafts go with the page', () => {
+    const {screen} = open();
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const first = screen.container.querySelector<HTMLElement>(
+      '.vs-pick-card:not([data-unavailable])',
+    );
+    if (first === null) throw new Error('a card fits');
+    screen.press(first);
+    expect(screen.text()).toContain('Start run');
+    screen.press(screen.controls('Runs').find(c => c.classList.contains('vs-crumb')) ?? first);
+    screen.press(screen.control('New run'));
+    expect(screen.text()).toContain('Bring a repository, or describe one');
+    expect(screen.text()).not.toContain('Start run');
+    screen.unmount();
+  });
+
+  it('points to Machines, with a status word, when no eval place can be read', () => {
+    const none = create(ListEvalPlacesResponseSchema, {places: []});
+    const {screen, seen} = open([read({evalPlaces: readOf(none)})]);
+    screen.press(screen.control('No eval place'));
+    expect(seen.at(-1)).toEqual({type: 'open-machines'});
+    screen.unmount();
+    const ok = open();
+    expect(ok.screen.controls('No eval place')).toHaveLength(0);
+    ok.screen.unmount();
+  });
+
   it('picks another machine by its tab, and reads it', () => {
     const loaded: string[] = [];
     const {screen} = open([read(), read({key: 'ssh:host-a', label: 'host-a'})], {

@@ -242,7 +242,7 @@ function newRunCommands(
   setIssues: (update: (all: Issues) => Issues) => void,
 ): Pick<
   AppCommands,
-  'loadNewRun' | 'startFromExample' | 'setUpInNewRepository' | 'forgetProvision'
+  'loadNewRun' | 'startFromExample' | 'setUpInNewRepository' | 'forgetProvision' | 'clearStart'
 > {
   return {
     loadNewRun: host => {
@@ -273,6 +273,7 @@ function newRunCommands(
         },
       );
     },
+    clearStart: () => setIssues(all => ({...all, start: undefined})),
     forgetProvision: host => {
       const session = sessionOf(host);
       if (session !== undefined) dispatch(session.newRun.forgetProvision, () => undefined);

@@ -132,6 +132,8 @@ export interface AppCommands {
     repository: {readonly name: string; readonly parent: string},
     request: StartRunRequest,
   ) => void;
+  /** Forget the last press of Start, so a form opened again shows none of it. */
+  readonly clearStart: () => void;
   /** Forget what `host` said of the last copy of an example. */
   readonly forgetProvision: (host: string) => void;
   readonly retryStart: () => void;
@@ -282,11 +284,14 @@ function NewRunButton(props: {
       icon="plus"
       variant="primary"
       press={() => {
+        // Every way in is this press: the page opens fresh, with no outcome of an earlier start.
+        props.commands.clearStart();
         for (const host of props.hosts) {
+          props.commands.forgetProvision(host.key);
           props.commands.loadNewRun(host.key);
           if (host.repositoriesDirectory !== '') {
             const folder = host.repositoriesDirectory.replace(/\/+$/, '');
-            props.commands.listDirectory(host.key, `${folder}/`, false, false);
+            props.commands.listDirectory(host.key, `${folder}/`, false, true);
           }
         }
         props.go({type: 'open-new-run'});

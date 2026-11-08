@@ -13,7 +13,7 @@ import {
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {type MachineFacts, offeredPlaces} from '../../../state/index.js';
+import {type MachineFacts, offeredPlaces, readable} from '../../../state/index.js';
 import type {StartHost} from '../start-run-form.js';
 import {placeDetail, placeName} from './words.js';
 
@@ -84,6 +84,9 @@ export function MachineStrip(props: {
               {offeredPlaces(props.places).map(place => (
                 <Chip key={place.name} label={`${placeName(place)} · ${placeDetail(place)}`} />
               ))}
+              {props.facts.places !== null && !props.places.some(readable) ? (
+                <Button text="No eval place" variant="quiet" size="sm" press={props.editMachines} />
+              ) : null}
             </ClipRow>
           </Stale>
           <Spacer />
