@@ -21,6 +21,7 @@ import {
   ListEvalPlacesResponseSchema,
   ModelMaker,
   OffersSource,
+  oneofIs,
   ProvisionRefusal,
   type ProvisionRepositoryRequest,
   ProvisionRepositoryResponseSchema,
@@ -199,13 +200,11 @@ export function provisionAnswer(request: ProvisionRepositoryRequest, taken: Read
     });
   if (taken.has(repository))
     return refuse(ProvisionRefusal.NAME_TAKEN, `${request.name} exists`, repository);
-  if (request.source.case === 'example') {
-    const entry = fixtureCards.find(([example]) => example === request.source.value);
+  const {source} = request;
+  if (oneofIs(source, 'example', {example: true, empty: true})) {
+    const entry = fixtureCards.find(([example]) => example === source.value);
     if (entry === undefined)
-      return refuse(
-        ProvisionRefusal.EXAMPLE_NOT_FOUND,
-        `no example ${String(request.source.value)}`,
-      );
+      return refuse(ProvisionRefusal.EXAMPLE_NOT_FOUND, `no example ${source.value}`);
     if (entry[2])
       return refuse(ProvisionRefusal.NEEDS_NETWORK, `${entry[0]} is cloned from elsewhere`);
   }

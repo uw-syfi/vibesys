@@ -3,6 +3,7 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   ListCatalogueResponseSchema,
   ListEvalPlacesResponseSchema,
+  oneofIs,
   ProvisionRepositoryRequestSchema,
   ProvisionRepositoryResponseSchema,
 } from '@vibesys/orchestrator-proto';
@@ -30,7 +31,8 @@ export function newRunSteps(taken: Set<string>) {
           fromBinary(ProvisionRepositoryRequestSchema, request),
           taken,
         );
-        if (answer.outcome.case === 'provisioned') taken.add(answer.outcome.value.repository);
+        if (oneofIs(answer.outcome, 'provisioned', {provisioned: true, refused: true}))
+          taken.add(answer.outcome.value.repository);
         return [
           {
             frame: toBinary(
