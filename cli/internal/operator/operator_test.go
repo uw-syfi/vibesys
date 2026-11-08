@@ -428,3 +428,23 @@ func TestThePathFollowsTheVariablesAndXDG(t *testing.T) {
 		t.Errorf("load: %v, %v", c, err)
 	}
 }
+
+// More placements than ListPlacements can report are refused, naming the key; the most it can are read.
+func TestMorePlacementsThanListPlacementsReportsAreRefused(t *testing.T) {
+	config := func(n int) []byte {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "[placements.place-%d]\nkind = \"local\"\n", i)
+		}
+		return []byte(b.String())
+	}
+	got, err := operator.Parse(config(operator.MaxPlacements))
+	if err != nil || len(got.GetPlacements()) != operator.MaxPlacements {
+		t.Fatalf("%d placements: %v, %v", operator.MaxPlacements, len(got.GetPlacements()), err)
+	}
+	_, err = operator.Parse(config(operator.MaxPlacements + 1))
+	var f *core.Failure
+	if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(err.Error(), "placements:") {
+		t.Fatalf("got %v, want invalid input naming placements", err)
+	}
+}

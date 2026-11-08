@@ -38,6 +38,9 @@ type Resource interface {
 	// *core.Failure of kind FailureUnavailable when the resource cannot be read.
 	Fingerprint(ctx context.Context) (map[string]string, error)
 
+	// Offers reports the accelerators given to a container, or an error when unreadable.
+	Offers(ctx context.Context) ([]core.Accelerator, error)
+
 	// Attach returns what a container is given to use the resource. An Attachment is only data
 	// for the container's creation: a resource makes nothing outside the container, so removing
 	// the container, which the docker environment does on every path, undoes it.

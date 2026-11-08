@@ -29,6 +29,8 @@ func (f *facts) GPUFacts(context.Context) (map[string]string, error) {
 	return maps.Clone(f.of), nil
 }
 
+func (f *facts) ProbeFacts(ctx context.Context) (map[string]string, error) { return f.GPUFacts(ctx) }
+
 func (f *facts) brk() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -90,6 +92,32 @@ func TestASettingThatCannotBeIsRefused(t *testing.T) {
 		var f *core.Failure
 		if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
 			t.Errorf("%s: %v, want invalid input", name, err)
+		}
+	}
+}
+
+func TestOffersCountTheDevicesASelectionNames(t *testing.T) {
+	for _, tc := range []struct {
+		devices, runtime string
+		want             uint32 // zero: unreadable
+	}{
+		{"all", "", 1}, {"device=0", "", 1}, {"device=0,0", "", 1}, {"0", "nvidia", 1}, {"GPU-1234", "nvidia", 1},
+		{"device=0,1", "", 0}, {"0", "", 0}, {"2", "", 0}, {"count=1", "", 0}, {"device=", "", 0},
+		{"device=0,", "", 0}, {"none", "nvidia", 0}, {"void", "nvidia", 0}, {"device=none", "", 0},
+	} {
+		g, err := gpu.New(gpu.Config{Devices: tc.devices, Runtime: tc.runtime, Machine: "host-a", Facts: someGPU()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		offers, err := g.Offers(t.Context())
+		if tc.want == 0 {
+			if err == nil {
+				t.Errorf("%s: got %v, want unreadable", tc.devices, offers)
+			}
+			continue
+		}
+		if err != nil || len(offers) != 1 || offers[0].Count != tc.want || offers[0].Model != core.ModelA100 {
+			t.Errorf("%s: %v, %v", tc.devices, offers, err)
 		}
 	}
 }
