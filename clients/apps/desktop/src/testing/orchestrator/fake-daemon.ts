@@ -121,6 +121,7 @@ const COMMAND_KINDS = {
   updateRun: true,
   beginSetup: true,
   completeSetup: true,
+  declareTask: true,
 } as const;
 
 /** The install of the app that calls: what the main process stamps on every call as metadata. */

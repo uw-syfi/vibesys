@@ -34,6 +34,7 @@ const BODY_KINDS = {
   reportDue: true,
   catchUpRequest: true,
   runLimitReached: true,
+  setupBrief: true,
 } as const satisfies Record<BodyKind, true>;
 
 /** Whether `message` has a body of kind `kind`, and so `message.body.value` is that kind's. */
@@ -75,6 +76,8 @@ export function noteOf(message: Message): MessageNote {
       return {kind: 'brief', text: body.value};
     case 'leadBrief':
       return {kind: 'brief', text: body.value.task};
+    case 'setupBrief':
+      return {kind: 'brief', text: body.value.steering};
     case 'handoff':
       return {kind: 'handoff', claim: body.value.claim};
     case 'report':
