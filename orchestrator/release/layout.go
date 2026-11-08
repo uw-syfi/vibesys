@@ -14,6 +14,8 @@ import (
 //	RELEASE/bin/                 vibesys-client vibesys-host vibesys-cli
 //	RELEASE/sidecar/             pyproject.toml uv.lock src/ and, once installed, .venv/
 //	RELEASE/marketplace/         .claude-plugin/marketplace.json and the skills it names
+//	RELEASE/catalogue.pb         the ReleaseCatalogue: the example tasks, built from the CLI's card reader
+//	RELEASE/examples/            one folder for each example the catalogue lists (see examples.go)
 const (
 	clientProgram = "bin/vibesys-client"
 	hostProgram   = "bin/vibesys-host"
@@ -49,6 +51,7 @@ func NewManifest(version, goos, goarch string) (*pb.ReleaseManifest, error) {
 			clientProgram, hostProgram, jobTool,
 			"sidecar/pyproject.toml", "sidecar/uv.lock", "sidecar/src/vs_sidecar/__init__.py",
 			skillsRoot + "/.claude-plugin/marketplace.json",
+			CatalogueName,
 		},
 	}
 	return m, validate(m)

@@ -7,7 +7,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
@@ -64,17 +63,6 @@ type TaskReader interface {
 	Read(ctx context.Context, ref TaskRef) (core.TaskCard, error)
 }
 
-// Provisioner makes a repository on the host. A refusal is the response's, not an error.
-type Provisioner interface {
-	Provision(ctx context.Context, req *pb.ProvisionRepositoryRequest) (*pb.ProvisionRepositoryResponse, error)
-}
-
 func unimplemented(rpc string) error {
 	return status.Errorf(codes.Unimplemented, "%s is not implemented by this host yet", rpc)
-}
-
-// ProvisionRepository implements OrchestratorService. It answers Unimplemented until the host can
-// provision.
-func (s *Service) ProvisionRepository(context.Context, *pb.ProvisionRepositoryRequest) (*pb.ProvisionRepositoryResponse, error) {
-	return nil, unimplemented("ProvisionRepository")
 }

@@ -1,3 +1,12 @@
+{{if .Setup -}}
+You are the new lead of a setup that is already going. The operator changed the lead's tool or model, and you replace the lead that ran on {{.PreviousHarness}}{{if .PreviousModel}} ({{.PreviousModel}}){{end}}. You start with none of that lead's conversation, so this message, the repository and the task's files are all you have. Do not start over: continue the `vibesys:create-task` skill with the operator in this chat.
+
+{{if .Task -}}
+The task is named `{{.Task}}`: read what is under `.vibesys/tasks/{{.Task}}/` and the `vibesys-cli` jobs run on it, and continue from there. Any mail the lead before you had not read reaches you after this message.
+{{- else -}}
+No task has been named yet: look in `.vibesys/tasks/` for what the lead before you wrote, and call `declare_task` when you choose its name. Any mail the lead before you had not read reaches you after this message.
+{{- end}}
+{{- else -}}
 You are the new lead of a run that is already going. The operator changed the lead's tool or model, and you replace the lead that ran on {{.PreviousHarness}}{{if .PreviousModel}} ({{.PreviousModel}}){{end}}. You start with none of that lead's conversation, so this message and the run's records are all you have. Do not start the run over: continue it with the `vibesys:optimize` skill for the task `{{.Task}}` with `--fanout {{.FanoutLimit}}`.
 
 {{template "lead_rules.md.tmpl"}}
@@ -31,4 +40,6 @@ No report about the whole run has been posted yet.
 The run has already reached its {{.Limit}} limit, and the lead before you was told to finish. Finish now: `spawn_agent` is refused, so start no new plan, worker or judge. If a candidate has been judged and beats the base, promote it. Then send a report of kind `final` with `post_report`: say which commit is best, what it measured against the base, and what you did not get to.
 {{- else -}}
 Read the run's records before you act, take every number from them, and continue from where the run stands. Any mail the lead before you had not read reaches you after this message.
+{{- end}}
+
 {{- end}}

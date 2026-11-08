@@ -8,6 +8,7 @@
 package release
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -197,6 +198,15 @@ func (r *Release) Verify(stage Stage) error {
 	}
 	if _, err := r.SkillsRoot(); err != nil {
 		missing = append(missing, r.Manifest.GetSkills().GetRoot())
+	}
+	var incomplete *IncompleteError
+	switch c, err := r.Catalogue(); {
+	case errors.As(err, &incomplete):
+		// Already named, as a required file.
+	case err != nil:
+		return err
+	default:
+		missing = append(missing, r.missingExamples(c)...)
 	}
 	if len(missing) == 0 {
 		return nil

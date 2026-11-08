@@ -206,6 +206,54 @@ func (x *SpawnAgentInput) GetPlanNumber() uint32 {
 	return 0
 }
 
+// DeclareTaskInput is the input of the declare_task tool, which only the lead has and only while the
+// run is in its setup phase (a call at any other time is refused). The run is the caller's own and
+// the server fills it in. The server sends DeclareTask with this name: the pattern is that message's
+// (a test holds the two equal), a directory name under .vibesys/tasks.
+type DeclareTaskInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          string                 `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeclareTaskInput) Reset() {
+	*x = DeclareTaskInput{}
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeclareTaskInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeclareTaskInput) ProtoMessage() {}
+
+func (x *DeclareTaskInput) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeclareTaskInput.ProtoReflect.Descriptor instead.
+func (*DeclareTaskInput) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DeclareTaskInput) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
 // ListAgentsInput is the input of the list_agents tool, which takes no argument.
 type ListAgentsInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -215,7 +263,7 @@ type ListAgentsInput struct {
 
 func (x *ListAgentsInput) Reset() {
 	*x = ListAgentsInput{}
-	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -227,7 +275,7 @@ func (x *ListAgentsInput) String() string {
 func (*ListAgentsInput) ProtoMessage() {}
 
 func (x *ListAgentsInput) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_tool_server_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -240,7 +288,7 @@ func (x *ListAgentsInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentsInput.ProtoReflect.Descriptor instead.
 func (*ListAgentsInput) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP(), []int{3}
 }
 
 var File_vibesys_orchestrator_v1_tool_server_proto protoreflect.FileDescriptor
@@ -263,7 +311,10 @@ const file_vibesys_orchestrator_v1_tool_server_proto_rawDesc = "" +
 	"\x06effort\x18\x05 \x01(\tB\x1e\xaa\xbb\x18\x1aOptional reasoning effort.R\x06effort\x12L\n" +
 	"\vplan_number\x18\x06 \x01(\rB+\xaa\xbb\x18'Optional. The plan this agent works on.R\n" +
 	"planNumber:\xda\x02\xaa\xbb\x18\xd5\x02\n" +
-	"\vspawn_agent\x12\xc5\x02Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours.\"\x92\x01\n" +
+	"\vspawn_agent\x12\xc5\x02Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours.\"\x93\x04\n" +
+	"\x10DeclareTaskInput\x12\xbe\x01\n" +
+	"\x04task\x18\x01 \x01(\tB\xa9\x01\xbaH*r(\x10\x012$^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$\xaa\xbb\x18xThe task's directory name: letters, digits, dot, underscore and hyphen, not starting with a dot, at most 128 characters.R\x04task:\xbd\x02\xaa\xbb\x18\xb8\x02\n" +
+	"\fdeclare_task\x12\xa7\x02Name the task you are making, as soon as you choose its directory name under .vibesys/tasks. The operator sees the name and the host checks that task's files and jobs, so declare it before you write them. Call it again to rename; the latest name counts. Only available while the run is in setup.\"\x92\x01\n" +
 	"\x0fListAgentsInput:\x7f\xaa\xbb\x18{\n" +
 	"\vlist_agents\x12lList the agents of your run with their role, status and plan, so you can see who is working and who is done.BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
@@ -279,18 +330,19 @@ func file_vibesys_orchestrator_v1_tool_server_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_tool_server_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_tool_server_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_vibesys_orchestrator_v1_tool_server_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_vibesys_orchestrator_v1_tool_server_proto_goTypes = []any{
 	(*ToolServerCredentials)(nil), // 0: vibesys.orchestrator.v1.ToolServerCredentials
 	(*SpawnAgentInput)(nil),       // 1: vibesys.orchestrator.v1.SpawnAgentInput
-	(*ListAgentsInput)(nil),       // 2: vibesys.orchestrator.v1.ListAgentsInput
-	(AgentRole)(0),                // 3: vibesys.orchestrator.v1.AgentRole
-	(Harness)(0),                  // 4: vibesys.orchestrator.v1.Harness
+	(*DeclareTaskInput)(nil),      // 2: vibesys.orchestrator.v1.DeclareTaskInput
+	(*ListAgentsInput)(nil),       // 3: vibesys.orchestrator.v1.ListAgentsInput
+	(AgentRole)(0),                // 4: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 5: vibesys.orchestrator.v1.Harness
 }
 var file_vibesys_orchestrator_v1_tool_server_proto_depIdxs = []int32{
-	3, // 0: vibesys.orchestrator.v1.ToolServerCredentials.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	3, // 1: vibesys.orchestrator.v1.SpawnAgentInput.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	4, // 2: vibesys.orchestrator.v1.SpawnAgentInput.harness:type_name -> vibesys.orchestrator.v1.Harness
+	4, // 0: vibesys.orchestrator.v1.ToolServerCredentials.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	4, // 1: vibesys.orchestrator.v1.SpawnAgentInput.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	5, // 2: vibesys.orchestrator.v1.SpawnAgentInput.harness:type_name -> vibesys.orchestrator.v1.Harness
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
@@ -311,7 +363,7 @@ func file_vibesys_orchestrator_v1_tool_server_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_tool_server_proto_rawDesc), len(file_vibesys_orchestrator_v1_tool_server_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

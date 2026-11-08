@@ -29,6 +29,8 @@ import {WorkstreamsCard} from './workstreams-card.js';
  */
 export function ReportScreen(props: {
   readonly report: RunReport;
+  /** The run's Settings control, in the title row beside its actions; none for a run the host does not hold. */
+  readonly settings?: ReactNode;
   readonly host: string;
   readonly nowMs: number;
   /** The host's one status; the header says so when it is not live. */
@@ -88,12 +90,15 @@ export function ReportScreen(props: {
         </>
       }
       actions={
-        <ReportActions
-          stoppable={isStoppable(report.header.status)}
-          stopProgress={props.stopProgress}
-          stop={props.stop}
-          openCatchUp={props.openCatchUp}
-        />
+        <>
+          {props.settings}
+          <ReportActions
+            stoppable={isStoppable(report.header.status)}
+            stopProgress={props.stopProgress}
+            stop={props.stop}
+            openCatchUp={props.openCatchUp}
+          />
+        </>
       }
     >
       <CommandLine

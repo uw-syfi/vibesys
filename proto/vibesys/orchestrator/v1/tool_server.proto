@@ -88,6 +88,23 @@ message SpawnAgentInput {
   uint32 plan_number = 6 [(tool_field_doc) = "Optional. The plan this agent works on."];
 }
 
+// DeclareTaskInput is the input of the declare_task tool, which only the lead has and only while the
+// run is in its setup phase (a call at any other time is refused). The run is the caller's own and
+// the server fills it in. The server sends DeclareTask with this name: the pattern is that message's
+// (a test holds the two equal), a directory name under .vibesys/tasks.
+message DeclareTaskInput {
+  option (mcp_tool) = {
+    name: "declare_task"
+    description: "Name the task you are making, as soon as you choose its directory name under .vibesys/tasks. The operator sees the name and the host checks that task's files and jobs, so declare it before you write them. Call it again to rename; the latest name counts. Only available while the run is in setup."
+  };
+
+  string task = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$",
+    (tool_field_doc) = "The task's directory name: letters, digits, dot, underscore and hyphen, not starting with a dot, at most 128 characters."
+  ];
+}
+
 // ListAgentsInput is the input of the list_agents tool, which takes no argument.
 message ListAgentsInput {
   option (mcp_tool) = {

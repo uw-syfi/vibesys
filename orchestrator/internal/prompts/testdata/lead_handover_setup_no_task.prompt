@@ -1,0 +1,3 @@
+You are the new lead of a setup that is already going. The operator changed the lead's tool or model, and you replace the lead that ran on codex. You start with none of that lead's conversation, so this message, the repository and the task's files are all you have. Do not start over: continue the `vibesys:create-task` skill with the operator in this chat.
+
+No task has been named yet: look in `.vibesys/tasks/` for what the lead before you wrote, and call `declare_task` when you choose its name. Any mail the lead before you had not read reaches you after this message.

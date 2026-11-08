@@ -173,6 +173,22 @@ export {
   type WorkstreamRow,
 } from './orchestrator/report/index.js';
 export {
+  type Change as SettingChangeView,
+  type CostSetting,
+  changeOf as settingChangeOf,
+  type FanoutSetting,
+  type LastWrite,
+  type LeadSetting,
+  type LeadState,
+  lastWrite,
+  type RunSettings,
+  runSettingsOf,
+  settingsHistory,
+  settingsTimeline,
+  type TimelineRow,
+  type TimeSetting,
+} from './orchestrator/run-settings.js';
+export {
   candidates,
   jobQueue,
   jobsWithNoRun,
@@ -185,6 +201,7 @@ export {
   type Overlay,
   type Progress,
   type RunHistoryRead,
+  type SettingsRecord,
   type SnapshotCut,
 } from './orchestrator/state.js';
 export {ms} from './orchestrator/time.js';

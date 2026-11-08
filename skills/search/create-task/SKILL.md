@@ -45,7 +45,7 @@ you cannot find, in one round of questions, in their words, each with your propo
 
 ## 2. Write the task
 
-Name it with one lowercase, hyphenated word or two. Write under `.vibesys/tasks/<task>/`:
+Name it with one lowercase, hyphenated word or two. In a run's setup phase, call `declare_task` with the name as soon as you choose it. Write under `.vibesys/tasks/<task>/`:
 `vibesys.input.toml`, `objectives.toml`, `OBJECTIVE.md`, the checker, the benchmark, any
 reference data, and a `Dockerfile` if the environment needs one. Follow task-format.md exactly;
 the CLI refuses an unknown key.

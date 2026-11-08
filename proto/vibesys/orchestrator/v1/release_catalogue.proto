@@ -1,0 +1,84 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/cli/v1/task.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// ReleaseCatalogue is RELEASE/catalogue.pb: the example tasks a release carries, one entry per task. The
+// release builder derives it from the example tasks with the CLI's card reader, so it cannot say
+// anything the task files do not. It is never edited. The host serves it as ListCatalogueResponse
+// entries and provisions repositories from the trees it names.
+message ReleaseCatalogue {
+  // The release the catalogue was built with.
+  string release = 1 [(buf.validate.field).string.pattern = "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"];
+  repeated ReleaseExample examples = 2 [
+    (buf.validate.field).repeated.max_items = 2000,
+    (buf.validate.field).cel = {
+      id: "release_catalogue.tasks_unique"
+      message: "an example task is listed once"
+      expression: "this.map(e, e.example + ':' + e.card.task).unique()"
+    }
+  ];
+}
+
+// ReleaseExample is one example task of a release and where its source is.
+message ReleaseExample {
+  option (buf.validate.message).cel = {
+    id: "release_example.tree_is_example"
+    message: "tree is examples/ and the example id"
+    expression: "this.tree == 'examples/' + this.example"
+  };
+  option (buf.validate.message).cel = {
+    id: "release_example.folder_is_last_part"
+    message: "folder is the last part of the example id"
+    expression: "this.example.endsWith('/' + this.folder) || this.example == this.folder"
+  };
+  option (buf.validate.message).cel = {
+    id: "release_example.clone_iff_needs_clone"
+    message: "a pinned clone is given exactly when the example needs one"
+    expression: "has(this.clone) == this.needs_clone"
+  };
+  // The example's id: its path under the examples root, as in CatalogueEntry.example. It holds no
+  // "..", no empty part and no leading or trailing "/".
+  string example = 1 [
+    (buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 256
+    },
+    (buf.validate.field).cel = {
+      id: "release_example.example_relative"
+      message: "must be a relative path without . or .. parts"
+      expression: "!this.startsWith('/') && !this.endsWith('/') && !this.split('/').exists(p, p == '' || p == '.' || p == '..')"
+    }
+  ];
+  // The example folder's name, which a client shows where the prototype showed a variant.
+  string folder = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  // The example's tree in the release, relative to the release folder.
+  string tree = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 300
+  }];
+  // The card of the task, as the CLI reads it; card.task is the task's name.
+  vibesys.cli.v1.TaskCard card = 4 [(buf.validate.field).required = true];
+  // Providing the example needs the network: the rest of it is cloned from elsewhere.
+  bool needs_clone = 5;
+  // Where the rest of the example is cloned from, at the pinned revision. The tree holds
+  // only the example's own files (the vendored ones), which win over the clone's.
+  CloneSource clone = 6;
+}
+
+// CloneSource is an external repository pinned to one revision.
+message CloneSource {
+  string url = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 512
+    pattern: "^[^-].*$"
+  }];
+  // A full commit id.
+  string revision = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+}
