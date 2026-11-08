@@ -41,6 +41,12 @@ func anyFlowPlan(r *rand.Rand) flow.Plan {
 		p.Build = &b
 	}
 	if r.IntN(2) == 0 {
+		p.Service = &task.Service{
+			Serve: append([]string{"serve", "--port", "${PORT}"}, words(r, r.IntN(3))...), Ready: pick(r, "/health", "/v1/models"),
+			StartupTimeout: time.Duration(1+r.IntN(3600)) * time.Second, Reset: anyCommand(r), ShareWithCheck: r.IntN(2) == 0,
+		}
+	}
+	if r.IntN(2) == 0 {
 		return p
 	}
 	p.Kind = core.JobMeasure

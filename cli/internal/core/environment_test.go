@@ -91,3 +91,27 @@ func TestFingerprintEquality(t *testing.T) {
 		}
 	}
 }
+
+// A task that keeps a server for the job runs it in a container of its image, so a request for the
+// host is refused naming [service], whatever the backend that is not metal; what else it asks for
+// is chosen as for a task without one.
+func TestATaskWithAJobServerIsRefusedTheHost(t *testing.T) {
+	for _, backend := range allBackends {
+		if backend == core.BackendMetal {
+			continue
+		}
+		for _, requested := range []core.EnvironmentKind{core.EnvironmentAuto, core.EnvironmentHost, core.EnvironmentDocker} {
+			task := core.TaskSetup{Backend: backend, HasDockerfile: true, JobServer: true}
+			got, err := core.ChooseEnvironment(task, requested)
+			if requested == core.EnvironmentHost {
+				if failureKind(err) != core.FailureInvalidInput || !strings.Contains(err.Error(), "[service]") || got != "" {
+					t.Errorf("%+v requested host: got %q, %v; want a refusal naming [service]", task, got, err)
+				}
+				continue
+			}
+			if err != nil || got != core.EnvironmentDocker {
+				t.Errorf("%+v requested %q: got %q, %v; want docker", task, requested, got, err)
+			}
+		}
+	}
+}

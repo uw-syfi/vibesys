@@ -44,7 +44,6 @@
   ],
   "proto/vibesys/cli/v1/result.proto": [
     "CheckResult",
-    "MeasureResult",
     "Measurement",
     "ObjectiveNoise",
     "Objectives",
