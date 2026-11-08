@@ -10,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"google.golang.org/protobuf/proto"
@@ -105,6 +106,10 @@ rescan:
 		}
 		current := map[string]*apiv1.RunEntry{}
 		directories := map[string]string{}
+		// heads holds each run's real head, even one dropped from its entry for size: a
+		// liveness probe tick must read the run's true state, not the value the topic
+		// publishes, or a run whose head was dropped reads as having none at all.
+		heads := map[string]*storev1.RunHead{}
 		for _, entry := range entries {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -160,6 +165,7 @@ rescan:
 			}
 			current[entry.Name()] = value
 			directories[entry.Name()] = dir
+			heads[entry.Name()] = head
 			if !proto.Equal(previous[entry.Name()], value) {
 				sink.Put(entry.Name(), value)
 			}
@@ -212,11 +218,11 @@ rescan:
 						(probes[id].confirmed || now.After(probes[id].until)) {
 						continue
 					}
-					live, err := liveness(directories[id], value.Head)
+					live, err := liveness(directories[id], heads[id])
 					if err != nil {
 						continue
 					}
-					probes[id] = probes[id].observe(directories[id], value.Head.GetEpoch(), live, now)
+					probes[id] = probes[id].observe(directories[id], heads[id].GetEpoch(), live, now)
 					if live != value.Liveness {
 						// The sink owns what it was given, so the change is a new value.
 						observed := proto.Clone(value).(*apiv1.RunEntry)
