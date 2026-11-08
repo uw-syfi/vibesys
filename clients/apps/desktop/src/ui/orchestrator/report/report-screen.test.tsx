@@ -46,6 +46,7 @@ import {
   serveSummaries,
   withReport,
 } from '../../../testing/orchestrator/index.js';
+import {runTitle} from '../fleet-words.js';
 import {agentNames} from '../names.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
 import {ObjectiveTiles} from './objective-tiles.js';
@@ -171,7 +172,10 @@ describe('the report as a page of the run', () => {
     const {screen} = render({});
     const header = screen.container.querySelector('.vs-page-header');
     expect(header?.firstElementChild?.classList.contains('vs-page-trail')).toBe(true);
-    expect(header?.querySelector('h1')?.textContent).toBe(stateOf({}).runs[RUN]?.task ?? 'a title');
+    const run = stateOf({}).runs[RUN];
+    expect(header?.querySelector('h1')?.textContent).toBe(
+      run === undefined ? 'a title' : runTitle(run.taskCard ?? null, run.task),
+    );
     // What is best so far is the objective tiles', so the header does not say it a second time.
     expect(header?.textContent).not.toMatch(/\bBest\b/);
     // Both actions are the standard size, in the one group; the danger one is the outline, the

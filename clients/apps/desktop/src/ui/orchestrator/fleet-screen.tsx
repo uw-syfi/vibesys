@@ -37,7 +37,16 @@ import {useDisplayClock} from '../display-clock.js';
 import type {DisplayClock} from '../display-time.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {hostStatusWord} from '../host-status-words.js';
-import {ago, dollars, percent, resultHint, resultWords, span, unreadTitle} from './fleet-words.js';
+import {
+  ago,
+  dollars,
+  percent,
+  resultHint,
+  resultWords,
+  runTitle,
+  span,
+  unreadTitle,
+} from './fleet-words.js';
 import {runWord} from './words.js';
 
 /** A row whose run started, or ended, within this long is new on screen: it arrives with a flash. */
@@ -93,7 +102,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
       size: 'fill',
       hint: row =>
         [
-          row.name,
+          runTitle(row.card, row.name),
           row.repository,
           row.startedMs === null ? '' : `Started ${clock.datedMoment(row.startedMs)}`,
         ]
@@ -101,7 +110,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
           .join('\n'),
       cell: row => (
         <CellLines
-          main={<Text variant="body-strong">{row.name}</Text>}
+          main={<Text variant="body-strong">{runTitle(row.card, row.name)}</Text>}
           note={
             <Text variant="small" tone="muted">
               {elapsed(row, nowMs)}

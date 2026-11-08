@@ -14,6 +14,7 @@ import {installDom, mount} from '../../testing/dom/harness.js';
 import {PRICED_AND_UNPRICED} from '../../testing/orchestrator/cost-views.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {type HostSnapshot, OrchestratorApp} from '../orchestrator/app.js';
+import {runTitle} from '../orchestrator/fleet-words.js';
 
 installDom();
 
@@ -69,7 +70,8 @@ function openCost(host: HostSnapshot) {
 }
 
 /** What the run is called on the list and in every trail. */
-const TASK = base.runs[scenario.runId]?.task ?? '';
+const run = base.runs[scenario.runId];
+const TASK = run === undefined ? '' : runTitle(run.taskCard ?? null, run.task);
 
 const title = (screen: ReturnType<typeof mount>): string | undefined =>
   screen.container.querySelector('h1')?.textContent ?? undefined;
