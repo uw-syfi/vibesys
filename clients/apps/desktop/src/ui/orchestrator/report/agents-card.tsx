@@ -18,6 +18,7 @@ export function AgentsCard(props: {
   const {agents} = props;
   return (
     <Card
+      dense
       section={props.runOver ? 'Agents' : 'Live agents'}
       action={
         <Button text="Agents" label="Open agents" variant="quiet" size="sm" press={props.open} />

@@ -1,5 +1,5 @@
 import {RunStatus} from '@vibesys/orchestrator-proto';
-import {ChartColumns, Page} from '@vibesys/ui';
+import {ChartColumns, Page, Stack} from '@vibesys/ui';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {
   CommandProgress,
@@ -101,56 +101,58 @@ export function ReportScreen(props: {
         </>
       }
     >
-      <CommandLine
-        progress={over ? undefined : props.stopProgress}
-        done="Stop"
-        retry={props.retryStop}
-      />
-      <LeadSummary summary={report.summary} nowMs={props.nowMs} />
-      <ObjectiveTiles objectives={report.objectives} />
-      <ChartColumns>
-        {report.tradeoff === undefined ? null : (
-          <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
-        )}
-        <OverTime
-          objectives={report.objectives}
-          span={report.span}
-          names={props.names}
-          links={{
-            ideas,
-            picked,
-            lit,
-            pick: jobId => setPicked(jobId === picked ? null : jobId),
-            showIdea: plan => {
-              setSelected(plan);
-              setReveal(reveal + 1);
-            },
-          }}
+      <Stack>
+        <CommandLine
+          progress={over ? undefined : props.stopProgress}
+          done="Stop"
+          retry={props.retryStop}
         />
-      </ChartColumns>
-      {ideas === undefined ? (
-        <ChartColumns align="start">
-          <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
-          {cost}
+        <ObjectiveTiles objectives={report.objectives} />
+        <LeadSummary summary={report.summary} nowMs={props.nowMs} />
+        <ChartColumns dense>
+          {report.tradeoff === undefined ? null : (
+            <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
+          )}
+          <OverTime
+            objectives={report.objectives}
+            span={report.span}
+            names={props.names}
+            links={{
+              ideas,
+              picked,
+              lit,
+              pick: jobId => setPicked(jobId === picked ? null : jobId),
+              showIdea: plan => {
+                setSelected(plan);
+                setReveal(reveal + 1);
+              },
+            }}
+          />
         </ChartColumns>
-      ) : (
-        <>
-          <ChartColumns align="start">
-            <WorkstreamsCard workstreams={ideas.workstreams} />
+        {ideas === undefined ? (
+          <ChartColumns dense align="start">
+            <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
             {cost}
           </ChartColumns>
-          <IdeasCard
-            ideas={ideas}
-            names={props.names}
-            units={units}
-            window={props.ideasWindow}
-            selected={selected}
-            select={setSelected}
-            reveal={reveal}
-          />
-          <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
-        </>
-      )}
+        ) : (
+          <>
+            <ChartColumns dense align="start">
+              <WorkstreamsCard workstreams={ideas.workstreams} />
+              {cost}
+            </ChartColumns>
+            <IdeasCard
+              ideas={ideas}
+              names={props.names}
+              units={units}
+              window={props.ideasWindow}
+              selected={selected}
+              select={setSelected}
+              reveal={reveal}
+            />
+            <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
+          </>
+        )}
+      </Stack>
     </Page>
   );
 }

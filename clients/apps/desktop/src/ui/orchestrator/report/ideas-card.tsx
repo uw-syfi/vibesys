@@ -199,7 +199,7 @@ export function IdeasCard(props: {
     })),
   ];
   return (
-    <Card section="Ideas">
+    <Card dense section="Ideas">
       <Stack gap="space-4">
         <Row gap="space-4" rowGap="space-3" wrap justify="between">
           <SegmentedControl

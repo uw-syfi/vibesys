@@ -45,6 +45,7 @@ export function WorkstreamsCard(props: {
 }): JSX.Element {
   return (
     <Card
+      dense
       section="Workstreams"
       action={
         <SwatchLegend

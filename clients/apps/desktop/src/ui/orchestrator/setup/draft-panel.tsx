@@ -1,4 +1,16 @@
-import {Button, Chip, KeyValue, MiddleText, Pane, Reserve, Row, Stack, Text} from '@vibesys/ui';
+import {
+  Button,
+  Chip,
+  Fact,
+  FactLine,
+  KeyValue,
+  MiddleText,
+  Pane,
+  Reserve,
+  Row,
+  Stack,
+  Text,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {CheckRow, SetupFacts, StartOutcome} from '../../../state/index.js';
 import {runTitle} from '../fleet-words.js';
@@ -27,9 +39,15 @@ function CheckLine(props: {readonly row: CheckRow; readonly dim: boolean}): JSX.
   return (
     <Stack gap="space-1">
       <Row justify="between" gap="space-3">
-        <Text variant="body-strong" tone={dim ? 'muted' : 'default'}>
-          {CHECK_LABEL[row.id]}
-        </Text>
+        <Row grow>
+          <FactLine fit="parent" wrap={false}>
+            <Fact shrink title={CHECK_LABEL[row.id]}>
+              <Text variant="body-strong" tone={dim ? 'muted' : 'default'}>
+                {CHECK_LABEL[row.id]}
+              </Text>
+            </Fact>
+          </FactLine>
+        </Row>
         <Chip label={word.label} tone={dim ? 'neutral' : word.tone} dot even />
       </Row>
       <Text variant="small" tone="muted">

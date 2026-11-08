@@ -117,7 +117,7 @@ export {
   type ToolState,
 } from './components/message.js';
 export {Gauge, LoadingBar, Meter, Readings} from './components/meter.js';
-export {MetricTile, MetricTiles} from './components/metric-tile.js';
+export {denseTilesPerRow, MetricTile, MetricTiles} from './components/metric-tile.js';
 export {MiddleText} from './components/middle-text.js';
 export {
   Narrative,

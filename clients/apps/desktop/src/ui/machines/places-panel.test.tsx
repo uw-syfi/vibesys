@@ -73,12 +73,31 @@ describe('the eval places of a machine', () => {
     screen.unmount();
   });
 
-  it('dims the places while they are read again, and swaps once to the answer', () => {
+  it('does not dim the places for the read that opening the page starts, and swaps once to the answer', () => {
     const {screen, draw} = open(readOf(response));
     const dimmed = () =>
       screen.container
         .querySelector('table[aria-label="This machine places"]')
         ?.hasAttribute('data-dim');
+    screen.render(draw(readingOf(readOf(response))));
+    expect(dimmed()).toBe(false);
+    expect(cells(screen.container)).toHaveLength(5);
+    const answer = create(ListEvalPlacesResponseSchema, {places: [notProbed]});
+    screen.render(draw(readOf(answer)));
+    expect(dimmed()).toBe(false);
+    expect(cells(screen.container)).toEqual([['cluster-c', 'not probed', '']]);
+    screen.unmount();
+  });
+
+  it('dims the places while a Refresh the person pressed reads them again, and swaps once to the answer', () => {
+    const {screen, draw} = open(readOf(response));
+    const dimmed = () =>
+      screen.container
+        .querySelector('table[aria-label="This machine places"]')
+        ?.hasAttribute('data-dim');
+    expect(dimmed()).toBe(false);
+    screen.press(screen.control('Refresh This machine'));
+    // The host's answer to the press is not in yet: nothing is dimmed before the read begins.
     expect(dimmed()).toBe(false);
     screen.render(draw(readingOf(readOf(response))));
     expect(dimmed()).toBe(true);

@@ -191,11 +191,11 @@ export function OverTime(props: {
     ...measured.flatMap(objective => valueLabels(objective).map(tick => tick.label.length)),
   );
   return (
-    <Card section="Over time">
+    <Card dense section="Over time">
       {measured.length === 0 ? (
         <Text tone="muted">No measurements yet</Text>
       ) : (
-        <Stack gap="space-5">
+        <Stack gap="space-4">
           <ChartLegend
             label="Key to the charts"
             items={[
@@ -312,8 +312,8 @@ export function TradeOff(props: {
   }));
   const options = names.map(name => ({value: name, label: name}));
   return (
-    <Card section="Trade-off">
-      <Stack gap="space-4">
+    <Card dense section="Trade-off">
+      <Stack gap="space-3">
         <Row gap="space-4" rowGap="space-2" wrap justify="between">
           <Text variant="small" tone="muted">
             {`${tradeoff.points.length} candidates · ${tradeoff.frontierCount} on the frontier`}

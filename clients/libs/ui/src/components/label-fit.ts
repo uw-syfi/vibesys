@@ -104,3 +104,34 @@ export function useInlineSize(): readonly [Measure, number | null] {
   }, []);
   return [measure, width];
 }
+
+/** The size of a box in pixels, as measured. */
+export interface BoxSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+function sizeOf(width: number, height: number): BoxSize | null {
+  return width > 0 && height > 0 ? {width, height} : null;
+}
+
+/**
+ * The size of an element in pixels as it changes, for a drawing that fills a box its stylesheet
+ * sizes (a height set by the window's, say) and draws itself to that box. Like `useInlineSize`: null
+ * until measured and wherever there is no layout, and no timer.
+ */
+export function useBoxSize(): readonly [Measure, BoxSize | null] {
+  const [size, setSize] = useState<BoxSize | null>(null);
+  const measure = useCallback<Measure>(element => {
+    if (element === null || typeof ResizeObserver === 'undefined') return undefined;
+    const rect = element.getBoundingClientRect();
+    setSize(sizeOf(rect.width, rect.height));
+    const watch = new ResizeObserver(entries => {
+      const entry = entries.at(-1);
+      if (entry !== undefined) setSize(sizeOf(entry.contentRect.width, entry.contentRect.height));
+    });
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, []);
+  return [measure, size];
+}
