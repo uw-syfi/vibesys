@@ -336,7 +336,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	}
 
 	// One brief, three handoffs, and the job-completion notices that came before the run ended wake the
-	// lead (see minJobNotices). Read the typed deliveries once the run is over, then count the files.
+	// lead (how many came is timing: see fixtureJobs). Read the typed deliveries once the run is over, then count the files.
 	expectedPrompts := 1 + 3 + r.awaitLeadDeliveries(started.RunID, lead.ID)
 	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
 		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
