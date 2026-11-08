@@ -400,6 +400,70 @@ func TestRunsSourceListsEveryRunWhateverItsHeadSize(t *testing.T) {
 	}
 }
 
+// A run past the topic's value bound is listed without its head (above), but a liveness probe
+// tick must still read the run's true state. A tick that instead reprobed the already-dropped
+// entry value found no head and read the run as RUN_LIVENESS_UNSPECIFIED (an absent head),
+// flipping back to the correct RUN_LIVENESS_INTERRUPTED on every full rescan and so flapping
+// between the two on every watched change. A run without any run.lock file is needed to see the
+// divergence: liveness() only tells a nil head from a real one in its run.lock-absent branch.
+func TestRunsSourceOversizedRunningHeadKeepsItsLivenessAcrossATick(t *testing.T) {
+	w := newRunsWorld(t)
+	addProjectRun(t, w, "big")
+	dir := filepath.Join(w.f.root, "runs", "big")
+	maxBytes := hostoperations.Topics[hostoperations.TopicRuns].MaxValueBytes
+
+	oversized := head(proto.Uint64(0))
+	oversized.Epoch = 3
+	// span_counts keys are capped at 65536 bytes each (proto/vibesys/store/v1/skeleton.proto),
+	// so the bound is crossed with several keys under that cap, not one huge key.
+	counts := map[string]uint64{}
+	for filler := range 6 {
+		counts[strings.Repeat(string(rune('a'+filler))+"x", 30_000)] = 1
+	}
+	oversized.SpanCounts = counts
+	whole := proto.Size(&apiv1.RunEntry{Head: oversized, Liveness: apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED})
+	if whole <= maxBytes {
+		t.Fatalf("harness fault: entry of %d bytes does not exceed the topic's %d byte bound", whole, maxBytes)
+	}
+	publishHeadIn(t, dir, oversized)
+
+	defer w.run()()
+	w.sink.awaitSynced(t, w.ctx)
+	w.idle()
+
+	entryFor := func(puts []putRun, id string) *apiv1.RunEntry {
+		t.Helper()
+		var found *apiv1.RunEntry
+		for _, put := range puts {
+			if put.id == id {
+				found = put.entry
+			}
+		}
+		if found == nil {
+			t.Fatalf("no put for %s among %v", id, puts)
+		}
+		return found
+	}
+
+	scanned := entryFor(w.sink.drain(), "big")
+	if scanned.Head != nil {
+		t.Fatalf("harness fault: head was not dropped for size (%d bytes)", proto.Size(scanned))
+	}
+	if scanned.Liveness != apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED {
+		t.Fatalf("initial full scan: got liveness %v, want INTERRUPTED", scanned.Liveness)
+	}
+
+	w.probe(server.LivenessProbeInterval)
+	if got := w.sink.drain(); len(got) != 0 {
+		t.Fatalf("a liveness probe tick changed an unchanged oversized run: %v", got)
+	}
+
+	w.change()
+	if got := w.sink.drain(); len(got) != 0 {
+		t.Fatalf("a full rescan of an unchanged oversized run restated it: %v", got)
+	}
+}
+
 // addProjectRun makes a run `id` in the layout a project's run has, so the source can tell its
 // project, links it into the index, and returns the project's canonical path.
 func addProjectRun(t *testing.T, w *runsWorld, id string) string {
