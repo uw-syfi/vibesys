@@ -143,6 +143,12 @@ var (
 		core.RefuseNoViewer:         pb.Refusal_REFUSAL_NO_VIEWER,
 		core.RefuseTimeLimitReached: pb.Refusal_REFUSAL_TIME_LIMIT_REACHED,
 		core.RefuseCostLimitReached: pb.Refusal_REFUSAL_COST_LIMIT_REACHED,
+
+		core.RefuseEvalPlaceNotFound:  pb.Refusal_REFUSAL_EVAL_PLACE_NOT_FOUND,
+		core.RefuseEvalPlaceMisfit:    pb.Refusal_REFUSAL_EVAL_PLACE_MISFIT,
+		core.RefuseEvalPlaceAmbiguous: pb.Refusal_REFUSAL_EVAL_PLACE_AMBIGUOUS,
+		core.RefuseSetupIncomplete:    pb.Refusal_REFUSAL_SETUP_INCOMPLETE,
+		core.RefuseNotInSetup:         pb.Refusal_REFUSAL_NOT_IN_SETUP,
 	})
 	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
 		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,

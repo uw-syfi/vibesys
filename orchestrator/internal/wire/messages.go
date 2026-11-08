@@ -67,6 +67,8 @@ func ChangeMessage(sequence uint64, e core.Event) (*pb.RunChange, error) {
 		out.Body = &pb.RunChange_Receipt{Receipt: receiptOut(b, sequence)}
 	case core.CheckIn:
 		out.Body = &pb.RunChange_CheckIn{CheckIn: checkInOut(b)}
+	case core.RunSettingsUpdated:
+		out.Body = &pb.RunChange_RunUpdated{RunUpdated: settingsUpdatedOut(b)}
 	default:
 		return nil, describe("event", e.Body)
 	}

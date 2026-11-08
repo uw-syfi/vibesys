@@ -284,6 +284,17 @@ const (
 	RefuseModelNotAllowed Refusal = "model_not_allowed"
 	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
 	RefuseHandoffNotYours Refusal = "handoff_not_yours"
+	// RefuseEvalPlaceNotFound, RefuseEvalPlaceMisfit and RefuseEvalPlaceAmbiguous say the eval place
+	// the start named is not one the host has, does not give the task's accelerator, or was not named
+	// and several give it. The receipt lists the places.
+	RefuseEvalPlaceNotFound  Refusal = "eval_place_not_found"
+	RefuseEvalPlaceMisfit    Refusal = "eval_place_misfit"
+	RefuseEvalPlaceAmbiguous Refusal = "eval_place_ambiguous"
+	// RefuseSetupIncomplete says a setup was completed before every check passed. The receipt lists
+	// the checks that have not.
+	RefuseSetupIncomplete Refusal = "setup_incomplete"
+	// RefuseNotInSetup says a setup-only command named a run that is not in setup.
+	RefuseNotInSetup Refusal = "not_in_setup"
 )
 
 // StartFailure says why a session never opened. The empty value means it did not fail to start.

@@ -31,6 +31,8 @@ func publicPart(in *pb.Event) *pb.RunChange {
 		out.Body = &pb.RunChange_Receipt{Receipt: b.ReceiptRecorded.GetReceipt()}
 	case *pb.Event_CheckInUpdated:
 		out.Body = &pb.RunChange_CheckIn{CheckIn: b.CheckInUpdated}
+	case *pb.Event_RunSettingsUpdated:
+		out.Body = &pb.RunChange_RunUpdated{RunUpdated: b.RunSettingsUpdated}
 	}
 	return out
 }

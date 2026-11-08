@@ -125,6 +125,8 @@ func (s *State) apply(e Event, w *written) {
 	case Receipt:
 		own(&s.receipts, &w.receipts)
 		s.receipts[b.Command] = b
+	case RunSettingsUpdated:
+		// Information for the timeline: the run's own event holds the new values.
 	case CheckIn:
 		own(&s.checkIns, &w.checkIns)
 		_, known := s.checkIns[b.ID]

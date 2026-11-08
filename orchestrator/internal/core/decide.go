@@ -105,6 +105,9 @@ func (t *tx) command(c Command) {
 			run = t.postReport(c, b, &r)
 		case RequestCatchUp:
 			run = t.requestCatchUp(c, b, &r)
+		case UpdateRun, BeginSetup, CompleteSetup:
+			// permit refuses them until their behavior exists (see permissions), so none arrives here.
+			panic(fmt.Sprintf("core: %T is not decided yet", c.Body))
 		default:
 			panic(fmt.Sprintf("core: unknown command %T", c.Body))
 		}

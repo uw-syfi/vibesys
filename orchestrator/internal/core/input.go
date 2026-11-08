@@ -68,6 +68,9 @@ type (
 		Brief        string
 		// Allow adds to what the run may use. The lead's own harness and model are always allowed.
 		Allow []AgentChoice
+		// EvalPlace is the eval place chosen, empty to let the host resolve it. The shell resolves it
+		// before the command is decided and sets the run's place; it is part of what the client sent.
+		EvalPlace string
 		// JobTool is what the run's agents use. The shell sets it, as the tool answered it before the
 		// command was decided: it is no part of what the client sent, or of the command's digest.
 		JobTool JobToolEndpoint

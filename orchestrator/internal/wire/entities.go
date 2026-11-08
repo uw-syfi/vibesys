@@ -21,6 +21,8 @@ func runOut(r core.Run) *pb.Run {
 		NeverOpened: r.NeverOpened,
 		MaxCostUsd:  limitOut(r.MaxCostUSD), LimitReached: runLimits.out(r.LimitReached), LimitReachedAt: when(r.LimitReachedAt),
 		SummaryEvery: spanOut(r.SummaryEvery), NextSummaryAt: when(r.NextSummaryAt),
+		TaskCard: cardOut(r.TaskCard), EvalPlace: r.EvalPlace, Phase: runPhases.out(r.Phase),
+		OptimizeStartedAt: when(r.OptimizeStartedAt), SetupUsage: optionalUsageOut(r.SetupUsage),
 	}
 }
 
@@ -77,6 +79,8 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		NeverOpened: r.GetNeverOpened(),
 		MaxCostUSD:  r.GetMaxCostUsd(), LimitReached: runLimits.in(r.GetLimitReached(), errs), LimitReachedAt: moment(r.GetLimitReachedAt(), errs),
 		SummaryEvery: r.GetSummaryEvery().AsDuration(), NextSummaryAt: moment(r.GetNextSummaryAt(), errs),
+		TaskCard: cardIn(r.GetTaskCard(), errs), EvalPlace: r.GetEvalPlace(), Phase: runPhases.in(r.GetPhase(), errs),
+		OptimizeStartedAt: moment(r.GetOptimizeStartedAt(), errs), SetupUsage: optionalUsageIn(r.GetSetupUsage()),
 	}
 }
 
@@ -442,6 +446,7 @@ func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 		RunId: string(r.Run), AgentId: string(r.Agent), MessageId: string(r.Message),
 		Delivery: deliveries.out(r.Delivery), Sequence: sequence, AllowedAgents: choicesOut(r.Allowed),
 		CheckInId: string(r.CheckIn), Model: string(r.Model), AllowedModels: modelsOut(r.AllowedModels),
+		EvalPlaces: r.EvalPlaces, UnmetChecks: checksOut(r.UnmetChecks),
 	}
 }
 
@@ -452,6 +457,7 @@ func receiptIn(r *pb.Receipt, errs *errorList) core.Receipt {
 		Message: core.MessageID(r.GetMessageId()), Delivery: deliveries.in(r.GetDelivery(), errs),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), CheckIn: core.CheckInID(r.GetCheckInId()),
 		Model: core.ModelName(r.GetModel()), AllowedModels: modelsIn(r.GetAllowedModels()),
+		EvalPlaces: r.GetEvalPlaces(), UnmetChecks: checksIn(r.GetUnmetChecks(), errs),
 	}
 }
 
@@ -489,6 +495,8 @@ func EncodeEvent(sequence uint64, e core.Event) ([]byte, error) {
 		out.Body = &pb.Event_ReceiptRecorded{ReceiptRecorded: receiptRecordOut(b, sequence)}
 	case core.CheckIn:
 		out.Body = &pb.Event_CheckInUpdated{CheckInUpdated: checkInOut(b)}
+	case core.RunSettingsUpdated:
+		out.Body = &pb.Event_RunSettingsUpdated{RunSettingsUpdated: settingsUpdatedOut(b)}
 	default:
 		return nil, describe("event", e.Body)
 	}
@@ -525,6 +533,8 @@ func DecodeEvent(data []byte) (uint64, core.Event, error) {
 		e.Body = receiptRecordIn(b.ReceiptRecorded, &errs)
 	case *pb.Event_CheckInUpdated:
 		e.Body = checkInIn(b.CheckInUpdated, &errs)
+	case *pb.Event_RunSettingsUpdated:
+		e.Body = settingsUpdatedIn(b.RunSettingsUpdated, &errs)
 	default:
 		errs.errs = append(errs.errs, describe("event", m.GetBody()))
 	}

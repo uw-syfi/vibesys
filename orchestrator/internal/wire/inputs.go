@@ -68,6 +68,7 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 			Repository: r.GetRepository(), Task: r.GetTask(), FanoutLimit: r.GetFanoutLimit(),
 			MaxTime: r.GetMaxTime().AsDuration(), MaxCostUSD: r.GetMaxCostUsd(), SummaryEvery: r.GetSummaryEvery().AsDuration(),
 			Lead: specIn(r.GetLead(), &errs), Brief: r.GetBrief(), Allow: choicesIn(r.GetAllowAgents(), &errs),
+			EvalPlace: r.GetEvalPlace(),
 		}
 	case *pb.Command_StopRun:
 		c.Body = core.StopRun{Run: core.RunID(b.StopRun.GetRunId())}
@@ -88,7 +89,11 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 	case *pb.Command_RequestCatchUp:
 		c.Body = core.RequestCatchUp{Run: core.RunID(b.RequestCatchUp.GetRunId())}
 	default:
-		errs.errs = append(errs.errs, describe("command", m.GetBody()))
+		if body, ok := commandIn(&m, &errs); ok {
+			c.Body = body
+		} else {
+			errs.errs = append(errs.errs, describe("command", m.GetBody()))
+		}
 	}
 	return c, errs.err()
 }
