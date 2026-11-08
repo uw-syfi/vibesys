@@ -7,6 +7,7 @@ export {
   NO_VIEWER_REFUSAL,
 } from './fake-daemon.js';
 export {FIXTURE_FILES} from './fake-files.js';
+export type {SetupFlavor} from './fake-setup.js';
 export {fleetScenario} from './fleet.js';
 export {faultsOn, type HostHarness, hostHarness} from './harness.js';
 export {
@@ -24,3 +25,4 @@ export {
 } from './report-fixtures.js';
 export {generateScenario, START_MS} from './scenario.js';
 export {serveSummaries} from './served-summary.js';
+export {setupDaemon} from './setup-daemon.js';

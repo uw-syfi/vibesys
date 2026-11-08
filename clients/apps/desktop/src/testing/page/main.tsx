@@ -61,6 +61,12 @@ import {
   PRICED_AND_UNPRICED,
 } from '../orchestrator/cost-views.js';
 import {
+  FakeSetup,
+  SETUP_FLAVORS,
+  type SetupFlavor,
+  setupScenario,
+} from '../orchestrator/fake-setup.js';
+import {
   FAKE_VIEWER,
   FakeDaemon,
   FIXTURE_FILES,
@@ -114,11 +120,24 @@ const COSTS: Readonly<Record<string, CostView>> = {
 const query = new URLSearchParams(window.location.search);
 
 /**
+ * `setup=<ticks|refused|unreadable|pending>` opens a run in its setup phase with the host's scripted
+ * setup world (`fake-setup.ts`): each message sent to the lead moves its six checks on one step. Every
+ * page has that world for New run's Set up a task, which begins one.
+ */
+const setupFlavor: SetupFlavor | undefined = SETUP_FLAVORS.find(
+  each => each === query.get('setup'),
+);
+
+function baseScenario() {
+  return setupFlavor === undefined ? scenarioOf(window.location.search) : setupScenario();
+}
+
+/**
  * The page's wall clock: the moment the scenario ends plus a minute, frozen, so a scenario reads the
  * same every time it is opened (ages, times of day, who is fresh). The fleet's runs are placed
  * against it and the screens read it as Effect's `Clock`.
  */
-const NOW_MS = scenarioOf(window.location.search).endMs + 60_000;
+const NOW_MS = baseScenario().endMs + 60_000;
 const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.defaultValue()), {
   currentTimeMillisUnsafe: () => NOW_MS,
   currentTimeMillis: Effect.succeed(NOW_MS),
@@ -170,7 +189,7 @@ function fleetRecording(spec: string): Recording {
   };
 }
 
-const base = scenarioOf(window.location.search);
+const base = baseScenario();
 const scenario = query.has('report')
   ? withReport(base, {
       sequence: 1,
@@ -205,6 +224,9 @@ const daemon = new FakeDaemon({
         ],
       }),
 });
+const world = new FakeSetup(daemon.ledger(), setupFlavor ?? 'ticks');
+daemon.setup = world;
+if (setupFlavor !== undefined) world.adopt(scenario.runId);
 const cost = COSTS[query.get('cost') ?? 'priced'];
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
 daemon.publishHostCost(servedHostCost(scenario.changes, NOW_MS));
