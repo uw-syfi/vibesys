@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import itertools
 import json
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
-from vs_bench.transport import _extract_text, stream_sse
+from vs_bench.transport import StreamResult, _extract_text, stream_sse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_URL = "http://test/v1/completions"
 
 
 def _chunk(text: str, finish_reason: str | None = None) -> str:
@@ -42,10 +48,9 @@ class TestExtractText:
         assert _extract_text({"choices": [{"text": ""}]}) == ""
 
 
-def _make_sse_response(chunks: list[str], status: int = 200) -> httpx.Response:
-    lines = [f"data: {c}\n\n" for c in chunks]
-    lines.append("data: [DONE]\n\n")
-    content = "".join(lines).encode()
+def _sse_response(lines: list[str], status: int = 200) -> httpx.Response:
+    """A streaming response whose body is the given raw SSE lines, verbatim."""
+    content = "".join(f"{line}\n\n" for line in lines).encode()
     return httpx.Response(
         status_code=status,
         headers={"content-type": "text/event-stream"},
@@ -53,15 +58,26 @@ def _make_sse_response(chunks: list[str], status: int = 200) -> httpx.Response:
     )
 
 
+def _make_sse_response(chunks: list[str], status: int = 200) -> httpx.Response:
+    return _sse_response([f"data: {c}" for c in chunks] + ["data: [DONE]"], status)
+
+
+async def _run(
+    response: httpx.Response, *, clock: Callable[[], float] | None = None
+) -> StreamResult:
+    """Drive stream_sse against an in-memory response. One shared client keeps the
+    test's real-API surface (tests/quality/real_api_baseline.jsonl) to a single site."""
+    transport = httpx.MockTransport(lambda _req: response)
+    async with httpx.AsyncClient(transport=transport) as client:
+        if clock is None:
+            return await stream_sse(client, _URL, {"stream": True})
+        return await stream_sse(client, _URL, {"stream": True}, clock=clock)
+
+
 class TestStreamSSE:
     @pytest.mark.asyncio
     async def test_basic_streaming(self) -> None:
-        chunks = [_chunk("Hello"), _chunk(" world"), _chunk("!")]
-        response = _make_sse_response(chunks)
-
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(_make_sse_response([_chunk("Hello"), _chunk(" world"), _chunk("!")]))
 
         assert result.text == "Hello world!"
         assert result.token_count == 3
@@ -72,11 +88,7 @@ class TestStreamSSE:
 
     @pytest.mark.asyncio
     async def test_empty_stream(self) -> None:
-        response = _make_sse_response([])
-
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(_make_sse_response([]))
 
         assert result.text == ""
         assert result.token_count == 0
@@ -85,34 +97,35 @@ class TestStreamSSE:
         assert result.error is None
 
     @pytest.mark.asyncio
-    async def test_finish_reason_captured(self) -> None:
-        chunks = [_chunk("tok", finish_reason="stop")]
-        response = _make_sse_response(chunks)
+    async def test_blank_data_line_is_a_keepalive_not_a_parse_error(self) -> None:
+        # Some proxies interleave a blank "data: " line between real chunks as an
+        # idle-timeout keep-alive; it carries no JSON and must not end the stream.
+        response = _sse_response(
+            [f"data: {_chunk('Hello')}", "data: ", f"data: {_chunk(' world')}", "data: [DONE]"]
+        )
 
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(response)
+
+        assert result.text == "Hello world"
+        assert result.token_count == 2
+        assert result.error is None
+
+    @pytest.mark.asyncio
+    async def test_finish_reason_captured(self) -> None:
+        result = await _run(_make_sse_response([_chunk("tok", finish_reason="stop")]))
 
         assert result.finish_reason == "stop"
 
     @pytest.mark.asyncio
     async def test_usage_captured(self) -> None:
-        chunks = [_chunk("a"), _usage_chunk(5)]
-        response = _make_sse_response(chunks)
-
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(_make_sse_response([_chunk("a"), _usage_chunk(5)]))
 
         assert result.usage is not None
         assert result.usage["completion_tokens"] == 5
 
     @pytest.mark.asyncio
     async def test_http_error(self) -> None:
-        response = httpx.Response(status_code=500, text="Internal Server Error")
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(httpx.Response(status_code=500, text="Internal Server Error"))
 
         assert result.error is not None
         assert result.token_count == 0
@@ -120,14 +133,8 @@ class TestStreamSSE:
     @pytest.mark.asyncio
     async def test_latency_positive(self) -> None:
         ticks = itertools.count(0.0)
-        chunks = [_chunk("x")]
-        response = _make_sse_response(chunks)
 
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(
-                client, "http://test/v1/completions", {"stream": True}, clock=ticks.__next__
-            )
+        result = await _run(_make_sse_response([_chunk("x")]), clock=ticks.__next__)
 
         # Read at the start, at the one token, and at the end: one second apart each.
         assert result.latency == 2.0
@@ -135,12 +142,7 @@ class TestStreamSSE:
 
     @pytest.mark.asyncio
     async def test_single_token_no_itl(self) -> None:
-        chunks = [_chunk("only")]
-        response = _make_sse_response(chunks)
-
-        transport = httpx.MockTransport(lambda _req: response)
-        async with httpx.AsyncClient(transport=transport) as client:
-            result = await stream_sse(client, "http://test/v1/completions", {"stream": True})
+        result = await _run(_make_sse_response([_chunk("only")]))
 
         assert result.token_count == 1
         assert result.itl == []

@@ -98,6 +98,9 @@ async def stream_sse(
                 if not raw_line.startswith("data: "):
                     continue
                 payload = raw_line[len("data: ") :].strip()
+                if not payload:
+                    # A blank data field is a proxy's idle-timeout keep-alive, not a chunk.
+                    continue
                 if payload == "[DONE]":
                     break
                 chunk: dict[str, object] = json.loads(payload)

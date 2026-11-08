@@ -33,7 +33,7 @@
 {"path": "libs/vs-slurm/tests/test_fake_shell.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-slurm/tests/test_run_cancels_abandoned_jobs.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-slurm/tests/test_shell_join.py", "rule": "subprocess", "count": 1}
-{"path": "sdk/vs-bench/tests/test_transport.py", "rule": "socket_io", "count": 7}
+{"path": "sdk/vs-bench/tests/test_transport.py", "rule": "socket_io", "count": 1}
 {"path": "skills/search/commit/tests/test_commit_schema.py", "rule": "subprocess", "count": 1}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "subprocess", "count": 13}
 {"path": "tests/architecture/test_ordered_map_evaluator.py", "rule": "subprocess", "count": 10}
