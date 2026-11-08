@@ -22,6 +22,7 @@ import {type HostCostFeed, makeHostCostFeed} from './host-cost-feed.js';
 import {makeHostStore} from './host-store.js';
 import type {Ids} from './ids.js';
 import {type MachineStatsFeed, makeMachineStatsFeed} from './machine-stats-feed.js';
+import {makeNewRun, type NewRun} from './new-run.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
 import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
@@ -51,6 +52,8 @@ export interface HostSession {
   readonly directories: DirectoryListings;
   /** The press of Catch me up, over `commands`. */
   readonly catchUp: CatchUp;
+  /** What the New run screen asks of the host: its catalogue, eval places, and a repository from an example. */
+  readonly newRun: NewRun;
 }
 
 export const makeHostSession = Effect.fn('HostSession.make')(function* (
@@ -81,5 +84,6 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     repositoryCheck: yield* makeRepositoryCheck(parts),
     directories: yield* makeDirectoryListings(parts),
     catchUp: yield* makeCatchUp(commands),
+    newRun: yield* makeNewRun(parts, commands),
   };
 });

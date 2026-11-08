@@ -37,6 +37,8 @@ type Rig struct {
 	Jobs     *jobstest.FakeJobSource
 	Starts   *StartChecks
 	Dirs     *Directories
+	// Tasks is the Fake a start reads its card through. A new Rig has no card for any task.
+	Tasks *FakeTaskReader
 	// Catalogue and Places are the host's example tasks and eval places; a new Rig has none of either.
 	Catalogue *FakeCatalogueSource
 	Places    *FakePlaceSource
@@ -89,7 +91,7 @@ func NewRig(tb testing.TB) *Rig {
 	}
 	r := &Rig{
 		Store: store.NewMemory(), Clock: NewClock(), Nonces: &Nonces{}, Sidecars: NewSidecars(),
-		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Dirs: &Directories{}, Catalogue: &FakeCatalogueSource{}, Places: &FakePlaceSource{}, Models: &Models{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
+		Jobs: jobstest.NewFakeJobSource(), Starts: &StartChecks{}, Dirs: &Directories{}, Tasks: &FakeTaskReader{}, Catalogue: &FakeCatalogueSource{}, Places: &FakePlaceSource{}, Models: &Models{}, Checkouts: &Checkouts{}, Auth: auth, Bounds: &Bounds{},
 		Log: slog.New(slog.DiscardHandler), Limits: hub.DefaultLimits, Wake: make(chan struct{}, 1),
 	}
 	r.Sidecars.Elapse = r.Bounds.Expire
@@ -143,7 +145,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Daemon = d
 	for audience, service := range map[daemon.Audience]**daemon.Service{daemon.AudienceOperator: &r.Service, daemon.AudienceAgent: &r.AgentService} {
 		if *service, err = daemon.NewService(d.Engine, daemon.ServiceDeps{
-			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, Directories: r.Dirs, Catalogue: r.Catalogue, Places: r.Places, JobTool: r.jobTool,
+			Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts, Directories: r.Dirs, Catalogue: r.Catalogue, Places: r.Places, Tasks: r.Tasks, JobTool: r.jobTool,
 		}); err != nil {
 			tb.Fatal(err)
 		}

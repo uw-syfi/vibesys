@@ -71,6 +71,7 @@ export {
   machineRequestToBytes,
 } from './machines/machines-codec.js';
 export {makeRoster, type Roster, type RosterEntry} from './machines/roster.js';
+export {makeNewRun, type NewRun, type ProvisionExample} from './new-run.js';
 export {
   CLIENT_BUILD,
   CLIENT_TOO_OLD_TEXT,

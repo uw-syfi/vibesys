@@ -23,14 +23,20 @@ import (
 func agentEnvironment(start daemon.SessionStart) (*pb.AgentEnvironment, error) {
 	l, tool := start.Launch, start.JobTool
 	out := &pb.AgentEnvironment{Set: map[string]string{}}
-	for _, m := range []proto.Message{
+	messages := []proto.Message{
 		&cliv1.AgentContext{
 			Repository: start.Repository, Task: start.Task, RunId: string(l.Run), Agent: string(l.Session.Agent),
 			Harness: strings.ReplaceAll(string(l.Spec.Harness), "_", "-"),
 		},
 		&cliv1.SkillEnvironment{Cli: tool.Executable},
 		&cliv1.JobToolPlace{RuntimeDirectory: tool.RuntimeDirectory},
-	} {
+	}
+	if start.EvalPlace != "" {
+		// The run's eval place is the placement its jobs default to. An unpinned run says nothing, so
+		// the placement the operator's own environment names, if any, stays as it is.
+		messages = append(messages, &cliv1.OperatorContext{Placement: start.EvalPlace})
+	}
+	for _, m := range messages {
 		encoded, err := envcodec.Encode(m)
 		if err != nil {
 			return nil, fmt.Errorf("the agent's environment: %w", err)
