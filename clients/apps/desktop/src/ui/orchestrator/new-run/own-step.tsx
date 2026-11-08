@@ -1,6 +1,7 @@
 import type {EvalPlace} from '@vibesys/orchestrator-proto';
 import {
   Button,
+  Card,
   Field,
   PathInput,
   PickCard,
@@ -103,10 +104,12 @@ function RepositoryPath(props: {
       <PathInput
         value={draft.repository}
         change={props.change}
-        completions={completionsFor(props.own, listed).map(({value, detail}) => ({
-          value,
-          ...(detail === undefined ? {} : {detail}),
-        }))}
+        completions={(props.verdict._tag === 'Valid' ? [] : completionsFor(props.own, listed)).map(
+          ({value, detail}) => ({
+            value,
+            ...(detail === undefined ? {} : {detail}),
+          }),
+        )}
         tabCompletes={split !== undefined && split.prefix !== '' && draft.repository.trim() !== ''}
         focus={props.enter}
         placeholder={props.own === 'tasks' ? 'Pick or type a path' : '~/code/my-server'}
@@ -224,7 +227,11 @@ function ExistingRepository(props: OwnProps & {readonly own: 'tasks' | 'repo'}):
               />
             ))}
           </PickCards>
-          {page.ownTask === null ? null : <PickedTask {...props} />}
+          {page.ownTask === null ? null : (
+            <Card>
+              <PickedTask {...props} />
+            </Card>
+          )}
         </Stack>
       )}
     </Stack>
@@ -307,7 +314,11 @@ export function OwnStep(
             title={each.title}
             note={each.note}
             selected={page.own === each.value}
-            press={() => props.act({type: 'own', own: each.value})}
+            press={() => {
+              // A case starts with an empty path, as the prototype's does: the one typed was for another case.
+              props.act({type: 'own', own: each.value});
+              props.set({repository: '', task: ''});
+            }}
           />
         ))}
       </PickCards>

@@ -361,6 +361,16 @@ describe('the My own step', () => {
     screen.unmount();
   });
 
+  it('closes the completion list once the path names a repository, and starts each case with an empty path', () => {
+    const {screen} = toOwn();
+    screen.press(card(screen, 'A repository with a task'));
+    type(field(screen, 'Pick or type a path'), '/work/decode-service');
+    expect(screen.container.querySelector('[role=option]')).toBeNull();
+    screen.press(card(screen, 'A repository without a task'));
+    expect(field(screen, '~/code/my-server').value).toBe('');
+    screen.unmount();
+  });
+
   it('begins a setup chat in a repository without a task', () => {
     const begun: {host: string; repository: string}[] = [];
     const {screen} = toOwn({

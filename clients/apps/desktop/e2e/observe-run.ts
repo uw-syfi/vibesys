@@ -147,22 +147,24 @@ async function launch(world: World, userData: string): Promise<ElectronApplicati
 }
 
 /**
- * The Start run form carries a Model control and the run's two bounds, and is put away with Escape. The
- * host of this world has no policy and cannot name its tool's models, so the model is the tool's own
- * default; the form's choices from a host's models are covered by its DOM tests. With a window folder
- * set, the form is captured (the window alone).
+ * The New run page's catalogue step carries the run's two bounds, and its More options a Model control;
+ * Escape puts the page away, back to the run list. The host of this world has no policy and cannot name
+ * its tool's models, so the model is the tool's own default; the form's choices from a host's models
+ * are covered by its DOM tests. With a window folder set, the page is captured (the window alone).
  */
 async function checkTheStartFormNamesTheModelAndBoundsTheRun(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'New run'}).click();
-  const form = page.getByRole('dialog');
-  await expect(form.getByLabel('Model')).toBeVisible();
-  await expect(form.getByLabel('Time limit')).toBeVisible();
-  await expect(form.getByLabel('Cost limit ($)')).toBeVisible();
+  await page.getByRole('button', {name: /Start from an example/}).click();
+  await page.locator('.vs-pick-card:not([data-unavailable])').first().click();
+  await page.getByRole('button', {name: 'More options'}).click();
+  await expect(page.getByLabel('Model')).toBeVisible();
+  await expect(page.getByLabel('Time limit')).toBeVisible();
+  await expect(page.getByLabel('Cost limit ($)')).toBeVisible();
   const folder = process.env['VIBESYS_E2E_SHOTS'];
   if (folder !== undefined && folder !== '')
     await page.screenshot({path: join(folder, '1b-start.png')});
   await page.keyboard.press('Escape');
-  await expect(form).toBeHidden();
+  await expect(page.getByRole('button', {name: 'New run'})).toBeVisible();
 }
 
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
