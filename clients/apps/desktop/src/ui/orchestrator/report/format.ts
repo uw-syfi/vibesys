@@ -33,5 +33,12 @@ export function formatDollars(usd: number): string {
 
 /** At most `limit` characters, the end cut with an ellipsis. */
 export function clip(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+  if (text.length <= limit) return text;
+  // Cut on a code-point boundary: `slice` counts UTF-16 units, so it could split an astral
+  // character's surrogate pair and leave a lone surrogate (a broken glyph) before the ellipsis.
+  const kept = [...text]
+    .slice(0, Math.max(0, limit - 1))
+    .join('')
+    .trimEnd();
+  return `${kept}…`;
 }

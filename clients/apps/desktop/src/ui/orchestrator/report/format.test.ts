@@ -123,4 +123,24 @@ describe('figures', () => {
       {seed: 35},
     );
   });
+
+  it('cuts on a whole character, never half of an astral one', () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    // ASCII and astral characters mixed, so a cut can fall where a surrogate pair is.
+    const mixed = fc
+      .array(fc.constantFrom('a', 'b', '😀', '🎉', '𝕏'), {maxLength: 40})
+      .map(parts => parts.join(''));
+    fc.assert(
+      fc.property(mixed, fc.integer({min: 1, max: 40}), (text, limit) => {
+        const out = clip(text, limit);
+        expect(LONE_SURROGATE.test(out)).toBe(false);
+        expect([...out].length).toBeLessThanOrEqual(Math.max(limit, 1));
+        if (text.length > limit) expect(out.endsWith('…')).toBe(true);
+      }),
+      {seed: 37},
+    );
+    // The reported case: an emoji straddling the cut index is kept as a whole pair, not halved
+    // into a lone surrogate (the output may still hold the emoji's valid pair).
+    expect(LONE_SURROGATE.test(clip(`${'x'.repeat(46)}😀${'y'.repeat(10)}`, 48))).toBe(false);
+  });
 });
