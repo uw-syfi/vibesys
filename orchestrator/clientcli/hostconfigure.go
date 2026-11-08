@@ -27,6 +27,7 @@ func hostConfigure(_ context.Context, c *call, args []string) error {
 	skills := fs.String("skills-directory", "", "the skills marketplace checkout, in place of the release's")
 	tool := fs.String("job-tool", "", "the job tool, in place of the release's")
 	toolPath := fs.String("tool-path", "", "the directories the host looks for programs in, separated by colons")
+	repositories := fs.String("repositories-directory", "", "where provisioned repositories go when a request names no parent: an absolute path, or ~ for the host user's home (default ~/.vibesys/repos)")
 	clear := fs.Bool("clear", false, "forget everything first")
 	positional, err := parse(fs, args)
 	if err != nil {
@@ -57,6 +58,8 @@ func hostConfigure(_ context.Context, c *call, args []string) error {
 			config.SkillsDirectory = *skills
 		case "job-tool":
 			config.JobTool = *tool
+		case "repositories-directory":
+			config.RepositoriesDirectory = *repositories
 		case "tool-path":
 			config.ToolPath = filepath.SplitList(*toolPath)
 		}

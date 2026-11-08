@@ -144,6 +144,27 @@ func ToolPath(config *pb.HostConfig, home string) []string {
 	return append([]string{filepath.Join(home, ".local", "bin")}, defaultToolPath...)
 }
 
+// DefaultRepositoriesDirectory is where a host provisions repositories when its configuration names
+// no directory. It is written with "~" as the configuration may write it.
+const DefaultRepositoriesDirectory = "~/.vibesys/repos"
+
+// RepositoriesDirectory is the directory the host of config provisions repositories in when a request
+// names no parent: the configured one or the default, with a leading "~" expanded to home. This is the
+// one place the host's default is worked out; the catalogue shows it and the provisioner uses it.
+func RepositoriesDirectory(config *pb.HostConfig, home string) string {
+	dir := config.GetRepositoriesDirectory()
+	if dir == "" {
+		dir = DefaultRepositoriesDirectory
+	}
+	switch {
+	case dir == "~":
+		return home
+	case strings.HasPrefix(dir, "~/"):
+		return filepath.Join(home, dir[2:])
+	}
+	return filepath.Clean(dir)
+}
+
 // sessionFacts are what a host keeps of the environment it was started in. None of them chooses
 // anything about the host: they say who the user is and how this login's programs reach each other.
 // The others are what the job tool resolves its daemon, store and operator configuration from when the

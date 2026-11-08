@@ -122,6 +122,7 @@ every default. `vibesys-client host configure` writes it and, with no flag, prin
 | `--session-holder` | an `orchestrator/sidecar` checkout, or the command that runs it | the release's |
 | `--skills-directory` | a checkout holding `.claude-plugin/marketplace.json` | the release's |
 | `--job-tool` | an absolute path to an executable `vibesys-cli` | the release's |
+| `--repositories-directory` | where provisioned repositories go when a request names no parent: an absolute path, or `~` for the host user's home | `~/.vibesys/repos` |
 | `--tool-path` | the directories the host looks for programs in, separated by colons | `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` |
 
 A host takes nothing else from the environment it was started in. It clears it and keeps `HOME`, a

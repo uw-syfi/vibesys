@@ -38,9 +38,13 @@ type HostConfig struct {
 	JobTool string `protobuf:"bytes,4,opt,name=job_tool,json=jobTool,proto3" json:"job_tool,omitempty"`
 	// The directories the host and what it starts look for programs in (git, for one), in order. Empty
 	// means a fixed list of the system's own, never the PATH of whoever started the host.
-	ToolPath      []string `protobuf:"bytes,5,rep,name=tool_path,json=toolPath,proto3" json:"tool_path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ToolPath []string `protobuf:"bytes,5,rep,name=tool_path,json=toolPath,proto3" json:"tool_path,omitempty"`
+	// Where a repository the host provisions goes when the request names no parent: an absolute path,
+	// or "~" or "~/..." for the home of the user the host runs as, which the host expands. Empty means
+	// ~/.vibesys/repos.
+	RepositoriesDirectory string `protobuf:"bytes,6,opt,name=repositories_directory,json=repositoriesDirectory,proto3" json:"repositories_directory,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *HostConfig) Reset() {
@@ -108,18 +112,26 @@ func (x *HostConfig) GetToolPath() []string {
 	return nil
 }
 
+func (x *HostConfig) GetRepositoriesDirectory() string {
+	if x != nil {
+		return x.RepositoriesDirectory
+	}
+	return ""
+}
+
 var File_vibesys_orchestrator_v1_host_config_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_host_config_proto_rawDesc = "" +
 	"\n" +
-	")vibesys/orchestrator/v1/host_config.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\"\xa1\x02\n" +
+	")vibesys/orchestrator/v1/host_config.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\"\xfb\x02\n" +
 	"\n" +
 	"HostConfig\x128\n" +
 	"\x0fstate_directory\x18\x01 \x01(\tB\x0f\xbaH\f\xd8\x01\x01r\a(\x80 2\x02^/R\x0estateDirectory\x12>\n" +
 	"\x16session_holder_command\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x14sessionHolderCommand\x12:\n" +
 	"\x10skills_directory\x18\x03 \x01(\tB\x0f\xbaH\f\xd8\x01\x01r\a(\x80 2\x02^/R\x0fskillsDirectory\x12*\n" +
 	"\bjob_tool\x18\x04 \x01(\tB\x0f\xbaH\f\xd8\x01\x01r\a(\x80 2\x02^/R\ajobTool\x121\n" +
-	"\ttool_path\x18\x05 \x03(\tB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x02\"\tr\a(\x80 2\x02^/R\btoolPathBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\ttool_path\x18\x05 \x03(\tB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x02\"\tr\a(\x80 2\x02^/R\btoolPath\x12X\n" +
+	"\x16repositories_directory\x18\x06 \x01(\tB!\xbaH\x1e\xd8\x01\x01r\x19(\x80 2\x14^(/|~(/|$))[^\\x00]*$R\x15repositoriesDirectoryBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_host_config_proto_rawDescOnce sync.Once
