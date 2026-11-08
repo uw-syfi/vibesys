@@ -118,6 +118,18 @@ func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
 	}
 }
 
+// --fanout does not wrap a value too big for uint32 into a small, or even zero, limit: run update's
+// --fanout already refuses such a value (see update_test.go), and run start must refuse it the same
+// way instead of silently starting a run that can spawn far fewer subagents than asked, or none.
+func TestStartFanoutRefusesAValueThatDoesNotFitInThirtyTwoBits(t *testing.T) {
+	w := newWorld(t, serveFake(t, &fakeService{}))
+	got := w.run(context.Background(), "run", "start", "--task", "toy", "--fanout", "4294967296")
+	if got.code != clientcli.ExitUsage {
+		t.Fatalf("exit %d, stderr %q, want a usage error", got.code, got.stderr)
+	}
+	contains(t, "stderr", got.stderr, "4294967296")
+}
+
 // A person at a terminal who starts a run is attached once the lead is live; Ctrl-C then detaches
 // and the run goes on.
 func TestStartOnATerminalAttachesAndCtrlCDetachesWithoutStopping(t *testing.T) {
