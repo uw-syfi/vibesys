@@ -10,6 +10,7 @@ import type {
   RunReport,
 } from '../../../state/index.js';
 import {CommandLine} from '../command-line.js';
+import {runTitle} from '../fleet-words.js';
 import {AgentsCard} from './agents-card.js';
 import {CostCard} from './cost-card.js';
 import {IdeasCard} from './ideas-card.js';
@@ -58,6 +59,7 @@ export function ReportScreen(props: {
   const [selected, setSelected] = useState<number | null>(null);
   const [reveal, setReveal] = useState(0);
   const ideas = report.ideas;
+  const title = runTitle(report.header.card, report.header.name);
   const lit = new Set(ideas?.ideas.find(idea => idea.planNumber === selected)?.candidateJobIds);
   const units = new Map(report.objectives.map(objective => [objective.name, objective.unit]));
   const cost = (
@@ -76,9 +78,9 @@ export function ReportScreen(props: {
       state="ready"
       trail={[
         {id: 'runs', label: 'Runs', press: props.goRuns},
-        {id: report.runId, label: report.header.name},
+        {id: report.runId, label: title},
       ]}
-      title={report.header.name}
+      title={title}
       meta={
         <>
           <ReportMeta report={report} host={props.host} status={props.status} nowMs={props.nowMs} />

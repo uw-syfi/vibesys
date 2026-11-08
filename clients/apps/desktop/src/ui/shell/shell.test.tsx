@@ -19,6 +19,7 @@ import {generateScenario} from '../../testing/orchestrator/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen} from '../machines/index.js';
 import {OrchestratorApp} from '../orchestrator/app.js';
+import {runTitle} from '../orchestrator/fleet-words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {COST_OVERVIEW_WORDS} from '../test-display-clock.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
@@ -44,7 +45,8 @@ const machines: readonly MachineRow[] = [
 const RAIL_ORDER = ['Runs', 'Cost', 'Machines', 'Settings'];
 
 /** What the run is called on the list and in every trail. */
-const TASK = host.model.data.runs[scenario.runId]?.task ?? '';
+const run = host.model.data.runs[scenario.runId];
+const TASK = run === undefined ? '' : runTitle(run.taskCard ?? null, run.task);
 
 /** The window as the entry composes it, over the navigation fold, recording every intent sent. */
 function Window(props: {readonly log: NavigationAction[]}): JSX.Element {

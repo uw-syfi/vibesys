@@ -74,17 +74,21 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
   };
 }
 
-/** One host's screen: its runs as the host ranked them, then its chart and splits. */
+/**
+ * One host's screen: its runs as the host ranked them, then its chart and splits. `titles` words
+ * the runs the client holds a card for; a run it does not hold keeps the name the host served.
+ */
 export function hostCostModel(
   host: string,
   view: HostCostView,
   words: CostWords,
+  titles: Readonly<Record<string, string>> = {},
 ): HostCostScreenModel {
   const precision = precisionOf(view.total.costUsd);
   const runs: RunLine[] = view.runs.map(run => ({
     key: `${host}/${run.runId}`,
     runId: run.runId,
-    name: run.name,
+    name: titles[run.runId] ?? run.name,
     status: run.status,
     turns: formatCount(run.turns),
     cost: costWords(run.usage.costUsd, run.unpricedTurns > 0, precision),

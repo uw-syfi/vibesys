@@ -4,6 +4,7 @@
  * (`DisplayClock.datedMoment`), so a list that spans days never leaves a reader to guess which
  * clock it is on.
  */
+import {AcceleratorVendor, type TaskCard} from '@vibesys/orchestrator-proto';
 import type {FleetHostRef, FleetObjective} from '../../state/index.js';
 import {span} from '../duration.js';
 import {formatFigure} from '../figures.js';
@@ -64,3 +65,43 @@ export function resultHint(objective: FleetObjective): string {
 
 /** A share of a bound as a whole percent: `71%`. */
 export const percent = (value: number): string => `${Math.round(value)}%`;
+
+/** Words of a vendor that lead an authored accelerator name ("AMD MI300X"); a title leaves them out. */
+const VENDOR_WORDS: ReadonlySet<string> = new Set([
+  'amd',
+  'nvidia',
+  'aws',
+  'intel',
+  'google',
+  'instinct',
+]);
+
+/** The accelerator as a title says it: the authored name without its vendor words ("MI300X"). */
+const acceleratorName = (authored: string): string =>
+  authored
+    .split(/\s+/)
+    .filter(word => word !== '' && !VENDOR_WORDS.has(word.toLowerCase()))
+    .join(' ');
+
+/** The hardware half of a title: `1× MI300X`, `CPU`, or empty when the card names none. */
+function hardwareWords(card: TaskCard): string {
+  const need = card.hardware;
+  if (need === undefined) return '';
+  if (need.vendor === AcceleratorVendor.CPU) return 'CPU';
+  const name = acceleratorName(card.hardwareName);
+  return name === '' ? '' : `${need.count}× ${name}`;
+}
+
+/**
+ * What a run is called: the model or workload and the hardware, `Flint 40B A2.5B · 1× MI300X` or
+ * `Tokenizer throughput · CPU`. A card with neither a model nor a workload is led by its heading; a
+ * run with no card (recorded before cards) keeps `task`, its folder name, as before. Never a stored
+ * field: the title is worded here from the card, and never names a variant.
+ */
+export function runTitle(card: TaskCard | null, task: string): string {
+  if (card === null) return task;
+  const subject = [card.modelName, card.workloadName, card.heading, card.task, task].find(
+    word => word.trim() !== '',
+  );
+  return [subject?.trim() ?? task, hardwareWords(card)].filter(part => part !== '').join(' · ');
+}

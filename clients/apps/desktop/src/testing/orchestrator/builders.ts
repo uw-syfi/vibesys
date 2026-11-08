@@ -2,6 +2,8 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
+  AcceleratorModel,
+  AcceleratorVendor,
   type Item,
   ItemSchema,
   ItemStatus,
@@ -12,6 +14,9 @@ import {
   RunSchema,
   type RunStatus,
   ShellCallSchema,
+  type TaskCard,
+  TaskCardSchema,
+  TaskDomain,
   type ToolCall,
   ToolCallSchema,
   type Turn,
@@ -22,11 +27,53 @@ import {
   UsageSchema,
 } from '@vibesys/orchestrator-proto';
 
-/** Task names a fixture run takes, by its seed, so runs of one fixture are told apart. */
-const TASKS = ['faster-decode', 'smaller-cache', 'lower-latency', 'cheaper-batching'] as const;
+/** What a fixture task is: its folder name, what it serves or measures, and the hardware it asks for. */
+interface FixtureTask {
+  readonly task: string;
+  readonly model?: string;
+  readonly workload?: string;
+  /** The accelerator as the task authored it, with its count; absent for a CPU task. */
+  readonly gpu?: {readonly name: string; readonly count: number};
+}
 
-const taskOf = (runId: string): string =>
-  TASKS[Number(runId.replace(/\D/g, '') || 0) % TASKS.length] ?? TASKS[0];
+const FIXTURE_TASKS: readonly FixtureTask[] = [
+  {task: 'flint', model: 'Flint 40B A2.5B', gpu: {name: 'AMD MI300X', count: 1}},
+  {task: 'ember', model: 'Qwen3 32B', gpu: {name: 'NVIDIA H100', count: 8}},
+  {task: 'tokenizer', workload: 'Tokenizer throughput'},
+  {task: 'kv-cache', model: 'Llama 3.3 70B', gpu: {name: 'AMD MI300X', count: 4}},
+  {task: 'swmr-map', workload: 'Single writer, multiple readers'},
+  {task: 'whisper', model: 'Whisper Large v3', gpu: {name: 'NVIDIA H100', count: 1}},
+  {task: 'radix-tree', workload: 'Radix tree lookups'},
+  {task: 'paged-attention', model: 'Mixtral 8x7B', gpu: {name: 'AMD MI300X', count: 2}},
+];
+
+const LONG_MODEL = 'Frontier mixture of experts instruct preview with a very long name';
+
+/**
+ * The task a fixture run has and the card the host read of it, by the run's place in its host:
+ * a function of `index` alone. `long` swaps the model or workload for one too long for any cell.
+ */
+export function fixtureTaskOf(
+  index: number,
+  long = false,
+): {readonly task: string; readonly card: TaskCard} {
+  const entry = FIXTURE_TASKS[index % FIXTURE_TASKS.length] ?? (FIXTURE_TASKS[0] as FixtureTask);
+  const subject = long ? LONG_MODEL : undefined;
+  const card = create(TaskCardSchema, {
+    task: entry.task,
+    domain: entry.model === undefined ? TaskDomain.DATA_STRUCTURES : TaskDomain.LLM_SERVING,
+    hardware:
+      entry.gpu === undefined
+        ? {vendor: AcceleratorVendor.CPU, model: AcceleratorModel.UNSPECIFIED, count: 1}
+        : entry.gpu.name.startsWith('NVIDIA')
+          ? {vendor: AcceleratorVendor.NVIDIA, model: AcceleratorModel.H100, count: entry.gpu.count}
+          : {vendor: AcceleratorVendor.AMD, model: AcceleratorModel.MI300X, count: entry.gpu.count},
+    hardwareName: entry.gpu?.name ?? 'CPU',
+    modelName: entry.model === undefined ? '' : (subject ?? entry.model),
+    workloadName: entry.workload === undefined ? '' : (subject ?? entry.workload),
+  });
+  return {task: entry.task, card};
+}
 
 export function runOf(fields: {
   id: string;
@@ -38,7 +85,8 @@ export function runOf(fields: {
   return create(RunSchema, {
     id: fields.id,
     repository: 'decode-service',
-    task: taskOf(fields.id),
+    task: fixtureTaskOf(Number(fields.id.replace(/\D/g, '') || 0)).task,
+    taskCard: fixtureTaskOf(Number(fields.id.replace(/\D/g, '') || 0)).card,
     status: fields.status,
     leadAgentId: fields.leadAgentId,
     fanoutLimit: fields.fanout,
