@@ -134,6 +134,10 @@ func projectionOf(e core.Event) (*projection, bool) {
 
 // project writes one event's row in the table of its entity.
 func project(tx *sql.Tx, seq uint64, e core.Event, body []byte) error {
+	if _, logOnly := e.Body.(core.RunSettingsUpdated); logOnly {
+		// Only in the log: a change of settings is no entity's row, and the run's own event holds the new values.
+		return nil
+	}
 	var res sql.Result
 	var err error
 	if b, ok := e.Body.(core.Receipt); ok {

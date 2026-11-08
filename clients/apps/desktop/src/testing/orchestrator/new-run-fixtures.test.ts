@@ -44,7 +44,12 @@ describe('the fake host answers the New run calls', () => {
       ListEvalPlacesResponseSchema,
       answer(calls, 'ListEvalPlaces', new Uint8Array()),
     );
-    expect(places.places.map(each => each.name)).toEqual(['local', 'host-a', 'cluster-a']);
+    expect(places.places.map(each => each.name)).toEqual([
+      'local',
+      'host-a',
+      'cluster-a',
+      'cluster-b',
+    ]);
     const catalogue = decodeValidated(
       ListCatalogueResponseSchema,
       answer(calls, 'ListCatalogue', new Uint8Array()),
@@ -96,6 +101,9 @@ describe('the fake host answers the New run calls', () => {
     expect(fitOf(cpu, [unreadable]).state).toBe(FitState.PLACES_UNREADABLE);
     expect(fitOf(cpu, [unreadable, ...fixturePlaces()]).places).not.toContain('host-b');
     expect(fitOf(gpu, [odd]).state).toBe(FitState.NO_ACCELERATOR);
+    // No place at all is no place that can be read: the host's rule, a CPU need included.
+    expect(fitOf(cpu, []).state).toBe(FitState.PLACES_UNREADABLE);
+    expect(fitOf(gpu, []).state).toBe(FitState.PLACES_UNREADABLE);
   });
 
   it('provisions a name once and refuses it the second time, and an example that needs a clone', () => {

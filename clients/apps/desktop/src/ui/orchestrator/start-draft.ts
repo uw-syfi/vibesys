@@ -44,6 +44,8 @@ export interface StartDraft {
   readonly costLimit: string;
   /** Optional steering for the lead, sent as the command's brief. */
   readonly steering: string;
+  /** The eval place of a run in the person's own repository: the host's name for it, empty to let the host resolve. */
+  readonly evalPlace: string;
 }
 
 export const emptyDraft: StartDraft = {
@@ -55,6 +57,7 @@ export const emptyDraft: StartDraft = {
   timeLimit: null,
   costLimit: '',
   steering: '',
+  evalPlace: '',
 };
 
 /** The fields of the StartRun command; the typed client checks the whole of it before it is sent. */
@@ -68,6 +71,8 @@ export interface StartRunRequest {
   readonly maxTimeSeconds: number | null;
   /** The most the run may cost in dollars; null for no limit. */
   readonly maxCostUsd: number | null;
+  /** The eval place, empty to let the host resolve it. */
+  readonly evalPlace: string;
 }
 
 /** The cost limit as a number, null for none and NaN for text that is not a positive amount. */
@@ -79,9 +84,16 @@ function costOf(typed: string): number | null {
 }
 
 /** Why the draft cannot be started yet, or null when it can. */
-export function missingFrom(draft: StartDraft, models: ModelChoices): string | null {
-  if (draft.repository.trim() === '') return 'Name the repository to optimize.';
-  if (draft.task.trim() === '') return 'Name the task to run.';
+export function missingFrom(
+  draft: StartDraft,
+  models: ModelChoices,
+  /** `example`: the repository and task come from the catalogue entry, not from the fields. */
+  source: 'repository' | 'example' = 'repository',
+): string | null {
+  if (source === 'repository') {
+    if (draft.repository.trim() === '') return 'Name the repository to optimize.';
+    if (draft.task.trim() === '') return 'Name the task to run.';
+  }
   if (models.blocked !== null) return models.blocked;
   if (Number.isNaN(costOf(draft.costLimit)))
     return 'The cost limit is a positive number of dollars.';
@@ -99,5 +111,6 @@ export function startRunRequest(draft: StartDraft, models: ModelChoices): StartR
     brief: steering === '' ? NO_STEERING : steering,
     maxTimeSeconds: draft.timeLimit === null ? null : draft.timeLimit * 60,
     maxCostUsd: costOf(draft.costLimit),
+    evalPlace: draft.evalPlace,
   };
 }

@@ -38,6 +38,7 @@ const draft: fc.Arbitrary<StartDraft> = fc.record({
     fc.string(),
   ),
   steering: fc.string(),
+  evalPlace: fc.constantFrom('', 'host-a'),
 });
 
 describe('the lead choices', () => {
@@ -105,6 +106,7 @@ describe('the Start run form’s command', () => {
       timeLimit: null,
       costLimit: '',
       steering: '',
+      evalPlace: '',
     };
     expect(missingFrom(ok, NO_CATALOG)).toBeNull();
     expect(missingFrom({...ok, repository: '  '}, NO_CATALOG)).toContain('repository');
@@ -125,6 +127,7 @@ describe('the Start run form’s command', () => {
       timeLimit: null,
       costLimit: '',
       steering: '',
+      evalPlace: '',
     } satisfies StartDraft;
     expect(missingFrom(ok, blocked)).toBe('No allowed model.');
   });

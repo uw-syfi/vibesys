@@ -7,10 +7,8 @@ import "vibesys/cli/v1/task.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
-// SETUP FACTS (placeholder): the six checks cannot be derived from a TaskCard and a search view alone.
-// Item I8 adds a typed setup-facts message here (the task's declarations, its version, the base commit,
-// the check and benchmark results, and the measurement samples) that the derivation reads. Until then
-// this file defines only the identities and states of the checks and what a client shows.
+// What a setup check is derived from is the CLI's SetupFacts (vibesys/cli/v1/setup.proto), read through
+// DescribeSetup. This file defines the identities and states of the checks and what a client shows.
 
 // SetupCheckId names one of the six checks a task passes before a run can optimize it.
 enum SetupCheckId {
@@ -83,8 +81,9 @@ message SetupView {
   optional double baseline_value = 5 [(buf.validate.field).double.finite = true];
   string baseline_unit = 6 [(buf.validate.field).string.max_bytes = 64];
   optional double baseline_spread_percent = 7 [(buf.validate.field).double.finite = true];
-  // What the setup phase has cost, in dollars: every turn of every agent of the run while it was in
-  // setup. Not counted toward the run's cost limit.
+  // What the setup phase has cost, in dollars: every turn of every agent of the run that started while
+  // it was in setup, also one that ends after the run left setup. Not counted toward the run's cost
+  // limit.
   double spent_usd = 8 [(buf.validate.field).double = {
     finite: true
     gte: 0
@@ -92,4 +91,7 @@ message SetupView {
   // How long the setup phase has lasted, or lasted when it ended. Not counted toward the run's time
   // limit.
   google.protobuf.Duration elapsed = 9 [(buf.validate.field).required = true];
+  // Why the host could not read the setup facts just now, in its words; empty when it could. While it
+  // is set the checks that need facts are PENDING, never FAILED.
+  string read_failure = 10 [(buf.validate.field).string.max_bytes = 1024];
 }

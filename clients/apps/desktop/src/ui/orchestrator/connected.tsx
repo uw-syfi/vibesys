@@ -146,6 +146,9 @@ const snapshots = (
         runsFeed: get(session.runs.status),
         repositoryChecked: get(session.repositoryCheck.state),
         directories: get(session.directories.state),
+        catalogue: get(session.newRun.catalogue),
+        evalPlaces: get(session.newRun.places),
+        provision: get(session.newRun.provision),
         agentFeeds:
           openHost === key && openAgent !== null && openAgent !== undefined
             ? {[openAgent]: get(session.agents.status(openAgent)) ?? OPENING}
@@ -182,6 +185,36 @@ function openOf(route: Route) {
     openRun: route.screen === 'run' ? route.runId : undefined,
     costHost: cost?.host,
     costRun: cost?.runId,
+  };
+}
+
+/** The commands of the New run screen that read the host's catalogue and make a repository from an example. */
+function newRunCommands(
+  sessionOf: (host: string) => HostSession | undefined,
+  dispatch: Dispatch,
+  setIssues: (update: (all: Issues) => Issues) => void,
+): Pick<AppCommands, 'loadNewRun' | 'startFromExample' | 'forgetProvision'> {
+  return {
+    loadNewRun: host => {
+      const session = sessionOf(host);
+      if (session !== undefined) dispatch(session.newRun.load, () => undefined);
+    },
+    startFromExample: (host, example, request) => {
+      const session = sessionOf(host);
+      if (session === undefined) return;
+      dispatch(
+        session.newRun.startFromExample(example, repository =>
+          startIntent({...request, repository}),
+        ),
+        id => {
+          if (id !== undefined) setIssues(all => ({...all, start: {host, id}}));
+        },
+      );
+    },
+    forgetProvision: host => {
+      const session = sessionOf(host);
+      if (session !== undefined) dispatch(session.newRun.forgetProvision, () => undefined);
+    },
   };
 }
 
@@ -279,6 +312,7 @@ export function ConnectedApp(props: {
       on(host, session => session.repositoryCheck.ask(repository)),
     listDirectory: (host, folder, hidden, fresh) =>
       on(host, session => session.directories.want(folder, hidden, fresh)),
+    ...newRunCommands(sessionOf, dispatch, setIssues),
     retryStart: () => retry(issues.start),
     stopRun: (host, runId) =>
       issue(host, stopIntent(runId), stop =>

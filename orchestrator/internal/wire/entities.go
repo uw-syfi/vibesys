@@ -23,7 +23,7 @@ func runOut(r core.Run) *pb.Run {
 		SummaryEvery: spanOut(r.SummaryEvery), NextSummaryAt: when(r.NextSummaryAt),
 		TaskCard: cardOut(r.TaskCard), EvalPlace: r.EvalPlace, Phase: runPhases.out(r.Phase),
 		OptimizeStartedAt: when(r.OptimizeStartedAt), SetupUsage: optionalUsageOut(r.SetupUsage),
-		PendingLead: pendingLeadOut(r.PendingLead),
+		PendingLead: pendingLeadOut(r.PendingLead), SetupTask: r.SetupTask,
 	}
 }
 
@@ -82,7 +82,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		SummaryEvery: r.GetSummaryEvery().AsDuration(), NextSummaryAt: moment(r.GetNextSummaryAt(), errs),
 		TaskCard: cardIn(r.GetTaskCard(), errs), EvalPlace: r.GetEvalPlace(), Phase: runPhases.in(r.GetPhase(), errs),
 		OptimizeStartedAt: moment(r.GetOptimizeStartedAt(), errs), SetupUsage: optionalUsageIn(r.GetSetupUsage()),
-		PendingLead: pendingLeadIn(r.GetPendingLead(), errs),
+		PendingLead: pendingLeadIn(r.GetPendingLead(), errs), SetupTask: r.GetSetupTask(),
 	}
 }
 
@@ -357,6 +357,10 @@ func messageOut(m core.Message) *pb.Message {
 		out.Body = &pb.Message_Brief{Brief: b.Text}
 	case core.LeadBrief:
 		out.Body = &pb.Message_LeadBrief{LeadBrief: &pb.LeadBrief{Task: b.Task, FanoutLimit: b.FanoutLimit, Steering: b.Steering}}
+	case core.LeadHandover:
+		out.Body = &pb.Message_LeadHandover{LeadHandover: leadHandoverOut(b)}
+	case core.SetupBrief:
+		out.Body = &pb.Message_SetupBrief{SetupBrief: &pb.SetupBrief{Repository: b.Repository, Steering: b.Steering}}
 	case core.Handoff:
 		out.Body = &pb.Message_Handoff{Handoff: handoffOut(b)}
 	case core.Report:
@@ -402,6 +406,10 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 		out.Body = core.Brief{Text: b.Brief}
 	case *pb.Message_LeadBrief:
 		out.Body = core.LeadBrief{Task: b.LeadBrief.GetTask(), FanoutLimit: b.LeadBrief.GetFanoutLimit(), Steering: b.LeadBrief.GetSteering()}
+	case *pb.Message_LeadHandover:
+		out.Body = leadHandoverIn(b.LeadHandover, errs)
+	case *pb.Message_SetupBrief:
+		out.Body = core.SetupBrief{Repository: b.SetupBrief.GetRepository(), Steering: b.SetupBrief.GetSteering()}
 	case *pb.Message_Handoff:
 		out.Body = handoffIn(b.Handoff, errs)
 	case *pb.Message_Report:

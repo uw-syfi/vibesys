@@ -12,6 +12,7 @@ import (
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -25,6 +26,8 @@ type Server struct {
 	machine    Machine
 	// neighbors lists the other daemons of the machine for the status; nil lists none.
 	neighbors func() []Neighbor
+	// cardFiles reaches the files DescribeTask reads; nil refuses the call as unavailable.
+	cardFiles task.CardFiles
 
 	// ctx is cancelled when the daemon is asked to stop. Every call is bound to it, so a call
 	// that waits for a job does not hold the daemon's shutdown.
@@ -67,6 +70,12 @@ func (s *Server) WithMachine(m Machine) *Server {
 // lists none.
 func (s *Server) WithNeighbors(f func() []Neighbor) *Server {
 	s.neighbors = f
+	return s
+}
+
+// WithCardFiles has DescribeTask read task files with f. A nil f refuses the call as unavailable.
+func (s *Server) WithCardFiles(f task.CardFiles) *Server {
+	s.cardFiles = f
 	return s
 }
 

@@ -12,6 +12,8 @@ import {
   type CommandProgress,
   type FolderListing,
   listingKey,
+  NOT_PROVISIONING,
+  NOT_READ,
   type RepositoryAnswer,
   type RepositoryChecked,
 } from '../../state/index.js';
@@ -21,6 +23,30 @@ import type {StartRunRequest} from './start-draft.js';
 import type {StartHost} from './start-run-form.js';
 
 installDom();
+
+/** What a host has said of its catalogue and places, and the commands that ask for them: nothing, for the repository half. */
+const NO_NEW_RUN = {catalogue: NOT_READ, evalPlaces: NOT_READ, provision: NOT_PROVISIONING};
+const NO_NEW_RUN_COMMANDS = {
+  loadNewRun: () => undefined,
+  startFromExample: () => undefined,
+  forgetProvision: () => undefined,
+};
+
+/** Opens the dialog and chooses the person's own repository, the half this file is about. */
+function openRepository(screen: Screen): void {
+  screen.press(screen.control('New run'));
+  screen.press(segment(screen, 'My repository'));
+}
+
+/** The radio a segment's label names: a segmented control is native radios, which the harness does not list as controls. */
+function segment(screen: Screen, label: string): HTMLInputElement {
+  const named = [...screen.container.querySelectorAll('label')].find(
+    each => each.textContent?.trim() === label,
+  );
+  const radio = named?.querySelector('input');
+  if (radio === null || radio === undefined) throw new Error(`no segment named ${label}`);
+  return radio;
+}
 
 const catalog = (allowedModels: string[]) =>
   create(ModelCatalogSchema, {
@@ -46,6 +72,7 @@ const HOSTS: readonly StartHost[] = [
     models: null,
     repositoryChecked: undefined,
     directories: new Map(),
+    ...NO_NEW_RUN,
   },
   {
     key: 'ssh:gpu-cluster-1',
@@ -53,6 +80,7 @@ const HOSTS: readonly StartHost[] = [
     models: null,
     repositoryChecked: undefined,
     directories: new Map(),
+    ...NO_NEW_RUN,
   },
 ];
 
@@ -64,6 +92,7 @@ const open = (
   const opened: {host: string; runId: string}[] = [];
   const screen = mount(
     <NewRun
+      {...NO_NEW_RUN_COMMANDS}
       hosts={hosts}
       progress={progress}
       start={(host, request) => started.push({host, request})}
@@ -130,7 +159,7 @@ const ready = (hosts: readonly StartHost[] = HOSTS, progress?: CommandProgress) 
     hosts.map(host => ({...host, repositoryChecked: PASSED})),
     progress,
   );
-  opened.screen.press(opened.screen.control('New run'));
+  openRepository(opened.screen);
   type(repository(opened.screen), '/work/decode-service');
   type(fieldOf(opened.screen, 'Task'), 'decode');
   return opened;
@@ -140,7 +169,7 @@ describe('the New run entry', () => {
   it('shows no form until it is pressed, and then the Start run form with its host choice', () => {
     const {screen} = open();
     expect(screen.container.querySelector('input[placeholder="/path/to/repository"]')).toBeNull();
-    screen.press(screen.control('New run'));
+    openRepository(screen);
     expect(repository(screen).value).toBe('');
     expect(screen.controls('Start run')).toHaveLength(1);
     expect(screen.text()).toContain('Host');
@@ -149,7 +178,7 @@ describe('the New run entry', () => {
 
   it('keeps what was typed when the form is put away and brought back', () => {
     const {screen} = open();
-    screen.press(screen.control('New run'));
+    openRepository(screen);
     type(repository(screen), '/work/decode-service');
     const dialog = screen.container.querySelector('dialog');
     if (dialog === null) throw new Error('no dialog');
@@ -158,7 +187,7 @@ describe('the New run entry', () => {
       dialog.dispatchEvent(new View.Event('cancel', {cancelable: true}));
     });
     expect(screen.container.querySelector('input[placeholder="/path/to/repository"]')).toBeNull();
-    screen.press(screen.control('New run'));
+    openRepository(screen);
     expect(repository(screen).value).toBe('/work/decode-service');
     screen.unmount();
   });
@@ -173,6 +202,7 @@ describe('the Start run form’s model control', () => {
         models: catalog(['model-b', 'model-d', 'model-a']),
         repositoryChecked: undefined,
         directories: new Map(),
+        ...NO_NEW_RUN,
       },
     ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
@@ -194,6 +224,7 @@ describe('the Start run form’s model control', () => {
         models: catalog(['model-b', 'model-d', 'model-a']),
         repositoryChecked: undefined,
         directories: new Map(),
+        ...NO_NEW_RUN,
       },
     ]);
     choose(fieldOf<HTMLSelectElement>(screen, 'Lead tool'), 'codex');
@@ -214,6 +245,7 @@ describe('the Start run form’s model control', () => {
         models: catalog([]),
         repositoryChecked: undefined,
         directories: new Map(),
+        ...NO_NEW_RUN,
       },
     ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
@@ -232,6 +264,7 @@ describe('the Start run form’s model control', () => {
         models: catalog(['model-a']),
         repositoryChecked: undefined,
         directories: new Map(),
+        ...NO_NEW_RUN,
       },
     ]);
     const start = screen.control('Start run');
@@ -253,6 +286,7 @@ describe('the Start run form’s model control', () => {
         models: unreadable,
         repositoryChecked: undefined,
         directories: new Map(),
+        ...NO_NEW_RUN,
       },
     ]);
     screen.press(screen.control('Start run'));
@@ -296,7 +330,7 @@ describe('the Start run form’s refusal', () => {
       allowedModels: ['model-a', 'model-b'],
     });
     const {screen} = open(HOSTS, {_tag: 'Refused', receipt} as CommandProgress);
-    screen.press(screen.control('New run'));
+    openRepository(screen);
     const text = screen.text();
     expect(text).toContain(
       'Start refused \u00b7 Model model-x not allowed \u00b7 allowed: model-a, model-b',
@@ -317,6 +351,7 @@ const withHostAnswers = (answers: Readonly<Record<string, RepositoryAnswer>>) =>
     const [checked, setChecked] = useState<RepositoryChecked | undefined>(undefined);
     return (
       <NewRun
+        {...NO_NEW_RUN_COMMANDS}
         hosts={HOSTS.map(host => ({...host, repositoryChecked: checked}))}
         listDirectory={() => undefined}
         progress={undefined}
@@ -332,7 +367,7 @@ const withHostAnswers = (answers: Readonly<Record<string, RepositoryAnswer>>) =>
     );
   }
   const screen = mount(<Connected />);
-  screen.press(screen.control('New run'));
+  openRepository(screen);
   type(fieldOf(screen, 'Task'), 'decode');
   return {screen, asked, started};
 };
@@ -442,6 +477,7 @@ const withHostFolders = (checks: Readonly<Record<string, RepositoryAnswer>> = {}
     const [checked, setChecked] = useState<RepositoryChecked | undefined>(undefined);
     return (
       <NewRun
+        {...NO_NEW_RUN_COMMANDS}
         hosts={HOSTS.map(host => ({...host, repositoryChecked: checked, directories}))}
         progress={undefined}
         start={() => undefined}
@@ -463,7 +499,7 @@ const withHostFolders = (checks: Readonly<Record<string, RepositoryAnswer>> = {}
     );
   }
   const screen = mount(<Connected />);
-  screen.press(screen.control('New run'));
+  openRepository(screen);
   return {screen, listed};
 };
 

@@ -24,11 +24,13 @@ const MESSAGE_KINDS = {
   subagentSettled: true,
   brief: true,
   leadBrief: true,
+  leadHandover: true,
   handoffReminder: true,
   leadIdleReminder: true,
   reportDue: true,
   catchUpRequest: true,
   runLimitReached: true,
+  setupBrief: true,
 } as const;
 
 const read = (name: string) =>

@@ -18,6 +18,19 @@ const (
 	JobMeasure JobKind = "measure"
 )
 
+// JobStage is the step of a check or measure job that ended it: the zero value is none.
+type JobStage string
+
+// The stages a failed check or measure job can end in.
+const (
+	// StageBuild is a candidate or task image that did not build.
+	StageBuild JobStage = "build"
+	// StageCheck is the correctness check, which ran and rejected the candidate or could not complete.
+	StageCheck JobStage = "check"
+	// StageMeasure is the benchmark that takes a measure job's samples.
+	StageMeasure JobStage = "measure"
+)
+
 // JobState is where a job is.
 type JobState string
 
@@ -174,6 +187,9 @@ type Job struct {
 	// runs only if the task is still at it when the job starts. It is empty for a command job, and
 	// for a job of a store of version 4 or older, which runs the task as it is then.
 	TaskVersion string
+	// FailedStage is the stage that ended a failed check or measure job, empty for a job that did not
+	// fail, a command job, a failure outside every stage, and a job saved before it was recorded.
+	FailedStage JobStage
 	// NoCache is the submission's choice to run the whole job fresh: it neither joined nor reused
 	// a job, and when it starts it reuses no saved samples and no saved check pass. It is kept on
 	// the job because the job may start long after, in another daemon.

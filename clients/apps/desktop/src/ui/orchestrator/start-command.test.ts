@@ -14,6 +14,7 @@ const request = (model: string): StartRunRequest => ({
   brief: 'No further steering.',
   maxTimeSeconds: 7200,
   maxCostUsd: 5,
+  evalPlace: '',
 });
 
 const freshDaemon = () => new FakeDaemon(generateScenario({seed: 3, subagents: 1, live: true}));

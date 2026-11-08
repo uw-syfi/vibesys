@@ -155,11 +155,17 @@ type (
 		Brief       string
 		EvalPlace   string
 	}
+	// DeclareTask names the task the setup lead is making. It sets Run.SetupTask.
+	DeclareTask struct {
+		Run  RunID
+		Task string
+	}
 )
 
 func (UpdateRun) action() Action     { return ActionUpdateRun }
 func (BeginSetup) action() Action    { return ActionBeginSetup }
 func (CompleteSetup) action() Action { return ActionCompleteSetup }
+func (DeclareTask) action() Action   { return ActionDeclareTask }
 
 // LeadChangeState says whether a change of the lead has taken effect.
 type LeadChangeState string

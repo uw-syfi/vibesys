@@ -18,6 +18,7 @@ type coverage struct {
 	finishedEnds, stalledEnds, stalls, leadReminders, handoffReminders, reports         int
 	schedule                                                                            scheduleCoverage
 	checkIns                                                                            checkInCoverage
+	updates                                                                             updateCoverage
 }
 
 func (c *coverage) add(o coverage) {
@@ -49,6 +50,7 @@ func (c *coverage) add(o coverage) {
 	c.reports += o.reports
 	c.schedule.add(o.schedule)
 	c.checkIns.add(o.checkIns)
+	c.updates.add(o.updates)
 }
 
 func (c coverage) require(t *testing.T) {
@@ -78,6 +80,7 @@ func (c coverage) require(t *testing.T) {
 			t.Errorf("the simulation never reached: %s", name)
 		}
 	}
+	c.updates.require(t)
 }
 
 // messageRecord is the monitor's own account of one message.
@@ -139,6 +142,8 @@ type monitor struct {
 	startEvery time.Duration
 	// checkInBooks holds the check-ins as the monitor works them out.
 	checkInBooks *checkInBooks
+	// updated holds what the rules for updates and a change of lead are kept with.
+	updated *updateBooks
 	// arms holds, for the commit being checked, each time a request became due in a run.
 	arms map[core.RunID][]time.Time
 
@@ -159,13 +164,14 @@ func newMonitor() *monitor {
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
 		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
 		windows: map[core.MessageID]bool{}, summary: map[core.RunID]core.MessageID{},
-		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{}, checkInBooks: newCheckInBooks(),
+		limited: map[core.RunID]core.MessageID{}, books: map[core.RunID]*schedule{}, checkInBooks: newCheckInBooks(), updated: newUpdateBooks(),
 	}
 }
 
 // commit checks one transaction, in order: what an input may change, then each event, then what
 // must have come of them taken together.
 func (m *monitor) commit(body core.InputBody, events []core.Event, effects []core.Effect) error {
+	before := m.beforeCommit()
 	m.refusedSteer = ""
 	m.idled, m.over, m.noticed, m.resumed = map[core.AgentID]bool{}, map[core.AgentID]bool{}, map[core.AgentID]int{}, map[core.AgentID]bool{}
 	if fact, ok := body.(core.SessionFact); ok {
@@ -208,6 +214,9 @@ func (m *monitor) commit(body core.InputBody, events []core.Event, effects []cor
 		if err := m.observe(e); err != nil {
 			return err
 		}
+	}
+	if err := m.updates(body, events, before); err != nil {
+		return err
 	}
 	if err := m.summaryBooks(effects); err != nil {
 		return err
@@ -349,6 +358,8 @@ func (m *monitor) observe(e core.Event) error {
 		return m.receipt(b)
 	case core.CheckIn:
 		return nil // held to its rules by checkIns, before the events are folded in
+	case core.RunSettingsUpdated:
+		return nil // held to its rules by updates, once the commit's events are folded in
 	}
 	return fmt.Errorf("unknown event %T", e.Body)
 }
@@ -418,10 +429,20 @@ func (m *monitor) run(r core.Run) error {
 func (m *monitor) agent(a core.Agent) error {
 	old, known := m.agents[a.ID]
 	m.agents[a.ID] = a
+	if known && a.Session == old.Session && a.Spec != old.Spec {
+		return fmt.Errorf("agent %s changed from %+v to %+v inside a session", a.ID, old.Spec, a.Spec)
+	}
 	if known && a.Session != old.Session {
 		m.covered.resumes++
 		if a.Session != old.Session+1 || !old.Status.Over() {
 			return fmt.Errorf("agent %s went from %+v to session %d", a.ID, old, a.Session)
+		}
+		if a.Role == core.RoleLead && a.ResumeToken == "" {
+			// A lead replaced is a fresh session: it has no failures, and nothing to resume.
+			m.failures[a.ID] = 0
+		}
+		if a.Spec != old.Spec && a.ResumeToken != "" {
+			return fmt.Errorf("agent %s changed spec in a session that resumes %q", a.ID, a.ResumeToken)
 		}
 		if a.Role == core.RoleLead && m.failures[a.ID] > core.MaxLeadResumes {
 			return fmt.Errorf("lead %s resumed after %d failures in a row", a.ID, m.failures[a.ID])
@@ -467,8 +488,10 @@ func (m *monitor) agent(a core.Agent) error {
 			live++
 		}
 	}
-	if limit := m.runs[a.Run].FanoutLimit; live > limit {
-		return fmt.Errorf("run %s has %d live subagents over its limit of %d", a.Run, live, limit)
+	// Only an admission is held to the limit: a run whose limit an update lowered has more live subagents
+	// than it, and none is let in while it is at or over.
+	if limit := m.runs[a.Run].FanoutLimit; live > limit && (!known || a.Session != old.Session) {
+		return fmt.Errorf("run %s admitted subagent %s as the %dth live one, over its limit of %d", a.Run, a.ID, live, limit)
 	}
 	return nil
 }
@@ -504,6 +527,9 @@ func (m *monitor) turn(t core.Turn) error {
 		}
 		if _, ok := record.body.(core.Handoff); ok {
 			m.covered.handoffTurns++
+		}
+		if err := m.firstTurnAfterSwitch(t, record); err != nil {
+			return err
 		}
 		if record.turns > 1 {
 			m.covered.retriedDeliveries++
@@ -549,6 +575,7 @@ func (m *monitor) item(i core.Item) error {
 
 func (m *monitor) message(msg core.Message) error {
 	record := m.messages[msg.ID]
+	fresh := record == nil
 	if record == nil {
 		record = &messageRecord{run: msg.Run, to: msg.To, body: msg.Body}
 		m.messages[msg.ID] = record
@@ -563,6 +590,10 @@ func (m *monitor) message(msg core.Message) error {
 			m.handed[msg.From] = true
 		case core.SubagentSettled:
 			m.noticed[b.Agent]++
+		case core.LeadHandover:
+			if err := m.handoverPosted(msg, b); err != nil {
+				return err
+			}
 		case core.LeadIdleReminder:
 			if err := m.leadReminder(msg); err != nil {
 				return err
@@ -611,6 +642,16 @@ func (m *monitor) message(msg core.Message) error {
 				return fmt.Errorf("job %s of run %s told twice: %s and %s", b.Job, msg.Run, first, msg.ID)
 			}
 			m.jobs[key] = msg.ID
+		}
+	}
+	if err := m.mailToLead(msg, fresh); err != nil {
+		return err
+	}
+	if h, ok := msg.Body.(core.LeadHandover); ok && !fresh && !reflect.DeepEqual(record.body, msg.Body) {
+		// The handover a lead that fell had not read, written again as the run stands now.
+		record.body = msg.Body
+		if err := m.handoverPosted(msg, h); err != nil {
+			return err
 		}
 	}
 	if record.last.Final() {
@@ -729,6 +770,9 @@ func (m *monitor) final() error {
 		return fmt.Errorf("agent %s still runs turn %s", agent, turn)
 	}
 	if err := m.checkInsFinal(); err != nil {
+		return err
+	}
+	if err := m.updatesFinal(); err != nil {
 		return err
 	}
 	for id, a := range m.agents {

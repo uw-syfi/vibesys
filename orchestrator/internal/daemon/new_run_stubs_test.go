@@ -35,14 +35,11 @@ func TestTheNewRunRpcsAreUnimplementedAndNameThemselves(t *testing.T) {
 	}
 }
 
-// The commands of the New run contracts are parsed and reach the core, which refuses each of them
-// as not permitted until its behavior exists: no run is made or changed.
-func TestTheNewRunCommandsAreRefusedUntilDecided(t *testing.T) {
+// The setup commands of the New run contracts are parsed and reach the core, which refuses each of
+// them as not permitted until its behavior exists: no run is made or changed.
+func TestTheSetupCommandsAreRefusedUntilDecided(t *testing.T) {
 	spec := &pb.AgentSpec{Harness: pb.Harness_HARNESS_CODEX}
 	bodies := map[string]*pb.Command{
-		"update_run": {Id: "u1", Body: &pb.Command_UpdateRun{UpdateRun: &pb.UpdateRun{
-			RunId: "run-1", CostLimit: &pb.CostLimitUpdate{Change: &pb.CostLimitUpdate_Remove{Remove: true}},
-		}}},
 		"begin_setup": {Id: "b1", Body: &pb.Command_BeginSetup{BeginSetup: &pb.BeginSetup{Repository: "/repo", Lead: spec}}},
 		"complete_setup": {Id: "c1", Body: &pb.Command_CompleteSetup{CompleteSetup: &pb.CompleteSetup{
 			RunId: "run-1", Task: "task", Lead: spec,

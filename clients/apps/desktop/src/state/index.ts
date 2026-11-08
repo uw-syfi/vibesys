@@ -77,6 +77,7 @@ export {
   hostStatusOf,
   hostStatusRank,
 } from './host-status.js';
+export * from './new-run/index.js';
 export {
   type CheckInRead,
   type Facts,

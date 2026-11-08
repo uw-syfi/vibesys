@@ -24,6 +24,7 @@ export function startRunMessage(request: StartRunRequest): StartRun {
     fanoutLimit: request.fanoutLimit,
     lead: create(AgentSpecSchema, {harness: request.lead.harness, model: request.lead.model}),
     brief: request.brief,
+    evalPlace: request.evalPlace,
     ...(request.maxTimeSeconds === null
       ? {}
       : {maxTime: create(DurationSchema, {seconds: BigInt(request.maxTimeSeconds)})}),

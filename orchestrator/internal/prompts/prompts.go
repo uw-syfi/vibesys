@@ -83,6 +83,47 @@ type (
 		Steering    string
 	}
 
+	// leadHandoverData is what a new lead is told of the run it takes over, in the words' units: minutes,
+	// whole dollars and cents, and a count of agents. HasSpent is false when no turn has reported a cost;
+	// MaxCost and MaxTimeMinutes are zero for no limit, and Limit is empty until the run reached one.
+	leadHandoverData struct {
+		Task            string
+		FanoutLimit     uint32
+		PreviousHarness core.Harness
+		PreviousModel   core.ModelName
+		ElapsedMinutes  uint32
+		MaxTimeMinutes  uint32
+		HasSpent        bool
+		Spent           float64
+		MaxCost         float64
+		Limit           core.RunLimit
+		ReportsPosted   uint32
+		Report          *handoverReport
+		Agents          []handoverAgent
+		AgentsEnded     uint32
+		ActiveJobs      uint32
+	}
+
+	// handoverReport is the old lead's latest report about the whole run.
+	handoverReport struct {
+		Sequence                               uint32
+		Kind                                   core.ReportKind
+		Headline, Changed, InFlight, Decisions string
+	}
+
+	// handoverAgent is a subagent that is still going. Plan is zero when it is not tied to a plan.
+	handoverAgent struct {
+		ID     core.AgentID
+		Role   core.AgentRole
+		Status core.AgentStatus
+		Plan   uint32
+	}
+
+	setupBriefData struct {
+		Repository string
+		Steering   string
+	}
+
 	// handoffData holds the fields of every kind of handoff; Kind says which the template reads.
 	handoffData struct {
 		From                                                 core.AgentID
@@ -186,6 +227,10 @@ func dataOf(m core.Message, records Records) (string, any, error) {
 		return "brief", textData{Text: b.Text}, nil
 	case core.LeadBrief:
 		return "lead_brief", leadBriefData(b), nil
+	case core.LeadHandover:
+		return "lead_handover", leadHandoverDataOf(b), nil
+	case core.SetupBrief:
+		return "setup_brief", setupBriefData(b), nil
 	case core.Handoff:
 		return "handoff", handoffDataOf(m.From, b), nil
 	case core.Report:
@@ -229,6 +274,24 @@ func dataOf(m core.Message, records Records) (string, any, error) {
 		}, nil
 	}
 	return "", nil, fmt.Errorf("message %s has no body: %w", m.ID, ErrNoPrompt)
+}
+
+func leadHandoverDataOf(h core.LeadHandover) leadHandoverData {
+	d := leadHandoverData{
+		Task: h.Task, FanoutLimit: h.FanoutLimit, PreviousHarness: h.Previous.Harness, PreviousModel: h.Previous.Model,
+		ElapsedMinutes: uint32(h.Elapsed / time.Minute), MaxTimeMinutes: uint32(h.MaxTime / time.Minute),
+		MaxCost: h.MaxCost, Limit: h.LimitReached, ReportsPosted: h.ReportsPosted, AgentsEnded: h.AgentsEnded, ActiveJobs: h.ActiveJobs,
+	}
+	if h.Spent != nil {
+		d.HasSpent, d.Spent = true, *h.Spent
+	}
+	if r := h.LatestReport; r != nil {
+		d.Report = &handoverReport{Sequence: r.Sequence, Kind: r.Kind, Headline: r.Headline, Changed: r.Changed, InFlight: r.InFlight, Decisions: r.Decisions}
+	}
+	for _, a := range h.Agents {
+		d.Agents = append(d.Agents, handoverAgent{ID: a.ID, Role: a.Role, Status: a.Status, Plan: a.PlanNumber})
+	}
+	return d
 }
 
 func handoffDataOf(from core.AgentID, h core.Handoff) handoffData {

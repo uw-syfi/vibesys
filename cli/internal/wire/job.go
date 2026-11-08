@@ -232,6 +232,7 @@ func Job(j core.Job) *cliv1.Job {
 		out.Needs = append(out.Needs, ResourceKind(k))
 	}
 	out.TaskVersion = j.TaskVersion
+	out.FailedStage = JobStage(j.FailedStage)
 	return out
 }
 
@@ -337,6 +338,11 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		out.Needs = append(out.Needs, kind)
 	}
 	out.TaskVersion = j.GetTaskVersion()
+	stage, err := ToJobStage("job.failed_stage", j.GetFailedStage())
+	if err != nil {
+		return core.Job{}, err
+	}
+	out.FailedStage = stage
 	return out, nil
 }
 

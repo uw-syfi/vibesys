@@ -233,7 +233,23 @@ func refusal(r *pb.Receipt) error {
 		return failed("refused: run %[1]s is already working in this repository, and one repository takes one run at a time.\n"+
 			"  to follow it:  vibesys-client run attach %[1]s\n  to end it:     vibesys-client run stop %[1]s", r.GetRunId())
 	}
+	switch r.GetRefusal() {
+	case pb.Refusal_REFUSAL_COST_LIMIT_REACHED:
+		return failed("refused: run %s has reached its cost limit and is finishing, so that limit stays as it is", r.GetRunId())
+	case pb.Refusal_REFUSAL_TIME_LIMIT_REACHED:
+		return failed("refused: run %s has reached its time limit and is finishing, so that limit stays as it is", r.GetRunId())
+	case pb.Refusal_REFUSAL_MODEL_NOT_ALLOWED:
+		return failed("refused: the host does not allow %s; it allows %s", textOr(r.GetModel(), "a model of that tool"), textOr(strings.Join(r.GetAllowedModels(), ", "), "none"))
+	}
 	return failed("refused: %s", statusWord(r.GetRefusal().String(), "REFUSAL_"))
+}
+
+// textOr is text, or otherwise when text is empty.
+func textOr(text, otherwise string) string {
+	if text == "" {
+		return otherwise
+	}
+	return text
 }
 
 // printJSON writes a message as one line of protojson. protojson varies its white space from
