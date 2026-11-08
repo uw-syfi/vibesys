@@ -536,6 +536,17 @@ while idle, which other users of the partition pay for.
   allocations alone, since cancelling them would undo the reuse.
 - A container claims only an allocation with its limit and the stop's margin
   left, the one with the least time left first.
+- Sites cap a job's time (one QOS refuses anything over 12 hours), and an
+  `sbatch` refusal deep in a job is a poor error. `[slurm] max_time_seconds`
+  states the cap, and the engine keeps every allocation under it: a reused
+  one's limit defaults to it and may not exceed it, and a container whose limit
+  and stop margin do not fit is refused before anything is submitted, naming
+  the key. A container with no limit (the environment gives every container
+  the run's limit, the server of a task of two images too; only a direct
+  caller of the engine gives none) no longer counts as a day: it claims the
+  allocation with the most time left, or asks for the reused allocations'
+  limit, and runs as long as that lasts. The key is refused on the `slurm`
+  kind, whose `srun` jobs it does not cap yet.
 
 ### Pyxis and Enroot: a runtime of the apptainer kind, not a kind of its own
 
