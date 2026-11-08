@@ -6,6 +6,7 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/checkin.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/setup.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
@@ -31,7 +32,65 @@ message RunChange {
     // A check-in made, or changed as its facts were worked out or its report was posted. The whole
     // check-in, so a client replaces by id.
     CheckIn check_in = 16;
+    // A setting of the run changed while it ran.
+    RunUpdated run_updated = 17;
   }
+}
+
+// RunUpdated is one committed change of a run's settings: every setting that changed in one UpdateRun,
+// in the order of SettingChange. A setting the update left as it was is not in it.
+message RunUpdated {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated SettingChange changes = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message SettingChange {
+  oneof change {
+    option (buf.validate.oneof).required = true;
+    CostLimitChange cost_limit = 1;
+    TimeLimitChange time_limit = 2;
+    FanoutChange fanout = 3;
+    LeadChange lead = 4;
+  }
+}
+
+// CostLimitChange: an absent side is "no limit".
+message CostLimitChange {
+  optional double from = 1 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  optional double to = 2 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+}
+
+// TimeLimitChange: the total allowed, as StartRun.max_time; an absent side is "no limit".
+message TimeLimitChange {
+  google.protobuf.Duration from = 1 [(buf.validate.field).duration.gt = {seconds: 0}];
+  google.protobuf.Duration to = 2 [(buf.validate.field).duration.gt = {seconds: 0}];
+}
+
+message FanoutChange {
+  uint32 from = 1;
+  uint32 to = 2 [(buf.validate.field).uint32.gte = 1];
+}
+
+enum LeadChangeState {
+  LEAD_CHANGE_STATE_UNSPECIFIED = 0;
+  // Asked for; it takes effect when the lead's current turn ends.
+  LEAD_CHANGE_STATE_PENDING = 1;
+  LEAD_CHANGE_STATE_APPLIED = 2;
+}
+
+message LeadChange {
+  AgentSpec from = 1;
+  AgentSpec to = 2 [(buf.validate.field).required = true];
+  LeadChangeState state = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 // Delta is progress on a running item. It is never stored and never reaches the decision core: the
@@ -89,6 +148,97 @@ message StartRun {
   // so a run that wants fewer reports sets a longer interval. The lead is asked only when work moved
   // since it last reported or was last asked, and a report it posts on its own restarts the interval.
   google.protobuf.Duration summary_every = 10 [(buf.validate.field).duration.gte = {seconds: 300}];
+  // The eval place the run's evaluations go to, by name (ListEvalPlaces). Empty lets the host decide:
+  // a task that needs no accelerator is left unpinned, one that has exactly one fitting place takes it,
+  // and several fitting places refuse the start (REFUSAL_EVAL_PLACE_AMBIGUOUS).
+  string eval_place = 11 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
+}
+
+// CostLimitUpdate sets, changes or removes the cost limit.
+message CostLimitUpdate {
+  oneof change {
+    option (buf.validate.oneof).required = true;
+    // The new limit, in dollars.
+    double set_usd = 1 [(buf.validate.field).double = {
+      finite: true
+      gt: 0
+    }];
+    // Remove the limit.
+    bool remove = 2 [(buf.validate.field).bool.const = true];
+  }
+}
+
+// TimeLimitUpdate sets, changes or removes the time limit.
+message TimeLimitUpdate {
+  oneof change {
+    option (buf.validate.oneof).required = true;
+    // The new total, counted as StartRun.max_time is.
+    google.protobuf.Duration set = 1 [(buf.validate.field).duration.gt = {seconds: 0}];
+    // Remove the limit.
+    bool remove = 2 [(buf.validate.field).bool.const = true];
+  }
+}
+
+// UpdateRun changes settings of a live run, all of them or none. A setting it does not name stays as
+// it is. Lowering the fanout stops no agent: it only refuses new ones until the live ones are under it.
+message UpdateRun {
+  option (buf.validate.message).cel = {
+    id: "update_run.not_empty"
+    message: "name at least one setting to change"
+    expression: "has(this.cost_limit) || has(this.time_limit) || has(this.fanout_limit) || has(this.lead)"
+  };
+
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  CostLimitUpdate cost_limit = 2;
+  TimeLimitUpdate time_limit = 3;
+  optional uint32 fanout_limit = 4 [(buf.validate.field).uint32.gte = 1];
+  // The lead's tool, model and effort from its next turn on. The harness is required.
+  AgentSpec lead = 5 [(buf.validate.field).cel = {
+    id: "update_run.lead.harness"
+    message: "the lead needs a harness"
+    expression: "this.harness != 0"
+  }];
+}
+
+// BeginSetup starts a run in its setup phase: a chat with a lead that makes the run's task. It is
+// listed with the runs and stopped by StopRun like any run. It holds the repository, like a run.
+message BeginSetup {
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+  AgentSpec lead = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "begin_setup.lead.harness"
+      message: "the lead needs a harness"
+      expression: "this.harness != 0"
+    }
+  ];
+  string brief = 3;
+  repeated AllowedAgent allow_agents = 4;
+}
+
+// CompleteSetup ends a run's setup phase and starts it optimizing the named task. The host refuses it
+// unless its own derivation says every setup check passes (REFUSAL_SETUP_INCOMPLETE). The limits count
+// from here: setup's spend and time are not in them.
+message CompleteSetup {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2 [(buf.validate.field).string.min_len = 1];
+  optional double max_cost_usd = 3 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  google.protobuf.Duration max_time = 4 [(buf.validate.field).duration.gt = {seconds: 0}];
+  uint32 fanout_limit = 5;
+  AgentSpec lead = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "complete_setup.lead.harness"
+      message: "the lead needs a harness"
+      expression: "this.harness != 0"
+    }
+  ];
+  string brief = 7;
+  // As StartRun.eval_place.
+  string eval_place = 8 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
 }
 
 message StopRun {
@@ -174,6 +324,9 @@ message Command {
     PostHandoff post_handoff = 15;
     PostReport post_report = 16;
     RequestCatchUp request_catch_up = 17;
+    UpdateRun update_run = 18;
+    BeginSetup begin_setup = 19;
+    CompleteSetup complete_setup = 20;
   }
 }
 
@@ -212,6 +365,17 @@ enum Refusal {
   // found for an unpinned choice on a host that allows only some. The receipt's model names it (empty
   // for an unpinned choice) and its allowed_models lists what the host allows.
   REFUSAL_MODEL_NOT_ALLOWED = 15;
+  // The eval place named is not one the host has. The receipt's eval_places lists the places it has.
+  REFUSAL_EVAL_PLACE_NOT_FOUND = 16;
+  // The place named does not give the task's accelerator. The receipt's eval_places lists the ones
+  // that do.
+  REFUSAL_EVAL_PLACE_MISFIT = 17;
+  // No place was named and several give the accelerator. The receipt's eval_places lists them.
+  REFUSAL_EVAL_PLACE_AMBIGUOUS = 18;
+  // CompleteSetup before every setup check passed. The receipt's unmet_checks lists the others.
+  REFUSAL_SETUP_INCOMPLETE = 19;
+  // CompleteSetup, or a setup-only command, for a run that is not in setup.
+  REFUSAL_NOT_IN_SETUP = 20;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.
@@ -240,4 +404,11 @@ message Receipt {
   // Set with REFUSAL_MODEL_NOT_ALLOWED: the models the host allows, so the caller can ask again. Empty
   // when the host's policy could not be read, which allows nothing.
   repeated string allowed_models = 12 [(buf.validate.field).repeated.max_items = 256];
+  // Set with the eval place refusals: the places the refusal names, as each says.
+  repeated string eval_places = 13 [(buf.validate.field).repeated.max_items = 64];
+  // Set with REFUSAL_SETUP_INCOMPLETE: the checks that have not passed.
+  repeated SetupCheckId unmet_checks = 14 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }

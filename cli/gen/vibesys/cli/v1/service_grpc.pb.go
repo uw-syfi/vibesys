@@ -48,6 +48,8 @@ const (
 	DaemonService_EditWorkstream_FullMethodName   = "/vibesys.cli.v1.DaemonService/EditWorkstream"
 	DaemonService_DeclareBound_FullMethodName     = "/vibesys.cli.v1.DaemonService/DeclareBound"
 	DaemonService_ListBounds_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListBounds"
+	DaemonService_DescribeTask_FullMethodName     = "/vibesys.cli.v1.DaemonService/DescribeTask"
+	DaemonService_ListPlacements_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListPlacements"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -122,6 +124,11 @@ type DaemonServiceClient interface {
 	DeclareBound(ctx context.Context, in *DeclareBoundRequest, opts ...grpc.CallOption) (*DeclareBoundResponse, error)
 	// ListBounds lists every declared bound of the task, oldest first.
 	ListBounds(ctx context.Context, in *ListBoundsRequest, opts ...grpc.CallOption) (*ListBoundsResponse, error)
+	// DescribeTask reads one task's files and answers the card a client shows of it, or why the files
+	// cannot be read. The daemon is the only reader of task files.
+	DescribeTask(ctx context.Context, in *DescribeTaskRequest, opts ...grpc.CallOption) (*DescribeTaskResponse, error)
+	// ListPlacements reports every placement and the hardware it gives.
+	ListPlacements(ctx context.Context, in *ListPlacementsRequest, opts ...grpc.CallOption) (*ListPlacementsResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -458,6 +465,26 @@ func (c *daemonServiceClient) ListBounds(ctx context.Context, in *ListBoundsRequ
 	return out, nil
 }
 
+func (c *daemonServiceClient) DescribeTask(ctx context.Context, in *DescribeTaskRequest, opts ...grpc.CallOption) (*DescribeTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeTaskResponse)
+	err := c.cc.Invoke(ctx, DaemonService_DescribeTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListPlacements(ctx context.Context, in *ListPlacementsRequest, opts ...grpc.CallOption) (*ListPlacementsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPlacementsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListPlacements_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -530,6 +557,11 @@ type DaemonServiceServer interface {
 	DeclareBound(context.Context, *DeclareBoundRequest) (*DeclareBoundResponse, error)
 	// ListBounds lists every declared bound of the task, oldest first.
 	ListBounds(context.Context, *ListBoundsRequest) (*ListBoundsResponse, error)
+	// DescribeTask reads one task's files and answers the card a client shows of it, or why the files
+	// cannot be read. The daemon is the only reader of task files.
+	DescribeTask(context.Context, *DescribeTaskRequest) (*DescribeTaskResponse, error)
+	// ListPlacements reports every placement and the hardware it gives.
+	ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -626,6 +658,12 @@ func (UnimplementedDaemonServiceServer) DeclareBound(context.Context, *DeclareBo
 }
 func (UnimplementedDaemonServiceServer) ListBounds(context.Context, *ListBoundsRequest) (*ListBoundsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListBounds not implemented")
+}
+func (UnimplementedDaemonServiceServer) DescribeTask(context.Context, *DescribeTaskRequest) (*DescribeTaskResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeTask not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPlacements not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1142,6 +1180,42 @@ func _DaemonService_ListBounds_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_DescribeTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).DescribeTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_DescribeTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).DescribeTask(ctx, req.(*DescribeTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListPlacements_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPlacementsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListPlacements(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListPlacements_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListPlacements(ctx, req.(*ListPlacementsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1248,6 +1322,14 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListBounds",
 			Handler:    _DaemonService_ListBounds_Handler,
+		},
+		{
+			MethodName: "DescribeTask",
+			Handler:    _DaemonService_DescribeTask_Handler,
+		},
+		{
+			MethodName: "ListPlacements",
+			Handler:    _DaemonService_ListPlacements_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

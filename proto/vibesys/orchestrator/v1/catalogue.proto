@@ -1,0 +1,59 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/cli/v1/task.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// FitState says whether a task's accelerator is given by any place the host can evaluate on.
+enum FitState {
+  FIT_STATE_UNSPECIFIED = 0;
+  // At least one place gives it: the task's model (any known model of the vendor when it names none) in
+  // at least its count; a CPU need fits any place with a known state. An unknown or unreadable place
+  // fits nothing, and an offer of model OTHER fits nothing (see AcceleratorNeed).
+  FIT_STATE_FITS = 1;
+  // The places are known and none gives it.
+  FIT_STATE_NO_ACCELERATOR = 2;
+  // The task names an accelerator the host has no entry for, so nothing can be said to fit.
+  FIT_STATE_UNKNOWN_ACCELERATOR = 3;
+  // No place's hardware could be read.
+  FIT_STATE_PLACES_UNREADABLE = 4;
+}
+
+// Fit is advice computed per call from the current eval places; StartRun decides again.
+message Fit {
+  FitState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The places that give the accelerator, by name, when the state is FITS.
+  repeated string places = 2 [
+    (buf.validate.field).repeated.max_items = 64,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+}
+
+// CatalogueEntry is one example task a run can start from.
+message CatalogueEntry {
+  // The example's id: its path under the examples root, such as "model-serving/flint".
+  string example = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  // card.task is the task's name. The task's folder name is the example id's last part.
+  vibesys.cli.v1.TaskCard card = 2 [(buf.validate.field).required = true];
+  // Providing the example needs the network: it is cloned from elsewhere.
+  bool needs_clone = 3;
+  Fit fit = 4 [(buf.validate.field).required = true];
+}
+
+message ListCatalogueRequest {}
+
+message ListCatalogueResponse {
+  // The release the catalogue was built with.
+  string release = 1 [(buf.validate.field).string.max_bytes = 128];
+  // Where ProvisionRepository puts a repository when the call names no parent.
+  string repositories_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
+  repeated CatalogueEntry entries = 3 [(buf.validate.field).repeated.max_items = 2000];
+}

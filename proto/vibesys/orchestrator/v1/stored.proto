@@ -96,5 +96,8 @@ message Event {
     ReceiptRecord receipt_recorded = 15;
     // The whole check-in. It has no private part, so it is the public message.
     CheckIn check_in_updated = 16;
+    // The settings of a run that changed in one UpdateRun. It has no private part, so it is the public
+    // message.
+    RunUpdated run_settings_updated = 17;
   }
 }

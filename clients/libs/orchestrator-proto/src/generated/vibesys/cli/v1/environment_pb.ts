@@ -4,6 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,7 +13,80 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/environment.proto.
  */
 export const file_vibesys_cli_v1_environment: GenFile = /*@__PURE__*/
-  fileDesc("CiB2aWJlc3lzL2NsaS92MS9lbnZpcm9ubWVudC5wcm90bxIOdmliZXN5cy5jbGkudjEi+wEKFkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoEa2luZBgBIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIsCgdiYWNrZW5kGAIgASgOMhsudmliZXN5cy5jbGkudjEuQmFja2VuZEtpbmQSFAoMaW1hZ2VfZGlnZXN0GAMgASgJEkAKBWZhY3RzGAQgAygLMjEudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludC5GYWN0c0VudHJ5GiwKCkZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ4CgxNYWNoaW5lRmFjdHMSDwoHaG9zdF9pZBgBIAEoCRIKCgJvcxgCIAEoCRIMCgRhcmNoGAMgASgJEhEKCWNwdV9tb2RlbBgEIAEoCRIUCgxsb2dpY2FsX2NwdXMYBSABKA0SFAoMbWVtb3J5X2J5dGVzGAYgASgEIpEBCgtNYWNoaW5lTG9hZBIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIXCg9sb2FkX2F2ZXJhZ2VfMW0YAiABKAESGQoRY3B1X2J1c3lfZnJhY3Rpb24YAyABKAESHgoWbWVtb3J5X2F2YWlsYWJsZV9ieXRlcxgEIAEoBCprCg9FbnZpcm9ubWVudEtpbmQSIAocRU5WSVJPTk1FTlRfS0lORF9VTlNQRUNJRklFRBAAEhkKFUVOVklST05NRU5UX0tJTkRfSE9TVBABEhsKF0VOVklST05NRU5UX0tJTkRfRE9DS0VSEAIqogEKC0JhY2tlbmRLaW5kEhwKGEJBQ0tFTkRfS0lORF9VTlNQRUNJRklFRBAAEhQKEEJBQ0tFTkRfS0lORF9DUFUQARIVChFCQUNLRU5EX0tJTkRfQ1VEQRACEhUKEUJBQ0tFTkRfS0lORF9ST0NNEAMSFgoSQkFDS0VORF9LSU5EX01FVEFMEAQSGQoVQkFDS0VORF9LSU5EX1RSQUlOSVVNEAUqlAEKDFJlc291cmNlS2luZBIdChlSRVNPVVJDRV9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRUkVTT1VSQ0VfS0lORF9HUFUQARIcChhSRVNPVVJDRV9LSU5EX0tVQkVSTkVURVMQAhIYChRSRVNPVVJDRV9LSU5EX01PVU5UUxADEhYKElJFU09VUkNFX0tJTkRfUk9DTRAEQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("CiB2aWJlc3lzL2NsaS92MS9lbnZpcm9ubWVudC5wcm90bxIOdmliZXN5cy5jbGkudjEiiQQKD0FjY2VsZXJhdG9yTmVlZBI9CgZ2ZW5kb3IYASABKA4yIS52aWJlc3lzLmNsaS52MS5BY2NlbGVyYXRvclZlbmRvckIKukgHggEEEAEgABI5CgVtb2RlbBgCIAEoDjIgLnZpYmVzeXMuY2xpLnYxLkFjY2VsZXJhdG9yTW9kZWxCCLpIBYIBAhABEhkKBWNvdW50GAMgASgNQgq6SAcqBRiAICgBOuACukjcAhrZAgogYWNjZWxlcmF0b3JfbmVlZC5tb2RlbF9vZl92ZW5kb3ISQ3RoZSBtb2RlbCBpcyBub3QgYSBkZXZpY2Ugb2YgdGhlIHZlbmRvciAoYSBDUFUgbmVlZCBuYW1lcyBubyBtb2RlbCka7wF0aGlzLm1vZGVsID09IDAgPyB0cnVlIDogdGhpcy5tb2RlbCA9PSA5OSA/IHRoaXMudmVuZG9yICE9IDUgOiB0aGlzLm1vZGVsIGluIFsxLCAyLCAzLCA0XSA/IHRoaXMudmVuZG9yID09IDIgOiB0aGlzLm1vZGVsIGluIFs1LCA2LCA3LCA4XSA/IHRoaXMudmVuZG9yID09IDEgOiB0aGlzLm1vZGVsID09IDkgPyB0aGlzLnZlbmRvciA9PSAzIDogdGhpcy5tb2RlbCA9PSAxMCA/IHRoaXMudmVuZG9yID09IDQgOiBmYWxzZSKyBAoQQWNjZWxlcmF0b3JPZmZlchI9CgZ2ZW5kb3IYASABKA4yIS52aWJlc3lzLmNsaS52MS5BY2NlbGVyYXRvclZlbmRvckIKukgHggEEEAEgABI5CgVtb2RlbBgCIAEoDjIgLnZpYmVzeXMuY2xpLnYxLkFjY2VsZXJhdG9yTW9kZWxCCLpIBYIBAhABEhkKBWNvdW50GAMgASgNQgq6SAcqBRiAICgBEh0KC2RldmljZV9uYW1lGAQgASgJQgi6SAVyAyiAATrpArpI5QIa4gIKIWFjY2VsZXJhdG9yX29mZmVyLm1vZGVsX29mX3ZlbmRvchI2dGhlIG1vZGVsIGlzIG5vdCBhIGRldmljZSBvZiB0aGUgdmVuZG9yLCBvciBpcyBtaXNzaW5nGoQCdGhpcy5tb2RlbCAhPSAwICYmICh0aGlzLm1vZGVsID09IDAgPyB0cnVlIDogdGhpcy5tb2RlbCA9PSA5OSA/IHRoaXMudmVuZG9yICE9IDUgOiB0aGlzLm1vZGVsIGluIFsxLCAyLCAzLCA0XSA/IHRoaXMudmVuZG9yID09IDIgOiB0aGlzLm1vZGVsIGluIFs1LCA2LCA3LCA4XSA/IHRoaXMudmVuZG9yID09IDEgOiB0aGlzLm1vZGVsID09IDkgPyB0aGlzLnZlbmRvciA9PSAzIDogdGhpcy5tb2RlbCA9PSAxMCA/IHRoaXMudmVuZG9yID09IDQgOiBmYWxzZSki+wEKFkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoEa2luZBgBIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIsCgdiYWNrZW5kGAIgASgOMhsudmliZXN5cy5jbGkudjEuQmFja2VuZEtpbmQSFAoMaW1hZ2VfZGlnZXN0GAMgASgJEkAKBWZhY3RzGAQgAygLMjEudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludC5GYWN0c0VudHJ5GiwKCkZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ4CgxNYWNoaW5lRmFjdHMSDwoHaG9zdF9pZBgBIAEoCRIKCgJvcxgCIAEoCRIMCgRhcmNoGAMgASgJEhEKCWNwdV9tb2RlbBgEIAEoCRIUCgxsb2dpY2FsX2NwdXMYBSABKA0SFAoMbWVtb3J5X2J5dGVzGAYgASgEIpEBCgtNYWNoaW5lTG9hZBIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIXCg9sb2FkX2F2ZXJhZ2VfMW0YAiABKAESGQoRY3B1X2J1c3lfZnJhY3Rpb24YAyABKAESHgoWbWVtb3J5X2F2YWlsYWJsZV9ieXRlcxgEIAEoBCprCg9FbnZpcm9ubWVudEtpbmQSIAocRU5WSVJPTk1FTlRfS0lORF9VTlNQRUNJRklFRBAAEhkKFUVOVklST05NRU5UX0tJTkRfSE9TVBABEhsKF0VOVklST05NRU5UX0tJTkRfRE9DS0VSEAIqogEKC0JhY2tlbmRLaW5kEhwKGEJBQ0tFTkRfS0lORF9VTlNQRUNJRklFRBAAEhQKEEJBQ0tFTkRfS0lORF9DUFUQARIVChFCQUNLRU5EX0tJTkRfQ1VEQRACEhUKEUJBQ0tFTkRfS0lORF9ST0NNEAMSFgoSQkFDS0VORF9LSU5EX01FVEFMEAQSGQoVQkFDS0VORF9LSU5EX1RSQUlOSVVNEAUqyAEKEUFjY2VsZXJhdG9yVmVuZG9yEiIKHkFDQ0VMRVJBVE9SX1ZFTkRPUl9VTlNQRUNJRklFRBAAEh0KGUFDQ0VMRVJBVE9SX1ZFTkRPUl9OVklESUEQARIaChZBQ0NFTEVSQVRPUl9WRU5ET1JfQU1EEAISGgoWQUNDRUxFUkFUT1JfVkVORE9SX0FXUxADEhwKGEFDQ0VMRVJBVE9SX1ZFTkRPUl9BUFBMRRAEEhoKFkFDQ0VMRVJBVE9SX1ZFTkRPUl9DUFUQBSr9AgoQQWNjZWxlcmF0b3JNb2RlbBIhCh1BQ0NFTEVSQVRPUl9NT0RFTF9VTlNQRUNJRklFRBAAEhsKF0FDQ0VMRVJBVE9SX01PREVMX01JMjEwEAESHAoYQUNDRUxFUkFUT1JfTU9ERUxfTUkzMDBBEAISHAoYQUNDRUxFUkFUT1JfTU9ERUxfTUkzMDBYEAMSHAoYQUNDRUxFUkFUT1JfTU9ERUxfTUkzMjVYEAQSGgoWQUNDRUxFUkFUT1JfTU9ERUxfSDEwMBAFEhoKFkFDQ0VMRVJBVE9SX01PREVMX0IyMDAQBhIYChRBQ0NFTEVSQVRPUl9NT0RFTF9MNBAHEhoKFkFDQ0VMRVJBVE9SX01PREVMX0ExMDAQCBIfChtBQ0NFTEVSQVRPUl9NT0RFTF9UUkFJTklVTTIQCRIjCh9BQ0NFTEVSQVRPUl9NT0RFTF9BUFBMRV9TSUxJQ09OEAoSGwoXQUNDRUxFUkFUT1JfTU9ERUxfT1RIRVIQYyqUAQoMUmVzb3VyY2VLaW5kEh0KGVJFU09VUkNFX0tJTkRfVU5TUEVDSUZJRUQQABIVChFSRVNPVVJDRV9LSU5EX0dQVRABEhwKGFJFU09VUkNFX0tJTkRfS1VCRVJORVRFUxACEhgKFFJFU09VUkNFX0tJTkRfTU9VTlRTEAMSFgoSUkVTT1VSQ0VfS0lORF9ST0NNEARCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+
+/**
+ * AcceleratorNeed is what a task wants of the place that evaluates it. Precedence of the fit rule, which
+ * the orchestrator's fit function states once: a place whose hardware is unknown or unreadable fits
+ * nothing, a CPU need included; an offer whose model is OTHER fits nothing, since a device the registry
+ * does not know cannot be shown to be the one wanted; otherwise a need fits an offer when the vendor is
+ * the same, the offer has at least `count` devices, and the model is the same or the need names none:
+ * a need of "NVIDIA GPU" (model unspecified) fits any known device of that vendor. A CPU need fits any
+ * place with a known state. The model must be a device of the vendor (see the rule below).
+ *
+ * @generated from message vibesys.cli.v1.AcceleratorNeed
+ */
+export type AcceleratorNeed = Message<"vibesys.cli.v1.AcceleratorNeed"> & {
+  /**
+   * @generated from field: vibesys.cli.v1.AcceleratorVendor vendor = 1;
+   */
+  vendor: AcceleratorVendor;
+
+  /**
+   * Unspecified: any model of the vendor.
+   *
+   * @generated from field: vibesys.cli.v1.AcceleratorModel model = 2;
+   */
+  model: AcceleratorModel;
+
+  /**
+   * @generated from field: uint32 count = 3;
+   */
+  count: number;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.AcceleratorNeed.
+ * Use `create(AcceleratorNeedSchema)` to create a new message.
+ */
+export const AcceleratorNeedSchema: GenMessage<AcceleratorNeed> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_environment, 0);
+
+/**
+ * AcceleratorOffer is what a place gives: `count` devices of one model.
+ *
+ * @generated from message vibesys.cli.v1.AcceleratorOffer
+ */
+export type AcceleratorOffer = Message<"vibesys.cli.v1.AcceleratorOffer"> & {
+  /**
+   * @generated from field: vibesys.cli.v1.AcceleratorVendor vendor = 1;
+   */
+  vendor: AcceleratorVendor;
+
+  /**
+   * @generated from field: vibesys.cli.v1.AcceleratorModel model = 2;
+   */
+  model: AcceleratorModel;
+
+  /**
+   * @generated from field: uint32 count = 3;
+   */
+  count: number;
+
+  /**
+   * The device as it reported itself, for a client to show beside an OTHER model.
+   *
+   * @generated from field: string device_name = 4;
+   */
+  deviceName: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.AcceleratorOffer.
+ * Use `create(AcceleratorOfferSchema)` to create a new message.
+ */
+export const AcceleratorOfferSchema: GenMessage<AcceleratorOffer> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_environment, 1);
 
 /**
  * EnvironmentFingerprint identifies the environment a result was taken in. Two results are
@@ -60,7 +134,7 @@ export type EnvironmentFingerprint = Message<"vibesys.cli.v1.EnvironmentFingerpr
  * Use `create(EnvironmentFingerprintSchema)` to create a new message.
  */
 export const EnvironmentFingerprintSchema: GenMessage<EnvironmentFingerprint> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_environment, 0);
+  messageDesc(file_vibesys_cli_v1_environment, 2);
 
 /**
  * MachineFacts describes the machine a result was taken on.
@@ -104,7 +178,7 @@ export type MachineFacts = Message<"vibesys.cli.v1.MachineFacts"> & {
  * Use `create(MachineFactsSchema)` to create a new message.
  */
 export const MachineFactsSchema: GenMessage<MachineFacts> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_environment, 1);
+  messageDesc(file_vibesys_cli_v1_environment, 3);
 
 /**
  * MachineLoad is the machine's load when it was sampled. The CLI reports it and never acts on it:
@@ -141,7 +215,7 @@ export type MachineLoad = Message<"vibesys.cli.v1.MachineLoad"> & {
  * Use `create(MachineLoadSchema)` to create a new message.
  */
 export const MachineLoadSchema: GenMessage<MachineLoad> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_environment, 2);
+  messageDesc(file_vibesys_cli_v1_environment, 4);
 
 /**
  * EnvironmentKind is where a job's commands run.
@@ -215,6 +289,127 @@ export const BackendKindSchema: GenEnum<BackendKind> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_environment, 1);
 
 /**
+ * AcceleratorVendor is who makes an accelerator. It is closed: a new vendor is a contract change, like
+ * BackendKind. A task names one in vibesys.input.toml as the value's name without its prefix, in lower
+ * case ([catalogue.hardware] vendor = "nvidia").
+ *
+ * @generated from enum vibesys.cli.v1.AcceleratorVendor
+ */
+export enum AcceleratorVendor {
+  /**
+   * @generated from enum value: ACCELERATOR_VENDOR_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ACCELERATOR_VENDOR_NVIDIA = 1;
+   */
+  NVIDIA = 1,
+
+  /**
+   * @generated from enum value: ACCELERATOR_VENDOR_AMD = 2;
+   */
+  AMD = 2,
+
+  /**
+   * @generated from enum value: ACCELERATOR_VENDOR_AWS = 3;
+   */
+  AWS = 3,
+
+  /**
+   * @generated from enum value: ACCELERATOR_VENDOR_APPLE = 4;
+   */
+  APPLE = 4,
+
+  /**
+   * No accelerator: the task and the place need only a processor.
+   *
+   * @generated from enum value: ACCELERATOR_VENDOR_CPU = 5;
+   */
+  CPU = 5,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.AcceleratorVendor.
+ */
+export const AcceleratorVendorSchema: GenEnum<AcceleratorVendor> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_environment, 2);
+
+/**
+ * AcceleratorModel is which device of a vendor. It is closed. OTHER is a device with no entry yet: it
+ * is shown by the name it reported, and it never fits a need that names a model.
+ *
+ * @generated from enum vibesys.cli.v1.AcceleratorModel
+ */
+export enum AcceleratorModel {
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_MI210 = 1;
+   */
+  MI210 = 1,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_MI300A = 2;
+   */
+  MI300A = 2,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_MI300X = 3;
+   */
+  MI300X = 3,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_MI325X = 4;
+   */
+  MI325X = 4,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_H100 = 5;
+   */
+  H100 = 5,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_B200 = 6;
+   */
+  B200 = 6,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_L4 = 7;
+   */
+  L4 = 7,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_A100 = 8;
+   */
+  A100 = 8,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_TRAINIUM2 = 9;
+   */
+  TRAINIUM2 = 9,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_APPLE_SILICON = 10;
+   */
+  APPLE_SILICON = 10,
+
+  /**
+   * @generated from enum value: ACCELERATOR_MODEL_OTHER = 99;
+   */
+  OTHER = 99,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.AcceleratorModel.
+ */
+export const AcceleratorModelSchema: GenEnum<AcceleratorModel> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_environment, 3);
+
+/**
  * ResourceKind is something a placement can give a job's container, and a task can need. It is
  * closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
  * name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
@@ -261,5 +456,5 @@ export enum ResourceKind {
  * Describes the enum vibesys.cli.v1.ResourceKind.
  */
 export const ResourceKindSchema: GenEnum<ResourceKind> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_environment, 2);
+  enumDesc(file_vibesys_cli_v1_environment, 4);
 

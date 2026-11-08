@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
@@ -20,6 +21,83 @@ enum BackendKind {
   BACKEND_KIND_ROCM = 3;
   BACKEND_KIND_METAL = 4;
   BACKEND_KIND_TRAINIUM = 5;
+}
+
+// AcceleratorVendor is who makes an accelerator. It is closed: a new vendor is a contract change, like
+// BackendKind. A task names one in vibesys.input.toml as the value's name without its prefix, in lower
+// case ([catalogue.hardware] vendor = "nvidia").
+enum AcceleratorVendor {
+  ACCELERATOR_VENDOR_UNSPECIFIED = 0;
+  ACCELERATOR_VENDOR_NVIDIA = 1;
+  ACCELERATOR_VENDOR_AMD = 2;
+  ACCELERATOR_VENDOR_AWS = 3;
+  ACCELERATOR_VENDOR_APPLE = 4;
+  // No accelerator: the task and the place need only a processor.
+  ACCELERATOR_VENDOR_CPU = 5;
+}
+
+// AcceleratorModel is which device of a vendor. It is closed. OTHER is a device with no entry yet: it
+// is shown by the name it reported, and it never fits a need that names a model.
+enum AcceleratorModel {
+  ACCELERATOR_MODEL_UNSPECIFIED = 0;
+  ACCELERATOR_MODEL_MI210 = 1;
+  ACCELERATOR_MODEL_MI300A = 2;
+  ACCELERATOR_MODEL_MI300X = 3;
+  ACCELERATOR_MODEL_MI325X = 4;
+  ACCELERATOR_MODEL_H100 = 5;
+  ACCELERATOR_MODEL_B200 = 6;
+  ACCELERATOR_MODEL_L4 = 7;
+  ACCELERATOR_MODEL_A100 = 8;
+  ACCELERATOR_MODEL_TRAINIUM2 = 9;
+  ACCELERATOR_MODEL_APPLE_SILICON = 10;
+  ACCELERATOR_MODEL_OTHER = 99;
+}
+
+// AcceleratorNeed is what a task wants of the place that evaluates it. Precedence of the fit rule, which
+// the orchestrator's fit function states once: a place whose hardware is unknown or unreadable fits
+// nothing, a CPU need included; an offer whose model is OTHER fits nothing, since a device the registry
+// does not know cannot be shown to be the one wanted; otherwise a need fits an offer when the vendor is
+// the same, the offer has at least `count` devices, and the model is the same or the need names none:
+// a need of "NVIDIA GPU" (model unspecified) fits any known device of that vendor. A CPU need fits any
+// place with a known state. The model must be a device of the vendor (see the rule below).
+message AcceleratorNeed {
+  option (buf.validate.message).cel = {
+    id: "accelerator_need.model_of_vendor"
+    message: "the model is not a device of the vendor (a CPU need names no model)"
+    expression: "this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false"
+  };
+
+  AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Unspecified: any model of the vendor.
+  AcceleratorModel model = 2 [(buf.validate.field).enum.defined_only = true];
+  uint32 count = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 4096
+  }];
+}
+
+// AcceleratorOffer is what a place gives: `count` devices of one model.
+message AcceleratorOffer {
+  option (buf.validate.message).cel = {
+    id: "accelerator_offer.model_of_vendor"
+    message: "the model is not a device of the vendor, or is missing"
+    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
+  };
+
+  AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  AcceleratorModel model = 2 [(buf.validate.field).enum.defined_only = true];
+  uint32 count = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 4096
+  }];
+  // The device as it reported itself, for a client to show beside an OTHER model.
+  string device_name = 4 [(buf.validate.field).string.max_bytes = 128];
 }
 
 // ResourceKind is something a placement can give a job's container, and a task can need. It is

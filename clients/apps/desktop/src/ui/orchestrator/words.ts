@@ -121,6 +121,11 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.COST_LIMIT_REACHED]: 'Cost limit reached',
   [Refusal.NO_VIEWER]: 'No viewer named',
   [Refusal.MODEL_NOT_ALLOWED]: 'Model not allowed',
+  [Refusal.EVAL_PLACE_NOT_FOUND]: 'No such place',
+  [Refusal.EVAL_PLACE_MISFIT]: 'Place does not fit',
+  [Refusal.EVAL_PLACE_AMBIGUOUS]: 'Choose a place',
+  [Refusal.SETUP_INCOMPLETE]: 'Setup not finished',
+  [Refusal.NOT_IN_SETUP]: 'Not in setup',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];

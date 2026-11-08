@@ -352,6 +352,7 @@ type Event struct {
 	//	*Event_MessageUpdated
 	//	*Event_ReceiptRecorded
 	//	*Event_CheckInUpdated
+	//	*Event_RunSettingsUpdated
 	Body          isEvent_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -492,6 +493,15 @@ func (x *Event) GetCheckInUpdated() *CheckIn {
 	return nil
 }
 
+func (x *Event) GetRunSettingsUpdated() *RunUpdated {
+	if x != nil {
+		if x, ok := x.Body.(*Event_RunSettingsUpdated); ok {
+			return x.RunSettingsUpdated
+		}
+	}
+	return nil
+}
+
 type isEvent_Body interface {
 	isEvent_Body()
 }
@@ -527,6 +537,12 @@ type Event_CheckInUpdated struct {
 	CheckInUpdated *CheckIn `protobuf:"bytes,16,opt,name=check_in_updated,json=checkInUpdated,proto3,oneof"`
 }
 
+type Event_RunSettingsUpdated struct {
+	// The settings of a run that changed in one UpdateRun. It has no private part, so it is the public
+	// message.
+	RunSettingsUpdated *RunUpdated `protobuf:"bytes,17,opt,name=run_settings_updated,json=runSettingsUpdated,proto3,oneof"`
+}
+
 func (*Event_RunUpdated) isEvent_Body() {}
 
 func (*Event_AgentUpdated) isEvent_Body() {}
@@ -540,6 +556,8 @@ func (*Event_MessageUpdated) isEvent_Body() {}
 func (*Event_ReceiptRecorded) isEvent_Body() {}
 
 func (*Event_CheckInUpdated) isEvent_Body() {}
+
+func (*Event_RunSettingsUpdated) isEvent_Body() {}
 
 var File_vibesys_orchestrator_v1_stored_proto protoreflect.FileDescriptor
 
@@ -565,7 +583,7 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"\rSessionSource\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
 	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\x12\x1f\n" +
-	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\xf7\x05\n" +
+	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\xd0\x06\n" +
 	"\x05Event\x12#\n" +
 	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n" +
@@ -581,7 +599,8 @@ const file_vibesys_orchestrator_v1_stored_proto_rawDesc = "" +
 	"\fitem_updated\x18\r \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\vitemUpdated\x12K\n" +
 	"\x0fmessage_updated\x18\x0e \x01(\v2 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12S\n" +
 	"\x10receipt_recorded\x18\x0f \x01(\v2&.vibesys.orchestrator.v1.ReceiptRecordH\x00R\x0freceiptRecorded\x12L\n" +
-	"\x10check_in_updated\x18\x10 \x01(\v2 .vibesys.orchestrator.v1.CheckInH\x00R\x0echeckInUpdatedB\r\n" +
+	"\x10check_in_updated\x18\x10 \x01(\v2 .vibesys.orchestrator.v1.CheckInH\x00R\x0echeckInUpdated\x12W\n" +
+	"\x14run_settings_updated\x18\x11 \x01(\v2#.vibesys.orchestrator.v1.RunUpdatedH\x00R\x12runSettingsUpdatedB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
@@ -612,6 +631,7 @@ var file_vibesys_orchestrator_v1_stored_proto_goTypes = []any{
 	(*Item)(nil),                  // 11: vibesys.orchestrator.v1.Item
 	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
 	(*CheckIn)(nil),               // 13: vibesys.orchestrator.v1.CheckIn
+	(*RunUpdated)(nil),            // 14: vibesys.orchestrator.v1.RunUpdated
 }
 var file_vibesys_orchestrator_v1_stored_proto_depIdxs = []int32{
 	6,  // 0: vibesys.orchestrator.v1.AgentRecord.agent:type_name -> vibesys.orchestrator.v1.Agent
@@ -628,11 +648,12 @@ var file_vibesys_orchestrator_v1_stored_proto_depIdxs = []int32{
 	12, // 11: vibesys.orchestrator.v1.Event.message_updated:type_name -> vibesys.orchestrator.v1.Message
 	2,  // 12: vibesys.orchestrator.v1.Event.receipt_recorded:type_name -> vibesys.orchestrator.v1.ReceiptRecord
 	13, // 13: vibesys.orchestrator.v1.Event.check_in_updated:type_name -> vibesys.orchestrator.v1.CheckIn
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	14, // 14: vibesys.orchestrator.v1.Event.run_settings_updated:type_name -> vibesys.orchestrator.v1.RunUpdated
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_stored_proto_init() }
@@ -652,6 +673,7 @@ func file_vibesys_orchestrator_v1_stored_proto_init() {
 		(*Event_MessageUpdated)(nil),
 		(*Event_ReceiptRecorded)(nil),
 		(*Event_CheckInUpdated)(nil),
+		(*Event_RunSettingsUpdated)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

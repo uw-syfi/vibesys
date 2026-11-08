@@ -1,0 +1,107 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// EvalPlaceKind is where a place evaluates candidates. It is closed, and the host reports only the
+// kinds its job tool has today; CLOUD is held for a managed cloud place, so adding one later is not a
+// contract change.
+enum EvalPlaceKind {
+  EVAL_PLACE_KIND_UNSPECIFIED = 0;
+  // Docker on the machine the run lives on.
+  EVAL_PLACE_KIND_LOCAL = 1;
+  // Docker on another machine, reached over ssh.
+  EVAL_PLACE_KIND_SSH = 2;
+  // A Slurm cluster.
+  EVAL_PLACE_KIND_SLURM = 3;
+  // An Apptainer cluster.
+  EVAL_PLACE_KIND_APPTAINER = 4;
+  // A managed cloud (Modal, SkyPilot). Never reported yet.
+  EVAL_PLACE_KIND_CLOUD = 5;
+}
+
+// OffersSource says how the host learned what a place gives.
+enum OffersSource {
+  OFFERS_SOURCE_UNSPECIFIED = 0;
+  OFFERS_SOURCE_PROBED = 1;
+  OFFERS_SOURCE_DECLARED = 2;
+}
+
+// OffersUnreadableReason says why a place's hardware is not known.
+enum OffersUnreadableReason {
+  OFFERS_UNREADABLE_REASON_UNSPECIFIED = 0;
+  OFFERS_UNREADABLE_REASON_UNREACHABLE = 1;
+  OFFERS_UNREADABLE_REASON_UNREADABLE = 2;
+  OFFERS_UNREADABLE_REASON_TIMED_OUT = 3;
+  OFFERS_UNREADABLE_REASON_NOT_PROBEABLE = 4;
+}
+
+// EvalPlace is one place a run's candidates can be evaluated, and the hardware it gives. A client
+// words the kind ("Local Docker") itself: the name is the operator's.
+message EvalPlace {
+  string name = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  EvalPlaceKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // What the place gives, in the order the place reported it. Empty with a known state means no
+  // accelerator.
+  repeated EvalOffer offers = 3 [(buf.validate.field).repeated.max_items = 64];
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    OffersKnown known = 4;
+    OffersUnreadable unreadable = 5;
+  }
+}
+
+// EvalOffer is what an eval place gives: `count` devices of one model. It is the orchestrator's own
+// message: the CLI's offers are private to its contract, and the host maps one to the other.
+message EvalOffer {
+  option (buf.validate.message).cel = {
+    id: "eval_offer.model_of_vendor"
+    message: "the model is not a device of the vendor, or is missing"
+    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
+  };
+
+  vibesys.cli.v1.AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  vibesys.cli.v1.AcceleratorModel model = 2 [(buf.validate.field).enum.defined_only = true];
+  uint32 count = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 4096
+  }];
+  // The device as it reported itself, for a client to show beside an OTHER model.
+  string device_name = 4 [(buf.validate.field).string.max_bytes = 128];
+}
+
+message OffersKnown {
+  OffersSource source = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // When the offers were probed; absent for declared offers.
+  google.protobuf.Timestamp probed_at = 2;
+}
+
+message OffersUnreadable {
+  OffersUnreadableReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 2 [(buf.validate.field).string.max_bytes = 1024];
+}
+
+message ListEvalPlacesRequest {
+  // False answers from what the host last probed. True probes now, bounded.
+  bool refresh = 1;
+}
+
+message ListEvalPlacesResponse {
+  repeated EvalPlace places = 1 [(buf.validate.field).repeated.max_items = 64];
+}

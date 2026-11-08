@@ -118,6 +118,9 @@ const COMMAND_KINDS = {
   postHandoff: true,
   postReport: true,
   requestCatchUp: true,
+  updateRun: true,
+  beginSetup: true,
+  completeSetup: true,
 } as const;
 
 /** The install of the app that calls: what the main process stamps on every call as metadata. */

@@ -143,9 +143,12 @@ type DesktopHostSettings struct {
 	// Unset until the person sets a checkout; a host can be saved without one.
 	Checkout string `protobuf:"bytes,1,opt,name=checkout,proto3" json:"checkout,omitempty"`
 	// What an ssh command added beyond the destination; absent for an alias of the person's ssh config.
-	Ssh           *DesktopSshOptions `protobuf:"bytes,3,opt,name=ssh,proto3,oneof" json:"ssh,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Ssh *DesktopSshOptions `protobuf:"bytes,3,opt,name=ssh,proto3,oneof" json:"ssh,omitempty"`
+	// Where this machine's new repositories are made, sent as ProvisionRepositoryRequest.parent_directory.
+	// Unset takes the host's own default (ListCatalogueResponse.repositories_directory).
+	RepositoriesDirectory string `protobuf:"bytes,4,opt,name=repositories_directory,json=repositoriesDirectory,proto3" json:"repositories_directory,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *DesktopHostSettings) Reset() {
@@ -190,6 +193,13 @@ func (x *DesktopHostSettings) GetSsh() *DesktopSshOptions {
 		return x.Ssh
 	}
 	return nil
+}
+
+func (x *DesktopHostSettings) GetRepositoriesDirectory() string {
+	if x != nil {
+		return x.RepositoriesDirectory
+	}
+	return ""
 }
 
 // The options of a pasted ssh command, held beside the saved host: the host key names the
@@ -1426,10 +1436,11 @@ var File_vibesys_desktop_v1_settings_proto protoreflect.FileDescriptor
 
 const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\n" +
-	"!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto\"\xb7\x01\n" +
+	"!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto\"\x96\x02\n" +
 	"\x13DesktopHostSettings\x12B\n" +
 	"\bcheckout\x18\x01 \x01(\tB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\bcheckout\x12<\n" +
-	"\x03ssh\x18\x03 \x01(\v2%.vibesys.desktop.v1.DesktopSshOptionsH\x00R\x03ssh\x88\x01\x01B\x06\n" +
+	"\x03ssh\x18\x03 \x01(\v2%.vibesys.desktop.v1.DesktopSshOptionsH\x00R\x03ssh\x88\x01\x01\x12]\n" +
+	"\x16repositories_directory\x18\x04 \x01(\tB&\xbaH#\xd8\x01\x01r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\x15repositoriesDirectoryB\x06\n" +
 	"\x04_sshJ\x04\b\x02\x10\x03R\x10run_transport_v2\"\xd3\x01\n" +
 	"\x11DesktopSshOptions\x12$\n" +
 	"\x04port\x18\x01 \x01(\rB\v\xbaH\b*\x06\x18\xff\xff\x03(\x01H\x00R\x04port\x88\x01\x01\x12J\n" +

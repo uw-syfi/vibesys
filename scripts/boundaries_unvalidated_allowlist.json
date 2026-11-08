@@ -30,6 +30,9 @@
     "Note",
     "ServiceSpec"
   ],
+  "proto/vibesys/cli/v1/placement.proto": [
+    "ListPlacementsRequest"
+  ],
   "proto/vibesys/cli/v1/plan.proto": [
     "LinkedJob",
     "PlanComment",

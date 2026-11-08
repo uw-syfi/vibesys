@@ -1,0 +1,106 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+import "vibesys/cli/v1/operator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// ListPlacementsRequest asks which placements the daemon has and what hardware each gives.
+message ListPlacementsRequest {
+  // False serves what the last probe found. True probes now, bounded by the call's deadline.
+  bool refresh = 1;
+}
+
+message ListPlacementsResponse {
+  repeated PlacementView placements = 1 [(buf.validate.field).repeated.max_items = 64];
+}
+
+// PlacementView is one placement as the daemon reports it: its identity and the hardware it gives.
+message PlacementView {
+  // The placement's name in the operator config.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  PlacementKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint32 max_jobs = 3;
+  oneof offers {
+    option (buf.validate.oneof).required = true;
+    PlacementOffers known = 4;
+    OffersUnknown unknown = 5;
+  }
+  PlacementReach reach = 6 [(buf.validate.field).required = true];
+}
+
+// OfferSource says how the daemon learned what a placement gives.
+enum OfferSource {
+  OFFER_SOURCE_UNSPECIFIED = 0;
+  // Measured through the placement's own resource.
+  OFFER_SOURCE_PROBED = 1;
+  // Written in the operator config, for a kind the daemon cannot probe.
+  OFFER_SOURCE_DECLARED = 2;
+}
+
+// PlacementOffers is what a placement gives. No offers with a known state means no accelerator.
+message PlacementOffers {
+  repeated AcceleratorOffer offers = 1 [(buf.validate.field).repeated.max_items = 64];
+  OfferSource source = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // When the offers were probed; absent for declared offers.
+  google.protobuf.Timestamp probed_at = 3;
+}
+
+// OffersUnknownReason says why a placement's hardware could not be read.
+enum OffersUnknownReason {
+  OFFERS_UNKNOWN_REASON_UNSPECIFIED = 0;
+  // The placement could not be reached to ask.
+  OFFERS_UNKNOWN_REASON_UNREACHABLE = 1;
+  // The probe ran and its answer was not understood.
+  OFFERS_UNKNOWN_REASON_UNREADABLE = 2;
+  // The probe did not finish in its bound.
+  OFFERS_UNKNOWN_REASON_TIMED_OUT = 3;
+  // The placement's kind has no probe and no declared offers.
+  OFFERS_UNKNOWN_REASON_NOT_PROBEABLE = 4;
+}
+
+message OffersUnknown {
+  OffersUnknownReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The probe's own words, naming the placement or the key at fault.
+  string detail = 2 [(buf.validate.field).string.max_bytes = 1024];
+}
+
+// ReachState is whether the daemon can reach a placement.
+enum ReachState {
+  REACH_STATE_UNSPECIFIED = 0;
+  // Reached when last asked. The placement's offers fit tasks.
+  REACH_STATE_REACHABLE = 1;
+  // Asked and not reached. Its offers fit nothing.
+  REACH_STATE_UNREACHABLE = 2;
+  // Never asked: the placement's kind is not probed, such as a declared Slurm or Apptainer placement.
+  // Its declared offers DO fit tasks; a client does not read this as unreachable.
+  REACH_STATE_NOT_PROBED = 3;
+}
+
+// PlacementReach is whether the daemon can reach the placement, in three states.
+message PlacementReach {
+  option (buf.validate.message).cel = {
+    id: "placement_reach.reason_only_when_unreachable"
+    message: "a reason is given exactly when the placement is unreachable"
+    expression: "(this.state == 2) == (this.reason != '')"
+  };
+
+  ReachState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Why not, when the state is UNREACHABLE; empty otherwise.
+  string reason = 2 [(buf.validate.field).string.max_bytes = 1024];
+}

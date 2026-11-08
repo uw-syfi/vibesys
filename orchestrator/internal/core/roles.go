@@ -31,6 +31,10 @@ const (
 	ActionPostReport  Action = "post_report"
 	// ActionRequestCatchUp is the press of Catch me up, which is for the operator and no tool.
 	ActionRequestCatchUp Action = "request_catch_up"
+	// The operator's commands that change a live run or move it through setup.
+	ActionUpdateRun     Action = "update_run"
+	ActionBeginSetup    Action = "begin_setup"
+	ActionCompleteSetup Action = "complete_setup"
 )
 
 var subagents = []Principal{PrincipalPlanner, PrincipalWorker, PrincipalJudge, PrincipalCombiner, PrincipalProfiler}
@@ -47,6 +51,9 @@ var permissions = map[Action][]Principal{
 	ActionPostReport:  {PrincipalLead},
 
 	ActionRequestCatchUp: {PrincipalOperator},
+	// ActionUpdateRun, ActionBeginSetup and ActionCompleteSetup have no entry until their behavior is
+	// decided: nobody is permitted, so a Decide refuses them before it reaches the command switch.
+	// Whoever implements one adds its row here, for the operator.
 }
 
 // Allowed says whether a principal may do an action.

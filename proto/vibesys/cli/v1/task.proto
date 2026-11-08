@@ -4,6 +4,7 @@ package vibesys.cli.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
+import "vibesys/cli/v1/environment.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -112,6 +113,9 @@ message TaskManifestV02 {
   google.protobuf.Struct resources = 14 [(task_schema_since_minor) = 2];
   google.protobuf.Struct workspace = 15 [(task_schema_since_minor) = 2];
   google.protobuf.Struct plan = 16 [(task_schema_since_minor) = 2];
+  // `[catalogue]` is held as data here, because a field's type cannot change under buf breaking. Its
+  // definition is TaskCatalogueV02, which the reader decodes it into (task.Catalogue) and refuses a
+  // table that does not meet, naming the key.
   google.protobuf.Struct catalogue = 17 [(task_schema_since_minor) = 2];
   repeated google.protobuf.Struct comparison = 18 [(task_schema_since_minor) = 2];
   // A server of the task's own image that a job starts once and runs its samples against, instead
@@ -119,6 +123,155 @@ message TaskManifestV02 {
   // Only a task of one image has it: a task with [candidate] starts its candidate's server for
   // each command.
   TaskServiceV02 service = 19 [(task_schema_since_minor) = 2];
+}
+
+// TaskDomain is what an example task optimizes. A task names one as the value's name without its
+// prefix, in lower case, with a hyphen for each underscore (domain = "llm-serving").
+enum TaskDomain {
+  TASK_DOMAIN_UNSPECIFIED = 0;
+  TASK_DOMAIN_LLM_SERVING = 1;
+  TASK_DOMAIN_DATA_STRUCTURES = 2;
+  TASK_DOMAIN_DATABASES = 3;
+  TASK_DOMAIN_MICROSERVICES = 4;
+}
+
+// ModelMaker is who made a served model; OTHER is a maker with no entry yet.
+enum ModelMaker {
+  MODEL_MAKER_UNSPECIFIED = 0;
+  MODEL_MAKER_META = 1;
+  MODEL_MAKER_QWEN = 2;
+  MODEL_MAKER_DEEPSEEK = 3;
+  MODEL_MAKER_ZHIPU = 4;
+  MODEL_MAKER_MOONSHOT = 5;
+  MODEL_MAKER_AI2 = 6;
+  MODEL_MAKER_OPENAI = 7;
+  MODEL_MAKER_OTHER = 8;
+}
+
+// TaskCatalogueV02 is the definition of the `[catalogue]` table, held in TaskManifestV02.catalogue as data: the facts a client words a task by. A key it has no
+// field for is refused by name. There is no variant: a client shows the task's folder name.
+message TaskCatalogueV02 {
+  option (buf.validate.message).cel = {
+    id: "catalogue.model_matches_domain"
+    expression: "(this.domain == 1) == has(this.model) ? '' : 'domain: model is required for llm-serving and only for it'"
+  };
+  option (buf.validate.message).cel = {
+    id: "catalogue.workload_matches_domain"
+    expression: "(this.domain == 2) == has(this.workload) ? '' : 'domain: workload is required for data-structures and only for it'"
+  };
+
+  TaskDomain domain = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  TaskHardwareV02 hardware = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).required = true
+  ];
+  // Required for, and only for, llm-serving.
+  TaskServedModelV02 model = 3 [(task_schema_since_minor) = 2];
+  // Required for, and only for, data-structures.
+  TaskWorkloadV02 workload = 4 [(task_schema_since_minor) = 2];
+}
+
+// TaskHardwareV02 is the hardware a task targets: `count` of `accelerator`, as a person would say it.
+message TaskHardwareV02 {
+  // The display name, for example "NVIDIA H100" or "CPU".
+  string accelerator = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 80
+    }
+  ];
+  uint32 count = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 4096
+    }
+  ];
+  AcceleratorVendor vendor = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// TaskServedModelV02 is the model an LLM-serving task serves.
+message TaskServedModelV02 {
+  string name = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 80
+    }
+  ];
+  ModelMaker maker = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// TaskWorkloadV02 is the workload a data-structure task drives.
+message TaskWorkloadV02 {
+  string name = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 80
+    }
+  ];
+  string description = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 400
+    }
+  ];
+}
+
+// TaskCard is what a client shows of a task. The daemon builds it from the task's files, which it
+// alone reads, so a card is attested by the host and never sent by a client. Without [catalogue] the
+// domain is unspecified and only the task, the heading and the objectives are set.
+message TaskCard {
+  // The task's name, as `--task` and a run name it.
+  string task = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  TaskDomain domain = 2 [(buf.validate.field).enum.defined_only = true];
+  // Absent without [catalogue.hardware].
+  AcceleratorNeed hardware = 3;
+  // The hardware as the task authored it, for example "AMD MI300X"; shown when the model is OTHER.
+  string hardware_name = 4 [(buf.validate.field).string.max_bytes = 80];
+  // LLM-serving tasks: the served model.
+  string model_name = 5 [(buf.validate.field).string.max_bytes = 80];
+  ModelMaker model_maker = 6 [(buf.validate.field).enum.defined_only = true];
+  // Data-structure tasks: the workload.
+  string workload_name = 7 [(buf.validate.field).string.max_bytes = 80];
+  string workload_description = 8 [(buf.validate.field).string.max_bytes = 400];
+  repeated CardObjective objectives = 9 [(buf.validate.field).repeated.max_items = 16];
+  // The first heading of the task's OBJECTIVE.md; empty without one.
+  string heading = 10 [(buf.validate.field).string.max_bytes = 200];
+}
+
+// CardObjective is one objective of a task, as a client lists it.
+message CardObjective {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string unit = 3 [(buf.validate.field).string.max_bytes = 64];
 }
 
 // TaskCandidateV02 is how the candidate's image is built from its commit, and how its server starts.

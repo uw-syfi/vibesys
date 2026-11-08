@@ -1,0 +1,66 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// ProvisionRepositoryRequest makes a new git repository on the host: a copy of a catalogue example, or
+// an empty one. It never overwrites.
+message ProvisionRepositoryRequest {
+  // Idempotency: the same name, source and id answer the same success again.
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string name = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._-]{0,62}$"];
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    // A CatalogueEntry.example.
+    string example = 3 [(buf.validate.field).string.min_len = 1];
+    EmptyRepository empty = 4;
+  }
+  // Absolute, or empty for ListCatalogueResponse.repositories_directory.
+  string parent_directory = 5 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+}
+
+// EmptyRepository is a repository with one initial commit and no task.
+message EmptyRepository {}
+
+message ProvisionRepositoryResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    Provisioned provisioned = 1;
+    ProvisionRefused refused = 2;
+  }
+}
+
+message Provisioned {
+  // The canonical absolute path of the new repository.
+  string repository = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]+$"];
+  // The initial commit.
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40,64}$"];
+}
+
+// ProvisionRefusal says why nothing was made.
+enum ProvisionRefusal {
+  PROVISION_REFUSAL_UNSPECIFIED = 0;
+  // A repository of that name exists and is not the same request's.
+  PROVISION_REFUSAL_NAME_TAKEN = 1;
+  PROVISION_REFUSAL_NAME_INVALID = 2;
+  PROVISION_REFUSAL_PARENT_NOT_WRITABLE = 3;
+  PROVISION_REFUSAL_EXAMPLE_NOT_FOUND = 4;
+  // The example is cloned from elsewhere and the host cannot reach it.
+  PROVISION_REFUSAL_NEEDS_NETWORK = 5;
+  PROVISION_REFUSAL_COPY_FAILED = 6;
+}
+
+message ProvisionRefused {
+  ProvisionRefusal reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 2 [(buf.validate.field).string.max_bytes = 2048];
+  // Set with NAME_TAKEN: the repository that holds the name.
+  string existing_repository = 3 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+}

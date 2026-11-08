@@ -66,6 +66,23 @@ type Run struct {
 	// SummaryEvery, or the moment the work moved if that is later. The timer armed for it is answered
 	// only while it still names this time.
 	NextSummaryAt time.Time
+	// TaskCard is what a client shows of the task, as the host read it before the run started or
+	// setup completed. Nil for a run recorded before it existed, and in setup.
+	TaskCard *TaskCard
+	// EvalPlace is the eval place the run's evaluations go to, resolved when it started; empty when
+	// the task needs no accelerator and none was chosen.
+	EvalPlace string
+	// Phase is setup or optimize; empty reads as optimize.
+	Phase RunPhase
+	// OptimizeStartedAt is when the run left setup, the zero time while in setup and for a run that
+	// never had one. A run's limits count from here for a run that had a setup.
+	OptimizeStartedAt time.Time
+	// SetupUsage is what the setup phase cost, frozen when it ended; nil before that and for a run
+	// that never had a setup. The cost limit counts Usage less this.
+	SetupUsage *Usage
+	// PendingLead is the lead a change of the lead waits to apply when the lead's current turn ends;
+	// nil when none waits. It is durable, so a restart in the middle of a handover finds it.
+	PendingLead *AgentSpec
 }
 
 // Checkout is a working copy of a run's repository that one agent made.
@@ -494,4 +511,8 @@ type Receipt struct {
 	// when the choice named none and none was found for it, and the models the host allows.
 	Model         ModelName
 	AllowedModels []ModelName
+	// EvalPlaces is set with the eval place refusals: the places the refusal names.
+	EvalPlaces []string
+	// UnmetChecks is set with RefuseSetupIncomplete: the setup checks that have not passed.
+	UnmetChecks []SetupCheckID
 }

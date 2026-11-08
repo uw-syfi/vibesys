@@ -281,6 +281,7 @@ function agentSession(history: Versioned, cut: number): WatchAgentResponse[] {
         message: true,
         receipt: true,
         checkIn: true,
+        runUpdated: true,
       })
     )
       newest.set(event.body.value.id, event.body.value);
@@ -296,6 +297,7 @@ function agentSession(history: Versioned, cut: number): WatchAgentResponse[] {
         message: true,
         receipt: true,
         checkIn: true,
+        runUpdated: true,
       })
     )
       return [];
@@ -514,6 +516,7 @@ describe('progress on running items', () => {
                 message: true,
                 receipt: true,
                 checkIn: true,
+                runUpdated: true,
               }),
           ),
         );

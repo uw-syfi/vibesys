@@ -1,7 +1,7 @@
 // Package tomlproto decodes a TOML file into a protobuf message by the message's field names: a
 // key the message has no field for, and a value of the wrong type, are refused here, naming the
 // key, and not by protojson, which names neither. An enum value is written as its name without the
-// enum's prefix, in lower case. The operator config and the task manifest are read with it, so
+// enum's prefix, in lower case, with a hyphen for each underscore. The operator config and the task manifest are read with it, so
 // each has one schema, its .proto, and no hand-kept decoder.
 //
 // A message that is a task manifest also says, field by field, which minor version of its schema
@@ -182,12 +182,12 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 		prefix := strings.TrimSuffix(string(values.ByNumber(0).Name()), "UNSPECIFIED")
 		var names []string
 		for i := 1; i < values.Len(); i++ {
-			names = append(names, strings.ToLower(strings.TrimPrefix(string(values.Get(i).Name()), prefix)))
+			names = append(names, kebab(strings.TrimPrefix(string(values.Get(i).Name()), prefix)))
 		}
 		if !slices.Contains(names, name) {
 			return nil, invalid("%s: %q is none of %s", at, name, strings.Join(names, ", "))
 		}
-		return prefix + strings.ToUpper(name), nil
+		return prefix + strings.ToUpper(strings.ReplaceAll(name, "-", "_")), nil
 	case protoreflect.StringKind:
 		if _, ok := v.(string); !ok {
 			return nil, wrong("a string")
@@ -265,4 +265,9 @@ func join(at, key string) string {
 		return key
 	}
 	return at + "." + key
+}
+
+// kebab writes an enum value's name as a task spells it: lower case, a hyphen for each underscore.
+func kebab(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, "_", "-"))
 }

@@ -133,6 +133,10 @@ the run reached its cost limit and starts no new agent: finish with what you hav
 a catch-up is for the operator's client, which names who is looking: this is not a tool you have, so do not call it
 {{- else if eq .Refusal "handoff_not_yours" -}}
 your handoff has no body for your role, or has another role's: give it again with the `{{.Role}}` field and no other body
+{{- else if or (eq .Refusal "eval_place_not_found") (eq .Refusal "eval_place_misfit") (eq .Refusal "eval_place_ambiguous") -}}
+only an operator starts a run or chooses its eval place: this is not a tool you have, so tell the operator
+{{- else if or (eq .Refusal "setup_incomplete") (eq .Refusal "not_in_setup") -}}
+only an operator completes a setup: this is not a tool you have, so tell the operator what is left to do
 {{- else -}}
 the orchestrator refused the command: {{.Refusal}}
 {{- end -}}

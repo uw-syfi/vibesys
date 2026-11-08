@@ -3,6 +3,9 @@
 import grpc
 import warnings
 
+from vs_sidecar.gen.vibesys.orchestrator.v1 import catalogue_pb2 as vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2
+from vs_sidecar.gen.vibesys.orchestrator.v1 import eval_place_pb2 as vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2
+from vs_sidecar.gen.vibesys.orchestrator.v1 import provision_pb2 as vibesys_dot_orchestrator_dot_v1_dot_provision__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import service_pb2 as vibesys_dot_orchestrator_dot_v1_dot_service__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
@@ -90,6 +93,21 @@ class OrchestratorServiceStub(object):
                 '/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost',
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostResponse.FromString,
+                _registered_method=True)
+        self.ListCatalogue = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/ListCatalogue',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueResponse.FromString,
+                _registered_method=True)
+        self.ListEvalPlaces = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/ListEvalPlaces',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesResponse.FromString,
+                _registered_method=True)
+        self.ProvisionRepository = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/ProvisionRepository',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryResponse.FromString,
                 _registered_method=True)
 
 
@@ -184,6 +202,28 @@ class OrchestratorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListCatalogue(self, request, context):
+        """The example tasks a run can start from, grouped by the card's domain by the client, each with
+        whether the host's eval places fit it. Read-only; for the operator only.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListEvalPlaces(self, request, context):
+        """The places the host can evaluate on and the hardware each gives. Read-only; for the operator only.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ProvisionRepository(self, request, context):
+        """Makes a new git repository on the host, from a catalogue example or empty. For the operator only.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OrchestratorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -241,6 +281,21 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.WatchHostCost,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostResponse.SerializeToString,
+            ),
+            'ListCatalogue': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCatalogue,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueResponse.SerializeToString,
+            ),
+            'ListEvalPlaces': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListEvalPlaces,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesResponse.SerializeToString,
+            ),
+            'ProvisionRepository': grpc.unary_unary_rpc_method_handler(
+                    servicer.ProvisionRepository,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -542,6 +597,87 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCatalogue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/ListCatalogue',
+            vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_catalogue__pb2.ListCatalogueResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListEvalPlaces(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/ListEvalPlaces',
+            vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_eval__place__pb2.ListEvalPlacesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ProvisionRepository(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/ProvisionRepository',
+            vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_provision__pb2.ProvisionRepositoryResponse.FromString,
             options,
             channel_credentials,
             insecure,
