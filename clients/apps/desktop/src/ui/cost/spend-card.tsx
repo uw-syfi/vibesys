@@ -1,10 +1,7 @@
 import {Card, Meter, Row, Stack, Stat, Text} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {SpendFigures} from './cost-model.js';
-import {NOT_REPORTED} from './words.js';
-
-/** The mark of a cost that is a floor, set close to its figure by a narrow space. */
-const FLOOR = '≥ ';
+import {FLOOR, NOT_REPORTED} from './words.js';
 
 /**
  * What a run has cost against its cap and how fast it is spending: the figures of the Cost screen's
@@ -50,6 +47,7 @@ export function SpendCard(props: {
               quiet={spend.lastHour === null}
             />
           )}
+          {spend.runs === undefined ? null : <Stat label="Runs" value={spend.runs} />}
           <Stat label="Turns" value={spend.turns} />
           {spend.floor ? null : <Stat label="Unpriced turns" value={spend.unpricedTurns} />}
         </Row>
