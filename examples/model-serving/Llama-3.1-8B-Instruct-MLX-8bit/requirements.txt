@@ -1,6 +1,0 @@
-mlx
-mlx-lm
-huggingface_hub
-httpx
-jsonschema
-datasets

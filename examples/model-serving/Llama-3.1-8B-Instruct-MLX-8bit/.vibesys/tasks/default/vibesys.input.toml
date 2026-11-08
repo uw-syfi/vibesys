@@ -1,16 +1,37 @@
-version = "0.1"
+# Llama 3.1 8B Instruct (MLX, 8-bit) on a Mac: JSON-schema constrained generation, for vibesys-cli (schema 0.2).
+# Metal needs the host, so this is a task of one image read like a command task, with no Dockerfile
+# and no [candidate]: bench.py starts the candidate's server from the checkout (launch.py), asks it
+# and stops it, in each mode. The legacy Python app refuses this file.
+version = "0.2"
 backends = ["metal"]
 
 [agent]
 domain = "llm-serving"
+interface = "service"
 
+# bench.py runs in the environment of the task directory (pyproject.toml and uv.lock there, which the
+# candidate cannot change); the server it starts runs in the project root's.
 [accuracy]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
-timeout_seconds = 120
+command = [
+  "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
+  "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "check",
+]
+# Measured on an M3 Pro with the baseline, warm caches, other jobs on the machine: 3.5 min (40
+# requests and one server start). The first job on a machine also installs both environments and
+# downloads the model (8.5 GB, 2 min on a fast link) and the dataset. 20 minutes is about 6 times
+# the warm run, which holds that and a slower machine.
+timeout_seconds = 1200
 
 [benchmark]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
-timeout_seconds = 300
+command = [
+  "uv", "run", "--frozen", "--project", "${PROJECT_ROOT}/.vibesys/tasks/default",
+  "python", "${PROJECT_ROOT}/.vibesys/tasks/default/bench.py", "benchmark",
+]
+# Measured the same way: 2 min for one sample (a server start, one request that is not counted, and
+# 24 that are). A server may take 300 s to start (launch.py), so 600 s is about 5 times the sample
+# and leaves room for the slowest start.
+timeout_seconds = 600
+result_protocol = 2
 
 [catalogue]
 domain = "llm-serving"

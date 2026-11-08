@@ -55,8 +55,12 @@ belong to the Python evaluator package and stay refused.
 read like a 0.1 command task: the task image runs the check, the benchmark and
 the profile command, which own the system under test (a microservice task, for
 example, deploys its app from its own trusted code). It has no candidate image,
-no server, and no standard profile (`submit command --wrap` profiles it). The
-rest of this section describes a manifest with `[candidate]`.
+no server, and no standard profile (`submit command --wrap` profiles it). With
+no `Dockerfile` either, its commands run on the host, which the Metal backend
+needs: the `Llama-3.1-8B-Instruct-MLX-8bit` example is such a task, whose
+`bench.py` starts the candidate's server from the checkout, asks it and stops
+its process group in each of its modes. The rest of this section describes a
+manifest with `[candidate]`.
 
 Schema 0.2 splits the judge from the candidate. The task's `Dockerfile` still
 builds the task image, which runs the check, the benchmark and the profile
