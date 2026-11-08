@@ -12,6 +12,7 @@ import type {
   Receipt,
   Run,
   RunSummary,
+  RunUpdated,
   SearchState,
   Turn,
 } from '@vibesys/orchestrator-proto';
@@ -72,6 +73,14 @@ export interface RunHistoryRead {
   readonly agentsLeftOut: number;
 }
 
+/** One committed change of a run's settings, as the run stream carried it, with when it was made. */
+export interface SettingsRecord {
+  readonly sequence: bigint;
+  /** The host's clock for the change, in milliseconds since the epoch. */
+  readonly atMs: number;
+  readonly update: RunUpdated;
+}
+
 export interface OrchestratorState {
   /** The last event applied, or the sequence of the snapshot; 0n before any. */
   readonly sequence: bigint;
@@ -113,6 +122,12 @@ export interface OrchestratorState {
    * the host froze in it. A viewer's own list is the ones with its id (`rewind` in `check-ins.ts`).
    */
   readonly checkIns: Readonly<Record<string, CheckIn>>;
+  /**
+   * The settings changes each run's stream carried (`run_updated`), oldest first, by run id. The run
+   * record holds the settings as they stand; this is the history of how they got there, from the
+   * moment this client began reading the stream.
+   */
+  readonly settingChanges: Readonly<Record<string, readonly SettingsRecord[]>>;
   /** Answers to commands this client has seen, by command id. */
   readonly receipts: Readonly<Record<string, Receipt>>;
   /** Unstored progress, by item id. */
@@ -138,6 +153,7 @@ export const emptyState: OrchestratorState = {
   itemSequences: {},
   messages: {},
   checkIns: {},
+  settingChanges: {},
   receipts: {},
   overlays: {},
   gap: null,
