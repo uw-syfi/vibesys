@@ -11,14 +11,14 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// minJobNotices is how many job-completion notices must have woken the lead: the two baseline jobs and
-// the four workers' jobs finish before the lead's last turn. The two jobs after the promotion are
-// awaited by the lead itself, and the run ends the moment it has reported: a job that finishes after a
-// finished run's report wakes nobody, so those notices may not come. The fixture submits eight jobs.
-const (
-	minJobNotices = 6
-	maxJobNotices = 8
-)
+// fixtureJobs is how many jobs the fixture submits: the two baseline jobs, the four workers' jobs and the
+// two the lead awaits after the promotion. The lead is told of a job only when the daemon reads the job
+// feed (on a timer) and finds the job settled while the run is live, and the run ends the moment the lead
+// has reported, so a fast run can end between two reads and be told of none. How many notices come is
+// timing. What holds is that none repeats, there are no more than the jobs submitted, and each is
+// consumed. The rule that decides which jobs are told is held by the core tests in
+// orchestrator/internal/core/job_notice_test.go.
+const fixtureJobs = 8
 
 // awaitLeadDeliveries waits until the run is over, then reads the typed mailbox of its snapshot as
 // `run get` serves it (it holds the messages of a run that is over) and returns how many job notices
@@ -42,8 +42,8 @@ func (r *rig) awaitLeadDeliveries(run, lead string) (jobNotices int) {
 	}
 }
 
-// leadDeliveries checks what woke the lead: one brief, three handoffs, and between minJobNotices and
-// maxJobNotices job notices, each job at most once, all consumed. It returns the number of job notices.
+// leadDeliveries checks what woke the lead: one brief, three handoffs, and job notices of at most
+// fixtureJobs jobs, each job at most once, all consumed. It returns the number of job notices.
 func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
 	t.Helper()
 	briefs, handoffs := 0, 0
@@ -69,8 +69,8 @@ func leadDeliveries(t *testing.T, messages []*pb.Message, lead string) int {
 			t.Errorf("a message to the lead (%T) is %s after the run ended, want consumed", m.Body, m.Delivery)
 		}
 	}
-	if briefs != 1 || handoffs != 3 || len(jobs) < minJobNotices || len(jobs) > maxJobNotices {
-		t.Errorf("lead wakes: %d briefs, %d handoffs, %d job notices; want 1, 3 and %d to %d", briefs, handoffs, len(jobs), minJobNotices, maxJobNotices)
+	if briefs != 1 || handoffs != 3 || len(jobs) > fixtureJobs {
+		t.Errorf("lead wakes: %d briefs, %d handoffs, %d job notices; want 1, 3 and at most %d", briefs, handoffs, len(jobs), fixtureJobs)
 	}
 	return len(jobs)
 }
