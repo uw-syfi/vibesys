@@ -139,3 +139,41 @@ def test_filter_skip_marked_respects_custom_marker(tmp_path: Path) -> None:
     t = _write(tmp_path / "t.j2", "{# custom-skip: profile_execution - reason #}")
 
     assert filter_skip_marked(t, {"profile_execution"}, skip_marker="custom-skip") == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("marked", "kept"),
+    [
+        ("profile_execution", "profile"),
+        ("identity", "id"),
+        ("runtime_notes", "runtime"),
+    ],
+)
+def test_filter_skip_marked_keeps_a_prefix_of_a_marked_name(
+    tmp_path: Path, marked: str, kept: str
+) -> None:
+    # A marker names exactly ``marked``; a different required name ``kept`` that
+    # is a prefix of it must not be swept up by the marker (word-boundary match).
+    t = _write(
+        tmp_path / "t.j2", f"{{# vs-prompts:unused: {marked} - reason #}}\n{{{{ objective }}}}"
+    )
+
+    assert filter_skip_marked(t, {kept, marked, "objective"}) == frozenset({kept, "objective"})
+
+
+def test_template_contract_still_flags_a_required_var_sharing_a_marked_name_prefix(
+    tmp_path: Path,
+) -> None:
+    # The template deliberately skips ``profile_execution`` but genuinely forgets
+    # ``profile``; the prefix overlap must not let the real omission pass silently.
+    t = _write(
+        tmp_path / "t.j2",
+        "{# vs-prompts:unused: profile_execution - remote execution never reaches this template #}\n"
+        "{{ objective }}",
+    )
+    contract = TemplateContract(required=frozenset({"profile", "profile_execution", "objective"}))
+
+    violations = contract.check([t], search_roots=(tmp_path,))
+
+    assert len(violations) == 1
+    assert violations[0].missing_vars == frozenset({"profile"})
