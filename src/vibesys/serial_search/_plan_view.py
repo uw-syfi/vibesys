@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from vibesys.profile_focus import FocusView
 
 _HISTORY_ROWS = 12
+_ATTRIBUTION_CHARS = 300
+"""How much of a judge's attribution one history row carries (claims are cut at 400)."""
 
 
 class RoundRow(Value):
@@ -40,6 +42,12 @@ class RoundRow(Value):
     metric: float | None = None
     unit: str | None = None
     delta_pct: float | None = None
+    gain: str | None = None
+    """Whether the reading beat its parent beyond noise, apart from the plan's bar."""
+    mechanism: str | None = None
+    """The judge's verdict on the plan's mechanism, apart from the gain."""
+    attribution: str = ""
+    """The judge's account of what produced the measured change."""
     retained: bool | None = None
     commit: str | None = None
 
@@ -153,6 +161,9 @@ def _row(record: RoundRecord) -> RoundRow:
         metric=record.perf_metric,
         unit=record.perf_unit,
         delta_pct=record.perf_delta_pct,
+        gain=record.perf_gain,
+        mechanism=record.mechanism_verdict,
+        attribution=(record.mechanism_attribution or "")[:_ATTRIBUTION_CHARS],
         retained=record.candidate_retained,
         commit=record.commit,
     )

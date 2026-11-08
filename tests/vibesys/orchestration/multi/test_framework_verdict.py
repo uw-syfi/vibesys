@@ -9,9 +9,13 @@ search recorded. Every story runs live and again with a restart after every step
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.architecture.decision_input_cases import cases, renderer
+from tests.support.prompt_context import registered_searches
 from tests.vibesys.orchestration.multi._host import JUDGE, PLANNER, config, reviewed
 from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
@@ -20,8 +24,12 @@ from tests.vibesys.vibesys_flows import across_restarts
 import vs_core.api as core
 from vibesys.hypothesis import ImplementerStatus, MechanismVerdict, RoundRecord
 from vibesys.orchestration.multi.models import ImplementerResponse
+from vibesys.serial_search.api import PlanPrompt, RoundRow
 from vs_core.api import RevisionRef
 from vs_sim.api.testing import examples
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from .test_stories import design, implement, judge, start
 
@@ -249,3 +257,65 @@ def test_a_judge_that_states_no_mechanism_records_it_as_untested() -> None:
     round_record = played_round(restarting=False, bar=1.0, ratio=1.2, noise=0.01)
     assert round_record.mechanism_verdict is MechanismVerdict.UNTESTED
     assert round_record.mechanism_attribution is None
+
+
+@pytest.mark.regression
+@across_restarts
+def test_the_next_designer_sees_the_gain_and_the_mechanism_of_a_round_apart(
+    *, restarting: bool
+) -> None:
+    """The history row the next designer reads carries all three verdicts of the round."""
+    attribution = "the new barrier primitive, not fewer barriers"
+    host = start(
+        config(max_rounds=2), restarting=restarting, comparisons={CANDIDATE: (1.04, 0.005)}
+    )
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply("h1", minimum_ratio=1.10))
+    implement(host, "implemented", CANDIDATE)
+    host.drain_until_turn(JUDGE)
+    host.run.reply(
+        host.run.expect_turn(role=JUDGE),
+        reviewed(passed=True, mechanism="refuted", mechanism_attribution=attribution),
+    )
+    host.drain_until_turn(PLANNER)
+    context = host.run.expect_turn(role=PLANNER).context
+    assert isinstance(context, PlanPrompt)
+
+    (row,) = context.history
+    assert (row.outcome, row.gain, row.mechanism) == ("disproven", "better", "refuted")
+    assert row.attribution == attribution
+
+
+def test_the_designers_history_states_a_gain_below_the_bar_and_a_refuted_mechanism(
+    tmp_path: Path,
+) -> None:
+    """The rendered row says the round beat its parent and what the judge credited."""
+    case = cases()["multi designer"]
+    search = next(item for item in registered_searches() if item.name == case.search)
+    row = RoundRow(
+        round_number=4,
+        hypothesis_id="h4",
+        passed=True,
+        official=True,
+        judge_verdict="pass",
+        outcome="disproven",
+        metric=8.34,
+        unit="kernel_latency_ms",
+        delta_pct=-0.7,
+        gain="better",
+        mechanism="refuted",
+        attribution="attributed-edit-z",
+    )
+    plain = row.model_copy(update={"gain": None, "mechanism": None, "attribution": ""})
+
+    def rendered(history: RoundRow) -> str:
+        context = case.context.model_copy(update={"history": (history,)})
+        root = tmp_path / history.hypothesis_id / str(history.mechanism)
+        root.mkdir(parents=True)
+        return renderer(search).render(root, context, subject=case.role, held=case.held)
+
+    text = rendered(row)
+    assert "outcome disproven, official 8.34 kernel_latency_ms (-0.7% vs its parent)" in text
+    assert ", beat its parent, mechanism refuted (judge: attributed-edit-z)" in text
+    without = rendered(plain)
+    assert "mechanism refuted" not in without
+    assert "beat its parent," not in without

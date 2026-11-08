@@ -23,7 +23,7 @@ tests, or launch benchmarks.
 {% if history %}
 - History of the last {{ history | length }} round(s){% if older_rounds %} ({{ older_rounds }} older not shown){% endif %}:
 {% for row in history %}
-  - round {{ row.round_number }}, `{{ row.hypothesis_id }}`: {{ 'passed' if row.passed else 'did not pass' }}, judge {{ row.judge_verdict }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.official and row.metric is not none %}, official {{ row.metric }}{% if row.unit %} {{ row.unit }}{% endif %}{% if row.delta_pct is not none %} ({{ '%+.1f'|format(row.delta_pct) }}% vs its parent){% endif %}{% elif not row.official %}, no official evaluation{% endif %}{% if row.retained is not none %}, checkpoint {{ 'retained' if row.retained else 'not retained' }}{% endif %}{% if row.commit %} at `{{ row.commit }}`{% endif %}{% if row.claim %}: {{ row.claim | indent(4) }}{% endif %}
+  - round {{ row.round_number }}, `{{ row.hypothesis_id }}`: {{ 'passed' if row.passed else 'did not pass' }}, judge {{ row.judge_verdict }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.official and row.metric is not none %}, official {{ row.metric }}{% if row.unit %} {{ row.unit }}{% endif %}{% if row.delta_pct is not none %} ({{ '%+.1f'|format(row.delta_pct) }}% vs its parent){% endif %}{% if row.gain in ('better', 'worse', 'within_noise') %}, {{ {'better': 'beat', 'worse': 'fell behind', 'within_noise': 'within noise of'}[row.gain] }} its parent{% endif %}{% elif not row.official %}, no official evaluation{% endif %}{% if row.mechanism %}, mechanism {{ row.mechanism }}{% if row.attribution %} (judge: {{ row.attribution | indent(4) }}){% endif %}{% endif %}{% if row.retained is not none %}, checkpoint {{ 'retained' if row.retained else 'not retained' }}{% endif %}{% if row.commit %} at `{{ row.commit }}`{% endif %}{% if row.claim %}: {{ row.claim | indent(4) }}{% endif %}
 
 {% endfor %}
 {% else %}
@@ -105,6 +105,15 @@ only when it is nearly empty.
 
 Mirror roadmap parking or abandonment in {{ reply.hypothesis_updates }}; structured
 updates are authoritative and apply only to completed hypotheses.
+
+Read each history row's three verdicts apart. The outcome answers the plan's bar;
+whether the round beat its parent answers whether the change gained at all; the
+judge's mechanism answers whether it worked for the planned reason. A round that
+beat its parent with outcome `disproven` or `inconclusive` is a real gain smaller
+than forecast, not a failed direction. A refuted mechanism with a gain credits the
+change the judge attributes it to: give that change its own roadmap item rather than
+abandoning the area. Abandon a direction only when its rounds neither beat their
+parents nor show its mechanism at work.
 
 Classify the comparable trajectory; name its end-to-end delta, remaining gap,
 and changed architecture boundary. After repeated noise, regressions, or
