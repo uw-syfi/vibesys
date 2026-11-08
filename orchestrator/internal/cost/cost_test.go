@@ -560,6 +560,44 @@ func TestEachGroupServesItsTokenTotal(t *testing.T) {
 	})
 }
 
+// Spend, like View, is of the turns and not of how they arrived: the window a check-in covers is
+// read from a fresh ledger that readTurns fills a page at a time, in the order the store returns
+// them (by start, not by end), so two turns whose spans overlap -- ordinary once a run has more than
+// one agent live at once -- can reach Add() in either order relative to each other. Spend must cost
+// the same regardless, as View already does, since nothing about a window's own cost should depend
+// on an accident of how the store happened to page its turns. A float sum is not associative, so
+// this only holds if Spend sums in a canonical order; these costs are ordinary provider amounts, not
+// the dyadic fractions the rest of this file draws to keep a sum exact in any order.
+func TestSpendDoesNotDependOnTheOrderTurnsArrived(t *testing.T) {
+	agent := core.Agent{ID: "agent-1", Run: "run-1", Role: core.RoleWorker}
+	costs := []float64{0.0037, 1.23, 9.99, 0.17, 0.4, 2.75, 0.0089, 5.5, 3.14, 0.009, 7.77, 0.123}
+	turns := make([]core.Turn, len(costs))
+	for i, c := range costs {
+		cost := c
+		turns[i] = core.Turn{
+			ID: core.TurnID(fmt.Sprintf("t%d", i)), Agent: agent.ID, Ordinal: uint32(i), Status: core.TurnCompleted,
+			Usage: core.Usage{CostUSD: &cost}, EndedAt: start.Add(time.Duration(i+1) * time.Minute),
+		}
+	}
+	spendOf := func(order []int) float64 {
+		var l cost.Ledger
+		l.Agent(agent)
+		for _, i := range order {
+			l.Add(turns[i], agent)
+		}
+		return costOf(l.Spend(start, start.Add(time.Hour)).Usage.CostUSD)
+	}
+	want := spendOf(inOrder(len(turns)))
+	for seed := range uint64(seeds) {
+		r := rand.New(rand.NewPCG(seed, seed^0x2545f4914f6cdd1d))
+		order := inOrder(len(turns))
+		r.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
+		if got := spendOf(order); got != want {
+			t.Fatalf("seed %d: spend %v for arrival order %v, want %v regardless of order", seed, got, order, want)
+		}
+	}
+}
+
 // Counts that would overflow stop at the largest count instead of wrapping to a small number.
 func TestTotalTokensStopsAtTheLargestCount(t *testing.T) {
 	big := uint64(math.MaxUint64 - 1)

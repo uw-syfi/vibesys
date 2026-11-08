@@ -370,7 +370,13 @@ func (l *Ledger) breakdown(start, asOf time.Time) Breakdown {
 // the window a check-in covers: a turn that ended exactly at until is in the next window, so windows
 // that follow one another count every turn once, and the spend of a span is the spend of its halves.
 // A turn is counted when it ended, as View's series counts it.
+//
+// It orders the entries first, as View does, so that the spend is a function of the turns and not of
+// the order they arrived: a float sum is not associative, so leaving the entries in whatever order
+// the store happened to page them would let the same turns cost a hair more or less from one read to
+// the next. Ordering them canonically makes the sum the same every time, the way the view's is.
 func (l *Ledger) Spend(from, until time.Time) core.Spend {
+	l.order()
 	roles := map[core.AgentRole]*tally{}
 	var total tally
 	for _, e := range l.entries {
