@@ -30,9 +30,10 @@ func (s State) Violations() []string {
 		}
 	}
 	for _, run := range s.runs {
-		if subagents[run.ID] > run.FanoutLimit {
-			bad("run %s has %d live subagents over its limit of %d", run.ID, subagents[run.ID], run.FanoutLimit)
-		}
+		// Not here: whether a spawn or a resume was admitted at or over the fan-out limit. A run that an
+		// update lowered the limit of has more live subagents than it, which is allowed, so no state says
+		// whether an agent was let in wrongly; the simulation's monitor checks each admission from the log.
+		s.leadChangeBreaches(run, bad)
 		if run.FinalReported && !run.StalledSince.IsZero() {
 			bad("run %s has given its final report and is stalled since %v", run.ID, run.StalledSince)
 		}
@@ -80,6 +81,27 @@ func (s State) Violations() []string {
 		}
 	}
 	return found
+}
+
+// leadChangeBreaches says how a run's wait to change its lead disagrees with the run: it waits only in
+// a run that is live, for a spec other than the lead's that the run allows, and the lead of a live run
+// stops only to be replaced.
+func (s State) leadChangeBreaches(run Run, bad func(format string, args ...any)) {
+	lead, ok := s.agents[run.Lead]
+	if run.PendingLead != nil {
+		switch {
+		case !run.Status.Live():
+			bad("run %s is %s and still waits to change its lead to %+v", run.ID, run.Status, *run.PendingLead)
+		case ok && lead.Spec == *run.PendingLead:
+			bad("run %s waits to change its lead to the spec it has: %+v", run.ID, lead.Spec)
+		case !slices.Contains(run.Allowed, AgentChoice{Harness: run.PendingLead.Harness, Model: run.PendingLead.Model}):
+			bad("run %s waits to change its lead to %+v, outside what it allows: %v", run.ID, *run.PendingLead, run.Allowed)
+		}
+	}
+	stopping := lead.Stop == StopInterrupting || lead.Stop == StopClosing
+	if ok && run.Status.Live() && stopping && run.PendingLead == nil {
+		bad("the lead %s of live run %s is stopping and no other waits to take over", lead.ID, run.ID)
+	}
 }
 
 func (s State) liveLead(run Run) uint32 {
