@@ -26,6 +26,13 @@ type Config = pb.HostConfig
 // IdentifyResponse is what a host says it is, likewise.
 type IdentifyResponse = pb.IdentifyResponse
 
+// ReleaseRelation is how a running host's release compares to the client that asked, as the host
+// reports it, for the programs that read it off an IdentifyResponse and pass it on.
+type ReleaseRelation = pb.ReleaseRelation
+
+// ReleaseRelationHostNewer says the running host is a newer release than the client that asked.
+const ReleaseRelationHostNewer = pb.ReleaseRelation_RELEASE_RELATION_HOST_NEWER
+
 // fileName is the configuration's place in a root.
 const fileName = "host-config.json"
 
