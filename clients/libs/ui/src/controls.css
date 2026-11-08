@@ -151,7 +151,6 @@
 .vs-action-panel-details {
   /* Tall details scroll here, so the bar and its action never leave the window. */
   max-height: 32dvh;
-  overflow-y: auto;
   padding: var(--space-2) var(--space-5);
   border-bottom: var(--hairline) solid var(--line);
 }

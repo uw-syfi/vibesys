@@ -173,6 +173,10 @@ type StartChecks interface {
 	// is refused: one with no commit, or one whose task is not committed. It may be called for every
 	// start and must be cheap.
 	CheckStart(repository, task string) (canonical string, err error)
+	// CheckRepository is the part of CheckStart that needs the repository alone, so a client can ask
+	// while the task is still being typed: it refuses a daemon that cannot launch and a repository
+	// that is not an absolute path to the root of a git work tree, and returns the canonical form.
+	CheckRepository(repository string) (canonical string, err error)
 }
 
 // StartRefusal says why a start was refused, in words that name the offending path or setting.

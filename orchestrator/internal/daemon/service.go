@@ -216,6 +216,31 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	return &pb.DispatchResponse{Receipt: wire.ReceiptMessage(answer.Receipt, answer.Sequence)}, nil
 }
 
+// CheckRepository answers whether a start in the repository passes the first part of the check a
+// StartRun makes, without making a run, an event or a receipt. A refusal is an answer, not a failure
+// of the call: the operator typed a path and is told what is wrong with it.
+func (s *Service) CheckRepository(ctx context.Context, req *pb.CheckRepositoryRequest) (*pb.CheckRepositoryResponse, error) {
+	if err := wire.Validate(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	caller, err := s.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := operatorOnly(caller, "CheckRepository"); err != nil {
+		return nil, err
+	}
+	_, err = s.Starts.CheckRepository(req.GetRepository())
+	var refusal *StartRefusal
+	switch {
+	case err == nil:
+		return &pb.CheckRepositoryResponse{}, nil
+	case errors.As(err, &refusal):
+		return &pb.CheckRepositoryResponse{Refusal: &pb.StartRefusal{Reason: refusal.Reason, NotReady: refusal.NotReady}}, nil
+	}
+	return nil, status.Error(codes.Unavailable, err.Error())
+}
+
 // checkStart refuses a new StartRun whose repository, task or launcher cannot work, before the
 // command reaches Decide, and names its repository in canonical form, so that the one-run rule of
 // Decide holds however the repository was spelled. The command's digest stays that of what the

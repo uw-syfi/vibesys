@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import {ScrollArea} from './scroll-area.js';
 
 const DEFAULT_WIDTH = 264;
 const MIN_WIDTH = 180;
@@ -74,7 +75,9 @@ export function AppFrame(props: {
         {props.navPinned === undefined ? null : (
           <div className="vs-app-nav-pinned">{props.navPinned}</div>
         )}
-        <div className="vs-app-nav-top">{props.nav}</div>
+        <ScrollArea kind="column" className="vs-app-nav-top">
+          {props.nav}
+        </ScrollArea>
         {props.footer === undefined ? null : (
           <div className="vs-app-nav-footer">{props.footer}</div>
         )}

@@ -37,5 +37,6 @@ describe('the window chrome', () => {
     const source = await readFile(new URL('./index.ts', import.meta.url), 'utf8');
     expect(source.match(/new BrowserWindow\(/g)).toHaveLength(1);
     expect(source).toContain('...windowChromeOptions(process.platform)');
+    expect(source).toContain('...MINIMUM_WINDOW');
   });
 });

@@ -70,7 +70,6 @@
   gap: var(--space-3);
   width: calc(var(--column-aside) + var(--space-8));
   max-width: calc(100% - 2 * var(--space-4));
-  overflow-y: auto;
   pointer-events: none;
 }
 .vs-toast {
@@ -203,8 +202,8 @@
 /* A modal sits in the top layer, so percentages are of the window. */
 .vs-dialog {
   max-width: calc(100% - 2 * var(--space-6));
-  max-height: calc(100% - 2 * var(--space-7));
-  overflow-y: auto;
+  /* The browser's own `dialog` scrolls (`overflow: auto`); the card inside it is the scroll area. */
+  overflow: visible;
   padding: 0;
   border: none;
   background: transparent;
@@ -215,6 +214,8 @@
 }
 .vs-dialog-card {
   box-sizing: border-box;
+  /* A modal sits in the top layer, so the window's height is the viewport's. */
+  max-height: calc(100dvh - 2 * var(--space-7));
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -245,7 +246,6 @@
 
 .vs-table-scroll {
   container-type: inline-size;
-  overflow-x: auto;
   min-width: 0;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);

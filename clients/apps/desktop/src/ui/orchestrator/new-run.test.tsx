@@ -7,8 +7,8 @@ import {
   ReceiptSchema,
   Refusal,
 } from '@vibesys/orchestrator-proto';
-import {act} from 'react';
-import type {CommandProgress} from '../../state/index.js';
+import {act, useState} from 'react';
+import type {CommandProgress, RepositoryAnswer, RepositoryChecked} from '../../state/index.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
 import {NewRun} from './new-run.js';
 import type {StartRunRequest} from './start-draft.js';
@@ -28,9 +28,14 @@ const catalog = (allowedModels: string[]) =>
     ],
   });
 
+const PASSED: RepositoryChecked = {
+  repository: '/work/decode-service',
+  answer: {_tag: 'Passed'},
+};
+
 const HOSTS: readonly StartHost[] = [
-  {key: 'local', label: 'This Mac', models: null},
-  {key: 'ssh:gpu-cluster-1', label: 'gpu-cluster-1', models: null},
+  {key: 'local', label: 'This Mac', models: null, repositoryChecked: undefined},
+  {key: 'ssh:gpu-cluster-1', label: 'gpu-cluster-1', models: null, repositoryChecked: undefined},
 ];
 
 const open = (
@@ -44,6 +49,7 @@ const open = (
       hosts={hosts}
       progress={progress}
       start={(host, request) => started.push({host, request})}
+      checkRepository={() => undefined}
       retry={() => undefined}
       openRun={(host, runId) => opened.push({host, runId})}
     />,
@@ -100,7 +106,11 @@ const optionsOf = (select: HTMLSelectElement): string[] =>
 
 /** Opens the form and fills the two fields Start needs. */
 const ready = (hosts: readonly StartHost[] = HOSTS, progress?: CommandProgress) => {
-  const opened = open(hosts, progress);
+  // The host has said the path is a work tree, as a host does for the path typed below.
+  const opened = open(
+    hosts.map(host => ({...host, repositoryChecked: PASSED})),
+    progress,
+  );
   opened.screen.press(opened.screen.control('New run'));
   type(repository(opened.screen), '/work/decode-service');
   type(fieldOf(opened.screen, 'Task'), 'decode');
@@ -138,7 +148,12 @@ describe('the New run entry', () => {
 describe('the Start run form’s model control', () => {
   it('offers only the models the host allows, the first already chosen, and starts on it', () => {
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: catalog(['model-b', 'model-d', 'model-a'])},
+      {
+        key: 'local',
+        label: 'This Mac',
+        models: catalog(['model-b', 'model-d', 'model-a']),
+        repositoryChecked: undefined,
+      },
     ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
     // The default lead tool runs model-d of the allowed ones, and model-b and model-a are the other's.
@@ -153,7 +168,12 @@ describe('the Start run form’s model control', () => {
 
   it('follows the lead tool: the options and the model started on change with it', () => {
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: catalog(['model-b', 'model-d', 'model-a'])},
+      {
+        key: 'local',
+        label: 'This Mac',
+        models: catalog(['model-b', 'model-d', 'model-a']),
+        repositoryChecked: undefined,
+      },
     ]);
     choose(fieldOf<HTMLSelectElement>(screen, 'Lead tool'), 'codex');
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
@@ -166,7 +186,9 @@ describe('the Start run form’s model control', () => {
   });
 
   it('offers the tool’s own models and its default on a host that allows all, and starts on none', () => {
-    const {screen, started} = ready([{key: 'local', label: 'This Mac', models: catalog([])}]);
+    const {screen, started} = ready([
+      {key: 'local', label: 'This Mac', models: catalog([]), repositoryChecked: undefined},
+    ]);
     const model = fieldOf<HTMLSelectElement>(screen, 'Model');
     expect(optionsOf(model)).toEqual(['', 'model-c', 'model-d']);
     expect(model.value).toBe('');
@@ -177,7 +199,7 @@ describe('the Start run form’s model control', () => {
 
   it('cannot start when the host allows no model for the tool, and says so', () => {
     const {screen, started} = ready([
-      {key: 'local', label: 'This Mac', models: catalog(['model-a'])},
+      {key: 'local', label: 'This Mac', models: catalog(['model-a']), repositoryChecked: undefined},
     ]);
     const start = screen.control('Start run');
     expect(start.getAttribute('aria-disabled') ?? String(start.hasAttribute('disabled'))).toBe(
@@ -191,7 +213,9 @@ describe('the Start run form’s model control', () => {
 
   it('cannot start when the host’s settings cannot be read', () => {
     const unreadable = create(ModelCatalogSchema, {unreadablePolicy: true});
-    const {screen, started} = ready([{key: 'local', label: 'This Mac', models: unreadable}]);
+    const {screen, started} = ready([
+      {key: 'local', label: 'This Mac', models: unreadable, repositoryChecked: undefined},
+    ]);
     screen.press(screen.control('Start run'));
     expect(started).toEqual([]);
     expect(screen.text()).toContain('settings cannot be read');
@@ -238,6 +262,113 @@ describe('the Start run form’s refusal', () => {
     expect(text).toContain(
       'Start refused \u00b7 Model model-x not allowed \u00b7 allowed: model-a, model-b',
     );
+    screen.unmount();
+  });
+});
+
+/**
+ * The form over a host that answers about repository paths the way the connected app does: a
+ * question about a path is answered when `answers` has the reply for it, and the form is handed the
+ * latest answer with the path it was about. A path `answers` does not know stays unanswered.
+ */
+const withHostAnswers = (answers: Readonly<Record<string, RepositoryAnswer>>) => {
+  const asked: {host: string; repository: string}[] = [];
+  const started: StartRunRequest[] = [];
+  function Connected(): ReturnType<typeof NewRun> {
+    const [checked, setChecked] = useState<RepositoryChecked | undefined>(undefined);
+    return (
+      <NewRun
+        hosts={HOSTS.map(host => ({...host, repositoryChecked: checked}))}
+        progress={undefined}
+        start={(_host, request) => started.push(request)}
+        checkRepository={(host, repository) => {
+          asked.push({host, repository});
+          const answer = answers[repository.trim()];
+          if (answer !== undefined) setChecked({repository: repository.trim(), answer});
+        }}
+        retry={() => undefined}
+        openRun={() => undefined}
+      />
+    );
+  }
+  const screen = mount(<Connected />);
+  screen.press(screen.control('New run'));
+  type(fieldOf(screen, 'Task'), 'decode');
+  return {screen, asked, started};
+};
+
+const NOT_A_TREE = 'repository /plain is not a git work tree: it has no .git';
+
+describe('the Start run form’s repository path as it is typed', () => {
+  it('asks the host about each path typed, and again when the host is changed', () => {
+    const {screen, asked} = withHostAnswers({});
+    type(repository(screen), '/plain');
+    type(repository(screen), '/plain/sub');
+    choose(fieldOf<HTMLSelectElement>(screen, 'Host'), 'ssh:gpu-cluster-1');
+    expect(asked).toEqual([
+      {host: 'local', repository: '/plain'},
+      {host: 'local', repository: '/plain/sub'},
+      {host: 'ssh:gpu-cluster-1', repository: '/plain/sub'},
+    ]);
+    screen.unmount();
+  });
+
+  it('shows the host’s refusal under the field and keeps Start from sending', () => {
+    const {screen, started} = withHostAnswers({'/plain': {_tag: 'Refused', reason: NOT_A_TREE}});
+    type(repository(screen), '/plain');
+    const field = repository(screen);
+    const error = field.getAttribute('aria-describedby');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(
+      [...(error?.split(' ') ?? [])].some(
+        id => screen.container.querySelector(`#${id}`)?.textContent === NOT_A_TREE,
+      ),
+    ).toBe(true);
+    const start = screen.control('Start run');
+    expect(start.hasAttribute('disabled') || start.getAttribute('aria-disabled') === 'true').toBe(
+      true,
+    );
+    screen.press(start);
+    expect(started).toEqual([]);
+    screen.unmount();
+  });
+
+  it('keeps Start disabled until the host has answered for the path now in the field', () => {
+    const {screen, started} = withHostAnswers({'/work/ok': {_tag: 'Passed'}});
+    type(repository(screen), '/work/o');
+    screen.press(screen.control('Start run'));
+    expect(started).toEqual([]);
+    type(repository(screen), '/work/ok');
+    screen.press(screen.control('Start run'));
+    expect(started).toHaveLength(1);
+    expect(started[0]?.repository).toBe('/work/ok');
+    // An answer about the earlier spelling is not an answer for a new one.
+    type(repository(screen), '/work/ok2');
+    screen.press(screen.control('Start run'));
+    expect(started).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('clears the error once the path is corrected, and then starts', () => {
+    const {screen, started} = withHostAnswers({
+      '/plain': {_tag: 'Refused', reason: NOT_A_TREE},
+      '/repo': {_tag: 'Passed'},
+    });
+    type(repository(screen), '/plain');
+    expect(screen.text()).toContain(NOT_A_TREE);
+    type(repository(screen), '/repo');
+    expect(screen.text()).not.toContain(NOT_A_TREE);
+    expect(repository(screen).getAttribute('aria-invalid')).not.toBe('true');
+    screen.press(screen.control('Start run'));
+    expect(started).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('does not hold a path back when the host could not say', () => {
+    const {screen, started} = withHostAnswers({'/work/x': {_tag: 'Unasked'}});
+    type(repository(screen), '/work/x');
+    screen.press(screen.control('Start run'));
+    expect(started).toHaveLength(1);
     screen.unmount();
   });
 });

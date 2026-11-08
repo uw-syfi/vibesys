@@ -17,8 +17,6 @@
   margin: 0 auto;
   padding: 0 0 var(--space-6);
   list-style: none;
-  overflow-x: hidden;
-  overflow-y: auto;
   /* The measure: rows never run wider than a page of text reads well, and share its left edge. */
   max-width: var(--content-narrow);
 }

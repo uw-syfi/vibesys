@@ -126,7 +126,6 @@
   max-height: var(--log-sm);
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  overflow: auto;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
   background: var(--log-bg);
@@ -155,7 +154,6 @@
   margin: 0;
   padding: 0 var(--space-4);
   list-style: none;
-  overflow: auto;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);

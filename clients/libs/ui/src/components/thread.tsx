@@ -7,6 +7,7 @@ import {
   type ToolState,
 } from './message.js';
 import {NewBelow} from './new-below.js';
+import {ScrollArea} from './scroll-area.js';
 import {type ReplyField, StructuredReply} from './structured-reply.js';
 import {Text} from './text.js';
 import {useWindowed} from './windowing.js';
@@ -175,11 +176,12 @@ export function Thread(props: {
       data-size={props.size ?? 'default'}
       data-plain={props.plain === true || undefined}
     >
-      <ul
+      <ScrollArea
+        as="ul"
+        kind="feed"
         ref={win.scroller}
         className="vs-thread-pane"
         aria-label={props.label}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
         onScroll={win.scrolled}
         onWheel={win.touched}
@@ -204,7 +206,7 @@ export function Thread(props: {
           );
         })}
         <li aria-hidden="true" className="vs-thread-gap" style={{height: win.after}} />
-      </ul>
+      </ScrollArea>
       {win.behind ? (
         <span className="vs-thread-jump">
           <NewBelow text="New below" press={win.jump} />

@@ -107,7 +107,10 @@ const afterFailure = (w: Wiring, error: AppError, failures: number) =>
       yield* Queue.take(w.retries);
       return 0;
     }
-    const delay = yield* reconnectDelay(w.policy, failures);
+    // A call that stalled already waited out its window and the host is up, only slow: the wait
+    // starts from the shortest step however often it stalled, so a slow host is retried promptly
+    // and the growing wait stays for a host that fails at once.
+    const delay = yield* reconnectDelay(w.policy, error._tag === 'DeadlineExceeded' ? 1 : failures);
     const now = yield* Clock.currentTimeMillis;
     yield* SubscriptionRef.set(w.state, {
       _tag: 'Waiting',

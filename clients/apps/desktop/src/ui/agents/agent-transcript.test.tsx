@@ -10,6 +10,7 @@ import {
   transcript,
 } from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {TEST_CLOCK} from '../test-display-clock.js';
 import {AgentTranscript, type HistoryAccess, itemsOf} from './agent-transcript.js';
 import {agentLabel} from './labels.js';
 
@@ -34,6 +35,7 @@ function contextOf(state: OrchestratorState, agentId: string, history: HistoryAc
   return {
     agentId,
     host: 'host-a',
+    clock: TEST_CLOCK,
     labelOf: (id: string) => {
       const name = names.get(id);
       return name === undefined ? 'An agent' : agentLabel(name);

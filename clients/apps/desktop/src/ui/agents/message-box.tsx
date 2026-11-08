@@ -2,10 +2,10 @@ import {type Agent, Delivery, type Message, type Receipt} from '@vibesys/orchest
 import {Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {type CommandProgress, messageIs, ms} from '../../state/index.js';
+import {useDisplayClock} from '../display-clock.js';
 import {CommandLine} from '../orchestrator/command-line.js';
 import {
   deliveryWord,
-  formatClock,
   harnessWord,
   refusalWord,
   rejectionWord,
@@ -39,11 +39,12 @@ function SentMessage(props: {
   readonly atMs: number | null;
   readonly line: {readonly label: string; readonly tone: Word['tone']};
 }): JSX.Element {
+  const clock = useDisplayClock();
   return (
     <Row gap="space-3" wrap>
       <Text tone="muted">{props.text}</Text>
       <Chip label={props.line.label} tone={props.line.tone} dot />
-      {props.atMs === null ? null : <Text variant="small">{formatClock(props.atMs)}</Text>}
+      {props.atMs === null ? null : <Text variant="small">{clock.time24(props.atMs)}</Text>}
     </Row>
   );
 }

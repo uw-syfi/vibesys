@@ -1,7 +1,12 @@
 import type {ModelCatalog} from '@vibesys/orchestrator-proto';
 import {Button, Field, Row, Select, Stack, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {CommandProgress} from '../../state/index.js';
+import {
+  type CommandProgress,
+  type RepositoryChecked,
+  type RepositoryVerdict,
+  repositoryVerdict,
+} from '../../state/index.js';
 import {CommandLine} from './command-line.js';
 import {
   DEFAULT_FANOUT,
@@ -24,6 +29,8 @@ export interface StartHost {
   readonly label: string;
   /** What the host said it runs agents on and allows, or null before it has said. */
   readonly models: ModelCatalog | null;
+  /** The host's latest answer about a repository path, with the path it was about. */
+  readonly repositoryChecked: RepositoryChecked | undefined;
 }
 
 const timeWord = (minutes: number): string =>
@@ -67,6 +74,36 @@ function LimitFields(props: {
   );
 }
 
+/** The repository path, with the host's refusal of it under the field. */
+function RepositoryField(props: {
+  readonly value: string;
+  readonly verdict: RepositoryVerdict;
+  readonly change: (repository: string) => void;
+}): JSX.Element {
+  const {verdict} = props;
+  return (
+    <Field
+      label="Repository"
+      help="The path of the repository on the host."
+      {...(verdict._tag === 'Invalid' ? {error: verdict.reason} : {})}
+    >
+      <TextInput value={props.value} change={props.change} placeholder="/path/to/repository" mono />
+    </Field>
+  );
+}
+
+/** Why Start cannot be pressed yet and whether that is said aloud, or null: sending, what is missing, the host's word on the path. */
+function startBlock(
+  sending: boolean,
+  missing: string | null,
+  verdict: RepositoryVerdict,
+): {readonly reason: string; readonly quiet: boolean} | null {
+  if (sending) return {reason: 'Sending.', quiet: true};
+  if (missing !== null) return {reason: missing, quiet: false};
+  if (verdict._tag === 'Invalid') return {reason: 'Fix the repository.', quiet: true};
+  return verdict._tag === 'Checking' ? {reason: 'Checking.', quiet: true} : null;
+}
+
 /**
  * Start a run: the host, the repository and task, how many agents at most, the lead's tool, and
  * optional steering. The draft is the caller's, so it stays filled in after a press (a run that was
@@ -83,6 +120,8 @@ export function StartRunForm(props: {
   /** What the last press of Start came to, or undefined before any. */
   readonly progress: CommandProgress | undefined;
   readonly start: (host: string, request: StartRunRequest) => void;
+  /** The repository path in the field is now `repository` on `host`: ask the host about it. */
+  readonly checkRepository: (host: string, repository: string) => void;
   /** Send the last Start again, under the id it already has. */
   readonly retry: () => void;
   /** Show the run a Start created. */
@@ -94,8 +133,11 @@ export function StartRunForm(props: {
   const choices = host === undefined ? NO_CATALOG : modelChoices(host.models, LEADS[draft.lead]);
   const model = startModel(draft.model, choices);
   const missing = host === undefined ? 'No host is connected.' : missingFrom(draft, choices);
-  const sending = props.progress?._tag === 'Sending';
-  const reason = sending ? 'Sending.' : missing;
+  const verdict = repositoryVerdict(draft.repository, host?.repositoryChecked);
+  const block = startBlock(props.progress?._tag === 'Sending', missing, verdict);
+  const askAbout = (repository: string): void => {
+    if (host !== undefined) props.checkRepository(host.key, repository);
+  };
   return (
     <Stack gap="space-3">
       {props.hosts.length > 1 ? (
@@ -103,19 +145,22 @@ export function StartRunForm(props: {
           <Select
             value={host?.key ?? ''}
             options={props.hosts.map(option => ({value: option.key, label: option.label}))}
-            change={props.choose}
+            change={key => {
+              props.choose(key);
+              props.checkRepository(key, draft.repository);
+            }}
             mono
           />
         </Field>
       ) : null}
-      <Field label="Repository" help="The path of the repository on the host.">
-        <TextInput
-          value={draft.repository}
-          change={repository => set({repository})}
-          placeholder="/path/to/repository"
-          mono
-        />
-      </Field>
+      <RepositoryField
+        value={draft.repository}
+        verdict={verdict}
+        change={repository => {
+          set({repository});
+          askAbout(repository);
+        }}
+      />
       <Field label="Task" help="The task to optimize, as named in the repository.">
         <TextInput value={draft.task} change={task => set({task})} placeholder="task" mono />
       </Field>
@@ -165,10 +210,10 @@ export function StartRunForm(props: {
           label="Start run"
           variant="primary"
           press={() => {
-            if (host !== undefined && missing === null)
+            if (host !== undefined && block === null)
               props.start(host.key, startRunRequest(draft, choices));
           }}
-          {...(reason === null ? {} : {disabledReason: reason, quietReason: sending})}
+          {...(block === null ? {} : {disabledReason: block.reason, quietReason: block.quiet})}
         />
       </Row>
       <CommandLine progress={props.progress} done="Start" retry={props.retry} />

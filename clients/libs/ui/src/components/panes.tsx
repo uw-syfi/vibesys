@@ -1,4 +1,5 @@
 import {type JSX, type ReactNode, useCallback, useId} from 'react';
+import {ScrollArea} from './scroll-area.js';
 import {Text} from './text.js';
 
 /** Panes side by side, filling the screen's body. */
@@ -81,9 +82,15 @@ export function Pane(props: {
           )}
         </header>
       )}
-      <div className="vs-pane-body" data-fixed={props.fixed || undefined}>
-        {props.children}
-      </div>
+      {props.fixed === true ? (
+        <div className="vs-pane-body" data-fixed="">
+          {props.children}
+        </div>
+      ) : (
+        <ScrollArea kind="column" className="vs-pane-body">
+          {props.children}
+        </ScrollArea>
+      )}
     </section>
   );
 }

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path"
 	"slices"
@@ -188,6 +189,15 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 		return invalid("%s %q gives no kubernetes resource", n.kind, kind)
 	case p.GetApptainer().GetAllocationLimitSeconds() > 0 && p.GetApptainer().GetIdleReleaseSeconds() == 0:
 		return invalid("%s allocation_limit_seconds: it limits reused allocations, and idle_release_seconds is unset, so none is reused", n.apptainer)
+	case !apptainer && p.GetSlurm().GetMaxTimeSeconds() > 0:
+		// The slurm kind's srun jobs are not capped by it: a cap that is quietly ignored would let a
+		// job ask for more than the site grants.
+		return invalid("%s max_time_seconds: only %s \"apptainer\" caps its allocations by it", n.slurm, n.kind)
+	case math.Mod(p.GetSlurm().GetMaxTimeSeconds(), 60) != 0:
+		return invalid("%s max_time_seconds = %v: Slurm counts a time limit in whole minutes; give a multiple of 60", n.slurm, p.GetSlurm().GetMaxTimeSeconds())
+	case p.GetSlurm().GetMaxTimeSeconds() > 0 && p.GetApptainer().GetAllocationLimitSeconds() > p.GetSlurm().GetMaxTimeSeconds():
+		return invalid("%s allocation_limit_seconds = %v is longer than %s max_time_seconds = %v, the longest allocation the cluster grants; lower it, or leave it unset for max_time_seconds",
+			n.apptainer, p.GetApptainer().GetAllocationLimitSeconds(), n.slurm, p.GetSlurm().GetMaxTimeSeconds())
 	case pyxis && p.GetApptainer().GetProgram() != "":
 		// The pyxis runtime runs no apptainer program on the nodes, and converts nothing on this
 		// machine: a setting of the other runtime would be quietly ignored.

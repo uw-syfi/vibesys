@@ -6,6 +6,13 @@
  * custom properties on its root (`rail.css`), which full screen sets to nothing.
  */
 
+/**
+ * The smallest window the app is laid out for, in CSS pixels. Every screen fits it with no box
+ * scrolling the wrong way, and the layout suites (`tools/e2e/scroll-audit.mts`) start their sweep of
+ * window sizes here, so a screen is held to every size a person can drag the window to.
+ */
+export const MINIMUM_WINDOW = {minWidth: 480, minHeight: 600} as const;
+
 /** What the controls cover, in CSS pixels. */
 export interface WindowChrome {
   readonly startWidth: number;

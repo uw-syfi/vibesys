@@ -240,6 +240,28 @@ describe('the machine stats feed', () => {
       }),
   );
 
+  it.effect('earns back its backoff from when a stream first synced, whatever comes after', () =>
+    Effect.gen(function* () {
+      // Four samplers fail at once, so a fifth failure in a row would wait 4s to 8s. The fifth
+      // stream holds for a minute, then sends a second `Synced` (which the fold ignores) and fails.
+      const held = steadyStream(() => TWO_GPUS, 6).slice(0, -1);
+      const h = yield* harness(nth => {
+        const failure = refusedFrame(TopicFailureCode.SOURCE_FAILED);
+        if (nth < 4) return [failure];
+        return nth === 4 ? [...held, SYNCED_FRAME, failure] : steadyStream(() => TWO_GPUS, 10);
+      });
+      h.mount(h.session.machine.watch);
+      for (let step = 0; step < 400 && topicCalls(h)[4]?.open !== false; step += 1) {
+        yield* h.elapse(0.25, 0.25);
+      }
+      expect(topicCalls(h)[4]?.open).toBe(false);
+      // A stream that held for a minute starts the count over: the next waits at most 0.5s.
+      yield* h.elapse(1);
+      expect(topicCalls(h)).toHaveLength(6);
+      expect(yield* view(h)).toMatchObject({_tag: 'Shown', stale: null});
+    }),
+  );
+
   it.effect('shows a host built before the topic as unsupported, and leaves its link up', () =>
     Effect.gen(function* () {
       // No wrap: the daemon's recording answers the topic as a method it does not know.

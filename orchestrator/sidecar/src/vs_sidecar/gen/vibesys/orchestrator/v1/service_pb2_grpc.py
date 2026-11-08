@@ -76,6 +76,11 @@ class OrchestratorServiceStub(object):
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.FromString,
                 _registered_method=True)
+        self.CheckRepository = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/CheckRepository',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.FromString,
+                _registered_method=True)
         self.WatchHostCost = channel.unary_stream(
                 '/vibesys.orchestrator.v1.OrchestratorService/WatchHostCost',
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchHostCostRequest.SerializeToString,
@@ -147,6 +152,16 @@ class OrchestratorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CheckRepository(self, request, context):
+        """Whether a run could start in this repository, answered by the part of the check a StartRun dispatch
+        makes that needs the repository alone (an absolute path that exists and is the root of a git work
+        tree, then that the host can launch agents at all), without starting or recording anything. For the operator only; the task is not looked at, so a
+        client can ask while its operator is still filling in the rest.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def WatchHostCost(self, request, context):
         """What every run the host holds has cost, live and ended: the whole host cost view, then the whole
         view again each time any run's cost changes. The host works it out, so the client sums nothing.
@@ -197,6 +212,11 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.WatchRunCost,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.SerializeToString,
+            ),
+            'CheckRepository': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckRepository,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.SerializeToString,
             ),
             'WatchHostCost': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchHostCost,
@@ -422,6 +442,33 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckRepository(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/CheckRepository',
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.CheckRepositoryResponse.FromString,
             options,
             channel_credentials,
             insecure,
