@@ -135,6 +135,63 @@ func (OffersUnknownReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_placement_proto_rawDescGZIP(), []int{1}
 }
 
+// ReachState is whether the daemon can reach a placement.
+type ReachState int32
+
+const (
+	ReachState_REACH_STATE_UNSPECIFIED ReachState = 0
+	// Reached when last asked. The placement's offers fit tasks.
+	ReachState_REACH_STATE_REACHABLE ReachState = 1
+	// Asked and not reached. Its offers fit nothing.
+	ReachState_REACH_STATE_UNREACHABLE ReachState = 2
+	// Never asked: the placement's kind is not probed, such as a declared Slurm or Apptainer placement.
+	// Its declared offers DO fit tasks; a client does not read this as unreachable.
+	ReachState_REACH_STATE_NOT_PROBED ReachState = 3
+)
+
+// Enum value maps for ReachState.
+var (
+	ReachState_name = map[int32]string{
+		0: "REACH_STATE_UNSPECIFIED",
+		1: "REACH_STATE_REACHABLE",
+		2: "REACH_STATE_UNREACHABLE",
+		3: "REACH_STATE_NOT_PROBED",
+	}
+	ReachState_value = map[string]int32{
+		"REACH_STATE_UNSPECIFIED": 0,
+		"REACH_STATE_REACHABLE":   1,
+		"REACH_STATE_UNREACHABLE": 2,
+		"REACH_STATE_NOT_PROBED":  3,
+	}
+)
+
+func (x ReachState) Enum() *ReachState {
+	p := new(ReachState)
+	*p = x
+	return p
+}
+
+func (x ReachState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReachState) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_placement_proto_enumTypes[2].Descriptor()
+}
+
+func (ReachState) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_placement_proto_enumTypes[2]
+}
+
+func (x ReachState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReachState.Descriptor instead.
+func (ReachState) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_placement_proto_rawDescGZIP(), []int{2}
+}
+
 // ListPlacementsRequest asks which placements the daemon has and what hardware each gives.
 type ListPlacementsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -456,11 +513,11 @@ func (x *OffersUnknown) GetDetail() string {
 	return ""
 }
 
-// PlacementReach is whether the daemon can reach the placement now.
+// PlacementReach is whether the daemon can reach the placement, in three states.
 type PlacementReach struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Reachable bool                   `protobuf:"varint,1,opt,name=reachable,proto3" json:"reachable,omitempty"`
-	// Why not, when it is not reachable.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	State ReachState             `protobuf:"varint,1,opt,name=state,proto3,enum=vibesys.cli.v1.ReachState" json:"state,omitempty"`
+	// Why not, when the state is UNREACHABLE; empty otherwise.
 	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -496,11 +553,11 @@ func (*PlacementReach) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_placement_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PlacementReach) GetReachable() bool {
+func (x *PlacementReach) GetState() ReachState {
 	if x != nil {
-		return x.Reachable
+		return x.State
 	}
-	return false
+	return ReachState_REACH_STATE_UNSPECIFIED
 }
 
 func (x *PlacementReach) GetReason() string {
@@ -538,10 +595,12 @@ const file_vibesys_cli_v1_placement_proto_rawDesc = "" +
 	"\rOffersUnknown\x12G\n" +
 	"\x06reason\x18\x01 \x01(\x0e2#.vibesys.cli.v1.OffersUnknownReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n" +
-	"\x06detail\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\x06detail\"P\n" +
-	"\x0ePlacementReach\x12\x1c\n" +
-	"\treachable\x18\x01 \x01(\bR\treachable\x12 \n" +
-	"\x06reason\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\x06reason*_\n" +
+	"\x06detail\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\x06detail\"\x8f\x02\n" +
+	"\x0ePlacementReach\x12<\n" +
+	"\x05state\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.ReachStateB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12 \n" +
+	"\x06reason\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\x06reason:\x9c\x01\xbaH\x98\x01\x1a\x95\x01\n" +
+	",placement_reach.reason_only_when_unreachable\x12;a reason is given exactly when the placement is unreachable\x1a((this.state == 2) == (this.reason != '')*_\n" +
 	"\vOfferSource\x12\x1c\n" +
 	"\x18OFFER_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13OFFER_SOURCE_PROBED\x10\x01\x12\x19\n" +
@@ -551,7 +610,13 @@ const file_vibesys_cli_v1_placement_proto_rawDesc = "" +
 	"!OFFERS_UNKNOWN_REASON_UNREACHABLE\x10\x01\x12$\n" +
 	" OFFERS_UNKNOWN_REASON_UNREADABLE\x10\x02\x12#\n" +
 	"\x1fOFFERS_UNKNOWN_REASON_TIMED_OUT\x10\x03\x12'\n" +
-	"#OFFERS_UNKNOWN_REASON_NOT_PROBEABLE\x10\x04B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"#OFFERS_UNKNOWN_REASON_NOT_PROBEABLE\x10\x04*}\n" +
+	"\n" +
+	"ReachState\x12\x1b\n" +
+	"\x17REACH_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15REACH_STATE_REACHABLE\x10\x01\x12\x1b\n" +
+	"\x17REACH_STATE_UNREACHABLE\x10\x02\x12\x1a\n" +
+	"\x16REACH_STATE_NOT_PROBED\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_placement_proto_rawDescOnce sync.Once
@@ -565,36 +630,38 @@ func file_vibesys_cli_v1_placement_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_placement_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_placement_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_cli_v1_placement_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_cli_v1_placement_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_cli_v1_placement_proto_goTypes = []any{
 	(OfferSource)(0),               // 0: vibesys.cli.v1.OfferSource
 	(OffersUnknownReason)(0),       // 1: vibesys.cli.v1.OffersUnknownReason
-	(*ListPlacementsRequest)(nil),  // 2: vibesys.cli.v1.ListPlacementsRequest
-	(*ListPlacementsResponse)(nil), // 3: vibesys.cli.v1.ListPlacementsResponse
-	(*PlacementView)(nil),          // 4: vibesys.cli.v1.PlacementView
-	(*PlacementOffers)(nil),        // 5: vibesys.cli.v1.PlacementOffers
-	(*OffersUnknown)(nil),          // 6: vibesys.cli.v1.OffersUnknown
-	(*PlacementReach)(nil),         // 7: vibesys.cli.v1.PlacementReach
-	(PlacementKind)(0),             // 8: vibesys.cli.v1.PlacementKind
-	(*AcceleratorOffer)(nil),       // 9: vibesys.cli.v1.AcceleratorOffer
-	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
+	(ReachState)(0),                // 2: vibesys.cli.v1.ReachState
+	(*ListPlacementsRequest)(nil),  // 3: vibesys.cli.v1.ListPlacementsRequest
+	(*ListPlacementsResponse)(nil), // 4: vibesys.cli.v1.ListPlacementsResponse
+	(*PlacementView)(nil),          // 5: vibesys.cli.v1.PlacementView
+	(*PlacementOffers)(nil),        // 6: vibesys.cli.v1.PlacementOffers
+	(*OffersUnknown)(nil),          // 7: vibesys.cli.v1.OffersUnknown
+	(*PlacementReach)(nil),         // 8: vibesys.cli.v1.PlacementReach
+	(PlacementKind)(0),             // 9: vibesys.cli.v1.PlacementKind
+	(*AcceleratorOffer)(nil),       // 10: vibesys.cli.v1.AcceleratorOffer
+	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_placement_proto_depIdxs = []int32{
-	4,  // 0: vibesys.cli.v1.ListPlacementsResponse.placements:type_name -> vibesys.cli.v1.PlacementView
-	8,  // 1: vibesys.cli.v1.PlacementView.kind:type_name -> vibesys.cli.v1.PlacementKind
-	5,  // 2: vibesys.cli.v1.PlacementView.known:type_name -> vibesys.cli.v1.PlacementOffers
-	6,  // 3: vibesys.cli.v1.PlacementView.unknown:type_name -> vibesys.cli.v1.OffersUnknown
-	7,  // 4: vibesys.cli.v1.PlacementView.reach:type_name -> vibesys.cli.v1.PlacementReach
-	9,  // 5: vibesys.cli.v1.PlacementOffers.offers:type_name -> vibesys.cli.v1.AcceleratorOffer
+	5,  // 0: vibesys.cli.v1.ListPlacementsResponse.placements:type_name -> vibesys.cli.v1.PlacementView
+	9,  // 1: vibesys.cli.v1.PlacementView.kind:type_name -> vibesys.cli.v1.PlacementKind
+	6,  // 2: vibesys.cli.v1.PlacementView.known:type_name -> vibesys.cli.v1.PlacementOffers
+	7,  // 3: vibesys.cli.v1.PlacementView.unknown:type_name -> vibesys.cli.v1.OffersUnknown
+	8,  // 4: vibesys.cli.v1.PlacementView.reach:type_name -> vibesys.cli.v1.PlacementReach
+	10, // 5: vibesys.cli.v1.PlacementOffers.offers:type_name -> vibesys.cli.v1.AcceleratorOffer
 	0,  // 6: vibesys.cli.v1.PlacementOffers.source:type_name -> vibesys.cli.v1.OfferSource
-	10, // 7: vibesys.cli.v1.PlacementOffers.probed_at:type_name -> google.protobuf.Timestamp
+	11, // 7: vibesys.cli.v1.PlacementOffers.probed_at:type_name -> google.protobuf.Timestamp
 	1,  // 8: vibesys.cli.v1.OffersUnknown.reason:type_name -> vibesys.cli.v1.OffersUnknownReason
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	2,  // 9: vibesys.cli.v1.PlacementReach.state:type_name -> vibesys.cli.v1.ReachState
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_placement_proto_init() }
@@ -613,7 +680,7 @@ func file_vibesys_cli_v1_placement_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_placement_proto_rawDesc), len(file_vibesys_cli_v1_placement_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
