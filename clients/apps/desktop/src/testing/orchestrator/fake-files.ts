@@ -25,7 +25,7 @@ export interface FakeFault {
   readonly message: string;
 }
 
-export interface FakeEntry {
+interface FakeEntry {
   readonly name: string;
   readonly isDirectory: boolean;
   readonly isGitRepository: boolean;

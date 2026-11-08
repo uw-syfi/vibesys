@@ -47,7 +47,7 @@ var boundaries = map[string]allowance{
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
 	"internal/production/sidecars.go":            {reason: "where the holder is installed, its directory, and the listing of an agent's session directories; process-boundaries.md, host control", reads: 3, writes: 1},
 	"internal/production/sessionprocesses.go":    {reason: "the lock a session's process holds and the SessionProcesses record it keeps beside it, which the host reads only to end what a gone process left; process-boundaries.md, process identity", reads: 2, writes: 2},
-	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
+	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, reads the repository with git, and lists the task folders and the children of a folder an operator is typing a path into", reads: 2, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},
 	"internal/store/sqlite.go":                   {reason: "the store's own database file", writes: 1},
 	"internal/store/storetest/contract.go":       {reason: "the contract suite reads its depth from the environment", env: 2},
