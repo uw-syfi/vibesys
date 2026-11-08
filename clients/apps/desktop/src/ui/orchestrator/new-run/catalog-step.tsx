@@ -162,6 +162,10 @@ function Selected(props: {
             : {disabledReason: props.block.reason, quietReason: props.block.quiet})}
         />
       </Row>
+      {/* The copy's outcome has a line of its own outside the disclosure, kept when empty: a refusal is never hidden. */}
+      <Text tone={line?.failed === true ? 'err' : 'muted'} title={line?.title ?? ''}>
+        {line?.text ?? ' '}
+      </Text>
       <MoreOptions
         draft={props.draft}
         set={props.set}

@@ -249,6 +249,29 @@ describe('the catalog step', () => {
     screen.unmount();
   });
 
+  it('says a refused copy beside Start, not only inside More options', () => {
+    const screen = mount(
+      <Window
+        hosts={[
+          read({
+            provision: {_tag: 'Refused', reason: 'NEEDS_NETWORK', detail: 'cloned', existing: ''},
+          }),
+        ]}
+        commands={appCommandsOf()}
+        seen={[]}
+      />,
+    );
+    screen.press(screen.control('New run'));
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const first = screen.container.querySelector<HTMLElement>(
+      '.vs-pick-card:not([data-unavailable])',
+    );
+    if (first === null) throw new Error('a card fits');
+    screen.press(first);
+    expect(screen.text()).toContain('Needs network');
+    screen.unmount();
+  });
+
   it('goes back one step by the New run crumb', () => {
     const {screen} = open();
     screen.press(card(screen, 'CatalogStart from an example'));
