@@ -127,17 +127,21 @@ func (m *monitor) updates(body core.InputBody, events []core.Event, before befor
 	fresh, cleared := map[core.RunID]bool{}, map[core.RunID]bool{}
 	for _, e := range events {
 		switch b := e.Body.(type) {
+		case core.Agent:
+			if command != nil && b.Role != core.RoleLead && (b.Stop != core.StopNone || b.Status.Over()) && m.runs[b.Run].Status.Live() {
+				// An update stops no subagent of a run it leaves live: lowering the fanout drains.
+				return fmt.Errorf("an update of run %s stopped agent %s: %+v", b.Run, b.ID, b)
+			}
+			// A lead's new session that continues no conversation is the one that replaces a lead: a resume
+			// always has a token, and a run that was not there before has no earlier session.
+			if before.sessions[b.Run] > 0 && b.Role == core.RoleLead && b.Session > before.sessions[b.Run] && b.ResumeToken == "" {
+				fresh[b.Run] = true
+			}
 		case core.Run:
 			if b.PendingLead != nil {
 				asked[b.ID] = b.PendingLead
 			} else if old, ok := before.runs[b.ID]; ok && old.PendingLead != nil && b.Status.Live() {
 				cleared[b.ID] = true
-			}
-		case core.Agent:
-			// A lead's new session that continues no conversation is the one that replaces a lead: a resume
-			// always has a token, and a run that was not there before has no earlier session.
-			if before.sessions[b.Run] > 0 && b.Role == core.RoleLead && b.Session > before.sessions[b.Run] && b.ResumeToken == "" {
-				fresh[b.Run] = true
 			}
 		case core.RunSettingsUpdated:
 			if len(b.Changes) == 0 {
