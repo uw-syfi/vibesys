@@ -49,7 +49,8 @@ class TopicPolicy(Message[_TopicPolicyFields]):
             ```
         first_frame_ms:
             Client bound on each wait inside the snapshot once the stream is open: the wait for the first
-            frame, and for each frame after it until `synced`. A frame renews the wait.
+            entry, removal or `synced`, and for each one after it until `synced`. Each of them renews the
+            wait; a heartbeat does not, because it proves the stream and not the source.
 
             ```proto
             uint32 first_frame_ms = 3;

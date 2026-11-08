@@ -27,7 +27,8 @@ message TopicPolicy {
   // means the lease alone decides.
   uint32 stale_after_ms = 2;
   // Client bound on each wait inside the snapshot once the stream is open: the wait for the first
-  // frame, and for each frame after it until `synced`. A frame renews the wait.
+  // entry, removal or `synced`, and for each one after it until `synced`. Each of them renews the
+  // wait; a heartbeat does not, because it proves the stream and not the source.
   uint32 first_frame_ms = 3 [(buf.validate.field).uint32.gt = 0];
   // A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
   uint32 max_keys = 4 [(buf.validate.field).uint32.gt = 0];
