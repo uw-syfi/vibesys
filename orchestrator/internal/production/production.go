@@ -174,6 +174,9 @@ type Wiring struct {
 	// Models is the host's model policy. Nil means the host has none, which every test of the daemon
 	// that is not about models leaves.
 	Models daemon.ModelPolicySource
+	// Catalogue serves the example tasks of the release. Nil means a host with no catalogue, whose
+	// ListCatalogue answers Unimplemented.
+	Catalogue daemon.CatalogueSource
 }
 
 // Daemon is an opened daemon: it holds the state directory's lock and its database, and serves the
@@ -252,6 +255,7 @@ func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
 		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool, Provisioner: x.wiring.Provisioner,
+		Catalogue: x.wiring.Catalogue, Places: placesOf(x.wiring.JobTool),
 	})
 }
 
@@ -363,4 +367,13 @@ func (NoSidecars) Launch(context.Context, daemon.SessionStart) (daemon.Sidecar, 
 // Attach implements daemon.Sidecars.
 func (NoSidecars) Attach(context.Context, core.Session) (daemon.Sidecar, error) {
 	return nil, daemon.ErrSidecarGone
+}
+
+// placesOf is the eval places of a host with a job tool; a host without one reports none, as a source
+// it does not have, and not as a source with no places.
+func placesOf(jobTool func(context.Context) (core.JobToolEndpoint, error)) daemon.PlaceSource {
+	if jobTool == nil {
+		return nil
+	}
+	return NewCLIPlaces(jobTool)
 }

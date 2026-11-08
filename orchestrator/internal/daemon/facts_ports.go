@@ -7,7 +7,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
@@ -64,38 +63,6 @@ type TaskReader interface {
 	Read(ctx context.Context, ref TaskRef) (core.TaskCard, error)
 }
 
-// PlaceSource lists the places evaluations can run and the hardware each gives. Refresh probes now;
-// otherwise it serves what the last probe found.
-type PlaceSource interface {
-	Places(ctx context.Context, refresh bool) ([]*pb.EvalPlace, error)
-}
-
-// CatalogueSource serves the example tasks of the release the host runs, without their fit, which the
-// daemon works out from the places.
-type CatalogueSource interface {
-	Catalogue(ctx context.Context) (Catalogue, error)
-}
-
-// Catalogue is what a CatalogueSource holds.
-type Catalogue struct {
-	Release string
-	// RepositoriesDirectory is where Provisioner puts a repository when the request names no parent.
-	RepositoriesDirectory string
-	// Entries carry no fit.
-	Entries []*pb.CatalogueEntry
-}
-
 func unimplemented(rpc string) error {
 	return status.Errorf(codes.Unimplemented, "%s is not implemented by this host yet", rpc)
-}
-
-// ListCatalogue implements OrchestratorService. It answers Unimplemented until the host serves a
-// catalogue.
-func (s *Service) ListCatalogue(context.Context, *pb.ListCatalogueRequest) (*pb.ListCatalogueResponse, error) {
-	return nil, unimplemented("ListCatalogue")
-}
-
-// ListEvalPlaces implements OrchestratorService. It answers Unimplemented until the host reports places.
-func (s *Service) ListEvalPlaces(context.Context, *pb.ListEvalPlacesRequest) (*pb.ListEvalPlacesResponse, error) {
-	return nil, unimplemented("ListEvalPlaces")
 }

@@ -60,6 +60,11 @@ type ServiceDeps struct {
 	Starts StartChecks
 	// Directories answers ListDirectory. Nil is a host that cannot list folders.
 	Directories Directories
+	// Catalogue answers ListCatalogue. Nil is a host with no catalogue.
+	Catalogue CatalogueSource
+	// Places answers ListEvalPlaces and gives ListCatalogue the places it works the fit out from. Nil is
+	// a host that cannot report places.
+	Places PlaceSource
 	// Provisioner answers ProvisionRepository. Nil is a host that cannot make repositories.
 	Provisioner Provisioner
 	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
