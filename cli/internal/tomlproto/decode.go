@@ -170,7 +170,7 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 		}
 		if fd.Message().FullName() == structName {
 			// A section held as data: any keys, read by someone else.
-			return opaque(table), nil
+			return opaque(table, at)
 		}
 		return d.message(table, fd.Message(), at)
 	case protoreflect.EnumKind:
@@ -231,33 +231,52 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 // structName is the message a section held as data is: its keys are not checked.
 const structName protoreflect.FullName = "google.protobuf.Struct"
 
-// opaque is a TOML value as JSON: a date or a time becomes its TOML text.
-func opaque(v any) any {
+// opaque is a TOML value as JSON: a date or a time becomes its TOML text. A data section holds
+// JSON, which has no nan or infinity, so a non-finite number is refused here naming its key, rather
+// than left for json.Marshal, which names neither.
+func opaque(v any, at string) (any, error) {
 	switch x := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(x))
-		for k, y := range x {
-			out[k] = opaque(y)
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			y, err := opaque(x[k], join(at, k))
+			if err != nil {
+				return nil, err
+			}
+			out[k] = y
 		}
-		return out
+		return out, nil
 	case []map[string]any:
 		out := make([]any, len(x))
 		for i, y := range x {
-			out[i] = opaque(y)
+			z, err := opaque(y, fmt.Sprintf("%s[%d]", at, i))
+			if err != nil {
+				return nil, err
+			}
+			out[i] = z
 		}
-		return out
+		return out, nil
 	case []any:
 		out := make([]any, len(x))
 		for i, y := range x {
-			out[i] = opaque(y)
+			z, err := opaque(y, fmt.Sprintf("%s[%d]", at, i))
+			if err != nil {
+				return nil, err
+			}
+			out[i] = z
 		}
-		return out
-	case string, bool, int64, float64:
-		return x
+		return out, nil
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return nil, invalid("%s: a data section holds JSON, which has no nan or infinity, got %v", at, x)
+		}
+		return x, nil
+	case string, bool, int64:
+		return x, nil
 	case fmt.Stringer:
-		return x.String()
+		return x.String(), nil
 	}
-	return fmt.Sprint(v)
+	return fmt.Sprint(v), nil
 }
 
 func join(at, key string) string {
