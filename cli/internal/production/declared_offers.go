@@ -41,7 +41,7 @@ func placementProbe(pl *cliv1.Placement, provider *docker.Provider) (app.Placeme
 // the accelerator resource ([resources.gpu] is NVIDIA, [resources.rocm] is AMD) and the models and
 // counts from the placement's gres, such as "gpu:h100:8" or "gpu:4" (a gres with no model names the
 // model OTHER). Without an accelerator resource it fails with errNoDeclaredAccelerators.
-// This reading is temporary until the shared accelerator identity registry replaces it.
+// A gres token names its model through the accelerator registry (core.ParseAccelerator).
 func declaredOffers(slurm *cliv1.SlurmSettings, res *cliv1.Resources) ([]core.Accelerator, error) {
 	var vendor core.AcceleratorVendor
 	switch {

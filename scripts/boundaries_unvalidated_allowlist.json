@@ -87,7 +87,6 @@
     "CancelJobRequest",
     "CommandEnd",
     "ExecutionOutcome",
-    "FlowEnd",
     "HandshakeResponse",
     "OutputChunk",
     "SupervisorOutcome"

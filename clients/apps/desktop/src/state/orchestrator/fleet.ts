@@ -16,6 +16,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import type {Freshness} from '../freshness.js';
 import type {HostStatus} from '../host-status.js';
+import {inSetup} from '../setup/setup.js';
 import {type ObjectiveReport, objectiveReports} from './report/objectives.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
@@ -90,6 +91,8 @@ export interface FleetRow {
   /** What the host read of the run's task when it started; null for a run recorded before cards. */
   readonly card: TaskCard | null;
   readonly repository: string;
+  /** The run is in its setup phase: a chat that makes its task, with no task yet. */
+  readonly setup: boolean;
   readonly status: RunStatus;
   /** Still working: starting, running or stopping. */
   readonly live: boolean;
@@ -152,6 +155,7 @@ function rowOf(host: FleetHostRef, summary: RunSummary | undefined, run: Run): F
     name: run.task,
     card: run.taskCard ?? null,
     repository: run.repository,
+    setup: inSetup(run),
     status: run.status,
     live: isLive(run.status),
     startedMs: ms(run.createdAt),

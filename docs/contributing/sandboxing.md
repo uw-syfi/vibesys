@@ -10,6 +10,7 @@ whichever is wrong in the same PR.
 | Term | Meaning | Code |
 | --- | --- | --- |
 | run environment | Where a run's evaluations execute: local Docker, Modal, SkyPilot, Slurm, host. The agent always runs in a local Docker container; Slurm's editor and host-only backends on macOS (Metal) are the exceptions (see Known limits). | `RunEnvironment` in `vs_runtime` |
+| eval place | Where a managed run's candidates are evaluated, as the orchestrator's host and the job tool report it: local Docker, Docker over ssh, Slurm, an Apptainer cluster. It is not a sandbox and not confinement. It is the managed-run counterpart of the run environment above, which belongs to the Python run CLI. The machine the run lives on (repository, agents) is separate from it. | `EvalPlace` in `orchestrator/v1/eval_place.proto`; a placement in the job tool |
 | command runner | A handle that executes one shell command and returns a bounded result. It isolates nothing. | `CommandRunner`, `CommandResult`, `LocalShellRunner`, `DockerSandbox.execute` in `vs_sandbox` |
 | agent confinement | Restricting the agent CLI process: which paths it can read and write, and which it cannot see. "Sandbox" is reserved for this. | `WorkspaceSandbox` and `HostSandbox`, `LandlockSandbox`, `SeatbeltSandbox`, `DockerSandbox.wrap` |
 | candidate isolation | Per-workstream evaluation isolation: each candidate is evaluated in its own worktree or workspace so candidates cannot affect each other's results. | `_project_run.py`, `_trusted_evaluation.py` in `vs_runtime` |

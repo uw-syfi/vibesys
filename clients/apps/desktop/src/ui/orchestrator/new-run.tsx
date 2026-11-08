@@ -14,6 +14,9 @@ import {placeLabel} from './new-run/words.js';
 import {emptyDraft, type StartDraft, type StartRunRequest} from './start-draft.js';
 import {type StartHost, StartRunForm} from './start-run-form.js';
 
+/** The host is making the repository of an example. */
+const copying = (host: StartHost | undefined): boolean => host?.provision._tag === 'Working';
+
 /** What a new run starts from: an example of the host's catalogue, or a repository of the person's own. */
 type Source = 'catalogue' | 'repository';
 
@@ -43,6 +46,8 @@ export function NewRun(props: {
   ) => void;
   /** Forget what the host said of the last copy. */
   readonly forgetProvision: (host: string) => void;
+  /** Begin a setup chat in the repository named, which makes its task. */
+  readonly beginSetup: (host: string, request: StartRunRequest) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<StartDraft>(emptyDraft);
@@ -53,7 +58,6 @@ export function NewRun(props: {
   const entries = host?.catalogue.data?.entries ?? [];
   const places = host?.evalPlaces.data?.places ?? [];
   const target = exampleTarget(entries, places, withKeptParent(host, example));
-  const copying = host?.provision._tag === 'Working';
   const pick = (picked: string): void => {
     setExample(pickExample(example, picked));
     if (host !== undefined) props.forgetProvision(host.key);
@@ -123,11 +127,12 @@ export function NewRun(props: {
                         listDirectory={props.listDirectory}
                       />
                     ),
-                    blocked: copying ? 'Copying' : target.ready ? null : target.reason,
+                    blocked: copying(host) ? 'Copying' : target.ready ? null : target.reason,
                     start: startExample,
                   },
                 }
               : {
+                  setUp: props.beginSetup,
                   placeField: (
                     <Field label="Evals on">
                       <Select

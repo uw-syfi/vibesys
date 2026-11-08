@@ -27,7 +27,9 @@ export type Intent = Extract<
       | 'stopAgent'
       | 'sendMessage'
       | 'requestCatchUp'
-      | 'updateRun';
+      | 'updateRun'
+      | 'beginSetup'
+      | 'completeSetup';
   }
 >;
 

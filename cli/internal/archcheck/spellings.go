@@ -27,7 +27,7 @@ var spelledAt = map[string][]string{
 	"slurm": {"cli/internal/environment/slurm/", "cli/internal/environment/apptainer/", "cli/internal/operator/"},
 	// The accelerator registry spells the display names a task authors ("NVIDIA H100"), which are
 	// the closed set of identities the domain knows, in the one file that holds them.
-	"nvidia": {"cli/internal/backend/nvidia/", "cli/internal/resource/gpu/", "cli/internal/task/accelerator.go"},
+	"nvidia": {"cli/internal/backend/nvidia/", "cli/internal/resource/gpu/", "cli/internal/core/accelerator.go"},
 }
 
 // Spellings returns the spellings the rule holds, sorted.
