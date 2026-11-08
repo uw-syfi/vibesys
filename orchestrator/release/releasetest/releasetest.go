@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
@@ -20,6 +22,22 @@ type spec struct {
 	version, goos, goarch string
 	without               map[string]bool
 	content               map[string]string
+	examples              []Example
+}
+
+// Example is an example task a test puts in the release: its id, the task's name, the files of its
+// folder (name to text) and, for one cloned from elsewhere, where from.
+type Example struct {
+	ID    string
+	Task  string
+	Files map[string]string
+	Clone *release.CloneSpec
+}
+
+// WithExamples puts example tasks in the release: their folders under examples/ and a catalogue
+// that lists them.
+func WithExamples(examples ...Example) Option {
+	return func(s *spec) { s.examples = append(s.examples, examples...) }
 }
 
 // Without leaves out files, named relative to the release.
@@ -70,6 +88,27 @@ func Tree(t testing.TB, dir string, options ...Option) fstest.MapFS {
 	for _, f := range m.GetRequiredFiles() {
 		tree[root+f] = &fstest.MapFile{Data: text(f), Mode: 0o644}
 	}
+	catalogue := &pb.ReleaseCatalogue{Release: s.version}
+	for _, e := range s.examples {
+		re := &pb.ReleaseExample{
+			Example: e.ID, Folder: e.ID[strings.LastIndex(e.ID, "/")+1:],
+			Tree: release.ExamplesRoot + "/" + e.ID, Card: &cliv1.TaskCard{Task: e.Task},
+		}
+		if e.Clone != nil {
+			re.NeedsClone = true
+			re.Clone = &pb.CloneSource{Url: e.Clone.URL, Revision: e.Clone.Revision}
+		}
+		catalogue.Examples = append(catalogue.Examples, re)
+		tree[root+re.Tree] = &fstest.MapFile{Mode: fs.ModeDir | 0o755}
+		for name, text := range e.Files {
+			tree[root+re.Tree+"/"+name] = &fstest.MapFile{Data: []byte(text), Mode: 0o644}
+		}
+	}
+	if data, err := release.MarshalCatalogue(catalogue); err != nil {
+		t.Fatal(err)
+	} else if _, set := s.content[release.CatalogueName]; !set {
+		tree[root+release.CatalogueName] = &fstest.MapFile{Data: data, Mode: 0o644}
+	}
 	for _, f := range []string{m.GetHostProgram(), m.GetJobTool(), m.GetSessionHolderCommand()[0]} {
 		tree[root+f] = &fstest.MapFile{Data: text(f), Mode: 0o755}
 	}
@@ -84,6 +123,12 @@ func Write(t testing.TB, dir string, options ...Option) {
 	t.Helper()
 	for name, file := range Tree(t, dir, options...) {
 		path := filepath.Join("/", name)
+		if file.Mode&fs.ModeDir != 0 {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}

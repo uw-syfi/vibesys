@@ -28,7 +28,9 @@ var boundaries = map[string]allowance{
 	"cmd/release-manifest/main.go":               {reason: "the build-time tool takes its output path from the command line and writes the release manifest; process-boundaries.md, release manifest", args: 1, writes: 1},
 	"privatesocket/placement.go":                 {reason: "makes and checks the private directory that holds a socket too long for its own place; process-boundaries.md, host control", reads: 1, writes: 1},
 	"privatesocket/privatesocket.go":             {reason: "binds a private socket in a directory of its own and renames it into place; process-boundaries.md, host control", writes: 6},
-	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 2},
+	"cmd/release-manifest/examples.go":           {reason: "the build-time tool makes a working folder for the CLI's daemon, stages the examples and writes the catalogue; process-boundaries.md, release manifest", writes: 4},
+	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 3},
+	"release/assemble/os.go":                     {reason: "the release builder writes the example trees into the stage, runs the CLI's card reader and fetches the pinned files of external examples with git; process-boundaries.md, release manifest", writes: 3, exec: 2},
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
 	"gatewayroot/gatewayroot.go":                 {reason: "says before a host starts whether its state directory can be made, as the host itself would find; process-boundaries.md, host control", reads: 1},
 	"hostconfig/hostconfig.go":                   {reason: "the host's configuration file in its root, a HostConfig message, and whether what it names is there; process-boundaries.md, host control", reads: 3, writes: 5},
@@ -56,6 +58,7 @@ var boundaries = map[string]allowance{
 
 // execFiles may import os/exec; their start counts are in boundaries.
 var execFiles = map[string]string{
+	"release/assemble/os.go":             "the builder runs the CLI that reads task files, and git for the pinned files of external examples",
 	"internal/production/checkouts.go":   "removing the git worktrees agents made, as holders.go made them, and keeping their commits under a ref",
 	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
 	"internal/production/holders.go":     "the lifetime of a session's process, ps for a group leader's start time, and git worktree creation",
@@ -92,8 +95,8 @@ func capabilities(name, source string) []string {
 			alias = imp.Name.Name
 		}
 		aliases[alias] = target
-		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" && rel != "internal/wire/run_facts.go" && rel != "internal/wire/setup_facts.go" && rel != "internal/fit/fit.go" && rel != "internal/production/taskreader.go" {
-			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment, the job tool's answer, the task reader, the wire mapping of a task card and of the setup facts and the fit of a task card's need, whose messages are the CLI's")
+		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && !strings.HasPrefix(rel, "release/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" && rel != "internal/wire/run_facts.go" && rel != "internal/wire/setup_facts.go" && rel != "internal/fit/fit.go" && rel != "internal/production/taskreader.go" {
+			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment, the job tool's answer, the task reader, the wire mapping of a task card and of the setup facts the fit of a task card's need and the release builder's catalogue of cards, whose messages are the CLI's")
 		}
 		if target == "os/exec" && execFiles[rel] == "" {
 			report("exec-confined", "process execution belongs to listed production files")

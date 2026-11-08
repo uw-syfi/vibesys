@@ -3,11 +3,18 @@
 //
 //	release-manifest VERSION OS ARCH DIR
 //
+// And, before the manifest, the example tasks the release carries:
+//
+//	release-manifest examples VERSION REPO STAGE CLI
+//
+// which lays them into STAGE and writes catalogue.pb (see examples.go).
+//
 // It is the builder's only way to write the manifest, so the layout it records is the one in
 // package release and no shell script restates it. It fails naming each missing file.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,8 +30,11 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 5 && args[0] == "examples" {
+		return examples(context.Background(), args[1:])
+	}
 	if len(args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: release-manifest VERSION OS ARCH DIR")
+		fmt.Fprintln(os.Stderr, "usage: release-manifest VERSION OS ARCH DIR | release-manifest examples VERSION REPO STAGE CLI")
 		os.Exit(2)
 	}
 	version, goos, goarch := args[0], args[1], args[2]

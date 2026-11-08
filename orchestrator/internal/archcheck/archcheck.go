@@ -54,8 +54,9 @@ var rules = map[string][]string{
 	"release":                          {"gen/vibesys/orchestrator/"},
 	"hostlock":                         {"gen/vibesys/orchestrator/"},
 	"privatesocket":                    {},
-	"release/releasetest":              {"release"},
-	"cmd/release-manifest":             {"release"},
+	"release/releasetest":              {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
+	"release/assemble":                 {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
+	"cmd/release-manifest":             {"release", "release/assemble"},
 	"clientcli":                        {"clientcli/attachview", "internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
 	"clientcli/attachview":             {"gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
@@ -76,10 +77,11 @@ var testRules = map[string][]string{
 	// The window facts are tested over job logs built as the job service states them.
 	"internal/window": {"gen/vibesys/cli/"},
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
-	"internal/production": {"release/releasetest", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
+	"internal/production": {"release/releasetest", "release/assemble", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
 	"internal/fit":        {"internal/wire"},
 	"release":             {"release/releasetest"},
+	"release/assemble":    {"release/releasetest"},
 	"gatewayroot":         {"release/releasetest"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
