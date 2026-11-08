@@ -28,6 +28,8 @@ import {
   type RepositoryChecked,
   type Route,
   runReport,
+  runSettingsOf,
+  settingsTimeline,
   staleForMs,
 } from '../../state/index.js';
 import {AgentPage} from '../agents/agent-page.js';
@@ -42,6 +44,9 @@ import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
 import {ReportScreen} from './report/report-screen.js';
+import {isStoppable} from './report/report-title.js';
+import {PendingLead, RunSettingsControl} from './run-settings/index.js';
+import type {RunUpdateRequest} from './run-settings/update-draft.js';
 import type {StartRunRequest} from './start-draft.js';
 
 const TITLE = 'Runs';
@@ -89,6 +94,8 @@ export interface AppCommands {
   readonly stop: Readonly<Record<string, CommandProgress>>;
   /** The last Send to each agent, by agent id. */
   readonly send: Readonly<Record<string, CommandProgress>>;
+  /** The last settings update of each run, by run id. */
+  readonly update: Readonly<Record<string, CommandProgress>>;
   readonly startRun: (host: string, request: StartRunRequest) => void;
   /** The repository path typed in the Start form is now `repository` on `host`. */
   readonly checkRepository: (host: string, repository: string) => void;
@@ -112,6 +119,9 @@ export interface AppCommands {
   readonly retryStop: (runId: string) => void;
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
+  /** Change settings of a live run: all of `request` or none of it. */
+  readonly updateRun: (host: string, runId: string, request: RunUpdateRequest) => void;
+  readonly retryUpdate: (runId: string) => void;
   /** Read the page of items of an agent before ordinal `before`. */
   readonly loadEarlier: (host: string, agentId: string, before: number) => void;
   /** Read the item at `ordinal` of an agent whole. */
@@ -471,8 +481,22 @@ function ReportDestination(props: {
   const state = host.model.data;
   const report = runReport(state, runId, nowMs);
   if (report === undefined) return <MissingRun goRuns={() => go({type: 'close-run'})} />;
+  const settings = runSettingsOf(state, runId, nowMs);
   return (
     <ReportScreen
+      settings={
+        settings === undefined ? null : (
+          <RunSettingsControl
+            settings={settings}
+            timeline={settingsTimeline(state, runId)}
+            models={state.models}
+            live={isStoppable(report.header.status)}
+            progress={commands.update[runId]}
+            update={request => commands.updateRun(host.key, runId, request)}
+            retry={() => commands.retryUpdate(runId)}
+          />
+        )
+      }
       report={report}
       host={host.label}
       nowMs={nowMs}
@@ -488,7 +512,12 @@ function ReportDestination(props: {
       openAgents={() => go({type: 'show', view: 'agents'})}
       openCost={() => go({type: 'show', view: 'cost'})}
       names={agentNames(state, runId)}
-      reading={props.reading}
+      reading={
+        <>
+          {props.reading}
+          {settings === undefined ? null : <PendingLead settings={settings} />}
+        </>
+      }
       ideasWindow={props.ideasWindow}
     />
   );
