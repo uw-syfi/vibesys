@@ -151,6 +151,6 @@ func invalid(format string, args ...any) error {
 }
 
 // Offers implements resource.Resource: this resource gives no accelerators.
-func (*Kubernetes) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (*Kubernetes) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	return nil, ctx.Err()
 }

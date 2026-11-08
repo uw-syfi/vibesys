@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
@@ -117,7 +116,7 @@ func TestOffersCountTheDevicesASelectionNames(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || len(offers) != 1 || offers[0].GetCount() != tc.want || offers[0].GetModel() != cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100 {
+		if err != nil || len(offers) != 1 || offers[0].Count != tc.want || offers[0].Model != core.ModelA100 {
 			t.Errorf("%s: %v, %v", tc.devices, offers, err)
 		}
 	}

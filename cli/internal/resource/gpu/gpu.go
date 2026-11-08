@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -114,7 +113,7 @@ func invalid(format string, args ...any) error {
 
 // Offers implements resource.Resource: the machine's GPU model, counted by the selection. A
 // selection that does not list its devices, such as a count, is unreadable.
-func (r *GPU) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (r *GPU) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -122,16 +121,16 @@ func (r *GPU) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	offer, err := resource.AcceleratorOffer(cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, facts["gpu_model"], facts["gpu_count"])
+	offer, err := core.ParseAccelerator(core.VendorNVIDIA, facts["gpu_model"], facts["gpu_count"])
 	if err != nil {
 		return nil, err
 	}
-	selected, err := selectedDevices(r.cfg.Devices, r.cfg.Runtime != "", offer.GetCount())
+	selected, err := selectedDevices(r.cfg.Devices, r.cfg.Runtime != "", offer.Count)
 	if err != nil {
 		return nil, err
 	}
 	offer.Count = selected
-	return []*cliv1.AcceleratorOffer{offer}, nil
+	return []core.Accelerator{offer}, nil
 }
 
 // selectedDevices counts the devices of a selection out of the machine's total: all of them for

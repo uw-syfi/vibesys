@@ -1,7 +1,6 @@
 package production
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"path"
@@ -84,7 +83,11 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		providers[name] = provider
-		out.probes[name] = placementProbe(op.GetPlacements()[name], provider)
+		probe, err := placementProbe(op.GetPlacements()[name], provider)
+		if err != nil {
+			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
+		}
+		out.probes[name] = probe
 		out.offers = append(out.offers, provider.Offer())
 		out.claims[name] = provider.Claims()
 	}
@@ -351,21 +354,4 @@ func seconds(s float64, otherwise time.Duration) time.Duration {
 		return time.Duration(s * float64(time.Second))
 	}
 	return otherwise
-}
-
-// placementProbe is how the daemon learns what a placement gives. A Slurm or Apptainer placement is
-// declared in the operator config: its resources read the login node, not the compute nodes the
-// jobs get, and a probe would have to hold an allocation. Any other placement is probed through its
-// own resources.
-func placementProbe(pl *cliv1.Placement, provider *docker.Provider) app.Placement {
-	out := app.Placement{Kind: pl.GetKind(), MaxJobs: pl.GetMaxJobs(), Probe: provider, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED}
-	if pl.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_SLURM && pl.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
-		return out
-	}
-	offers, err := resource.DeclaredOffers(pl.GetSlurm(), pl.GetResources())
-	if errors.Is(err, resource.ErrNoDeclaredAccelerators) {
-		err = fmt.Errorf("%w: %w", app.ErrNotProbeable, err)
-	}
-	out.Probe, out.Source = app.DeclaredOffers{Declared: offers, Err: err}, cliv1.OfferSource_OFFER_SOURCE_DECLARED
-	return out
 }

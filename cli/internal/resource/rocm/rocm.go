@@ -15,7 +15,6 @@ import (
 	"maps"
 	"regexp"
 
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -128,7 +127,7 @@ func invalid(format string, args ...any) error {
 }
 
 // Offers implements resource.Resource using the same facts as the fingerprint.
-func (r *ROCm) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (r *ROCm) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -136,9 +135,9 @@ func (r *ROCm) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	offer, err := resource.AcceleratorOffer(cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, facts["amd_gpu_model"], facts["amd_gpu_count"])
+	offer, err := core.ParseAccelerator(core.VendorAMD, facts["amd_gpu_model"], facts["amd_gpu_count"])
 	if err != nil {
 		return nil, err
 	}
-	return []*cliv1.AcceleratorOffer{offer}, nil
+	return []core.Accelerator{offer}, nil
 }

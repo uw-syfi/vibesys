@@ -9,17 +9,28 @@ import (
 	"testing"
 	"time"
 
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
+
+var oneH100 = []core.Accelerator{{Vendor: core.VendorNVIDIA, Model: core.ModelH100, Count: 1}}
+
+// placement is a probed placement of the kind, with the probe.
+func placement(kind core.PlacementKind, probe app.PlacementProbe) app.Placement {
+	return app.Placement{Kind: kind, MaxJobs: 1, Probe: probe, Source: core.OfferProbed}
+}
+
+func newReader(placements map[string]app.Placement, timers clock.Timers) *app.PlacementReader {
+	return app.NewPlacementReader(placements, clock.NewManual(time.Unix(1, 0), 0), timers, time.Minute)
+}
 
 type placementProbe struct {
 	fail bool
 	wait bool
 }
 
-func (p placementProbe) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (p placementProbe) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	if p.wait {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -27,18 +38,18 @@ func (p placementProbe) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, 
 	if p.fail {
 		return nil, errors.New("unreadable")
 	}
-	return []*cliv1.AcceleratorOffer{{Vendor: cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, Model: cliv1.AcceleratorModel_ACCELERATOR_MODEL_H100, Count: 1}}, nil
+	return oneH100, nil
 }
 
 func TestPlacementReaderReportsEveryConfiguredPlacementAndOnlySuccessfulOffers(t *testing.T) {
+	kinds := []core.PlacementKind{core.PlacementLocal, core.PlacementSSH, core.PlacementSlurm, core.PlacementApptainer}
 	rng := rand.New(rand.NewPCG(1, 2))
 	for range 200 {
 		cfg := map[string]app.Placement{}
 		for i := 0; i < rng.IntN(20); i++ {
-			cfg[fmt.Sprintf("place-%d", i)] = app.Placement{Kind: cliv1.PlacementKind(1 + rng.IntN(4)), MaxJobs: 1, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: placementProbe{fail: rng.IntN(2) == 0}}
+			cfg[fmt.Sprintf("place-%d", i)] = placement(kinds[rng.IntN(len(kinds))], placementProbe{fail: rng.IntN(2) == 0})
 		}
-		reader := app.NewPlacementReader(cfg, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
-		got, err := reader.List(t.Context(), true)
+		got, err := newReader(cfg, clock.NewManualTimers()).List(t.Context(), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,26 +58,26 @@ func TestPlacementReaderReportsEveryConfiguredPlacementAndOnlySuccessfulOffers(t
 		}
 		seen := map[string]bool{}
 		for _, v := range got {
-			p, ok := cfg[v.GetName()]
-			if !ok || seen[v.GetName()] || v.GetKind() != p.Kind {
+			p, ok := cfg[v.Name]
+			if !ok || seen[v.Name] || v.Kind != p.Kind {
 				t.Fatalf("unexpected placement %v", v)
 			}
-			seen[v.GetName()] = true
+			seen[v.Name] = true
 			success := !p.Probe.(placementProbe).fail
-			if (v.GetKnown() != nil) != success || (v.GetUnknown() != nil) == success || (v.GetKnown() != nil && len(v.GetKnown().GetOffers()) != 1) {
-				t.Fatalf("%s: %v", v.GetName(), v)
+			if (v.Unknown == core.OffersKnown) != success || v.Reachable != success || (success && len(v.Offers) != 1) || (!success && (len(v.Offers) != 0 || v.Detail == "")) {
+				t.Fatalf("%s: %v", v.Name, v)
 			}
 		}
 	}
 }
 
 func TestPlacementProbeTimeoutUsesInjectedTimer(t *testing.T) {
-	reader := app.NewPlacementReader(map[string]app.Placement{"host-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SSH, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: placementProbe{wait: true}}}, clock.NewManual(time.Unix(1, 0), 0), clock.Immediate{Longest: time.Minute}, time.Minute)
+	reader := newReader(map[string]app.Placement{"host-a": placement(core.PlacementSSH, placementProbe{wait: true})}, clock.Immediate{Longest: time.Minute})
 	got, err := reader.List(t.Context(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[0].GetUnknown().GetReason() != cliv1.OffersUnknownReason_OFFERS_UNKNOWN_REASON_TIMED_OUT || got[0].GetUnknown().GetDetail() == "" {
+	if got[0].Unknown != core.OffersTimedOut || got[0].Detail == "" {
 		t.Fatalf("got %v", got[0])
 	}
 }
@@ -76,7 +87,7 @@ type gatedProbe struct {
 	release <-chan struct{}
 }
 
-func (p gatedProbe) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (p gatedProbe) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	p.entered <- struct{}{}
 	select {
 	case <-p.release:
@@ -90,10 +101,10 @@ func TestPlacementProbesRunInParallel(t *testing.T) {
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	probe := gatedProbe{entered: entered, release: release}
-	reader := app.NewPlacementReader(map[string]app.Placement{
-		"host-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SSH, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: probe},
-		"host-b": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SSH, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: probe},
-	}, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
+	reader := newReader(map[string]app.Placement{
+		"host-a": placement(core.PlacementSSH, probe),
+		"host-b": placement(core.PlacementSSH, probe),
+	}, clock.NewManualTimers())
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
@@ -115,13 +126,14 @@ func TestPlacementProbesRunInParallel(t *testing.T) {
 
 type countingProbe struct{ calls int }
 
-func (p *countingProbe) Offers(context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (p *countingProbe) Offers(context.Context) ([]core.Accelerator, error) {
 	p.calls++
 	return nil, nil
 }
+
 func TestPlacementReaderCachesUntilRefresh(t *testing.T) {
 	probe := &countingProbe{}
-	reader := app.NewPlacementReader(map[string]app.Placement{"host-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_LOCAL, MaxJobs: 1, Source: cliv1.OfferSource_OFFER_SOURCE_PROBED, Probe: probe}}, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
+	reader := newReader(map[string]app.Placement{"host-a": placement(core.PlacementLocal, probe)}, clock.NewManualTimers())
 	first, err := reader.List(t.Context(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -141,20 +153,20 @@ func TestPlacementReaderCachesUntilRefresh(t *testing.T) {
 }
 
 func TestDeclaredPlacementsReportTheirOffersAsDeclaredAndNoneAsNotProbeable(t *testing.T) {
-	declared := []*cliv1.AcceleratorOffer{{Vendor: cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, Model: cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X, Count: 8}}
-	reader := app.NewPlacementReader(map[string]app.Placement{
-		"cluster-a": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_SLURM, Source: cliv1.OfferSource_OFFER_SOURCE_DECLARED, Probe: app.DeclaredOffers{Declared: declared}},
-		"cluster-b": {Kind: cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER, Source: cliv1.OfferSource_OFFER_SOURCE_DECLARED, Probe: app.DeclaredOffers{Err: fmt.Errorf("%w: no declared accelerators", app.ErrNotProbeable)}},
-	}, clock.NewManual(time.Unix(1, 0), 0), clock.NewManualTimers(), time.Minute)
+	declared := []core.Accelerator{{Vendor: core.VendorAMD, Model: core.ModelMI300X, Count: 8}}
+	reader := newReader(map[string]app.Placement{
+		"cluster-a": {Kind: core.PlacementSlurm, Source: core.OfferDeclared, Probe: app.DeclaredOffers{Declared: declared}},
+		"cluster-b": {Kind: core.PlacementApptainer, Source: core.OfferDeclared, Probe: app.DeclaredOffers{Err: fmt.Errorf("%w: no declared accelerators", app.ErrNotProbeable)}},
+	}, clock.NewManualTimers())
 	got, err := reader.List(t.Context(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, b := got[0], got[1]
-	if a.GetKnown().GetSource() != cliv1.OfferSource_OFFER_SOURCE_DECLARED || len(a.GetKnown().GetOffers()) != 1 || a.GetKnown().GetProbedAt() != nil {
+	if a.Unknown != core.OffersKnown || a.Source != core.OfferDeclared || len(a.Offers) != 1 || !a.ProbedAt.IsZero() {
 		t.Errorf("declared: %v", a)
 	}
-	if b.GetUnknown().GetReason() != cliv1.OffersUnknownReason_OFFERS_UNKNOWN_REASON_NOT_PROBEABLE || !strings.Contains(b.GetUnknown().GetDetail(), "no declared accelerators") {
+	if b.Unknown != core.OffersNotProbeable || !strings.Contains(b.Detail, "no declared accelerators") {
 		t.Errorf("none declared: %v", b)
 	}
 }

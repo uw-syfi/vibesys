@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // DescribeTask implements cliv1.DaemonServiceServer. It answers Unimplemented until the task reader
@@ -24,5 +25,9 @@ func (s *Server) ListPlacements(ctx context.Context, req *cliv1.ListPlacementsRe
 	if err != nil {
 		return nil, status.FromContextError(err).Err()
 	}
-	return &cliv1.ListPlacementsResponse{Placements: placements}, nil
+	out := make([]*cliv1.PlacementView, len(placements))
+	for i, r := range placements {
+		out[i] = wire.PlacementView(r)
+	}
+	return &cliv1.ListPlacementsResponse{Placements: out}, nil
 }

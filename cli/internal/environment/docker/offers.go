@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
 // Offers probes the placement's machine and the resources its containers receive.
-func (p *Provider) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error) {
+func (p *Provider) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	if _, err := p.cfg.Engine.Containers(ctx, Labels{}); err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (p *Provider) Offers(ctx context.Context) ([]*cliv1.AcceleratorOffer, error
 	if machine.HostID == "" {
 		return nil, fmt.Errorf("the compute node has not been observed")
 	}
-	var offers []*cliv1.AcceleratorOffer
+	var offers []core.Accelerator
 	for _, r := range p.cfg.Resources {
 		got, err := r.Offers(ctx)
 		if err != nil {
