@@ -52,10 +52,12 @@ func TestEveryFollowedStreamIsNamedAndBelongsToALiveRun(t *testing.T) {
 			if r.IntN(2) == 0 {
 				run.Phase = core.PhaseSetup
 				run.Task = ""
+			} else if run.Task == "" {
+				run.Task = "z" // a run that is not in setup has its task
 			}
 			runs = append(runs, run)
 			name := run.Task
-			if name == "" {
+			if !run.Phase.Optimizing() {
 				name = run.SetupTask
 			}
 			if !run.Status.Final() && name != "" {

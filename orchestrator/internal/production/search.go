@@ -21,19 +21,20 @@ type Subscription struct {
 	Repository, Task string
 }
 
-// subscription is the task stream a run follows: its task, or while it is in setup, the name its lead
-// has declared for the task it is making, which is empty until it declares one. A run with an empty
-// name follows nothing (see hasTask).
+// subscription is the task stream a run follows: its task, or while it is in setup, where it has none,
+// the name its lead has declared for the task it is making. That name is empty until the lead declares
+// one, and a run in setup with none follows nothing (see hasTask).
 func subscription(r core.Run) Subscription {
 	task := r.Task
-	if task == "" {
+	if !r.Phase.Optimizing() {
 		task = r.SetupTask
 	}
 	return Subscription{r.JobTool, r.Repository, task}
 }
 
-// hasTask says the run has a task to follow.
-func hasTask(r core.Run) bool { return subscription(r).Task != "" }
+// hasTask says the run has a task to follow: every run does, but a run in setup that has not yet
+// declared one.
+func hasTask(r core.Run) bool { return r.Phase.Optimizing() || r.SetupTask != "" }
 
 // over says the run has ended or failed: nothing it did can still reach the job log. A run that is
 // stopping is not over, since its agents may yet record a result as they stop.
