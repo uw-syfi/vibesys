@@ -29,6 +29,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {isLive} from '../../state/orchestrator/fleet.js';
 import {ms} from '../../state/orchestrator/time.js';
+import {fleetTurns} from './fleet-turns.js';
 import {ChangeLog, Rng} from './log.js';
 import {measuredSearch, type ObjectiveSpec} from './report-fixtures.js';
 import type {Scenario} from './scenario.js';
@@ -223,6 +224,8 @@ function agentOf(rng: Rng, run: Run, index: number): Agent {
     parentAgentId: lead ? '' : run.leadAgentId,
     role: lead ? AgentRole.LEAD : AgentRole.WORKER,
     harness: Harness.CODEX,
+    // The lead runs on the host's default model, which no price is known for; the workers on named ones.
+    model: lead ? '' : index % 2 === 0 ? 'model-b' : 'model-a',
     status: agentStatusOf(rng, isLive(run.status), lead),
     session: 1,
     stopStage: AgentStopStage.NONE,
@@ -256,8 +259,11 @@ function pushRun(
   const startMs = ms(run.createdAt) ?? options.nowMs;
   log.push(startMs, {case: 'run', value: run});
   const agents = 1 + rng.int(5);
-  for (let agent = 0; agent < agents; agent++)
-    log.push(startMs + MINUTE, {case: 'agent', value: agentOf(rng, run, agent)});
+  const members = Array.from({length: agents}, (_, agent) => agentOf(rng, run, agent));
+  for (const member of members) log.push(startMs + MINUTE, {case: 'agent', value: member});
+  // The turns come from a stream of their own, so adding them moved nothing else of the fleet.
+  for (const {at, turn} of fleetTurns(options.seed, run, members, options.nowMs))
+    log.push(at, {case: 'turn', value: turn});
   if (rng.int(4) !== 0) {
     const reportAt = (ms(run.endedAt) ?? options.nowMs) - (1 + rng.int(90)) * MINUTE;
     log.push(reportAt, {case: 'message', value: reportOf(run, reportAt)});

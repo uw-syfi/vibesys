@@ -17,7 +17,6 @@ import {
   type NavigationAction,
   staleForMs,
 } from '../../state/index.js';
-import {CostOverviewScreen} from '../cost-overview/index.js';
 import {MachinesScreen, useMachineControls} from '../machines/index.js';
 import {nowMs} from '../orchestrator/clock.js';
 import {
@@ -30,6 +29,7 @@ import {
 import {faultWord, roleWord} from '../orchestrator/words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {ConnectedCatchUp} from './connected-catch-up.js';
+import {ConnectedCost} from './connected-cost.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
 
@@ -81,18 +81,6 @@ export function ConnectedShell(props: {
     current.destination === 'runs' && runs.screen === 'run' && runs.view === 'catch-up'
       ? runs
       : null;
-  /** The screens of the destinations that have no state of their own to keep. */
-  const pages: Record<Exclude<Destination, 'runs'>, JSX.Element> = {
-    cost: <CostOverviewScreen key="cost" />,
-    machines: (
-      <MachinesScreen
-        key="machines"
-        rows={machineRows}
-        {...(controls === undefined ? {} : {controls})}
-      />
-    ),
-    settings: <SettingsScreen key="settings" appearance={look} choose={choose} />,
-  };
   return (
     <FocusMemory place={placeOf(current)}>
       {note => {
@@ -101,6 +89,26 @@ export function ConnectedShell(props: {
           note(action);
           dispatch(navigation.go(action), () => undefined);
         };
+        /** The screens of the destinations that have no state of their own to keep. */
+        const pages: Record<Exclude<Destination, 'runs'>, JSX.Element> = {
+          cost: (
+            <ConnectedCost
+              key="cost"
+              hosts={hosts}
+              dispatch={dispatch}
+              open={(host, runId) => go({type: 'open-run', host, runId})}
+            />
+          ),
+          machines: (
+            <MachinesScreen
+              key="machines"
+              rows={machineRows}
+              {...(controls === undefined ? {} : {controls})}
+            />
+          ),
+          settings: <SettingsScreen key="settings" appearance={look} choose={choose} />,
+        };
+
         return (
           <AppShell destination={current.destination} go={go}>
             {catchUp !== null ? (
