@@ -1,6 +1,4 @@
-import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
 import {type JSX, useReducer} from 'react';
 import {
   applyChange,
@@ -11,6 +9,7 @@ import {
   type NavigationAction,
   navigationReducer,
 } from '../../state/index.js';
+import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {PRICED_AND_UNPRICED} from '../../testing/orchestrator/cost-views.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
@@ -27,19 +26,10 @@ function hostWith(
   costs: typeof COSTS | Record<string, never>,
   feed: CostFeedSnapshot | undefined,
 ): HostSnapshot {
-  return {
-    key: 'local',
-    label: 'This machine',
-    repositoryChecked: undefined,
+  return hostSnapshotOf({
     model: {data: {...base, costs}, agentCursors: {}},
-    connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
-    freshness: {status: 'live', lastUpdateMs: null},
-    runsFeed: {_tag: 'Live'},
-    agentFeeds: {},
-    runHistory: {_tag: 'Idle'},
-    history: {earlier: {_tag: 'Idle'}, wholes: {}},
     costFeeds: feed === undefined ? {} : {[scenario.runId]: feed},
-  };
+  });
 }
 
 /** The runs as the shell composes them, over the navigation fold, recording what is watched and retried. */
@@ -58,20 +48,7 @@ function Window(props: {
     <OrchestratorApp
       hosts={[props.host]}
       nowMs={scenario.endMs}
-      commands={{
-        start: undefined,
-        stop: {},
-        send: {},
-        startRun: () => undefined,
-        checkRepository: () => undefined,
-        retryStart: () => undefined,
-        stopRun: () => undefined,
-        retryStop: () => undefined,
-        sendMessage: () => undefined,
-        retrySend: () => undefined,
-        loadEarlier: () => undefined,
-        expand: () => undefined,
-      }}
+      commands={appCommandsOf()}
       retryHost={() => undefined}
       retryCost={(host, runId) => props.retries.push(`${host}/${runId}`)}
       route={navigation.runs}

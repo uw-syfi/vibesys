@@ -8,7 +8,8 @@
 
 /** What the host said of one path. */
 export type RepositoryAnswer =
-  | {readonly _tag: 'Passed'}
+  /** The path is a repository a start could use, and these are the tasks it holds, sorted. */
+  | {readonly _tag: 'Passed'; readonly tasks: readonly string[]}
   | {readonly _tag: 'Refused'; readonly reason: string}
   /**
    * The host could not say: it does not know the question (an older host), cannot launch agents
@@ -27,7 +28,7 @@ export interface RepositoryChecked {
 export type RepositoryVerdict =
   | {readonly _tag: 'Empty'}
   | {readonly _tag: 'Checking'}
-  | {readonly _tag: 'Valid'}
+  | {readonly _tag: 'Valid'; readonly tasks: readonly string[]}
   | {readonly _tag: 'Invalid'; readonly reason: string};
 
 /** The verdict for the path typed in the field, from the host's latest answer. */
@@ -38,7 +39,7 @@ export function repositoryVerdict(
   const repository = typed.trim();
   if (repository === '') return {_tag: 'Empty'};
   if (checked === undefined || checked.repository !== repository) return {_tag: 'Checking'};
-  return checked.answer._tag === 'Refused'
-    ? {_tag: 'Invalid', reason: checked.answer.reason}
-    : {_tag: 'Valid'};
+  const {answer} = checked;
+  if (answer._tag === 'Refused') return {_tag: 'Invalid', reason: answer.reason};
+  return {_tag: 'Valid', tasks: answer._tag === 'Passed' ? answer.tasks : []};
 }

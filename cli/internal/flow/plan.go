@@ -47,6 +47,17 @@ type Plan struct {
 	// commit after the checkout, and every command runs in the task's image against the candidate's
 	// server, which each run starts in the candidate's image.
 	Candidate *task.Candidate
+	// Service is set for a task of one image with a job-scoped server: the job starts the server
+	// once, before its first sample (before its check, when the check shares it), and runs every
+	// sample against it, with the task's reset before each sample that reuses it. A server that
+	// ended between two commands is started again.
+	Service *task.Service
+}
+
+// serves reports whether the job starts its job-scoped server: a measure job of a task with one,
+// and a check job when the check shares it.
+func (p Plan) serves() bool {
+	return p.Service != nil && (p.Kind == core.JobMeasure || p.Service.ShareWithCheck)
 }
 
 // RunsCheck reports whether the job runs the check.
@@ -97,6 +108,21 @@ func (p Plan) Validate() error {
 	}
 	if p.Build != nil {
 		if err := validCommand("build", *p.Build); err != nil {
+			return bad("%v", err)
+		}
+	}
+	if sv := p.Service; sv != nil {
+		switch {
+		case p.Candidate != nil:
+			return bad("a job of a task of two images starts its candidate's server for each command, and has no job-scoped server")
+		case len(sv.Serve) == 0 || sv.Serve[0] == "":
+			return bad("the job's server has a command")
+		case !strings.HasPrefix(sv.Ready, "/"):
+			return bad("the job's server's readiness path %q is not an absolute HTTP path", sv.Ready)
+		case sv.StartupTimeout <= 0:
+			return bad("the job's server has no positive startup time (%v)", sv.StartupTimeout)
+		}
+		if err := validCommand("reset", sv.Reset); err != nil {
 			return bad("%v", err)
 		}
 	}
@@ -174,6 +200,11 @@ const (
 	StageCheck     Stage = "check"
 	StageBenchmark Stage = "benchmark"
 	StageObserve   Stage = "observe"
+	// StageService starts the job-scoped server: before the first sample, before the check when the
+	// check shares it, and again before a sample whose server ended.
+	StageService Stage = "service"
+	// StageReset is the task's reset of the job-scoped server, before a sample that reuses it.
+	StageReset Stage = "reset"
 )
 
 // Findings is what a job that passed found out.
@@ -190,6 +221,9 @@ type Findings struct {
 	// CandidateImage is the exact digest of the candidate's image the commands ran against, for a
 	// task of two images.
 	CandidateImage string
+	// Services is the server each sample ran on, one per sample, for a job with a job-scoped
+	// server, and nil otherwise.
+	Services []core.SampleService
 }
 
 // Record is the result to save for a job that passed. A measure job names itself as its check pass
@@ -208,7 +242,7 @@ func (p Plan) Record(job core.JobID, commit core.Commit, f Findings, at time.Tim
 	if p.RunsCheck() {
 		checkJob = job
 	}
-	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: p.withUnits(f.Observations), CheckJob: checkJob, Objectives: p.Objectives}
+	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: p.withUnits(f.Observations), CheckJob: checkJob, Objectives: p.Objectives, Services: f.Services}
 	return r
 }
 

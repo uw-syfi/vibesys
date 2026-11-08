@@ -8,6 +8,7 @@ import {
   type FeedStatus,
   type FleetHostInput,
   type FleetPlace,
+  type FolderListing,
   freshnessOf,
   type HostConnectionState,
   type HostFreshness,
@@ -51,6 +52,8 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The host's latest answer about the repository path typed in the Start form. */
   readonly repositoryChecked: RepositoryChecked | undefined;
+  /** The host's listing of each folder the Start form has asked for, by `listingKey`. */
+  readonly directories: ReadonlyMap<string, FolderListing>;
   /** The status of each agent's stream the screen has open, by agent id. */
   readonly agentFeeds: Readonly<Record<string, FeedStatus>>;
   /** How each run's cost stream stands while its Cost view is showing, by run id. */
@@ -75,6 +78,11 @@ export interface AppCommands {
   readonly startRun: (host: string, request: StartRunRequest) => void;
   /** The repository path typed in the Start form is now `repository` on `host`. */
   readonly checkRepository: (host: string, repository: string) => void;
+  /**
+   * Ask `host` for the entries of `folder` (once), hidden ones too when `hidden`. With `fresh` what
+   * the host listed before is dropped first, so the folder is read again: the field was entered.
+   */
+  readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
   readonly retryStart: () => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
@@ -204,15 +212,17 @@ export function OrchestratorApp(props: {
         retryHost={props.retryHost}
         newRun={
           <NewRun
-            hosts={hosts.map(({key, label, model, repositoryChecked}) => ({
+            hosts={hosts.map(({key, label, model, repositoryChecked, directories}) => ({
               key,
               label,
               models: model.data.models,
               repositoryChecked,
+              directories,
             }))}
             progress={commands.start}
             start={commands.startRun}
             checkRepository={commands.checkRepository}
+            listDirectory={commands.listDirectory}
             retry={commands.retryStart}
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />

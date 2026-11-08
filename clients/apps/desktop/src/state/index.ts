@@ -21,6 +21,15 @@ export {
   refusalCauseOf,
 } from './connection.js';
 export {
+  completionsOf,
+  type FolderEntry,
+  type FolderListing,
+  listingKey,
+  type PathCompletion,
+  type PathSplit,
+  splitPath,
+} from './directory-listing.js';
+export {
   FAULT_KINDS,
   type Fault,
   type FaultKind,

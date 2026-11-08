@@ -44,6 +44,7 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 		Samples:        p.Samples,
 		CheckPassJobId: string(p.CheckPass),
 		Candidate:      planCandidate(p.Candidate),
+		Service:        planService(p.Service),
 	}
 	if p.Kind == core.JobMeasure {
 		out.Benchmark = planCommand(&p.Benchmark)
@@ -116,10 +117,48 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 	if out.Candidate, err = toPlanCandidate(field+".candidate", p.GetCandidate()); err != nil {
 		return nil, err
 	}
+	if out.Service, err = toPlanService(field+".service", p.GetService()); err != nil {
+		return nil, err
+	}
 	if err := out.Validate(); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// planService is the contract's message for a job-scoped server, nil for none.
+func planService(s *task.Service) *cliv1.PlanService {
+	if s == nil {
+		return nil
+	}
+	return &cliv1.PlanService{
+		Serve: slices.Clone(s.Serve), Ready: s.Ready, StartupTimeout: durationpb.New(s.StartupTimeout),
+		ResetCommand: planCommand(&s.Reset), ShareWithCheck: s.ShareWithCheck,
+	}
+}
+
+// toPlanService returns the job-scoped server of the contract's message, nil for none.
+func toPlanService(field string, s *cliv1.PlanService) (*task.Service, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if s.GetStartupTimeout() == nil {
+		return nil, invalid("%s.startup_timeout: a job-scoped server has a startup time", field)
+	}
+	if err := s.GetStartupTimeout().CheckValid(); err != nil {
+		return nil, invalid("%s.startup_timeout: %v", field, err)
+	}
+	if s.GetResetCommand() == nil {
+		return nil, invalid("%s.reset_command: a job-scoped server has a reset", field)
+	}
+	reset, err := toPlanCommand(field+".reset_command", s.GetResetCommand())
+	if err != nil {
+		return nil, err
+	}
+	return &task.Service{
+		Serve: slices.Clone(s.GetServe()), Ready: s.GetReady(), StartupTimeout: s.GetStartupTimeout().AsDuration(),
+		Reset: reset, ShareWithCheck: s.GetShareWithCheck(),
+	}, nil
 }
 
 // resultFormat is how a task's benchmark reports a result, as the message states it: nil when the

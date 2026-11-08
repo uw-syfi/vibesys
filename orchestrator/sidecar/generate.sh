@@ -14,7 +14,7 @@ trap 'rm -rf "$(dirname "$image")"' EXIT
 
 rm -rf "$out"
 mkdir -p "$out"
-files="$(cd "$root" && uv run --locked --group proto buf ls-files proto --path proto/vibesys/orchestrator --format=import)"
+files="$(cd "$root" && uv run --locked --group proto buf ls-files proto --path proto/vibesys/orchestrator --path proto/vibesys/cli/v1/task.proto --path proto/vibesys/cli/v1/environment.proto --format=import)"
 (cd "$here" && uv run --locked --group dev python -m grpc_tools.protoc \
   --descriptor_set_in="$image" \
   --python_out="$out" --grpc_python_out="$out" \

@@ -63,6 +63,9 @@ type Environment struct {
 	// candidates builds a candidate's image; nil builds every one to a digest of its build.
 	candidates func(core.CandidateBuild) (core.CandidateImage, error)
 	built      []core.CandidateBuild
+	// served is every job-scoped server Serve was asked for, and live how many run.
+	served []core.JobService
+	live   []*service
 }
 
 // CandidatePort is the port a fake environment's candidate server is told to listen on.
@@ -270,18 +273,7 @@ func (m Environments) Environment(kind core.EnvironmentKind, target environment.
 // another. Every process of a script is a goroutine of a group, and the group ends on every path
 // as the contract requires; Run returns when they all have.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
-	e.mu.Lock()
-	e.runs = append(e.runs, x)
-	e.active++
-	e.running = append(e.running, &x)
-	e.mu.Unlock()
-	defer func() {
-		e.mu.Lock()
-		e.active--
-		e.running = slices.DeleteFunc(e.running, func(r *core.Execution) bool { return r == &x })
-		e.mu.Unlock()
-	}()
-
+	defer e.track(&x)()
 	if err := environment.Validate(x); err != nil {
 		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
@@ -319,6 +311,21 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	attempt := environment.ExecuteBeside(x, places, ev, out)
 	l.end()
 	return environment.WithServiceLog(environment.Finish(ctx, attempt, nil), tail)
+}
+
+// track records a run that starts, and returns the function that records its end.
+func (e *Environment) track(x *core.Execution) (ended func()) {
+	e.mu.Lock()
+	e.runs = append(e.runs, *x)
+	e.active++
+	e.running = append(e.running, x)
+	e.mu.Unlock()
+	return func() {
+		e.mu.Lock()
+		e.active--
+		e.running = slices.DeleteFunc(e.running, func(r *core.Execution) bool { return r == x })
+		e.mu.Unlock()
+	}
 }
 
 // syncWriter serializes the writes of the several processes of one run.

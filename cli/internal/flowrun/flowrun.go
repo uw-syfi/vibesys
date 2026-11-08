@@ -50,12 +50,31 @@ type Shell struct {
 	scratch  string
 	removals []func()
 	runs     int // the commands run so far
+	// service is the job-scoped server the last Serve started, until Close ends it.
+	service environment.Service
 }
 
 var _ flow.Shell = (*Shell)(nil)
 
 // New returns a shell that has made nothing yet.
-func New(cfg Config) *Shell { return &Shell{cfg: cfg} }
+func New(cfg Config) *Shell {
+	// A job-scoped server writes to the output while the commands run against it do.
+	cfg.Output = &serialWriter{w: cfg.Output}
+	return &Shell{cfg: cfg}
+}
+
+// serialWriter serializes the writes of the processes of a job to its one output, and passes on
+// what the output says of each.
+type serialWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *serialWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
 
 // Run drives the plan to its verdict on a new shell and closes the shell. It fails only for a
 // plan that is not valid.
@@ -65,14 +84,31 @@ func Run(ctx context.Context, cfg Config, p flow.Plan) (flow.Verdict, error) {
 	return flow.Drive(ctx, p, sh)
 }
 
-// Close removes the scratch directory and then the checkout. It is idempotent.
+// Close ends the job-scoped server, when one runs, and then removes the scratch directory and the
+// checkout. It is idempotent. Run calls it on every path the job ends by, a cancel included.
 func (s *Shell) Close() {
 	s.mu.Lock()
 	removals := s.removals
 	s.removals = nil
 	s.mu.Unlock()
+	s.endService()
 	for i := len(removals) - 1; i >= 0; i-- {
 		removals[i]()
+	}
+}
+
+// endService ends the job-scoped server the shell holds, if any, and says in the output what it
+// could not clean up.
+func (s *Shell) endService() {
+	s.mu.Lock()
+	sv := s.service
+	s.service = nil
+	s.mu.Unlock()
+	if sv == nil {
+		return
+	}
+	if err := sv.Close(); err != nil {
+		_, _ = fmt.Fprintf(s.cfg.Output, "[%s] the job's server was not ended cleanly: %v\n", flow.StageService, err)
 	}
 }
 
@@ -87,6 +123,13 @@ func (s *Shell) Do(ctx context.Context, r flow.Request) flow.Event {
 		return s.observe(ctx)
 	case flow.BuildCandidate:
 		return s.buildCandidate(ctx, r)
+	case flow.Serve:
+		return s.serve(ctx, r)
+	case flow.ProbeService:
+		s.mu.Lock()
+		sv := s.service
+		s.mu.Unlock()
+		return flow.ServiceState{Alive: sv != nil && sv.Alive()}
 	}
 	return flow.CheckoutFailed{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the shell cannot carry out %T", r)}}
 }
@@ -131,25 +174,81 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 		}
 		_, _ = fmt.Fprintf(s.cfg.Output, "[%s] artifacts: %s\n", r.Stage, x.Artifacts)
 	}
+	runner := s.cfg.Environment.Run
+	if r.OnService {
+		s.mu.Lock()
+		sv := s.service
+		s.mu.Unlock()
+		if sv == nil {
+			return flow.NotRan{Failure: core.Failure{Kind: core.FailureInternal, Message: "the command runs against the job's server, and none was started"}}
+		}
+		runner = sv.Run
+	}
 	started := s.cfg.Clock.Now()
-	attempt := s.cfg.Environment.Run(ctx, x, s.cfg.Output)
+	attempt := runner(ctx, x, s.cfg.Output)
 	ended := s.cfg.Clock.Now()
-	var ran flow.Ran
-	switch a := attempt.(type) {
-	case core.NotStarted:
-		return flow.NotRan{Failure: a.Failure}
-	case core.Unobserved:
-		return flow.Unseen{Failure: a.Failure}
-	case core.Ended:
-		ran = flow.Ran{Exec: a.Exec, ServiceLog: a.ServiceLog}
-	default:
-		return flow.Unseen{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the environment answered %T", attempt)}}
+	ran, other := answer(attempt)
+	if other != nil {
+		return other
 	}
 	ran.Started, ran.Ended = started, ended
 	if r.Read != "" {
 		ran.Output, ran.Found, ran.ReadError = s.read(r.Read)
 	}
 	return ran
+}
+
+// answer is the event that says how an attempt ended: a Ran, or another event in its place.
+func answer(attempt core.Attempt) (flow.Ran, flow.Event) {
+	switch a := attempt.(type) {
+	case core.NotStarted:
+		return flow.Ran{}, flow.NotRan{Failure: a.Failure}
+	case core.Unobserved:
+		return flow.Ran{}, flow.Unseen{Failure: a.Failure}
+	case core.Ended:
+		return flow.Ran{Exec: a.Exec, ServiceLog: a.ServiceLog}, nil
+	default:
+		return flow.Ran{}, flow.Unseen{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the environment answered %T", attempt)}}
+	}
+}
+
+// serve starts the job-scoped server, after ending the one before it when that one ended, and holds
+// it until Close. Its output goes to the job's output.
+func (s *Shell) serve(ctx context.Context, r flow.Serve) flow.Event {
+	if r.Again {
+		_, _ = fmt.Fprintf(s.cfg.Output, "[%s] the job's server ended; starting it again\n", flow.StageService)
+	}
+	s.endService()
+	s.mu.Lock()
+	checkout := s.checkout
+	s.runs++
+	n := s.runs
+	s.mu.Unlock()
+	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] %s\n", flow.StageService, strings.Join(r.Argv, " "))
+	js := core.JobService{Checkout: checkout, Argv: r.Argv, Ready: r.Ready, StartupTimeout: r.StartupTimeout, Lifetime: r.Lifetime}
+	if s.cfg.Artifacts != "" {
+		js.Artifacts = ArtifactsOf(s.cfg.Artifacts, n, flow.StageService)
+		if err := s.cfg.Files.MakeDir(ctx, js.Artifacts); err != nil {
+			return flow.NotRan{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
+		}
+		_, _ = fmt.Fprintf(s.cfg.Output, "[%s] artifacts: %s\n", flow.StageService, js.Artifacts)
+	}
+	sv, attempt := s.cfg.Environment.Serve(ctx, js, s.cfg.Output)
+	if attempt != nil {
+		ran, other := answer(attempt)
+		if other != nil {
+			return other
+		}
+		return ran
+	}
+	if sv == nil {
+		return flow.NotRan{Failure: core.Failure{Kind: core.FailureInternal, Message: "the environment answered Serve with neither a server nor an attempt"}}
+	}
+	s.mu.Lock()
+	s.service = sv
+	s.mu.Unlock()
+	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] the job's server is ready\n", flow.StageService)
+	return flow.Serving{}
 }
 
 // buildCandidate builds the candidate's image of a task of two images, or finds it built. The

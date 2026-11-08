@@ -248,7 +248,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
-		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool,
+		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree}, Directories: DirectoryLister{Tree: x.wiring.Tree}, JobTool: x.wiring.JobTool,
 	})
 }
 
