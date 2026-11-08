@@ -52,7 +52,9 @@ export function MachineStrip(props: {
     <Card>
       <Stack gap="space-3">
         <Row gap="space-4" wrap>
-          <Text variant="section">Machine</Text>
+          <ClipRow fixed>
+            <Text variant="section">Machine</Text>
+          </ClipRow>
           <SegmentedControl
             label="Machine"
             value={props.chosen}
@@ -74,7 +76,9 @@ export function MachineStrip(props: {
           </Row>
         </Row>
         <Row gap="space-3">
-          <Text variant="section">Evals on</Text>
+          <ClipRow fixed>
+            <Text variant="section">Evals on</Text>
+          </ClipRow>
           <Stale stale={props.stale}>
             <ClipRow>
               {offeredPlaces(props.places).map(place => (

@@ -27,3 +27,8 @@
 .vs-clip-row > * {
   flex: none;
 }
+
+.vs-clip-row[data-fixed] {
+  flex: none;
+  mask-image: none;
+}
