@@ -33,6 +33,7 @@ def test_a_phase_round_names_the_coordinator_duties(
     monkeypatch.setenv(MICROBENCH_FULL_ROUNDS_ENV, "0")
     plan, implement = _calls(tmp_path)
     assert "Phase table and phase rounds" in implement
+    assert "run_in_background: false" in implement and "do not return before every subagent" in implement
     assert "`phase` subagent" in implement
     assert "name the target phases" in plan
 

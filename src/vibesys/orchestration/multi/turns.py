@@ -211,8 +211,10 @@ _PHASE_ROUND_IMPLEMENTER = """
 
 This is a phase round. Follow the "Phase table and phase rounds" section of the objective
 (`{objective}`): give each target phase of the plan to a `phase` subagent, all at once, and
-coordinate them. Do not edit phase code yourself before they return. Then merge, check and
-time the merged build as that section says.
+coordinate them. Start them in the foreground (`run_in_background: false`), all Agent calls in
+one message, so that they run at the same time and you wait for all of them. A subagent stops
+when your turn ends: do not return before every subagent has returned. Do not edit phase code
+yourself before they return. Then merge, check and time the merged build as that section says.
 """
 
 _PHASE_ROUND_PLAN = """
