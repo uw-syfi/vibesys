@@ -552,7 +552,8 @@ class _MultiRun:
         implementation: ImplementerReply,
     ) -> str | None:
         artifact = implementation.validation_recipe_artifact
-        if artifact is None:
+        if artifact is None or not artifact.strip():
+            # An empty string from the structured reply means no recipe, like None.
             return None
         report_location = self.files.validation_report_location(
             self.round_number,
