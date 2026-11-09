@@ -22,7 +22,7 @@ import {
   type NavigationAction,
   staleForMs,
 } from '../../state/index.js';
-import {MachinesScreen, type PlacesHost, useMachineControls} from '../machines/index.js';
+import {type PlacesHost, useMachineControls} from '../machines/index.js';
 import {nowMs} from '../orchestrator/clock.js';
 import {
   ConnectedApp,
@@ -36,6 +36,7 @@ import type {RepositoriesControls} from '../settings/repositories-card.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
 import {ConnectedCatchUp} from './connected-catch-up.js';
 import {ConnectedCost} from './connected-cost.js';
+import {ConnectedMachines} from './connected-machines.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
 
@@ -147,8 +148,9 @@ export function ConnectedShell(props: {
             />
           ),
           machines: (
-            <MachinesScreen
+            <ConnectedMachines
               key="machines"
+              hosts={hosts}
               rows={machineRows}
               {...(controls === undefined ? {} : {controls})}
               places={{hosts: places, refresh: refreshPlaces(hosts, dispatch)}}
