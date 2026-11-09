@@ -314,8 +314,12 @@ Read `progress/microbench/open.md` and the latest timeline in `reports/`. List t
 your draft that depend on a measurement that neither the timeline of the current kernel nor
 existing rows (`./primdb`) gives: for example a design that the kernel does not contain yet
 and that no matched row prices. For each, say what measurement would settle it and why the
-timeline cannot. Return an empty list when the timeline and the existing rows settle every
-choice of the draft.
+timeline cannot. Also list each ledger question that has gone two or more rounds without a
+matched comparison, and each phase that the newest `progress/microbench/build/` record defers:
+the timeline of the current kernel cannot price a design that the kernel does not contain, and
+`./check_candidate` refuses the round until such a question has matched rows. Return an empty
+list when the timeline and the existing rows settle every choice of the draft and no such
+question or deferral exists.
 """
 
 
