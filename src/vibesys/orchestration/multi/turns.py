@@ -203,6 +203,10 @@ MICROBENCH_MINUTES_ENV = "VIBESYS_MICROBENCH_MINUTES"
 # the open questions of its draft that a timeline of the current kernel cannot settle, and
 # skips it when there are none. Unset: every round runs the full phase.
 MICROBENCH_FULL_ROUNDS_ENV = "VIBESYS_MICROBENCH_FULL_ROUNDS"
+# A file in which the GPU broker keeps the seconds that the run's GPU jobs waited in the
+# queue while none of them ran. The microbench time limit moves later by the wait that
+# accumulates during the phase, so that a full node does not use up the measuring time.
+GPU_WAIT_FILE_ENV = "VIBESYS_GPU_WAIT_FILE"
 # When set, a round past the full microbench rounds (two when the count is unset) is a phase
 # round: the implementer coordinates one subagent per target phase of the plan.
 PHASE_AGENTS_ENV = "VIBESYS_PHASE_AGENTS"
@@ -252,10 +256,52 @@ def _measurements(root: object, directory: str) -> set[str]:
     return {str(path.relative_to(base)) for path in base.rglob("*")}
 
 
+def _queue_wait(path: str) -> float:
+    """Seconds of GPU queue wait that the broker recorded, or 0 when there is no record."""
+    if not path:
+        return 0.0
+    try:
+        return float(Path(path).read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
+async def _wait_with_queue_credit(awaitable, limit: float | None, wait_file: str,
+                                  poll: float = 30.0):
+    """Await with a time limit that moves later by the GPU queue wait during the call.
+
+    Raises asyncio.TimeoutError (and cancels the call) when the limit passes.
+    """
+    if limit is None:
+        return await awaitable
+    loop = asyncio.get_running_loop()
+    task = asyncio.ensure_future(awaitable)
+    start, waited0 = loop.time(), _queue_wait(wait_file)
+    try:
+        while True:
+            credit = max(0.0, _queue_wait(wait_file) - waited0)
+            left = start + limit + credit - loop.time()
+            if left <= 0:
+                raise asyncio.TimeoutError
+            done, _ = await asyncio.wait({task}, timeout=min(left, poll))
+            if done:
+                return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+
 _MICROBENCH_DEADLINE = """
 The phase has a time limit. Write `deadline: {deadline}` as the first line of the request
 file, so that the subagent fits its measurements to it. At the deadline, the answers settle
 what the rows settle, and the rest stays open in the ledger for a later round.
+Time that GPU jobs wait in the queue does not count: the limit moves later by that time.
+If a GPU job waits, do not cancel it or skip its measurement. Run `./gpu_run` in the
+background and wait for its result.
 """
 
 _MICROBENCH_ONLY = """
@@ -583,8 +629,9 @@ class MultiAgentTurns:
         )
         try:
             try:
-                response = await asyncio.wait_for(
-                    session.turn(prompt, response=MicrobenchPhaseResponse), hard_limit)
+                response = await _wait_with_queue_credit(
+                    session.turn(prompt, response=MicrobenchPhaseResponse), hard_limit,
+                    os.environ.get(GPU_WAIT_FILE_ENV, "").strip())
                 return response.summary
             except StructuredResponseError:
                 self._mark_stopped(round_name, "returned no structured summary")
@@ -598,7 +645,7 @@ class MultiAgentTurns:
                     "ledger for a later round.\n")
                 self.run.observations.warning(
                     f"[microbench] {round_name}: hard time limit "
-                    f"({hard_limit / 60:.0f} min) reached; the plan is revised from the "
+                    f"({(hard_limit or 0) / 60:.0f} min plus GPU queue wait) reached; the plan is revised from the "
                     "answers written so far")
                 return ("The microbench phase reached its hard time limit and was stopped. "
                         f"Read `progress/microbench/answers/{round_name}.md` for what it "
