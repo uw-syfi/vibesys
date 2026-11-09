@@ -119,9 +119,9 @@ func TestRefusalsNameEveryReasonInOrder(t *testing.T) {
 			checkedBy("ck")(&r.Results[1])
 			r.Results = append(r.Results, checkPass("ck", candidateCommit, 1, inEnvironment(dockerEnv)))
 		}, []core.PromoteRefusalKind{core.RefusalCheckMissing}},
-		{"a measurement is not a check", func(r *core.PromotionRequest) {
+		{"a measurement that linked another job's pass holds no pass of its own", func(r *core.PromotionRequest) {
 			checkedBy("m2")(&r.Results[1])
-			r.Results = append(r.Results, measurement("m2", candidateCommit, clearWin, 1))
+			r.Results = append(r.Results, measurement("m2", candidateCommit, clearWin, 1, checkedBy("gone")))
 		}, []core.PromoteRefusalKind{core.RefusalCheckMissing}},
 		{"the branch moved after the measurement", func(r *core.PromotionRequest) { r.Promotions = []core.Promotion{{Commit: baseCommit, At: at(3)}} }, []core.PromoteRefusalKind{core.RefusalStale}},
 		{"the branch moved at the instant of the measurement", func(r *core.PromotionRequest) { r.Promotions = []core.Promotion{{Commit: baseCommit, At: at(2)}} }, []core.PromoteRefusalKind{core.RefusalStale}},
@@ -159,6 +159,92 @@ func TestRefusalsNameEveryReasonInOrder(t *testing.T) {
 			t.Errorf("%s: %v, want %v", c.name, kinds, c.want)
 		}
 	}
+}
+
+// A top-up measure job of a commit links the check pass of the measurement it tops up when that
+// measurement ran its check inside its own job, and names that job as its check. The top-up rests
+// on a passing check exactly when the job it names holds a pass of its own (a check, or a
+// measurement that ran its check in its own job) of the same commit, task version and
+// environment. Promotion, the frontier and the current result all agree.
+func TestATopUpRestsOnTheCheckOfTheMeasurementItTopsUp(t *testing.T) {
+	cases := []struct {
+		name string
+		// named is the results the top-up's named job "first" adds; it is a measurement of the
+		// candidate that ran its check in its own job unless the case says otherwise.
+		named  func(measureFunc) []core.Result
+		passes bool
+	}{
+		{"the measurement it tops up ran its check", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2)}
+		}, true},
+		{"the job it names is a check", func(m measureFunc) []core.Result {
+			return []core.Result{checkPass("first", candidateCommit, 2)}
+		}, true},
+		{"the measurement it names is of another commit", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", commitN(9), 2)}
+		}, false},
+		{"the measurement it names ran under another task version", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, underTask("t0"))}
+		}, false},
+		{"the measurement it names ran in another environment", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, inEnvironment(dockerEnv))}
+		}, false},
+		{"the measurement it names names no check", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, checkedBy(""))}
+		}, false},
+		{"the measurement it names linked a check that is not saved", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, checkedBy("gone"))}
+		}, false},
+		{"the measurement it names linked a check of another commit", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, checkedBy("ck")), checkPass("ck", commitN(9), 1)}
+		}, false},
+		// A top-up links the pass a measurement holds itself, never a measurement that linked one
+		// (PassKey), so the link is one step long.
+		{"the measurement it names linked a pass of its own commit", func(m measureFunc) []core.Result {
+			return []core.Result{m("first", candidateCommit, 2, checkedBy("ck")), checkPass("ck", candidateCommit, 1)}
+		}, false},
+		{"the job it names is not saved", func(m measureFunc) []core.Result { return nil }, false},
+	}
+	for _, c := range cases {
+		promoting := func(job string, commit core.Commit, minute int, options ...func(*core.Result)) core.Result {
+			return measurement(job, commit, clearWin, minute, options...)
+		}
+		req := ready()
+		req.Results = append(append([]core.Result{measurement("base", baseCommit, baseline, 1)}, c.named(promoting)...),
+			measurement("topup", candidateCommit, clearWin, 3, checkedBy("first")))
+		if missing := slices.Contains(kindsOrNone(t, decide(t, req)), core.RefusalCheckMissing); missing == c.passes {
+			t.Errorf("%s: promotion refuses check_missing %v, want %v", c.name, missing, !c.passes)
+		}
+
+		answer := core.CurrentResultAt(candidateCommit, req.Results)
+		if got, ok := answer.(core.CurrentResult); (ok && got.Result.Job == "topup") != c.passes {
+			t.Errorf("%s: the current result is %+v, want the top-up %v", c.name, answer, c.passes)
+		}
+
+		pareto := func(job string, commit core.Commit, minute int, options ...func(*core.Result)) core.Result {
+			return paretoMeasurement(job, commit, []float64{300, 100, 100}, minute, options...)
+		}
+		results := append(c.named(pareto), paretoMeasurement("topup", candidateCommit, []float64{300, 100, 100}, 3, checkedBy("first")))
+		d, err := core.DecideFrontier(core.FrontierRequest{Candidate: candidateCommit, Results: results, TaskVersion: "t1", At: at(4)})
+		if err != nil {
+			t.Fatalf("%s: DecideFrontier: %v", c.name, err)
+		}
+		if missing := slices.Contains(refusalKinds(d), core.FrontierCheckMissing); missing == c.passes {
+			t.Errorf("%s: the frontier refuses check_missing %v, want %v", c.name, missing, !c.passes)
+		}
+	}
+}
+
+// measureFunc saves a measurement of a commit at a minute, resting on a check in its own job.
+type measureFunc = func(job string, commit core.Commit, minute int, options ...func(*core.Result)) core.Result
+
+// kindsOrNone is the refusal's kinds, and none for a promotion.
+func kindsOrNone(t testing.TB, decision core.PromotionDecision) []core.PromoteRefusalKind {
+	t.Helper()
+	if _, ok := decision.(core.Approved); ok {
+		return nil
+	}
+	return kindsOf(t, decision)
 }
 
 func TestRefusalsCarryTheirEvidence(t *testing.T) {

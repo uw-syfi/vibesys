@@ -233,7 +233,8 @@ func movedSince(measuredAt time.Time, promotions []Promotion) (bool, Commit) {
 
 // restsOnPassingCheck reports whether a measurement names a passing check of its own commit,
 // task version and environment. The measuring job names itself when its check ran inside it, and
-// otherwise names the check job whose pass it linked.
+// otherwise names the saved pass it linked: a check job, or an earlier measure job that ran its
+// check inside it (a top-up of that measurement links the pass its check left).
 func restsOnPassingCheck(measurement Result, results []Result) bool {
 	_, ok := checkPassOf(measurement, results)
 	return ok
@@ -249,10 +250,25 @@ func checkPassOf(measurement Result, results []Result) (time.Time, bool) {
 		return measurement.RecordedAt, true
 	}
 	for _, r := range results {
-		if _, isCheck := r.Outcome.(CheckOutcome); isCheck && r.Job == named && r.Commit == measurement.Commit &&
+		if r.Job == named && holdsCheckPass(r) && r.Commit == measurement.Commit &&
 			r.TaskVersion == measurement.TaskVersion && r.Environment.Equal(measurement.Environment) {
 			return r.RecordedAt, true
 		}
 	}
 	return time.Time{}, false
+}
+
+// holdsCheckPass reports whether a saved result holds a check pass of its own: a check, or a
+// measurement whose check ran inside its own job. A measure job saves a result only after that
+// check passed. A measurement that linked another job's pass holds none of its own, as PassKey
+// says.
+func holdsCheckPass(r Result) bool {
+	switch o := r.Outcome.(type) {
+	case CheckOutcome:
+		return true
+	case MeasureOutcome:
+		return o.CheckJob == r.Job
+	default:
+		return false
+	}
 }
