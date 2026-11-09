@@ -9,6 +9,7 @@ import {
   SendMessageSchema,
   type StartRun,
   StartRunSchema,
+  StopAgentSchema,
   StopRunSchema,
   TimeLimitUpdateSchema,
   type UpdateRun,
@@ -41,6 +42,10 @@ export function startIntent(request: StartRunRequest): Intent {
 
 export function stopIntent(runId: string): Intent {
   return {case: 'stopRun', value: create(StopRunSchema, {runId})};
+}
+
+export function stopAgentIntent(agentId: string): Intent {
+  return {case: 'stopAgent', value: create(StopAgentSchema, {agentId})};
 }
 
 export function sendIntent(agentId: string, text: string): Intent {

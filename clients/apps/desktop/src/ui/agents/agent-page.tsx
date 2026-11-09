@@ -15,6 +15,7 @@ import {agentWord, harnessWord} from '../orchestrator/words.js';
 import {AgentTranscript, type HistoryAccess} from './agent-transcript.js';
 import {agentLabel} from './labels.js';
 import {MessageBox} from './message-box.js';
+import {StopControl} from './stop-control.js';
 import {formatSpan, formatUsd} from './time.js';
 
 /**
@@ -70,9 +71,13 @@ export function AgentPage(props: {
   readonly reading: ReactNode;
   /** What the last press of Send to this agent came to, or undefined before any. */
   readonly sendProgress: CommandProgress | undefined;
+  /** What the last press of Stop for this agent came to, or undefined before any. */
+  readonly stopProgress: CommandProgress | undefined;
   readonly history: HistoryAccess;
   readonly send: (text: string) => void;
   readonly retrySend: () => void;
+  readonly stop: () => void;
+  readonly retryStop: () => void;
   /** Opens another agent of the run. */
   readonly open: (agentId: string) => void;
 }): JSX.Element {
@@ -92,6 +97,14 @@ export function AgentPage(props: {
       state="ready"
       trail={props.trail}
       title={label}
+      actions={
+        <StopControl
+          agent={agent}
+          progress={props.stopProgress}
+          stop={props.stop}
+          retry={props.retryStop}
+        />
+      }
       meta={
         <>
           <Chip label={status.label} tone={status.tone} dot />

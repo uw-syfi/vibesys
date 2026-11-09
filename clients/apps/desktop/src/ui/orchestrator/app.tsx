@@ -104,6 +104,8 @@ export interface AppCommands {
   readonly start: CommandProgress | undefined;
   /** The last Stop of each run, by run id. */
   readonly stop: Readonly<Record<string, CommandProgress>>;
+  /** The last Stop of each agent, by agent id. */
+  readonly agentStop: Readonly<Record<string, CommandProgress>>;
   /** The last Send to each agent, by agent id. */
   readonly send: Readonly<Record<string, CommandProgress>>;
   /** The last settings update of each run, by run id. */
@@ -139,6 +141,9 @@ export interface AppCommands {
   readonly retryStart: () => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
+  /** Stop one agent of a run (not its lead): the host interrupts its turn and closes its session. */
+  readonly stopAgent: (host: string, agentId: string) => void;
+  readonly retryStopAgent: (agentId: string) => void;
   readonly sendMessage: (host: string, agentId: string, text: string) => void;
   readonly retrySend: (agentId: string) => void;
   /** Change settings of a live run: all of `request` or none of it. */
@@ -224,6 +229,9 @@ function OpenAgent(props: {
       sendProgress={commands.send[agent.id]}
       send={text => commands.sendMessage(host.key, agent.id, text)}
       retrySend={() => commands.retrySend(agent.id)}
+      stopProgress={commands.agentStop[agent.id]}
+      stop={() => commands.stopAgent(host.key, agent.id)}
+      retryStop={() => commands.retryStopAgent(agent.id)}
     />
   );
 }
