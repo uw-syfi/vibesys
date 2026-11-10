@@ -94,6 +94,10 @@ func (s script) run(t *testing.T) run {
 	write("uname", fmt.Sprintf("case \"$1\" in -s) echo '%s';; -m) echo '%s';; esac\n", s.machine.system, s.machine.arch))
 	if s.machine.sysctlArm64 != "" {
 		write("sysctl", fmt.Sprintf("echo %s\n", s.machine.sysctlArm64))
+	} else {
+		// A machine without the key, which sysctl reports as an error. Without this fake the real
+		// sysctl of an Apple Silicon host would answer 1.
+		write("sysctl", "exit 1\n")
 	}
 	tmp := t.TempDir()
 	path := os.Getenv("PATH")
