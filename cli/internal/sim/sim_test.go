@@ -59,6 +59,9 @@ type profile struct {
 	// them, renew them, and lose them to the backend, through every fault and every restart
 	// (alloc_test.go). It needs slots.
 	allocs bool
+	// fast makes the time limits of allocations come soon, so that jobs meet allocations that end and
+	// are renewed; otherwise the allocations outlast the jobs.
+	fast bool
 }
 
 // scheduledOf is a profile of a daemon that runs several jobs at once, for several runs, with some
@@ -429,7 +432,11 @@ func (w *world) actions() []option {
 	if len(all) > 0 && (w.profile.slots == 0 || w.rng.IntN(4) == 0) {
 		l := all[w.rng.IntN(len(all))]
 		name := fmt.Sprintf("%s/%s", string(l.scope.Task()), l.job.ID)
-		add("cancel "+name, func() { w.cancel(l) })
+		// A profile of allocations cancels seldom: a job cancelled before it launched says nothing of
+		// running in an allocation.
+		if w.rare(12) {
+			add("cancel "+name, func() { w.cancel(l) })
+		}
 		add("wait "+name, func() { w.wait(l) })
 	}
 	w.mu.Lock()
@@ -442,7 +449,7 @@ func (w *world) actions() []option {
 	outages := !p.lost || slices.ContainsFunc(all, func(l located) bool { return l.job.State == core.JobRunning })
 	// A profile of allocations lets the daemon live long enough for its allocations to start, take jobs
 	// and reach their end.
-	if up && p.crashes && !p.recovery && (!p.allocs || w.rng.IntN(12) == 0) {
+	if up && p.crashes && !p.recovery && (!p.allocs || w.rng.IntN(30) == 0) {
 		add("crash", w.crash)
 		add("restart", func() {
 			w.start("restart", func(ctx context.Context) string {
@@ -454,7 +461,7 @@ func (w *world) actions() []option {
 			})
 		})
 	}
-	if p.machine && len(w.spawned) > 0 {
+	if p.machine && len(w.spawned) > 0 && w.rare(12) {
 		add("reboot", func() {
 			w.crash()
 			for _, r := range w.spawned {
@@ -583,6 +590,10 @@ func mapKeysToString[V any](m map[lifecycle.Ref]V) map[string]V {
 	return out
 }
 
+// rare says whether a fault is offered this time: always outside a profile of allocations, and in
+// one once in n times, so that the daemon lives, and its jobs run in its allocations, between faults.
+func (w *world) rare(n int) bool { return !w.profile.allocs || w.rng.IntN(n) == 0 }
+
 // moves are what the driver may let go on.
 func (w *world) moves(heal bool) []option {
 	var out []option
@@ -600,7 +611,7 @@ func (w *world) moves(heal bool) []option {
 	// Nothing but repositories goes wrong in a profile of them, and a late call is not one.
 	calls := len(w.gate.sorted())
 	if at, ok := w.timers.next(); ok && (!heal || len(out) == 0) && (!w.profile.lost || calls == 0) {
-		// Allocations have time limits, which only time reaches, so a profile of them lets it pass more.
+		// Allocations have time limits, which only time reaches: a profile of fast ones lets it pass more.
 		for range 1 + w.timeWeight() {
 			out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
 		}
@@ -822,7 +833,7 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 		}
 		// A job whose every supervisor died before its start runs again until it had all its
 		// attempts, unless it was cancelled or the place that ran it was given up.
-		if !w.startedKill[ref] && !w.asked[ref] && !w.vanished[ref] && !w.wasGivenUp(ref) && w.unstarted[ref] < core.MaxAttempts {
+		if !w.startedKill[ref] && !w.asked[ref] && l.job.Spec.Allocation == "" && !w.vanished[ref] && !w.wasGivenUp(ref) && w.unstarted[ref] < core.MaxAttempts {
 			w.violate("job %s is lost after %d kills, each before its command started", ref, w.unstarted[ref])
 		}
 	case core.JobCancelled:

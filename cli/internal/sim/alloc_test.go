@@ -62,10 +62,13 @@ const (
 // allocationsOf is a profile of runs holding standing allocations through every fault and restart.
 func allocationsOf(r *rand.Rand) profile {
 	coin := func() bool { return r.IntN(2) == 0 }
+	// A fault is in one seed of three, so that most seeds let their jobs run in their allocations, and
+	// the invariants are still held through the faults of the rest.
+	rare := func() bool { return r.IntN(3) == 0 }
 	return profile{
-		allocs: true, slots: 2 + r.IntN(3), fair: coin(),
-		storeWrites: coin(), supervisorFaults: coin(), crashes: r.IntN(3) != 0, machine: coin(),
-		attempts: 4 + r.IntN(5), faultPercent: r.IntN(9), chaosSteps: 500 + r.IntN(700), jobs: 10 + r.IntN(10),
+		allocs: true, fast: r.IntN(4) == 0, slots: 2 + r.IntN(3), fair: coin(),
+		storeWrites: rare(), supervisorFaults: rare(), crashes: coin(), machine: rare(),
+		attempts: 4 + r.IntN(5), faultPercent: r.IntN(6), chaosSteps: 400 + r.IntN(300), jobs: 8 + r.IntN(8),
 	}
 }
 
@@ -169,7 +172,7 @@ func (w *world) submitWeight() int {
 	if w.alloc == nil {
 		return 1
 	}
-	if w.rng.IntN(4) != 0 {
+	if w.rng.IntN(2) != 0 {
 		return 0
 	}
 	for _, al := range w.alloc.state().Allocations() {
@@ -180,10 +183,11 @@ func (w *world) submitWeight() int {
 	return 0
 }
 
-// timeWeight is how many more times than any other move a profile offers time passing.
+// timeWeight is how many more times than any other move a profile of fast allocations offers time
+// passing.
 func (w *world) timeWeight() int {
-	if w.profile.allocs {
-		return 1
+	if w.profile.fast {
+		return 3
 	}
 	return 0
 }
@@ -388,8 +392,16 @@ func (w *world) allocActions() []option {
 	run := runs[w.rng.IntN(len(runs))]
 	if a.requests < 10 {
 		placement := []string{placementCluster, placementSlots}[w.rng.IntN(2)]
-		d := []time.Duration{10 * time.Minute, 20 * time.Minute, 40 * time.Minute, maxFor}[w.rng.IntN(4)]
-		add(fmt.Sprintf("%s requests %s for %s", run, placement, d), func() { w.requestAllocation(run, placement, d) })
+		// Mostly long ones, which outlive the jobs that are submitted into them; a short one now and then
+		// ends by its time limit under a job.
+		d := []time.Duration{20 * time.Minute, time.Hour, time.Hour, maxFor}[w.rng.IntN(4)]
+		if w.profile.fast {
+			d = []time.Duration{15 * time.Minute, 20 * time.Minute, 40 * time.Minute, time.Hour}[w.rng.IntN(4)]
+		}
+		// The first requests are offered often, so that allocations run before the jobs are over.
+		for range 1 + 5*max(0, 3-a.requests)/3 {
+			add(fmt.Sprintf("%s requests %s for %s", run, placement, d), func() { w.requestAllocation(run, placement, d) })
+		}
 	}
 	if len(all) > 0 {
 		al := all[w.rng.IntN(len(all))]
@@ -407,7 +419,9 @@ func (w *world) allocActions() []option {
 		} else {
 			order.Until = &cliv1.RenewalOrder_At{At: timestamppb.New(w.clock.Now().Add(time.Duration(1+w.rng.IntN(6)) * time.Hour))}
 		}
-		if al.Placement == placementCluster && w.rng.IntN(3) == 0 {
+		// A run asks for renewals of the allocations of the cluster often, since a successor is only made
+		// when time passes the lead of an order.
+		if al.Placement == placementCluster && al.RenewedBy == "" {
 			add(fmt.Sprintf("%s renews %s", al.Run, al.ID), func() { w.renewAllocation(string(al.Run), al.ID, order) })
 		}
 		if w.rng.IntN(10) == 0 {
@@ -425,13 +439,16 @@ func (w *world) allocActions() []option {
 	if len(all) >= 3 && w.rng.IntN(25) == 0 {
 		add(run+" ends", func() { w.endRun(run) })
 	}
-	add("the cluster flips", func() {
-		a.mu.Lock()
-		a.down = !a.down
-		down := a.down
-		a.mu.Unlock()
-		a.fake.SetUnreachable(down)
-	})
+	// The cluster is unreachable now and then, and not half the time, or no allocation would start.
+	if w.rng.IntN(8) == 0 {
+		add("the cluster flips", func() {
+			a.mu.Lock()
+			a.down = !a.down
+			down := a.down
+			a.mu.Unlock()
+			a.fake.SetUnreachable(down)
+		})
+	}
 	return out
 }
 
@@ -787,22 +804,49 @@ func TestSeedsOfAllocationsHoldTheInvariants(t *testing.T) {
 	}
 	for _, m := range allocationMarks {
 		t.Logf("%d of %d seeds: %s", got[m.name], count, m.name)
-		if count == allocDefaultSeeds && got[m.name] == 0 {
-			t.Errorf("no seed of %d: %s", count, m.name)
+		if count == allocDefaultSeeds && float64(got[m.name]) < m.floor*float64(count) {
+			t.Errorf("only %d of %d seeds: %s; at least %.0f%% must", got[m.name], count, m.name, m.floor*100)
+		}
+	}
+}
+
+// relaunchSeeds are seeds of the allocation profile that found a job cut off before its command
+// started and launched again by the reference of its first placement, while the allocation machine
+// had let the cut-off run go (a discarded run was told to it as a finished job): the allocation then
+// ran a second job beside the first, or a job it did not hold. They fail on the daemon that did so,
+// and must pass for as long as the profile is as it is; a change of the profile makes them seeds that
+// find nothing, and the default range, which has other seeds of the kind, goes on looking.
+var relaunchSeeds = []uint64{143, 147, 179, 187, 213, 216, 355}
+
+func TestSeedsOfAJobRelaunchedInItsAllocationHoldTheInvariants(t *testing.T) {
+	t.Parallel()
+	for _, seed := range relaunchSeeds {
+		var violation string
+		synctest.Test(t, func(*testing.T) { violation, _ = simulateWith(seed, allocationsOf) })
+		if violation != "" {
+			t.Errorf("seed %d: %s", seed, violation)
 		}
 	}
 }
 
 // allocationMarks are what a seed's trace says it did, and what the default range must reach.
-var allocationMarks = []struct{ name, text string }{
-	{"a run asked for an allocation of the cluster", "requests p"},
-	{"a run asked for an allocation of the machine's slots", "requests q"},
-	{"a job was launched in an allocation", "is launched in fake"},
-	{"a job started in an allocation", "starts in allocation"},
-	{"a job in an allocation of the machine's slots was launched", "is launched in slot"},
-	{"an allocation ended by its time limit", ": time_limit"},
-	{"an allocation ended as someone cancelled it", ": external"},
-	{"an allocation ended as its run asked", ": requested"},
-	{"an allocation was renewed", "renewed by"},
-	{"the daemon restarted", "daemon 2 starts"},
+var allocationMarks = []struct {
+	name, text string
+	// floor is the fraction of the default seeds that must have it. A job that ran in an allocation is
+	// what most of the invariants are about, so most seeds must have one; the rest are the other
+	// things that happen to an allocation, which fewer seeds reach, and which the floors keep from
+	// going unreached.
+	floor float64
+}{
+	{"a run asked for an allocation of the cluster", "requests p", 0.9},
+	{"a run asked for an allocation of the machine's slots", "requests q", 0.9},
+	{"a job was launched in an allocation of the cluster", "is launched in fake", 0.1},
+	{"a job was launched in an allocation", "is launched in ", 0.6},
+	{"a job started in an allocation", "starts in allocation", 0.6},
+	{"a job in an allocation of the machine's slots was launched", "is launched in slot", 0.4},
+	{"an allocation ended by its time limit", ": time_limit", 0.05},
+	{"an allocation ended as someone cancelled it", ": external", 0.1},
+	{"an allocation ended as its run asked", ": requested", 0.8},
+	{"an allocation was renewed", "renewed by", 0.1},
+	{"the daemon restarted", "daemon 2 starts", 0.5},
 }
