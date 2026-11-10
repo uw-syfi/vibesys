@@ -44,6 +44,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	// submission in neither count.
 	a.submitting.Add(1)
 	defer a.submitting.Add(-1)
+	a.RunSeen(req.Context.Run)
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
 	}

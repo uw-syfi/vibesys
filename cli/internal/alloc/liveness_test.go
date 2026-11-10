@@ -65,6 +65,21 @@ func TestARunSilentForItsIdleEndIsEnded(t *testing.T) {
 	}
 }
 
+// A call the shell steps a while after it was made counts from when it was made: the shell's queue
+// may lag behind the calls.
+func TestARunIsSeenWhenItCalledNotWhenTheCallWasStepped(t *testing.T) {
+	w := livenessWorld(t)
+	asked := w.now
+	w.running(gpu, 10*time.Hour)
+	w.now = asked.Add(90 * time.Minute)
+	w.do(alloc.RunSeen{Run: "run-a", At: asked.Add(time.Hour)})
+	w.now = asked.Add(time.Hour + idleEnd)
+	w.do(alloc.Tick{})
+	if !w.s.RunEnded("run-a") {
+		t.Fatal("the run was taken as seen when its call was stepped, not when it was made")
+	}
+}
+
 // liveRun is a run that renews its allocations for good (--until run-end) on a backend that starts
 // each at once, and calls at random gaps until it dies; the daemon ticks every five minutes. It
 // returns the time of the run's last call, every successor's request time, and when the run ended.

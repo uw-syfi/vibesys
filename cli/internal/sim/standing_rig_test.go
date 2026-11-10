@@ -48,6 +48,9 @@ max_time_seconds = 7200
 max_held = 3
 max_for = "2h"
 fit_margin = "1m"
+# The rig's runs make no call for hours at a time between their steps; a run is ended for its
+# silence only where a test says so.
+run_idle_end = "1000h"
 `
 
 const clusterPlacement = "cluster-a"

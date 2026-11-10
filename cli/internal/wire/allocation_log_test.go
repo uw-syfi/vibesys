@@ -24,7 +24,7 @@ func everyInput() []alloc.Input {
 		alloc.RenewAsk{Run: "run-a", ID: "a1", Order: alloc.RenewalOrder{Lead: time.Minute, For: time.Hour, Until: alloc.UntilRunEnd{}}},
 		alloc.RenewOffAsk{Run: "run-a", ID: "a1"},
 		alloc.RunEnded{Run: "run-a"},
-		alloc.RunSeen{Run: "run-a"},
+		alloc.RunSeen{Run: "run-a", At: logAt},
 		alloc.JobSubmitted{Run: "run-a", Job: "ab12-j3", Bound: 90 * time.Minute, Into: "a2", Eligible: []string{"p", "q"}},
 		alloc.JobSubmitted{Run: "run-a", Job: "ab12-j4", Bound: time.Minute},
 		alloc.JobStarted{Job: "ab12-j3"},

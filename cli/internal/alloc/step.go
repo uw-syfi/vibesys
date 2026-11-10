@@ -147,8 +147,12 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 	case RunEnded:
 		st.runEnded(e.Run)
 	case RunSeen:
-		if last, ok := st.s.seen[e.Run]; ok && st.now.Sub(last) >= SeenGranularity {
-			st.s.seen[e.Run] = st.now
+		at := e.At
+		if at.IsZero() || at.After(st.now) {
+			at = st.now
+		}
+		if last, ok := st.s.seen[e.Run]; ok && at.Sub(last) >= SeenGranularity {
+			st.s.seen[e.Run] = at
 		}
 	case JobStarted:
 		st.jobStarted(e.Job)

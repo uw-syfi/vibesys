@@ -45,7 +45,12 @@ type RenewOffAsk struct {
 // a placement's RunIdleEnd is ended by the first step from then on, a Tick if nothing else, as
 // RunEnded ends it. It is a fact, never refused, and changes nothing for a run that holds no
 // allocation or was seen within SeenGranularity.
-type RunSeen struct{ Run core.RunID }
+type RunSeen struct {
+	Run core.RunID
+	// At is when the call was made, which the shell may step a while after; one later than the
+	// step is taken as the step's time.
+	At time.Time
+}
 
 // RunEnded is the end of a run: each of its allocations that has not ended ends at once, and the
 // run asks for nothing more.

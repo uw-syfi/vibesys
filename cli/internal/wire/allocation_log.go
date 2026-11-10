@@ -30,7 +30,7 @@ func FromAllocationInput(in alloc.Input) (*cliv1.AllocationInput, error) {
 	case alloc.RunEnded:
 		out.Event = &cliv1.AllocationInput_RunEnded{RunEnded: &cliv1.AllocationRunEnded{Run: string(e.Run)}}
 	case alloc.RunSeen:
-		out.Event = &cliv1.AllocationInput_RunSeen{RunSeen: &cliv1.AllocationRunSeen{Run: string(e.Run)}}
+		out.Event = &cliv1.AllocationInput_RunSeen{RunSeen: &cliv1.AllocationRunSeen{Run: string(e.Run), At: timestamp(e.At)}}
 	case alloc.JobSubmitted:
 		out.Event = &cliv1.AllocationInput_JobSubmitted{JobSubmitted: &cliv1.AllocationJobSubmitted{
 			Run: string(e.Run), Job: string(e.Job), Bound: durationpb.New(e.Bound), Into: string(e.Into), Eligible: append([]string(nil), e.Eligible...),
@@ -125,7 +125,7 @@ func ToAllocationInput(m *cliv1.AllocationInput) (alloc.Input, error) {
 	case *cliv1.AllocationInput_RunEnded:
 		in.Event = alloc.RunEnded{Run: core.RunID(e.RunEnded.GetRun())}
 	case *cliv1.AllocationInput_RunSeen:
-		in.Event = alloc.RunSeen{Run: core.RunID(e.RunSeen.GetRun())}
+		in.Event = alloc.RunSeen{Run: core.RunID(e.RunSeen.GetRun()), At: toTime(e.RunSeen.GetAt())}
 	case *cliv1.AllocationInput_JobSubmitted:
 		j := e.JobSubmitted
 		in.Event = alloc.JobSubmitted{

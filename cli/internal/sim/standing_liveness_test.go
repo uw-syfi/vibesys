@@ -15,7 +15,7 @@ import (
 // is cancelled and no successor is asked for, however long the daemon runs on. While it calls, it
 // keeps its allocation.
 func TestAStandingAllocationOfAnAgentThatDiedEndsAfterRunIdleEnd(t *testing.T) {
-	r := newStandingRig(t, strings.Replace(standingConfig, `fit_margin = "1m"`, "fit_margin = \"1m\"\nrun_idle_end = \"20m\"", 1))
+	r := newStandingRig(t, strings.Replace(standingConfig, `run_idle_end = "1000h"`, `run_idle_end = "20m"`, 1))
 	a, _ := r.start()
 	v, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
 	if err != nil {
@@ -49,6 +49,6 @@ func TestAStandingAllocationOfAnAgentThatDiedEndsAfterRunIdleEnd(t *testing.T) {
 		r.tick()
 	}
 	if n := len(r.cluster.Submitted()); n != 1 {
-		t.Fatalf("%d batch jobs submitted, want the first alone: the dead run renewed", n)
+		t.Fatalf("%d batch jobs submitted, want the first alone: the dead run renewed: %+v", n, r.cluster.Submitted())
 	}
 }

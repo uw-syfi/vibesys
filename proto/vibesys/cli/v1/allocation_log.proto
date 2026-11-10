@@ -64,6 +64,8 @@ message AllocationRenewOffAsked {
 // AllocationRunSeen is a call of the run's, which says it is alive.
 message AllocationRunSeen {
   string run = 1 [(buf.validate.field).string.min_len = 1];
+  // When the call was made.
+  google.protobuf.Timestamp at = 2;
 }
 
 message AllocationRunEnded {

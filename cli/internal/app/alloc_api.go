@@ -84,7 +84,7 @@ func RefusalFailure(r alloc.Refusal) *core.Failure {
 // nothing. It never blocks.
 func (a *App) RunSeen(run core.RunID) {
 	if a.alloc != nil && run != "" {
-		a.alloc.post(allocMsg{event: alloc.RunSeen{Run: run}})
+		a.alloc.post(allocMsg{event: alloc.RunSeen{Run: run, At: a.now()}})
 	}
 }
 

@@ -623,8 +623,10 @@ func (x *AllocationRenewOffAsked) GetId() string {
 
 // AllocationRunSeen is a call of the run's, which says it is alive.
 type AllocationRunSeen struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Run           string                 `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Run   string                 `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
+	// When the call was made.
+	At            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -664,6 +666,13 @@ func (x *AllocationRunSeen) GetRun() string {
 		return x.Run
 	}
 	return ""
+}
+
+func (x *AllocationRunSeen) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
 }
 
 type AllocationRunEnded struct {
@@ -1682,9 +1691,10 @@ const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"\x05order\x18\x03 \x01(\v2\x1c.vibesys.cli.v1.RenewalOrderB\x06\xbaH\x03\xc8\x01\x01R\x05order\"`\n" +
 	"\x17AllocationRenewOffAsked\x12\x19\n" +
 	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\x12*\n" +
-	"\x02id\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\".\n" +
+	"\x02id\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\"Z\n" +
 	"\x11AllocationRunSeen\x12\x19\n" +
-	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\"/\n" +
+	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\x12*\n" +
+	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"/\n" +
 	"\x12AllocationRunEnded\x12\x19\n" +
 	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\"\xd6\x01\n" +
 	"\x16AllocationJobSubmitted\x12\x19\n" +
@@ -1819,27 +1829,28 @@ var file_vibesys_cli_v1_allocation_log_proto_depIdxs = []int32{
 	6,  // 16: vibesys.cli.v1.AllocationInput.run_seen:type_name -> vibesys.cli.v1.AllocationRunSeen
 	26, // 17: vibesys.cli.v1.AllocationAsked.requested_for:type_name -> google.protobuf.Duration
 	27, // 18: vibesys.cli.v1.AllocationRenewAsked.order:type_name -> vibesys.cli.v1.RenewalOrder
-	26, // 19: vibesys.cli.v1.AllocationJobSubmitted.bound:type_name -> google.protobuf.Duration
-	14, // 20: vibesys.cli.v1.AllocationObserved.pending:type_name -> vibesys.cli.v1.SeenPending
-	15, // 21: vibesys.cli.v1.AllocationObserved.running:type_name -> vibesys.cli.v1.SeenRunning
-	16, // 22: vibesys.cli.v1.AllocationObserved.ended:type_name -> vibesys.cli.v1.SeenEnded
-	25, // 23: vibesys.cli.v1.SeenPending.estimated_start:type_name -> google.protobuf.Timestamp
-	25, // 24: vibesys.cli.v1.SeenRunning.started_at:type_name -> google.protobuf.Timestamp
-	25, // 25: vibesys.cli.v1.SeenRunning.ends_at:type_name -> google.protobuf.Timestamp
-	0,  // 26: vibesys.cli.v1.SeenEnded.cause:type_name -> vibesys.cli.v1.SeenEndedCause
-	25, // 27: vibesys.cli.v1.SeenEnded.at:type_name -> google.protobuf.Timestamp
-	24, // 28: vibesys.cli.v1.AllocationDaemonStarted.placements:type_name -> vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
-	26, // 29: vibesys.cli.v1.AllocationLimits.max_for:type_name -> google.protobuf.Duration
-	26, // 30: vibesys.cli.v1.AllocationLimits.fit_margin:type_name -> google.protobuf.Duration
-	26, // 31: vibesys.cli.v1.AllocationLimits.queue_timeout:type_name -> google.protobuf.Duration
-	26, // 32: vibesys.cli.v1.AllocationLimits.run_idle_end:type_name -> google.protobuf.Duration
-	1,  // 33: vibesys.cli.v1.AllocationLogRecord.input:type_name -> vibesys.cli.v1.AllocationInput
-	21, // 34: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry.value:type_name -> vibesys.cli.v1.AllocationLimits
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	25, // 19: vibesys.cli.v1.AllocationRunSeen.at:type_name -> google.protobuf.Timestamp
+	26, // 20: vibesys.cli.v1.AllocationJobSubmitted.bound:type_name -> google.protobuf.Duration
+	14, // 21: vibesys.cli.v1.AllocationObserved.pending:type_name -> vibesys.cli.v1.SeenPending
+	15, // 22: vibesys.cli.v1.AllocationObserved.running:type_name -> vibesys.cli.v1.SeenRunning
+	16, // 23: vibesys.cli.v1.AllocationObserved.ended:type_name -> vibesys.cli.v1.SeenEnded
+	25, // 24: vibesys.cli.v1.SeenPending.estimated_start:type_name -> google.protobuf.Timestamp
+	25, // 25: vibesys.cli.v1.SeenRunning.started_at:type_name -> google.protobuf.Timestamp
+	25, // 26: vibesys.cli.v1.SeenRunning.ends_at:type_name -> google.protobuf.Timestamp
+	0,  // 27: vibesys.cli.v1.SeenEnded.cause:type_name -> vibesys.cli.v1.SeenEndedCause
+	25, // 28: vibesys.cli.v1.SeenEnded.at:type_name -> google.protobuf.Timestamp
+	24, // 29: vibesys.cli.v1.AllocationDaemonStarted.placements:type_name -> vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
+	26, // 30: vibesys.cli.v1.AllocationLimits.max_for:type_name -> google.protobuf.Duration
+	26, // 31: vibesys.cli.v1.AllocationLimits.fit_margin:type_name -> google.protobuf.Duration
+	26, // 32: vibesys.cli.v1.AllocationLimits.queue_timeout:type_name -> google.protobuf.Duration
+	26, // 33: vibesys.cli.v1.AllocationLimits.run_idle_end:type_name -> google.protobuf.Duration
+	1,  // 34: vibesys.cli.v1.AllocationLogRecord.input:type_name -> vibesys.cli.v1.AllocationInput
+	21, // 35: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry.value:type_name -> vibesys.cli.v1.AllocationLimits
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_allocation_log_proto_init() }
