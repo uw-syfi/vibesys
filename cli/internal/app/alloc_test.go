@@ -189,7 +189,9 @@ func mustAllocation(t *testing.T, a *app.App, id alloc.ID) app.AllocationView {
 // A daemon that restarts while an allocation is pending finds it again by its log and its backend,
 // asks for nothing more, and sees it start.
 func TestARestartWhileAnAllocationIsPendingReadoptsIt(t *testing.T) {
-	r := newAllocRig(t, true, fakealloc.Options{Looks: 1})
+	// The backend's queue stays shut until the test opens it: how many times either daemon looked at
+	// the allocation around the restart is the scheduler's to say, and must not decide the outcome.
+	r := newAllocRig(t, true, fakealloc.Options{Queued: true})
 	a := r.w.newApp()
 	al := r.request(t, a, time.Hour)
 	if al.Stage() != alloc.StagePending {
@@ -199,6 +201,7 @@ func TestARestartWhileAnAllocationIsPendingReadoptsIt(t *testing.T) {
 	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StagePending {
 		t.Fatalf("the restarted daemon knows the allocation as %s, want pending", got.Stage())
 	}
+	r.fake.OpenQueue()
 	r.timers.tick()
 	got := r.await(t, a, al.ID, app.UntilRunning)
 	if got.Handle == (alloc.Handle{}) {

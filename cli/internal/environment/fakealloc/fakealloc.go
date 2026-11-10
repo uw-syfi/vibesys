@@ -31,6 +31,10 @@ type Options struct {
 	// MovingEstimate has a waiting allocation say when it expects to start, a minute later at each
 	// look, as Slurm's estimate of a queued job moves while it waits.
 	MovingEstimate bool
+	// Queued keeps every allocation waiting until OpenQueue, however often it is looked at; Looks
+	// counts from then. A test that must see an allocation still waiting after something that may or
+	// may not look at it, such as a restart, says when it starts instead of counting looks.
+	Queued bool
 }
 
 // FakeAllocator is the backend and the allocator over it. Its methods are safe for concurrent use.
@@ -40,6 +44,7 @@ type FakeAllocator struct {
 
 	mu          sync.Mutex
 	unreachable bool
+	open        bool    // OpenQueue was called.
 	allocs      []*held // In the order they were made.
 	made        int
 }
@@ -134,6 +139,9 @@ func (f *FakeAllocator) Observe(_ context.Context, handle alloc.Handle) (alloc.O
 		return alloc.SeenEnded{Cause: h.cause, At: h.endedAt}, nil
 	}
 	if h.startedAt.IsZero() {
+		if f.opts.Queued && !f.open {
+			return alloc.SeenPending{Reason: f.opts.Reason}, nil
+		}
 		if h.looks < f.opts.Looks {
 			h.looks++
 			seen := alloc.SeenPending{Reason: f.opts.Reason}
@@ -180,6 +188,14 @@ func (f *FakeAllocator) Adopt(context.Context) ([]alloc.Handle, error) {
 		}
 	}
 	return out, nil
+}
+
+// OpenQueue lets the allocations of a Queued backend start, as they would once the backend has
+// room: each starts at a look after this one, Looks counted from now.
+func (f *FakeAllocator) OpenQueue() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.open = true
 }
 
 // SetUnreachable makes the backend unreachable, or reachable again. What it holds is unchanged,
