@@ -2,8 +2,8 @@
 
 The helper is a POSIX sh program, so its public surface is its command line. Each test runs it
 under every POSIX shell found on the machine, against a copy of the skill whose minimum version
-file the test writes, fake binaries that print what a real build prints, and a release listing
-served from a file instead of the network. A Python model of caret ranges is the oracle.
+file the test writes, fake binaries that print what a real build prints, and a local HTTP
+server standing in for GitHub's tag listing and release downloads. A Python model of caret ranges is the oracle.
 """
 
 from __future__ import annotations
@@ -14,18 +14,23 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "cli_version.sh"
 MIN_FILE = SKILL / "assets" / "min-cli-version"
 SHELLS = [found for name in ("sh", "dash", "bash") if (found := shutil.which(name))]
-CURL = shutil.which("curl")
 EXIT = {"ok": 0, "too-old": 3, "too-new": 4, "dev": 5, "unknown": 6}
 
 
@@ -264,18 +269,65 @@ def test_usage_errors_exit_two(shell: str, args: list[str]) -> None:
 
 
 # --- picking a release -------------------------------------------------------------------------
+#
+# A local HTTP server stands in for GitHub: the tag listing and the release assets are routes, and
+# any other path answers 404, as a tag whose release workflow failed does. curl's file:// support
+# cannot tell a missing file from a server error, so the fake speaks HTTP.
+
+
+class FakeGitHub:
+    """Routes from path to (status, body); every other path is a 404."""
+
+    def __init__(self) -> None:
+        self.routes: dict[str, tuple[int, bytes]] = {}
+        routes = self.routes
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                status, body = routes.get(self.path, (404, b"Not Found"))
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_: object) -> None:
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def env(self) -> dict[str, str]:
+        return {
+            "VIBESYS_CLI_TAGS_URL": f"{self.url}/tags",
+            "VIBESYS_CLI_RELEASES_URL": f"{self.url}/download/",
+        }
+
+    def publish(self, tag: str, status: int = 200) -> None:
+        self.routes[f"/download/{tag}/checksums.txt"] = (status, b"0" * 64 + b"  x\n")
+
+    def list_tags(self, tags: list[str], indent: int | None = None) -> None:
+        refs = [{"ref": f"refs/tags/cli-v{tag}", "object": {"type": "tag"}} for tag in tags]
+        self.routes["/tags"] = (200, json.dumps(refs, indent=indent).encode())
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=60)  # guards against a hang only
+
+
+@pytest.fixture(scope="module")
+def github() -> Iterator[FakeGitHub]:
+    fake = FakeGitHub()
+    yield fake
+    fake.close()
+
 
 TAG = st.one_of(
     st.builds(Version, SMALL, SMALL, SMALL, PRE).map(str),
     st.sampled_from(["foo", "1.2", "01.2.3"]),
 )
-
-
-def listing(folder: Path, tags: list[str], indent: int | None) -> str:
-    refs = [{"ref": f"refs/tags/cli-v{tag}", "object": {"type": "tag"}} for tag in tags]
-    path = folder / "refs.json"
-    path.write_text(json.dumps(refs, indent=indent), encoding="utf-8")
-    return path.as_uri()
 
 
 def parsed(tag: str) -> Version | None:
@@ -286,37 +338,122 @@ def parsed(tag: str) -> Version | None:
     return Version(*map(int, parts), pre)
 
 
-@pytest.mark.skipif(CURL is None, reason="a file:// listing is read with curl")
+def run_against(
+    github: FakeGitHub, shell: str, minimum: Version, mode: str
+) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as root:
+        script = skill_copy(Path(root), str(minimum))
+        return run(shell, script, mode, env=github.env())
+
+
+needs_a_fetcher = pytest.mark.skipif(
+    not (shutil.which("curl") or shutil.which("wget")), reason="the lookups need curl or wget"
+)
+
+
+@needs_a_fetcher
 @pytest.mark.parametrize("shell", SHELLS)
 @given(
     minimum=MINIMUM,
-    tags=st.lists(TAG, max_size=8),
+    tags=st.lists(st.tuples(TAG, st.booleans()), max_size=8),
     indent=st.sampled_from([None, 2]),
-    compatible=st.booleans(),
 )
-def test_newest_picks_the_highest_stable_release(
-    shell: str, minimum: Version, tags: list[str], indent: int | None, *, compatible: bool
+@example(minimum=Version(0, 1, 0), tags=[("0.1.0", False), ("0.1.0-rc.2", True)], indent=2)
+def test_newest_compatible_is_the_highest_supported_release_that_is_published(
+    github: FakeGitHub,
+    shell: str,
+    minimum: Version,
+    tags: list[tuple[str, bool]],
+    indent: int | None,
 ) -> None:
-    stable = [v for v in map(parsed, tags) if v is not None and not v.pre]
-    if compatible:
-        stable = [v for v in stable if expected_status(minimum, v) == "ok"]
-    with tempfile.TemporaryDirectory() as root:
-        script = skill_copy(Path(root), str(minimum))
-        url = listing(Path(root), tags, indent)
-        mode = "newest-compatible" if compatible else "newest"
-        result = run(shell, script, mode, env={"VIBESYS_CLI_TAGS_URL": url})
-    if not stable:
-        assert result.returncode == 1
-        assert result.stdout == ""
+    github.routes.clear()
+    github.list_tags([tag for tag, _ in tags], indent)
+    for tag, published in tags:
+        if published:
+            github.publish(f"cli-v{tag}")
+    published_tags = {tag for tag, published in tags if published}
+    supported = [
+        v
+        for v in map(parsed, published_tags)
+        if v is not None and not v.pre and expected_status(minimum, v) == "ok"
+    ]
+    result = run_against(github, shell, minimum, "newest-compatible")
+    if not supported:
+        assert (result.returncode, result.stdout) == (1, ""), result.stderr
+        assert "no published stable release" in result.stderr
         return
     assert result.returncode == 0, result.stderr
-    assert result.stdout == f"{max(stable, key=lambda v: v.core)}\n"
+    assert result.stdout == f"{max(supported, key=lambda v: v.core)}\n"
+
+
+@needs_a_fetcher
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("status", [500, 403])
+def test_a_server_error_on_a_candidate_fails_instead_of_skipping_it(
+    github: FakeGitHub, shell: str, status: int
+) -> None:
+    github.routes.clear()
+    github.list_tags(["0.1.0", "0.1.1"])
+    github.publish("cli-v0.1.0")
+    github.publish("cli-v0.1.1", status)
+    result = run_against(github, shell, Version(0, 1, 0), "newest-compatible")
+    assert (result.returncode, result.stdout) == (1, "")
+    assert f"HTTP {status}" in result.stderr
+
+
+@needs_a_fetcher
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("status", [404, 500])
+def test_a_tag_listing_that_does_not_answer_fails(
+    github: FakeGitHub, shell: str, status: int
+) -> None:
+    github.routes.clear()
+    github.routes["/tags"] = (status, b"")
+    github.publish("cli-v0.1.0")
+    result = run_against(github, shell, Version(0, 1, 0), "newest-compatible")
+    assert (result.returncode, result.stdout) == (1, "")
+
+
+@needs_a_fetcher
+@pytest.mark.parametrize("shell", SHELLS)
+@given(version=st.builds(Version, COMPONENT, COMPONENT, COMPONENT).map(str), trailer=st.booleans())
+def test_newest_is_the_version_cli_latest_serves(
+    github: FakeGitHub, shell: str, version: str, *, trailer: bool
+) -> None:
+    github.routes.clear()
+    body = f"{version}\n" if trailer else version
+    github.routes["/download/cli-latest/VERSION"] = (200, body.encode())
+    result = run_against(github, shell, Version(0, 1, 0), "newest")
+    assert (result.returncode, result.stdout) == (0, f"{version}\n"), result.stderr
+
+
+@needs_a_fetcher
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize(
+    ("status", "body", "message"),
+    [
+        (404, b"", "no stable release is published"),
+        (500, b"", "HTTP 500"),
+        (200, b"0.2.0-rc.1\n", "not a stable version"),
+        (200, b"<html>", "not a stable version"),
+    ],
+    ids=["missing", "server-error", "pre-release", "garbage"],
+)
+def test_newest_without_a_stable_cli_latest_fails(
+    github: FakeGitHub, shell: str, status: int, body: bytes, message: str
+) -> None:
+    github.routes.clear()
+    github.routes["/download/cli-latest/VERSION"] = (status, body)
+    result = run_against(github, shell, Version(0, 1, 0), "newest")
+    assert (result.returncode, result.stdout) == (1, "")
+    assert message in result.stderr
 
 
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("mode", ["newest", "newest-compatible"])
-def test_an_unreachable_listing_fails(shell: str, mode: str, tmp_path: Path) -> None:
-    url = (tmp_path / "absent.json").as_uri()
-    result = run(shell, SCRIPT, mode, env={"VIBESYS_CLI_TAGS_URL": url})
-    assert result.returncode == 1
-    assert result.stdout == ""
+def test_an_unreachable_server_fails(shell: str, mode: str) -> None:
+    closed = FakeGitHub()
+    env = closed.env()
+    closed.close()  # nothing listens on its port any more
+    result = run(shell, SCRIPT, mode, env=env)
+    assert (result.returncode, result.stdout) == (1, "")

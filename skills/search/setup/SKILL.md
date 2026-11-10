@@ -51,7 +51,8 @@ continue on an `unknown` binary, or on a `too-old` or `too-new` one the user did
    checks the release's SHA-256 and needs no root access. Wait for explicit approval. If it is
    declined or unanswered, stop without installing or starting work.
 2. Pick the version: the one the user named, or else `V=$(sh cli_version.sh newest-compatible)`.
-   If that fails (no network, or no stable release is supported), report its message and stop.
+   It counts only releases that are published, not bare tags. If it fails (no network, or no
+   published stable release is supported), report its message and stop.
 3. Install exactly that version. Keep any other installer settings the user has
    (`VIBESYS_CLI_INSTALL_DIR`, `VIBESYS_CLI_RELEASES_URL`):
 
@@ -70,12 +71,14 @@ continue on an `unknown` binary, or on a `too-old` or `too-new` one the user did
 Upgrade only when the user asked for it, or approved it after a `too-old` check. Upgrading a
 `dev` build replaces a developer's own build: do it only when the user asks by name.
 
-1. Find the newest stable release, `N=$(sh cli_version.sh newest)`, and the newest one the
-   skills support, `C=$(sh cli_version.sh newest-compatible)`. If either fails, report and stop.
-2. If `N` equals `C`, run `"$VIBESYS_CLI" upgrade`. It takes no arguments, always moves to the
-   newest stable release, and replaces the binary in place.
-3. Otherwise the newest release is outside the supported range, so never run `upgrade`.
-   Reinstall `C` over the current binary instead, with the installer pinned:
+1. Find the newest published release the skills support,
+   `C=$(sh cli_version.sh newest-compatible)`; if it fails, report and stop. Then find the
+   version `upgrade` would install (the one the rolling `cli-latest` release serves),
+   `N=$(sh cli_version.sh newest)`.
+2. If `N` succeeded and equals `C`, run `"$VIBESYS_CLI" upgrade`. It takes no arguments, always
+   moves to the `cli-latest` version, and replaces the binary in place.
+3. Otherwise (`N` is outside the supported range or failed), never run `upgrade`. Reinstall `C`
+   over the current binary instead, with the installer pinned:
    `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | VIBESYS_CLI_VERSION="$C" VIBESYS_CLI_INSTALL_DIR="$(dirname "$VIBESYS_CLI")" sh`.
 4. If the upgrade or install says the binary's directory is not writable, ask the user whether to
    install `C` into a directory they own ([Install](#install)) and switch `VIBESYS_CLI` to it.
