@@ -24,7 +24,12 @@ const (
 	// 5: a task of schema 0.2 (two images, an evaluator package) is read and run. A build of 4 or
 	// below reads only schema 0.1 and refuses a manifest with an [evaluator] table, which the
 	// orchestrator reads as a job tool too old for its tasks (TaskSchema02Since).
-	ProtocolVersion uint32 = 5
+	//
+	// 6: a submission may ask for a trace job (JobSpec.trace), whose result is a trace
+	// (Result.trace) and whose failure may name the trace stage. A daemon of 5 reads such a
+	// submission as one with no settings and refuses it; it serves everything else as before, so
+	// the command line's minimum stays where it is.
+	ProtocolVersion uint32 = 6
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
