@@ -167,13 +167,9 @@ def test_a_trace_instruments_runs_the_phases_and_renders_the_reports(
         "--settle-seconds",
         "5",
         "--window",
-        f"{w0[0] - PAD}:{w0[1] + PAD}",
-        "--label",
-        "phase-0",
+        f"{w0[0] - PAD}:{w0[1] + PAD}:phase-0",
         "--window",
-        f"{w1[0] - PAD}:{w1[1] + PAD}",
-        "--label",
-        "phase-1",
+        f"{w1[0] - PAD}:{w1[1] + PAD}:phase-1",
     ]
     assert stitch.call("ingest") == [
         "ingest",

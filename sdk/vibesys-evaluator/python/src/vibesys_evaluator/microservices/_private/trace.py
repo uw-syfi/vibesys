@@ -202,7 +202,7 @@ def collect_args(
     for window in windows:
         start = max(0, window.start_unix_nanos - WINDOW_PAD_NANOS)
         end = window.end_unix_nanos + WINDOW_PAD_NANOS
-        args += ["--window", f"{start}:{end}", "--label", window.name]
+        args += ["--window", f"{start}:{end}:{window.name}"]
     return args
 
 
