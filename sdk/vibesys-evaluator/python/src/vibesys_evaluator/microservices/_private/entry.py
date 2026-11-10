@@ -243,7 +243,7 @@ def _deploy_and_trace(
             driver = PhaseDriver(
                 runner=runner, sample=sample, validity=task.validity, log=log, measured=False
             )
-            return tracing.run_trace(
+            failed = tracing.run_trace(
                 trace_spec,
                 stitch=stitch,
                 namespace=runner.namespace,
@@ -254,8 +254,23 @@ def _deploy_and_trace(
                 windows=lambda: driver.windows,
                 log=log,
             )
+            if failed is not None:
+                # Leave the deploy as failed, so its teardown keeps the pods' state and logs
+                # (pods.json, logs/) beside the trace's README.
+                raise _TraceFailed(failed)
+            return None
+    except _TraceFailed as failure:
+        return failure.reason
     except SampleError as error:
         return tracing.incomplete(reports, [f"the deploy failed: {error}"], log)
+
+
+class _TraceFailed(Exception):
+    """A trace step failed after the deploy; raised through the deploy so it tears down as failed."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 def trace(
