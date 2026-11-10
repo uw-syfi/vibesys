@@ -24,7 +24,7 @@ Three things hold for the whole run:
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
 `PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
-started by the orchestrator sets it. Before invoking the CLI, follow [CLI setup](#cli-setup)
+started by the orchestrator sets it. Before invoking the CLI, set it up with `vibesys:setup`
 and pass the selected absolute path to every subagent and background command.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
@@ -40,14 +40,9 @@ Harness-specific mechanics (subagents, background tasks, scheduling): when `VIBE
 in your environment, read `references/harness/vibesys-orchestrator.md`; otherwise read
 `references/harness/<harness>.md` for the harness you are running in.
 
-## CLI setup
-
-Before task creation or optimization, follow [CLI setup](references/cli-setup.md).
-It selects a working CLI or installs one only after explicit user approval.
-
 ## Start
 
-1. Complete [CLI setup](#cli-setup), including user approval before any installation.
+1. Set up the CLI with `vibesys:setup`, including user approval before any install or upgrade.
 2. Read `.vibesys/tasks/<task>/OBJECTIVE.md`, `vibesys.input.toml` and `objectives.toml`. Stop and
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
