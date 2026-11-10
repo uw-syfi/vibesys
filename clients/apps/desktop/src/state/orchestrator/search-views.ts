@@ -40,7 +40,7 @@ export function candidates(search: SearchState): {
     ? head.value.head
     : head?.value?.head;
   return search.results
-    .filter(result => oneofIs(result.outcome, 'measure', {check: true, measure: true}))
+    .filter(result => oneofIs(result.outcome, 'measure', {check: true, measure: true, trace: true}))
     .map(result => {
       const judgment = search.judgments.find(row => row.commit === result.commit);
       const current = judgment !== undefined && judgment.against === against;
