@@ -1173,7 +1173,7 @@ export const ShowRequestSchema: GenMessage<ShowRequest> = /*@__PURE__*/
  */
 export type ShowResponse = Message<"vibesys.cli.v1.ShowResponse"> & {
   /**
-   * Every result saved for the commit, checks and measurements, oldest first.
+   * Every result saved for the commit, checks, measurements and traces, oldest first.
    *
    * @generated from field: repeated vibesys.cli.v1.Result results = 1;
    */

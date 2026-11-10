@@ -12,7 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
-// This file carries what a supervisor of a check or measure job is given: the plan the daemon
+// This file carries what a supervisor of a check, measure or trace job is given: the plan the daemon
 // made. What the job finds goes back as lifecycle.Passed, converted in result.go.
 
 func planCommand(c *task.Command) *cliv1.PlanCommand {
@@ -55,6 +55,9 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 		}
 		out.Objectives = Objectives(p.Objectives)
 	}
+	if p.Kind == core.JobTrace {
+		out.Trace = planCommand(&p.Trace)
+	}
 	return out
 }
 
@@ -89,6 +92,11 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 	}
 	if p.GetBenchmark() != nil {
 		if out.Benchmark, err = toPlanCommand(field+".benchmark", p.GetBenchmark()); err != nil {
+			return nil, err
+		}
+	}
+	if p.GetTrace() != nil {
+		if out.Trace, err = toPlanCommand(field+".trace", p.GetTrace()); err != nil {
 			return nil, err
 		}
 	}

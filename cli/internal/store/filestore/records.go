@@ -57,7 +57,13 @@ import (
 // format file at version 6 last. A program of version 5 refuses the store from then on, which is
 // what keeps it from opening a store whose bounds or workstreams it would not see and ignoring them.
 // A plan saved before has no origin and no transitions, and none is invented for it.
-const formatVersion = 6
+//
+// Version 7 adds the trace job: a spec's trace settings, a trace result and the trace stage a job
+// failed in, which a version 6 program would refuse as unknown. It only adds, so this program reads
+// versions 2 to 7 and migrates a store of 2 to 6 the same way, writing the format file at version 7
+// last; a program of version 6 refuses the store from then on with the newer version named, instead
+// of finding a record it cannot read.
+const formatVersion = 7
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -258,6 +264,8 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 		return out, nil
 	case *cliv1.JobSpec_Measure:
 		return core.MeasureSettings{Samples: settings.Measure.GetSamples(), Recheck: settings.Measure.GetRecheck()}, nil
+	case *cliv1.JobSpec_Trace:
+		return core.TraceSettings{}, nil
 	}
 	return nil, fmt.Errorf("a spec with no settings")
 }
@@ -340,8 +348,12 @@ func rekeyed(r core.Result) core.Result {
 		return r
 	}
 	kind, settings := core.JobKind(core.JobCheck), core.Settings(core.CheckSettings{})
-	if _, ok := r.Outcome.(core.MeasureOutcome); ok {
+	switch r.Outcome.(type) {
+	case core.MeasureOutcome:
 		kind, settings = core.JobMeasure, core.MeasureSettings{}
+	case core.TraceOutcome:
+		kind, settings = core.JobTrace, core.TraceSettings{}
+	case core.CheckOutcome:
 	}
 	key, err := core.NewJobKey(core.KeyInputs{
 		Kind: kind, Commit: r.Commit, TaskVersion: r.TaskVersion, Environment: r.Environment, Settings: settings, SchemaVersion: r.SchemaVersion,
@@ -412,8 +424,17 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 			return fail(err)
 		}
 		r.Outcome = out
+	case *cliv1.Result_Trace:
+		var d time.Duration
+		if o.Trace.GetDuration() != nil {
+			if err := o.Trace.GetDuration().CheckValid(); err != nil {
+				return fail(fmt.Errorf("trace duration: %v", err))
+			}
+			d = o.Trace.GetDuration().AsDuration()
+		}
+		r.Outcome = core.TraceOutcome{ArtifactsDir: o.Trace.GetArtifactsDir(), Files: slices.Clone(o.Trace.GetFiles()), Duration: d}
 	default:
-		return fail(fmt.Errorf("it says neither that it is a check nor a measurement"))
+		return fail(fmt.Errorf("it says neither that it is a check, a measurement nor a trace"))
 	}
 	return r, nil
 }

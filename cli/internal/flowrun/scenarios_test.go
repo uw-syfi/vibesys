@@ -63,6 +63,7 @@ type scenario struct {
 	build   *prog
 	check   prog
 	bench   prog
+	trace   prog
 	samples uint32
 	linked  bool // a measure job links a saved check pass
 
@@ -104,6 +105,12 @@ func scenarios() []scenario {
 			samples: 1, stage: flow.StageBenchmark, rejected: "sample 1"},
 		{name: "a program that does not exist is never a pass", kind: core.JobMeasure, check: ok, bench: missing(),
 			samples: 1, stage: flow.StageBenchmark},
+		{name: "a trace that exits non-zero fails in the trace, and runs no check", kind: core.JobTrace, check: exits(9), trace: exits(5),
+			stage: flow.StageTrace, exec: core.ExecExited, exitCode: 5},
+		{name: "a trace after a failing build ends in the build", kind: core.JobTrace, build: ptr(exits(2)), check: ok, trace: ok,
+			stage: flow.StageBuild, exec: core.ExecExited, exitCode: 2},
+		{name: "a trace of a job that keeps no artifacts is rejected", kind: core.JobTrace, check: exits(9), trace: ok,
+			stage: flow.StageTrace, rejected: "no artifacts directory"},
 	}
 }
 
@@ -124,6 +131,9 @@ func (s scenario) plan(real bool) flow.Plan {
 	if s.build != nil {
 		b := command(*s.build)
 		p.Build = &b
+	}
+	if s.kind == core.JobTrace {
+		p.Trace = command(s.trace)
 	}
 	if s.kind == core.JobMeasure {
 		p.Samples = s.samples

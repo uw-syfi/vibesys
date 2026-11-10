@@ -55,6 +55,9 @@ type world struct {
 	// leasing is how they share what they hold alone with other daemons; the zero value leases
 	// nothing.
 	leasing app.Leasing
+	// artifacts, when set, names the artifacts directory of a job, as the daemon's machine does;
+	// without it the jobs keep none.
+	artifacts func(repository, task string, job core.JobID) string
 	// timers and slowPeriod, when set, replace the instant timers and the slow period of an hour.
 	timers     clock.Timers
 	slowPeriod time.Duration
@@ -101,7 +104,7 @@ func newWorld(t *testing.T) *world {
 var rigMachine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
 
 func (w *world) supervisors() supervisor.Supervisors {
-	host := supervisor.Host{Files: w.files, Clock: w.clock}
+	host := supervisor.Host{Files: w.files, Clock: w.clock, Artifacts: w.artifacts}
 	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
 }
 

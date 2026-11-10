@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -142,6 +143,41 @@ func TestEachCommandGetsItsOwnArtifactsDirectoryInTheJobs(t *testing.T) {
 		made := r.files.Dirs()
 		if job == "" && len(made) != 0 || job != "" && strings.Join(made, ",") != strings.Join(want, ",") {
 			t.Errorf("job %q: made %v, want %v", job, made, want)
+		}
+	}
+}
+
+// A trace's command gets the artifacts directory named for its stage, after the build's, and the
+// trace saves that directory relative to the repository with the entries the command left in its
+// trace/ directory, sorted; a trace that left no such directory lists none.
+func TestATraceNamesItsArtifactsDirectoryAndTheFilesItLeft(t *testing.T) {
+	for _, left := range [][]string{{"waterfall.txt", "README.txt", "critical-path.txt", "report.txt", "tree.txt"}, nil} {
+		r := newFakeRig(t).(*fakeRig)
+		cfg := r.config(io.Discard)
+		cfg.Artifacts = "/repo/state/.artifacts/t/j7"
+		for _, name := range left {
+			r.files.Put(cfg.Artifacts+"/02-trace/trace/"+name, []byte("x"))
+		}
+		s := scenario{kind: core.JobTrace, build: ptr(exits(0)), check: exits(9), trace: exits(0)}
+		v, err := flowrun.Run(context.Background(), cfg, s.plan(false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		passed, ok := v.(flow.Passed)
+		if !ok {
+			t.Fatalf("left %v: %+v", left, v)
+		}
+		var stages []string
+		for _, x := range r.env.Runs() {
+			stages = append(stages, x.Artifacts)
+		}
+		if got := strings.Join(stages, ","); got != cfg.Artifacts+"/01-build,"+cfg.Artifacts+"/02-trace" {
+			t.Errorf("the commands' artifacts = %s", got)
+		}
+		want := slices.Sorted(slices.Values(left))
+		f := passed.Findings
+		if f.TraceArtifacts != "state/.artifacts/t/j7/02-trace" || !slices.Equal(f.TraceFiles, want) {
+			t.Errorf("left %v: found %q, %v", left, f.TraceArtifacts, f.TraceFiles)
 		}
 	}
 }

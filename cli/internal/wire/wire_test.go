@@ -45,10 +45,13 @@ func anyJob(r *rand.Rand) core.Job {
 		ID:          core.JobID(fmt.Sprintf("j%d", r.IntN(100))),
 		State:       pick(r, core.JobStates()...),
 		SubmittedAt: epoch.Add(time.Duration(r.IntN(1e6)) * time.Millisecond),
-		FailedStage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure),
+		FailedStage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure, core.StageTrace),
 	}
 	commit := core.Commit(fmt.Sprintf("%040x", r.Uint64()))
-	switch r.IntN(3) {
+	switch r.IntN(4) {
+	case 3:
+		j.Spec = core.JobSpec{Commit: commit, Settings: core.TraceSettings{}}
+		j.Key = "k3"
 	case 0:
 		j.Spec = core.JobSpec{Commit: commit, Settings: core.CheckSettings{}}
 		j.Key = "k1"
@@ -284,11 +287,11 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 		case 3:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Passed{Result: aResult()}}
 		case 4:
-			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: exec(), Stage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure)}}
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: exec(), Stage: pick(r, core.JobStage(""), core.StageBuild, core.StageCheck, core.StageMeasure, core.StageTrace)}}
 		case 5:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.NotAttempted{Failure: failure()}}
 		case 6:
-			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Rejected{Reason: pick(r, "", "no result"), Stage: pick(r, core.JobStage(""), core.StageMeasure)}}
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Rejected{Reason: pick(r, "", "no result"), Stage: pick(r, core.JobStage(""), core.StageMeasure, core.StageTrace)}}
 		case 7:
 			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Lost{Failure: failure()}}
 		default:

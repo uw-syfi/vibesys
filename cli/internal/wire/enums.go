@@ -52,6 +52,7 @@ var jobStages = []struct {
 	{core.StageBuild, cliv1.JobStage_JOB_STAGE_BUILD},
 	{core.StageCheck, cliv1.JobStage_JOB_STAGE_CHECK},
 	{core.StageMeasure, cliv1.JobStage_JOB_STAGE_MEASURE},
+	{core.StageTrace, cliv1.JobStage_JOB_STAGE_TRACE},
 }
 
 // JobStage returns the contract's value for a stage, or unspecified for none.
@@ -85,6 +86,7 @@ var jobKinds = []struct {
 	{core.JobCheck, cliv1.JobKind_JOB_KIND_CHECK},
 	{core.JobCommand, cliv1.JobKind_JOB_KIND_COMMAND},
 	{core.JobMeasure, cliv1.JobKind_JOB_KIND_MEASURE},
+	{core.JobTrace, cliv1.JobKind_JOB_KIND_TRACE},
 }
 
 // JobKind returns the contract's value for a kind.

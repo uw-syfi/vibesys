@@ -151,7 +151,7 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("jobs", d)
 	var states stateList
 	commit := fs.String("commit", "", "only jobs of this commit (any revision)")
-	kind := fs.String("kind", "", "only jobs of this kind: check, command or measure")
+	kind := fs.String("kind", "", "only jobs of this kind: check, command, measure or trace")
 	contains := fs.String("note-contains", "", "only jobs with a note that contains this text")
 	fs.Var(&states, "state", "only jobs in this state; repeat or separate with commas")
 	positional, err := parse(fs, args)

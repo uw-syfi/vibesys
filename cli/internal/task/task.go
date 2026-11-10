@@ -135,6 +135,10 @@ type Task struct {
 	// Profile is the standard profile load of a task of two images, when it declares one. It is
 	// never scored.
 	Profile *Command
+	// Trace is the command a trace job runs once, after the build and the candidate's image and
+	// with no check, when the task declares [trace] (a Schema02 manifest). It leaves its reports in
+	// the trace/ directory of its artifacts directory and is never scored.
+	Trace *Command
 	// Service is set for a task of one image with a job-scoped server (a Schema02 manifest with
 	// [service]): a job starts it once and runs its samples against it.
 	Service *Service

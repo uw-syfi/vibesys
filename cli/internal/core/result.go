@@ -30,7 +30,8 @@ type Observation struct {
 	Unit string
 }
 
-// Outcome is what a saved result recorded: exactly one of CheckOutcome and MeasureOutcome.
+// Outcome is what a saved result recorded: exactly one of CheckOutcome, MeasureOutcome and
+// TraceOutcome.
 type Outcome interface {
 	outcome()
 }
@@ -55,8 +56,29 @@ type MeasureOutcome struct {
 	Services []SampleService
 }
 
+// TraceOutcome is a trace job whose [trace] command exited 0: where it left its reports. A failed
+// trace saves no result.
+type TraceOutcome struct {
+	// ArtifactsDir is the trace command's artifacts directory, relative to the repository's root
+	// when it is inside it, and absolute otherwise.
+	ArtifactsDir string
+	// Files are the names of the entries directly under the trace/ directory of ArtifactsDir,
+	// sorted. Empty when the command left no such directory.
+	Files []string
+	// Duration is how long the trace command ran.
+	Duration time.Duration
+}
+
+// TraceFilesDir is the directory under a trace command's artifacts directory that its reports go
+// in: $VIBESYS_ARTIFACTS_DIR/trace.
+const TraceFilesDir = "trace"
+
+// MaxTraceFiles is the most entries of the trace directory a trace result lists.
+const MaxTraceFiles = 1024
+
 func (CheckOutcome) outcome()   {}
 func (MeasureOutcome) outcome() {}
+func (TraceOutcome) outcome()   {}
 
 // Result is one saved outcome of a job. It is immutable once saved.
 type Result struct {
@@ -102,6 +124,8 @@ func (r Result) PassKey() (JobKey, bool) {
 			Environment: r.Environment, Settings: CheckSettings{}, SchemaVersion: r.SchemaVersion,
 		})
 		return key, err == nil
+	case TraceOutcome:
+		return "", false
 	default:
 		return "", false
 	}

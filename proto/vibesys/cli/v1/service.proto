@@ -467,7 +467,7 @@ message ShowRequest {
 }
 
 message ShowResponse {
-  // Every result saved for the commit, checks and measurements, oldest first.
+  // Every result saved for the commit, checks, measurements and traces, oldest first.
   repeated Result results = 1;
   // The commit's measurements pooled as compare pools them: one per environment, task version,
   // metric and objectives, holding the samples of every measure job of that kind, oldest first.

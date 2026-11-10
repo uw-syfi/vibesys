@@ -81,15 +81,18 @@ var hexKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // randomKeyInputs draws valid inputs for a check or measure job.
 func randomKeyInputs(r *rand.Rand) core.KeyInputs {
 	in := core.KeyInputs{
-		Kind:          []core.JobKind{core.JobCheck, core.JobMeasure}[r.IntN(2)],
+		Kind:          []core.JobKind{core.JobCheck, core.JobMeasure, core.JobTrace}[r.IntN(3)],
 		Commit:        commitN(r.IntN(1 << 30)),
 		TaskVersion:   fmt.Sprintf("task@%d", r.IntN(50)),
 		Environment:   randomFingerprint(r),
 		SchemaVersion: uint32(1 + r.IntN(5)),
 	}
-	if in.Kind == core.JobCheck {
+	switch in.Kind {
+	case core.JobCheck:
 		in.Settings = core.CheckSettings{}
-	} else {
+	case core.JobTrace:
+		in.Settings = core.TraceSettings{}
+	default:
 		in.Settings = core.MeasureSettings{Samples: uint32(r.IntN(20)), Recheck: r.IntN(2) == 0}
 	}
 	return in
@@ -210,6 +213,14 @@ func TestEveryKeyInputChangesTheKey(t *testing.T) {
 				in.Kind, in.Settings = core.JobMeasure, core.MeasureSettings{}
 			} else {
 				in.Kind, in.Settings = core.JobCheck, core.CheckSettings{}
+			}
+			return in
+		},
+		"the job kind, to or from a trace": func(in core.KeyInputs) core.KeyInputs {
+			if in.Kind == core.JobTrace {
+				in.Kind, in.Settings = core.JobCheck, core.CheckSettings{}
+			} else {
+				in.Kind, in.Settings = core.JobTrace, core.TraceSettings{}
 			}
 			return in
 		},

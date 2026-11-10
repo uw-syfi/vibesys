@@ -52,7 +52,7 @@ func TestPlanLinkSaysExactlyWhatTheCallerSaid(t *testing.T) {
 // --no-plan on a job that is not a measure, or says nothing on a measure from a run, and the
 // refusal names the flags the caller should have given.
 func TestAPlanLinkIsCheckedAgainstTheKindOfJobAndTheCaller(t *testing.T) {
-	kinds := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand}
+	kinds := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand, core.JobTrace}
 	for _, kind := range kinds {
 		for _, run := range []core.RunID{"", "run-1"} {
 			for _, plan := range []core.PlanNumber{0, 4} {

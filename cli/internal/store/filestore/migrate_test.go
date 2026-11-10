@@ -57,7 +57,7 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 		mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 		opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err == nil {
-			if got := unspaced(file(t, mem, "state/format")); got != `{"format":6}` {
+			if got := unspaced(file(t, mem, "state/format")); got != `{"format":7}` {
 				t.Fatalf("format file after the migration = %s", got)
 			}
 			if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
@@ -73,7 +73,7 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 			if got := storetest.Observe(t, again, runs...); !reflect.DeepEqual(got, want) {
 				t.Fatalf("after a crash at step %d (power loss %v) the store shows\n%+v\nwant\n%+v", step, power, got, want)
 			}
-			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":6}` {
+			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":7}` {
 				t.Fatalf("format file after a crash at step %d = %s", step, got)
 			}
 		}
@@ -99,7 +99,7 @@ func TestAStoreOfVersionThreeIsMigrated(t *testing.T) {
 		}
 	}
 	opened := openOn(t, image)
-	if got := unspaced(file(t, image, "state/format")); got != `{"format":6}` {
+	if got := unspaced(file(t, image, "state/format")); got != `{"format":7}` {
 		t.Fatalf("format file after the migration = %s", got)
 	}
 	if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
@@ -165,7 +165,7 @@ func TestAStoreOfVersionFourHasWhereItsResultsRanLeaveTheirKeys(t *testing.T) {
 	}
 
 	opened := openOn(t, image)
-	if got := unspaced(file(t, image, "state/format")); got != `{"format":6}` {
+	if got := unspaced(file(t, image, "state/format")); got != `{"format":7}` {
 		t.Fatalf("format file after the migration = %s", got)
 	}
 	results, err := opened.Results(t.Context(), core.ResultFilter{Key: want})

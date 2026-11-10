@@ -4,8 +4,11 @@ import (
 	"context"
 	"math"
 	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"buf.build/go/protovalidate"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -221,6 +224,46 @@ func TestComparisonAndShowCarryExactNumbers(t *testing.T) {
 		if math.Float64bits(s) != math.Float64bits(odd[i]) {
 			t.Fatalf("sample %d is %v, want %v", i, s, odd[i])
 		}
+	}
+}
+
+// Show carries a saved trace with the directory of its reports and the files there, as a message the
+// contract's rules accept, and ListJobs of the trace kind finds the trace's job alone.
+func TestShowCarriesATraceAndJobsListsItByKind(t *testing.T) {
+	r := newResultsRig(t)
+	r.measured(cm(1), levelAt...)
+	st, err := r.stores.Create(ctxFor(t), mustScope(t, "/repo", "task"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := storetest.SeedTrace(t, st, cm(1), r.clk.Now(), ".state/artifacts/task/j3/03-trace", "README.txt", "report.txt", "tree.txt")
+
+	shown, err := r.client.Show(ctxFor(t), &cliv1.ShowRequest{Context: call, Commit: string(cm(1))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var traces []*cliv1.TraceResult
+	for _, res := range shown.GetResults() {
+		if tr := res.GetTrace(); tr != nil {
+			traces = append(traces, tr)
+		}
+	}
+	if len(traces) != 1 || len(shown.GetMeasurements()) != 1 {
+		t.Fatalf("Show = %+v", shown)
+	}
+	if tr := traces[0]; tr.GetArtifactsDir() != ".state/artifacts/task/j3/03-trace" || strings.Join(tr.GetFiles(), " ") != "README.txt report.txt tree.txt" || tr.GetDuration().AsDuration() != time.Minute {
+		t.Errorf("trace = %+v", tr)
+	}
+	if err := protovalidate.Validate(shown); err != nil {
+		t.Errorf("the answer is not valid: %v", err)
+	}
+
+	list, err := r.client.ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call, Kind: cliv1.JobKind_JOB_KIND_TRACE})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.GetJobs()) != 1 || list.GetJobs()[0].GetId() != string(saved.Job) || list.GetJobs()[0].GetSpec().GetTrace() == nil {
+		t.Errorf("trace jobs = %+v", list.GetJobs())
 	}
 }
 

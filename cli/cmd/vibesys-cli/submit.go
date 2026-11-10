@@ -16,17 +16,17 @@ import (
 // submitCommand is `submit <kind> <commit> ...`.
 func submitCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, d.jsonErrors, usagef("submit: name the kind of job: check, measure, command or profile"))
+		return fail(d, d.jsonErrors, usagef("submit: name the kind of job: check, measure, trace, command or profile"))
 	}
 	switch args[0] {
 	case "command":
 		return submitJob(ctx, d, args[1:])
 	case "profile":
 		return submitProfile(ctx, d, args[1:])
-	case "check", "measure":
+	case "check", "measure", "trace":
 		return submitFlow(ctx, d, args[0], args[1:])
 	default:
-		return fail(d, d.jsonErrors, usagef("submit: %q is not a kind of job (check, measure, command or profile)", args[0]))
+		return fail(d, d.jsonErrors, usagef("submit: %q is not a kind of job (check, measure, trace, command or profile)", args[0]))
 	}
 }
 
@@ -90,15 +90,17 @@ type unavailable struct{ message string }
 
 func (u *unavailable) Error() string { return u.message }
 
-// submitFlow is `submit check|measure <commit>`: it runs the task's own commands, so it takes no
-// command of its own.
+// submitFlow is `submit check|measure|trace <commit>`: it runs the task's own commands, so it takes
+// no command of its own. A trace runs the task's [trace] once, with no check, and its result names
+// the reports it left; like a check it takes no samples, and like a check it is linked to a plan or
+// to none without saying so.
 func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	flagArgs, extra, hasCommand := splitDashes(args)
 	fs, c := newFlags("submit "+kind, d)
 	var (
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
 		note    = fs.String("note", "", "a note to attach to the job")
-		noCache = fs.Bool("no-cache", false, "run the whole job again, with a fresh check, even when saved results answer it")
+		noCache = fs.Bool("no-cache", false, "run the whole job again, with a fresh check (a trace: a fresh trace), even when saved results answer it")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		noPlan  = fs.Bool("no-plan", false, "measure: the job tests no plan, as for the baseline or a re-measure of the head; not with --plan")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
@@ -122,8 +124,12 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		return fail(d, asJSON, usagef("--samples: a check job takes no samples"))
 	case kind == "check" && *recheck:
 		return fail(d, asJSON, usagef("--recheck: a check job always runs its check"))
-	case kind == "check" && *noPlan:
-		return fail(d, asJSON, usagef("--no-plan: only a measure job says it tests no plan; a check job takes --plan N or neither"))
+	case kind != "measure" && *samples != 0:
+		return fail(d, asJSON, usagef("--samples: a %s job takes no samples", kind))
+	case kind == "trace" && *recheck:
+		return fail(d, asJSON, usagef("--recheck: a trace job runs no check"))
+	case kind != "measure" && *noPlan:
+		return fail(d, asJSON, usagef("--no-plan: only a measure job says it tests no plan; a %s job takes --plan N or neither", kind))
 	case *samples > math.MaxUint32:
 		return fail(d, asJSON, usagef("--samples: %d is too many", *samples))
 	}
@@ -146,9 +152,12 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		return fail(d, asJSON, err)
 	}
 	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: c.placement}
-	if kind == "check" {
+	switch kind {
+	case "check":
 		spec.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
-	} else {
+	case "trace":
+		spec.Settings = &cliv1.JobSpec_Trace{Trace: &cliv1.TraceSettings{}}
+	default:
 		spec.Settings = &cliv1.JobSpec_Measure{Measure: &cliv1.MeasureSettings{Samples: uint32(*samples), Recheck: *recheck}}
 	}
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{

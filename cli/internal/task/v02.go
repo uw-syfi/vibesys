@@ -120,6 +120,16 @@ func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task,
 		}
 		t.Profile = &c
 	}
+	if tr := m.GetTrace(); tr != nil {
+		c, err := makeCommand("trace", tr.GetCommand(), int(tr.GetTimeoutSeconds()))
+		if err != nil {
+			return Task{}, err
+		}
+		if err := checkPlaceholders(c); err != nil {
+			return Task{}, err
+		}
+		t.Trace = &c
+	}
 	for _, c := range []Command{t.Check, t.Benchmark} {
 		if err := checkPlaceholders(c); err != nil {
 			return Task{}, err
@@ -200,7 +210,7 @@ func serviceOf(s *cliv1.TaskServiceV02) (*Service, error) {
 }
 
 // commandSections are the sections of a manifest that hold a command.
-var commandSections = []string{"accuracy", "check", "benchmark", "measure", "profile", "build"}
+var commandSections = []string{"accuracy", "check", "benchmark", "measure", "profile", "trace", "build"}
 
 // refusedV02 refuses, by name, what 0.1 has and 0.2 does not: an evaluator package, and a command
 // given as an evaluator's entrypoint and args.

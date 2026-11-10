@@ -195,7 +195,36 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	if r.Read != "" {
 		ran.Output, ran.Found, ran.ReadError = s.read(r.Read)
 	}
+	if x.Artifacts != "" {
+		ran.Artifacts = s.inRepository(x.Artifacts)
+		if r.List != "" {
+			ran.Listed, ran.ListError = s.list(path.Join(x.Artifacts, r.List))
+		}
+	}
 	return ran
+}
+
+// inRepository is an artifacts directory as a result names it: relative to the repository's root
+// when it is inside it, which it is under the layout the daemon keeps, and as it is otherwise.
+func (s *Shell) inRepository(dir string) string {
+	if rel, ok := strings.CutPrefix(dir, strings.TrimSuffix(s.cfg.Repository, "/")+"/"); ok && s.cfg.Repository != "" {
+		return rel
+	}
+	return dir
+}
+
+// list lists a directory a command was asked to leave its files in. A directory that is not there
+// lists nothing: the command left none.
+func (s *Shell) list(dir string) (names []string, problem string) {
+	names, err := s.cfg.Files.ListDir(dir)
+	switch {
+	case err == nil:
+		return names, ""
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, ""
+	default:
+		return nil, err.Error()
+	}
 }
 
 // answer is the event that says how an attempt ended: a Ran, or another event in its place.

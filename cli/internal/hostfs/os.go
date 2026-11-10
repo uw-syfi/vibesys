@@ -45,6 +45,19 @@ func (OS) MakeDir(ctx context.Context, path string) error {
 	return nil
 }
 
+// ListDir implements FS. os.ReadDir returns the entries sorted by name.
+func (OS) ListDir(path string) ([]string, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return names, nil
+}
+
 // ReadFile implements FS.
 func (OS) ReadFile(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)

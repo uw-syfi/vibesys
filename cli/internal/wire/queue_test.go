@@ -15,7 +15,7 @@ import (
 // reads takes it.
 func TestEveryWaitIsAValidMessage(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
-	kinds := []core.JobKind{"", core.JobCheck, core.JobCommand, core.JobMeasure}
+	kinds := []core.JobKind{"", core.JobCheck, core.JobCommand, core.JobMeasure, core.JobTrace}
 	for i := range 2000 {
 		kind := core.WaitKinds()[r.IntN(len(core.WaitKinds()))]
 		w := core.JobWait{Kind: kind}
