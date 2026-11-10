@@ -41,6 +41,10 @@ type World struct {
 	// CardFiles holds the files DescribeTask reads a task's card from.
 	CardFiles *task.MemoryCardFiles
 	Files     *hostfs.Memory
+	// Scheduler and Allocations, when set, are how the daemons share the machine and keep standing
+	// allocations; the zero values run one job at a time and keep none.
+	Scheduler   app.Scheduler
+	Allocations app.Allocations
 }
 
 // Machine is what the World's environment reads of the machine its commands run on.
@@ -78,6 +82,7 @@ func (w *World) Runtime() daemon.Runtime {
 	return daemon.Runtime{
 		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks, CardFiles: w.CardFiles,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),
+		Scheduler:   w.Scheduler, Allocations: w.Allocations,
 	}
 }
 

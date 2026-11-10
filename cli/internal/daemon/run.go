@@ -54,6 +54,8 @@ type Runtime struct {
 	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
 	// leases nothing.
 	Leasing app.Leasing
+	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
+	Allocations app.Allocations
 	// Neighbors lists the other daemons of the machine, of any user, for the status. Nil lists
 	// none.
 	Neighbors func() []Neighbor
@@ -161,6 +163,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Tasks:         named(cfg.Runtime.Tasks, cfg.Version),
 		Scheduler:     cfg.Runtime.Scheduler,
 		Leasing:       cfg.Runtime.Leasing,
+		Allocations:   cfg.Runtime.Allocations,
 		Logf:          cfg.Logf,
 	})
 	defer a.Close()

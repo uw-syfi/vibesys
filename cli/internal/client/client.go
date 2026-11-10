@@ -412,6 +412,11 @@ func (c *Client) ForgetRepository(ctx context.Context, repository string) (*cliv
 // either is not sent again, since a second one would run a second job: it fails with
 // ErrSubmissionUnknown.
 func (c *Client) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
+	if req.GetSpec().GetAllocation() != "" {
+		if err := c.needAllocations("a job in an allocation"); err != nil {
+			return nil, err
+		}
+	}
 	current := c
 	defer func() {
 		if current != nil && current != c {

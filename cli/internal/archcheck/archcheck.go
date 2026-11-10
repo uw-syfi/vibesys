@@ -179,7 +179,7 @@ var rules = map[string][]string{
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
-		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
+		"gen/", "internal/alloc", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
 		"internal/gitrepo", "internal/runtimedir", "internal/supervisor", "internal/task", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
@@ -194,7 +194,7 @@ var rules = map[string][]string{
 
 	// The wiring of the shipped binary.
 	"internal/production": {
-		"envcodec",
+		"envcodec", "internal/alloc",
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
 		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
@@ -303,7 +303,7 @@ var testRules = map[string][]string{
 	},
 	"internal/app/filestores": {"internal/core"},
 	"internal/daemon": {
-		"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
+		"internal/store", "internal/store/memstore", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
 		"internal/lease", "internal/lease/fakelease", "internal/schedule", "internal/task/tasktest",
 	},
 	"internal/client": {
@@ -318,6 +318,7 @@ var testRules = map[string][]string{
 		"internal/store", "internal/supervisor", "internal/lease", "internal/lease/fakelease",
 	},
 	"cmd/vibesys-cli": {
+		"internal/alloc", "internal/schedule", "internal/store/memstore",
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/docker", "internal/environment/fakeenv",
 		"internal/lifecycle", "internal/runtimedir", "internal/store", "internal/store/filestore",
