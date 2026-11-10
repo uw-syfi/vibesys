@@ -136,3 +136,112 @@ jobs:
           VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
           VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
         run: ./support/repoctl/repoctl run-checks --group ${{ matrix.group }}
+
+  # The published install path of vibesys-cli, run as a user runs it: the install script from main
+  # against the live GitHub releases. No other workflow reads the releases after they are made, so a
+  # missing or stale cli-latest (it is made only by a stable cli-v* tag, see cli-release.yml) or a
+  # missing attestation shows up here within a day. No checkout: every step uses what a user has.
+  cli-install:
+    name: cli-install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # gh attestation verify reads the repository's attestations through the API.
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux amd64 and macOS arm64; macos-15 is pinned rather than macos-latest so the
+        # architecture cannot drift.
+        os: [ubuntu-24.04, macos-15]
+    env:
+      INSTALL_URL: https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh
+      LATEST_URL: https://github.com/uw-syfi/vibesys/releases/download/cli-latest
+    # bash with pipefail: under the default shell, a failed curl piped into sh is an empty
+    # script that succeeds.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The runner context is not available in job-level env.
+      - name: Pick the install directories
+        run: |
+          echo "LATEST_DIR=$RUNNER_TEMP/cli-latest" >> "$GITHUB_ENV"
+          echo "PINNED_DIR=$RUNNER_TEMP/cli-pinned" >> "$GITHUB_ENV"
+
+      - name: Install the newest release as cli/README.md says
+        run: curl -fsSL "$INSTALL_URL" | VIBESYS_CLI_INSTALL_DIR="$LATEST_DIR" sh
+
+      - name: Check that it reports the version cli-latest publishes
+        run: |
+          expected="$(curl -fsSL "$LATEST_URL/VERSION")"
+          reported="$("$LATEST_DIR/vibesys-cli" --version)"
+          echo "cli-latest VERSION: $expected"
+          echo "--version: $reported"
+          # --version prints "vibesys-cli <version> (task schemas ...)".
+          read -r _ got _ <<< "$reported"
+          if [[ "$got" != "$expected" ]]; then
+            echo "::error::the installed binary is $got, but cli-latest's VERSION is $expected"
+            exit 1
+          fi
+          echo "VERSION=$expected" >> "$GITHUB_ENV"
+
+      - name: Install the same version by number
+        run: |
+          curl -fsSL "$INSTALL_URL" | VIBESYS_CLI_VERSION="$VERSION" VIBESYS_CLI_INSTALL_DIR="$PINNED_DIR" sh
+          read -r _ got _ <<< "$("$PINNED_DIR/vibesys-cli" --version)"
+          [[ "$got" == "$VERSION" ]] || { echo "::error::the pinned install is $got, want $VERSION"; exit 1; }
+
+      - name: Check that upgrade finds the fresh install up to date
+        run: |
+          out="$("$LATEST_DIR/vibesys-cli" upgrade)"
+          echo "$out"
+          [[ "$out" == "vibesys-cli $VERSION is up to date" ]] || { echo "::error::upgrade said: $out"; exit 1; }
+
+      # The binary was built and attested by cli-release.yml in this repository, not merely
+      # matched against a checksum served beside it.
+      - name: Verify the build attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "$LATEST_DIR/vibesys-cli" --repo uw-syfi/vibesys \
+            --signer-workflow uw-syfi/vibesys/.github/workflows/cli-release.yml
+
+      # The smallest real use: a throwaway repository with a host task (no Dockerfile, so no docker),
+      # a check job and a command job, each through the daemon the client starts on demand.
+      - name: Run a check and a command job end to end
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p smoke/.vibesys/tasks/smoke
+          cd smoke
+          git init -q -b main
+          printf 'committed\n' > src.txt
+          cat > .vibesys/tasks/smoke/vibesys.input.toml <<'TOML'
+          version = "0.1"
+          backends = ["cpu"]
+
+          [accuracy]
+          command = ['sh', '-c', 'test "$(cat ${PROJECT_ROOT}/src.txt)" = committed']
+          timeout_seconds = 60
+
+          [benchmark]
+          command = ['sh', '-c', 'printf "{\"ops\": 1}" > "$2"', 'sh']
+          timeout_seconds = 60
+
+          [benchmark.result]
+          json_argument = "--out"
+          metric = "ops"
+          TOML
+          printf '[[objective]]\nname = "ops"\ndirection = "max"\n' > .vibesys/tasks/smoke/objectives.toml
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.com -c commit.gpgsign=false commit -q -m task
+          export VIBESYS_TASK=smoke
+          "$LATEST_DIR/vibesys-cli" submit check HEAD --wait
+          "$LATEST_DIR/vibesys-cli" submit command HEAD --env host --wait -- sh -c 'test -f src.txt'
+
+      - name: Stop the daemon
+        if: always()
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [[ -x "$LATEST_DIR/vibesys-cli" ]]; then "$LATEST_DIR/vibesys-cli" daemon stop || true; fi
