@@ -1415,6 +1415,27 @@ func (s *State) resources() []schedule.Resource {
 	return s.scheduling.Resources
 }
 
+// Used is the units of each resource the claims of the jobs that hold the machine and of the slots
+// granted add up to, as the scheduler counts them; a resource nothing holds is absent.
+func (s *State) Used() map[schedule.ResourceID]int {
+	out := map[schedule.ResourceID]int{}
+	for _, e := range s.entries {
+		if e.holdsMachine() {
+			for _, c := range s.heldClaims(e) {
+				out[c.Resource] += max(c.Amount, 1)
+			}
+		}
+	}
+	for _, sl := range s.slots {
+		if sl.granted {
+			for _, c := range slotClaims(sl) {
+				out[c.Resource] += max(c.Amount, 1)
+			}
+		}
+	}
+	return out
+}
+
 func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
 
 func (s *State) candidate(e entry, first bool) schedule.Candidate {

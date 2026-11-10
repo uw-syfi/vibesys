@@ -9,6 +9,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
 // AllocationView is an allocation with what the daemon knows of it besides its record.
@@ -335,4 +336,37 @@ func (a *App) submitIntoAllocation(ctx context.Context, req SubmitRequest, ref l
 		a.cfg.Logf("cancelling job %s, which no allocation took: %v", ref, cancelErr)
 	}
 	return err
+}
+
+// PlacementSlots is the slots of a placement of the operator config, max_jobs of them, and how many
+// the jobs and standing allocations that hold the machine leave free. ok is false for a placement
+// the scheduler has no slots of.
+func (a *App) PlacementSlots(placement string) (total, free uint32, ok bool) {
+	id := schedule.PlacementOf(placement)
+	for _, r := range a.cfg.Scheduler.Resources {
+		if r.ID != id {
+			continue
+		}
+		used := a.view.Load().used[id]
+		return uint32(r.Capacity), uint32(max(r.Capacity-used, 0)), true
+	}
+	return 0, 0, false
+}
+
+// RecentWaits is how long recent allocations of the placement waited to start, newest first: the
+// requests of this daemon, kept for as long as it runs and rebuilt from its log when it starts.
+func (a *App) RecentWaits(placement string) []alloc.WaitSample {
+	if a.alloc == nil {
+		return nil
+	}
+	return slices.Clone(a.alloc.snapshot.Load().waits[placement])
+}
+
+// HasAllocations says whether the placement offers standing allocations.
+func (a *App) HasAllocations(placement string) bool {
+	if a.alloc == nil {
+		return false
+	}
+	_, ok := a.alloc.cfg.Placements[placement]
+	return ok
 }

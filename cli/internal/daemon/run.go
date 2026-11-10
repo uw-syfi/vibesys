@@ -56,6 +56,8 @@ type Runtime struct {
 	Leasing app.Leasing
 	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
 	Allocations app.Allocations
+	// Capacities measure the placements whose capacity is a cluster's, by placement name.
+	Capacities map[string]Capacity
 	// Neighbors lists the other daemons of the machine, of any user, for the status. Nil lists
 	// none.
 	Neighbors func() []Neighbor
@@ -181,7 +183,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors).WithPlacements(cfg.Runtime.PlacementReader).WithCardFiles(cfg.Runtime.CardFiles)
+	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors).WithPlacements(cfg.Runtime.PlacementReader).WithCapacities(cfg.Runtime.Capacities).WithCardFiles(cfg.Runtime.CardFiles)
 	server := grpc.NewServer(grpc.ChainUnaryInterceptor(wire.RequestValidator()), grpc.ChainStreamInterceptor(wire.StreamRequestValidator()))
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)

@@ -156,6 +156,6 @@ message AllocationLogRecord {
 // its own again after a restart (environment.Allocator.Adopt) and never another daemon's.
 message DaemonIdentity {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
-  // A name made once, 16 to 64 characters of a-z and 0-9.
-  string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,64}$"];
+  // A name made once, 16 to 32 characters of a-z and 0-9.
+  string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,32}$"];
 }

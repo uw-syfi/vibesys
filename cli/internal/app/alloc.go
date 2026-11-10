@@ -115,6 +115,8 @@ type allocReply struct {
 // allocSnapshot is the allocations as the loop last published them.
 type allocSnapshot struct {
 	state alloc.State
+	// waits are the recent waits of each placement's allocations, newest first.
+	waits map[string][]alloc.WaitSample
 }
 
 // allocShell is the thin shell around the allocation machine (internal/alloc): it keeps the log,
@@ -312,7 +314,11 @@ func (s *allocShell) recordWait(w alloc.RecordWait) {
 
 // publish makes the state readable, and wakes whoever waits for a change.
 func (s *allocShell) publish() {
-	s.snapshot.Store(&allocSnapshot{state: s.state})
+	waits := make(map[string][]alloc.WaitSample, len(s.waits))
+	for placement, list := range s.waits {
+		waits[placement] = slices.Clone(list)
+	}
+	s.snapshot.Store(&allocSnapshot{state: s.state, waits: waits})
 	s.changes.Notify()
 }
 

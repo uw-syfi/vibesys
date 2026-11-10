@@ -1,9 +1,11 @@
 package production
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"maps"
 	"slices"
 	"time"
@@ -12,6 +14,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 )
 
@@ -38,35 +42,56 @@ func newDaemonID() string {
 //
 // A placement whose capacity is slots of a machine, local or over ssh, takes its allocations as
 // slots of its own max_jobs, so it needs no allocator of its own and its allocations have no end.
-// A placement whose capacity is a cluster's batch allocations gets its allocator here, made with
-// Owner: apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster, Scope, Sizing, MaxTime, Owner}),
-// set as AllocPlacement.Allocator, and its engine's docker.Config.AllocationLabel is
-// apptainer.LabelAllocation, so that a job started in an allocation runs inside it. Until then such
-// a placement refuses to start with an allocations section, which says so, instead of keeping
-// allocations it cannot back.
-func allocationsOf(op *cliv1.OperatorConfig, indexDir string) (app.Allocations, error) {
+// A placement of kind apptainer, whose capacity is a cluster's batch allocations, gets an
+// apptainer.Allocator made with the Owner, over the cluster, scope and sizing its engine uses, and
+// its allocations are Slurm's. Its engine's docker.Config.AllocationLabel is
+// apptainer.LabelAllocation, so that a job started in an allocation runs inside it.
+//
+// A placement of kind slurm has no allocator: its containers run in one Docker daemon outside the
+// allocations Slurm makes, so it refuses to start with an allocations section, which says so,
+// instead of keeping allocations it cannot back.
+func allocationsOf(op *cliv1.OperatorConfig, indexDir string, clusters map[string]clusterSide) (app.Allocations, error) {
 	var out app.Allocations
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
+	var owner string
 	for _, name := range names {
 		pl := op.GetPlacements()[name]
 		a := pl.GetAllocations()
 		if a == nil {
 			continue
 		}
+		var backend environment.Allocator
 		switch pl.GetKind() {
 		case cliv1.PlacementKind_PLACEMENT_KIND_LOCAL, cliv1.PlacementKind_PLACEMENT_KIND_SSH:
-		case cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED, cliv1.PlacementKind_PLACEMENT_KIND_SLURM, cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER:
+		case cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER:
+			if owner == "" {
+				var err error
+				if owner, err = filestore.DaemonID(indexDir, newDaemonID); err != nil {
+					return app.Allocations{}, fmt.Errorf("reading the daemon's identity: %w", err)
+				}
+			}
+			side, ok := clusters[name]
+			if !ok {
+				return app.Allocations{}, fmt.Errorf("placements.%s is an apptainer placement the daemon made no cluster for", name)
+			}
+			allocator, err := apptainer.NewAllocator(apptainer.AllocatorConfig{
+				Cluster: side.Cluster, Scope: side.Scope, Sizing: side.Sizing, MaxTime: side.MaxTime, Owner: owner,
+			})
+			if err != nil {
+				return app.Allocations{}, fmt.Errorf("the operator config: %s: %w", alloc.ConfigKey(name), err)
+			}
+			backend = allocator
+		case cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED, cliv1.PlacementKind_PLACEMENT_KIND_SLURM:
 			return app.Allocations{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
-				"the operator config: %s: this build keeps standing allocations for placements of kind local and ssh only, and placements.%s is %s",
+				"the operator config: %s: this build keeps standing allocations for placements of kind local, ssh and apptainer only, and placements.%s is %s",
 				alloc.ConfigKey(name), name, pl.GetKind())}
 		}
 		margin := defaultFitMargin
 		if a.GetFitMargin() != nil {
 			margin = a.GetFitMargin().AsDuration()
 		}
-		out.Placements = append(out.Placements, app.AllocPlacement{Name: name, Limits: alloc.Limits{
-			MaxHeld: int(a.GetMaxHeld()), MaxFor: a.GetMaxFor().AsDuration(), Margin: margin, Endless: true,
-		}})
+		limits := alloc.Limits{MaxHeld: int(a.GetMaxHeld()), MaxFor: a.GetMaxFor().AsDuration(), Margin: margin, Endless: backend == nil}
+		out.Placements = append(out.Placements, app.AllocPlacement{Name: name, Limits: limits, Allocator: backend, Slurm: backend != nil})
 	}
 	if len(out.Placements) == 0 {
 		return app.Allocations{}, nil
@@ -80,4 +105,22 @@ func allocationsOf(op *cliv1.OperatorConfig, indexDir string) (app.Allocations, 
 		return app.Allocations{}, fmt.Errorf("reading the daemon's identity: %w", err)
 	}
 	return out, nil
+}
+
+// capacitiesOf are the readers of the placements whose capacity is a cluster's, every apptainer
+// placement whether or not it has an allocations section: what Slurm says of its partition, with
+// the placement's recent waits. The slots are the partition's nodes, and the daemon adds the run's
+// own allocations.
+func capacitiesOf(clusters map[string]clusterSide) map[string]daemon.Capacity {
+	out := map[string]daemon.Capacity{}
+	for name, side := range clusters {
+		out[name] = func(ctx context.Context, waits []alloc.WaitSample) (*cliv1.PlacementCapacity, error) {
+			// The lines of Slurm's answers that could not be read have no place in the contract.
+			c, _, err := apptainer.Capacity(ctx, apptainer.CapacityQuery{
+				Cluster: side.Cluster, Placement: name, Partition: side.Partition, Waits: waits,
+			})
+			return c, err
+		}
+	}
+	return out
 }

@@ -1378,7 +1378,7 @@ func (x *AllocationLogRecord) GetInput() *AllocationInput {
 type DaemonIdentity struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Format int32                  `protobuf:"varint,1,opt,name=format,proto3" json:"format,omitempty"`
-	// A name made once, 16 to 64 characters of a-z and 0-9.
+	// A name made once, 16 to 32 characters of a-z and 0-9.
 	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1516,7 +1516,7 @@ const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"\x05input\x18\x03 \x01(\v2\x1f.vibesys.cli.v1.AllocationInputB\x06\xbaH\x03\xc8\x01\x01R\x05input\"[\n" +
 	"\x0eDaemonIdentity\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12(\n" +
-	"\x02id\x18\x02 \x01(\tB\x18\xbaH\x15r\x132\x11^[a-z0-9]{16,64}$R\x02id*s\n" +
+	"\x02id\x18\x02 \x01(\tB\x18\xbaH\x15r\x132\x11^[a-z0-9]{16,32}$R\x02id*s\n" +
 	"\x0eSeenEndedCause\x12 \n" +
 	"\x1cSEEN_ENDED_CAUSE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bSEEN_ENDED_CAUSE_TIME_LIMIT\x10\x01\x12\x1e\n" +

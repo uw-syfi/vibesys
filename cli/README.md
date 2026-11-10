@@ -111,7 +111,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/flowrun/` | The shell that carries a flow's requests out on an `Environment`, a `Backend` and a file system, and nothing else. A `Fake` environment passes the same scenarios as the real one. |
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
-| `internal/alloc/` | Standing allocations as a pure machine: `Step(State, Config, now, Event) (State, []Action)` and `Fold` over a log of them. It holds the states (pending, running, draining, ended), the fit of a job (`Fit`), where a job of any allocation goes (`Choose`), the renewal rule, max_held, and typed refusals. Not wired into the daemon yet. |
+| `internal/alloc/` | Standing allocations as a pure machine: `Step(State, Config, now, Event) (State, []Action)` and `Fold` over a log of them. It holds the states (pending, running, draining, ended), the fit of a job (`Fit`), where a job of any allocation goes (`Choose`), the renewal rule, max_held, and typed refusals. The daemon runs it (`internal/app`). |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
 | `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
@@ -832,7 +832,7 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF, or on streaming its files and making its squashfs under `pyxis` (3600 by default). See "The apptainer placement". |
 | `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (`gres`, and `exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (`[slurm] max_time_seconds` by default, or a day without it; at most the partition's, and at most `max_time_seconds`). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
 | `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
-| `[placements.<name>.allocations] max_held`, `max_for` | Optional: lets a run hold standing allocations of the placement, at most `max_held` at once (1 to 64, pending and running, renewals included), each asked for at most `max_for`, a duration such as `"24h"` (for `apptainer`, at most `[slurm] max_time_seconds`). Unset, the placement offers none. This build reads and checks the section; the commands that request standing allocations come in a later build. |
+| `[placements.<name>.allocations] max_held`, `max_for` | Optional: lets a run hold standing allocations of the placement, at most `max_held` at once (1 to 64, pending and running, renewals included), each asked for at most `max_for`, a duration such as `"24h"` (for `apptainer`, at most `[slurm] max_time_seconds`). Unset, the placement offers none. See "Standing allocations". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -986,10 +986,21 @@ start without it, saying to install it.
 
 A run can hold capacity over time instead of asking for it per job. With an `[placements.<name>.allocations]`
 section (`max_held`, `max_for`, `fit_margin`) a placement of kind `local` or `ssh` takes standing
-allocations as slots of its own `max_jobs`; they have no end. A placement that is a cluster is wired
-through the apptainer allocator (`apptainer.NewAllocator`, `docker.Config.AllocationLabel`); this build
-refuses an allocations section on any other kind, naming the placement. Every command below needs a run
-(`--run` or `VIBESYS_RUN`) and `--json` gives the typed message.
+allocations as slots of its own `max_jobs`; they have no end. A placement of kind `apptainer` makes them
+batch jobs of its cluster (`apptainer.NewAllocator`, owned by this daemon's persisted identity), sized as a
+measured container's allocation, and a job submitted into one runs in it as `srun --jobid <id> --overlap`.
+A placement of kind `slurm` has no allocator, so this build refuses an allocations section on it, naming
+the placement. To turn them on for an apptainer placement, add to it:
+
+```toml
+[placements.cluster-a.allocations]
+max_held = 2        # at most two allocations at once, pending and running
+max_for = "24h"     # each asked for at most this; at most [slurm] max_time_seconds
+fit_margin = "2m"   # a job fits only when this much time is left after its bound
+```
+
+Every command below needs a run (`--run` or `VIBESYS_RUN`) and `--json` gives the typed message, except
+`placement capacity`, which names no run unless it is to list the run's held allocations.
 
 | Command | What it does |
 | --- | --- |
@@ -1000,6 +1011,7 @@ refuses an allocations section on any other kind, naming the placement. Every co
 | `alloc end <id> [--after-jobs]` | End now, or once its jobs are done. |
 | `alloc renew <id> --lead <dur> --for <dur> [--until <RFC3339>\|run-end]`, `alloc renew <id> --off` | Ask for a successor once the time left is at most `--lead`; `--off` takes the order away. |
 | `alloc end-run` | End every allocation of the run and ask for no more. |
+| `placement capacity <placement> [--run <id>]` | What the daemon measured of a placement: slots free and in all, for a cluster its nodes, waiting jobs and the reservations the account may use, the run's held allocations, and how long recent allocations waited. Facts only, no prediction. |
 | `submit ... --alloc <id>\|any` | Run the job inside that allocation. A named one that cannot fit the job's bound is refused (`CONFLICT`) with both durations; `any` falls back to the placement's own capacity when nothing fits. With no flag a job runs as before. |
 
 A refusal is a failure of the existing kinds: a request that cannot be right is `INVALID_INPUT`, one the
