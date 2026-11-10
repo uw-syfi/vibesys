@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "windows": [
+    {
+      "label": "measure",
+      "start_unix_nanos": 1700000000500000000,
+      "end_unix_nanos": 1700000003000000000
+    }
+  ],
+  "quality": {
+    "captured_traces": 20,
+    "eligible_traces": 17,
+    "excluded_traces": 3,
+    "exclusion_reasons": {
+      "clock_inconsistency": 1,
+      "duplicate_span_id": 1,
+      "missing_parent": 1
+    },
+    "matched_client_server_pairs": 58,
+    "unmatched_client_spans": 77,
+    "unmatched_server_spans": 0,
+    "async_relationships": 0,
+    "windows": [
+      {
+        "label": "measure",
+        "captured_traces": 20,
+        "eligible_traces": 17,
+        "excluded_traces": 3
+      }
+    ]
+  },
+  "span_count": 256,
+  "trace_count": 20,
+  "error_count": 1,
+  "services": [
+    {
+      "name": "frontend",
+      "count": 72,
+      "error_count": 1,
+      "mean_ms": 5.517805388888889,
+      "p50_ms": 4.746157,
+      "p95_ms": 13.1214191,
+      "p99_ms": 20.079130650000007,
+      "max_ms": 20.970667
+    },
+    {
+      "name": "search",
+      "count": 43,
+      "error_count": 0,
+      "mean_ms": 3.8136083488372097,
+      "p50_ms": 3.150469,
+      "p95_ms": 6.3648247,
+      "p99_ms": 9.403909119999998,
+      "max_ms": 9.646507
+    },
+    {
+      "name": "profile",
+      "count": 66,
+      "error_count": 0,
+      "mean_ms": 2.5923740000000004,
+      "p50_ms": 2.2860875,
+      "p95_ms": 4.3306565,
+      "p99_ms": 6.247887349999997,
+      "max_ms": 6.500907
+    },
+    {
+      "name": "rate",
+      "count": 42,
+      "error_count": 0,
+      "mean_ms": 1.7376746666666667,
+      "p50_ms": 1.3800455,
+      "p95_ms": 3.1903514500000005,
+      "p99_ms": 4.7048441300000015,
+      "max_ms": 4.823255
+    },
+    {
+      "name": "geo",
+      "count": 28,
+      "error_count": 0,
+      "mean_ms": 1.907204,
+      "p50_ms": 1.8202485,
+      "p95_ms": 3.187421699999998,
+      "p99_ms": 3.7136947900000004,
+      "max_ms": 3.774721
+    },
+    {
+      "name": "recommendation",
+      "count": 5,
+      "error_count": 0,
+      "mean_ms": 2.4567883999999998,
+      "p50_ms": 2.421684,
+      "p95_ms": 3.0378476,
+      "p99_ms": 3.0920895199999996,
+      "max_ms": 3.10565
+    }
+  ],
+  "spans": [
+    {
+      "name": "frontend: GET /hotels",
+      "count": 14,
+      "error_count": 1,
+      "mean_ms": 12.714689499999997,
+      "p50_ms": 11.5003785,
+      "p95_ms": 20.15447175,
+      "p99_ms": 20.80742795,
+      "max_ms": 20.970667
+    },
+    {
+      "name": "frontend: search.Search/Nearby",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 6.357344571428571,
+      "p50_ms": 5.750189000000001,
+      "p95_ms": 10.0772357,
+      "p99_ms": 10.40371354,
+      "max_ms": 10.485333
+    },
+    {
+      "name": "search: search.Search/Nearby",
+      "count": 15,
+      "error_count": 0,
+      "mean_ms": 5.592174000000001,
+      "p50_ms": 5.016345,
+      "p95_ms": 9.2421772,
+      "p99_ms": 9.565641040000001,
+      "max_ms": 9.646507
+    },
+    {
+      "name": "frontend: HTTP GET /recommendations",
+      "count": 5,
+      "error_count": 0,
+      "mean_ms": 5.7806756,
+      "p50_ms": 5.698076,
+      "p95_ms": 7.1478728,
+      "p99_ms": 7.27550096,
+      "max_ms": 7.307408
+    },
+    {
+      "name": "frontend: profile.Profile/GetProfiles",
+      "count": 19,
+      "error_count": 0,
+      "mean_ms": 3.8114820526315785,
+      "p50_ms": 3.652116,
+      "p95_ms": 6.9441929,
+      "p99_ms": 7.260624979999999,
+      "max_ms": 7.339733
+    },
+    {
+      "name": "profile: profile.Profile/GetProfiles",
+      "count": 19,
+      "error_count": 0,
+      "mean_ms": 3.360672684210526,
+      "p50_ms": 3.234732,
+      "p95_ms": 6.1505721000000015,
+      "p99_ms": 6.43084002,
+      "max_ms": 6.500907
+    },
+    {
+      "name": "search: rate.Rate/GetRates",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 3.1786726428571432,
+      "p50_ms": 2.8750945,
+      "p95_ms": 5.03861835,
+      "p99_ms": 5.2018572700000005,
+      "max_ms": 5.242667
+    },
+    {
+      "name": "rate: rate.Rate/GetRates",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 2.9243799285714283,
+      "p50_ms": 2.6450885,
+      "p95_ms": 4.63553045,
+      "p99_ms": 4.785710089999999,
+      "max_ms": 4.823255
+    },
+    {
+      "name": "search: geo.Geo/Nearby",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 2.542938,
+      "p50_ms": 2.3000755,
+      "p95_ms": 4.030893949999999,
+      "p99_ms": 4.16148519,
+      "max_ms": 4.194133
+    },
+    {
+      "name": "profile: memcached get",
+      "count": 47,
+      "error_count": 0,
+      "mean_ms": 2.2817851702127663,
+      "p50_ms": 2.2,
+      "p95_ms": 3.912852300000001,
+      "p99_ms": 4.48647154,
+      "max_ms": 4.613547
+    },
+    {
+      "name": "geo: geo.Geo/Nearby",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 2.2886452857142854,
+      "p50_ms": 2.0700695000000002,
+      "p95_ms": 3.6278060500000002,
+      "p99_ms": 3.7453380099999998,
+      "max_ms": 3.774721
+    },
+    {
+      "name": "frontend: recommendation.Recommendation/GetRecommendations",
+      "count": 5,
+      "error_count": 0,
+      "mean_ms": 2.8903375999999996,
+      "p50_ms": 2.849038,
+      "p95_ms": 3.5739364,
+      "p99_ms": 3.63775048,
+      "max_ms": 3.653704
+    },
+    {
+      "name": "recommendation: recommendation.Recommendation/GetRecommendations",
+      "count": 5,
+      "error_count": 0,
+      "mean_ms": 2.4567883999999998,
+      "p50_ms": 2.421684,
+      "p95_ms": 3.0378476,
+      "p99_ms": 3.0920895199999996,
+      "max_ms": 3.10565
+    },
+    {
+      "name": "geo: mongodb find",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 1.5257627142857142,
+      "p50_ms": 1.3800455,
+      "p95_ms": 2.4185366999999998,
+      "p99_ms": 2.49689134,
+      "max_ms": 2.51648
+    },
+    {
+      "name": "rate: mongodb find",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 1.5257627142857142,
+      "p50_ms": 1.3800455,
+      "p95_ms": 2.4185366999999998,
+      "p99_ms": 2.49689134,
+      "max_ms": 2.51648
+    },
+    {
+      "name": "frontend: render",
+      "count": 15,
+      "error_count": 0,
+      "mean_ms": 0.9666857333333333,
+      "p50_ms": 0.604784,
+      "p95_ms": 2.4139731000000033,
+      "p99_ms": 4.962794619999997,
+      "max_ms": 5.6
+    },
+    {
+      "name": "rate: memcached get",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 0.7628813571428571,
+      "p50_ms": 0.690023,
+      "p95_ms": 1.2092683499999999,
+      "p99_ms": 1.24844567,
+      "max_ms": 1.25824
+    }
+  ],
+  "datastores": [
+    {
+      "name": "profile → memcached: get",
+      "count": 47,
+      "error_count": 0,
+      "mean_ms": 2.2817851702127663,
+      "p50_ms": 2.2,
+      "p95_ms": 3.912852300000001,
+      "p99_ms": 4.48647154,
+      "max_ms": 4.613547
+    },
+    {
+      "name": "geo → mongodb: find",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 1.5257627142857142,
+      "p50_ms": 1.3800455,
+      "p95_ms": 2.4185366999999998,
+      "p99_ms": 2.49689134,
+      "max_ms": 2.51648
+    },
+    {
+      "name": "rate → mongodb: find",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 1.5257627142857142,
+      "p50_ms": 1.3800455,
+      "p95_ms": 2.4185366999999998,
+      "p99_ms": 2.49689134,
+      "max_ms": 2.51648
+    },
+    {
+      "name": "rate → memcached: get",
+      "count": 14,
+      "error_count": 0,
+      "mean_ms": 0.7628813571428571,
+      "p50_ms": 0.690023,
+      "p95_ms": 1.2092683499999999,
+      "p99_ms": 1.24844567,
+      "max_ms": 1.25824
+    }
+  ]
+}

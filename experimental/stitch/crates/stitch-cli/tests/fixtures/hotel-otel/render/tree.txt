@@ -1,0 +1,51 @@
+STITCH CALL GRAPH
+Per root endpoint, every eligible trace merged into one tree. Each node is `service: operation  [kind]  ×calls per root request`.
+─▶ marks a remote call: a client span paired with the server span it caused, shown as one hop. Its client time is the caller's view, server time the callee's, and network+queue their difference.
+── marks an in-process child. Times are p50 / p95 in ms; incl is the node's wall time, self subtracts the union of its direct children.
+Children are ordered by median start offset.
+eligible traces 17/20 (excluded 3: clock_inconsistency 1, duplicate_span_id 1, missing_parent 1)
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: GET /hotels   requests 12  errors 1
+latency mean 13.17 ms  p50 12.35 ms  p95 20.28 ms  p99 20.83 ms  max 20.97 ms
+
+frontend: GET /hotels  [server]  ×1.00/req
+│    incl 12.35 / 20.28 ms   self 1.23 / 2.03 ms
+├─▶ search: search.Search/Nearby  [rpc]  ×1.00/req
+│   │    client 6.17 / 10.14 ms   server 5.68 / 9.33 ms   network+queue 0.49 / 0.81 ms
+│   │    self 0.74 / 1.22 ms
+│   ├─▶ geo: geo.Geo/Nearby  [rpc]  ×1.00/req
+│   │   │    client 2.47 / 4.06 ms   server 2.22 / 3.65 ms   network+queue 0.25 / 0.41 ms
+│   │   │    self 0.74 / 1.22 ms
+│   │   └── geo: mongodb find  [client]  ×1.00/req
+│   │            incl 1.48 / 2.43 ms   self 1.48 / 2.43 ms
+│   └─▶ rate: rate.Rate/GetRates  [rpc]  ×1.00/req
+│       │    client 3.09 / 5.07 ms   server 2.84 / 4.66 ms   network+queue 0.25 / 0.41 ms
+│       │    self 0.62 / 1.01 ms
+│       ├── rate: memcached get  [client]  ×1.00/req
+│       │        incl 0.74 / 1.22 ms   self 0.74 / 1.22 ms
+│       └── rate: mongodb find  [client]  ×1.00/req
+│                incl 1.48 / 2.43 ms   self 1.48 / 2.43 ms
+├─▶ profile: profile.Profile/GetProfiles  [rpc]  ×1.00/req
+│   │    client 4.32 / 7.10 ms   server 3.83 / 6.29 ms   network+queue 0.49 / 0.81 ms
+│   │    self 0.62 / 1.01 ms
+│   └── profile: memcached get  [client]  ×3.00/req
+│            incl 2.30 / 4.07 ms   self 2.30 / 4.07 ms
+└── frontend: render  [internal]  ×1.00/req
+         incl 0.62 / 1.01 ms   self 0.62 / 1.01 ms
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: HTTP GET /recommendations   requests 5  errors 0
+latency mean 5.78 ms  p50 5.70 ms  p95 7.15 ms  p99 7.28 ms  max 7.31 ms
+
+frontend: HTTP GET /recommendations  [server]  ×1.00/req
+│    incl 5.70 / 7.15 ms   self 0.85 / 1.07 ms
+├─▶ recommendation: recommendation.Recommendation/GetRecommendations  [rpc]  ×1.00/req
+│        client 2.85 / 3.57 ms   server 2.42 / 3.04 ms   network+queue 0.43 / 0.54 ms
+│        self 2.42 / 3.04 ms
+└─▶ profile: profile.Profile/GetProfiles  [rpc]  ×1.00/req
+    │    client 1.99 / 2.50 ms   server 1.71 / 2.14 ms   network+queue 0.28 / 0.36 ms
+    │    self 0.57 / 0.71 ms
+    └── profile: memcached get  [client]  ×1.00/req
+             incl 1.14 / 1.43 ms   self 1.14 / 1.43 ms
+

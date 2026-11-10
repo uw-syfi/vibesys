@@ -352,11 +352,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "stitch-analysis"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stitch-core",
+ "thiserror",
+]
+
+[[package]]
 name = "stitch-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
  "serde_json",
+ "stitch-analysis",
  "stitch-core",
  "stitch-importer-api",
  "stitch-profiler-dial9",
