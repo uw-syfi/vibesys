@@ -145,6 +145,10 @@ func Result(r core.Result) *cliv1.Result {
 		out.Outcome = &cliv1.Result_Check{Check: &cliv1.CheckResult{Duration: durationpb.New(o.Duration)}}
 	case core.MeasureOutcome:
 		out.Outcome = &cliv1.Result_Measure{Measure: measureResult(o)}
+	case core.TraceOutcome:
+		out.Outcome = &cliv1.Result_Trace{Trace: &cliv1.TraceResult{
+			ArtifactsDir: o.ArtifactsDir, Files: slices.Clone(o.Files), Duration: durationpb.New(o.Duration),
+		}}
 	}
 	return out
 }
@@ -380,8 +384,17 @@ func toResult(field string, r *cliv1.Result) (core.Result, error) {
 			return core.Result{}, err
 		}
 		out.Outcome = m
+	case *cliv1.Result_Trace:
+		var d time.Duration
+		if o.Trace.GetDuration() != nil {
+			if err := o.Trace.GetDuration().CheckValid(); err != nil {
+				return core.Result{}, invalid("%s.trace.duration: %v", field, err)
+			}
+			d = o.Trace.GetDuration().AsDuration()
+		}
+		out.Outcome = core.TraceOutcome{ArtifactsDir: o.Trace.GetArtifactsDir(), Files: slices.Clone(o.Trace.GetFiles()), Duration: d}
 	default:
-		return core.Result{}, invalid("%s: a result says whether it is a check or a measurement", field)
+		return core.Result{}, invalid("%s: a result says whether it is a check, a measurement or a trace", field)
 	}
 	return out, nil
 }

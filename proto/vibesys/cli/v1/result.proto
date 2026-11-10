@@ -66,6 +66,20 @@ message CheckResult {
   google.protobuf.Duration duration = 1;
 }
 
+// TraceResult is a trace job whose [trace] command exited 0: where its reports are. A failed trace
+// saves no result.
+message TraceResult {
+  // The artifacts directory of the trace command, relative to the repository's root when it is
+  // inside it (the job's artifacts directory in the state directory, then the command's own, such
+  // as 03-trace) and absolute otherwise.
+  string artifacts_dir = 1 [(buf.validate.field).string.min_len = 1];
+  // The names of the entries directly under the trace/ directory of artifacts_dir, sorted, such as
+  // report.txt and tree.txt. Empty when the command left no trace/ directory.
+  repeated string files = 2 [(buf.validate.field).repeated.max_items = 1024];
+  // How long the trace command ran.
+  google.protobuf.Duration duration = 3;
+}
+
 // MeasureResult is the official measurement of a commit.
 message MeasureResult {
   option (buf.validate.message).cel = {
@@ -137,6 +151,7 @@ message Result {
   oneof outcome {
     CheckResult check = 11;
     MeasureResult measure = 12;
+    TraceResult trace = 14;
   }
   // For a task of two images, the exact digest of the candidate's image the commands ran against.
   // It is recorded and never part of the key: a dependency the candidate changes is part of the

@@ -4,6 +4,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 )
 
 // next lists the states a job in this state can move to, and is the one place the job state
@@ -193,8 +194,30 @@ func checkSavedResult(j Job, kind JobKind, r Result) error {
 			return failf(FailureInvalidInput, "result: a measure outcome for a %s job", kind)
 		}
 		return checkMeasurement(outcome)
+	case TraceOutcome:
+		if kind != JobTrace {
+			return failf(FailureInvalidInput, "result: a trace outcome for a %s job", kind)
+		}
+		return checkTrace(outcome)
 	default:
-		return failf(FailureInvalidInput, "result: outcome %T is neither a check nor a measure outcome", r.Outcome)
+		return failf(FailureInvalidInput, "result: outcome %T is not a check, measure or trace outcome", r.Outcome)
+	}
+	return nil
+}
+
+func checkTrace(t TraceOutcome) error {
+	switch {
+	case t.ArtifactsDir == "":
+		return failf(FailureInvalidInput, "result: a trace names no artifacts directory")
+	case len(t.Files) > MaxTraceFiles:
+		return failf(FailureInvalidInput, "result: a trace lists %d files, more than %d", len(t.Files), MaxTraceFiles)
+	case t.Duration < 0:
+		return failf(FailureInvalidInput, "result: a trace ran for a negative time (%v)", t.Duration)
+	}
+	for i, name := range t.Files {
+		if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
+			return failf(FailureInvalidInput, "result: trace file %d (%q) is not a name in the trace directory", i, name)
+		}
 	}
 	return nil
 }

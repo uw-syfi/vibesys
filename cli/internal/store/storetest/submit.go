@@ -352,12 +352,14 @@ func testSubmit(t *testing.T, newStore New) {
 			e := newEnv(t, newStore, store.Rules{DefaultSamples: defaultSamples})
 			for range 40 {
 				s := e.measure(1, []string{"key-a", "key-a", "key-b"}[g.pick(3)], 0)
-				switch g.pick(5) {
+				switch g.pick(6) {
 				case 0:
 					s.Spec.Settings = core.CheckSettings{}
 				case 1:
 					s.Spec.Settings = core.CommandSettings{Argv: []string{"ls"}}
 					s.Key = ""
+				case 2:
+					s.Spec.Settings = core.TraceSettings{}
 				default:
 					s.Spec.Settings = core.MeasureSettings{Samples: uint32(g.pick(6)), Recheck: g.pick(2) == 0}
 				}

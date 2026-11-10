@@ -16,9 +16,13 @@ const (
 	JobCommand JobKind = "command"
 	// JobMeasure is the official measurement: build, check, benchmark samples, saved result.
 	JobMeasure JobKind = "measure"
+	// JobTrace is trace evidence of a commit: build, then the task's [trace] command once, which
+	// leaves its reports in the job's artifacts directory. It runs no check and is never scored; a
+	// trace that succeeded is cached as a check pass is.
+	JobTrace JobKind = "trace"
 )
 
-// JobStage is the step of a check or measure job that ended it: the zero value is none.
+// JobStage is the step of a check, measure or trace job that ended it: the zero value is none.
 type JobStage string
 
 // The stages a failed check or measure job can end in.
@@ -29,11 +33,13 @@ const (
 	StageCheck JobStage = "check"
 	// StageMeasure is the benchmark that takes a measure job's samples.
 	StageMeasure JobStage = "measure"
+	// StageTrace is the task's [trace] command of a trace job.
+	StageTrace JobStage = "trace"
 )
 
-// Valid says whether the stage is one of the three, so the zero value (none) is not.
+// Valid says whether the stage is one of the stages, so the zero value (none) is not.
 func (s JobStage) Valid() bool {
-	return s == StageBuild || s == StageCheck || s == StageMeasure
+	return s == StageBuild || s == StageCheck || s == StageMeasure || s == StageTrace
 }
 
 // JobState is where a job is.
@@ -64,7 +70,7 @@ func (s JobState) Final() bool {
 }
 
 // Settings is what a kind of job is configured with: exactly one of CheckSettings,
-// CommandSettings and MeasureSettings. The interface is closed, so a JobSpec cannot carry a kind
+// CommandSettings, MeasureSettings and TraceSettings. The interface is closed, so a JobSpec cannot carry a kind
 // that disagrees with its settings.
 type Settings interface {
 	// Kind is the job kind these settings belong to.
@@ -122,8 +128,15 @@ type MeasureSettings struct {
 	Recheck bool
 }
 
+// TraceSettings configures a trace job. It has none: the command and its time limit are the
+// task's [trace].
+type TraceSettings struct{}
+
 // Kind implements Settings.
 func (CheckSettings) Kind() JobKind { return JobCheck }
+
+// Kind implements Settings.
+func (TraceSettings) Kind() JobKind { return JobTrace }
 
 // Kind implements Settings.
 func (CommandSettings) Kind() JobKind { return JobCommand }
@@ -134,6 +147,7 @@ func (MeasureSettings) Kind() JobKind { return JobMeasure }
 func (CheckSettings) settings()   {}
 func (CommandSettings) settings() {}
 func (MeasureSettings) settings() {}
+func (TraceSettings) settings()   {}
 
 // JobSpec is what a submission asks for.
 type JobSpec struct {
@@ -284,17 +298,30 @@ const (
 	RerunBeforeStartOnly RerunPolicy = "before start only"
 	// RerunAfterProvenDeath runs a job again whenever its supervisor is proved gone. A check or a
 	// measure job saves nothing until it passes, so a second attempt cannot meet half of the first.
+	// A trace job is the same: it saves its result only when its command exited 0.
 	RerunAfterProvenDeath RerunPolicy = "after proven death"
 )
 
 // RerunPolicyOf is the rerun policy of a kind of job.
 func RerunPolicyOf(kind JobKind) RerunPolicy {
 	switch kind {
-	case JobCheck, JobMeasure:
+	case JobCheck, JobMeasure, JobTrace:
 		return RerunAfterProvenDeath
 	case JobCommand:
 	}
 	return RerunBeforeStartOnly
+}
+
+// HoldsPlacementAlone reports whether a job of the kind claims the placement it runs on for itself
+// alone: a measure job, whose benchmark samples must not be disturbed, and a trace job, which
+// deploys the system and loads it as a measure does, so its timings must not be disturbed either.
+func HoldsPlacementAlone(kind JobKind) bool {
+	switch kind {
+	case JobMeasure, JobTrace:
+		return true
+	case JobCheck, JobCommand:
+	}
+	return false
 }
 
 // JobFilter selects jobs. Fields combine with AND and the zero value matches every job.

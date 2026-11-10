@@ -49,7 +49,7 @@ type PlacementDemand struct {
 // A queued docker job that no placement of the config fits, or restricted to one the config does not
 // have or that lacks a need, has no option, so Step refuses it.
 func (d PlacementDemand) Options(job core.Job) []Option {
-	measure := job.Spec.Settings != nil && job.Spec.Settings.Kind() == core.JobMeasure
+	measure := job.Spec.Settings != nil && core.HoldsPlacementAlone(job.Spec.Settings.Kind())
 	if job.Spec.Environment != core.EnvironmentDocker {
 		return Only(Claim{Resource: d.Host, Amount: 1, Exclusive: measure})
 	}

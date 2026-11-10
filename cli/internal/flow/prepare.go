@@ -26,6 +26,7 @@ type Starting struct {
 // result saved while the job waited is counted:
 //
 //   - a check job always runs its check: it has no result of its own to save otherwise;
+//   - a trace job always runs its trace, for the same reason, and runs no check;
 //   - a measure job takes the samples the cache lacks (core.PlanCache), and at least the count
 //     asked for when saved samples already cover it, since a job that succeeds saves a result of
 //     its own;
@@ -49,7 +50,7 @@ func Prepare(in Starting) (Plan, error) {
 		return Plan{}, &core.Failure{Kind: core.FailureInvalidInput, Message: "job: no settings"}
 	}
 	kind := job.Spec.Settings.Kind()
-	if kind != core.JobCheck && kind != core.JobMeasure {
+	if kind != core.JobCheck && kind != core.JobMeasure && kind != core.JobTrace {
 		return Plan{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("job: a %s job has no plan", kind)}
 	}
 	if job.TaskVersion != "" && job.TaskVersion != in.Task.Version {
@@ -72,7 +73,14 @@ func Prepare(in Starting) (Plan, error) {
 		Kind: kind, Task: t.Name, TaskVersion: t.Version, Key: key, Environment: in.Environment,
 		Build: t.Build, Check: t.Check, Candidate: t.Candidate, Service: t.Service,
 	}
-	if kind == core.JobCheck {
+	switch kind {
+	case core.JobCheck:
+		return p, nil
+	case core.JobTrace:
+		if t.Trace == nil {
+			return Plan{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("task %q declares no [trace], so job %s has nothing to run", t.Name, job.ID)}
+		}
+		p.Trace = *t.Trace
 		return p, nil
 	}
 	settings := job.Spec.Settings.(core.MeasureSettings)

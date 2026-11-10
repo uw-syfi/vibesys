@@ -539,12 +539,12 @@ type Demand interface {
 }
 
 // DefaultDemand is the demand of a daemon whose config names no placement: every job takes one
-// slot of DefaultPlacement, and a measure job, whose benchmark samples must not be disturbed, takes
-// the whole placement.
+// slot of DefaultPlacement, and a measure or a trace job takes the whole placement
+// (core.HoldsPlacementAlone).
 type DefaultDemand struct{}
 
 // Options implements Demand.
 func (DefaultDemand) Options(job core.Job) []Option {
-	exclusive := job.Spec.Settings != nil && job.Spec.Settings.Kind() == core.JobMeasure
+	exclusive := job.Spec.Settings != nil && core.HoldsPlacementAlone(job.Spec.Settings.Kind())
 	return Only(Claim{Resource: DefaultPlacement, Amount: 1, Exclusive: exclusive})
 }

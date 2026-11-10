@@ -133,11 +133,13 @@ func (d *driver) step(step int) {
 	case op < 4:
 		sub := core.Submission{Spec: g.spec(), Key: core.JobKey(fmt.Sprintf("k%d", g.pick(5))), NoCache: g.pick(6) == 0, At: d.instant()}
 		sub.Spec.Commit = commit(g.pick(3))
-		switch g.pick(3) {
+		switch g.pick(4) {
 		case 0:
 			sub.Spec.Settings = core.CheckSettings{}
 		case 1:
 			sub.Spec.Settings = core.MeasureSettings{Samples: uint32(g.pick(3)), Recheck: g.pick(2) == 0}
+		case 2:
+			sub.Spec.Settings = core.TraceSettings{}
 		default:
 			sub.Key = ""
 		}
@@ -276,7 +278,7 @@ func (d *driver) read(step int, jobs []core.Job) {
 			f.Commit = commit(g.pick(3))
 		}
 		if g.pick(3) == 0 {
-			f.Kind = []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure}[g.pick(3)]
+			f.Kind = []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure, core.JobTrace}[g.pick(4)]
 		}
 		if g.pick(2) == 0 {
 			f.NoteContains = "e"

@@ -117,6 +117,8 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 		out.Settings = &cliv1.JobSpec_Command{Command: command}
 	case core.MeasureSettings:
 		out.Settings = &cliv1.JobSpec_Measure{Measure: &cliv1.MeasureSettings{Samples: settings.Samples, Recheck: settings.Recheck}}
+	case core.TraceSettings:
+		out.Settings = &cliv1.JobSpec_Trace{Trace: &cliv1.TraceSettings{}}
 	}
 	return out
 }
@@ -153,6 +155,8 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 		out.Settings = command
 	case *cliv1.JobSpec_Measure:
 		out.Settings = core.MeasureSettings{Samples: settings.Measure.GetSamples(), Recheck: settings.Measure.GetRecheck()}
+	case *cliv1.JobSpec_Trace:
+		out.Settings = core.TraceSettings{}
 	default:
 		return core.JobSpec{}, invalid("%s: no job settings, so no job kind", field)
 	}

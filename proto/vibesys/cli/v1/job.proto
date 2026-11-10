@@ -16,6 +16,10 @@ enum JobKind {
   JOB_KIND_COMMAND = 2;
   // The official measurement: build, check, benchmark samples, saved result.
   JOB_KIND_MEASURE = 3;
+  // Trace evidence of a commit: build, then the task's [trace] command once, which leaves its
+  // reports in the job's artifacts directory. No check runs and nothing is scored; a succeeded trace
+  // is cached like a check pass.
+  JOB_KIND_TRACE = 4;
 }
 
 // JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
@@ -33,6 +37,10 @@ enum JobState {
 }
 
 message CheckSettings {}
+
+// TraceSettings configures a trace job. It has none yet: the command and its time limit are the
+// task's [trace].
+message TraceSettings {}
 
 // ServiceSpec is a long-lived process a command job runs against. The environment owns its
 // lifecycle: it starts the service, waits for the probe to succeed, and kills the whole process
@@ -116,6 +124,7 @@ message JobSpec {
     CheckSettings check = 10;
     CommandSettings command = 11;
     MeasureSettings measure = 12;
+    TraceSettings trace = 13;
   }
 }
 
@@ -229,7 +238,7 @@ message Job {
   JobStage failed_stage = 20 [(buf.validate.field).enum.defined_only = true];
 }
 
-// JobStage is the step of a check or measure job that ended it.
+// JobStage is the step of a check, measure or trace job that ended it.
 enum JobStage {
   JOB_STAGE_UNSPECIFIED = 0;
   // The candidate or the task's image did not build.
@@ -238,6 +247,8 @@ enum JobStage {
   JOB_STAGE_CHECK = 2;
   // The benchmark that takes the samples of a measure job failed.
   JOB_STAGE_MEASURE = 3;
+  // The task's [trace] command of a trace job failed.
+  JOB_STAGE_TRACE = 4;
 }
 
 // WaitKind is why a queued job has not started.

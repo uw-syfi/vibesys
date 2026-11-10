@@ -123,6 +123,10 @@ message TaskManifestV02 {
   // Only a task of one image has it: a task with [candidate] starts its candidate's server for
   // each command.
   TaskServiceV02 service = 19 [(task_schema_since_minor) = 2];
+  // The trace: run once by a trace job, after the build (and the candidate's image), with no check.
+  // It deploys the commit, runs a short traced load and leaves text reports in
+  // $VIBESYS_ARTIFACTS_DIR/trace/. It is never scored. Optional: a task without it has no trace jobs.
+  TaskCommandV02 trace = 20 [(task_schema_since_minor) = 2];
 }
 
 // TaskDomain is what an example task optimizes. A task names one as the value's name without its

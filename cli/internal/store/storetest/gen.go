@@ -120,9 +120,11 @@ func (g *gen) pinned() core.Fingerprint {
 }
 
 func (g *gen) settings() core.Settings {
-	switch g.pick(3) {
+	switch g.pick(4) {
 	case 0:
 		return core.CheckSettings{}
+	case 2:
+		return core.TraceSettings{}
 	case 1:
 		return core.CommandSettings{
 			Argv:    g.strs(),
@@ -152,8 +154,14 @@ func (g *gen) load() core.MachineLoad {
 	return core.MachineLoad{SampledAt: g.instant(), LoadAverage1m: g.float(), CPUBusyFraction: g.float(), MemoryAvailableBytes: g.u64()}
 }
 
-func (g *gen) outcome(measure bool) core.Outcome {
-	if !measure {
+// outcome is an outcome of the kind's result with every field set: a check's for any kind that is
+// neither a measure nor a trace.
+func (g *gen) outcome(kind core.JobKind) core.Outcome {
+	switch kind {
+	case core.JobMeasure:
+	case core.JobTrace:
+		return core.TraceOutcome{ArtifactsDir: g.text(), Files: []string{g.name(), g.name()}, Duration: time.Duration(1 + g.r.Int64N(1<<50))}
+	default:
 		return core.CheckOutcome{Duration: time.Duration(1 + g.r.Int64N(1<<50))}
 	}
 	samples := g.floats()
@@ -202,18 +210,18 @@ func (g *gen) members() []core.FrontierMember {
 }
 
 // result is a saved result with every field set, for a job with this id, key and commit.
-func (g *gen) result(job core.JobID, key core.JobKey, c core.Commit, measure bool) core.Result {
+func (g *gen) result(job core.JobID, key core.JobKey, c core.Commit, kind core.JobKind) core.Result {
 	return core.Result{
 		Job: job, Key: key, Task: g.text(), TaskVersion: g.text(), Commit: c, SchemaVersion: 1 + g.r.Uint32(),
-		Environment: g.fingerprint(), Machine: g.machine(), Load: g.load(), RecordedAt: g.instant(), Outcome: g.outcome(measure),
+		Environment: g.fingerprint(), Machine: g.machine(), Load: g.load(), RecordedAt: g.instant(), Outcome: g.outcome(kind),
 		CandidateImage: fmt.Sprintf("sha256:%016x%016x%016x%016x", g.r.Uint64(), g.r.Uint64(), g.r.Uint64(), g.r.Uint64()),
 	}
 }
 
 // acceptedResult is a result core accepts from a job that is running in the environment it
 // pinned, with every other field set at random.
-func (g *gen) acceptedResult(job core.Job, measure bool) core.Result {
-	r := g.result(job.ID, job.Key, job.Spec.Commit, measure)
+func (g *gen) acceptedResult(job core.Job, kind core.JobKind) core.Result {
+	r := g.result(job.ID, job.Key, job.Spec.Commit, kind)
 	r.SchemaVersion = core.SchemaVersion
 	r.Environment = *job.Environment
 	r.Environment.Facts = maps.Clone(r.Environment.Facts)
@@ -294,8 +302,9 @@ func (g *gen) needs() []core.ResourceKind {
 // details is one event detail of every kind a command records.
 func (g *gen) details() []core.EventDetail {
 	return []core.EventDetail{
-		g.job(), g.result(core.JobID(g.name()), core.JobKey(g.name()), core.Commit(g.text()), true),
-		g.result(core.JobID(g.name()), core.JobKey(g.name()), core.Commit(g.text()), false), g.verdict(), g.promotion(), g.refusal(),
+		g.job(), g.result(core.JobID(g.name()), core.JobKey(g.name()), core.Commit(g.text()), core.JobMeasure),
+		g.result(core.JobID(g.name()), core.JobKey(g.name()), core.Commit(g.text()), core.JobCheck),
+		g.result(core.JobID(g.name()), core.JobKey(g.name()), core.Commit(g.text()), core.JobTrace), g.verdict(), g.promotion(), g.refusal(),
 		core.Failure{Kind: core.FailureConflict, Message: g.text()}, g.plan(), nil,
 	}
 }
@@ -396,7 +405,7 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 	if (tr.To == core.JobSucceeded && g.pick(6) != 0) || g.pick(12) == 0 {
 		var res core.Result
 		if job.Environment != nil {
-			res = g.acceptedResult(job, job.Spec.Settings.Kind() == core.JobMeasure)
+			res = g.acceptedResult(job, job.Spec.Settings.Kind())
 		} else {
 			res = resultAt(job, at, 1, 2, 3)
 		}
@@ -421,6 +430,10 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 			res.Outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: "sideways"}, Samples: []float64{1}, CheckJob: "j-check"}
 		case 9:
 			res.Outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: core.Minimize}, Samples: []float64{1}}
+		case 10:
+			res.Outcome = core.TraceOutcome{Files: []string{"report.txt"}}
+		case 11:
+			res.Outcome = core.TraceOutcome{ArtifactsDir: "a/01-trace", Files: []string{"../escape"}}
 		}
 		tr.Result = &res
 	}
