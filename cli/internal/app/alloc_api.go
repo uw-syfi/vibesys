@@ -73,7 +73,7 @@ func RefusalFailure(r alloc.Refusal) *core.Failure {
 	case alloc.UnknownAllocation, alloc.NotOwnedByRun:
 		kind = core.FailureNotFound
 	case alloc.RunNotLive, alloc.MaxHeldReached, alloc.NotRunning, alloc.DoesNotFit, alloc.DuplicateJob,
-		alloc.NotRenewable, alloc.NoEnd, alloc.AlreadyRenewed:
+		alloc.NotRenewable, alloc.NoEnd, alloc.AlreadyRenewed, alloc.NoAllocation:
 		kind = core.FailureConflict
 	}
 	return &core.Failure{Kind: kind, Message: r.Message()}

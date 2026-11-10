@@ -793,6 +793,14 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 		return
 	}
 	out, cuts := withoutCutLines(w.outputOf(l))
+	// The daemon says why a job of any allocation runs without one, before the job's own output.
+	var kept []string
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if !strings.HasPrefix(line, "[allocation] ") {
+			kept = append(kept, line)
+		}
+	}
+	out = strings.Join(kept, "")
 	if cuts != len(l.job.Attempts) {
 		w.violate("job %s says %d attempts were cut off, and its store records %d", ref, cuts, len(l.job.Attempts))
 	}

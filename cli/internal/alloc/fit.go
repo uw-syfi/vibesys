@@ -89,6 +89,38 @@ func Choose(s State, cfg Config, j JobSubmitted, now time.Time) (ID, bool) {
 	return best.id, true
 }
 
+// Declined is why Choose found no allocation for the job: of the run's allocations, the refusal that
+// came closest to taking it (a fit that fell short, then an allocation of a placement the job may
+// not use, then one that is not running), the oldest of equals; NoAllocation when the run holds none.
+func Declined(s State, cfg Config, j JobSubmitted, now time.Time) Refusal {
+	var best Refusal
+	rank, bestN := -1, uint64(0)
+	for _, a := range s.allocs {
+		if a.Run != j.Run || a.Stage() == StageEnded {
+			continue
+		}
+		var why Refusal
+		var r int
+		switch p, running := a.Phase.(Running); {
+		case !running:
+			why, r = notRunning(a), 0
+		case !slices.Contains(j.Eligible, a.Placement):
+			why, r = NotEligible{ID: a.ID, Placement: a.Placement}, 1
+		default:
+			f := Fit(p.Live, j.Bound, now, cfg.Placements[a.Placement].Margin)
+			why, r = DoesNotFit{ID: a.ID, TimeLeft: f.TimeLeft, Ahead: f.Ahead, Bound: j.Bound, Margin: cfg.Placements[a.Placement].Margin}, 2
+		}
+		n, _ := a.ID.number()
+		if r > rank || (r == rank && n < bestN) {
+			best, rank, bestN = why, r, n
+		}
+	}
+	if best == nil {
+		return NoAllocation{Run: j.Run}
+	}
+	return best
+}
+
 func compare[T ~int64 | ~uint64](x, y T) int {
 	switch {
 	case x < y:

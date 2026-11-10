@@ -313,8 +313,8 @@ func TestAStrictRefusalNamesBothDurations(t *testing.T) {
 	if !ok || f.Kind != core.FailureConflict {
 		t.Fatalf("Submit = %v, want a conflict", err)
 	}
-	// The command's bound is the daemon's default of 30m; the allocation has just under 10m.
-	for _, want := range []string{"30m0s", "left", "9m5"} {
+	// The command's bound is the daemon's default of 30m; the allocation has 10m, said in whole seconds.
+	for _, want := range []string{"30m0s", "left", "10m0s"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("the refusal %q does not say %q", f.Message, want)
 		}

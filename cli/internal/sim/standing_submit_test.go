@@ -212,3 +212,45 @@ func TestAJobWhoseCheckFailsFailsWithoutHarmingItsAllocation(t *testing.T) {
 		t.Fatalf("%d containers started in the allocation, want both jobs' two", n)
 	}
 }
+
+// A job submitted into any allocation that none takes runs without one, and says why on its notes
+// (what `jobs` and `jobs --json` show) and at the head of its output (what `logs` shows), in the
+// words of the refusal that came closest to taking it: the allocation it did not fit, or that the
+// run holds none.
+func TestAJobOfAnyAllocationThatNoneTakesSaysWhy(t *testing.T) {
+	for _, k := range submitKinds {
+		for _, held := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/held=%v", k.name, held), func(t *testing.T) {
+				r := newStandingRig(t, standingConfig)
+				r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "0"}, protocol2Scores))
+				a, srv := r.start()
+				want := "no running allocation"
+				if held {
+					first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, 2*time.Minute)
+					if err != nil {
+						t.Fatal(err)
+					}
+					r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning})
+					want = "does not fit allocation a1"
+				}
+				id := r.submitThrough(srv, k, core.AllocationAny, "")
+				awaitFinal(t, a, id)
+				j, err := a.Job(r.ctx(), standingScope, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				note := ""
+				for _, n := range j.Notes {
+					note += n.Text + "\n"
+				}
+				var log strings.Builder
+				_ = a.ReadLogs(r.ctx(), standingScope, id, 0, false, func(c core.LogChunk) error { log.Write(c.Data); return nil })
+				for where, text := range map[string]string{"notes": note, "output": log.String()} {
+					if !strings.Contains(text, "allocation any: ") || !strings.Contains(text, want) || !strings.Contains(text, "queued without one") {
+						t.Errorf("the job's %s %q do not say why it has no allocation (%q)", where, text, want)
+					}
+				}
+			})
+		}
+	}
+}

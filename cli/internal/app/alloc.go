@@ -480,7 +480,7 @@ func (s *allocShell) perform(ctx context.Context, actions []alloc.Action) {
 		case alloc.DropJob:
 			s.cancel(act.Job, act.Reason.Message())
 		case alloc.NotPlaced:
-			s.placeAsPlain(act.Job)
+			s.placeAsPlain(act.Job, act.Why)
 		case alloc.RecordWait:
 			s.recordWait(act)
 		case alloc.Refuse:
@@ -605,13 +605,30 @@ func (s *allocShell) outbox(ctx context.Context) {
 	}
 }
 
-// placeAsPlain lets a job that no allocation took run as a job with no allocation does.
-func (s *allocShell) placeAsPlain(job core.JobID) {
+// placeAsPlain lets a job that no allocation took run as a job with no allocation does, once the
+// job says why, on its notes and at the head of its output, so that whoever submitted it into any
+// allocation finds out that it runs without one.
+func (s *allocShell) placeAsPlain(job core.JobID, why alloc.Refusal) {
 	ref, ok := refOfJob(job)
 	if !ok {
 		return
 	}
-	s.tell(lifecycle.AllocReleased{Ref: ref})
+	text := "allocation any: " + why.Message() + "; queued without one"
+	s.effect(s.app.ctx, "unplaced "+ref.String(), func(ctx context.Context) {
+		if scope, ok := s.app.scopeOfStore(ctx, ref.Store); ok {
+			if st, err := s.app.findStore(ctx, scope); err == nil {
+				if _, err := s.app.AddNote(ctx, core.CallContext{Scope: scope}, ref.Job, text); err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("noting that job %s was queued without an allocation: %v", ref, err)
+				}
+				if err := appendLineOnce(ctx, st, ref.Job, "[allocation] "+text); err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("logging that job %s was queued without an allocation: %v", ref, err)
+				}
+			}
+		}
+		if ctx.Err() == nil {
+			s.tell(lifecycle.AllocReleased{Ref: ref})
+		}
+	})
 }
 
 // resendReleases tells the job machine again where each job an allocation runs is, so that a job

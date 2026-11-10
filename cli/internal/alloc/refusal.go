@@ -73,6 +73,10 @@ type DoesNotFit struct {
 	Margin   time.Duration
 }
 
+// NoAllocation: the run holds no allocation that could take the job: none is running on a placement
+// it may run on. It is why a job of any allocation, which none takes, runs without one.
+type NoAllocation struct{ Run core.RunID }
+
 // BoundNotPositive: a job said it takes no time, which no fit can judge.
 type BoundNotPositive struct {
 	Job   core.JobID
@@ -125,7 +129,7 @@ func (r ForNotPositive) Message() string {
 
 // Message implements Refusal.
 func (r ForExceedsMaxFor) Message() string {
-	return fmt.Sprintf("asked for %s, longer than %s = %s", r.For, r.Key, r.MaxFor)
+	return fmt.Sprintf("asked for %s, longer than %s = %s", secs(r.For), r.Key, secs(r.MaxFor))
 }
 
 // Message implements Refusal.
@@ -157,7 +161,16 @@ func (r NotEligible) Message() string {
 // Message implements Refusal.
 func (r DoesNotFit) Message() string {
 	return fmt.Sprintf("the job does not fit allocation %s: it has %s left, less a margin of %s, and the job needs %s after %s of jobs ahead of it",
-		r.ID, r.TimeLeft, r.Margin, r.Bound, r.Ahead)
+		r.ID, secs(r.TimeLeft), secs(r.Margin), secs(r.Bound), secs(r.Ahead))
+}
+
+// secs is a duration as a message says it: to the whole second, as nobody reads nanoseconds. The
+// refusal itself keeps the exact value.
+func secs(d time.Duration) time.Duration { return d.Round(time.Second) }
+
+// Message implements Refusal.
+func (r NoAllocation) Message() string {
+	return fmt.Sprintf("run %q holds no running allocation on a placement the job may run on", r.Run)
 }
 
 // Message implements Refusal.
@@ -192,7 +205,7 @@ func (r LeadNotPositive) Message() string {
 
 // Message implements Refusal.
 func (r LeadNotShorterThanFor) Message() string {
-	return fmt.Sprintf("a renewal's lead (%s) must be shorter than its --for (%s), or every successor would be due for renewal as it starts", r.Lead, r.For)
+	return fmt.Sprintf("a renewal's lead (%s) must be shorter than its --for (%s), or every successor would be due for renewal as it starts", secs(r.Lead), secs(r.For))
 }
 
 // Message implements Refusal.
@@ -215,6 +228,7 @@ func (NotOwnedByRun) refusal()         {}
 func (NotRunning) refusal()            {}
 func (NotEligible) refusal()           {}
 func (DoesNotFit) refusal()            {}
+func (NoAllocation) refusal()          {}
 func (BoundNotPositive) refusal()      {}
 func (DuplicateJob) refusal()          {}
 func (NotRenewable) refusal()          {}

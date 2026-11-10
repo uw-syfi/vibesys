@@ -198,6 +198,11 @@ func checkStep(cfg alloc.Config, now time.Time, before alloc.State, e alloc.Even
 			// First in, first out: every job queued ahead of it is gone from the queue.
 			if bl, ok := liveOf(prev[x.ID]); ok {
 				ahead := true
+				for _, act := range actions {
+					if n, ok := act.(alloc.NotPlaced); ok && n.Why == nil {
+						fail("job %s was left without an allocation and nothing says why", n.Job)
+					}
+				}
 				for _, q := range bl.Queue {
 					if q.Job == x.Job {
 						ahead = false

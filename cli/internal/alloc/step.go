@@ -329,7 +329,7 @@ func (st *stepper) submitted(e JobSubmitted) Refusal {
 	if e.Into == "" {
 		id, ok := Choose(*st.s, st.cfg, e, st.now)
 		if !ok {
-			st.emit(NotPlaced{Job: e.Job})
+			st.emit(NotPlaced{Job: e.Job, Why: Declined(*st.s, st.cfg, e, st.now)})
 			return nil
 		}
 		st.enqueue(st.find(id), slot)
@@ -457,7 +457,7 @@ func (st *stepper) orphan(a *Allocation, l Live, reason EndReason) {
 // without an allocation does, and a strict one fails.
 func (st *stepper) unplace(a *Allocation, q Slot, why Refusal) {
 	if q.Any {
-		st.emit(NotPlaced{Job: q.Job})
+		st.emit(NotPlaced{Job: q.Job, Why: why})
 		return
 	}
 	st.emit(DropJob{Job: q.Job, ID: a.ID, Reason: why})
