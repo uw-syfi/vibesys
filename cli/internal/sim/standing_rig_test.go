@@ -157,7 +157,8 @@ func (r *standingRig) start() (*app.App, *daemon.Server) {
 // over the rig's state home and cluster. Its clock is the rig's from then on: tick lets it go.
 func (r *standingRig) startAs(machine, runtime string) (*app.App, *daemon.Server) {
 	r.t.Helper()
-	dir, err := runtimedir.Open(shortDir(r.t), r.process.UID, runtimedir.System())
+	// The directory is made on the real disk, so the real user owns it, whatever uid the simulated process has.
+	dir, err := runtimedir.Open(shortDir(r.t), os.Getuid(), runtimedir.System())
 	if err != nil {
 		r.t.Fatal(err)
 	}

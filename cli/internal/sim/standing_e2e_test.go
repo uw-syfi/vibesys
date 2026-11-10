@@ -2,6 +2,7 @@ package sim_test
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -194,7 +195,7 @@ func TestAnAllocationsSectionIsRefusedWhereNoAllocatorBacksIt(t *testing.T) {
 			cfg = "[placements.p]\nkind = \"ssh\"\n[placements.p.remote]\nhost = \"host-a\"\nremote_workspace_root = \"/w\"\n" + section
 		}
 		r := newStandingRig(t, cfg)
-		dir, err := runtimedir.Open(shortDir(t), r.process.UID, runtimedir.System())
+		dir, err := runtimedir.Open(shortDir(t), os.Getuid(), runtimedir.System())
 		if err != nil {
 			t.Fatal(err)
 		}
