@@ -58,6 +58,9 @@ vibesys-cli alloc renew <id> --lead 4h --for 6h --until run-end
   before your allocation would end, or before a successor could run, renew earlier or ask for a
   length that ends before it starts.
 - `--until run-end` makes the order stop when the run ends. Without it, say when it should stop.
+  A run that makes no `vibesys-cli` call for the operator's `run_idle_end` (2h by default) is
+  taken to have ended: its orders stop and its allocations end. A long quiet wait therefore needs a
+  call now and then (`alloc ls` is enough), or it loses what it holds.
 - The old allocation is never handed over: it runs to its end, and `--alloc any` jobs go to
   whichever fits. If renewal was skipped (`renewal_skipped_reason`, for example `max_held`), end one
   you no longer need, or wait.
