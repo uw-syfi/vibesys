@@ -248,8 +248,6 @@ func (s *allocShell) noteJob(e lifecycle.Event) {
 		s.post(allocMsg{event: alloc.JobStarted{Job: jobOfRef(e.Ref)}})
 	case lifecycle.Closed:
 		s.post(allocMsg{event: alloc.JobFinished{Job: jobOfRef(e.Ref)}})
-	case lifecycle.Discarded:
-		s.post(allocMsg{event: alloc.JobFinished{Job: jobOfRef(e.Ref)}})
 	default:
 		// Nothing else about a job is the allocation machine's.
 	}
