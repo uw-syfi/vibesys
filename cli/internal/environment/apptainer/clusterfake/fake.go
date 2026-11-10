@@ -131,7 +131,8 @@ func (c *Cluster) Say(script, out string) {
 
 // SetFaults makes the calls named by op fail with what f returns, or none with nil. The ops are
 // "has", "read", "publish", "squash", "submit", "state", "jobs", "cancel", "hold", "readnode", "port", "start"
-// and "signal".
+// and "signal". ErrHang makes a call hang until its context ends; "release" has no context and
+// returns it.
 func (c *Cluster) SetFaults(f func(op string) error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -323,7 +324,14 @@ func (cl *Client) enter(ctx context.Context, op string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return cl.c.fault(op)
+	err := cl.c.fault(op)
+	if errors.Is(err, ErrHang) {
+		// A hang ends only with the call's context, as the Converter's does. Returning ErrHang at
+		// once let a caller read its context's cause before a deadline that had fired cancelled it.
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
 // Has implements apptainer.Cluster.
