@@ -223,6 +223,7 @@ func (h gatedHandle) call(ctx context.Context, what string, do func() error) err
 func (h gatedHandle) Start(ctx context.Context) error {
 	return h.call(ctx, "sup.Start", func() error {
 		h.w.noteStart(h.d, h.ref)
+		h.w.checkAllocationStart(h.ref)
 		return h.inner.Start(ctx)
 	})
 }
@@ -276,6 +277,7 @@ func (s gatedSupervisors) wrap(h supervisor.Handle, ref lifecycle.Ref) superviso
 func (s gatedSupervisors) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Handle, error) {
 	h, err := gated(ctx, s.w, s.d, "sup.Spawn "+l.Ref().String(), false, func() (supervisor.Handle, error) {
 		s.w.noteSpawn(l.Ref())
+		s.w.noteLaunch(l)
 		return s.inner.Spawn(ctx, l)
 	})
 	if err != nil {

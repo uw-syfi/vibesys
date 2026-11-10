@@ -12,6 +12,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/changed"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/localalloc"
@@ -98,6 +99,8 @@ type cancelAsk struct {
 type adoption struct {
 	placement string
 	handles   []alloc.Handle
+	// issued is the number of effects of submissions that had finished when the question was asked.
+	issued int
 }
 
 // allocReply is what the loop answers a request: the allocation it concerns, as it is after the
@@ -129,6 +132,9 @@ type allocShell struct {
 	mu    sync.Mutex
 	queue []allocMsg
 	wake  changed.Signal
+	// out is what the job machine is to be told, and outWake wakes the goroutine that tells it.
+	out     []lifecycle.Event
+	outWake changed.Signal
 	// changes wakes whoever waits for an allocation to change.
 	changes  changed.Signal
 	snapshot atomic.Pointer[allocSnapshot]
@@ -143,6 +149,9 @@ type allocShell struct {
 	waits      map[string][]alloc.WaitSample
 	reconciled map[string]bool
 	retry      []allocMsg
+	// seq counts the submissions that finished, and submitDone says when each allocation's last did.
+	seq        int
+	submitDone map[alloc.ID]int
 }
 
 const maxWaitSamples = 64
@@ -151,7 +160,7 @@ func newAllocShell(a *App, c Allocations) *allocShell {
 	s := &allocShell{
 		app: a, conf: c, backends: map[string]environment.Allocator{}, slurm: map[string]bool{},
 		expected: map[lifecycle.Ref]int{}, inflight: map[string]bool{}, again: map[string]func(context.Context){}, cancels: map[lifecycle.Ref]string{},
-		waits: map[string][]alloc.WaitSample{}, reconciled: map[string]bool{},
+		waits: map[string][]alloc.WaitSample{}, reconciled: map[string]bool{}, submitDone: map[alloc.ID]int{},
 	}
 	s.cfg = alloc.Config{Placements: map[string]alloc.Limits{}}
 	for _, p := range c.Placements {
@@ -280,6 +289,7 @@ func (s *allocShell) start(ctx context.Context) error {
 			return err
 		}
 	}
+	s.app.group.Go(func() { s.outbox(named(s.app.ctx, "allocation outbox")) })
 	s.app.group.Go(func() { s.loop(named(s.app.ctx, "allocations")) })
 	s.app.group.Go(func() { s.clockTicks(named(s.app.ctx, "allocation clock")) })
 	return nil
@@ -344,7 +354,7 @@ func (s *allocShell) tick(ctx context.Context) {
 	s.apply(ctx, allocMsg{event: alloc.Tick{}})
 	s.observeAll(ctx)
 	for _, p := range s.conf.Placements {
-		if !s.reconciled[p.Name] {
+		if !s.reconciled[p.Name] || s.hasUnknownEnd(p.Name) {
 			s.adopt(ctx, p.Name)
 		}
 	}
@@ -357,6 +367,10 @@ func (s *allocShell) tick(ctx context.Context) {
 func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 	if m.done != "" {
 		delete(s.inflight, m.done)
+		if id, ok := strings.CutPrefix(m.done, "submit "); ok {
+			s.seq++
+			s.submitDone[alloc.ID(id)] = s.seq
+		}
 		// What was asked for while the effect ran is done once more: it may be about a later state.
 		if f, ok := s.again[m.done]; ok {
 			delete(s.again, m.done)
@@ -396,7 +410,7 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 	if !next.Equal(s.state) {
 		// The input is durable before the state moves, so a restart finds the allocations the
 		// callers were told of.
-		if err := s.conf.Log.Append(ctx, alloc.Input{At: now, Event: m.event}); err != nil {
+		if err := s.bounded(ctx, func(ctx context.Context) error { return s.conf.Log.Append(ctx, alloc.Input{At: now, Event: m.event}) }); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -471,6 +485,14 @@ func (s *allocShell) perform(ctx context.Context, actions []alloc.Action) {
 	}
 }
 
+// bounded runs a call to a backend or to the log with the time a call to a store gets, so that one
+// that never answers is an unreachable backend and not a daemon that stops.
+func (s *allocShell) bounded(ctx context.Context, do func(ctx context.Context) error) error {
+	ctx, done := clock.Deadline(ctx, s.app.cfg.Timers, s.app.cfg.CallTimeout)
+	defer done()
+	return do(ctx)
+}
+
 // effect starts f beside the loop, one for a key at a time: a request that comes while one runs is
 // carried out when it is done, once, however many came.
 func (s *allocShell) effect(ctx context.Context, key string, f func(ctx context.Context)) {
@@ -479,6 +501,7 @@ func (s *allocShell) effect(ctx context.Context, key string, f func(ctx context.
 		return
 	}
 	s.inflight[key] = true
+	ctx = named(ctx, key)
 	s.app.group.Go(func() {
 		f(ctx)
 		if ctx.Err() == nil {
@@ -500,7 +523,8 @@ func unreachable(err error) bool {
 func (s *allocShell) submit(ctx context.Context, spec alloc.Spec) {
 	b := s.backends[spec.Placement]
 	s.effect(ctx, "submit "+string(spec.ID), func(ctx context.Context) {
-		h, err := b.Request(ctx, spec)
+		var h alloc.Handle
+		err := s.bounded(ctx, func(ctx context.Context) (err error) { h, err = b.Request(ctx, spec); return })
 		switch {
 		case ctx.Err() != nil:
 		case err == nil:
@@ -521,7 +545,7 @@ func (s *allocShell) release(ctx context.Context, r alloc.Release) {
 	}
 	b := s.backends[al.Placement]
 	s.effect(ctx, "release "+string(r.ID), func(ctx context.Context) {
-		err := b.Release(ctx, r.Handle)
+		err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, r.Handle) })
 		switch {
 		case ctx.Err() != nil:
 		case err == nil:
@@ -544,8 +568,37 @@ func (s *allocShell) startJob(act alloc.StartJob) {
 }
 
 func (s *allocShell) releaseJob(ref lifecycle.Ref, al alloc.Allocation) {
-	e := lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref}
-	s.app.group.Go(func() { s.app.post(message{event: e}) })
+	s.tell(lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref})
+}
+
+// tell sends the job machine an event, in the order the allocation machine decided them: one
+// goroutine posts them, so that two decisions of one step never overtake each other.
+func (s *allocShell) tell(e lifecycle.Event) {
+	s.mu.Lock()
+	s.out = append(s.out, e)
+	s.mu.Unlock()
+	s.outWake.Notify()
+}
+
+// outbox posts what tell was given.
+func (s *allocShell) outbox(ctx context.Context) {
+	for {
+		wake := s.outWake.Wait()
+		s.mu.Lock()
+		out := s.out
+		s.out = nil
+		s.mu.Unlock()
+		for _, e := range out {
+			if s.app.post(message{event: e}) != nil {
+				return
+			}
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // placeAsPlain lets a job that no allocation took run as a job with no allocation does.
@@ -554,7 +607,7 @@ func (s *allocShell) placeAsPlain(job core.JobID) {
 	if !ok {
 		return
 	}
-	s.app.group.Go(func() { s.app.post(message{event: lifecycle.AllocReleased{Ref: ref}}) })
+	s.tell(lifecycle.AllocReleased{Ref: ref})
 }
 
 // resendReleases tells the job machine again where each job an allocation runs is, so that a job
@@ -625,7 +678,8 @@ func (s *allocShell) observeAll(ctx context.Context) {
 		b := s.backends[al.Placement]
 		id, h := al.ID, al.Handle
 		s.effect(ctx, "observe "+string(id), func(ctx context.Context) {
-			seen, err := b.Observe(ctx, h)
+			var seen alloc.Observation
+			err := s.bounded(ctx, func(ctx context.Context) (err error) { seen, err = b.Observe(ctx, h); return })
 			switch {
 			case ctx.Err() != nil:
 			case err != nil:
@@ -637,18 +691,29 @@ func (s *allocShell) observeAll(ctx context.Context) {
 	}
 }
 
+// hasUnknownEnd says an allocation of the placement ended before the backend said it took the
+// request, so that nothing is known of what the backend made, if it made anything.
+func (s *allocShell) hasUnknownEnd(placement string) bool {
+	return slices.ContainsFunc(s.state.Allocations(), func(al alloc.Allocation) bool {
+		end, ended := al.Phase.(alloc.Ended)
+		return ended && !end.Released && al.Handle == (alloc.Handle{}) && al.Placement == placement
+	})
+}
+
 // adopt asks a placement's backend for the allocations it holds that this daemon made.
 func (s *allocShell) adopt(ctx context.Context, placement string) {
 	b := s.backends[placement]
+	issued := s.seq
 	s.effect(ctx, "adopt "+placement, func(ctx context.Context) {
-		handles, err := b.Adopt(ctx)
+		var handles []alloc.Handle
+		err := s.bounded(ctx, func(ctx context.Context) (err error) { handles, err = b.Adopt(ctx); return })
 		if err != nil {
 			if ctx.Err() == nil {
 				s.app.cfg.Logf("adopting the allocations of placement %s: %v", placement, err)
 			}
 			return
 		}
-		s.post(allocMsg{adopted: &adoption{placement: placement, handles: handles}})
+		s.post(allocMsg{adopted: &adoption{placement: placement, handles: handles, issued: issued}})
 	})
 }
 
@@ -663,8 +728,14 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 		switch {
 		case !ok || al.Stage() == alloc.StageEnded && al.Handle == (alloc.Handle{}):
 			s.effect(ctx, "release unknown "+string(h.Alloc), func(ctx context.Context) {
-				if err := b.Release(ctx, h); err != nil && ctx.Err() == nil {
+				err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, h) })
+				switch {
+				case ctx.Err() != nil:
+				case err != nil:
 					s.app.cfg.Logf("releasing allocation %s, which no record names: %v", h.Alloc, err)
+				default:
+					// A record of an allocation that ended before the backend took it has nothing left.
+					s.post(allocMsg{event: alloc.Released{ID: h.Alloc}})
 				}
 			})
 		case al.Handle == (alloc.Handle{}) && al.Stage() == alloc.StagePending:
@@ -672,6 +743,22 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 			s.observeAll(ctx)
 		default:
 			// A record that has its handle.
+		}
+	}
+	// An allocation that ended before the backend took the request, and that the backend does not
+	// hold now, with no request of it in flight and none that finished after the question was
+	// asked, has nothing left at the backend.
+	named := map[alloc.ID]bool{}
+	for _, h := range found.handles {
+		named[h.Alloc] = true
+	}
+	for _, al := range s.state.Allocations() {
+		end, ended := al.Phase.(alloc.Ended)
+		if !ended || end.Released || al.Handle != (alloc.Handle{}) || al.Placement != found.placement || named[al.ID] {
+			continue
+		}
+		if !s.inflight["submit "+string(al.ID)] && s.submitDone[al.ID] <= found.issued {
+			s.apply(ctx, allocMsg{event: alloc.Released{ID: al.ID}})
 		}
 	}
 }
@@ -728,7 +815,7 @@ func (s *allocShell) settleUnplaced(ctx context.Context, ref lifecycle.Ref) {
 		return
 	}
 	if job.Spec.Allocation == core.AllocationAny {
-		s.app.post(message{event: lifecycle.AllocReleased{Ref: ref}})
+		s.tell(lifecycle.AllocReleased{Ref: ref})
 		return
 	}
 	s.post(allocMsg{cancelAsk: &cancelAsk{ref: ref, reason: fmt.Sprintf("allocation %s never took the job", job.Spec.Allocation)}})

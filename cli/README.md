@@ -982,6 +982,31 @@ start without it, saying to install it.
   alone on its placement: besides the node, it shares this machine (image builds and conversions)
   and the login node with whatever runs beside it, and `exclusive` may be off.
 
+### Standing allocations
+
+A run can hold capacity over time instead of asking for it per job. With an `[placements.<name>.allocations]`
+section (`max_held`, `max_for`, `fit_margin`) a placement of kind `local` or `ssh` takes standing
+allocations as slots of its own `max_jobs`; they have no end. A placement that is a cluster is wired
+through the apptainer allocator (`apptainer.NewAllocator`, `docker.Config.AllocationLabel`); this build
+refuses an allocations section on any other kind, naming the placement. Every command below needs a run
+(`--run` or `VIBESYS_RUN`) and `--json` gives the typed message.
+
+| Command | What it does |
+| --- | --- |
+| `alloc request <placement> --for <dur>` | Record a request and return, usually with the allocation `PENDING`. |
+| `alloc ls [--ended] [--all-runs]` | The run's allocations that have not ended; `--ended` adds the ended ones, `--all-runs` lists every run's. |
+| `alloc show <id>` | One allocation: placement, phase, start and end, renewal order, jobs. |
+| `alloc wait <id> --until running\|ended --timeout <dur>`, `alloc wait <id> --until ending-in <dur>` | Return when the allocation is in the state; bounded by `--timeout`. Exit `0` met, `1` ended first, `3` timed out. |
+| `alloc end <id> [--after-jobs]` | End now, or once its jobs are done. |
+| `alloc renew <id> --lead <dur> --for <dur> [--until <RFC3339>\|run-end]`, `alloc renew <id> --off` | Ask for a successor once the time left is at most `--lead`; `--off` takes the order away. |
+| `alloc end-run` | End every allocation of the run and ask for no more. |
+| `submit ... --alloc <id>\|any` | Run the job inside that allocation. A named one that cannot fit the job's bound is refused (`CONFLICT`) with both durations; `any` falls back to the placement's own capacity when nothing fits. With no flag a job runs as before. |
+
+A refusal is a failure of the existing kinds: a request that cannot be right is `INVALID_INPUT`, one the
+state refuses is `CONFLICT`, an allocation nobody holds is `NOT_FOUND`. The daemon keeps its allocations
+in a log and rebuilds them on restart, adopting what the backend still holds and releasing what no record
+names. This needs protocol 6.
+
 ### Reused allocations
 
 On a busy cluster each allocation can wait in the queue for hours, and a measure of five samples asks

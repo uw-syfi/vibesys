@@ -312,6 +312,7 @@ var testRules = map[string][]string{
 	},
 	// The whole daemon, over Fakes, in one process.
 	"internal/sim": {
+		"internal/alloc", "internal/environment", "internal/environment/fakealloc", "internal/store/memstore", "internal/wire",
 		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
