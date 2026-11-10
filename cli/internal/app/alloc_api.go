@@ -8,8 +8,10 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // AllocationView is an allocation with what the daemon knows of it besides its record.
@@ -259,26 +261,42 @@ func (a *App) EndRunAllocations(ctx context.Context, run core.RunID) ([]Allocati
 }
 
 // jobBound is the longest a job is taken to run, which is what it would ask a backend for on its
-// own: a command's timeout, and for a check or a measure the configured bound, since its plan is
-// made only when it launches.
-func (a *App) jobBound(spec core.JobSpec) time.Duration {
-	if c, ok := spec.Settings.(core.CommandSettings); ok {
-		if c.Timeout > 0 {
-			return c.Timeout
+// own: a command's own timeout, and for a check or a measure what its task holds it to (flow.Bound),
+// so a job of a task whose limits are minutes fits an allocation of minutes. A profile that has not
+// been through the daemon's flows yet is given the task's load and server as they will make it.
+func (a *App) jobBound(ctx context.Context, scope core.Scope, spec core.JobSpec) (time.Duration, error) {
+	read := func() (task.Task, error) {
+		return a.taskAt(ctx, string(scope.Repository()), spec.Commit, string(scope.Task()))
+	}
+	switch s := spec.Settings.(type) {
+	case core.CommandSettings:
+		if s.Profile != nil && len(s.Argv) == 0 {
+			t, err := read()
+			if err != nil {
+				return 0, err
+			}
+			if s, err = commandOfTwoImages(s, t); err != nil {
+				return 0, err
+			}
 		}
-		return a.cfg.DefaultTimeout
+		if s.Timeout > 0 {
+			return s.Timeout, nil
+		}
+		return a.cfg.DefaultTimeout, nil
+	default:
+		t, err := read()
+		if err != nil {
+			return 0, err
+		}
+		return flow.Bound(t, s), nil
 	}
-	if b := a.cfg.Allocations.JobBound; b > 0 {
-		return b
-	}
-	return DefaultCommandTimeout
 }
 
 // precheckAllocation refuses a submission into an allocation that cannot work before anything is
 // built or stored: the daemon keeps no allocations, the call has no run, or the allocation it names
 // is not one that takes the job. What it cannot know yet, the job's eligible placements, is judged
 // again when the job is stored.
-func (a *App) precheckAllocation(req SubmitRequest) error {
+func (a *App) precheckAllocation(ctx context.Context, req SubmitRequest) error {
 	if req.Spec.Allocation == "" {
 		return nil
 	}
@@ -297,8 +315,12 @@ func (a *App) precheckAllocation(req SubmitRequest) error {
 	if req.Spec.Allocation == core.AllocationAny {
 		into = ""
 	}
+	bound, err := a.jobBound(ctx, req.Context.Scope, req.Spec)
+	if err != nil {
+		return err
+	}
 	_, actions := alloc.Step(s.snapshot.Load().state, s.cfg, a.now(), alloc.JobSubmitted{
-		Run: req.Context.Run, Job: "precheck", Bound: a.jobBound(req.Spec), Into: into, Eligible: eligible,
+		Run: req.Context.Run, Job: "precheck", Bound: bound, Into: into, Eligible: eligible,
 	})
 	for _, act := range actions {
 		if r, ok := act.(alloc.Refuse); ok {
@@ -326,9 +348,12 @@ func (a *App) submitIntoAllocation(ctx context.Context, req SubmitRequest, ref l
 	if job.Spec.Allocation == core.AllocationAny {
 		into = ""
 	}
-	_, err = s.ask(ctx, alloc.JobSubmitted{
-		Run: req.Context.Run, Job: jobOfRef(ref), Bound: a.jobBound(job.Spec), Into: into, Eligible: eligible,
-	})
+	bound, err := a.jobBound(ctx, req.Context.Scope, job.Spec)
+	if err == nil {
+		_, err = s.ask(ctx, alloc.JobSubmitted{
+			Run: req.Context.Run, Job: jobOfRef(ref), Bound: bound, Into: into, Eligible: eligible,
+		})
+	}
 	if err == nil {
 		return nil
 	}

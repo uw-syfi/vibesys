@@ -49,10 +49,6 @@ type Allocations struct {
 	// ObservePeriod is how often the backends are asked about the allocations that have not ended,
 	// and the core is ticked. It defaults to DefaultObservePeriod.
 	ObservePeriod time.Duration
-	// JobBound is the longest a check or a measure job is taken to run when it is submitted into an
-	// allocation: its plan is made only when it launches, so its own limits are not known before.
-	// It defaults to DefaultCommandTimeout. A command job's bound is its own timeout.
-	JobBound time.Duration
 }
 
 // DefaultObservePeriod is how often allocations are looked at when the config does not say.

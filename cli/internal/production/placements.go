@@ -129,6 +129,9 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir r
 // whatever libraries their image has. Any other build has none, and its placements run no task
 // of two images.
 func (p Process) probe() string {
+	if p.Outside.Probe != "" {
+		return p.Outside.Probe
+	}
 	if runtime.GOOS != "linux" || !path.IsAbs(p.Executable) || !static() {
 		return ""
 	}
@@ -190,10 +193,14 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 	if p.Outside.Source != nil {
 		source = p.Outside.Source
 	}
+	var files task.Files = gitwork.Tasks{}
+	if p.Outside.Files != nil {
+		files = p.Outside.Files
+	}
 	cfg := docker.Config{
 		Source: source, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
-		Candidates: docker.CandidateFiles{Files: gitwork.Tasks{}},
+		Candidates: docker.CandidateFiles{Files: files},
 	}
 	engineCfg := dockercli.Config{Timers: clk}
 	var shell remote.Shell = remote.Local{}

@@ -73,6 +73,11 @@ type Outside struct {
 	Converter apptainer.Converter
 	// Source reads the files of a task at a commit, in place of the checkouts of git.
 	Source docker.Source
+	// Files reads what builds a candidate's image, in place of the checkouts of git.
+	Files task.Files
+	// Probe is the program the placements start a candidate's server probe with, in place of this
+	// executable, which is one only when it is a static Linux build.
+	Probe string
 	// Machine is where an apptainer placement's containers see their files, in place of its login
 	// node over ssh and rsync.
 	Machine docker.Machine

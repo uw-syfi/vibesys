@@ -20,6 +20,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
@@ -122,9 +123,9 @@ func newStandingRig(t *testing.T, config string) *standingRig {
 	r.process = production.Process{UID: 1000, GID: 1000, Home: "/home/u", Getenv: func(string) string { return "" }, Outside: production.Outside{
 		Cluster:   func(string) apptainer.Cluster { return r.cluster.Connect() },
 		Docker:    local,
-		Converter: clusterfake.NewConverter(),
-		Source:    dockerfake.Fixed(docker.Spec{Dockerfile: []byte("FROM busybox:1.36.1\n")}),
-		Machine:   docker.Shared{As: docker.User{UID: 1000, GID: 1000}},
+		Converter: clusterfake.NewConverter(), Files: r.tasks, Probe: "/probe/vibesys-cli",
+		Source:  dockerfake.Fixed(docker.Spec{Dockerfile: []byte("FROM busybox:1.36.1\n")}),
+		Machine: docker.Shared{As: docker.User{UID: 1000, GID: 1000}},
 	}}
 	return r
 }
@@ -151,7 +152,7 @@ func (r *standingRig) start() (*app.App, *daemon.Server) {
 	}
 	a := app.New(app.Config{
 		Clock: r.clock, Timers: r.timers, Stores: r.stores, Environments: wired.Environments,
-		Supervisors:  supervisor.NewInProcess(wired.Environments, r.checkouts, r.survivors),
+		Supervisors:  supervisor.NewInProcess(wired.Environments, r.checkouts, r.survivors).WithHost(supervisor.Host{Files: hostfs.NewMemory(), Clock: r.clock}),
 		Tasks:        r.tasks,
 		Repositories: r.repos, Scheduler: wired.Scheduler, Placements: wired.Placements, Allocations: wired.Allocations,
 		Retry:       app.Retry{Attempts: 4, First: time.Millisecond, Longest: time.Millisecond},
