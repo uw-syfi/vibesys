@@ -76,6 +76,11 @@ release whose tag starts with `cli-`. Users install it with `cli/install.sh` and
    for that tag. For a stable version that is the newest, it then points the rolling tag
    `cli-latest` at the same commit and replaces that release's assets.
 
+The `cli-install` job of `.github/workflows/nightly.yml` runs the published install path every
+night on Linux and macOS: `install.sh` from `main` against the live releases, a pinned install,
+`vibesys-cli upgrade`, the build attestation, and a small job end to end. A missing or stale
+`cli-latest` is therefore caught within a day.
+
 Two releases of this repository must not share GitHub's "latest" marker, which goes to the most
 recently created release that is not a pre-release. The Python releases keep it. Every `vibesys-cli`
 release is created with `--latest=false`, and `install.sh` and `vibesys-cli upgrade` read the
