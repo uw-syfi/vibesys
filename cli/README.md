@@ -1270,6 +1270,14 @@ How the daemon is checked:
 - `internal/sim/leases_test.go` runs two users' daemons on one machine through crashes and restarts,
   sharing only the machine's lease, and checks that their measures never run at once, except where
   the daemon of one died while it ran; a test with the lease not shared sees them meet.
+- `internal/sim/alloc_test.go` runs runs holding standing allocations of a cluster placement (a fake
+  backend) and of a machine's slots through faults, outages and restarts, and fails unless the default
+  seeds reach each thing the invariants are about, each in a stated fraction of them: a job running in
+  an allocation, a time limit, a cancel from outside, a run's end, a renewal and a restart.
+  `internal/sim/standing_property_test.go` runs the same life over the daemon's production wiring
+  (`production.Process.Wire`), the apptainer allocator and the cluster fake, and
+  `standing_e2e_test.go` follows one allocation from the operator config to a job that runs in it and
+  a renewal.
 - The decoders in `internal/wire` have fuzz targets (`FuzzDecodeJob` and the others in
   `fuzz_test.go`). `go test` runs their seed inputs; to search for new failures run one for a while,
   for example `go test -run '^$' -fuzz '^FuzzDecodeJob$' -fuzztime 1m ./internal/wire`, and commit the

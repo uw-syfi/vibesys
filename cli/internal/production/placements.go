@@ -15,7 +15,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
-	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
@@ -80,7 +79,7 @@ type clusterSide struct {
 // that a run clears what a dead job of the placement left and never what a live one uses. Another
 // machine runs one job of the daemon at a time (operator.Parse refuses more), so there the
 // containers and the Slurm allocations stay in the placement's scope, which a run sweeps whole.
-func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string) (machines, error) {
+func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, containerKey string) (machines, error) {
 	local := cpu.New(cpu.Host(), clk)
 	// One per process, shared by its placements' engines and machines: a second one would wait on
 	// the lock the first holds for the same run.
@@ -185,10 +184,14 @@ func (e engineBuilds) of(host string) *docker.Builds {
 }
 
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, *clusterSide, error) {
+func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, *clusterSide, error) {
 	scope := scopeOf(dir.Path(), name)
+	var source docker.Source = docker.TaskSource{Tasks: gitwork.Tasks{}}
+	if p.Outside.Source != nil {
+		source = p.Outside.Source
+	}
 	cfg := docker.Config{
-		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
+		Source: source, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
 		Candidates: docker.CandidateFiles{Files: gitwork.Tasks{}},
 	}
@@ -219,6 +222,9 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 			cfg.Builds = builds.of("")
 		}
 		cfg.Machine = staging
+		if p.Outside.Machine != nil {
+			cfg.Machine = p.Outside.Machine
+		}
 	}
 	s := pl.GetSlurm()
 	if s != nil {
@@ -274,8 +280,12 @@ const gpuScript = "gpu"
 // machine and the GPUs are what the nodes say inside the allocations, never the login node.
 //
 // cfg.Scope is the run's, and scope the placement's, under which runs says which runs live.
-func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope string, runs docker.Runs, pl *cliv1.Placement) (*docker.Provider, *clusterSide, error) {
-	local, err := dockercli.New(dockercli.Config{Timers: clk})
+func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string, runs docker.Runs, pl *cliv1.Placement) (*docker.Provider, *clusterSide, error) {
+	var local interface {
+		docker.Engine
+		apptainer.Exporter
+	}
+	local, err := p.localDocker(clk)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -286,6 +296,8 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 	if a.GetRuntime() == cliv1.ContainerRuntime_CONTAINER_RUNTIME_PYXIS {
 		// The login node makes each image's squashfs from its files, streamed from here.
 		runtime = apptainer.RuntimePyxis
+	} else if p.Outside.Converter != nil {
+		converter, localDir = p.Outside.Converter, p.localScratch(a)
 	} else {
 		// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
 		sif, err := localsif.New(p.Getenv("PATH"), clk, cfg.Grace)
@@ -295,12 +307,17 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 		converter, localDir = sif, p.localScratch(a)
 	}
 	ssh := remote.SSH{Host: pl.GetRemote().GetHost(), Program: orDefault(pl.GetRemote().GetSshCommand(), "ssh")}
-	cluster, err := clustercli.New(clustercli.Config{
-		Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
-		Runtime: runtime, Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
-	})
-	if err != nil {
-		return nil, nil, err
+	var cluster apptainer.Cluster
+	if p.Outside.Cluster != nil {
+		cluster = p.Outside.Cluster(ssh.Host)
+	} else {
+		cluster, err = clustercli.New(clustercli.Config{
+			Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
+			Runtime: runtime, Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	var scripts map[string]string
 	if pl.GetResources().GetRocm() != nil {
@@ -344,10 +361,22 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 	}, nil
 }
 
+// localDocker is this machine's Docker, which builds and exports the images of an apptainer
+// placement.
+func (p Process) localDocker(clk Clocks) (interface {
+	docker.Engine
+	apptainer.Exporter
+}, error) {
+	if p.Outside.Docker != nil {
+		return p.Outside.Docker, nil
+	}
+	return dockercli.New(dockercli.Config{Timers: clk})
+}
+
 // resources are the resources of a placement, each made by its own package from its section. where
 // names the machine the placement reaches, and gpus whose GPUs a job of it gets, which names their
 // claim. The AMD GPUs' facts are read by amdFacts.
-func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk clock.System, amdFacts rocm.Facts) ([]resource.Resource, error) {
+func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk Clocks, amdFacts rocm.Facts) ([]resource.Resource, error) {
 	var out []resource.Resource
 	if r.GetRocm() != nil {
 		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts})

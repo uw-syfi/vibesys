@@ -58,6 +58,7 @@ type Cluster struct {
 	ends      bool
 	fail      func(op string) error
 	started   []apptainer.Box
+	startedIn map[string][]string // the names of the boxes whose processes started in each job
 	submitted []apptainer.Allocation
 	now       time.Duration // how long the cluster has run, which Advance moves
 	linger    bool          // a dead claim leaves its containers' processes running
@@ -91,7 +92,7 @@ type box struct {
 // New returns an empty cluster whose node scripts wait at the gates.
 func New(gates fakeenv.Gates) *Cluster {
 	return &Cluster{
-		gates: gates, files: map[string][]byte{}, published: map[string]int{}, jobs: map[string]*job{},
+		gates: gates, files: map[string][]byte{}, published: map[string]int{}, jobs: map[string]*job{}, startedIn: map[string][]string{},
 		says: maps.Clone(Machine),
 	}
 }
@@ -184,6 +185,14 @@ func (c *Cluster) Started() []apptainer.Box {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return slices.Clone(c.started)
+}
+
+// StartedIn names the boxes whose processes started in the batch job of the id, in order: where
+// the processes of a container ran. A job that joined a standing allocation is here under its id.
+func (c *Cluster) StartedIn(id string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.startedIn[id])
 }
 
 // Submitted returns the allocations asked for, in order.
@@ -725,6 +734,7 @@ func (n *node) Start(spec apptainer.Box, argv []string, sink io.Writer) (environ
 		j.boxes[spec.Name] = b
 	}
 	c.started = append(c.started, spec)
+	c.startedIn[j.id] = append(c.startedIn[j.id], spec.Name)
 	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
 		// The probe asks a port the node chose in this allocation, which a box's server answers on
 		// once it is ready, its own box's as another's: the node's network is the boxes' one

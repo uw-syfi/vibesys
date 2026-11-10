@@ -317,6 +317,10 @@ var testRules = map[string][]string{
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
 		"internal/store", "internal/supervisor", "internal/lease", "internal/lease/fakelease",
+		// The standing allocations of an apptainer placement, through the production wiring over its fakes.
+		"internal/production", "internal/operator", "internal/environment/apptainer", "internal/environment/apptainer/clusterfake",
+		"internal/environment/docker", "internal/environment/docker/dockerfake", "internal/environment/fakeenv/fakeworld",
+		"internal/store/filestore", "internal/task", "internal/task/tasktest",
 	},
 	"cmd/vibesys-cli": {
 		"internal/alloc", "internal/schedule", "internal/store/memstore",

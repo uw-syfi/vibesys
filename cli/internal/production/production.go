@@ -18,6 +18,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
@@ -50,6 +53,29 @@ type Process struct {
 	// holds its lock. Empty is runtimedir.ResolveMachine's, which no variable moves; a test of two
 	// daemons sets a directory of its own.
 	MachineDir string
+	// Outside is what the placements reach beyond this process. The zero value reaches the real
+	// ones; a test names the ones it replaces.
+	Outside Outside
+}
+
+// Outside is the machines and tools an apptainer placement reaches, which a test replaces with
+// fakes of the same interfaces. A nil field is the real one.
+type Outside struct {
+	// Cluster is the login node of the cluster of the host named, in place of one over ssh.
+	Cluster func(host string) apptainer.Cluster
+	// Docker is this machine's Docker, which builds and exports the images of every apptainer
+	// placement.
+	Docker interface {
+		docker.Engine
+		apptainer.Exporter
+	}
+	// Converter converts the images to SIFs, in place of this machine's apptainer.
+	Converter apptainer.Converter
+	// Source reads the files of a task at a commit, in place of the checkouts of git.
+	Source docker.Source
+	// Machine is where an apptainer placement's containers see their files, in place of its login
+	// node over ssh and rsync.
+	Machine docker.Machine
 }
 
 // RuntimePath is the runtime directory of this process: the one it was told to use (JobToolPlace), and
@@ -126,11 +152,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		return err
 	}
 	// The daemon runs no container: it only fingerprints the environments.
-	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
-	if err != nil {
-		return err
-	}
-	scheduler, err := schedulerOf(op, machines.offers, machines.claims)
+	wired, err := p.Wire(op, clk, dir, indexDir)
 	if err != nil {
 		return err
 	}
@@ -139,10 +161,6 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	}
 	if here := filestore.StateHome(p.Getenv, p.Home); here != places.GetStateHome() {
 		logf("this daemon keeps its state in %s, as %s records; this environment alone would say %s", places.GetStateHome(), dir.Path(), here)
-	}
-	allocations, err := allocationsOf(op, indexDir, machines.clusters)
-	if err != nil {
-		return err
 	}
 	hold, err := p.daemonMachine(dir, clk)
 	if err != nil {
@@ -174,17 +192,17 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 				BinaryVersion: p.Version,
 				Timers:        clock.System{},
 			}),
-			Environments:    machines.environments,
-			Placements:      machines.offers,
-			PlacementReader: app.NewPlacementReader(machines.probes, clk, clk, app.DefaultCallTimeout),
+			Environments:    wired.Environments,
+			Placements:      wired.Placements,
+			PlacementReader: app.NewPlacementReader(wired.probes, clk, clk, app.DefaultCallTimeout),
 			Branches:        gitrepo.System{},
 			Repositories:    gitrepo.System{},
 			Tasks:           gitwork.Tasks{},
 			CardFiles:       gitwork.CardFiles{},
-			Scheduler:       scheduler,
-			Leasing:         p.leasingOf(op, scope, machines.claims, clk, logf),
-			Allocations:     allocations,
-			Capacities:      capacitiesOf(machines.clusters),
+			Scheduler:       wired.Scheduler,
+			Leasing:         p.leasingOf(op, scope, wired.claims, clk, logf),
+			Allocations:     wired.Allocations,
+			Capacities:      wired.Capacities,
 			Neighbors:       neighborsOf,
 		},
 	})
@@ -199,6 +217,50 @@ var policies = map[string]func() schedule.Policy{
 
 // hostResource is the resource host jobs claim when no local placement is the default one.
 const hostResource schedule.ResourceID = "host"
+
+// Wired is what the operator config decides of the daemon: the environments of its placements, how
+// jobs share them, and how it keeps standing allocations and reads capacities. RunDaemon runs with it
+// as Wire makes it, and a test makes it over fakes of what lies beyond the process (Process.Outside).
+type Wired struct {
+	Environments environment.Environments
+	// Placements are the placements a docker job can run on.
+	Placements  []core.PlacementOffer
+	Scheduler   app.Scheduler
+	Allocations app.Allocations
+	// Capacities measure the placements whose capacity is a cluster's.
+	Capacities map[string]daemon.Capacity
+
+	claims map[string][]core.Claim
+	probes map[string]app.Placement
+}
+
+// Clocks is the time a process keeps: its clock and its timers, the system's in the daemon.
+type Clocks interface {
+	clock.Clock
+	clock.Timers
+}
+
+// Wire makes the daemon's environments, scheduler, allocations and capacity readers from the operator
+// config. indexDir is the directory of the per-user index, which keeps the allocation log and the
+// identity of the daemon. Making them touches neither Docker nor another machine.
+func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, indexDir string) (Wired, error) {
+	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
+	if err != nil {
+		return Wired{}, err
+	}
+	scheduler, err := schedulerOf(op, machines.offers, machines.claims)
+	if err != nil {
+		return Wired{}, err
+	}
+	allocations, err := allocationsOf(op, indexDir, machines.clusters)
+	if err != nil {
+		return Wired{}, err
+	}
+	return Wired{
+		Environments: machines.environments, Placements: machines.offers, Scheduler: scheduler, Allocations: allocations,
+		Capacities: capacitiesOf(machines.clusters), claims: machines.claims, probes: machines.probes,
+	}, nil
+}
 
 // schedulerOf is how the operator config shares the machines: the named policy, a demand that lets
 // a docker job run on every placement that gives what its task needs (offers says what each gives),
