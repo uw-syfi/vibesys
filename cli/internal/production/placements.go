@@ -15,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
@@ -58,6 +59,11 @@ type clusterSide struct {
 	Sizing    apptainer.Sizing
 	MaxTime   time.Duration
 	Partition string
+	// QueueTimeout is how long an allocation may wait in Slurm's queue: the placement's slurm
+	// queue_timeout_seconds, as its engine bounds the wait for a container's allocation.
+	QueueTimeout time.Duration
+	// Clock is the time the placement's allocator reads.
+	Clock clock.Clock
 }
 
 // machineEnvironments are the environments this machine has: the host, and docker on each
@@ -365,6 +371,7 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	}
 	return provider, &clusterSide{
 		Cluster: cluster, Scope: scope, Sizing: sizing, MaxTime: seconds(s.GetMaxTimeSeconds(), 0), Partition: s.GetPartition(),
+		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout), Clock: clk,
 	}, nil
 }
 

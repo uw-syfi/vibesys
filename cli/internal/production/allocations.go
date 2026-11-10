@@ -114,6 +114,11 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 			idleEnd = a.GetRunIdleEnd().AsDuration()
 		}
 		limits := alloc.Limits{MaxHeld: int(a.GetMaxHeld()), MaxFor: a.GetMaxFor().AsDuration(), Margin: margin, Endless: backend == nil, RunIdleEnd: idleEnd}
+		if backend != nil {
+			// The queue is Slurm's: an allocation that waits past the placement's queue timeout ends
+			// QUEUE_TIMEOUT, as a container's allocation fails past it. A machine's slots have no queue.
+			limits.QueueTimeout = clusters[name].QueueTimeout
+		}
 		out.Placements = append(out.Placements, app.AllocPlacement{Name: name, Limits: limits, Allocator: backend, Slurm: backend != nil})
 	}
 	if len(out.Placements) == 0 {
