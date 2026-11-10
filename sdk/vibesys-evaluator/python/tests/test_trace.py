@@ -57,7 +57,7 @@ class NamespacedRunner:
     namespace: str
 
     def run_phase(self, job: object, out_dir: Path) -> None:
-        self.inner.run_phase(job, out_dir)  # type: ignore[arg-type]
+        self.inner.run_phase(job, out_dir)  # ty: ignore[invalid-argument-type]
 
 
 @dataclass
@@ -93,7 +93,7 @@ def _task(
 ) -> Task:
     return Task(
         dataset=kv.Data,
-        system=system,  # type: ignore[arg-type]
+        system=system,  # ty: ignore[invalid-argument-type]
         workload=kv.WORKLOAD,
         benchmark=kv.benchmark,
         metrics=kv.METRICS,
@@ -118,7 +118,7 @@ def _trace(tmp_path: Path, task: Task, deployer: object | None = None) -> tuple[
         project_root=tmp_path,
         out=None,
         seed_flag=5,
-        deployer=deployer if deployer is not None else NamespacedDeployer(_in_process(task)),  # type: ignore[arg-type]
+        deployer=deployer if deployer is not None else NamespacedDeployer(_in_process(task)),  # ty: ignore[invalid-argument-type]
         env={"VIBESYS_ARTIFACTS_DIR": str(artifacts)},
         script=SCRIPT,
     )
@@ -332,7 +332,7 @@ def test_a_benchmark_never_runs_stitch(tmp_path: Path, stitch: FakeStitch) -> No
         project_root=tmp_path,
         output=tmp_path / "records.jsonl",
         seed_flag=5,
-        deployer=NamespacedDeployer(_in_process(task)),  # type: ignore[arg-type]
+        deployer=NamespacedDeployer(_in_process(task)),
         env={"VIBESYS_ARTIFACTS_DIR": str(tmp_path / "artifacts")},
         script=SCRIPT,
     )
@@ -360,4 +360,4 @@ def test_a_bad_trace_is_refused_naming_the_field(
 ) -> None:
     fields: dict[str, object] = {"body": two_phases, **options}
     with pytest.raises(error, match="Trace"):
-        ms.Trace(**fields)  # type: ignore[arg-type]
+        ms.Trace(**fields)  # ty: ignore[invalid-argument-type]
