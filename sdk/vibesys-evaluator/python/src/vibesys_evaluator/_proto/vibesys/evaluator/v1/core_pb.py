@@ -195,7 +195,7 @@ class SampleStartRequest(Message[_SampleStartRequestFields]):
 
     Attributes:
         mode:
-            "check", "benchmark" or "profile".
+            "check", "benchmark", "profile" or "trace".
 
             ```proto
             string mode = 1;

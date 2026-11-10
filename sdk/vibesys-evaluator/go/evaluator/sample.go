@@ -14,17 +14,21 @@ import (
 // Mode is what one invocation of the task script does.
 type Mode string
 
-// The three modes of a sample (docs/spec.md, "The sample"):
+// The modes of a sample (docs/spec.md, "The sample"):
 //
 //   - Benchmark: a hello record first, then exactly one outcome on --vs-output: the result the
 //     task reports, or an error record naming what failed.
 //   - Check: no records; the exit status is the verdict (0 passes).
 //   - Profile: the standard load for a profiler, never scored; its files go to the artifacts
 //     directory, which vibesys-cli copies back.
+//   - Trace: a short load with the application's OpenTelemetry spans captured, never scored; its
+//     reports go to the artifacts directory. Only a domain's own command line has it (the
+//     microservices `trace`), not Main.
 const (
 	Check     Mode = "check"
 	Benchmark Mode = "benchmark"
 	Profile   Mode = "profile"
+	Trace     Mode = "trace"
 )
 
 // Log writes one progress line on standard error.

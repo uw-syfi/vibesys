@@ -16,8 +16,8 @@ func init() {
 // sampleStart resolves the sample seed and artifacts directory and writes seeds.json.
 func sampleStart(req *pb.SampleStartRequest) (*pb.SampleStartResponse, error) {
 	mode := evaluator.Mode(req.GetMode())
-	if mode != evaluator.Check && mode != evaluator.Benchmark && mode != evaluator.Profile {
-		return nil, fail("invalid_argument", "mode is check, benchmark or profile, got %q", req.GetMode())
+	if mode != evaluator.Check && mode != evaluator.Benchmark && mode != evaluator.Profile && mode != evaluator.Trace {
+		return nil, fail("invalid_argument", "mode is check, benchmark, profile or trace, got %q", req.GetMode())
 	}
 	seed, source, err := evaluator.SampleSeed(req.GetSeedFlag(), req.SeedFlag != nil, req.GetEnvSeed())
 	if err != nil {
