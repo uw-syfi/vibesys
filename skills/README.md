@@ -40,9 +40,10 @@ holds developer skills in `.agents/skills/` that `npx skills add uw-syfi/vibesys
 
 The optimize loop needs a harness with subagents and background commands, git, and `vibesys-cli`,
 the standalone binary that measures, compares and promotes commits and stores the plans.
-The `create-task` and `optimize` skills reuse an existing CLI or ask your permission to
-install it from the official GitHub releases, verify it, and continue. They select an absolute
-`VIBESYS_CLI` path for the session without editing your shell profile. The `commit`
+The `setup` skill, which `create-task` and `optimize` run first, reuses an existing CLI or asks
+your permission to install it from the official GitHub releases, checks that its version is one
+the skills support, and upgrades it only on request and only to a supported release. It selects
+an absolute `VIBESYS_CLI` path for the session without editing your shell profile. The `commit`
 skill's message checker also needs Python 3.10 or newer. Nothing needs the VibeSys Python package.
 
 | Harness | Domain skills | `optimize` loop |
@@ -88,7 +89,9 @@ short section in the harness file.
   because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
   optimization: planners store hypotheses as plans, workers try them, every commit is
   measured and judged, all through `vibesys-cli`. Its state is described by the `state` skill, and every commit follows the
-  `commit` skill's enforced message schema. `create-task` turns a description of what to
+  `commit` skill's enforced message schema. `setup` finds, installs, upgrades and
+  version-checks `vibesys-cli`; the oldest version the skills support is in its
+  `assets/min-cli-version`. `create-task` turns a description of what to
   optimize into a task and validates it with real jobs before a run starts. Search skills are named verb-first
   (`measure`, `judge-candidate`, ...) except `state`.
 
@@ -123,7 +126,9 @@ a `name` that differs from its folder or is not lowercase letters, digits and si
 frontmatter field the specification does not define, or a name another skill also uses. It also
 fails when a domain skill names a tool that only a VibeSys run offers, such as
 `submit_evaluation`, and when a skill's `references/harness/` files use a heading outside the
-list above or answer different capabilities from each other. Vendored packs, which stay
+list above or answer different capabilities from each other. It fails when a search skill names a
+`references/`, `scripts/` or `assets/` path of its own or a sibling's that does not exist, and when
+the `setup` skill's minimum CLI version is not a plain `MAJOR.MINOR.PATCH`. Vendored packs, which stay
 byte-identical with upstream, are exempt from the tool-name rule and from the field rule: the
 Neuron pack's `argument-hint` and `context` fields are Claude Code extensions that the
 specification's reference validator rejects.

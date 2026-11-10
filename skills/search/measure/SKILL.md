@@ -8,7 +8,7 @@ description: "Use when you must measure a commit for a vibesys optimization, com
 A number is a job that `vibesys-cli` ran from a clean checkout of one commit and saved. Never
 report a number that `vibesys-cli` did not print. The CLI decides what a check, a sample, a verdict
 and a promotion are; this skill says how to use it and how to read what comes back. The lead
-installs and checks the CLI (`vibesys:optimize`).
+installs and checks the CLI (`vibesys:setup`).
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
 `PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run

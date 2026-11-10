@@ -3,7 +3,8 @@
 Everything under ``skills/`` ships through the plugins of ``PLUGIN_SKILLS`` and nothing outside
 it does. Each plugin keeps the one source root and differs only by its skill list, which is
 derived from the tree rather than written by hand, and every listed skill is checked against the
-Agent Skills specification.
+Agent Skills specification. The search skills' named files must exist, and the oldest
+supported vibesys-cli version must parse.
 
 Stdlib only apart from the frontmatter reader it shares with ``scripts.check_skills``, so CI's
 always-on job can run it without installing the environment.
@@ -20,6 +21,11 @@ from scripts.published_skills.manifest import (
     check_manifest,
     render_manifest,
 )
+from scripts.published_skills.named_files import (
+    MIN_CLI_VERSION,
+    check_min_cli_version,
+    check_named_files,
+)
 from scripts.published_skills.plugins import PLUGIN_SKILLS
 from scripts.published_skills.skills import (
     SPEC_FIELDS,
@@ -32,6 +38,7 @@ from scripts.published_skills.skills import (
 __all__ = [
     "HARNESS_HEADINGS",
     "MANIFEST_PATH",
+    "MIN_CLI_VERSION",
     "PLUGIN_SKILLS",
     "SPEC_FIELDS",
     "VIBESYS_TOOL_NAMES",
@@ -39,6 +46,8 @@ __all__ = [
     "ManifestError",
     "PublishedSkill",
     "check_manifest",
+    "check_min_cli_version",
+    "check_named_files",
     "check_skills",
     "discover",
     "render_manifest",

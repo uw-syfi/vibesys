@@ -12,10 +12,9 @@ You write the task; you never optimize the code.
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
 `PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
-started by the orchestrator sets it. Before any CLI call, follow
-[CLI setup](../optimize/SKILL.md#cli-setup): reuse a working installation, or ask
-permission and install it before continuing. Pass the selected absolute path to all
-subagents and background commands.
+started by the orchestrator sets it. Before any CLI call, set it up with `vibesys:setup`: it
+reuses a working installation of a supported version, or asks permission and installs one. Pass
+the selected absolute path to all subagents and background commands.
 
 Needs git and `vibesys-cli` (set up as above). File format:
 [task-format.md](references/task-format.md). Validation recipes:
