@@ -257,20 +257,24 @@ def _deploy_and_trace(
             if failed is not None:
                 # Leave the deploy as failed, so its teardown keeps the pods' state and logs
                 # (pods.json, logs/) beside the trace's README.
-                raise _TraceFailed(failed)
+                _fail_the_deploy(failed)
             return None
-    except _TraceFailed as failure:
+    except _TraceStepError as failure:
         return failure.reason
     except SampleError as error:
         return tracing.incomplete(reports, [f"the deploy failed: {error}"], log)
 
 
-class _TraceFailed(Exception):
+class _TraceStepError(Exception):
     """A trace step failed after the deploy; raised through the deploy so it tears down as failed."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+def _fail_the_deploy(reason: str) -> NoReturn:
+    raise _TraceStepError(reason)
 
 
 def trace(
