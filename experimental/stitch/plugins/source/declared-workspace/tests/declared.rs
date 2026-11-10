@@ -85,6 +85,7 @@ fn mapping_plugins_can_add_independent_claims() {
             artifact: "test".into(),
             record: "1".into(),
         },
+        span: None,
     };
     let mut registry = MappingRegistry::default();
     registry.register(AlternateMapper).unwrap();

@@ -415,6 +415,9 @@ dependencies = [
  "serde_json",
  "stitch-core",
  "stitch-importer-api",
+ "stitch-session",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

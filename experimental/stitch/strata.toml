@@ -64,7 +64,7 @@ allow = ["stitch-core", "stitch-importer-api"]
 
 [[crate]]
 name = "stitch-profiler-otel"
-allow = ["stitch-core", "stitch-importer-api"]
+allow = ["stitch-core", "stitch-importer-api", "stitch-session"]
 
 [[crate]]
 name = "stitch-profiler-perf"

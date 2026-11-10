@@ -52,6 +52,102 @@ pub struct Activity {
     pub source_file: Option<String>,
     pub source_line: Option<u32>,
     pub origin: Origin,
+    /// Distributed-tracing detail for spans; absent for other activity kinds
+    /// and in graphs written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<Box<SpanDetail>>,
+}
+
+/// The role a span plays in a distributed request.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanKind {
+    #[default]
+    Internal,
+    Server,
+    Client,
+    Producer,
+    Consumer,
+}
+
+/// A link from one span to another span's context.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpanLink {
+    pub trace_id: String,
+    pub span_id: String,
+}
+
+/// Tracing semantics an importer derived from one span's attributes.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpanDetail {
+    pub kind: SpanKind,
+    /// A low-cardinality operation name, for example an HTTP route or an RPC
+    /// method, used to aggregate spans of the same operation.
+    pub operation: String,
+    pub failed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_system: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_operation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<SpanLink>,
+}
+
+/// A wall-clock interval, in Unix nanoseconds, that bounds the evidence an
+/// analysis should consider, for example one benchmark measurement phase.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimeWindow {
+    pub start_unix_nanos: u64,
+    pub end_unix_nanos: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl TimeWindow {
+    /// Whether `[start_ns, end_ns]` lies entirely inside this window.
+    #[must_use]
+    pub fn contains(&self, start_ns: u64, end_ns: u64) -> bool {
+        start_ns >= self.start_unix_nanos && end_ns <= self.end_unix_nanos
+    }
+
+    /// Whether `[start_ns, end_ns]` shares any instant with this window.
+    #[must_use]
+    pub fn overlaps(&self, start_ns: u64, end_ns: u64) -> bool {
+        end_ns > self.start_unix_nanos && start_ns < self.end_unix_nanos
+    }
+
+    /// Validate a list of windows: each is non-empty and labels are unique.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the offending window.
+    pub fn validate_all(windows: &[Self]) -> Result<(), String> {
+        let mut labels = BTreeSet::new();
+        for (index, window) in windows.iter().enumerate() {
+            if window.end_unix_nanos <= window.start_unix_nanos {
+                return Err(format!(
+                    "windows[{index}] must end after it starts ({}..{})",
+                    window.start_unix_nanos, window.end_unix_nanos
+                ));
+            }
+            if let Some(label) = &window.label {
+                if label.trim().is_empty() || label == "all" {
+                    return Err(format!(
+                        "windows[{index}] label must be non-empty and not \"all\""
+                    ));
+                }
+                if !labels.insert(label.as_str()) {
+                    return Err(format!("windows[{index}] repeats label {label:?}"));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -125,6 +221,9 @@ pub struct Graph {
     pub relationships: Vec<Relationship>,
     pub source_attributions: Vec<SourceAttribution>,
     pub unassigned_samples: usize,
+    /// Measurement windows carried from the run manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<TimeWindow>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -223,7 +322,9 @@ impl Graph {
                     if !ids.insert(activity.id.clone()) {
                         return Err(GraphError::DuplicateId(activity.id));
                     }
-                    if activity.interval.end_ns <= activity.interval.start_ns {
+                    // A zero-length activity is an instant; microsecond
+                    // exporters report sub-microsecond spans that way.
+                    if activity.interval.end_ns < activity.interval.start_ns {
                         return Err(GraphError::InvalidInterval(activity.id));
                     }
                     activities.push(activity);
@@ -288,6 +389,7 @@ impl Graph {
             relationships,
             source_attributions: Vec::new(),
             unassigned_samples,
+            windows: Vec::new(),
         })
     }
 
