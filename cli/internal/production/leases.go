@@ -12,7 +12,6 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
-	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
@@ -41,7 +40,7 @@ import (
 //
 // scope says where each kind of lease is kept, so that a sandbox daemon's are its own. claims are what the resources of each placement claim, by
 // placement name, as the scheduler has them.
-func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
+func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims map[string][]core.Claim, clk Clocks, logf func(string, ...any)) app.Leasing {
 	holder := core.LeaseHolder{User: userName(p.UID), PID: os.Getpid()}
 	if host, err := os.Hostname(); err == nil {
 		holder.Host = host

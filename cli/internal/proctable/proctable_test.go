@@ -99,9 +99,15 @@ func texts(in []string) []string {
 
 // Whatever the executable, the padding, the arguments and the environment, and whatever follows the
 // environment, the arguments and the environment come back as written.
+//
+// A process always has argv[0], so the arguments are never empty. Without one, the layout cannot hold
+// an empty environment followed by the kernel's strings: the environment's end is an empty string,
+// which the padding before it is made of too, so the kernel's first string would read as the
+// environment's.
 func TestProcArgs2ReadsBackWhatTheKernelLayoutHolds(t *testing.T) {
-	err := quick.Check(func(execPath string, padding uint8, args, environ, apple []string, laterEmpty []bool, trailing uint8) bool {
-		args, environ, apple = texts(args), texts(environ), texts(apple)
+	err := quick.Check(func(execPath string, padding uint8, argv0 string, rest, environ, apple []string, laterEmpty []bool, trailing uint8) bool {
+		args := append([]string{text(argv0)}, texts(rest)...)
+		environ, apple = texts(environ), texts(apple)
 		// An empty argument after the first is legal. An empty first one cannot be told from padding.
 		for i := 1; i < len(args) && i <= len(laterEmpty); i++ {
 			if laterEmpty[i-1] {

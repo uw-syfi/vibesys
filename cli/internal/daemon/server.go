@@ -26,6 +26,8 @@ type Server struct {
 	machine    Machine
 	// neighbors lists the other daemons of the machine for the status; nil lists none.
 	neighbors func() []Neighbor
+	// capacities measure the placements whose capacity is not slots of this machine, by placement.
+	capacities map[string]Capacity
 	// cardFiles reaches the files DescribeTask reads; nil refuses the call as unavailable.
 	cardFiles task.CardFiles
 
@@ -63,6 +65,13 @@ type Machine interface {
 // sandbox daemons that run. Nil reports neither.
 func (s *Server) WithMachine(m Machine) *Server {
 	s.machine = m
+	return s
+}
+
+// WithCapacities has ReadPlacementCapacity measure the placements in the map with their own
+// function; every other placement of the operator config answers with its slots.
+func (s *Server) WithCapacities(c map[string]Capacity) *Server {
+	s.capacities = c
 	return s
 }
 

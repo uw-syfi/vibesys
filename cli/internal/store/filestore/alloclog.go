@@ -3,6 +3,7 @@ package filestore
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
+	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -42,6 +44,21 @@ func OpenAllocLog(dir string, opts ...Option) (*AllocLog, error) {
 		return nil, unavailable(dir, err)
 	}
 	return &AllocLog{b: newBackend(c.fs, dir), dir: dir}, nil
+}
+
+// HasAllocLog says whether the directory dir holds an allocation log with at least one input, so
+// that a daemon whose config no longer offers allocations still finds the ones it kept. It makes
+// nothing.
+func HasAllocLog(dir string, opts ...Option) (bool, error) {
+	c := optionsOf(opts)
+	entries, err := c.fs.ReadDir(path.Join(path.Clean(dir), allocationsDir))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, unavailable(dir, err)
+	}
+	return slices.ContainsFunc(entries, func(e fsys.Entry) bool { return !hidden(e.Name) }), nil
 }
 
 func (l *AllocLog) file(n uint64) string {

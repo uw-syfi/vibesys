@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -43,16 +44,17 @@ type Allocations struct {
 	Log store.AllocLog
 	// Placements are the placements that offer allocations. One that is not here offers none.
 	Placements []AllocPlacement
+	// Former are placements that offer no allocations now and whose backend could still hold ones
+	// this daemon made before its config dropped their allocations section, such as an apptainer
+	// placement's cluster. Their Limits are unused: their allocations end and are released when the
+	// daemon starts, and what their backend holds of this daemon's is released when it is adopted.
+	Former []AllocPlacement
 	// Owner is who this daemon is across restarts (store/filestore DaemonID): it is what the
 	// allocator of the local placements is made with. Empty is allowed for a test.
 	Owner string
 	// ObservePeriod is how often the backends are asked about the allocations that have not ended,
 	// and the core is ticked. It defaults to DefaultObservePeriod.
 	ObservePeriod time.Duration
-	// JobBound is the longest a check or a measure job is taken to run when it is submitted into an
-	// allocation: its plan is made only when it launches, so its own limits are not known before.
-	// It defaults to DefaultCommandTimeout. A command job's bound is its own timeout.
-	JobBound time.Duration
 }
 
 // DefaultObservePeriod is how often allocations are looked at when the config does not say.
@@ -89,6 +91,13 @@ type allocMsg struct {
 	cancelled *lifecycle.Ref
 	// cancelAsk is a job that is to be cancelled, with the reason.
 	cancelAsk *cancelAsk
+	// left is a job's end reporting processes left in a standing allocation.
+	left *processesLeft
+}
+
+type processesLeft struct {
+	job  lifecycle.Ref
+	left lifecycle.ProcessesLeft
 }
 
 type cancelAsk struct {
@@ -115,6 +124,8 @@ type allocReply struct {
 // allocSnapshot is the allocations as the loop last published them.
 type allocSnapshot struct {
 	state alloc.State
+	// waits are the recent waits of each placement's allocations, newest first.
+	waits map[string][]alloc.WaitSample
 }
 
 // allocShell is the thin shell around the allocation machine (internal/alloc): it keeps the log,
@@ -171,6 +182,12 @@ func newAllocShell(a *App, c Allocations) *allocShell {
 			s.backends[p.Name] = localalloc.Allocator{Slots: appSlots{a}, Owner: c.Owner}
 		} else {
 			s.backends[p.Name] = p.Allocator
+		}
+	}
+	for _, p := range c.Former {
+		if _, ok := s.cfg.Placements[p.Name]; !ok && p.Allocator != nil {
+			s.backends[p.Name] = p.Allocator
+			s.slurm[p.Name] = p.Slurm
 		}
 	}
 	s.snapshot.Store(&allocSnapshot{})
@@ -244,9 +261,13 @@ func (s *allocShell) noteJob(e lifecycle.Event) {
 	switch e := e.(type) {
 	case lifecycle.Launched:
 		s.post(allocMsg{event: alloc.JobStarted{Job: jobOfRef(e.Ref)}})
+	case lifecycle.Finished:
+		// Before the job's Closed: the allocation ends before the job's end could start the next
+		// job in it, beside the processes.
+		for _, p := range e.Outcome.ProcessesLeft {
+			s.post(allocMsg{left: &processesLeft{job: e.Ref, left: p}})
+		}
 	case lifecycle.Closed:
-		s.post(allocMsg{event: alloc.JobFinished{Job: jobOfRef(e.Ref)}})
-	case lifecycle.Discarded:
 		s.post(allocMsg{event: alloc.JobFinished{Job: jobOfRef(e.Ref)}})
 	default:
 		// Nothing else about a job is the allocation machine's.
@@ -261,9 +282,13 @@ func (s *allocShell) poke() { s.post(allocMsg{observeAll: true}) }
 func (s *allocShell) start(ctx context.Context) error {
 	var inputs []alloc.Input
 	err := s.app.retry(ctx, func(ctx context.Context) error {
-		var err error
-		inputs, err = s.conf.Log.Load(ctx)
-		return err
+		// A log that never answers fails the start, as a store that never does fails a call; the
+		// retry gives it its attempts, each bounded.
+		return s.bounded(ctx, func(ctx context.Context) error {
+			var err error
+			inputs, err = s.conf.Log.Load(ctx)
+			return err
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("reading the allocation log: %w", err)
@@ -274,6 +299,12 @@ func (s *allocShell) start(ctx context.Context) error {
 		if w, ok := a.(alloc.RecordWait); ok {
 			s.recordWait(w)
 		}
+	}
+	// The config this daemon started with is logged before anything is decided under it, so that a
+	// later start replays what this one decides under these limits, whatever its own are. It ends the
+	// allocations of a placement that no longer offers them.
+	if err := s.startWith(ctx); err != nil {
+		return err
 	}
 	s.publish()
 	// A slot an allocation held before the restart is held again at once, before any job takes it.
@@ -295,9 +326,33 @@ func (s *allocShell) start(ctx context.Context) error {
 	return nil
 }
 
+// startWith steps the machine with the daemon's start, logged whatever it changed, and settles at
+// once what no backend can: an allocation that ended on a placement this daemon has no backend for
+// has nothing left that the daemon could release.
+func (s *allocShell) startWith(ctx context.Context) error {
+	now := s.app.now()
+	started := alloc.DaemonStarted{Config: s.cfg}
+	next, actions := alloc.Step(s.state, s.cfg, now, started)
+	err := s.app.retry(ctx, func(ctx context.Context) error {
+		return s.bounded(ctx, func(ctx context.Context) error { return s.conf.Log.Append(ctx, alloc.Input{At: now, Event: started}) })
+	})
+	if err != nil {
+		return fmt.Errorf("writing the allocation log: %w", err)
+	}
+	s.state = next
+	s.perform(ctx, actions)
+	for _, al := range s.state.Allocations() {
+		end, ended := al.Phase.(alloc.Ended)
+		if _, reachable := s.backends[al.Placement]; ended && !end.Released && !reachable {
+			s.apply(ctx, allocMsg{event: alloc.Released{ID: al.ID}})
+		}
+	}
+	return nil
+}
+
 // usesBackend says the placement has an allocator of its own, and not slots.
 func (s *allocShell) usesBackend(placement string) bool {
-	for _, p := range s.conf.Placements {
+	for _, p := range slices.Concat(s.conf.Placements, s.conf.Former) {
 		if p.Name == placement {
 			return p.Allocator != nil
 		}
@@ -312,7 +367,11 @@ func (s *allocShell) recordWait(w alloc.RecordWait) {
 
 // publish makes the state readable, and wakes whoever waits for a change.
 func (s *allocShell) publish() {
-	s.snapshot.Store(&allocSnapshot{state: s.state})
+	waits := make(map[string][]alloc.WaitSample, len(s.waits))
+	for placement, list := range s.waits {
+		waits[placement] = slices.Clone(list)
+	}
+	s.snapshot.Store(&allocSnapshot{state: s.state, waits: waits})
 	s.changes.Notify()
 }
 
@@ -353,9 +412,9 @@ func (s *allocShell) tick(ctx context.Context) {
 	s.retry = nil
 	s.apply(ctx, allocMsg{event: alloc.Tick{}})
 	s.observeAll(ctx)
-	for _, p := range s.conf.Placements {
-		if !s.reconciled[p.Name] || s.hasUnknownEnd(p.Name) {
-			s.adopt(ctx, p.Name)
+	for _, name := range slices.Sorted(maps.Keys(s.backends)) {
+		if !s.reconciled[name] || s.hasUnknownEnd(name) {
+			s.adopt(ctx, name)
 		}
 	}
 	s.resendReleases()
@@ -389,6 +448,9 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 	if m.adopted != nil {
 		s.adoptedBy(ctx, *m.adopted)
 	}
+	if m.left != nil {
+		s.endLeft(ctx, *m.left)
+	}
 	if m.event == nil {
 		return
 	}
@@ -407,7 +469,10 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 		reply(m, allocReply{refusal: refusal})
 		return
 	}
-	if !next.Equal(s.state) {
+	// A step that changed only what a backend says of a pending allocation for display is kept in
+	// memory and not logged (alloc.Durable): an estimate that moves at every look would otherwise
+	// add a record at every look.
+	if alloc.Durable(s.state, next) {
 		// The input is durable before the state moves, so a restart finds the allocations the
 		// callers were told of.
 		if err := s.bounded(ctx, func(ctx context.Context) error { return s.conf.Log.Append(ctx, alloc.Input{At: now, Event: m.event}) }); err != nil {
@@ -422,8 +487,8 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 			}
 			return
 		}
-		s.state = next
 	}
+	s.state = next
 	// What the core asked is started before the change is visible, so whoever sees the change finds
 	// the work under way.
 	s.perform(ctx, kept)
@@ -476,7 +541,7 @@ func (s *allocShell) perform(ctx context.Context, actions []alloc.Action) {
 		case alloc.DropJob:
 			s.cancel(act.Job, act.Reason.Message())
 		case alloc.NotPlaced:
-			s.placeAsPlain(act.Job)
+			s.placeAsPlain(act.Job, act.Why)
 		case alloc.RecordWait:
 			s.recordWait(act)
 		case alloc.Refuse:
@@ -543,7 +608,12 @@ func (s *allocShell) release(ctx context.Context, r alloc.Release) {
 	if !ok {
 		return
 	}
-	b := s.backends[al.Placement]
+	b, reachable := s.backends[al.Placement]
+	if !reachable {
+		// A placement gone from the config with no backend left: nothing this daemon could reach
+		// holds the allocation, and startWith recorded it released.
+		return
+	}
 	s.effect(ctx, "release "+string(r.ID), func(ctx context.Context) {
 		err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, r.Handle) })
 		switch {
@@ -564,11 +634,19 @@ func (s *allocShell) startJob(act alloc.StartJob) {
 	if !ok || !isRef {
 		return
 	}
-	s.releaseJob(ref, al)
+	s.releaseJob(ref, al, act.Bound)
 }
 
-func (s *allocShell) releaseJob(ref lifecycle.Ref, al alloc.Allocation) {
-	s.tell(lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref})
+// releaseJob lets the job machine launch a job in the allocation. The job's first container must
+// enter it in time for its bound and the margin before the allocation's end: its preparation (an
+// image build, a conversion) counts against the allocation, and not against the job's bound, which
+// starts when it enters.
+func (s *allocShell) releaseJob(ref lifecycle.Ref, al alloc.Allocation, bound time.Duration) {
+	var by time.Time
+	if l, ok := liveOf(al); ok && !l.EndsAt.IsZero() {
+		by = l.EndsAt.Add(-s.cfg.Placements[al.Placement].Margin - bound)
+	}
+	s.tell(lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref, EnterBy: by})
 }
 
 // tell sends the job machine an event, in the order the allocation machine decided them: one
@@ -601,13 +679,30 @@ func (s *allocShell) outbox(ctx context.Context) {
 	}
 }
 
-// placeAsPlain lets a job that no allocation took run as a job with no allocation does.
-func (s *allocShell) placeAsPlain(job core.JobID) {
+// placeAsPlain lets a job that no allocation took run as a job with no allocation does, once the
+// job says why, on its notes and at the head of its output, so that whoever submitted it into any
+// allocation finds out that it runs without one.
+func (s *allocShell) placeAsPlain(job core.JobID, why alloc.Refusal) {
 	ref, ok := refOfJob(job)
 	if !ok {
 		return
 	}
-	s.tell(lifecycle.AllocReleased{Ref: ref})
+	text := "allocation any: " + why.Message() + "; queued without one"
+	s.effect(s.app.ctx, "unplaced "+ref.String(), func(ctx context.Context) {
+		if scope, ok := s.app.scopeOfStore(ctx, ref.Store); ok {
+			if st, err := s.app.findStore(ctx, scope); err == nil {
+				if _, err := s.app.AddNote(ctx, core.CallContext{Scope: scope}, ref.Job, text); err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("noting that job %s was queued without an allocation: %v", ref, err)
+				}
+				if err := appendLineOnce(ctx, st, ref.Job, "[allocation] "+text); err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("logging that job %s was queued without an allocation: %v", ref, err)
+				}
+			}
+		}
+		if ctx.Err() == nil {
+			s.tell(lifecycle.AllocReleased{Ref: ref})
+		}
+	})
 }
 
 // resendReleases tells the job machine again where each job an allocation runs is, so that a job
@@ -619,7 +714,7 @@ func (s *allocShell) resendReleases() {
 			continue
 		}
 		if ref, ok := refOfJob(l.Current.Job); ok {
-			s.releaseJob(ref, al)
+			s.releaseJob(ref, al, l.Current.Bound)
 		}
 	}
 }
@@ -741,8 +836,19 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 		case al.Handle == (alloc.Handle{}) && al.Stage() == alloc.StagePending:
 			s.apply(ctx, allocMsg{event: alloc.Submitted{ID: h.Alloc, Handle: h}})
 			s.observeAll(ctx)
+		case al.Handle != (alloc.Handle{}) && al.Handle.Ref != h.Ref:
+			// A second allocation at the backend for one record, such as a request whose answer was
+			// lost and that landed after the next one: the record keeps the one it has, and the
+			// other is released, so it does not hold capacity for its whole time limit.
+			s.app.cfg.Logf("releasing %s of allocation %s, which is recorded as %s", h.Ref, h.Alloc, al.Handle.Ref)
+			s.effect(ctx, "release duplicate "+h.Ref, func(ctx context.Context) {
+				err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, h) })
+				if err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("releasing %s of allocation %s, which is recorded as %s: %v", h.Ref, h.Alloc, al.Handle.Ref, err)
+				}
+			})
 		default:
-			// A record that has its handle.
+			// A record that has this handle.
 		}
 	}
 	// An allocation that ended before the backend took the request, and that the backend does not
@@ -760,6 +866,34 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 		if !s.inflight["submit "+string(al.ID)] && s.submitDone[al.ID] <= found.issued {
 			s.apply(ctx, allocMsg{event: alloc.Released{ID: al.ID}})
 		}
+	}
+}
+
+// endLeft ends the started allocations whose backend reference names one where a job left
+// processes that may still run, so that no next job runs beside them: the one that runs the job,
+// or, when none does, every one of that reference.
+func (s *allocShell) endLeft(ctx context.Context, p processesLeft) {
+	job := jobOfRef(p.job)
+	var ids []alloc.ID
+	for _, al := range s.state.Allocations() {
+		l, ok := liveOf(al)
+		if !ok || al.Handle.Ref != p.left.Allocation {
+			continue
+		}
+		if l.Current != nil && l.Current.Job == job {
+			ids = []alloc.ID{al.ID}
+			break
+		}
+		ids = append(ids, al.ID)
+	}
+	if len(ids) == 0 {
+		s.app.cfg.Logf("job %s left processes in %s, which no started allocation is: %s", p.job, p.left.Allocation, p.left.Detail)
+		return
+	}
+	for _, id := range ids {
+		s.app.cfg.Logf("allocation %s (%s) ends and is released: job %s left processes in it that may still run, and no job runs beside them: %s",
+			id, p.left.Allocation, p.job, p.left.Detail)
+		s.apply(ctx, allocMsg{event: alloc.ProcessesLeft{ID: id, Job: job}})
 	}
 }
 
@@ -781,7 +915,9 @@ func (s *allocShell) lookAtJobs() {
 	}
 	var unplaced, lost []lifecycle.Ref
 	for _, ref := range v.unplaced {
-		if !held[jobOfRef(ref)] && !s.isExpected(ref) {
+		// A job whose why is being written is let go by that effect, once its output says why: let
+		// go here as well, it could launch before the line is in its output.
+		if !held[jobOfRef(ref)] && !s.isExpected(ref) && !s.inflight["unplaced "+ref.String()] {
 			unplaced = append(unplaced, ref)
 		}
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"reflect"
 	"slices"
 	"strconv"
@@ -113,6 +114,8 @@ type view struct {
 	slots map[string]bool
 	// unplaced is the jobs held back for the allocation machine to decide where they run.
 	unplaced []lifecycle.Ref
+	// used is the units of each resource the jobs and slots that hold the machine add up to.
+	used map[schedule.ResourceID]int
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
@@ -349,7 +352,7 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	next := &view{
 		trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{},
 		queue: map[lifecycle.Ref]lifecycle.Queued{}, tasks: map[lifecycle.StoreID]core.TaskName{},
-		slots: map[string]bool{}, unplaced: s.AllocationWaiting(),
+		slots: map[string]bool{}, unplaced: s.AllocationWaiting(), used: s.Used(),
 	}
 	for _, sl := range s.Slots() {
 		next.slots[sl.Slot] = sl.Granted

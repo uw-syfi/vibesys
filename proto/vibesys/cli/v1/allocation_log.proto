@@ -33,6 +33,9 @@ message AllocationInput {
     AllocationUnreachable unreachable = 13;
     AllocationReleased released = 14;
     AllocationTick tick = 15;
+    AllocationDaemonStarted daemon_started = 16;
+    AllocationRunSeen run_seen = 17;
+    AllocationProcessesLeft processes_left = 18;
   }
 }
 
@@ -57,6 +60,13 @@ message AllocationRenewAsked {
 message AllocationRenewOffAsked {
   string run = 1 [(buf.validate.field).string.min_len = 1];
   string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+}
+
+// AllocationRunSeen is a call of the run's, which says it is alive.
+message AllocationRunSeen {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  // When the call was made.
+  google.protobuf.Timestamp at = 2;
 }
 
 message AllocationRunEnded {
@@ -142,6 +152,34 @@ message AllocationReleased {
 
 message AllocationTick {}
 
+// AllocationProcessesLeft is a job's end reporting that processes in the allocation were not
+// confirmed killed: the allocation ends, EXTERNAL, and is released, and the job is done in it.
+message AllocationProcessesLeft {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  string job = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// AllocationDaemonStarted is the daemon starting with its operator config: the limits of each
+// placement that offers standing allocations then. Every input after it, until the next one, is
+// replayed under these limits, so a later change of the config changes nothing that was decided.
+message AllocationDaemonStarted {
+  map<string, AllocationLimits> placements = 1 [(buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+}
+
+// AllocationLimits is what [placements.<name>.allocations] said, as the daemon judged by it.
+message AllocationLimits {
+  int32 max_held = 1 [(buf.validate.field).int32.gte = 0];
+  google.protobuf.Duration max_for = 2 [(buf.validate.field).required = true];
+  google.protobuf.Duration fit_margin = 3 [(buf.validate.field).required = true];
+  // Unset or zero: no queue timeout.
+  google.protobuf.Duration queue_timeout = 4;
+  // The placement's allocations have no end: slots of a machine.
+  bool endless = 5;
+  // How long a run holding allocations may go unseen before it is taken to have ended. Unset or
+  // zero: never.
+  google.protobuf.Duration run_idle_end = 6;
+}
+
 // AllocationLogRecord is allocations/<n>.json of the per-user state directory: the nth input of the
 // allocation log, written once.
 message AllocationLogRecord {
@@ -156,6 +194,6 @@ message AllocationLogRecord {
 // its own again after a restart (environment.Allocator.Adopt) and never another daemon's.
 message DaemonIdentity {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
-  // A name made once, 16 to 64 characters of a-z and 0-9.
-  string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,64}$"];
+  // A name made once, 16 to 32 characters of a-z and 0-9.
+  string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,32}$"];
 }

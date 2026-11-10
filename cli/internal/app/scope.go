@@ -25,6 +25,7 @@ type Caller struct {
 // is about. It is the only way a request reaches a store, so two worktrees of one repository reach
 // one store. It fails with a failure of kind invalid input that names the field.
 func (a *App) Resolve(ctx context.Context, c Caller) (core.CallContext, error) {
+	a.RunSeen(c.Run)
 	task, err := core.ParseTaskName("context.task", c.Task)
 	if err != nil {
 		return core.CallContext{}, err

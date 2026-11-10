@@ -187,6 +187,48 @@ type Engine struct {
 	mu      sync.Mutex
 	boxes   map[string]*box // the containers this engine started, by name
 	reading *Reading        // the last node this process read
+	// survivors are the boxes of standing allocations whose processes a kill did not confirm gone,
+	// by job and box name.
+	survivors map[string]Survivor
+}
+
+// ErrSurvivors is what a kill of the processes of a container in a standing allocation wraps when it
+// was not confirmed: the processes may still run in the allocation, beside the next job's. The error
+// of Engine.Remove wraps it, and TakeSurvivors names each such box, so that a caller that can release
+// the allocation (the daemon, through its Allocator) tests errors.Is(err, apptainer.ErrSurvivors) and
+// does so, and no job runs beside the survivors.
+var ErrSurvivors = errors.New("apptainer: processes of a container may survive in its standing allocation")
+
+// Survivor is a box of a standing allocation whose processes were not confirmed killed.
+type Survivor struct {
+	// Job is the batch job of the allocation (alloc.Handle.Ref) and Box the container's name.
+	Job, Box string
+	Err      error // the failed kill, wrapping ErrSurvivors
+}
+
+// TakeSurvivors returns the boxes whose kill failed and was not made good since, and forgets them.
+func (e *Engine) TakeSurvivors() []Survivor {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := slices.SortedFunc(maps.Values(e.survivors), func(a, b Survivor) int { return strings.Compare(a.Job+"/"+a.Box, b.Job+"/"+b.Box) })
+	e.survivors = map[string]Survivor{}
+	return out
+}
+
+// reap kills the processes of the box of a standing allocation, confirmed, and records the box as a
+// survivor when it was not.
+func (e *Engine) reap(ctx context.Context, b *box) error {
+	err := e.cfg.Cluster.Node(b.job).Reap(ctx, b.name)
+	key := b.job + "/" + b.name
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil {
+		delete(e.survivors, key)
+		return nil
+	}
+	err = fmt.Errorf("%w: killing the processes of %s: %w", ErrSurvivors, b.name, err)
+	e.survivors[key] = Survivor{Job: b.job, Box: b.name, Err: err}
+	return err
 }
 
 var _ docker.Engine = (*Engine)(nil)
@@ -197,12 +239,15 @@ type box struct {
 	labels docker.Labels
 	job    string // the allocation it runs in
 	owner  bool   // the allocation is its own, or claimed for it
-	pool   string // the name of the reusable allocation claimed for it, when it is one
-	spec   docker.ContainerSpec
-	env    map[string]string // what its processes get: the image's environment, then the spec's
-	sif    string
-	hold   io.Closer
-	gone   bool // removed or closed: its processes end with it
+	// standing says the allocation is a standing one (standing.go), the run's and not the
+	// container's: the container's removal kills its processes and leaves it.
+	standing bool
+	pool     string // the name of the reusable allocation claimed for it, when it is one
+	spec     docker.ContainerSpec
+	env      map[string]string // what its processes get: the image's environment, then the spec's
+	sif      string
+	hold     io.Closer
+	gone     bool // removed or closed: its processes end with it
 }
 
 // New returns an engine, or a core.FailureInvalidInput naming what is missing.
@@ -254,7 +299,7 @@ func New(cfg Config) (*Engine, error) {
 	case !path.IsAbs(cfg.LocalDir) || path.Clean(cfg.LocalDir) == "/":
 		return nil, invalid("the local conversion directory %q is not an absolute directory other than /", cfg.LocalDir)
 	}
-	return &Engine{cfg: cfg, boxes: map[string]*box{}}, nil
+	return &Engine{cfg: cfg, boxes: map[string]*box{}, survivors: map[string]Survivor{}}, nil
 }
 
 // JobName is the name of the allocation of the container with the name.
@@ -324,6 +369,11 @@ func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string,
 		for _, job := range jobs {
 			if strings.HasPrefix(job.Name, PoolPrefix) {
 				// A reusable allocation is not a container: a claim clears what it ran.
+				continue
+			}
+			if strings.HasPrefix(job.Name, StandingPrefix) {
+				// A standing allocation is a run's, whether the run lives or not: only its Allocator
+				// and its time limit end it, never a sweep.
 				continue
 			}
 			name, ok := strings.CutPrefix(job.Name, JobPrefix)
@@ -396,6 +446,9 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if strings.HasPrefix(JobName(name), StandingPrefix) {
+		return invalid("%s is a standing allocation, which only its Allocator releases", JobName(name))
+	}
 	e.mu.Lock()
 	b := e.boxes[name]
 	var owner *box
@@ -410,6 +463,14 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	e.mu.Unlock()
 	if pool != "" {
 		return e.release(ctx, b, pool, hold)
+	}
+	if b != nil && b.standing {
+		// The allocation is the run's: the box's processes are killed, confirmed, and it runs on.
+		if err := e.reap(ctx, b); err != nil {
+			return err
+		}
+		e.forget(b)
+		return nil
 	}
 	if b != nil && !b.owner {
 		if owner != nil && b.job != "" {
@@ -480,16 +541,23 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	if spec.GPUs.Devices != "" {
 		return nil, invalid("the container %s is given GPUs by device (--gpus %s), and a node of this placement gives only AMD GPUs, with a rocm resource", spec.Name, spec.GPUs.Devices)
 	}
+	standing := spec.Labels[LabelAllocation]
 	joined, joins := strings.CutPrefix(spec.Network, "container:")
 	if !joins && spec.Network != "" && spec.Network != "host" {
 		return nil, invalid("the container %s asks for the network %q, and a container on a cluster's node has the node's network", spec.Name, spec.Network)
 	}
-	if !joins {
+	if standing != "" && strings.Trim(standing, "0123456789") != "" {
+		return nil, invalid("the container %s names the standing allocation %q, which is not a batch job's id", spec.Name, standing)
+	}
+	if !joins && standing == "" {
 		if err := e.fits(spec); err != nil {
 			return nil, err
 		}
 	}
-	b := &box{name: spec.Name, labels: maps.Clone(spec.Labels), spec: spec, owner: !joins}
+	b := &box{name: spec.Name, labels: maps.Clone(spec.Labels), spec: spec, owner: !joins && standing == "", standing: !joins && standing != ""}
+	if b.standing {
+		b.job = standing
+	}
 	e.mu.Lock()
 	if _, taken := e.boxes[spec.Name]; taken {
 		e.mu.Unlock()
@@ -497,11 +565,11 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	}
 	if joins {
 		o := e.boxes[joined]
-		if o == nil || o.gone || !o.owner {
+		if o == nil || o.gone || !(o.owner || o.standing) {
 			e.mu.Unlock()
 			return nil, unavailable("cannot join the allocation of container %q, which is not running", joined)
 		}
-		b.job = o.job
+		b.job, b.standing = o.job, o.standing
 	}
 	e.boxes[spec.Name] = b
 	e.mu.Unlock()
@@ -525,7 +593,12 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	if log == nil {
 		log = io.Discard
 	}
-	if !joins {
+	if b.standing {
+		if err := e.enter(ctx, b, log); err != nil {
+			e.forget(b)
+			return nil, err
+		}
+	} else if !joins {
 		allocate := e.allocate
 		if e.cfg.Idle > 0 {
 			allocate = e.claim
@@ -540,6 +613,20 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	b.sif = sif
 	e.mu.Unlock()
 	return &handle{e: e, b: b, node: node}, nil
+}
+
+// enter checks that the standing allocation the box runs in runs, and reads its node. A job that
+// is not running starts nothing, so the container is refused, and the allocation is left as it is.
+func (e *Engine) enter(ctx context.Context, b *box, log io.Writer) error {
+	st, err := e.cfg.Cluster.State(ctx, b.job)
+	if err != nil {
+		return err
+	}
+	if st.Phase != Running {
+		return unavailable("the standing allocation %s does not run (Slurm says %s), so the container %s cannot run in it", b.job, orUnknown(st.Name), b.name)
+	}
+	_, _ = fmt.Fprintf(log, "[apptainer] the container %s runs in the standing allocation %s on %s\n", b.name, b.job, orUnknown(st.Node))
+	return e.read(ctx, e.cfg.Cluster.Node(b.job))
 }
 
 // allocate asks for the box's allocation, waits for it to run, saying to log what Slurm says of the
@@ -733,6 +820,8 @@ func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
 					said = &st
 				}
+			case Suspended:
+				// It ran and is suspended: its caller waits for it, as for a queued one, until the queue timeout.
 			case Ended:
 				return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 			}
@@ -1186,11 +1275,18 @@ func (h *handle) Close() {
 		hold, owner := h.b.hold, h.b.owner
 		h.b.gone = true
 		h.e.mu.Unlock()
-		if owner {
+		switch {
+		case h.b.standing:
+			// The allocation is the run's, and stays: only the box's processes end.
+			ctx, stop := clock.Deadline(context.Background(), h.e.cfg.Timers, CallTimeout)
+			// A failure is kept by the engine (TakeSurvivors), where the caller of Close reads it.
+			_ = h.e.reap(ctx, h.b)
+			stop()
+		case owner:
 			if hold != nil {
 				_ = hold.Close()
 			}
-		} else {
+		default:
 			_ = h.signal(SIGKILL)
 		}
 		for _, p := range procs {

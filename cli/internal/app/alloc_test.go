@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/store/memstore"
+	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
 // allocPeriod is the period of the allocation clock in these tests. No other wait asks for exactly
@@ -187,7 +189,9 @@ func mustAllocation(t *testing.T, a *app.App, id alloc.ID) app.AllocationView {
 // A daemon that restarts while an allocation is pending finds it again by its log and its backend,
 // asks for nothing more, and sees it start.
 func TestARestartWhileAnAllocationIsPendingReadoptsIt(t *testing.T) {
-	r := newAllocRig(t, true, fakealloc.Options{Looks: 1})
+	// The backend's queue stays shut until the test opens it: how many times either daemon looked at
+	// the allocation around the restart is the scheduler's to say, and must not decide the outcome.
+	r := newAllocRig(t, true, fakealloc.Options{Queued: true})
 	a := r.w.newApp()
 	al := r.request(t, a, time.Hour)
 	if al.Stage() != alloc.StagePending {
@@ -197,6 +201,7 @@ func TestARestartWhileAnAllocationIsPendingReadoptsIt(t *testing.T) {
 	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StagePending {
 		t.Fatalf("the restarted daemon knows the allocation as %s, want pending", got.Stage())
 	}
+	r.fake.OpenQueue()
 	r.timers.tick()
 	got := r.await(t, a, al.ID, app.UntilRunning)
 	if got.Handle == (alloc.Handle{}) {
@@ -313,8 +318,8 @@ func TestAStrictRefusalNamesBothDurations(t *testing.T) {
 	if !ok || f.Kind != core.FailureConflict {
 		t.Fatalf("Submit = %v, want a conflict", err)
 	}
-	// The command's bound is the daemon's default of 30m; the allocation has just under 10m.
-	for _, want := range []string{"30m0s", "left", "9m5"} {
+	// The command's bound is the daemon's default of 30m; the allocation has 10m, said in whole seconds.
+	for _, want := range []string{"30m0s", "left", "10m0s"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("the refusal %q does not say %q", f.Message, want)
 		}
@@ -351,4 +356,189 @@ func TestALocalSlotIsNotClaimedTwice(t *testing.T) {
 		t.Fatalf("EndAllocation: %v", err)
 	}
 	awaitState(t, a, outside.ID, core.JobSucceeded)
+}
+
+// hangingLog is an allocation log whose reads end only with their context, as a log on a file
+// system that stopped answering does.
+type hangingLog struct{ memstore.AllocLog }
+
+func (*hangingLog) Load(ctx context.Context) ([]alloc.Input, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A daemon whose allocation log never answers fails to start, as one whose stores never do fails the
+// call: the read of the log is bounded, and the start says what it could not read. Before, the
+// start waited for the log for as long as the file system hung.
+func TestADaemonStartFailsWhenItsAllocationLogNeverAnswers(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	// Every wait of up to two hours ends at once, the bound of a call among them.
+	r.w.timers = clock.Immediate{Longest: 2 * time.Hour}
+	r.w.allocations.Log = &hangingLog{}
+	a, err := r.w.tryNewApp()
+	if err == nil {
+		t.Fatal("the daemon started over an allocation log that never answers")
+	}
+	if !strings.Contains(err.Error(), "allocation log") {
+		t.Fatalf("Start failed with %q, want it to name the allocation log", err)
+	}
+	a.Close()
+}
+
+// A pending allocation whose backend changes only its display words at every look (Slurm's estimate
+// of when it starts) adds nothing to the log: the words are kept in memory and shown, and only a
+// change of what the allocation is is logged. Before, every look whose estimate moved appended an
+// input, so a daemon that read its whole log at start had a record for every five seconds of every
+// wait.
+func TestAMovingEstimateOfAPendingAllocationIsNotLogged(t *testing.T) {
+	const looks = 40
+	r := newAllocRig(t, true, fakealloc.Options{Looks: looks + 1, MovingEstimate: true})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	// movedFrom waits until the allocation shows an estimate other than last, and returns it.
+	movedFrom := func(last time.Time) time.Time {
+		t.Helper()
+		ctx := ctxFor(t)
+		for {
+			if p, ok := mustAllocation(t, a, al.ID).Phase.(alloc.Pending); ok && !p.EstimatedStart.IsZero() && !p.EstimatedStart.Equal(last) {
+				return p.EstimatedStart
+			}
+			// A change of the allocation wakes the wait, which is bounded only against a hang.
+			if _, _, err := a.WaitAllocation(ctx, al.ID, app.AllocUntil{Kind: app.UntilEnded}, time.Millisecond); err != nil {
+				t.Fatalf("waiting for the estimate to move from %s: %v", last, err)
+			}
+		}
+	}
+	first := movedFrom(time.Time{})
+	before, err := r.log.Load(ctxFor(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := first
+	for range looks - 1 {
+		r.timers.tick()
+		last = movedFrom(last)
+	}
+	if want := first.Add((looks - 1) * time.Minute); !last.Equal(want) {
+		t.Fatalf("the last estimate shown is %s, want %s: a look was missed", last, want)
+	}
+	after, err := r.log.Load(ctxFor(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("%d looks that moved only the estimate appended %d inputs, want none: %+v", looks-1, len(after)-len(before), after[len(before):])
+	}
+	// The restarted daemon has the allocation as the log has it, and its next look says the words again.
+	a = r.restart(a)
+	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StagePending || got.Handle == (alloc.Handle{}) {
+		t.Fatalf("after a restart the allocation is %+v, want it pending with its handle", got)
+	}
+}
+
+// A second allocation at the backend for an ID whose record has another handle, such as a request
+// that timed out and landed after it was asked again, is released when the daemon adopts what the
+// backend holds; the record keeps its own, which goes on running. Before, adoption ignored it, and it
+// held its capacity for its whole time limit.
+func TestASecondAllocationForARecordedIDIsReleased(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	run := r.await(t, a, al.ID, app.UntilRunning)
+	dup := r.fake.Duplicate(alloc.Spec{ID: al.ID, Run: call.Run, Placement: "p", For: time.Hour})
+	a = r.restart(a)
+	ctx := ctxFor(t)
+	for slices.Contains(r.fake.Live(), dup) {
+		r.timers.tick()
+		// Each look is the daemon's; the wait only lets it run, bounded against a hang.
+		if _, _, err := a.WaitAllocation(ctx, al.ID, app.AllocUntil{Kind: app.UntilEnded}, time.Millisecond); err != nil {
+			t.Fatalf("the duplicate %s was never released: %v", dup.Ref, err)
+		}
+	}
+	got := mustAllocation(t, a, al.ID)
+	if got.Handle != run.Handle || got.Stage() != alloc.StageRunning || !slices.Contains(r.fake.Live(), run.Handle) {
+		t.Fatalf("after the duplicate's release the allocation is %+v (live %v), want it running on %s", got, r.fake.Live(), run.Handle.Ref)
+	}
+}
+
+// A daemon restarted with a config whose placement lost its allocations section ends that
+// placement's allocations, external, and releases them at the backend, and logs that it did; a
+// later start folds the log to the same ends. Before, the records were replayed under the new
+// config and the backend's allocations were left to run their time limit.
+func TestARemovedAllocationsSectionReleasesItsAllocationsAtStart(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	r.await(t, a, al.ID, app.UntilRunning)
+	a.Close()
+	former := r.w.allocations.Placements[0]
+	r.w.allocations.Placements, r.w.allocations.Former = nil, []app.AllocPlacement{{Name: former.Name, Allocator: r.fake}}
+	a = r.w.newApp()
+	got := r.await(t, a, al.ID, app.UntilEnded)
+	if end := got.Phase.(alloc.Ended); end.Reason != alloc.EndExternal {
+		t.Fatalf("the allocation ended as %s, want external", end.Reason)
+	}
+	// Its release is a step of the daemon's own, bounded against a hang.
+	ctx := ctxFor(t)
+	for len(r.fake.Live()) > 0 {
+		if ctx.Err() != nil {
+			t.Fatalf("the backend still holds %v", r.fake.Live())
+		}
+		r.timers.tick()
+		runtime.Gosched()
+	}
+	if _, err := a.RequestAllocation(ctx, call.Run, former.Name, time.Hour); err == nil {
+		t.Fatal("a placement with no allocations section took a request")
+	}
+	a = r.restart(a)
+	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StageEnded {
+		t.Fatalf("after another restart the allocation is %s, want ended", got.Stage())
+	}
+}
+
+// launches records the launch of every job the daemon starts.
+type launches struct {
+	supervisor.Supervisors
+	mu   *sync.Mutex
+	seen *[]lifecycle.Launch
+}
+
+func (l launches) Spawn(ctx context.Context, launch lifecycle.Launch) (supervisor.Handle, error) {
+	l.mu.Lock()
+	*l.seen = append(*l.seen, launch)
+	l.mu.Unlock()
+	return l.Supervisors.Spawn(ctx, launch)
+}
+
+// The reviewer's case: an allocation with 60m left and a fit margin of 2m takes a job of a 55m
+// bound, and the job's launch carries the latest time its first container may enter it, 3m on,
+// so that a preparation of 10m (an image build) does not start a job the allocation's end would
+// kill. Before, the bound was counted from the launch, and the job was killed at the time limit.
+func TestAJobInAnAllocationLaunchesWithTheWindowItMustEnterIn(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	var mu sync.Mutex
+	var seen []lifecycle.Launch
+	r.w.wrap = func(s supervisor.Supervisors) supervisor.Supervisors {
+		return launches{Supervisors: s, mu: &mu, seen: &seen}
+	}
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	ends := running(t, r.await(t, a, al.ID, app.UntilRunning)).EndsAt
+	spec := command("mark", "in", ";", "exit", "0")
+	spec.Allocation = string(al.ID)
+	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: 55 * time.Minute}
+	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	awaitState(t, a, out.Job.ID, core.JobSucceeded)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("%d launches, want the job's", len(seen))
+	}
+	// The latest entry is the allocation's end less the margin and the bound.
+	if got, want := seen[0].AllocationEnterBy, ends.Add(-2*time.Minute-55*time.Minute); !got.Equal(want) {
+		t.Fatalf("the launch's latest entry is %v, want %v (60m left, 2m margin, 55m bound)", got, want)
+	}
 }

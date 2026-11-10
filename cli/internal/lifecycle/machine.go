@@ -114,6 +114,7 @@ type entry struct {
 	released, inAlloc bool
 	allocPlacement    string
 	allocRef          string
+	allocEnterBy      time.Time
 }
 
 // Work is what a job asks of the machine, as the shell read it from the job: the places it may run,
@@ -478,6 +479,9 @@ type AllocReleased struct {
 	Ref        Ref
 	Placement  string
 	Allocation string
+	// EnterBy is the latest time the job's first container may enter the allocation
+	// (Launch.AllocationEnterBy); zero for none.
+	EnterBy time.Time
 }
 
 // SlotWanted says a standing allocation wants one slot of a placement, for a run: the slot waits
@@ -547,6 +551,8 @@ type LaunchRequest struct {
 	// for a job that is not in one. The job's supervisor carries it to its environment
 	// (Launch.Allocation).
 	Allocation string
+	// AllocationEnterBy is AllocReleased.EnterBy of the job's allocation.
+	AllocationEnterBy time.Time
 }
 
 // Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
@@ -1396,7 +1402,7 @@ func (s *State) schedule() []Request {
 				continue
 			}
 			cur.phase = PhaseLaunching
-			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur), Allocation: cur.allocRefOf()})
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur), Allocation: cur.allocRefOf(), AllocationEnterBy: cur.allocEnterByOf()})
 		case schedule.Wait:
 			cur.wait, cur.waits = d.Reason, true
 		case schedule.Refuse:
@@ -1413,6 +1419,27 @@ func (s *State) resources() []schedule.Resource {
 		return OneAtATime().Resources
 	}
 	return s.scheduling.Resources
+}
+
+// Used is the units of each resource the claims of the jobs that hold the machine and of the slots
+// granted add up to, as the scheduler counts them; a resource nothing holds is absent.
+func (s *State) Used() map[schedule.ResourceID]int {
+	out := map[schedule.ResourceID]int{}
+	for _, e := range s.entries {
+		if e.holdsMachine() {
+			for _, c := range s.heldClaims(e) {
+				out[c.Resource] += max(c.Amount, 1)
+			}
+		}
+	}
+	for _, sl := range s.slots {
+		if sl.granted {
+			for _, c := range slotClaims(sl) {
+				out[c.Resource] += max(c.Amount, 1)
+			}
+		}
+	}
+	return out
 }
 
 func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
@@ -1489,6 +1516,14 @@ func (e entry) allocRefOf() string {
 	return ""
 }
 
+// allocEnterByOf is the bound on a job's entry into the allocation it launches inside.
+func (e entry) allocEnterByOf() time.Time {
+	if e.inAlloc {
+		return e.allocEnterBy
+	}
+	return time.Time{}
+}
+
 // allocReleased records where the allocation machine put a job the machine holds.
 func (s *State) allocReleased(e AllocReleased) {
 	i := s.find(e.Ref)
@@ -1498,7 +1533,7 @@ func (s *State) allocReleased(e AllocReleased) {
 	cur := &s.entries[i]
 	cur.released = true
 	cur.inAlloc = e.Placement != ""
-	cur.allocPlacement, cur.allocRef = e.Placement, e.Allocation
+	cur.allocPlacement, cur.allocRef, cur.allocEnterBy = e.Placement, e.Allocation, e.EnterBy
 }
 
 // holdsMachine reports whether a job holds its claims: its command may run, or its end is on its

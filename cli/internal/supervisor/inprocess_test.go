@@ -2,6 +2,7 @@ package supervisor_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -499,5 +500,32 @@ func TestTheEnvironmentIsAskedForTheJobsTarget(t *testing.T) {
 	want := environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task}
 	if len(envs.targets) != 1 || envs.targets[0] != want {
 		t.Fatalf("the environment was asked for %+v, want exactly %+v", envs.targets, want)
+	}
+}
+
+// The standing allocations where the job's environments could not confirm its processes killed
+// are taken once the command is done, and the outcome carries them to the daemon, beside how the
+// job ended.
+func TestTheOutcomeCarriesTheProcessesLeftInStandingAllocations(t *testing.T) {
+	p := newParts(t)
+	left := []lifecycle.ProcessesLeft{{Allocation: "4242", Detail: "killing the processes: timed out"}}
+	taken := 0
+	s := supervisor.New(supervisor.Config{
+		Launch: launchOf("print", "x"), Environments: fakeenv.Environments{core.EnvironmentHost: p.env},
+		Checkouts: p.checkouts, Spool: &supervisor.MemorySpool{},
+		ProcessesLeft: func() []lifecycle.ProcessesLeft {
+			taken++
+			if n := len(p.env.Runs()); n != 1 {
+				t.Errorf("the processes left were taken with %d runs done, want after the command", n)
+			}
+			return left
+		},
+	})
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	out := finish(t, s)
+	if execOf(out).Kind != core.ExecExited || !reflect.DeepEqual(out.ProcessesLeft, left) || taken != 1 {
+		t.Fatalf("outcome = %+v after %d takes, want the command's exit and %+v", out, taken, left)
 	}
 }

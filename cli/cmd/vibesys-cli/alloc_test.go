@@ -131,3 +131,45 @@ func TestAnAllocationWaitsExitAsTheirOutcomeSays(t *testing.T) {
 		}
 	}
 }
+
+// A local placement's capacity is the slots of its max_jobs, and an allocation holds one of them,
+// listed as held for the run that has it.
+func TestPlacementCapacityCountsTheSlotsAnAllocationHolds(t *testing.T) {
+	c := allocCLI(t)
+	type capacity struct {
+		Capacity struct {
+			Placement  string `json:"placement"`
+			SlotsTotal uint32 `json:"slots_total"`
+			SlotsFree  uint32 `json:"slots_free"`
+			Held       []struct {
+				ID string `json:"id"`
+			} `json:"held"`
+		} `json:"capacity"`
+	}
+	read := func() capacity {
+		t.Helper()
+		r := c.run("placement", "capacity", "p", "--json")
+		if r.code != exitOK {
+			t.Fatalf("placement capacity: exit %d: %s", r.code, r.stderr)
+		}
+		var got capacity
+		if err := json.Unmarshal([]byte(r.stdout), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(); got.Capacity.SlotsTotal != 2 || got.Capacity.SlotsFree != 2 || len(got.Capacity.Held) != 0 {
+		t.Fatalf("before any allocation: %+v, want 2 of 2 free and none held", got)
+	}
+	c.allocOK("request", "p", "--for", "1h")
+	c.allocOK("wait", "a1", "--until", "running", "--timeout", "1h")
+	if got := read(); got.Capacity.SlotsFree != 1 || len(got.Capacity.Held) != 1 || got.Capacity.Held[0].ID != "a1" {
+		t.Fatalf("with a1 running: %+v, want 1 free and a1 held", got)
+	}
+	if r := c.run("placement", "capacity", "nowhere"); r.code == exitOK || !strings.Contains(r.stderr, "nowhere") {
+		t.Fatalf("an unknown placement: exit %d, stderr %q; want a failure naming it", r.code, r.stderr)
+	}
+	if r := c.run("placement", "capacity"); r.code != exitInvalidInput {
+		t.Fatalf("no placement: exit %d, want invalid input", r.code)
+	}
+}

@@ -1,0 +1,33 @@
+==vibesys:clock==
+0
+1794326400 2026-11-10T08:00:00
+==vibesys:user==
+0
+user-a
+==vibesys:sinfo==
+0
+3/2/1/6
+==vibesys:nodes==
+0
+node01
+node02
+node03
+node04
+node05
+node06
+==vibesys:pending==
+0
+5001
+5002
+5003
+==vibesys:res==
+0
+ReservationName=maint StartTime=2026-11-12T08:00:00 EndTime=2026-11-12T20:00:00 Duration=12:00:00 Nodes=node[01-04] NodeCnt=4 CoreCnt=256 Features=(null) PartitionName=part-a Flags=MAINT,IGNORE_JOBS TRES=cpu=256 Users=root Groups=(null) Accounts=(null) Licenses=(null) State=INACTIVE BurstBuffer=(null) MaxStartDelay=(null)
+ReservationName=ours StartTime=2026-11-11T08:00:00 EndTime=2026-11-11T12:00:00 Duration=04:00:00 Nodes=node[05-06] NodeCnt=2 CoreCnt=128 Features=(null) PartitionName=(null) Flags=SPEC_NODES TRES=cpu=128 Users=(null) Groups=(null) Accounts=acct-a,acct-b Licenses=(null) State=INACTIVE BurstBuffer=(null) MaxStartDelay=(null)
+ReservationName=another-partition StartTime=2026-11-11T08:00:00 EndTime=2026-11-11T12:00:00 Duration=04:00:00 Nodes=gpu[1-2] NodeCnt=2 CoreCnt=16 Features=(null) PartitionName=part-b Flags=SPEC_NODES Users=user-b Groups=(null) Accounts=(null) State=INACTIVE
+ReservationName=over StartTime=2026-11-09T08:00:00 EndTime=2026-11-09T12:00:00 Duration=04:00:00 Nodes=node01 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=user-a Groups=(null) Accounts=(null) State=INACTIVE
+ReservationName=all-but-one StartTime=2026-11-10T20:00:00 EndTime=2026-11-10T23:00:00 Duration=03:00:00 Nodes=node03 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=(null) Groups=(null) Accounts=-acct-z State=INACTIVE
+ReservationName=of-a-group StartTime=2026-11-10T21:00:00 EndTime=2026-11-10T22:00:00 Duration=01:00:00 Nodes=node04 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=(null) Groups=staff Accounts=(null) State=INACTIVE
+ReservationName=excluded StartTime=2026-11-10T21:00:00 EndTime=2026-11-10T22:00:00 Duration=01:00:00 Nodes=node02 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=(null) Groups=(null) Accounts=acct-a,-acct-a State=INACTIVE
+ReservationName=bad StartTime=sometime EndTime=2026-11-11T12:00:00 Nodes=node01 NodeCnt=1 PartitionName=part-a
+this line is no reservation

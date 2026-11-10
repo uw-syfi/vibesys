@@ -14,6 +14,7 @@ import (
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -34,6 +35,8 @@ type Deps struct {
 	// Timers bound how long a released supervisor waits for its callers. It defaults to the
 	// system's.
 	Timers clock.Timers
+	// ProcessesLeft is supervisor.Config.ProcessesLeft; nil for none.
+	ProcessesLeft func() []lifecycle.ProcessesLeft
 }
 
 // releaseGrace is how long a released supervisor waits for its calls to end. The answer to Release
@@ -78,6 +81,7 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 
 	sup := supervisor.New(supervisor.Config{
 		Launch: launch, Environments: deps.Environments, Checkouts: deps.Checkouts, Spool: spool, Host: deps.Host,
+		ProcessesLeft: deps.ProcessesLeft,
 	})
 	defer sup.Close()
 

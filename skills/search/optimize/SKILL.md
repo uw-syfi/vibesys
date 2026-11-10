@@ -33,7 +33,7 @@ workers, profilers, combiners and judges all count; a judge takes a slot too. A 
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git
 and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Commands for measuring:
-`vibesys:measure`. Brief templates: [briefs.md](references/briefs.md). Read
+`vibesys:measure`. Long queue waits: `vibesys:allocations`. Brief templates: [briefs.md](references/briefs.md). Read
 [failure-patterns.md](references/failure-patterns.md) before you plan.
 
 Harness-specific mechanics (subagents, background tasks, scheduling): when `VIBESYS_RUN` is set

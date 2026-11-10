@@ -58,10 +58,14 @@ type Cluster struct {
 	ends      bool
 	fail      func(op string) error
 	started   []apptainer.Box
+	startedIn map[string][]string // the names of the boxes whose processes started in each job
 	submitted []apptainer.Allocation
 	now       time.Duration // how long the cluster has run, which Advance moves
 	linger    bool          // a dead claim leaves its containers' processes running
 	maxTime   time.Duration // the longest time limit a job may ask for, as a site's QOS caps it; zero is none
+	partition apptainer.PartitionFacts
+	lose      int // how many later submits take the job but lose the reply
+	unseen    int // how many listings of Jobs each of those jobs is left out of
 }
 
 // job is a batch allocation.
@@ -78,6 +82,8 @@ type job struct {
 	ran               time.Duration // when it started running
 	idleSince         time.Duration // when its last claim was released, or it started
 	claim             *claim        // the live claim of a reusable allocation
+	suspendedAt       time.Duration // when it was suspended, while it is
+	unseen            int           // how many listings by Jobs still leave it out, as a job squeue shows late
 }
 
 // box is a container's processes on the job's node.
@@ -90,7 +96,7 @@ type box struct {
 // New returns an empty cluster whose node scripts wait at the gates.
 func New(gates fakeenv.Gates) *Cluster {
 	return &Cluster{
-		gates: gates, files: map[string][]byte{}, published: map[string]int{}, jobs: map[string]*job{},
+		gates: gates, files: map[string][]byte{}, published: map[string]int{}, jobs: map[string]*job{}, startedIn: map[string][]string{},
 		says: maps.Clone(Machine),
 	}
 }
@@ -185,6 +191,14 @@ func (c *Cluster) Started() []apptainer.Box {
 	return slices.Clone(c.started)
 }
 
+// StartedIn names the boxes whose processes started in the batch job of the id, in order: where
+// the processes of a container ran. A job that joined a standing allocation is here under its id.
+func (c *Cluster) StartedIn(id string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.startedIn[id])
+}
+
 // Submitted returns the allocations asked for, in order.
 func (c *Cluster) Submitted() []apptainer.Allocation {
 	c.mu.Lock()
@@ -249,7 +263,11 @@ func (c *Cluster) Advance(d time.Duration) {
 	}
 	c.mu.Unlock()
 	for _, j := range ending {
-		c.end(j, "COMPLETED")
+		state := "COMPLETED"
+		if c.now-j.ran >= j.limit {
+			state = "TIMEOUT"
+		}
+		c.end(j, state)
 	}
 }
 
@@ -444,7 +462,48 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	}
 	c.jobs[id] = j
 	c.submitted = append(c.submitted, a)
+	if c.lose > 0 {
+		c.lose--
+		j.unseen = c.unseen
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: the reply of sbatch was lost, though the job was taken"}
+	}
 	return id, nil
+}
+
+// LoseSubmitReplies makes the next n submits take their job and fail as unavailable, as an sbatch
+// whose reply was cut off does, and leaves each such job out of the next `unseen` listings of Jobs,
+// as a job squeue shows only a little later.
+func (c *Cluster) LoseSubmitReplies(n, unseen int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lose, c.unseen = n, unseen
+}
+
+// Suspend suspends a running job as `scontrol suspend` does: it lives, holds its node, runs
+// nothing and counts no time against its limit. It reports false for a job that does not run.
+func (c *Cluster) Suspend(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil || j.phase != apptainer.Running {
+		return false
+	}
+	j.phase, j.state, j.suspendedAt = apptainer.Suspended, "SUSPENDED", c.now
+	return true
+}
+
+// Resume resumes a suspended job; the time it was suspended is not counted against its limit.
+func (c *Cluster) Resume(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil || j.phase != apptainer.Suspended {
+		return false
+	}
+	j.phase, j.state = apptainer.Running, "RUNNING"
+	j.ran += c.now - j.suspendedAt
+	j.idleSince += c.now - j.suspendedAt
+	return true
 }
 
 // State implements apptainer.Cluster.
@@ -459,14 +518,7 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 	if j == nil {
 		return apptainer.JobState{Phase: apptainer.Ended}, nil
 	}
-	if j.phase == apptainer.Queued {
-		if j.waits--; j.waits < 0 {
-			j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
-			if c.ends {
-				j.phase, j.state = apptainer.Ended, "FAILED"
-			}
-		}
-	}
+	c.advance(j)
 	switch j.phase {
 	case apptainer.Queued:
 		j.reads++
@@ -477,6 +529,8 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 		}
 		return apptainer.JobState{Phase: j.phase, Name: j.state, Reason: "Priority"}, nil
 	case apptainer.Running:
+		return apptainer.JobState{Phase: j.phase, Name: j.state, Node: NodeName}, nil
+	case apptainer.Suspended:
 		return apptainer.JobState{Phase: j.phase, Name: j.state, Node: NodeName}, nil
 	}
 	return apptainer.JobState{Phase: j.phase, Name: j.state}, nil
@@ -492,6 +546,10 @@ func (cl *Client) Jobs(ctx context.Context, scope string) ([]apptainer.Job, erro
 	defer c.mu.Unlock()
 	var out []apptainer.Job
 	for _, j := range c.jobs {
+		if j.unseen > 0 {
+			j.unseen--
+			continue
+		}
 		if _, ok := apptainer.InScope(j.comment, scope); ok && j.phase != apptainer.Ended {
 			job := apptainer.Job{ID: j.id, Name: j.name, Comment: j.comment, Phase: j.phase}
 			if j.phase == apptainer.Running {
@@ -727,6 +785,7 @@ func (n *node) Start(spec apptainer.Box, argv []string, sink io.Writer) (environ
 		j.boxes[spec.Name] = b
 	}
 	c.started = append(c.started, spec)
+	c.startedIn[j.id] = append(c.startedIn[j.id], spec.Name)
 	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
 		// The probe asks a port the node chose in this allocation, which a box's server answers on
 		// once it is ready, its own box's as another's: the node's network is the boxes' one
@@ -805,4 +864,131 @@ func lostProcess(why string) environment.Process {
 	p := &simple{exited: make(chan environment.Exit, 1)}
 	p.exited <- docker.Lost(why)
 	return p
+}
+
+// advance counts a read of a queued job's state, which starts it once it has waited for enough of
+// them. c.mu is held.
+func (c *Cluster) advance(j *job) {
+	if j.phase == apptainer.Queued {
+		if j.waits--; j.waits < 0 {
+			j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
+			if c.ends {
+				j.phase, j.state = apptainer.Ended, "FAILED"
+			}
+		}
+	}
+}
+
+// Epoch is the instant at which the cluster's time, which Advance moves, begins.
+var Epoch = time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
+
+// Now is the login node's clock: Epoch, and as long as the cluster has run.
+func (c *Cluster) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Epoch.Add(c.now)
+}
+
+// Detail implements apptainer.Cluster. A queued job's reads count as State's do. A job that ended
+// says how, as sacct does: TIMEOUT by its time limit, and CANCELLED or NODE_FAIL otherwise.
+func (cl *Client) Detail(ctx context.Context, id string) (apptainer.JobDetail, error) {
+	if err := cl.enter(ctx, "detail"); err != nil {
+		return apptainer.JobDetail{}, err
+	}
+	c := cl.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil {
+		return apptainer.JobDetail{Phase: apptainer.Ended}, nil
+	}
+	c.advance(j)
+	d := apptainer.JobDetail{Phase: j.phase, Name: j.state}
+	switch j.phase {
+	case apptainer.Queued:
+		d.Reason = "Priority"
+		d.EstimatedStart = Epoch.Add(c.now + time.Hour)
+	case apptainer.Running:
+		d.Node = NodeName
+		d.StartedAt = Epoch.Add(j.ran)
+		d.EndsAt = d.StartedAt.Add(j.limit)
+	case apptainer.Suspended:
+		d.Node = NodeName
+	default:
+		d.TimeLimit = j.state == "TIMEOUT"
+		d.EndedAt = Epoch.Add(c.now)
+	}
+	return d, nil
+}
+
+// CancelJob implements apptainer.Cluster.
+func (cl *Client) CancelJob(ctx context.Context, id string) error {
+	if err := cl.enter(ctx, "canceljob"); err != nil {
+		return err
+	}
+	c := cl.c
+	c.mu.Lock()
+	j := c.jobs[id]
+	c.mu.Unlock()
+	if j != nil {
+		c.end(j, "CANCELLED")
+	}
+	return nil
+}
+
+// SetPartition sets what Slurm says of every partition's capacity; its Now and User are the
+// cluster's own when zero.
+func (c *Cluster) SetPartition(f apptainer.PartitionFacts) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.partition = f
+}
+
+// Partition implements apptainer.Cluster.
+func (cl *Client) Partition(ctx context.Context, _ string) (apptainer.PartitionFacts, error) {
+	if err := cl.enter(ctx, "partition"); err != nil {
+		return apptainer.PartitionFacts{}, err
+	}
+	c := cl.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f := c.partition
+	if f.Now.IsZero() {
+		f.Now = Epoch.Add(c.now)
+	}
+	if f.User == "" {
+		f.User = "user-a"
+	}
+	return f, nil
+}
+
+// CancelOutside ends the job as someone else's cancel does: the CLI did not ask for it.
+func (c *Cluster) CancelOutside(id string) { c.endOutside(id, "CANCELLED") }
+
+// FailNode ends the job as the failure of its node does.
+func (c *Cluster) FailNode(id string) { c.endOutside(id, "NODE_FAIL") }
+
+func (c *Cluster) endOutside(id, state string) {
+	c.mu.Lock()
+	j := c.jobs[id]
+	c.mu.Unlock()
+	if j != nil {
+		c.end(j, state)
+	}
+}
+
+// Job returns the job's name, comment and phase, and false for a job that was never made.
+func (c *Cluster) Job(id string) (name, comment string, phase apptainer.Phase, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil {
+		return "", "", 0, false
+	}
+	return j.name, j.comment, j.phase, true
+}
+
+// Reap implements apptainer.Node: the box's processes are killed, and none is left.
+func (n *node) Reap(ctx context.Context, name string) error {
+	return n.Signal(ctx, name, apptainer.SIGKILL)
 }

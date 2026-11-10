@@ -58,12 +58,18 @@ import (
 // what keeps it from opening a store whose bounds or workstreams it would not see and ignoring them.
 // A plan saved before has no origin and no transitions, and none is invented for it.
 //
-// Version 7 adds the trace job: a spec's trace settings, a trace result and the trace stage a job
-// failed in, which a version 6 program would refuse as unknown. It only adds, so this program reads
-// versions 2 to 7 and migrates a store of 2 to 6 the same way, writing the format file at version 7
-// last; a program of version 6 refuses the store from then on with the newer version named, instead
+// Version 7 adds the standing allocation of a job's spec (JobSpec.allocation), which a version 6
+// program would refuse as unknown, with the per-daemon allocation log and identity that come with
+// it. It only adds, so this program reads versions 2 to 7, and Open migrates a store of 2 to 6 the
+// same way, writing the format file at version 7 last, so that a program of version 6 refuses the
+// store instead of failing on the first job of an allocation it reads.
+//
+// Version 8 adds the trace job: a spec's trace settings, a trace result and the trace stage a job
+// failed in, which a version 7 program would refuse as unknown. It only adds, so this program reads
+// versions 2 to 8 and migrates a store of 2 to 7 the same way, writing the format file at version 8
+// last; a program of version 7 refuses the store from then on with the newer version named, instead
 // of finding a record it cannot read.
-const formatVersion = 7
+const formatVersion = 8
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.

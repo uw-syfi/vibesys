@@ -44,6 +44,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	// submission in neither count.
 	a.submitting.Add(1)
 	defer a.submitting.Add(-1)
+	a.RunSeen(req.Context.Run)
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
 	}
@@ -70,7 +71,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		return core.SubmitOutcome{}, err
 	}
 	// Before anything is built: an allocation that cannot take the job refuses it at the door.
-	if err := a.precheckAllocation(req); err != nil {
+	if err := a.precheckAllocation(ctx, req); err != nil {
 		return core.SubmitOutcome{}, err
 	}
 	// A submission that cannot be keyed, such as one for a task its commit does not have, makes no

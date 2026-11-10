@@ -1,4 +1,5 @@
 import {fileURLToPath} from 'node:url';
+import {PROPERTY_SEED_SETUP} from './test_runner_config.mjs';
 
 /**
  * The one Vitest configuration every Effect package runs with, passed by `run_vitest.mjs`.
@@ -14,6 +15,7 @@ export default {
   root: process.cwd(),
   test: {
     setupFiles: [
+      PROPERTY_SEED_SETUP,
       fileURLToPath(
         new URL('../../apps/desktop/src/testing/callback-errors.setup.ts', import.meta.url),
       ),

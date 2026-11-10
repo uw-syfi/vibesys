@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -67,6 +68,8 @@ type run struct {
 	staged    *Dirs // the run's directories on the engine's machine, once staged
 	// against is the job-scoped server the run's command runs against, for a run of a Service.
 	against *served
+	// inAlloc says the run's first container enters the job's standing allocation.
+	inAlloc bool
 }
 
 // role is what a container of a run is for.
@@ -85,6 +88,38 @@ const (
 	// roleAgainst is a command's container beside a job-scoped server's, joined to its network.
 	roleAgainst
 )
+
+// enter decides, once the run is ready to start its containers, whether the first one enters the
+// job's standing allocation. The allocation's end leaves the job a window to enter in
+// (Target.EnterBy), what is left once its bound and the margin are kept free: preparing the
+// job (building its image, converting it) counts against the allocation, and the job's bound starts
+// when it enters. A job ready after the window does not fit: a job submitted into the allocation by
+// name does not run, and fails saying both durations; one of any allocation runs as a job with no
+// allocation does, and its output says why.
+func (r *run) enter() error {
+	t := r.e.target
+	if t.Allocation == "" {
+		return nil
+	}
+	now := time.Time{}
+	if t.EnterBy.IsZero() || r.e.p.cfg.Clock == nil {
+		r.inAlloc = true
+		return nil
+	}
+	if now = r.e.p.cfg.Clock.Now(); r.e.entry.admit(now, t.EnterBy) {
+		r.inAlloc = true
+		return nil
+	}
+	why := fmt.Sprintf("the job was ready %v after the latest time the allocation %s left it to start in, before its end less its bound and the fit margin, so its command of limit %v no longer fits",
+		now.Sub(t.EnterBy).Round(time.Second), t.Allocation, r.x.Timeout)
+	if !t.AllocationAny {
+		return &core.Failure{Kind: core.FailureConflict, Message: "allocation: " + why + "; it did not run"}
+	}
+	if _, err := fmt.Fprintln(r.sink, "[allocation] allocation any: "+why+"; it runs without one"); err != nil {
+		return err
+	}
+	return nil
+}
 
 // prepareAndExecute makes the containers and runs the execution in them. Until a command starts
 // in a container nothing of the execution ran: a container itself runs only a process that waits.
@@ -131,6 +166,9 @@ func (r *run) prepareAndExecute() core.Attempt {
 		if candImg, err = checked(candImg, err); err != nil {
 			return notStarted(err)
 		}
+	}
+	if err := r.enter(); err != nil {
+		return notStarted(err)
 	}
 	var port int
 	switch {
@@ -370,7 +408,7 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 	}
 	// A job that runs inside a standing allocation names it on its first container, which the
 	// placement's engine reads (Config.AllocationLabel) to run the container inside it.
-	if key := p.cfg.AllocationLabel; key != "" && r.e.target.Allocation != "" && b == r.boxes[0] {
+	if key := p.cfg.AllocationLabel; key != "" && r.inAlloc && b == r.boxes[0] {
 		cs.Labels[key] = r.e.target.Allocation
 	}
 	switch as {

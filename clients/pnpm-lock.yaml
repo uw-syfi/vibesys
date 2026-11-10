@@ -18,6 +18,9 @@ importers:
       dependency-cruiser:
         specifier: 16.10.4
         version: 16.10.4
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       knip:
         specifier: 6.37.0
         version: 6.37.0

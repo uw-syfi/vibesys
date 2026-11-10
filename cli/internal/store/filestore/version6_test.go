@@ -134,12 +134,12 @@ func versionFive(t *testing.T, withBounds bool) *fsys.MemFS {
 	return image
 }
 
-// A store of version 5 opens as it was, and is a store of version 6 from then on, with every
-// directory version 6 added: its format file says 6, and a program of version 5 would refuse it. A
-// crash at any step of the migration leaves a store that the next Open migrates and that shows the
-// same, and the format file says 6 only once every directory is there. A plan the older program
+// A store of version 5 opens as it was, and is a store of the current version (7) from then on, with
+// every directory version 6 added: its format file says 7, and a program of version 5 or 6 would
+// refuse it. A crash at any step of the migration leaves a store that the next Open migrates and that
+// shows the same, and the format file says 7 only once every directory is there. A plan the older program
 // saved has no origin and no transitions, and none is invented.
-func TestAStoreOfVersionFiveIsMigratedToSix(t *testing.T) {
+func TestAStoreOfVersionFiveIsMigratedToTheCurrentVersion(t *testing.T) {
 	for _, withBounds := range []bool{true, false} {
 		t.Run(fmt.Sprintf("with bounds %v", withBounds), func(t *testing.T) {
 			ref := versionFive(t, withBounds)
@@ -155,8 +155,8 @@ func TestAStoreOfVersionFiveIsMigratedToSix(t *testing.T) {
 				mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 				opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 				if err == nil {
-					if got := formatOf(t, mem); got != 7 {
-						t.Fatalf("format after the migration = %d, want 7", got)
+					if got := formatOf(t, mem); got != 8 {
+						t.Fatalf("format after the migration = %d, want 8", got)
 					}
 					if got := dirNames(t, mem); !slices.Equal(got, wantDirs) {
 						t.Fatalf("directories after the migration = %v, want %v", got, wantDirs)
@@ -173,8 +173,8 @@ func TestAStoreOfVersionFiveIsMigratedToSix(t *testing.T) {
 				}
 				for _, power := range []bool{false, true} {
 					image := mem.CrashImage(power)
-					if formatOf(t, image) == 7 && !slices.Equal(dirNames(t, image), wantDirs) {
-						t.Fatalf("after a crash at step %d (power loss %v) the format says 7 and the directories are %v", step, power, dirNames(t, image))
+					if formatOf(t, image) == 8 && !slices.Equal(dirNames(t, image), wantDirs) {
+						t.Fatalf("after a crash at step %d (power loss %v) the format says 8 and the directories are %v", step, power, dirNames(t, image))
 					}
 					if got := storetest.Observe(t, openOn(t, image), runs...); !reflect.DeepEqual(got, want) {
 						t.Fatalf("after a crash at step %d (power loss %v) the store shows\n%+v\nwant\n%+v", step, power, got, want)

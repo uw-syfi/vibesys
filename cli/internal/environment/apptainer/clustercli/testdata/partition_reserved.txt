@@ -1,0 +1,27 @@
+==vibesys:clock==
+0
+1794326400 2026-11-10T08:00:00
+==vibesys:user==
+0
+user-a
+==vibesys:sinfo==
+0
+1/5/0/6
+==vibesys:nodes==
+0
+node01
+node02
+node03
+node04
+node05
+node06
+==vibesys:reserved==
+0
+node04
+node05
+==vibesys:pending==
+0
+==vibesys:res==
+0
+ReservationName=theirs StartTime=2026-11-10T06:00:00 EndTime=2026-11-10T20:00:00 Duration=14:00:00 Nodes=node04 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=user-b Groups=(null) Accounts=(null) State=ACTIVE
+ReservationName=ours StartTime=2026-11-10T06:00:00 EndTime=2026-11-10T20:00:00 Duration=14:00:00 Nodes=node05 NodeCnt=1 CoreCnt=64 Features=(null) PartitionName=part-a Flags=SPEC_NODES Users=user-a Groups=(null) Accounts=(null) State=ACTIVE

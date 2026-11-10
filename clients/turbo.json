@@ -8,7 +8,9 @@
     "tools/scripts/run_node_tests.mjs",
     "tools/scripts/run_node_suite.mjs",
     "tools/scripts/run_vitest.mjs",
-    "tools/scripts/test_runner_config.mjs"
+    "tools/scripts/test_runner_config.mjs",
+    "tools/scripts/property_seed.mjs",
+    "tools/scripts/property_seed.setup.mjs"
   ],
   "tasks": {
     "transit": {
@@ -24,6 +26,7 @@
     },
     "test": {
       "dependsOn": ["transit"],
+      "env": ["VIBESYS_PROPERTY_SEED", "VIBESYS_PROPERTY_PATH"],
       "outputs": []
     }
   }

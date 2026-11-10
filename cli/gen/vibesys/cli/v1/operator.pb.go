@@ -408,7 +408,11 @@ type AllocationSettings struct {
 	MaxFor *durationpb.Duration `protobuf:"bytes,2,opt,name=max_for,json=maxFor,proto3" json:"max_for,omitempty"`
 	// The time a job's fit keeps free before its allocation ends: a job fits when the work ahead of
 	// it and its own bound are at most the time left less this. Unset means 2m.
-	FitMargin     *durationpb.Duration `protobuf:"bytes,3,opt,name=fit_margin,json=fitMargin,proto3" json:"fit_margin,omitempty"`
+	FitMargin *durationpb.Duration `protobuf:"bytes,3,opt,name=fit_margin,json=fitMargin,proto3" json:"fit_margin,omitempty"`
+	// How long a run that holds allocations of the placement may make no call (no command with its
+	// --run) before the daemon takes it to have ended, as alloc end-run does: its allocations end and
+	// no renewal order of it asks for more. At least a minute. Unset means 2h.
+	RunIdleEnd    *durationpb.Duration `protobuf:"bytes,4,opt,name=run_idle_end,json=runIdleEnd,proto3" json:"run_idle_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -460,6 +464,13 @@ func (x *AllocationSettings) GetMaxFor() *durationpb.Duration {
 func (x *AllocationSettings) GetFitMargin() *durationpb.Duration {
 	if x != nil {
 		return x.FitMargin
+	}
+	return nil
+}
+
+func (x *AllocationSettings) GetRunIdleEnd() *durationpb.Duration {
+	if x != nil {
+		return x.RunIdleEnd
 	}
 	return nil
 }
@@ -1143,12 +1154,15 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x05slurm\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.SlurmSettingsR\x05slurm\x127\n" +
 	"\tresources\x18\x05 \x01(\v2\x19.vibesys.cli.v1.ResourcesR\tresources\x12?\n" +
 	"\tapptainer\x18\x06 \x01(\v2!.vibesys.cli.v1.ApptainerSettingsR\tapptainer\x12D\n" +
-	"\vallocations\x18\a \x01(\v2\".vibesys.cli.v1.AllocationSettingsR\vallocations\"\xbf\x01\n" +
+	"\vallocations\x18\a \x01(\v2\".vibesys.cli.v1.AllocationSettingsR\vallocations\"\x88\x02\n" +
 	"\x12AllocationSettings\x12$\n" +
 	"\bmax_held\x18\x01 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\amaxHeld\x12?\n" +
 	"\amax_for\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xc8\x01\x01\xaa\x01\x02*\x00R\x06maxFor\x12B\n" +
 	"\n" +
-	"fit_margin\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x022\x00R\tfitMargin\"\xf4\x01\n" +
+	"fit_margin\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x022\x00R\tfitMargin\x12G\n" +
+	"\frun_idle_end\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\n" +
+	"\xbaH\a\xaa\x01\x042\x02\b<R\n" +
+	"runIdleEnd\"\xf4\x01\n" +
 	"\x0eRemoteSettings\x128\n" +
 	"\x04host\x18\x01 \x01(\tB$\xbaH!r\x1f2\x1d^[A-Za-z0-9][A-Za-z0-9_.@-]*$R\x04host\x12-\n" +
 	"\vssh_command\x18\x02 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\n" +
@@ -1268,19 +1282,20 @@ var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
 	5,  // 10: vibesys.cli.v1.Placement.allocations:type_name -> vibesys.cli.v1.AllocationSettings
 	17, // 11: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
 	17, // 12: vibesys.cli.v1.AllocationSettings.fit_margin:type_name -> google.protobuf.Duration
-	1,  // 13: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
-	11, // 14: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
-	12, // 15: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	15, // 16: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	10, // 17: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
-	0,  // 18: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
-	16, // 19: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
-	4,  // 20: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	17, // 13: vibesys.cli.v1.AllocationSettings.run_idle_end:type_name -> google.protobuf.Duration
+	1,  // 14: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
+	11, // 15: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
+	12, // 16: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	15, // 17: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	10, // 18: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
+	0,  // 19: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
+	16, // 20: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
+	4,  // 21: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
