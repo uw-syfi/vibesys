@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -211,7 +215,7 @@ func TestAReleaseThatCannotBeTrustedChangesNothing(t *testing.T) {
 		}, upgrade.ErrChecksumMismatch},
 		"checksums missing":     {func(r *upgradetest.Release) { r.Remove(upgrade.ChecksumsAsset) }, upgrade.ErrAssetNotFound},
 		"binary missing":        {func(r *upgradetest.Release) { r.Remove(name) }, upgrade.ErrAssetNotFound},
-		"version missing":       {func(r *upgradetest.Release) { r.Remove(upgrade.VersionAsset) }, upgrade.ErrAssetNotFound},
+		"version missing":       {func(r *upgradetest.Release) { r.Remove(upgrade.VersionAsset) }, upgrade.ErrNoRelease},
 		"version not a version": {func(r *upgradetest.Release) { r.Set(upgrade.VersionAsset, []byte("latest\n")) }, nil},
 		"checksums malformed":   {func(r *upgradetest.Release) { r.Set(upgrade.ChecksumsAsset, []byte("<html>rate limited</html>")) }, nil},
 	}
@@ -223,6 +227,10 @@ func TestAReleaseThatCannotBeTrustedChangesNothing(t *testing.T) {
 			_, err := i.upgrade()
 			if err == nil || (c.want != nil && !errors.Is(err, c.want)) {
 				t.Fatalf("error = %v, want %v", err, c.want)
+			}
+			// Only a missing VERSION says the release itself is missing.
+			if c.want != upgrade.ErrNoRelease && errors.Is(err, upgrade.ErrNoRelease) {
+				t.Fatalf("error = %v, which claims no release is published", err)
 			}
 			if !sameFiles(before, i.snapshot(t)) {
 				t.Fatal("the installation changed")
@@ -269,5 +277,48 @@ func TestAMissingInstallDirectoryIsAnErrorThatNamesIt(t *testing.T) {
 	_, err := i.upgrade()
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte(filepath.Join(i.dir, "gone"))) {
 		t.Fatalf("error = %v, want one naming %s", err, filepath.Join(i.dir, "gone"))
+	}
+}
+
+// A releases URL with no release under the tag, as before the first stable release, answers 404
+// for every asset. Through the fake and over HTTP that is ErrNoRelease, naming the URL it read, and
+// nothing changes; any other HTTP failure is not.
+func TestAMissingReleaseIsToldApartFromAFailedOne(t *testing.T) {
+	const base = "https://releases.invalid/download/cli-latest"
+	empty := func() *upgradetest.Release {
+		r := upgradetest.New("2.0.0", nil)
+		r.Remove(upgrade.VersionAsset)
+		r.Remove(upgrade.ChecksumsAsset)
+		return r
+	}
+	sources := map[string]upgrade.Source{
+		"fake": empty(),
+		"http": upgrade.HTTPSource{Client: &http.Client{Transport: empty()}, BaseURL: base},
+	}
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			i := newInstall(t, []byte("new binary"))
+			before := i.snapshot(t)
+			_, err := upgrade.Upgrade(context.Background(), upgrade.Request{Source: source, Platform: host, Current: "1.0.0", Target: i.target})
+			if !errors.Is(err, upgrade.ErrNoRelease) || !errors.Is(err, upgrade.ErrAssetNotFound) {
+				t.Fatalf("error = %v, want ErrNoRelease wrapping ErrAssetNotFound", err)
+			}
+			if name == "http" && !strings.Contains(err.Error(), base+"/"+upgrade.VersionAsset) {
+				t.Errorf("error %q does not name the URL it read", err)
+			}
+			if !sameFiles(before, i.snapshot(t)) {
+				t.Fatal("the installation changed")
+			}
+		})
+	}
+	for _, status := range []int{http.StatusForbidden, http.StatusGone, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+		})}
+		i := newInstall(t, []byte("new binary"))
+		_, err := upgrade.Upgrade(context.Background(), upgrade.Request{Source: upgrade.HTTPSource{Client: client, BaseURL: base}, Platform: host, Current: "1.0.0", Target: i.target})
+		if err == nil || errors.Is(err, upgrade.ErrNoRelease) || !strings.Contains(err.Error(), fmt.Sprint(status)) {
+			t.Errorf("status %d: error = %v, want a failed fetch naming the status, not ErrNoRelease", status, err)
+		}
 	}
 }

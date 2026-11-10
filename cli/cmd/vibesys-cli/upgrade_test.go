@@ -90,6 +90,43 @@ func TestUpgradeRefusesADamagedDownload(t *testing.T) {
 	}
 }
 
+// With no stable release published, the error names where it looked and what to do instead, and
+// points to the list of releases only for GitHub's releases URL. Any other failure to read the
+// release says what failed instead.
+func TestUpgradeSaysWhenNoStableReleaseIsPublished(t *testing.T) {
+	const listed = " (versions are listed at https://github.com/uw-syfi/vibesys/releases)"
+	for releases, want := range map[string]string{
+		upgrade.DefaultReleasesURL:       upgrade.DefaultReleasesURL + "/cli-latest; to install a specific version, run install.sh with VIBESYS_CLI_VERSION=<version>" + listed,
+		upgrade.DefaultReleasesURL + "/": upgrade.DefaultReleasesURL + "/cli-latest; to install a specific version, run install.sh with VIBESYS_CLI_VERSION=<version>" + listed,
+		"https://mirror.invalid/vibesys": "https://mirror.invalid/vibesys/cli-latest; to install a specific version, run install.sh with VIBESYS_CLI_VERSION=<version>",
+	} {
+		i := newInstallation(t, "new binary")
+		i.release.Remove(upgrade.VersionAsset)
+		i.release.Remove(upgrade.ChecksumsAsset)
+		var stdout, stderr bytes.Buffer
+		code := runUpgrade(nil, &stdout, &stderr, func() (upgradeEnv, error) {
+			return upgradeEnv{Source: i.release, Platform: hostPlatform, Current: "1.0.0", Target: i.target, Releases: releases}, nil
+		})
+		if code != exitFailed || stdout.Len() != 0 {
+			t.Fatalf("%s: code = %d, stdout = %q", releases, code, stdout.String())
+		}
+		if got, want := stderr.String(), "vibesys-cli upgrade: no stable vibesys-cli release is published at "+want+"\n"; got != want {
+			t.Fatalf("%s: stderr =\n%q\nwant\n%q", releases, got, want)
+		}
+		if i.content(t) != "old binary" {
+			t.Fatalf("binary = %q, want it unchanged", i.content(t))
+		}
+	}
+
+	i := newInstallation(t, "new binary")
+	name, _ := upgrade.AssetName(hostPlatform)
+	i.release.Remove(name)
+	var stdout, stderr bytes.Buffer
+	if code := runUpgrade(nil, &stdout, &stderr, i.env("1.0.0")); code != exitFailed || strings.Contains(stderr.String(), "published at") {
+		t.Fatalf("a release without this platform's binary: code = %d, stderr = %q", code, stderr.String())
+	}
+}
+
 func TestUpgradeReportsAnEnvironmentItCannotBuild(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runUpgrade(nil, &stdout, &stderr, func() (upgradeEnv, error) { return upgradeEnv{}, errors.New("no home") })

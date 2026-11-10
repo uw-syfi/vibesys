@@ -25,6 +25,10 @@ var (
 	ErrChecksumMismatch = errors.New("downloaded binary does not match the published checksum")
 	// ErrNoChecksum means checksums.txt has no entry for this platform's binary.
 	ErrNoChecksum = errors.New("no published checksum for this platform's binary")
+	// ErrNoRelease means the source has no release at all: it has no VERSION, which every
+	// published release carries. For the newest release it means no stable release has been
+	// published yet. The error also wraps the source's ErrAssetNotFound.
+	ErrNoRelease = errors.New("no stable release is published")
 )
 
 // Outcome says what Upgrade did.
@@ -71,6 +75,9 @@ func Upgrade(ctx context.Context, request Request) (Result, error) {
 		return Result{}, err
 	}
 	versionText, err := readAsset(ctx, request.Source, VersionAsset, maxTextBytes)
+	if errors.Is(err, ErrAssetNotFound) {
+		return Result{}, fmt.Errorf("%w: %w", ErrNoRelease, err)
+	}
 	if err != nil {
 		return Result{}, err
 	}
