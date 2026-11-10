@@ -73,6 +73,9 @@ type Config struct {
 	// as it is.
 	Placements []core.PlacementOffer
 
+	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
+	Allocations Allocations
+
 	// DefaultTimeout is the time limit of a command that sets none.
 	DefaultTimeout time.Duration
 	// MaxNoteBytes bounds the text of a note.

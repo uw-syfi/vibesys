@@ -1,6 +1,7 @@
 package alloc
 
 import (
+	"reflect"
 	"slices"
 	"time"
 
@@ -47,6 +48,12 @@ func (s State) Held(run core.RunID, placement string) int {
 func (s State) RunEnded(run core.RunID) bool {
 	_, ok := slices.BinarySearch(s.endedRuns, run)
 	return ok
+}
+
+// Equal says whether two states hold the same allocations, numbering and ended runs. The shell asks
+// it of the state before a step and after, to keep only the inputs that changed something.
+func (s State) Equal(o State) bool {
+	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && reflect.DeepEqual(s.Allocations(), o.Allocations())
 }
 
 func (s State) index(id ID) int {

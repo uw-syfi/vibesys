@@ -69,6 +69,10 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if err := resolved(scope); err != nil {
 		return core.SubmitOutcome{}, err
 	}
+	// Before anything is built: an allocation that cannot take the job refuses it at the door.
+	if err := a.precheckAllocation(req); err != nil {
+		return core.SubmitOutcome{}, err
+	}
 	// A submission that cannot be keyed, such as one for a task its commit does not have, makes no
 	// store. Only a submission that can be queued does.
 	sub := core.Submission{Context: req.Context, Spec: req.Spec, NoCache: req.NoCache, Plan: link.Plan()}
@@ -113,8 +117,22 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
 		event = a.admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job)
 	}
+	// A job stored into an allocation is the allocation machine's to place once the job machine
+	// holds it. Until it has been handed over, no look at the jobs takes it for one nobody placed.
+	jobRef := lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}
+	inAllocation := req.Spec.Allocation != "" && out.Disposition == core.SubmitCreated && out.Job.State == core.JobQueued
+	if inAllocation {
+		a.alloc.expect(jobRef)
+	}
 	// Settled, so a returned submission is in Status, even while recovery waits.
 	err = a.settleEffect(ctx, message{event: event, readiness: readiness, scope: &scope, changed: true})
+	if inAllocation {
+		if err != nil {
+			a.alloc.met(jobRef)
+		} else if refused := a.submitIntoAllocation(ctx, req, jobRef, out.Job); refused != nil {
+			return core.SubmitOutcome{}, refused
+		}
+	}
 	// The store has accepted the job. Closing only prevents this App from
 	// observing it; the next App recovers it. Do not invite a duplicate retry.
 	if errors.Is(err, context.Canceled) && a.ctx.Err() != nil {

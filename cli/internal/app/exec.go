@@ -311,7 +311,7 @@ func (a *App) launch(ctx context.Context, r lifecycle.LaunchRequest, scope core.
 		return
 	}
 	t := &taken{ref: ref, leases: held}
-	h, gone, err := a.prepare(ctx, ref, r.Placement, scope)
+	h, gone, err := a.prepare(ctx, ref, r.Placement, r.Allocation, scope)
 	posted := false
 	switch {
 	case ctx.Err() != nil:
@@ -332,9 +332,10 @@ func (a *App) launch(ctx context.Context, r lifecycle.LaunchRequest, scope core.
 
 // prepare does the steps of a launch up to and including recording the job as running, on the
 // placement the scheduler started it on. gone says the job is not queued any more, so there is
-// nothing to launch. A failure can leave a parked supervisor, which the handle reaches and the job's
+// nothing to launch. allocation is the backend's reference for the standing allocation the job runs
+// inside, empty for a job that is not in one. A failure can leave a parked supervisor, which the handle reaches and the job's
 // end releases.
-func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, scope core.Scope) (h supervisor.Handle, gone bool, err error) {
+func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement, allocation string, scope core.Scope) (h supervisor.Handle, gone bool, err error) {
 	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return nil, false, storeError{err}
@@ -384,7 +385,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, 
 	if err != nil {
 		return nil, false, storeError{err}
 	}
-	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec, OutputBase: base}
+	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec, OutputBase: base, Allocation: allocation}
 	if spec.Settings.Kind() != core.JobCommand {
 		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
 		if err != nil {

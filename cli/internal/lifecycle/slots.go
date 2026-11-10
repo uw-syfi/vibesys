@@ -60,3 +60,16 @@ func (s State) Slots() []SlotView {
 	}
 	return out
 }
+
+// AllocationWaiting returns the jobs submitted into a standing allocation that wait for the
+// allocation machine to decide where they run (AllocReleased), in the order the machine heard of
+// them.
+func (s State) AllocationWaiting() []Ref {
+	var out []Ref
+	for _, e := range s.entries {
+		if e.phase == PhaseQueued && e.heldForAllocation() {
+			out = append(out, e.ref)
+		}
+	}
+	return out
+}

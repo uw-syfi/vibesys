@@ -171,6 +171,7 @@ var rules = map[string][]string{
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
+		"internal/alloc", "internal/environment/localalloc",
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/gitrepo",
 		"internal/lease", "internal/lifecycle", "internal/owned", "internal/schedule", "internal/store", "internal/supervisor",
 		"internal/task",
@@ -295,6 +296,7 @@ var testRules = map[string][]string{
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/app": {
+		"internal/alloc", "internal/environment/fakealloc", "internal/store/memstore",
 		"internal/app/filestores", "internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv",
 		"internal/hostfs", "internal/store/filestore", "internal/store/filestore/fsys", "internal/store/storetest", "internal/task/tasktest",
 		"internal/lease/fakelease",
