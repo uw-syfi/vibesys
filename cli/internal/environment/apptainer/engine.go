@@ -187,6 +187,48 @@ type Engine struct {
 	mu      sync.Mutex
 	boxes   map[string]*box // the containers this engine started, by name
 	reading *Reading        // the last node this process read
+	// survivors are the boxes of standing allocations whose processes a kill did not confirm gone,
+	// by job and box name.
+	survivors map[string]Survivor
+}
+
+// ErrSurvivors is what a kill of the processes of a container in a standing allocation wraps when it
+// was not confirmed: the processes may still run in the allocation, beside the next job's. The error
+// of Engine.Remove wraps it, and TakeSurvivors names each such box, so that a caller that can release
+// the allocation (the daemon, through its Allocator) tests errors.Is(err, apptainer.ErrSurvivors) and
+// does so, and no job runs beside the survivors.
+var ErrSurvivors = errors.New("apptainer: processes of a container may survive in its standing allocation")
+
+// Survivor is a box of a standing allocation whose processes were not confirmed killed.
+type Survivor struct {
+	// Job is the batch job of the allocation (alloc.Handle.Ref) and Box the container's name.
+	Job, Box string
+	Err      error // the failed kill, wrapping ErrSurvivors
+}
+
+// TakeSurvivors returns the boxes whose kill failed and was not made good since, and forgets them.
+func (e *Engine) TakeSurvivors() []Survivor {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := slices.SortedFunc(maps.Values(e.survivors), func(a, b Survivor) int { return strings.Compare(a.Job+"/"+a.Box, b.Job+"/"+b.Box) })
+	e.survivors = map[string]Survivor{}
+	return out
+}
+
+// reap kills the processes of the box of a standing allocation, confirmed, and records the box as a
+// survivor when it was not.
+func (e *Engine) reap(ctx context.Context, b *box) error {
+	err := e.cfg.Cluster.Node(b.job).Reap(ctx, b.name)
+	key := b.job + "/" + b.name
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil {
+		delete(e.survivors, key)
+		return nil
+	}
+	err = fmt.Errorf("%w: killing the processes of %s: %w", ErrSurvivors, b.name, err)
+	e.survivors[key] = Survivor{Job: b.job, Box: b.name, Err: err}
+	return err
 }
 
 var _ docker.Engine = (*Engine)(nil)
@@ -257,7 +299,7 @@ func New(cfg Config) (*Engine, error) {
 	case !path.IsAbs(cfg.LocalDir) || path.Clean(cfg.LocalDir) == "/":
 		return nil, invalid("the local conversion directory %q is not an absolute directory other than /", cfg.LocalDir)
 	}
-	return &Engine{cfg: cfg, boxes: map[string]*box{}}, nil
+	return &Engine{cfg: cfg, boxes: map[string]*box{}, survivors: map[string]Survivor{}}, nil
 }
 
 // JobName is the name of the allocation of the container with the name.
@@ -424,8 +466,8 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	}
 	if b != nil && b.standing {
 		// The allocation is the run's: the box's processes are killed, confirmed, and it runs on.
-		if err := e.cfg.Cluster.Node(b.job).Reap(ctx, name); err != nil {
-			return fmt.Errorf("killing the processes of %s: %w", name, err)
+		if err := e.reap(ctx, b); err != nil {
+			return err
 		}
 		e.forget(b)
 		return nil
@@ -1237,7 +1279,8 @@ func (h *handle) Close() {
 		case h.b.standing:
 			// The allocation is the run's, and stays: only the box's processes end.
 			ctx, stop := clock.Deadline(context.Background(), h.e.cfg.Timers, CallTimeout)
-			_ = h.node.Reap(ctx, h.b.name)
+			// A failure is kept by the engine (TakeSurvivors), where the caller of Close reads it.
+			_ = h.e.reap(ctx, h.b)
 			stop()
 		case owner:
 			if hold != nil {
