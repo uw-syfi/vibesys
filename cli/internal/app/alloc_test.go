@@ -352,3 +352,30 @@ func TestALocalSlotIsNotClaimedTwice(t *testing.T) {
 	}
 	awaitState(t, a, outside.ID, core.JobSucceeded)
 }
+
+// hangingLog is an allocation log whose reads end only with their context, as a log on a file
+// system that stopped answering does.
+type hangingLog struct{ memstore.AllocLog }
+
+func (*hangingLog) Load(ctx context.Context) ([]alloc.Input, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A daemon whose allocation log never answers fails to start, as one whose stores never do fails the
+// call: the read of the log is bounded, and the start says what it could not read. Before, the
+// start waited for the log for as long as the file system hung.
+func TestADaemonStartFailsWhenItsAllocationLogNeverAnswers(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	// Every wait of up to two hours ends at once, the bound of a call among them.
+	r.w.timers = clock.Immediate{Longest: 2 * time.Hour}
+	r.w.allocations.Log = &hangingLog{}
+	a, err := r.w.tryNewApp()
+	if err == nil {
+		t.Fatal("the daemon started over an allocation log that never answers")
+	}
+	if !strings.Contains(err.Error(), "allocation log") {
+		t.Fatalf("Start failed with %q, want it to name the allocation log", err)
+	}
+	a.Close()
+}

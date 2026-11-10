@@ -110,6 +110,16 @@ func (w *world) supervisors() supervisor.Supervisors {
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.
 func (w *world) newApp() *app.App {
 	w.t.Helper()
+	a, err := w.tryNewApp()
+	if err != nil {
+		w.t.Fatalf("Start: %v", err)
+	}
+	return a
+}
+
+// tryNewApp is newApp that returns the error the daemon could not start with.
+func (w *world) tryNewApp() (*app.App, error) {
+	w.t.Helper()
 	var branches gitrepo.Branches
 	if w.branches != nil {
 		branches = w.branches
@@ -135,10 +145,7 @@ func (w *world) newApp() *app.App {
 	}
 	a := app.New(cfg)
 	w.apps = append(w.apps, a)
-	if err := a.Start(context.Background()); err != nil {
-		w.t.Fatalf("Start: %v", err)
-	}
-	return a
+	return a, a.Start(context.Background())
 }
 
 // instant makes every wait of a retry end at once, so a test sees the retries and not their pace,

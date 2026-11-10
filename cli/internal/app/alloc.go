@@ -263,9 +263,13 @@ func (s *allocShell) poke() { s.post(allocMsg{observeAll: true}) }
 func (s *allocShell) start(ctx context.Context) error {
 	var inputs []alloc.Input
 	err := s.app.retry(ctx, func(ctx context.Context) error {
-		var err error
-		inputs, err = s.conf.Log.Load(ctx)
-		return err
+		// A log that never answers fails the start, as a store that never does fails a call; the
+		// retry gives it its attempts, each bounded.
+		return s.bounded(ctx, func(ctx context.Context) error {
+			var err error
+			inputs, err = s.conf.Log.Load(ctx)
+			return err
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("reading the allocation log: %w", err)
