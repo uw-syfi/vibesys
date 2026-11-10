@@ -177,6 +177,16 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 				a.Phase = p
 			}
 		}
+	case ProcessesLeft:
+		if a := st.find(e.ID); a != nil && (a.Stage() == StageRunning || a.Stage() == StageDraining) {
+			// The job that reported them is done in it: it is not lost with the allocation.
+			st.withLive(a, func(l *Live) {
+				if l.Current != nil && l.Current.Job == e.Job {
+					l.Current = nil
+				}
+			})
+			st.end(a, EndExternal)
+		}
 	case Tick:
 		st.retry()
 	case DaemonStarted:

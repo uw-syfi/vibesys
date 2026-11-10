@@ -27,6 +27,7 @@ import (
 	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/slurm"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
@@ -64,6 +65,21 @@ type clusterSide struct {
 	QueueTimeout time.Duration
 	// Clock is the time the placement's allocator reads.
 	Clock clock.Clock
+	// Survivors takes the boxes of standing allocations whose processes the placement's engine
+	// did not confirm killed (apptainer.Engine.TakeSurvivors).
+	Survivors func() []apptainer.Survivor
+}
+
+// processesLeft takes, of every apptainer placement's engine, the standing allocations where
+// processes of a container were not confirmed killed: supervisor.Config.ProcessesLeft.
+func (m machines) processesLeft() []lifecycle.ProcessesLeft {
+	var out []lifecycle.ProcessesLeft
+	for _, name := range slices.Sorted(maps.Keys(m.clusters)) {
+		for _, s := range m.clusters[name].Survivors() {
+			out = append(out, lifecycle.ProcessesLeft{Allocation: s.Job, Detail: s.Err.Error()})
+		}
+	}
+	return out
 }
 
 // machineEnvironments are the environments this machine has: the host, and docker on each
@@ -372,6 +388,7 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	return provider, &clusterSide{
 		Cluster: cluster, Scope: scope, Sizing: sizing, MaxTime: seconds(s.GetMaxTimeSeconds(), 0), Partition: s.GetPartition(),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout), Clock: clk,
+		Survivors: eng.TakeSurvivors,
 	}, nil
 }
 

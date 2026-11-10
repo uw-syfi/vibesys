@@ -33,13 +33,18 @@ type Host struct {
 }
 
 // Config is what a Supervisor needs. Every field is required, except Host for a launch that has
-// no plan.
+// no plan, and ProcessesLeft.
 type Config struct {
 	Launch       lifecycle.Launch
 	Environments environment.Environments
 	Checkouts    Checkouts
 	Spool        Spool
 	Host         Host
+	// ProcessesLeft, when set, takes the standing allocations where processes of a container the
+	// environments ran were not confirmed killed (apptainer.Engine.TakeSurvivors). It is called
+	// once the command is done, and the outcome carries what it returns to the daemon, which ends
+	// and releases each allocation, so no later job runs beside the processes.
+	ProcessesLeft func() []lifecycle.ProcessesLeft
 }
 
 // Supervisor runs one job's command and keeps what the daemon needs to learn about it. Create it
@@ -195,6 +200,9 @@ func (s *Supervisor) Attach(ctx context.Context, offset uint64, emit func(offset
 func (s *Supervisor) run() {
 	defer close(s.done)
 	outcome := s.execute()
+	if s.cfg.ProcessesLeft != nil {
+		outcome.ProcessesLeft = s.cfg.ProcessesLeft()
+	}
 	s.mu.Lock()
 	outcome.CancelAsked, outcome.CancelReason = s.cancelAsked, s.cancelReason
 	s.outcome = outcome

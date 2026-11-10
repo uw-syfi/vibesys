@@ -191,6 +191,16 @@ func (g *gen) next(s alloc.State, now time.Time) (time.Duration, alloc.Event) {
 		if g.c.IntN(4) == 0 {
 			return pass, alloc.RunEnded{Run: pick(g.c, runs...)}
 		}
+	case 35:
+		// Mostly reported by the end of the job that runs in it, before its JobFinished.
+		id := g.id(s)
+		job := g.job(s)
+		if a, ok := s.Get(id); ok {
+			if l, ok := liveOf(a); ok && l.Current != nil && g.c.IntN(4) != 0 {
+				job = l.Current.Job
+			}
+		}
+		return pass, alloc.ProcessesLeft{ID: id, Job: job}
 	}
 	return pass, alloc.Tick{}
 }
@@ -411,7 +421,15 @@ func TestTheGeneratorReachesEveryKindOfStep(t *testing.T) {
 		var s alloc.State
 		for _, in := range log {
 			var actions []alloc.Action
+			before := s
 			s, actions = alloc.Step(s, config, in.At, in.Event)
+			if e, ok := in.Event.(alloc.ProcessesLeft); ok {
+				if a, ok := before.Get(e.ID); ok && a.Stage() == alloc.StageRunning {
+					if l, _ := liveOf(a); l.Current != nil && l.Current.Job == e.Job {
+						seen["processes left by the running job"] = true
+					}
+				}
+			}
 			for _, a := range actions {
 				seen[fmt.Sprintf("%T", a)] = true
 			}
@@ -429,6 +447,7 @@ func TestTheGeneratorReachesEveryKindOfStep(t *testing.T) {
 	for _, want := range []string{
 		"alloc.Submit", "alloc.Release", "alloc.StartJob", "alloc.LoseJob", "alloc.DropJob", "alloc.NotPlaced",
 		"alloc.RecordWait", "alloc.Refuse", "draining", "renewed", "skipped: max_held reached",
+		"processes left by the running job",
 	} {
 		if !seen[want] {
 			t.Errorf("no history reached %s", want)

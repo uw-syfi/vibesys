@@ -53,6 +53,8 @@ func FromAllocationInput(in alloc.Input) (*cliv1.AllocationInput, error) {
 		out.Event = &cliv1.AllocationInput_Unreachable{Unreachable: &cliv1.AllocationUnreachable{Id: string(e.ID), Detail: e.Detail}}
 	case alloc.Released:
 		out.Event = &cliv1.AllocationInput_Released{Released: &cliv1.AllocationReleased{Id: string(e.ID)}}
+	case alloc.ProcessesLeft:
+		out.Event = &cliv1.AllocationInput_ProcessesLeft{ProcessesLeft: &cliv1.AllocationProcessesLeft{Id: string(e.ID), Job: string(e.Job)}}
 	case alloc.Tick:
 		out.Event = &cliv1.AllocationInput_Tick{Tick: &cliv1.AllocationTick{}}
 	case alloc.DaemonStarted:
@@ -151,6 +153,8 @@ func ToAllocationInput(m *cliv1.AllocationInput) (alloc.Input, error) {
 		in.Event = alloc.Unreachable{ID: alloc.ID(e.Unreachable.GetId()), Detail: e.Unreachable.GetDetail()}
 	case *cliv1.AllocationInput_Released:
 		in.Event = alloc.Released{ID: alloc.ID(e.Released.GetId())}
+	case *cliv1.AllocationInput_ProcessesLeft:
+		in.Event = alloc.ProcessesLeft{ID: alloc.ID(e.ProcessesLeft.GetId()), Job: core.JobID(e.ProcessesLeft.GetJob())}
 	case *cliv1.AllocationInput_Tick:
 		in.Event = alloc.Tick{}
 	case *cliv1.AllocationInput_DaemonStarted:

@@ -37,6 +37,7 @@ func everyInput() []alloc.Input {
 		alloc.Observed{ID: "a1", Seen: alloc.SeenEnded{Cause: alloc.EndedOtherwise}},
 		alloc.Unreachable{ID: "a1", Detail: "ssh: timed out"},
 		alloc.Released{ID: "a1"},
+		alloc.ProcessesLeft{ID: "a1", Job: "ab12-j3"},
 		alloc.Tick{},
 		alloc.DaemonStarted{Config: alloc.Config{Placements: map[string]alloc.Limits{
 			"p": {MaxHeld: 2, MaxFor: 24 * time.Hour, Margin: 2 * time.Minute, QueueTimeout: time.Hour, RunIdleEnd: 2 * time.Hour},

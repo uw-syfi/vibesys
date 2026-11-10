@@ -35,6 +35,7 @@ message AllocationInput {
     AllocationTick tick = 15;
     AllocationDaemonStarted daemon_started = 16;
     AllocationRunSeen run_seen = 17;
+    AllocationProcessesLeft processes_left = 18;
   }
 }
 
@@ -150,6 +151,13 @@ message AllocationReleased {
 }
 
 message AllocationTick {}
+
+// AllocationProcessesLeft is a job's end reporting that processes in the allocation were not
+// confirmed killed: the allocation ends, EXTERNAL, and is released, and the job is done in it.
+message AllocationProcessesLeft {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  string job = 2 [(buf.validate.field).string.min_len = 1];
+}
 
 // AllocationDaemonStarted is the daemon starting with its operator config: the limits of each
 // placement that offers standing allocations then. Every input after it, until the next one, is

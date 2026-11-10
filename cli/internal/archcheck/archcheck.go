@@ -198,7 +198,7 @@ var rules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
 		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
-		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
+		"internal/gitwork", "internal/hostfs", "internal/lifecycle", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
 		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",

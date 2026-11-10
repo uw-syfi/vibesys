@@ -52,6 +52,17 @@ type Outcome struct {
 	// reports how it ended.
 	CancelAsked  bool
 	CancelReason string
+	// ProcessesLeft are the standing allocations where processes of a container the supervisor
+	// ran were not confirmed killed and may still run. The daemon ends and releases each, so no
+	// later job runs beside them; how the job itself ended is End alone.
+	ProcessesLeft []ProcessesLeft
+}
+
+// ProcessesLeft names a standing allocation, by the backend's reference that Launch.Allocation
+// gives, where processes may survive a container's removal, and what the failed kill said.
+type ProcessesLeft struct {
+	Allocation string
+	Detail     string
 }
 
 // End is how a job ended, and its variant is the job's kind: a command job ends in CommandEnded

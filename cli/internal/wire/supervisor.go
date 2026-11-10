@@ -65,6 +65,9 @@ func Outcome(o lifecycle.Outcome) *cliv1.SupervisorOutcome {
 		reason := o.CancelReason
 		out.CancelReason = &reason
 	}
+	for _, p := range o.ProcessesLeft {
+		out.ProcessesLeft = append(out.ProcessesLeft, &cliv1.ProcessesLeft{Allocation: p.Allocation, Detail: p.Detail})
+	}
 	return out
 }
 
@@ -133,6 +136,9 @@ func ToOutcome(o *cliv1.SupervisorOutcome) lifecycle.Outcome {
 	default:
 		// No end, or one of the members that are not sent: which kind of job it is cannot be
 		// told, and Settle reads a missing end as lost.
+	}
+	for _, p := range o.GetProcessesLeft() {
+		out.ProcessesLeft = append(out.ProcessesLeft, lifecycle.ProcessesLeft{Allocation: p.GetAllocation(), Detail: p.GetDetail()})
 	}
 	return out
 }

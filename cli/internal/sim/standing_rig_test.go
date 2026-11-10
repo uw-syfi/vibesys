@@ -171,7 +171,7 @@ func (r *standingRig) startAs(machine, runtime string) (*app.App, *daemon.Server
 	}
 	a := app.New(app.Config{
 		Clock: r.clock, Timers: r.timers, Stores: r.stores, Environments: wired.Environments,
-		Supervisors:  supervisor.NewInProcess(wired.Environments, r.checkouts, r.survivors).WithHost(supervisor.Host{Files: hostfs.NewMemory(), Clock: r.clock}),
+		Supervisors:  supervisor.NewInProcess(wired.Environments, r.checkouts, r.survivors).WithHost(supervisor.Host{Files: hostfs.NewMemory(), Clock: r.clock}).WithProcessesLeft(wired.ProcessesLeft),
 		Tasks:        r.tasks,
 		Repositories: r.repos, Scheduler: wired.Scheduler, Placements: wired.Placements, Allocations: wired.Allocations,
 		Retry:       app.Retry{Attempts: 4, First: time.Millisecond, Longest: time.Millisecond},

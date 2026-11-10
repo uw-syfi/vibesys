@@ -127,6 +127,7 @@ func allocInputs(n int) []alloc.Input {
 		alloc.Released{ID: "a1"},
 		alloc.RunEnded{Run: "run-a"},
 		alloc.RunSeen{Run: "run-a", At: base},
+		alloc.ProcessesLeft{ID: "a1", Job: "s1-j1"},
 		alloc.Tick{},
 		alloc.DaemonStarted{Config: alloc.Config{Placements: map[string]alloc.Limits{
 			"p": {MaxHeld: 2, MaxFor: 24 * time.Hour, Margin: 2 * time.Minute, QueueTimeout: time.Hour, RunIdleEnd: 2 * time.Hour},

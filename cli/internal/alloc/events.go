@@ -114,6 +114,17 @@ type Released struct{ ID ID }
 // allocations of ends at once, EndExternal, and is released. It is a fact, never refused.
 type DaemonStarted struct{ Config Config }
 
+// ProcessesLeft is a job's end reporting that processes in a standing allocation were not
+// confirmed killed: they may still run there, beside the next job. A Running or Draining
+// allocation ends at once, EndExternal, and is released, so no job runs beside them: the jobs that
+// wait in it are given up as when it ends otherwise, and a running one is lost, but Job, the job
+// whose end reported them, is done and not lost. It is a fact, never refused, and changes nothing
+// for an allocation that is pending or has ended.
+type ProcessesLeft struct {
+	ID  ID
+	Job core.JobID
+}
+
 // Tick is time passing with nothing else happening. The shell sends one now and then, so what is
 // decided by time (renewals) is decided, and a Submit or Release that may not have arrived is asked
 // for again.
@@ -133,5 +144,6 @@ func (SubmitRefused) event() {}
 func (Observed) event()      {}
 func (Unreachable) event()   {}
 func (Released) event()      {}
+func (ProcessesLeft) event() {}
 func (Tick) event()          {}
 func (DaemonStarted) event() {}

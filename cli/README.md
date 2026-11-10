@@ -1032,7 +1032,11 @@ keyed by the machine and the runtime directory as its run records are, so daemon
 never share them. The log records the limits each start ran under, and replays every decision under
 them, so changing `max_held`, `max_for` or `fit_margin` changes nothing already decided. A daemon
 started without an allocations section that a placement had ends that placement's allocations
-(`EXTERNAL`) and cancels what its cluster still holds of them. Only changes of what an allocation is
+(`EXTERNAL`) and cancels what its cluster still holds of them. When a job's container leaves a
+standing allocation and its processes there cannot be confirmed killed, the job's supervisor says so
+in the job's outcome, and the daemon ends that allocation (`EXTERNAL`) and cancels its batch job before
+the next job could start in it: the jobs queued in it are given up as when it ends otherwise, so no job
+runs beside the processes. Only changes of what an allocation is
 are logged: why a pending one waits and when Slurm expects it to start are shown by `alloc show` and
 kept in memory. This needs protocol 6.
 

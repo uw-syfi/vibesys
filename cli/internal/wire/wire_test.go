@@ -296,6 +296,12 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 		if r.IntN(2) == 0 {
 			o.CancelAsked, o.CancelReason = true, pick(r, "", "stop")
 		}
+		for range r.IntN(3) {
+			o.ProcessesLeft = append(o.ProcessesLeft, lifecycle.ProcessesLeft{Allocation: pick(r, "4242", "4243"), Detail: pick(r, "", "reap: timed out")})
+		}
+		if err := wire.Validate(wire.Outcome(o)); err != nil {
+			t.Fatalf("outcome %+v breaks the contract: %v", o, err)
+		}
 		if got := wire.ToOutcome(wire.Outcome(o)); !reflect.DeepEqual(got, o) {
 			t.Fatalf("outcome came back changed: got %+v, want %+v", got, o)
 		}

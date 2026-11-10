@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
@@ -234,6 +235,10 @@ type Wired struct {
 	Allocations app.Allocations
 	// Capacities measure the placements whose capacity is a cluster's.
 	Capacities map[string]daemon.Capacity
+	// ProcessesLeft takes what the environments' standing allocations hold of processes not
+	// confirmed killed: a supervisor that runs jobs in Environments is given it
+	// (supervisor.Config.ProcessesLeft). The daemon's own runs no container.
+	ProcessesLeft func() []lifecycle.ProcessesLeft
 
 	claims map[string][]core.Claim
 	probes map[string]app.Placement
@@ -265,6 +270,7 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 	return Wired{
 		Environments: machines.environments, Placements: machines.offers, Scheduler: scheduler, Allocations: allocations,
 		Capacities: capacitiesOf(machines.clusters), claims: machines.claims, probes: machines.probes,
+		ProcessesLeft: machines.processesLeft,
 	}, nil
 }
 
@@ -343,6 +349,9 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 		Checkouts:     gitwork.Checkouts{},
 		Host:          supervisor.Host{Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir},
 		BinaryVersion: p.Version,
+		// Each supervisor runs one job: what its engines hold of processes not confirmed killed
+		// was left by its job, and the outcome tells the daemon, which releases the allocation.
+		ProcessesLeft: machines.processesLeft,
 	}, ready)
 }
 

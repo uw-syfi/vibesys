@@ -91,6 +91,13 @@ type allocMsg struct {
 	cancelled *lifecycle.Ref
 	// cancelAsk is a job that is to be cancelled, with the reason.
 	cancelAsk *cancelAsk
+	// left is a job's end reporting processes left in a standing allocation.
+	left *processesLeft
+}
+
+type processesLeft struct {
+	job  lifecycle.Ref
+	left lifecycle.ProcessesLeft
 }
 
 type cancelAsk struct {
@@ -254,6 +261,12 @@ func (s *allocShell) noteJob(e lifecycle.Event) {
 	switch e := e.(type) {
 	case lifecycle.Launched:
 		s.post(allocMsg{event: alloc.JobStarted{Job: jobOfRef(e.Ref)}})
+	case lifecycle.Finished:
+		// Before the job's Closed: the allocation ends before the job's end could start the next
+		// job in it, beside the processes.
+		for _, p := range e.Outcome.ProcessesLeft {
+			s.post(allocMsg{left: &processesLeft{job: e.Ref, left: p}})
+		}
 	case lifecycle.Closed:
 		s.post(allocMsg{event: alloc.JobFinished{Job: jobOfRef(e.Ref)}})
 	default:
@@ -434,6 +447,9 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 	}
 	if m.adopted != nil {
 		s.adoptedBy(ctx, *m.adopted)
+	}
+	if m.left != nil {
+		s.endLeft(ctx, *m.left)
 	}
 	if m.event == nil {
 		return
@@ -850,6 +866,34 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 		if !s.inflight["submit "+string(al.ID)] && s.submitDone[al.ID] <= found.issued {
 			s.apply(ctx, allocMsg{event: alloc.Released{ID: al.ID}})
 		}
+	}
+}
+
+// endLeft ends the started allocations whose backend reference names one where a job left
+// processes that may still run, so that no next job runs beside them: the one that runs the job,
+// or, when none does, every one of that reference.
+func (s *allocShell) endLeft(ctx context.Context, p processesLeft) {
+	job := jobOfRef(p.job)
+	var ids []alloc.ID
+	for _, al := range s.state.Allocations() {
+		l, ok := liveOf(al)
+		if !ok || al.Handle.Ref != p.left.Allocation {
+			continue
+		}
+		if l.Current != nil && l.Current.Job == job {
+			ids = []alloc.ID{al.ID}
+			break
+		}
+		ids = append(ids, al.ID)
+	}
+	if len(ids) == 0 {
+		s.app.cfg.Logf("job %s left processes in %s, which no started allocation is: %s", p.job, p.left.Allocation, p.left.Detail)
+		return
+	}
+	for _, id := range ids {
+		s.app.cfg.Logf("allocation %s (%s) ends and is released: job %s left processes in it that may still run, and no job runs beside them: %s",
+			id, p.left.Allocation, p.job, p.left.Detail)
+		s.apply(ctx, allocMsg{event: alloc.ProcessesLeft{ID: id, Job: job}})
 	}
 }
 
