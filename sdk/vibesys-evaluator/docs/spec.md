@@ -153,7 +153,7 @@ phase primitives (`microservices.Run` adds `closed_loop`, `open_loop` and
 `fault`).
 The core's `main` is enough for a domain whose phases are plain functions
 (`llm_serving`). A domain's `main` has its own command line: the
-microservices script's commands are `benchmark`, `accuracy`, `phase`,
+microservices script's commands are `benchmark`, `accuracy`, `trace`, `phase`,
 `generate` and `accuracy-workload generate` (the generators', see "Generator
 command line"), `seed` and `ctl`.
 
@@ -249,7 +249,7 @@ Listing: [`api/public-api.txt`](../api/public-api.txt).
 | Module | Names |
 | --- | --- |
 | `vibesys_evaluator` | `main`, `Run`, `Metric`, `Validity`, `Rand` |
-| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref`, `Accuracy`, `Fault` |
+| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref`, `Accuracy`, `Fault`, `Trace` |
 | `vibesys_evaluator.microservices.k8s` | `App`, `attach`, `Deployment`, `ExecResult`, `ReplacedPod` |
 | `vibesys_evaluator.llm_serving` | `endpoint` |
 | `vibesys_evaluator.llm_serving.agentx` | `replay`, `METRICS`, `HARNESS_VERSION` |
@@ -295,9 +295,15 @@ The microservices names:
   `command + ["generate", ...]` ("Generator command line");
   `microservices.main(workload=Generator([...]))`.
 - `main(dataset, system, workload, benchmark, metrics, validity, capture,
-  accuracy)`. `capture=True` records the accuracy history; benchmarks leave
+  accuracy, trace)`. `capture=True` records the accuracy history; benchmarks leave
   it off. `accuracy` is the task's accuracy check, `bench.py accuracy`
-  ("Accuracy run").
+  ("Accuracy run"). `trace` is the task's trace, `bench.py trace` ("Trace
+  run").
+- `Trace(body, sampler_ratio=1.0, deployments=None, settle_secs=5)`: the
+  trace's load (`body(run)`, phases as a benchmark function runs them, with
+  no report), the fraction of traces sampled, the Deployments instrumented
+  (None: the `k8s.App`'s `restartable`), and how long the collector is given
+  after the last phase.
 - `Accuracy(phases, rate, secs, oracle, warmup, arrivals, faults)`: the
   check's open-loop phases, the oracle's command (a program on
   `check.Main`; a relative path is the task script's directory's), and the
@@ -494,6 +500,46 @@ that failed, a signal), with `UNKNOWN: the accuracy run did not complete:
 timelines and the history. The Go `--history DIR` judges a history again
 without running. The Python wrapper drives the core's `accuracy run`.
 
+### Trace run
+
+Where a request's time goes, hop by hop, is a trace's to show; benchmarks
+and accuracy checks never trace. A task opts in with
+`main(trace=Trace(body=...))`, and vibesys-cli's `trace` job runs:
+
+```text
+bench.py trace [--project-root DIR] [--out DIR] [--seed N]
+```
+
+1. The sample starts in the core's `trace` mode (no records; never scored)
+   and the application is deployed and seeded as for a benchmark sample.
+2. `stitch capture otel-k8s start` deploys an OpenTelemetry collector into
+   the sample's namespace and points the traced Deployments
+   (`Trace(deployments=)`, else the `k8s.App`'s `restartable`; never the
+   data tier) at it, sampling `sampler_ratio` of the traces, and waits for
+   their rollouts (bounded by `k8s.App(wait_secs)`).
+3. `body(run)` runs its phases. A phase that is not a measurement is logged
+   and returned all the same; `run.report` is refused.
+4. `stitch capture otel-k8s collect` takes the spans of each phase's window
+   on loadgen's clock, padded by 1 s each side and labelled `phase-N`, after
+   `settle_secs`; `stitch ingest` builds the graph; the raw spans are
+   gzipped; `stitch render` writes the reports.
+5. The application is torn down on every path.
+
+`OUT` (default `trace/` in `$VIBESYS_ARTIFACTS_DIR`) holds stitch's
+`README.txt`, `report.txt`, `report.json`, `tree.txt`, `critical-path.txt`,
+`waterfall.txt` and `graph-summary.json`, the graph (`graph.json`), what
+`start` printed (`start.json`), the capture (`capture/manifest.json`,
+`capture/otel.jsonl.gz`) and `stitch.log` (every stitch command, its output
+and exit status). The exit status is 0 with the reports, 1 when a step
+failed (the deploy, a stitch command, or the body, whose phases are still
+collected): what the earlier steps wrote is kept and `README.txt` starts
+with the reason; 2 when the task has no trace or nothing to instrument.
+stitch is found like the core's binaries (`$VIBESYS_EVALUATOR_STITCH`, then
+`PATH`); the wheels do not bundle it yet.
+
+The trace is one-sided: Python only. The Go `microservices.Main` has no
+`trace` command yet.
+
 ## Core command line (`vibesys-evaluator`)
 
 The Go module's `cmd/vibesys-evaluator` is the core the language SDKs wrap, one
@@ -523,7 +569,7 @@ The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`, and
 | Verb | What it does |
 |---|---|
 | `core version` | what this build implements |
-| `sample start` | resolve the sample seed (`--seed`, `$VIBESYS_SAMPLE_SEED`, else drawn) and the artifacts directory; write `seeds.json` |
+| `sample start` | start a `check`, `benchmark`, `profile` or `trace` sample: resolve the sample seed (`--seed`, `$VIBESYS_SAMPLE_SEED`, else drawn) and the artifacts directory; write `seeds.json` |
 | `sample phase` | create one phase's directory, `<artifacts>/<name>`, refusing a bad or repeated name |
 | `sample combine` | combine each metric's trials into the sample's value (median, mean, min, max, sum) |
 | `records write` | append one result-protocol-2 record (`hello`, `result` or `error`) to the `--vs-output` file, enforcing the protocol against what the file holds |

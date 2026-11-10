@@ -53,13 +53,18 @@ class vibesys_evaluator.microservices.Step  ()
 class vibesys_evaluator.microservices.Template  ()
 vibesys_evaluator.microservices.Template.__add__(other: str | Template) -> Template
 vibesys_evaluator.microservices.Template.__radd__(other: str) -> Template
+class vibesys_evaluator.microservices.Trace  (*, body: Callable[[Run], None], sampler_ratio: float = 1.0, deployments: Sequence[str] | None = None, settle_secs: float = 5.0) -> None
+vibesys_evaluator.microservices.Trace.body: Callable[[Run], None]
+vibesys_evaluator.microservices.Trace.deployments: Sequence[str] | None
+vibesys_evaluator.microservices.Trace.sampler_ratio: float
+vibesys_evaluator.microservices.Trace.settle_secs: float
 class vibesys_evaluator.microservices.Workload(Generic[D, M])  (*, model: Callable[[D, Rand], M], operations: Sequence[Operation[M]], begin_phase: Callable[[M, int], None] | None = None) -> None
 vibesys_evaluator.microservices.Workload.begin_phase: Callable[[M, int], None] | None
 vibesys_evaluator.microservices.Workload.model: Callable[[D, Rand], M]
 vibesys_evaluator.microservices.Workload.operations: Sequence[Operation[M]]
 vibesys_evaluator.microservices.get(path: str | Template, *, query: Mapping[str, str | Template] | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
 vibesys_evaluator.microservices.http(method: str, path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
-vibesys_evaluator.microservices.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M] | Generator, benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity | None = None, capture: bool = False, accuracy: Accuracy | None = None) -> NoReturn
+vibesys_evaluator.microservices.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M] | Generator, benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity | None = None, capture: bool = False, accuracy: Accuracy | None = None, trace: Trace | None = None) -> NoReturn
 vibesys_evaluator.microservices.post(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
 vibesys_evaluator.microservices.put(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
 vibesys_evaluator.microservices.ref(name: str) -> Template

@@ -11,8 +11,11 @@ the phases run in the Go core (``vibesys-evaluator phase``). A benchmark only
 measures: whether the responses are right is for the task's accuracy check
 (``main(accuracy=Accuracy(...))``, ``bench.py accuracy``) to judge: phases at
 a fixed rate with the whole history captured and ``Fault``s between them,
-judged by the task's oracle (the Go SDK's ``check``). The system under test is
-a ``microservices.k8s.App``. See the package's ``docs/spec.md``.
+judged by the task's oracle (the Go SDK's ``check``). Where the time goes,
+hop by hop, is for the task's trace (``main(trace=Trace(...))``, ``bench.py
+trace``): the same kind of phases with the application's OpenTelemetry spans
+captured and analysed by stitch. The system under test is a
+``microservices.k8s.App``. See the package's ``docs/spec.md``.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from vibesys_evaluator.microservices._private import entry
 from vibesys_evaluator.microservices._private.accuracy import Accuracy, Fault
 from vibesys_evaluator.microservices._private.results import PhaseResult
 from vibesys_evaluator.microservices._private.run import Run
+from vibesys_evaluator.microservices._private.trace import Trace
 from vibesys_evaluator.microservices._private.workload import Generator, Operation, Workload
 
 if TYPE_CHECKING:
@@ -46,6 +50,7 @@ __all__ = [
     "Run",
     "Step",
     "Template",
+    "Trace",
     "Workload",
     "get",
     "http",
@@ -66,8 +71,9 @@ def main(
     validity: Validity | None = None,
     capture: bool = False,
     accuracy: Accuracy | None = None,
+    trace: Trace | None = None,
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``accuracy``, ``phase``, ``generate``, ``accuracy-workload``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``benchmark``, ``accuracy``, ``trace``, ``phase``, ``generate``, ``accuracy-workload``, ``seed`` or ``ctl``) and exit.
 
     Args:
         dataset: Builds the initial data; a pure function of the task's constants.
@@ -86,6 +92,12 @@ def main(
             runs: phases with the history captured and faults between them,
             then the task's oracle; it exits 0 on PASS, 1 on FAIL and 2 on
             UNKNOWN (see ``docs/spec.md``, "Accuracy run").
+        trace: The task's trace, which ``bench.py trace`` runs: the system
+            deployed as for a benchmark, its Deployments instrumented with
+            OpenTelemetry, the trace's phases, and stitch's reports (call
+            tree, critical path, per-hop latency) in ``trace/`` of the
+            artifacts; it exits 0 with the reports, 1 when a step failed and
+            2 without a trace (see ``docs/spec.md``, "Trace run").
     """
     task = entry.Task(
         dataset=dataset,
@@ -96,6 +108,7 @@ def main(
         validity=validity if validity is not None else Validity(),
         capture=capture,
         accuracy=accuracy,
+        trace=trace,
     )
     entry.main(
         task,

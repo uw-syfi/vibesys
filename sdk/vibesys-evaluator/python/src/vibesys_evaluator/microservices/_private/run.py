@@ -50,6 +50,15 @@ class BenchmarkError(SampleError):
     """A phase is not a measurement; the message is the error record's."""
 
 
+@dataclass(frozen=True)
+class PhaseWindow:
+    """A phase's measurement window on loadgen's clock (the phase pod's), from its summary."""
+
+    name: str
+    start_unix_nanos: int
+    end_unix_nanos: int
+
+
 @dataclass(frozen=True, kw_only=True)
 class Load:
     """How one phase offers load."""
@@ -94,16 +103,23 @@ class PhaseDriver:
         validity: Validity,
         log: Callable[[str], None],
         capture: bool = False,
+        measured: bool = True,
         clock: Callable[[], int] = time.time_ns,
     ) -> None:
-        """Drive phases through ``runner``; their files go to the sample's phase directories."""
+        """Drive phases through ``runner``; their files go to the sample's phase directories.
+
+        ``measured``: a phase that is not a measurement ends the sample (a benchmark). Without it
+        (a trace) the reason is logged and the phase's result returned all the same.
+        """
         self._runner = runner
         self._sample = sample
         self._seed = sample.seed
         self._validity = validity
         self._log = log
         self._capture = capture
+        self._measured = measured
         self._clock = clock
+        self._windows: list[PhaseWindow] = []
         self._next_index = 0
         self._faults: list[phase_pb.FaultEvent] = []
         self._window_end = 0
@@ -120,6 +136,11 @@ class PhaseDriver:
             direction="max",
             unit="ops/s",
         )
+
+    @property
+    def windows(self) -> list[PhaseWindow]:
+        """The window of every phase that left a summary, in order (also of one that then failed)."""
+        return list(self._windows)
 
     def _fail(self, message: str) -> BenchmarkError:
         return BenchmarkError(message, partial=self.partial)
@@ -142,14 +163,19 @@ class PhaseDriver:
         name = f"phase-{index}"
         out_dir = self._sample.phase_dir(name)
         self._log(f"phase {index}: {load.describe()}")
-        self._runner.run_phase(
-            PhaseJob(
-                name=name,
-                phase_input=phase_input.to_binary(),
-                timeout_secs=load.warmup + load.secs + PHASE_OVERHEAD_SECS,
-            ),
-            out_dir,
-        )
+        try:
+            self._runner.run_phase(
+                PhaseJob(
+                    name=name,
+                    phase_input=phase_input.to_binary(),
+                    timeout_secs=load.warmup + load.secs + PHASE_OVERHEAD_SECS,
+                ),
+                out_dir,
+            )
+        finally:
+            start, end = _window(out_dir)
+            if 0 < start < end:
+                self._windows.append(PhaseWindow(name, start, end))
         if self._capture:
             self._write_history()
         verdict = core.call(
@@ -168,14 +194,16 @@ class PhaseDriver:
         for line in verdict.get("log", []):
             self._log(str(line))
         if verdict.get("failure"):
-            raise self._fail(str(verdict["failure"]))
+            if self._measured:
+                raise self._fail(str(verdict["failure"]))
+            self._log(f"{verdict['failure']} (not a measurement; it ran all the same)")
         measured = verdict.get("measurement") or {}
         result = PhaseResult(
             ops_per_sec=float(measured.get("ops_per_sec", 0.0)),
             p50_ms=float(measured.get("p50_ms", 0.0)),
             p99_ms=float(measured.get("p99_ms", 0.0)),
         )
-        self._window_end = _window_end(out_dir)
+        self._window_end = _window(out_dir)[1]
         self._last = result
         self._sample.partial = self.partial
         return result
@@ -222,13 +250,16 @@ class PhaseDriver:
         partial.replace(path)
 
 
-def _window_end(out_dir: Path) -> int:
-    """The end of a judged phase's window on loadgen's clock (0 when unknown)."""
+def _window(out_dir: Path) -> tuple[int, int]:
+    """The start and end of a phase's window on loadgen's clock (0 when unknown)."""
     try:
         output = read_message(out_dir / PHASE_OUTPUT_FILE, phase_pb.PhaseOutput)
     except SchemaFileError:
-        return 0
-    return output.summary.window_end_unix_nanos if output.summary is not None else 0
+        return 0, 0
+    summary = output.summary
+    if summary is None:
+        return 0, 0
+    return summary.window_start_unix_nanos, summary.window_end_unix_nanos
 
 
 class Run(vibesys_evaluator.Run):

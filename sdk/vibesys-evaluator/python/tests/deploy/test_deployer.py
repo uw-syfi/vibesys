@@ -29,6 +29,7 @@ from vibesys_evaluator.microservices._private.deploy import (
     PHASE_LOG_FILE,
     DeployContext,
     DeployError,
+    NamespacedRunner,
     PhaseJob,
     PhaseRunError,
     TaskCommand,
@@ -53,6 +54,15 @@ def context(tmp_path: Path, lines: list[str] | None = None) -> DeployContext:
 
 def job() -> PhaseJob:
     return PhaseJob(name="phase-0", phase_input=b"in", timeout_secs=300)
+
+
+def test_the_runner_names_the_namespace_a_trace_instruments(
+    fake_core: FakeCore, tmp_path: Path
+) -> None:
+    with KubeDeployer(make_app()).deploy(context(tmp_path)) as runner:
+        assert isinstance(runner, NamespacedRunner)
+        assert runner.namespace == TARGET["namespace"]
+    assert fake_core.verbs() == ["deploy", "teardown"]
 
 
 def test_deploy_asks_the_core_and_phases_run_in_pods_with_their_files(
