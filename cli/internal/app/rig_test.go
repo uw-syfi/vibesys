@@ -58,6 +58,8 @@ type world struct {
 	// artifacts, when set, names the artifacts directory of a job, as the daemon's machine does;
 	// without it the jobs keep none.
 	artifacts func(repository, task string, job core.JobID) string
+	// allocations is how the daemons keep standing allocations; the zero value keeps none.
+	allocations app.Allocations
 	// timers and slowPeriod, when set, replace the instant timers and the slow period of an hour.
 	timers     clock.Timers
 	slowPeriod time.Duration
@@ -125,6 +127,7 @@ func (w *world) newApp() *app.App {
 		Repositories: w.git,
 		Scheduler:    w.scheduler,
 		Leasing:      w.leasing,
+		Allocations:  w.allocations,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	})
 	if w.timers != nil {

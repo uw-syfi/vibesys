@@ -116,6 +116,11 @@ message JobSpec {
   // scheduler chooses when the job starts; the placement it ran on is a fact of its environment. A
   // host job has none.
   string placement = 3 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
+  // The standing allocation of the caller's run the job runs in (allocation.proto): its name, such
+  // as a7, which refuses the job unless it fits that allocation, or "any", which puts it in a
+  // running allocation of the run that it fits and otherwise queues it as a job with no allocation
+  // is queued. Empty runs the job as it always has. In a launch (Launch.spec) it is as submitted.
+  string allocation = 5 [(buf.validate.field).string.pattern = "^(any|a[1-9][0-9]{0,17})?$"];
   oneof settings {
     CheckSettings check = 10;
     CommandSettings command = 11;

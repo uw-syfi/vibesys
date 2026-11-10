@@ -25,11 +25,17 @@ const (
 	// below reads only schema 0.1 and refuses a manifest with an [evaluator] table, which the
 	// orchestrator reads as a job tool too old for its tasks (TaskSchema02Since).
 	//
-	// 6: a submission may ask for a trace job (JobSpec.trace), whose result is a trace
-	// (Result.trace) and whose failure may name the trace stage. A daemon of 5 reads such a
+	// 6: standing allocations. A submission may name the allocation its job runs in (JobSpec.allocation),
+	// and the allocation calls exist. A daemon of 5 would drop the field and run the job outside the
+	// allocation it was asked to run in, so a command line sends it only to a daemon of 6
+	// (AllocationsSince). MinDaemonProtocolVersion stays 4: a command line that names no allocation
+	// works with an older daemon as it always did.
+	//
+	// 7: a submission may ask for a trace job (JobSpec.trace), whose result is a trace
+	// (Result.trace) and whose failure may name the trace stage. A daemon of 6 reads such a
 	// submission as one with no settings and refuses it; it serves everything else as before, so
 	// the command line's minimum stays where it is.
-	ProtocolVersion uint32 = 6
+	ProtocolVersion uint32 = 7
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -54,6 +60,11 @@ const WatchTaskSince uint32 = 3
 // the same number for the orchestrator, which asks the tool for its version before it starts a run,
 // and a test holds this to it.
 const TaskSchema02Since uint32 = 5
+
+// AllocationsSince is the protocol version that added standing allocations. A command line that
+// names an allocation needs a daemon of at least this, and refuses an older one rather than have it
+// drop the allocation.
+const AllocationsSince uint32 = 6
 
 // Versions is what one build carries, less the build identity (BuildVersions.binary_version),
 // which names a build and is not a version to order.

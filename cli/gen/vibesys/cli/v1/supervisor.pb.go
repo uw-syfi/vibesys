@@ -219,7 +219,12 @@ type Launch struct {
 	// Where this attempt's output starts in the job's stored output: what earlier attempts of a job
 	// that was queued again left there. The supervisor's output offsets count from it, so a daemon
 	// follows the job from what its store holds, whichever attempt wrote it.
-	OutputBase    uint64 `protobuf:"varint,6,opt,name=output_base,json=outputBase,proto3" json:"output_base,omitempty"`
+	OutputBase uint64 `protobuf:"varint,6,opt,name=output_base,json=outputBase,proto3" json:"output_base,omitempty"`
+	// The backend's reference for the standing allocation the job runs inside (allocation.proto,
+	// Handle.ref), set when the daemon started the job in one. A placement whose allocations are
+	// batch allocations runs the job's containers inside it; any other ignores it. Empty for a job
+	// that runs as it always has.
+	Allocation    string `protobuf:"bytes,7,opt,name=allocation,proto3" json:"allocation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -294,6 +299,13 @@ func (x *Launch) GetOutputBase() uint64 {
 		return x.OutputBase
 	}
 	return 0
+}
+
+func (x *Launch) GetAllocation() string {
+	if x != nil {
+		return x.Allocation
+	}
+	return ""
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
@@ -1896,7 +1908,7 @@ var File_vibesys_cli_v1_supervisor_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xf2\x01\n" +
+	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\x9c\x02\n" +
 	"\x06Launch\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1906,7 +1918,10 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x04spec\x18\x04 \x01(\v2\x17.vibesys.cli.v1.JobSpecB\x06\xbaH\x03\xc8\x01\x01R\x04spec\x12,\n" +
 	"\x04plan\x18\x05 \x01(\v2\x18.vibesys.cli.v1.FlowPlanR\x04plan\x12\x1f\n" +
 	"\voutput_base\x18\x06 \x01(\x04R\n" +
-	"outputBase\"^\n" +
+	"outputBase\x12(\n" +
+	"\n" +
+	"allocation\x18\a \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\n" +
+	"allocation\"^\n" +
 	"\vPlanCommand\x12\x12\n" +
 	"\x04argv\x18\x01 \x03(\tR\x04argv\x12;\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\atimeout\"\x92\x05\n" +

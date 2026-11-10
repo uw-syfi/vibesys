@@ -285,7 +285,7 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		return fail(err)
 	}
 	j := core.Job{
-		ID: core.JobID(m.GetId()), Spec: core.JobSpec{Commit: core.Commit(m.GetSpec().GetCommit()), Environment: env, Placement: m.GetSpec().GetPlacement(), Settings: settings},
+		ID: core.JobID(m.GetId()), Spec: core.JobSpec{Commit: core.Commit(m.GetSpec().GetCommit()), Environment: env, Placement: m.GetSpec().GetPlacement(), Allocation: m.GetSpec().GetAllocation(), Settings: settings},
 		State: state, Key: core.JobKey(m.GetKey()), NoCache: m.GetNoCache(),
 		SubmittedAt: instant(m.GetSubmittedAt()), StartedAt: instantPtr(m.GetStartedAt()), FinishedAt: instantPtr(m.GetFinishedAt()),
 		CancelReason: m.GetCancelReason(), ResultJob: core.JobID(m.GetResultJobId()), CheckJob: core.JobID(m.GetCheckJobId()),

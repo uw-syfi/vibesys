@@ -100,7 +100,8 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 6 is migrated to version 7 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, version 6 a plan's origin, transitions and workstream with the `bounds` and `workstreams` directories, so that a program of version 5 refuses the store and never opens it to ignore them, and version 7 the trace job's settings, result and failed stage, so that a program of version 6 refuses the store instead of finding a record it cannot read); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
-| `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
+| `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. `Allocator`: how a placement's standing allocations are made, observed, released and found again after a restart. |
+| `internal/environment/fakealloc/`, `allocatortest/` | A `FakeAllocator` that keeps a backend of standing allocations in memory (a queue, time limits by a clock the test moves, cancels from outside, unreachable windows), and the one contract suite every `Allocator` passes. Tests only. |
 | `internal/environment/host/` | The host `Environment`: runs a command on this machine in its own process group, and ends the whole group on every path. Passes the environment contract suite. |
 | `internal/backend/` | `Backend`: facts about the compute hardware a task targets. |
 | `internal/backend/cpu/` | The CPU `Backend`: the machine's facts and load, read through a `System` seam with a fake. |
@@ -110,6 +111,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/flowrun/` | The shell that carries a flow's requests out on an `Environment`, a `Backend` and a file system, and nothing else. A `Fake` environment passes the same scenarios as the real one. |
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
+| `internal/alloc/` | Standing allocations as a pure machine: `Step(State, Config, now, Event) (State, []Action)` and `Fold` over a log of them. It holds the states (pending, running, draining, ended), the fit of a job (`Fit`), where a job of any allocation goes (`Choose`), the renewal rule, max_held, and typed refusals. Not wired into the daemon yet. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
 | `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
@@ -838,6 +840,7 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF, or on streaming its files and making its squashfs under `pyxis` (3600 by default). See "The apptainer placement". |
 | `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (`gres`, and `exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (`[slurm] max_time_seconds` by default, or a day without it; at most the partition's, and at most `max_time_seconds`). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
 | `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
+| `[placements.<name>.allocations] max_held`, `max_for` | Optional: lets a run hold standing allocations of the placement, at most `max_held` at once (1 to 64, pending and running, renewals included), each asked for at most `max_for`, a duration such as `"24h"` (for `apptainer`, at most `[slurm] max_time_seconds`). Unset, the placement offers none. This build reads and checks the section; the commands that request standing allocations come in a later build. |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -986,6 +989,31 @@ start without it, saying to install it.
   left (an earlier binary's among them), and leaves a live job's alone. A measure job still runs
   alone on its placement: besides the node, it shares this machine (image builds and conversions)
   and the login node with whatever runs beside it, and `exclusive` may be off.
+
+### Standing allocations
+
+A run can hold capacity over time instead of asking for it per job. With an `[placements.<name>.allocations]`
+section (`max_held`, `max_for`, `fit_margin`) a placement of kind `local` or `ssh` takes standing
+allocations as slots of its own `max_jobs`; they have no end. A placement that is a cluster is wired
+through the apptainer allocator (`apptainer.NewAllocator`, `docker.Config.AllocationLabel`); this build
+refuses an allocations section on any other kind, naming the placement. Every command below needs a run
+(`--run` or `VIBESYS_RUN`) and `--json` gives the typed message.
+
+| Command | What it does |
+| --- | --- |
+| `alloc request <placement> --for <dur>` | Record a request and return, usually with the allocation `PENDING`. |
+| `alloc ls [--ended] [--all-runs]` | The run's allocations that have not ended; `--ended` adds the ended ones, `--all-runs` lists every run's. |
+| `alloc show <id>` | One allocation: placement, phase, start and end, renewal order, jobs. |
+| `alloc wait <id> --until running\|ended --timeout <dur>`, `alloc wait <id> --until ending-in <dur>` | Return when the allocation is in the state; bounded by `--timeout`. Exit `0` met, `1` ended first, `3` timed out. |
+| `alloc end <id> [--after-jobs]` | End now, or once its jobs are done. |
+| `alloc renew <id> --lead <dur> --for <dur> [--until <RFC3339>\|run-end]`, `alloc renew <id> --off` | Ask for a successor once the time left is at most `--lead`; `--off` takes the order away. |
+| `alloc end-run` | End every allocation of the run and ask for no more. |
+| `submit ... --alloc <id>\|any` | Run the job inside that allocation. A named one that cannot fit the job's bound is refused (`CONFLICT`) with both durations; `any` falls back to the placement's own capacity when nothing fits. With no flag a job runs as before. |
+
+A refusal is a failure of the existing kinds: a request that cannot be right is `INVALID_INPUT`, one the
+state refuses is `CONFLICT`, an allocation nobody holds is `NOT_FOUND`. The daemon keeps its allocations
+in a log and rebuilds them on restart, adopting what the backend still holds and releasing what no record
+names. This needs protocol 6.
 
 ### Reused allocations
 

@@ -1,0 +1,253 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// A standing allocation is one slot of a placement's capacity that a run holds over time: one batch
+// allocation of a cluster, or one of a machine's max_jobs slots. Jobs submitted into it run inside it
+// one at a time and never wait for capacity again. A placement offers them only when its operator
+// config has a [placements.<name>.allocations] section. A job submitted without an allocation runs
+// as it always has.
+
+// AllocationState is where a standing allocation is. ENDED is final, and the states only move forward:
+// PENDING to RUNNING to DRAINING to ENDED, and from PENDING or RUNNING straight to ENDED.
+enum AllocationState {
+  ALLOCATION_STATE_UNSPECIFIED = 0;
+  // Asked for, and not running yet, such as while it waits in a cluster's queue.
+  ALLOCATION_STATE_PENDING = 1;
+  // Its capacity has started; it takes jobs.
+  ALLOCATION_STATE_RUNNING = 2;
+  // Asked to end once the jobs it holds are done; it takes no new job.
+  ALLOCATION_STATE_DRAINING = 3;
+  // Ended, for the reason end_reason gives.
+  ALLOCATION_STATE_ENDED = 4;
+}
+
+// AllocationEndReason is why a standing allocation ended.
+enum AllocationEndReason {
+  ALLOCATION_END_REASON_UNSPECIFIED = 0;
+  // Its run asked for the end, or ended.
+  ALLOCATION_END_REASON_REQUESTED = 1;
+  // It reached the time limit it was asked for.
+  ALLOCATION_END_REASON_TIME_LIMIT = 2;
+  // It waited longer than the placement's queue timeout and never started.
+  ALLOCATION_END_REASON_QUEUE_TIMEOUT = 3;
+  // Something outside the CLI ended it, such as a cancel by an administrator.
+  ALLOCATION_END_REASON_EXTERNAL = 4;
+}
+
+// Allocation is one standing allocation as the daemon knows it.
+message Allocation {
+  // The times are consistent with the state: started_at is set exactly in RUNNING and DRAINING, and in
+  // ENDED after a start; ended_at and an end reason exactly in ENDED.
+  option (buf.validate.message).cel = {
+    id: "allocation.ended_iff_ended"
+    message: "ended_at and end_reason are set exactly when the state is ENDED"
+    expression: "has(this.ended_at) == (this.state == 4) && (this.end_reason != 0) == (this.state == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "allocation.started_iff_started"
+    message: "started_at is set in RUNNING and DRAINING, never in PENDING"
+    expression: "(this.state == 2 || this.state == 3) ? has(this.started_at) : (this.state == 1 ? !has(this.started_at) : true)"
+  };
+  option (buf.validate.message).cel = {
+    id: "allocation.ends_only_after_start"
+    message: "ends_at is set only once the allocation started, and never later than started_at + requested_for"
+    expression: "!has(this.ends_at) || (has(this.started_at) && this.ends_at <= this.started_at + this.requested_for)"
+  };
+  option (buf.validate.message).cel = {
+    id: "allocation.times_in_order"
+    message: "an allocation starts and ends no earlier than it was requested, and ends no earlier than it started"
+    expression: "(!has(this.started_at) || this.started_at >= this.requested_at) && (!has(this.ended_at) || this.ended_at >= this.requested_at) && (!has(this.ended_at) || !has(this.started_at) || this.ended_at >= this.started_at)"
+  };
+  option (buf.validate.message).cel = {
+    id: "allocation.jobs_only_while_live"
+    message: "only a RUNNING or DRAINING allocation holds jobs"
+    expression: "(this.state == 2 || this.state == 3) || (!has(this.running_job) && size(this.queued_jobs) == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "allocation.not_its_own_successor"
+    message: "an allocation is not its own successor"
+    expression: "!has(this.renewed_by) || this.renewed_by != this.id"
+  };
+
+  // The allocation's name, such as a7.
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  // The placement whose capacity it holds.
+  string placement = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  // The run that holds it.
+  string run = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  AllocationState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // How long it was asked for: its time limit from its start.
+  google.protobuf.Duration requested_for = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+  google.protobuf.Timestamp requested_at = 6 [(buf.validate.field).required = true];
+  // When its capacity started. Unset while PENDING, and in ENDED for one that never started.
+  google.protobuf.Timestamp started_at = 7;
+  // When it ends by its time limit. Unset for a placement whose allocations have no end, such as a
+  // slot of this machine, where every job fits.
+  google.protobuf.Timestamp ends_at = 8;
+  google.protobuf.Timestamp ended_at = 9;
+  AllocationEndReason end_reason = 10 [(buf.validate.field).enum.defined_only = true];
+  // The job running in it now; at most one at a time.
+  optional string running_job = 11 [(buf.validate.field).string.min_len = 1];
+  // The jobs that wait to run in it, oldest first.
+  repeated string queued_jobs = 12 [(buf.validate.field).repeated = {
+    max_items: 1024
+    unique: true
+    items: {
+      string: {min_len: 1}
+    }
+  }];
+  // The standing order to ask for a successor before this one ends.
+  RenewalOrder renewal = 13;
+  // The successor this one's renewal order asked for. Set at most once.
+  optional string renewed_by = 14 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  // Why the renewal order asked for no successor when it was due, such as max_held reached. It is
+  // decided again at every look, and cleared once it no longer holds.
+  optional string renewal_skipped_reason = 15 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 1024
+  }];
+  // What the placement's kind adds. Empty for a slot of a machine.
+  oneof detail {
+    SlurmAllocation slurm = 20;
+  }
+}
+
+// RenewalOrder is a standing order on an allocation: once its time left is at most lead, ask for a
+// successor of successor_for on the same placement, which carries the same order. The old one runs
+// to its end; nothing is handed over or cancelled.
+message RenewalOrder {
+  option (buf.validate.message).cel = {
+    id: "renewal_order.lead_shorter_than_for"
+    message: "lead must be shorter than successor_for, or every successor would be due for renewal as it starts"
+    expression: "this.lead < this.successor_for"
+  };
+
+  // Ask for the successor when the time left is at most this.
+  google.protobuf.Duration lead = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+  // What the successor asks for: its requested_for.
+  google.protobuf.Duration successor_for = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+  // When the order stops asking for successors.
+  oneof until {
+    option (buf.validate.oneof).required = true;
+    // No successor is asked for at or after this instant.
+    google.protobuf.Timestamp at = 3;
+    // Successors are asked for until the run ends.
+    bool run_end = 4 [(buf.validate.field).bool.const = true];
+  }
+}
+
+// SlurmAllocation is what a Slurm cluster says of an allocation's batch job.
+message SlurmAllocation {
+  // The batch job's id.
+  string job_id = 1 [(buf.validate.field).string.pattern = "^[0-9]+$"];
+  string partition = 2 [(buf.validate.field).string.max_bytes = 256];
+  // Why it waits, in Slurm's words (Priority, Resources), while PENDING.
+  string pending_reason = 3 [(buf.validate.field).string.max_bytes = 1024];
+  // When Slurm expects it to start, while PENDING and if Slurm says.
+  google.protobuf.Timestamp estimated_start = 4;
+  // The node it runs on, once RUNNING.
+  string node = 5 [(buf.validate.field).string.max_bytes = 256];
+}
+
+// AllocationRequest asks for a standing allocation on a placement.
+message AllocationRequest {
+  string placement = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  // At most the placement's allocations.max_for.
+  google.protobuf.Duration requested_for = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+}
+
+// AllocationEnd ends a standing allocation: at once, or once the jobs it holds are done.
+message AllocationEnd {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  bool after_jobs = 2;
+}
+
+// PlacementCapacity is what the daemon measured of a placement's capacity: facts, not predictions.
+message PlacementCapacity {
+  option (buf.validate.message).cel = {
+    id: "placement_capacity.free_within_total"
+    message: "slots_free is at most slots_total"
+    expression: "this.slots_free <= this.slots_total"
+  };
+
+  string placement = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  uint32 slots_total = 2;
+  uint32 slots_free = 3;
+  // The caller's run's allocations on the placement that are not ENDED.
+  repeated Allocation held = 4 [(buf.validate.field).repeated.max_items = 1024];
+  // How long recent allocations of the placement waited to start, newest first.
+  repeated WaitSample recent_waits = 5 [(buf.validate.field).repeated.max_items = 256];
+  oneof detail {
+    SlurmCapacity slurm = 20;
+  }
+}
+
+// WaitSample is how long one allocation waited from its request to its start.
+message WaitSample {
+  google.protobuf.Timestamp requested_at = 1 [(buf.validate.field).required = true];
+  google.protobuf.Duration waited = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gte = {}
+  ];
+  google.protobuf.Duration requested_for = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+}
+
+// SlurmCapacity is what a Slurm cluster says of a placement's partition.
+message SlurmCapacity {
+  option (buf.validate.message).cel = {
+    id: "slurm_capacity.idle_within_total"
+    message: "nodes_idle is at most nodes_total"
+    expression: "this.nodes_idle <= this.nodes_total"
+  };
+
+  uint32 nodes_total = 1;
+  uint32 nodes_idle = 2;
+  uint32 pending_jobs = 3;
+  repeated SlurmReservation reservations = 4 [(buf.validate.field).repeated.max_items = 256];
+}
+
+// SlurmReservation is one reservation of the partition's nodes.
+message SlurmReservation {
+  option (buf.validate.message).cel = {
+    id: "slurm_reservation.ends_after_start"
+    message: "a reservation ends after it starts"
+    expression: "this.end > this.start"
+  };
+
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  google.protobuf.Timestamp start = 2 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp end = 3 [(buf.validate.field).required = true];
+  uint32 node_count = 4;
+  // Whether the caller's account may use it.
+  bool usable = 5;
+}

@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -243,5 +244,39 @@ func TestAnIntegerThatFitsItsFieldIsRead(t *testing.T) {
 	}
 	if got := cpus.GetSlurm().GetCpus(); got != 2147483647 {
 		t.Errorf("cpus = %d, want the largest int32", got)
+	}
+}
+
+// A duration is written as Go spells one, and every duration a field can hold reads back as itself,
+// whatever its unit: d.String() is the text a file or a flag would hold.
+func TestADurationReadsBackAsItselfFromItsText(t *testing.T) {
+	r := rand.New(rand.NewPCG(41, 42))
+	for range 2000 {
+		var d time.Duration
+		switch r.IntN(3) {
+		case 0:
+			d = time.Duration(r.Int64())
+		case 1:
+			d = time.Duration(r.IntN(1000)) * time.Hour
+		default:
+			d = -time.Duration(r.Int64N(int64(time.Hour)))
+		}
+		m := &cliv1.AllocationSettings{}
+		if err := tomlproto.Decode([]byte(fmt.Sprintf("max_for = %q", d.String())), m, tomlproto.Options{}); err != nil {
+			t.Fatalf("%s: %v", d, err)
+		}
+		if got := m.GetMaxFor().AsDuration(); got != d {
+			t.Fatalf("%q read as %s", d.String(), got)
+		}
+	}
+}
+
+// A duration that is not text, or text that is no duration, is refused naming its key.
+func TestADurationThatIsNotOneIsRefusedNamingItsKey(t *testing.T) {
+	for _, text := range []string{"max_for = 3600", "max_for = \"a day\"", "max_for = \"24\"", "max_for = \"1d\"", "[max_for]\nseconds = 1"} {
+		err := tomlproto.Decode([]byte(text), &cliv1.AllocationSettings{}, tomlproto.Options{})
+		if err == nil || !strings.Contains(err.Error(), "max_for") || !strings.Contains(err.Error(), "duration") {
+			t.Errorf("%q: %v, want a refusal naming max_for and what a duration looks like", text, err)
+		}
 	}
 }

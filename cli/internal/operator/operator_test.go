@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -194,6 +196,14 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"a cap of part of a minute":                 {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 43170", 1), "max_time_seconds = 43170"},
 		"a reuse limit over the cap":                {strings.Replace(strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 43200", 1), "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nidle_release_seconds = 900\nallocation_limit_seconds = 86400", 1), "allocation_limit_seconds = 86400 is longer than [placements.mi210.slurm] max_time_seconds = 43200"},
 		"a cap on a slurm placement":                {strings.Replace(placementsConfig, "[placements.a100.slurm]", "[placements.a100.slurm]\nmax_time_seconds = 43200", 1), "[placements.a100.slurm] max_time_seconds"},
+		"an unknown allocations key":                {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"1h\"\nmax_hold = 2\n", "placements.x.allocations.max_hold"},
+		"allocations with no max_held":              {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_for = \"1h\"\n", "max_held"},
+		"allocations with no max_for":               {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\n", "max_for"},
+		"a max_for that is no duration":             {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = 3600\n", "placements.x.allocations.max_for"},
+		"a max_for of nothing":                      {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"0s\"\n", "max_for"},
+		"a negative max_for":                        {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"-1h\"\n", "max_for"},
+		"too many held":                             {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 65\nmax_for = \"1h\"\n", "max_held"},
+		"a max_for over the cluster's cap":          {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.allocations]\nmax_held = 2\nmax_for = \"24h\"\n[placements.mi210.slurm]\nmax_time_seconds = 43200", 1), "[placements.mi210.allocations] max_for = 24h0m0s is longer than [placements.mi210.slurm] max_time_seconds = 43200"},
 		"a local scratch directory under pyxis":     {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nlocal_scratch_dir = \"/scratch/me\"", 1), "local_scratch_dir"},
 	}
 	for name, c := range cases {
@@ -372,6 +382,12 @@ func TestAnyPlacementsReadAsWrittenAndAnUnknownKeyAnywhereIsNamed(t *testing.T) 
 				fmt.Fprintf(&text, "[placements.%s.slurm]\npartition = \"gpu\"\n", name)
 				tables = append(tables, "placements."+name+".slurm")
 			}
+			if r.IntN(3) == 0 {
+				held, hours := uint32(1+r.IntN(64)), 1+r.IntN(48)
+				p.Allocations = &cliv1.AllocationSettings{MaxHeld: held, MaxFor: durationpb.New(time.Duration(hours) * time.Hour)}
+				fmt.Fprintf(&text, "[placements.%s.allocations]\nmax_held = %d\nmax_for = \"%dh\"\n", name, held, hours)
+				tables = append(tables, "placements."+name+".allocations")
+			}
 			if r.IntN(2) == 0 {
 				p.Resources = &cliv1.Resources{}
 				if r.IntN(2) == 0 {
@@ -446,5 +462,23 @@ func TestMorePlacementsThanListPlacementsReportsAreRefused(t *testing.T) {
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(err.Error(), "placements:") {
 		t.Fatalf("got %v, want invalid input naming placements", err)
+	}
+}
+
+// A placement's allocations section is read as written, its max_for a duration as a flag takes one;
+// a placement without one offers no standing allocations.
+func TestAPlacementsAllocationsAreRead(t *testing.T) {
+	text := strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.allocations]\nmax_held = 2\nmax_for = \"12h\"\n[placements.mi210.slurm]\nmax_time_seconds = 43200", 1) +
+		"[placements.local]\nkind = \"local\"\n"
+	c, err := operator.Parse([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.GetPlacements()["mi210"].GetAllocations()
+	if got.GetMaxHeld() != 2 || got.GetMaxFor().AsDuration() != 12*time.Hour {
+		t.Errorf("allocations = %v, want max_held 2 and max_for 12h", got)
+	}
+	if c.GetPlacements()["local"].GetAllocations() != nil {
+		t.Errorf("a placement with no allocations section has %v", c.GetPlacements()["local"].GetAllocations())
 	}
 }

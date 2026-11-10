@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -80,6 +81,28 @@ message Placement {
   Resources resources = 5;
   // How a batch allocation is submitted and Apptainer run, for the apptainer kind.
   ApptainerSettings apptainer = 6;
+  // When set, a run may hold standing allocations of the placement (allocation.proto). Unset, a
+  // request for one is refused, naming this section.
+  AllocationSettings allocations = 7;
+}
+
+// AllocationSettings is the [placements.<name>.allocations] section: how much of a placement a run
+// may hold as standing allocations.
+message AllocationSettings {
+  // How many standing allocations one run may hold on the placement at once, PENDING and RUNNING
+  // (DRAINING counts as RUNNING), renewals included.
+  uint32 max_held = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  // The longest an allocation may be asked for, written as a duration such as "24h".
+  google.protobuf.Duration max_for = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+  // The time a job's fit keeps free before its allocation ends: a job fits when the work ahead of
+  // it and its own bound are at most the time left less this. Unset means 2m.
+  google.protobuf.Duration fit_margin = 3 [(buf.validate.field).duration.gte = {}];
 }
 
 // RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node

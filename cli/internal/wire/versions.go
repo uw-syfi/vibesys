@@ -123,3 +123,20 @@ func OtherBuildFailure(clientBuild string, st *cliv1.StatusResponse) error {
 			"to replace it now; its running jobs keep running under their own supervisors",
 		name(clientBuild), st.GetPid(), name(st.GetVersions().GetBinaryVersion()), st.GetSubmittingJobs(), st.GetQueuedJobs(), st.GetRunningJobs())}
 }
+
+// NeedsAllocations returns nil when the daemon's build keeps standing allocations
+// (core.AllocationsSince), and otherwise says what to do about it.
+func NeedsAllocations(daemon *cliv1.BuildVersions, what string) error {
+	return NeedsProtocol(daemon, core.AllocationsSince, what)
+}
+
+// NeedsProtocol returns nil when the daemon's build speaks at least the protocol version since, and
+// otherwise the failure that says what asked for it needs and how to get it: a daemon that is
+// older would drop what the call adds and answer as if it had not been said.
+func NeedsProtocol(daemon *cliv1.BuildVersions, since uint32, what string) error {
+	if got := daemon.GetProtocolVersion(); got < since {
+		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
+			"%s needs a daemon of protocol %d or newer, and the running daemon speaks %d; restart it with `vibesys-cli daemon restart`", what, since, got)}
+	}
+	return nil
+}

@@ -55,6 +55,10 @@ type profile struct {
 	// does: the machine sees only claims, so such a command stands for one.
 	slots int
 	fair  bool
+	// allocs makes runs ask for standing allocations of two placements, submit jobs into them, end
+	// them, renew them, and lose them to the backend, through every fault and every restart
+	// (alloc_test.go). It needs slots.
+	allocs bool
 }
 
 // scheduledOf is a profile of a daemon that runs several jobs at once, for several runs, with some
@@ -208,10 +212,15 @@ func (w *world) submit() {
 	s := w.rng.IntN(len(scopes))
 	cc := w.callContext(s)
 	if w.profile.slots > 0 {
-		cc.RunId = runs[w.rng.IntN(len(runs))]
-		if w.rng.IntN(3) == 0 {
+		cc.RunId = w.pickRun()
+		// A job in an allocation claims nothing of the machine's, so none of them is run alone.
+		if w.rng.IntN(3) == 0 && !w.profile.allocs {
 			w.alone.Store(token, true)
 		}
+	}
+	into := w.pickAllocation(cc.RunId)
+	if into != "" {
+		w.tracef("    %s of %s goes into %s", token, cc.RunId, into)
 	}
 	w.start("submit", func(ctx context.Context) string {
 		c, err := client.Connect(ctx, w.options())
@@ -223,7 +232,7 @@ func (w *world) submit() {
 		}
 		defer c.Close()
 		_, err = c.Submit(ctx, &cliv1.SubmitRequest{Context: cc, Spec: &cliv1.JobSpec{
-			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_HOST,
+			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_HOST, Allocation: into,
 			Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: sc.argv()}},
 		}})
 		if err != nil {
@@ -402,8 +411,10 @@ func (w *world) actions() []option {
 	add := func(label string, do func()) { out = append(out, option{label, do}) }
 	all := w.jobs()
 	if len(w.tokens) < w.profile.jobs {
-		add("submit", w.submit)
-		if w.profile.slots > 0 {
+		for range w.submitWeight() {
+			add("submit", w.submit)
+		}
+		if w.profile.slots > 0 && !w.profile.allocs {
 			// Runs submit in bursts, so that more jobs wait than the machine has slots.
 			add("submit several", func() {
 				for range 1 + w.rng.IntN(w.profile.slots+1) {
@@ -429,7 +440,9 @@ func (w *world) actions() []option {
 	// A profile of repositories going away lets work get going first, as a repository that is away
 	// from the start only refuses what it is sent.
 	outages := !p.lost || slices.ContainsFunc(all, func(l located) bool { return l.job.State == core.JobRunning })
-	if up && p.crashes && !p.recovery {
+	// A profile of allocations lets the daemon live long enough for its allocations to start, take jobs
+	// and reach their end.
+	if up && p.crashes && !p.recovery && (!p.allocs || w.rng.IntN(12) == 0) {
 		add("crash", w.crash)
 		add("restart", func() {
 			w.start("restart", func(ctx context.Context) string {
@@ -556,6 +569,9 @@ func (w *world) actions() []option {
 			})
 		}
 	}
+	if p.allocs {
+		out = append(out, w.allocActions()...)
+	}
 	return out
 }
 
@@ -584,7 +600,10 @@ func (w *world) moves(heal bool) []option {
 	// Nothing but repositories goes wrong in a profile of them, and a late call is not one.
 	calls := len(w.gate.sorted())
 	if at, ok := w.timers.next(); ok && (!heal || len(out) == 0) && (!w.profile.lost || calls == 0) {
-		out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
+		// Allocations have time limits, which only time reaches, so a profile of them lets it pass more.
+		for range 1 + w.timeWeight() {
+			out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
+		}
 	}
 	if heal {
 		for _, scope := range w.toGiveUp() {
@@ -669,7 +688,7 @@ func (w *world) check() {
 	// The machine runs one command at a time, or as many as it has slots. A store can show more
 	// than the machine does, as a store that was away shows a job whose supervisor died meanwhile,
 	// but not more than that.
-	slots := max(1, w.profile.slots)
+	slots := w.concurrency()
 	for _, scope := range scopes {
 		if running[scope] > slots {
 			w.violate("%d jobs of %s are running", running[scope], string(scope.Task()))
@@ -685,6 +704,7 @@ func (w *world) check() {
 	if n > slots {
 		w.violate("%d commands run at once", n)
 	}
+	w.checkAllocs()
 	// A command that claims the machine alone runs beside nothing.
 	if active := w.env.ActiveRuns(); len(active) > 1 {
 		for _, x := range active {
@@ -806,7 +826,9 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 			w.violate("job %s is lost after %d kills, each before its command started", ref, w.unstarted[ref])
 		}
 	case core.JobCancelled:
-		if !w.asked[ref] {
+		// A job in an allocation is also cancelled by the daemon, when its allocation ends or does not
+		// take it.
+		if !w.asked[ref] && l.job.Spec.Allocation == "" {
 			w.violate("job %s is cancelled though nobody asked", ref)
 		}
 	}
@@ -849,13 +871,16 @@ func (w *world) finalCheck() {
 	if w.profile.forget && w.lost != "" && !w.profile.lostHangs && !forgot {
 		w.violate("%s is gone for good and was not forgotten", w.lost)
 	}
+	w.finalAllocCheck()
 	all := w.jobs()
 	byToken := map[string]located{}
 	for _, l := range all {
 		byToken[tokenOf(l.job)] = l
 	}
 	// A fair policy may start a later run's job first; fifo starts a store's jobs in order.
-	if w.profile.fair {
+	// A job in an allocation does not wait its turn for the machine, so a profile of them has no
+	// order of starts either.
+	if w.profile.fair || w.profile.allocs {
 		return
 	}
 	for _, s := range scopes {
@@ -904,7 +929,7 @@ func (w *world) settled() bool {
 			return false
 		}
 	}
-	return true
+	return w.allocsSettled()
 }
 
 // teardown ends everything the simulation started, so the bubble ends clean.
@@ -1021,6 +1046,9 @@ func simulateWith(seed uint64, pick func(*rand.Rand) profile) (string, string) {
 		w.absent[w.lost] = true
 	}
 	w.mu.Unlock()
+	if w.profile.allocs {
+		w.healAllocs()
+	}
 	for _, l := range w.jobs() {
 		w.finalWait(l)
 	}
@@ -1071,6 +1099,7 @@ func (w *world) unfinished() string {
 			out = append(out, o.name)
 		}
 	}
+	out = append(out, w.allocsUnsettled()...)
 	return strings.Join(out, ", ")
 }
 

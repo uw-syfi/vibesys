@@ -41,6 +41,15 @@ var units = []string{"tok/s", "ms", "µs", "GB/s", "requests per second", "%", "
 
 func (g *gen) unit() string { return units[g.pick(len(units))] }
 
+// allocation is any allocation or one by name, as a submission's flag gives; the generators set
+// every field, so never none.
+func (g *gen) allocation() string {
+	if g.r.IntN(2) == 0 {
+		return core.AllocationAny
+	}
+	return fmt.Sprintf("a%d", 1+g.r.IntN(1000))
+}
+
 func (g *gen) name() string { return fmt.Sprintf("n%x", g.r.Uint32()) }
 
 var floats = []float64{
@@ -143,7 +152,7 @@ func (g *gen) settings() core.Settings {
 func (g *gen) note() core.Note { return core.Note{Text: g.text(), At: g.instant(), Agent: g.text()} }
 
 func (g *gen) spec() core.JobSpec {
-	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Placement: g.name(), Settings: g.settings()}
+	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Placement: g.name(), Allocation: g.allocation(), Settings: g.settings()}
 }
 
 func (g *gen) machine() core.MachineFacts {
