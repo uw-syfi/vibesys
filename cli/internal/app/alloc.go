@@ -411,7 +411,10 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 		reply(m, allocReply{refusal: refusal})
 		return
 	}
-	if !next.Equal(s.state) {
+	// A step that changed only what a backend says of a pending allocation for display is kept in
+	// memory and not logged (alloc.Durable): an estimate that moves at every look would otherwise
+	// add a record at every look.
+	if alloc.Durable(s.state, next) {
 		// The input is durable before the state moves, so a restart finds the allocations the
 		// callers were told of.
 		if err := s.bounded(ctx, func(ctx context.Context) error { return s.conf.Log.Append(ctx, alloc.Input{At: now, Event: m.event}) }); err != nil {
@@ -426,8 +429,8 @@ func (s *allocShell) apply(ctx context.Context, m allocMsg) {
 			}
 			return
 		}
-		s.state = next
 	}
+	s.state = next
 	// What the core asked is started before the change is visible, so whoever sees the change finds
 	// the work under way.
 	s.perform(ctx, kept)

@@ -56,6 +56,26 @@ func (s State) Equal(o State) bool {
 	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && reflect.DeepEqual(s.Allocations(), o.Allocations())
 }
 
+// Durable says whether a step from before to after changed what the log keeps: anything but the
+// words a backend gives a pending allocation for display (Pending.Reason and EstimatedStart), which
+// a backend such as Slurm may change at every look. The shell logs a step only when it is durable,
+// and keeps the display words in memory, so a restart shows them again at the next look instead of
+// replaying every change of an estimate.
+func Durable(before, after State) bool {
+	return !before.withoutDisplay().Equal(after.withoutDisplay())
+}
+
+// withoutDisplay is the state with the display words of every pending allocation cleared.
+func (s State) withoutDisplay() State {
+	out := s.clone()
+	for i, a := range out.allocs {
+		if _, ok := a.Phase.(Pending); ok {
+			out.allocs[i].Phase = Pending{}
+		}
+	}
+	return out
+}
+
 func (s State) index(id ID) int {
 	return slices.IndexFunc(s.allocs, func(a Allocation) bool { return a.ID == id })
 }

@@ -28,6 +28,9 @@ type Options struct {
 	Node string
 	// Reason is what a waiting allocation says it waits for.
 	Reason string
+	// MovingEstimate has a waiting allocation say when it expects to start, a minute later at each
+	// look, as Slurm's estimate of a queued job moves while it waits.
+	MovingEstimate bool
 }
 
 // FakeAllocator is the backend and the allocator over it. Its methods are safe for concurrent use.
@@ -133,7 +136,11 @@ func (f *FakeAllocator) Observe(_ context.Context, handle alloc.Handle) (alloc.O
 	if h.startedAt.IsZero() {
 		if h.looks < f.opts.Looks {
 			h.looks++
-			return alloc.SeenPending{Reason: f.opts.Reason}, nil
+			seen := alloc.SeenPending{Reason: f.opts.Reason}
+			if f.opts.MovingEstimate {
+				seen.EstimatedStart = h.requestedAt.Add(time.Duration(h.looks) * time.Minute)
+			}
+			return seen, nil
 		}
 		h.startedAt = now
 	}

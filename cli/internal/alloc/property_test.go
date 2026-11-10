@@ -294,7 +294,7 @@ func history(c chooser, steps int, until func() bool) error {
 	md := newModel(config)
 	now := epoch
 	var s alloc.State
-	var log []alloc.Input
+	var log, durable []alloc.Input
 	var all []alloc.Action
 	for i := 0; i < steps && (until == nil || !until()); i++ {
 		pass, e := g.next(s, now)
@@ -314,9 +314,17 @@ func history(c chooser, steps int, until func() bool) error {
 		if err := md.agree(after); err != nil {
 			return fmt.Errorf("step %d, %T%+v at +%s: %w", i, e, e, now.Sub(epoch), err)
 		}
+		if alloc.Durable(s, after) {
+			durable = append(durable, alloc.Input{At: now, Event: e})
+		}
 		s = after
 		log = append(log, alloc.Input{At: now, Event: e})
 		all = append(all, actions...)
+	}
+	// The log the shell keeps has the durable steps alone: folding it gives the state but for the
+	// display words of pending allocations.
+	if sd, _ := alloc.Fold(config, durable); alloc.Durable(sd, s) {
+		return errors.New("folding the durable steps alone gave another state than the steps did")
 	}
 	s1, a1 := alloc.Fold(config, log)
 	s2, a2 := alloc.Fold(config, log)

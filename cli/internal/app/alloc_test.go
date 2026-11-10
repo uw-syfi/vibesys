@@ -379,3 +379,54 @@ func TestADaemonStartFailsWhenItsAllocationLogNeverAnswers(t *testing.T) {
 	}
 	a.Close()
 }
+
+// A pending allocation whose backend changes only its display words at every look (Slurm's estimate
+// of when it starts) adds nothing to the log: the words are kept in memory and shown, and only a
+// change of what the allocation is is logged. Before, every look whose estimate moved appended an
+// input, so a daemon that read its whole log at start had a record for every five seconds of every
+// wait.
+func TestAMovingEstimateOfAPendingAllocationIsNotLogged(t *testing.T) {
+	const looks = 40
+	r := newAllocRig(t, true, fakealloc.Options{Looks: looks + 1, MovingEstimate: true})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	// movedFrom waits until the allocation shows an estimate other than last, and returns it.
+	movedFrom := func(last time.Time) time.Time {
+		t.Helper()
+		ctx := ctxFor(t)
+		for {
+			if p, ok := mustAllocation(t, a, al.ID).Phase.(alloc.Pending); ok && !p.EstimatedStart.IsZero() && !p.EstimatedStart.Equal(last) {
+				return p.EstimatedStart
+			}
+			// A change of the allocation wakes the wait, which is bounded only against a hang.
+			if _, _, err := a.WaitAllocation(ctx, al.ID, app.AllocUntil{Kind: app.UntilEnded}, time.Millisecond); err != nil {
+				t.Fatalf("waiting for the estimate to move from %s: %v", last, err)
+			}
+		}
+	}
+	first := movedFrom(time.Time{})
+	before, err := r.log.Load(ctxFor(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := first
+	for range looks - 1 {
+		r.timers.tick()
+		last = movedFrom(last)
+	}
+	if want := first.Add((looks - 1) * time.Minute); !last.Equal(want) {
+		t.Fatalf("the last estimate shown is %s, want %s: a look was missed", last, want)
+	}
+	after, err := r.log.Load(ctxFor(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("%d looks that moved only the estimate appended %d inputs, want none: %+v", looks-1, len(after)-len(before), after[len(before):])
+	}
+	// The restarted daemon has the allocation as the log has it, and its next look says the words again.
+	a = r.restart(a)
+	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StagePending || got.Handle == (alloc.Handle{}) {
+		t.Fatalf("after a restart the allocation is %+v, want it pending with its handle", got)
+	}
+}
