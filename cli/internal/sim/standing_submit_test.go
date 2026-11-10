@@ -119,37 +119,39 @@ func TestEveryKindOfJobSubmittedIntoAStandingAllocationRunsInIt(t *testing.T) {
 					}
 					name := fmt.Sprintf("%s/into=%s/placement=%q/restarted=%v", k.name, into, placement, restarted)
 					t.Run(name, func(t *testing.T) {
-						r := newStandingRig(t, standingConfig)
-						r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "0"}, protocol2Scores))
-						a, srv := r.start()
-						first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, shortAllocation)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if first.ID != "a1" {
-							t.Fatalf("the first allocation is %s, the test names a1", first.ID)
-						}
-						standing := r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
-						if restarted {
-							a.Close()
-							a, srv = r.start()
-							r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning})
-						}
-						id := r.submitThrough(srv, k, into, placement)
-						awaitFinal(t, a, id)
-						// The containers of the fake cluster write no result file, so a measure's samples end
-						// in failure; where the job ran is what is judged for it.
-						if j, _ := a.Job(r.ctx(), standingScope, id); j.State != core.JobSucceeded && k.name != "measure" {
-							var log strings.Builder
-							_ = a.ReadLogs(r.ctx(), standingScope, id, 0, false, func(c core.LogChunk) error { log.Write(c.Data); return nil })
-							t.Fatalf("job %s ended %s: %s", id, j.State, log.String())
-						}
-						if boxes := r.cluster.StartedIn(standing); len(boxes) == 0 {
-							t.Errorf("no process of the job ran in the standing allocation %s", standing)
-						}
-						if got := r.cluster.Submitted(); len(got) != 1 {
-							t.Errorf("%d batch jobs submitted, want the standing allocation alone: %+v", len(got), got)
-						}
+						inStandingBubble(t, func(t *testing.T) {
+							r := newStandingRig(t, standingConfig)
+							r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "0"}, protocol2Scores))
+							a, srv := r.start()
+							first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, shortAllocation)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if first.ID != "a1" {
+								t.Fatalf("the first allocation is %s, the test names a1", first.ID)
+							}
+							standing := r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
+							if restarted {
+								a.Close()
+								a, srv = r.start()
+								r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning})
+							}
+							id := r.submitThrough(srv, k, into, placement)
+							awaitFinal(t, a, id)
+							// The containers of the fake cluster write no result file, so a measure's samples end
+							// in failure; where the job ran is what is judged for it.
+							if j, _ := a.Job(r.ctx(), standingScope, id); j.State != core.JobSucceeded && k.name != "measure" {
+								var log strings.Builder
+								_ = a.ReadLogs(r.ctx(), standingScope, id, 0, false, func(c core.LogChunk) error { log.Write(c.Data); return nil })
+								t.Fatalf("job %s ended %s: %s", id, j.State, log.String())
+							}
+							if boxes := r.cluster.StartedIn(standing); len(boxes) == 0 {
+								t.Errorf("no process of the job ran in the standing allocation %s", standing)
+							}
+							if got := r.cluster.Submitted(); len(got) != 1 {
+								t.Errorf("%d batch jobs submitted, want the standing allocation alone: %+v", len(got), got)
+							}
+						})
 					})
 				}
 			}
@@ -186,31 +188,33 @@ func awaitFinal(t *testing.T, a *app.App, id core.JobID) {
 // The allocation is not told it is lost, and it takes the next job: such a failure is the job's, not
 // the allocation's.
 func TestAJobWhoseCheckFailsFailsWithoutHarmingItsAllocation(t *testing.T) {
-	r := newStandingRig(t, standingConfig)
-	r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "127"}, protocol2Scores))
-	a, srv := r.start()
-	first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, shortAllocation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	standing := r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
-	for range 2 {
-		id := r.submitThrough(srv, submitKinds[0], core.AllocationAny, "")
-		awaitFinal(t, a, id)
-		if j, _ := a.Job(r.ctx(), standingScope, id); j.State != core.JobFailed {
-			t.Fatalf("job %s ended %s, want failed", id, j.State)
+	inStandingBubble(t, func(t *testing.T) {
+		r := newStandingRig(t, standingConfig)
+		r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "127"}, protocol2Scores))
+		a, srv := r.start()
+		first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, shortAllocation)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	v, err := a.Allocation(first.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.Phase.Stage() != alloc.StageRunning || len(r.cluster.Submitted()) != 1 {
-		t.Fatalf("allocation %+v after two failed jobs, %d batch jobs", v.Phase, len(r.cluster.Submitted()))
-	}
-	if n := len(r.cluster.StartedIn(standing)); n < 4 {
-		t.Fatalf("%d containers started in the allocation, want both jobs' two", n)
-	}
+		standing := r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
+		for range 2 {
+			id := r.submitThrough(srv, submitKinds[0], core.AllocationAny, "")
+			awaitFinal(t, a, id)
+			if j, _ := a.Job(r.ctx(), standingScope, id); j.State != core.JobFailed {
+				t.Fatalf("job %s ended %s, want failed", id, j.State)
+			}
+		}
+		v, err := a.Allocation(first.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Phase.Stage() != alloc.StageRunning || len(r.cluster.Submitted()) != 1 {
+			t.Fatalf("allocation %+v after two failed jobs, %d batch jobs", v.Phase, len(r.cluster.Submitted()))
+		}
+		if n := len(r.cluster.StartedIn(standing)); n < 4 {
+			t.Fatalf("%d containers started in the allocation, want both jobs' two", n)
+		}
+	})
 }
 
 // A job submitted into any allocation that none takes runs without one, and says why on its notes
@@ -221,35 +225,37 @@ func TestAJobOfAnyAllocationThatNoneTakesSaysWhy(t *testing.T) {
 	for _, k := range submitKinds {
 		for _, held := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/held=%v", k.name, held), func(t *testing.T) {
-				r := newStandingRig(t, standingConfig)
-				r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "0"}, protocol2Scores))
-				a, srv := r.start()
-				want := "no running allocation"
-				if held {
-					first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, 2*time.Minute)
+				inStandingBubble(t, func(t *testing.T) {
+					r := newStandingRig(t, standingConfig)
+					r.tasks.Put("/repo", standingCommit, twoImageSource([]string{"exit", "0"}, protocol2Scores))
+					a, srv := r.start()
+					want := "no running allocation"
+					if held {
+						first, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, 2*time.Minute)
+						if err != nil {
+							t.Fatal(err)
+						}
+						r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning})
+						want = "does not fit allocation a1"
+					}
+					id := r.submitThrough(srv, k, core.AllocationAny, "")
+					awaitFinal(t, a, id)
+					j, err := a.Job(r.ctx(), standingScope, id)
 					if err != nil {
 						t.Fatal(err)
 					}
-					r.await(a, first.ID, app.AllocUntil{Kind: app.UntilRunning})
-					want = "does not fit allocation a1"
-				}
-				id := r.submitThrough(srv, k, core.AllocationAny, "")
-				awaitFinal(t, a, id)
-				j, err := a.Job(r.ctx(), standingScope, id)
-				if err != nil {
-					t.Fatal(err)
-				}
-				note := ""
-				for _, n := range j.Notes {
-					note += n.Text + "\n"
-				}
-				var log strings.Builder
-				_ = a.ReadLogs(r.ctx(), standingScope, id, 0, false, func(c core.LogChunk) error { log.Write(c.Data); return nil })
-				for where, text := range map[string]string{"notes": note, "output": log.String()} {
-					if !strings.Contains(text, "allocation any: ") || !strings.Contains(text, want) || !strings.Contains(text, "queued without one") {
-						t.Errorf("the job's %s %q do not say why it has no allocation (%q)", where, text, want)
+					note := ""
+					for _, n := range j.Notes {
+						note += n.Text + "\n"
 					}
-				}
+					var log strings.Builder
+					_ = a.ReadLogs(r.ctx(), standingScope, id, 0, false, func(c core.LogChunk) error { log.Write(c.Data); return nil })
+					for where, text := range map[string]string{"notes": note, "output": log.String()} {
+						if !strings.Contains(text, "allocation any: ") || !strings.Contains(text, want) || !strings.Contains(text, "queued without one") {
+							t.Errorf("the job's %s %q do not say why it has no allocation (%q)", where, text, want)
+						}
+					}
+				})
 			})
 		}
 	}

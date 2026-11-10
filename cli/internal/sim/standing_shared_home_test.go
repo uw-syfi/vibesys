@@ -26,73 +26,75 @@ func TestTwoDaemonsOnASharedStateHomeKeepTheirAllocationsApart(t *testing.T) {
 	}
 	for name, d := range daemons {
 		t.Run(name, func(t *testing.T) {
-			r := newStandingRig(t, standingConfig)
-			second := "/run/user/1000/vibesys-cli-2"
-			a, _ := r.startAs(d.other, r.runtime)
-			timersA := r.timers
-			b, _ := r.startAs(d.machine, second)
-			timersB := r.timers
-			on := func(timers *observeTimers) { r.timers = timers }
+			inStandingBubble(t, func(t *testing.T) {
+				r := newStandingRig(t, standingConfig)
+				second := "/run/user/1000/vibesys-cli-2"
+				a, _ := r.startAs(d.other, r.runtime)
+				timersA := r.timers
+				b, _ := r.startAs(d.machine, second)
+				timersB := r.timers
+				on := func(timers *observeTimers) { r.timers = timers }
 
-			va, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
-			if err != nil {
-				t.Fatalf("RequestAllocation on the first daemon: %v", err)
-			}
-			vb, err := b.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
-			if err != nil {
-				t.Fatalf("RequestAllocation on the second daemon: %v", err)
-			}
-			on(timersA)
-			ra := r.await(a, va.ID, app.AllocUntil{Kind: app.UntilRunning})
-			on(timersB)
-			rb := r.await(b, vb.ID, app.AllocUntil{Kind: app.UntilRunning})
-
-			submitted := r.cluster.Submitted()
-			if len(submitted) != 2 || submitted[0].Name == submitted[1].Name {
-				t.Fatalf("batch jobs submitted: %+v, want one of each daemon, with names of their own", submitted)
-			}
-			if ra.Handle.Ref == rb.Handle.Ref {
-				t.Fatalf("both daemons hold batch job %s", ra.Handle.Ref)
-			}
-
-			// Each daemon looks at the cluster a few times, and a restart of the first adopts again:
-			// neither releases, nor lists, the other's.
-			for range 3 {
-				on(timersA)
-				r.tick()
-				on(timersB)
-				r.tick()
-			}
-			a.Close()
-			a, _ = r.startAs(d.other, r.runtime)
-			timersA = r.timers
-			for range 3 {
-				on(timersA)
-				r.tick()
-			}
-			for _, ref := range []string{ra.Handle.Ref, rb.Handle.Ref} {
-				if _, _, phase, ok := r.cluster.Job(ref); !ok || phase == apptainer.Ended {
-					t.Fatalf("batch job %s ended while both daemons held their own", ref)
-				}
-			}
-			for _, c := range []struct {
-				who  *app.App
-				want app.AllocationView
-			}{{a, ra}, {b, rb}} {
-				all, err := c.who.Allocations("", true)
+				va, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("RequestAllocation on the first daemon: %v", err)
 				}
-				if len(all) != 1 || all[0].ID != c.want.ID || all[0].Handle != c.want.Handle || all[0].Stage() != alloc.StageRunning {
-					t.Fatalf("a daemon lists %+v, want its own allocation %s on %s alone, running", all, c.want.ID, c.want.Handle.Ref)
+				vb, err := b.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
+				if err != nil {
+					t.Fatalf("RequestAllocation on the second daemon: %v", err)
 				}
-			}
-			// Each keeps an identity of its own.
-			idA, errA := filestore.DaemonID(production.AllocationsDir(r.indexes, d.other, r.runtime), func() string { return "" })
-			idB, errB := filestore.DaemonID(production.AllocationsDir(r.indexes, d.machine, second), func() string { return "" })
-			if errA != nil || errB != nil || idA == idB {
-				t.Fatalf("the daemons' identities are %q (%v) and %q (%v), want two", idA, errA, idB, errB)
-			}
+				on(timersA)
+				ra := r.await(a, va.ID, app.AllocUntil{Kind: app.UntilRunning})
+				on(timersB)
+				rb := r.await(b, vb.ID, app.AllocUntil{Kind: app.UntilRunning})
+
+				submitted := r.cluster.Submitted()
+				if len(submitted) != 2 || submitted[0].Name == submitted[1].Name {
+					t.Fatalf("batch jobs submitted: %+v, want one of each daemon, with names of their own", submitted)
+				}
+				if ra.Handle.Ref == rb.Handle.Ref {
+					t.Fatalf("both daemons hold batch job %s", ra.Handle.Ref)
+				}
+
+				// Each daemon looks at the cluster a few times, and a restart of the first adopts again:
+				// neither releases, nor lists, the other's.
+				for range 3 {
+					on(timersA)
+					r.tick()
+					on(timersB)
+					r.tick()
+				}
+				a.Close()
+				a, _ = r.startAs(d.other, r.runtime)
+				timersA = r.timers
+				for range 3 {
+					on(timersA)
+					r.tick()
+				}
+				for _, ref := range []string{ra.Handle.Ref, rb.Handle.Ref} {
+					if _, _, phase, ok := r.cluster.Job(ref); !ok || phase == apptainer.Ended {
+						t.Fatalf("batch job %s ended while both daemons held their own", ref)
+					}
+				}
+				for _, c := range []struct {
+					who  *app.App
+					want app.AllocationView
+				}{{a, ra}, {b, rb}} {
+					all, err := c.who.Allocations("", true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(all) != 1 || all[0].ID != c.want.ID || all[0].Handle != c.want.Handle || all[0].Stage() != alloc.StageRunning {
+						t.Fatalf("a daemon lists %+v, want its own allocation %s on %s alone, running", all, c.want.ID, c.want.Handle.Ref)
+					}
+				}
+				// Each keeps an identity of its own.
+				idA, errA := filestore.DaemonID(production.AllocationsDir(r.indexes, d.other, r.runtime), func() string { return "" })
+				idB, errB := filestore.DaemonID(production.AllocationsDir(r.indexes, d.machine, second), func() string { return "" })
+				if errA != nil || errB != nil || idA == idB {
+					t.Fatalf("the daemons' identities are %q (%v) and %q (%v), want two", idA, errA, idB, errB)
+				}
+			})
 		})
 	}
 }
@@ -101,25 +103,27 @@ func TestTwoDaemonsOnASharedStateHomeKeepTheirAllocationsApart(t *testing.T) {
 // daemon, has the daemon cancel the batch jobs it held there: the records end, external, and the
 // cluster holds none of them, also when no placement offers allocations any more.
 func TestRemovingTheAllocationsSectionCancelsItsBatchJobs(t *testing.T) {
-	r := newStandingRig(t, standingConfig)
-	a, _ := r.start()
-	v, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := r.await(a, v.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
-	a.Close()
-	r.op = parseConfig(t, strings.Split(standingConfig, "[placements.cluster-a.allocations]")[0])
-	a, _ = r.start()
-	r.settle("the batch job is cancelled", func() bool {
-		_, _, phase, ok := r.cluster.Job(ref)
-		return !ok || phase == apptainer.Ended
+	inStandingBubble(t, func(t *testing.T) {
+		r := newStandingRig(t, standingConfig)
+		a, _ := r.start()
+		v, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := r.await(a, v.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
+		a.Close()
+		r.op = parseConfig(t, strings.Split(standingConfig, "[placements.cluster-a.allocations]")[0])
+		a, _ = r.start()
+		r.settle("the batch job is cancelled", func() bool {
+			_, _, phase, ok := r.cluster.Job(ref)
+			return !ok || phase == apptainer.Ended
+		})
+		got, err := a.Allocation(v.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if end, ok := got.Phase.(alloc.Ended); !ok || end.Reason != alloc.EndExternal {
+			t.Fatalf("the allocation is %+v, want it ended external", got.Phase)
+		}
 	})
-	got, err := a.Allocation(v.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if end, ok := got.Phase.(alloc.Ended); !ok || end.Reason != alloc.EndExternal {
-		t.Fatalf("the allocation is %+v, want it ended external", got.Phase)
-	}
 }

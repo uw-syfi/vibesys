@@ -81,7 +81,9 @@ type reached struct {
 func TestSeedsOfStandingAllocationsOnAClusterHoldTheirInvariants(t *testing.T) {
 	var got []reached
 	for seed := range uint64(standingSeeds) {
-		t.Run(fmt.Sprint("seed ", seed), func(t *testing.T) { got = append(got, runStandingSeed(t, seed)) })
+		t.Run(fmt.Sprint("seed ", seed), func(t *testing.T) {
+			inStandingBubble(t, func(t *testing.T) { got = append(got, runStandingSeed(t, seed)) })
+		})
 	}
 	for name, hit := range map[string]func(reached) bool{
 		"a job ran inside an allocation":                      func(r reached) bool { return r.jobInAllocation },

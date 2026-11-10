@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -116,12 +117,22 @@ type standingRig struct {
 	op      *cliv1.OperatorConfig
 }
 
+// inStandingBubble runs a test of a standing rig in a synctest bubble: the daemon's goroutines are
+// the bubble's, so the test can wait until they are all blocked (settle) instead of for a while, and
+// a daemon that never gets there ends the test at once with a deadlock instead of hanging it.
+func inStandingBubble(t *testing.T, f func(t *testing.T)) {
+	t.Helper()
+	synctest.Test(t, f)
+}
+
 func newStandingRig(t *testing.T, config string) *standingRig {
 	t.Helper()
 	w := fakeworld.New()
 	r := &standingRig{
 		t: t, cluster: clusterfake.New(w.MemoryGates), gates: w.MemoryGates,
-		clock: clock.NewManual(clusterfake.Epoch, time.Millisecond), timers: newObserveTimers(),
+		// The clock holds still on a read, so the time a step takes does not depend on how often the
+		// daemon's loops read it on this machine. Time moves only by passes.
+		clock: clock.NewManual(clusterfake.Epoch, 0), timers: newObserveTimers(),
 		stores: memstores.New(app.Rules(5)), repos: gitrepo.NewFake(), tasks: task.NewMemorySource(), survivors: supervisor.NewSurvivors(), checkouts: &fakeenv.Checkouts{}, indexes: t.TempDir(), runtime: "/run/user/1000/vibesys-cli", op: parseConfig(t, config),
 	}
 	r.repos.AddRepo("/repo", nil)
@@ -195,7 +206,10 @@ func (r *standingRig) ctx() context.Context {
 	return ctx
 }
 
-// tick lets the daemon's allocation clock fire once, and returns when it did.
+// tick is one turn of the daemon's allocation loop: it lets the allocation clock fire once, and
+// returns once the daemon has done all that look started, when every goroutine of the bubble is
+// blocked on something only the test can give it (synctest.Wait). So what the test reads after a
+// tick is the daemon's state after exactly that many turns, on any machine.
 func (r *standingRig) tick() {
 	r.t.Helper()
 	select {
@@ -204,6 +218,7 @@ func (r *standingRig) tick() {
 	case <-r.ctx().Done():
 		r.t.Fatal("the daemon never waited on its allocation clock")
 	}
+	synctest.Wait()
 }
 
 // passes moves the time of the daemon and of the cluster together.
