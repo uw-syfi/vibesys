@@ -12,6 +12,7 @@
       "version": "0.10.0",
       "strict": false,
       "skills": [
+        "./search/allocations",
         "./search/combine-candidates",
         "./search/commit",
         "./search/create-task",
