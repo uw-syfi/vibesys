@@ -88,9 +88,11 @@ func TestAReleaseWithoutItsToolIsAnErrorAndNeverAnotherBuild(t *testing.T) {
 	}
 }
 
+// The daemon that reads SettingJobTool is the one already running, which keeps its configuration
+// until it is restarted; the error says so, not only which setting to change.
 func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
 	got, err := ResolveCLI("", []string{"/usr/bin", "relative"}, developerBuild, fakeFiles{"relative/vibesys-cli": true})
-	if err == nil || got != "" || !strings.Contains(err.Error(), SettingJobTool) {
-		t.Fatalf("got %q, %v, want an error naming %s", got, err, SettingJobTool)
+	if err == nil || got != "" || !strings.Contains(err.Error(), SettingJobTool) || !strings.Contains(err.Error(), "host restart") {
+		t.Fatalf("got %q, %v, want an error naming %s and host restart", got, err, SettingJobTool)
 	}
 }

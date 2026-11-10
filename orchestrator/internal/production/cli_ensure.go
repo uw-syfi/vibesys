@@ -120,7 +120,7 @@ func (e ExecEnsurer) Answer(ctx context.Context) (*cliv1.DaemonEnsureResponse, e
 	answer := &cliv1.DaemonEnsureResponse{}
 	if err := validAnswer(stdout, answer); err != nil {
 		return nil, &clidaemon.Unreadable{Reason: core.CLINotInstalled, Detail: fmt.Sprintf(
-			"the job tool %s did not answer where its daemon is (%v); it is not a vibesys-cli this host can use: install this release's, or choose one with `vibesys-client host configure --job-tool PATH`", binary, err)}
+			"the job tool %s did not answer where its daemon is (%v); it is not a vibesys-cli this host can use: install this release's, or choose one with `vibesys-client host configure --job-tool PATH`, then `vibesys-client host restart`", binary, err)}
 	}
 	return answer, nil
 }

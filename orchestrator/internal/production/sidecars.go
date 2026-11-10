@@ -59,7 +59,7 @@ func sidecarCommand(setting string, find release.Finder) ([]string, error) {
 			return command, nil
 		}
 	}
-	return nil, fmt.Errorf("the host's configuration names no %s and %w, so no agent session can start: choose an orchestrator/sidecar checkout or the command that runs the sidecar with `vibesys-client host configure --session-holder`", SettingSessionHolder, err)
+	return nil, fmt.Errorf("the host's configuration names no %s and %w, so no agent session can start: choose an orchestrator/sidecar checkout or the command that runs the sidecar with `vibesys-client host configure --session-holder`, then `vibesys-client host restart`", SettingSessionHolder, err)
 }
 
 func sidecarSetting(setting string) ([]string, error) {

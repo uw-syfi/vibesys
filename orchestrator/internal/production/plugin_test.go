@@ -36,6 +36,8 @@ const good = `{"name": "vibesys", "plugins": [{"name": "other"}, {"name": "vibes
 // one it cannot load comes back as the session's start failure.
 func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 	cases := map[string]struct{ path, want string }{
+		// Unset falls to the release; a host in none keeps whatever it already resolved until it is
+		// restarted, so the remedy names that step too.
 		"unset":    {"", "names no"},
 		"relative": {"skills", "not an absolute path"},
 	}
@@ -44,6 +46,9 @@ func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 			_, err := PluginFor(c.path, developerBuild)
 			if err == nil || !strings.Contains(err.Error(), SettingSkills) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("PluginFor(%q) = %v, want an error naming %s and %q", c.path, err, SettingSkills, c.want)
+			}
+			if name == "unset" && !strings.Contains(err.Error(), "host restart") {
+				t.Fatalf("PluginFor(%q) = %v, want the remedy to also say host restart", c.path, err)
 			}
 		})
 	}

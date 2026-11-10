@@ -38,7 +38,7 @@ func PluginFor(setting string, find release.Finder) (Plugin, error) {
 			path, err = rel.SkillsRoot()
 		}
 		if err != nil {
-			return Plugin{}, fmt.Errorf("the host's configuration names no %s and %w, so no agent session can start: choose the checkout of the vibesys plugin marketplace (the directory holding .claude-plugin/marketplace.json) with `vibesys-client host configure --skills-directory`", SettingSkills, err)
+			return Plugin{}, fmt.Errorf("the host's configuration names no %s and %w, so no agent session can start: choose the checkout of the vibesys plugin marketplace (the directory holding .claude-plugin/marketplace.json) with `vibesys-client host configure --skills-directory`, then `vibesys-client host restart`", SettingSkills, err)
 		}
 	case !filepath.IsAbs(path):
 		return Plugin{}, fmt.Errorf("%s=%s is not an absolute path", SettingSkills, path)

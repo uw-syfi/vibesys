@@ -309,7 +309,9 @@ func TestAToolThatAnswersNoEndpointIsNotUsed(t *testing.T) {
 			e := ExecEnsurer{Endpoint: core.JobToolEndpoint{Executable: plainTool}, Runner: scriptedRunner{stdout: stdout}, Environ: func() []string { return nil }}
 			_, err := e.Ensure(ctx)
 			var unreadable *clidaemon.Unreadable
-			if !errors.As(err, &unreadable) || unreadable.Reason != core.CLINotInstalled || !strings.Contains(unreadable.Detail, plainTool) {
+			// The running daemon keeps the tool it already resolved until it is restarted, so the
+			// detail says that, not only which setting picks another build.
+			if !errors.As(err, &unreadable) || unreadable.Reason != core.CLINotInstalled || !strings.Contains(unreadable.Detail, plainTool) || !strings.Contains(unreadable.Detail, "host restart") {
 				t.Fatalf("%v", err)
 			}
 		})

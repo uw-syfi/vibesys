@@ -84,5 +84,5 @@ func ResolveCLI(setting string, toolPath []string, find release.Finder, files Fi
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("no vibesys-cli: %w, and none in the host's tool path; choose the one to use (%s) with `vibesys-client host configure --job-tool PATH`", err, SettingJobTool)
+	return "", fmt.Errorf("no vibesys-cli: %w, and none in the host's tool path; choose the one to use (%s) with `vibesys-client host configure --job-tool PATH`, then `vibesys-client host restart`", err, SettingJobTool)
 }
