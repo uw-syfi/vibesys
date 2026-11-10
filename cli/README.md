@@ -985,7 +985,11 @@ start without it, saying to install it.
 
 ### Standing allocations
 
-A run can hold capacity over time instead of asking for it per job. With an `[placements.<name>.allocations]`
+A run can hold capacity over time instead of asking for it per job. Opt-in per placement: with no
+`allocations` section, `alloc request` is refused with an error naming
+`placements.<name>.allocations`, and a job submitted without `--alloc` runs exactly as it always
+has, whatever allocations exist. The agent guidance is the `allocations` skill (`skills/search/allocations`).
+With an `[placements.<name>.allocations]`
 section (`max_held`, `max_for`, `fit_margin`) a placement of kind `local` or `ssh` takes standing
 allocations as slots of its own `max_jobs`; they have no end. A placement of kind `apptainer` makes them
 batch jobs of its cluster (`apptainer.NewAllocator`, owned by this daemon's persisted identity), sized as a
