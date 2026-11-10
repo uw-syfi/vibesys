@@ -10,7 +10,9 @@ when the question depends on a small difference, and report the spread.
 
 - Where time goes in the process: a sampling profiler or a built-in profiler of the
   language or runtime, over a representative run.
-- What a request or step does end to end: the system's own tracing or logging if it has any, or
+- What a request or step does end to end: the task's trace job if it has `[trace]`
+  (OpenTelemetry spans of every request: per-hop latency, the call tree and each node's share
+  of the critical path), else the system's own tracing or logging if it has any, or
   timestamps added on an instrumentation branch (the skill, Work step 4).
 - What limits a kernel or hot loop: counters or a roofline estimate from the domain skill.
 - Whether a phase is worth optimizing: its share of the total, not its absolute time.

@@ -37,9 +37,17 @@ critical-path contribution are different quantities, and the expensive service
 is frequently not the one holding the request open. When the summary names no
 edge, plan a profiling round rather than guessing one.
 
+**Where the evidence comes from.** A task with a `[trace]` section records
+every request's OpenTelemetry spans per commit (`vibesys-cli submit trace
+<sha>`; vibesys:measure, references/traces.md): `critical-path.txt` ranks each
+endpoint's nodes by critical-path contribution, `tree.txt` shows the call graph
+with client against server time per hop, `waterfall.txt` shows what overlaps.
+That is the evidence both roles below cite. A task without one has only what
+the services log, or timings added in a profiling round.
+
 **Implementer.** You can read the code and the per-request timing evidence
-the run has: traces the deployment exports, if it exports any, or timings you
-add around the calls in a profiling round. Confirm the edge or the structure
+the run has: the trace job's reports and raw spans, traces the deployment
+exports otherwise, or timings you add around the calls in a profiling round. Confirm the edge or the structure
 before editing: which calls a request makes, in what order, and which of them
 hold the request open.
 

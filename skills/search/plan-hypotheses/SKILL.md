@@ -40,7 +40,10 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
 1. Read `OBJECTIVE.md`; its rules bind every idea. Read the plan index first
    (`vibesys-cli plan list --json`) and open full plans only for plans near your idea
    (`plan view <n>`). Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
-   `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments.
+   `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments. In a
+   task with `[trace]`, read the newest trace of the revision you plan on (`vibesys-cli show <sha>`
+   lists its traces, newest last, with their artifacts directories): its `critical-path.txt` and `tree.txt` say
+   which hop holds each request open ([traces.md](../measure/references/traces.md)).
    Read the code of the revision you plan on (usually the result branch head) without checking it
    out: `git show <sha>:<path>`, `git grep <pattern> <sha>`, `git diff <a> <b>`. The checkout you
    start in belongs to the user or the lead; never change its index, HEAD or files.
@@ -48,7 +51,9 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    operations it must move and the hardware's measured peaks. The gap to the observed time is the
    headroom. Use the benchmark's observed operating point, not its configured one. An idea may not
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
-   first step a measurement. Bound the whole system too: the most the task's fixed resources allow
+   first step a measurement. In a traced microservice task, a change to one hop can remove at most
+   that hop's critical-path contribution (ms per request, `critical-path.txt`), not its inclusive or
+   aggregate latency; cite the trace job and the number. Bound the whole system too: the most the task's fixed resources allow
    end to end, including whatever drives the load. Say which resource sets that ceiling and where
    the current result sits under it. A part's headroom is real only below that ceiling. When your
    ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
