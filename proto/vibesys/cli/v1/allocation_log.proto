@@ -1,0 +1,150 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/allocation.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// The allocation log is what the daemon keeps of its standing allocations (allocation.proto): every
+// input of the pure machine that changed its state, in the order it was applied, each with the time
+// it was applied at. The daemon rebuilds the allocations by replaying the log from the first input,
+// so what the log holds is the allocations. A job is named as the daemon names it across stores, by
+// its store and its number.
+
+// AllocationInput is one input of the allocation machine and when it was applied.
+message AllocationInput {
+  google.protobuf.Timestamp at = 1 [(buf.validate.field).required = true];
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    AllocationAsked ask = 2;
+    AllocationEndAsked end_ask = 3;
+    AllocationRenewAsked renew_ask = 4;
+    AllocationRenewOffAsked renew_off_ask = 5;
+    AllocationRunEnded run_ended = 6;
+    AllocationJobSubmitted job_submitted = 7;
+    AllocationJobStarted job_started = 8;
+    AllocationJobFinished job_finished = 9;
+    AllocationBackendTook submitted = 10;
+    AllocationBackendRefused submit_refused = 11;
+    AllocationObserved observed = 12;
+    AllocationUnreachable unreachable = 13;
+    AllocationReleased released = 14;
+    AllocationTick tick = 15;
+  }
+}
+
+message AllocationAsked {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  string placement = 2 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  google.protobuf.Duration requested_for = 3 [(buf.validate.field).required = true];
+}
+
+message AllocationEndAsked {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  bool after_jobs = 3;
+}
+
+message AllocationRenewAsked {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  RenewalOrder order = 3 [(buf.validate.field).required = true];
+}
+
+message AllocationRenewOffAsked {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+}
+
+message AllocationRunEnded {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message AllocationJobSubmitted {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
+  string job = 2 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Duration bound = 3 [(buf.validate.field).required = true];
+  // The allocation asked for; empty for any.
+  string into = 4 [(buf.validate.field).string.pattern = "^(a[1-9][0-9]{0,17})?$"];
+  repeated string eligible = 5;
+}
+
+message AllocationJobStarted {
+  string job = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message AllocationJobFinished {
+  string job = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// AllocationBackendTook is the backend taking an allocation's request, with its handle.
+message AllocationBackendTook {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  // The backend's own name for the allocation.
+  string ref = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message AllocationBackendRefused {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  string detail = 2;
+}
+
+// AllocationObserved is what the backend said of an allocation.
+message AllocationObserved {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  oneof seen {
+    option (buf.validate.oneof).required = true;
+    SeenPending pending = 2;
+    SeenRunning running = 3;
+    SeenEnded ended = 4;
+  }
+}
+
+message SeenPending {
+  string reason = 1;
+  google.protobuf.Timestamp estimated_start = 2;
+}
+
+message SeenRunning {
+  string node = 1;
+  google.protobuf.Timestamp started_at = 2;
+  google.protobuf.Timestamp ends_at = 3;
+}
+
+// SeenEndedCause is why a backend says an allocation ended.
+enum SeenEndedCause {
+  SEEN_ENDED_CAUSE_UNSPECIFIED = 0;
+  SEEN_ENDED_CAUSE_TIME_LIMIT = 1;
+  SEEN_ENDED_CAUSE_OTHERWISE = 2;
+}
+
+message SeenEnded {
+  SeenEndedCause cause = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Timestamp at = 2;
+}
+
+message AllocationUnreachable {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  string detail = 2;
+}
+
+message AllocationReleased {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+}
+
+message AllocationTick {}
+
+// AllocationLogFile is allocations/<n>.json of the per-user state directory: the nth input of the
+// allocation log, written once.
+message AllocationLogFile {
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  // The input's place in the log, from 1 with no gaps.
+  uint64 seq = 2 [(buf.validate.field).uint64.gt = 0];
+  AllocationInput input = 3 [(buf.validate.field).required = true];
+}

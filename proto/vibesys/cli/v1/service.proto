@@ -4,6 +4,7 @@ package vibesys.cli.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/allocation.proto";
 import "vibesys/cli/v1/bound.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
@@ -105,6 +106,138 @@ service DaemonService {
   rpc DescribeSetup(DescribeSetupRequest) returns (DescribeSetupResponse);
   // ListPlacements reports every placement and the hardware it gives.
   rpc ListPlacements(ListPlacementsRequest) returns (ListPlacementsResponse);
+
+  // RequestAllocation asks for a standing allocation of a placement for a run (allocation.proto). It
+  // returns once the request is recorded and the backend asked, usually with the allocation PENDING.
+  // A request the rules refuse (a placement with no allocations section, a time over its max_for,
+  // max_held reached) fails with the reason. Protocol 6.
+  rpc RequestAllocation(RequestAllocationRequest) returns (RequestAllocationResponse);
+  // ListAllocations lists a run's allocations with the live state the daemon holds.
+  rpc ListAllocations(ListAllocationsRequest) returns (ListAllocationsResponse);
+  // ShowAllocation returns one allocation.
+  rpc ShowAllocation(ShowAllocationRequest) returns (ShowAllocationResponse);
+  // WaitAllocation returns once the allocation is in the state asked for, ended, or the timeout
+  // passed, whichever is first. The daemon measures the timeout; the call never changes the
+  // allocation.
+  rpc WaitAllocation(WaitAllocationRequest) returns (WaitAllocationResponse);
+  // EndAllocation ends an allocation of the caller's run at once, or with after_jobs once the jobs it
+  // holds are done.
+  rpc EndAllocation(EndAllocationRequest) returns (EndAllocationResponse);
+  // RenewAllocation gives an allocation a standing renewal order, or takes its order away.
+  rpc RenewAllocation(RenewAllocationRequest) returns (RenewAllocationResponse);
+  // EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
+  // once, and the run asks for no more. Whoever ends a run calls it.
+  rpc EndRunAllocations(EndRunAllocationsRequest) returns (EndRunAllocationsResponse);
+}
+
+message RequestAllocationRequest {
+  // The run that will hold the allocation.
+  string run_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  AllocationRequest request = 2 [(buf.validate.field).required = true];
+}
+
+message RequestAllocationResponse {
+  Allocation allocation = 1;
+}
+
+message ListAllocationsRequest {
+  // The run whose allocations are listed; empty lists every run's.
+  string run_id = 1 [(buf.validate.field).string.max_len = 256];
+  // Also list the allocations that ended.
+  bool ended = 2;
+}
+
+message ListAllocationsResponse {
+  // Oldest first.
+  repeated Allocation allocations = 1 [(buf.validate.field).repeated.max_items = 4096];
+}
+
+message ShowAllocationRequest {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+}
+
+message ShowAllocationResponse {
+  Allocation allocation = 1;
+}
+
+// AllocationWaitOutcome says how a wait on an allocation ended.
+enum AllocationWaitOutcome {
+  ALLOCATION_WAIT_OUTCOME_UNSPECIFIED = 0;
+  // The allocation is in the state asked for.
+  ALLOCATION_WAIT_OUTCOME_MET = 1;
+  // The timeout passed first.
+  ALLOCATION_WAIT_OUTCOME_TIMED_OUT = 2;
+  // The allocation ended before it was in the state asked for.
+  ALLOCATION_WAIT_OUTCOME_ENDED = 3;
+}
+
+message WaitAllocationRequest {
+  string id = 1 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  oneof until {
+    option (buf.validate.oneof).required = true;
+    // The allocation is RUNNING or DRAINING.
+    bool running = 2 [(buf.validate.field).bool.const = true];
+    // The allocation has at most this much time left, or has ended.
+    google.protobuf.Duration ending_in = 3 [(buf.validate.field).duration.gte = {}];
+    // The allocation has ended.
+    bool ended = 4 [(buf.validate.field).bool.const = true];
+  }
+  // The longest the call waits. A wait is always bounded.
+  google.protobuf.Duration timeout = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).duration.gt = {}
+  ];
+}
+
+message WaitAllocationResponse {
+  Allocation allocation = 1;
+  AllocationWaitOutcome outcome = 2;
+}
+
+message EndAllocationRequest {
+  string run_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  AllocationEnd end = 2 [(buf.validate.field).required = true];
+}
+
+message EndAllocationResponse {
+  Allocation allocation = 1;
+}
+
+message RenewAllocationRequest {
+  string run_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+  oneof order {
+    option (buf.validate.oneof).required = true;
+    // The standing order, which replaces any the allocation had.
+    RenewalOrder renewal = 3;
+    // Take the allocation's order away.
+    bool off = 4 [(buf.validate.field).bool.const = true];
+  }
+}
+
+message RenewAllocationResponse {
+  Allocation allocation = 1;
+}
+
+message EndRunAllocationsRequest {
+  string run_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+}
+
+message EndRunAllocationsResponse {
+  // The run's allocations after the end, oldest first.
+  repeated Allocation allocations = 1 [(buf.validate.field).repeated.max_items = 4096];
 }
 
 // DescribeTaskRequest names a task and where to read it from.

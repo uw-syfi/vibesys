@@ -62,6 +62,11 @@ message Launch {
   // that was queued again left there. The supervisor's output offsets count from it, so a daemon
   // follows the job from what its store holds, whichever attempt wrote it.
   uint64 output_base = 6;
+  // The backend's reference for the standing allocation the job runs inside (allocation.proto,
+  // Handle.ref), set when the daemon started the job in one. A placement whose allocations are
+  // batch allocations runs the job's containers inside it; any other ignores it. Empty for a job
+  // that runs as it always has.
+  string allocation = 7 [(buf.validate.field).string.max_bytes = 256];
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its

@@ -151,7 +151,8 @@ func (s MeasureSettings) wanted(taskDefault uint32) uint32 {
 //
 // defaultSamples is the task's default sample count.
 func CanJoin(existing Job, submission Submission, defaultSamples uint32) bool {
-	if existing.State.Final() || submission.NoCache || existing.Key == "" || existing.Key != submission.Key {
+	if existing.State.Final() || submission.NoCache || existing.Key == "" || existing.Key != submission.Key ||
+		existing.Spec.Allocation != submission.Spec.Allocation {
 		return false
 	}
 	switch theirs := submission.Spec.Settings.(type) {
