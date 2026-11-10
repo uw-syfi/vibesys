@@ -18,12 +18,14 @@ import (
 const skillsRoot = "../../../skills/search"
 
 // namesOfOthers are the VIBESYS_ names the search skills use that no message of the run declares,
-// each with its owner. The installer's setting is read by POSIX sh before any binary of ours exists
+// each with its owner. The installer's settings are read by POSIX sh before any binary of ours exists
 // (docs/contributing/process-boundaries.md), so it stays a plain name.
 var namesOfOthers = map[string]string{
-	"VIBESYS_CLI_INSTALL_DIR": "the installer's own setting, where it puts vibesys-cli",
-	"VIBESYS_K8S_REGISTRY":    "a setting of a task's own Kubernetes evaluator, which its author documents in the task format",
-	"VIBESYS_K8S_BUILDER":     "a setting of a task's own Kubernetes evaluator, which its author documents in the task format",
+	"VIBESYS_CLI_INSTALL_DIR":  "the installer's own setting, where it puts vibesys-cli",
+	"VIBESYS_CLI_VERSION":      "the installer's own setting, the version it installs instead of the newest",
+	"VIBESYS_CLI_RELEASES_URL": "the installer's own setting, the mirror it reads release assets from",
+	"VIBESYS_K8S_REGISTRY":     "a setting of a task's own Kubernetes evaluator, which its author documents in the task format",
+	"VIBESYS_K8S_BUILDER":      "a setting of a task's own Kubernetes evaluator, which its author documents in the task format",
 }
 
 // Every VIBESYS_ name the search skills tell an agent to read is a field of a message the
