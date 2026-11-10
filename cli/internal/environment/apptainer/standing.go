@@ -20,7 +20,8 @@ import (
 //
 // What marks one, in squeue:
 //
-//   - its name is StandingName(id): StandingPrefix and the allocation's ID, which starts with
+//   - its name is StandingName(owner, id): StandingPrefix, the owner (the daemon that made it) and
+//     the allocation's ID, which starts with
 //     JobPrefix like every allocation this package asks for, so that Jobs lists it, and which
 //     Engine.Containers passes over by StandingPrefix, as it does a reusable allocation, so that a
 //     run's sweep never cancels it;
@@ -31,8 +32,18 @@ import (
 // StandingPrefix starts the name of every standing allocation.
 const StandingPrefix = JobPrefix + "standing-"
 
-// StandingName is the name of the standing allocation of the ID.
-func StandingName(id alloc.ID) string { return StandingPrefix + string(id) }
+// StandingName is the name of the standing allocation of the ID that the owner made:
+// StandingPrefix, the owner, "-" and the ID. An owner holds no "-", so the name says whose it is.
+func StandingName(owner string, id alloc.ID) string { return StandingPrefix + owner + "-" + string(id) }
+
+// ownerPattern is what an owner is made of: letters and digits, since it is part of a Slurm name.
+var ownerPattern = regexp.MustCompile(`^[A-Za-z0-9]{1,32}$`)
+
+// ownerOf splits the part of a standing allocation's name after StandingPrefix.
+func ownerOf(rest string) (owner string, id alloc.ID, ok bool) {
+	owner, idText, ok := strings.Cut(rest, "-")
+	return owner, alloc.ID(idText), ok && ownerPattern.MatchString(owner) && alloc.ID(idText).Valid()
+}
 
 // LabelAllocation is the label of a container's spec that names the standing allocation the
 // container's job runs in: the batch job's id (alloc.Handle.Ref). The job's first container joins
@@ -48,6 +59,11 @@ var runPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 type AllocatorConfig struct {
 	// Cluster is the cluster the allocations are asked of.
 	Cluster Cluster
+	// Owner names the daemon that makes the allocations: letters and digits, 1 to 32. It is part of
+	// each allocation's name, and Adopt returns only the allocations of its owner, so daemons that
+	// share a scope never take one another's. It must be stable for a daemon across restarts, or
+	// its allocations are not found again, and differ between daemons that share a cluster account.
+	Owner string
 	// Scope is the placement's scope, the one Config.Scope of the placement's Engine names: it
 	// starts every allocation's comment, which is how Adopt finds this daemon's own.
 	Scope string
@@ -69,6 +85,8 @@ func NewAllocator(cfg AllocatorConfig) (*Allocator, error) {
 	switch {
 	case cfg.Cluster == nil:
 		return nil, invalid("the allocator's config has no Cluster")
+	case !ownerPattern.MatchString(cfg.Owner):
+		return nil, invalid("the allocator's owner %q is not 1 to 32 letters and digits", cfg.Owner)
 	case cfg.Scope == "" || strings.ContainsAny(cfg.Scope, "\n\x00"):
 		return nil, invalid("the allocator's scope %q is not a scope", cfg.Scope)
 	case cfg.MaxTime < 0 || cfg.MaxTime%time.Minute != 0:
@@ -99,12 +117,12 @@ func (a *Allocator) Request(ctx context.Context, s alloc.Spec) (alloc.Handle, er
 		return alloc.Handle{}, err
 	}
 	for _, j := range jobs {
-		if j.Name == StandingName(s.ID) && j.Comment == comment && j.Phase != Ended {
+		if j.Name == StandingName(a.cfg.Owner, s.ID) && j.Comment == comment && j.Phase != Ended {
 			return alloc.Handle{Alloc: s.ID, Ref: j.ID}, nil
 		}
 	}
 	job, err := a.cfg.Cluster.Submit(ctx, Allocation{
-		Name: StandingName(s.ID), Comment: comment, Limit: limit, Options: a.cfg.Sizing.Options(true),
+		Name: StandingName(a.cfg.Owner, s.ID), Comment: comment, Limit: limit, Options: a.cfg.Sizing.Options(true),
 	})
 	if err != nil {
 		return alloc.Handle{}, err
@@ -150,7 +168,7 @@ func (a *Allocator) Release(ctx context.Context, h alloc.Handle) error {
 }
 
 // Adopt implements environment.Allocator: the pending and running standing allocations of this
-// scope, found by their name. A per-container allocation, a reusable one and any other job of the
+// scope and owner, found by their name; another owner's are never returned. A per-container allocation, a reusable one and any other job of the
 // user's are not standing allocations.
 func (a *Allocator) Adopt(ctx context.Context) ([]alloc.Handle, error) {
 	jobs, err := a.cfg.Cluster.Jobs(ctx, a.cfg.Scope)
@@ -159,11 +177,13 @@ func (a *Allocator) Adopt(ctx context.Context) ([]alloc.Handle, error) {
 	}
 	var out []alloc.Handle
 	for _, j := range jobs {
-		id, ok := strings.CutPrefix(j.Name, StandingPrefix)
-		if !ok || j.Phase == Ended || !alloc.ID(id).Valid() {
+		rest, ok := strings.CutPrefix(j.Name, StandingPrefix)
+		if !ok || j.Phase == Ended {
 			continue
 		}
-		out = append(out, alloc.Handle{Alloc: alloc.ID(id), Ref: j.ID})
+		if owner, id, ok := ownerOf(rest); ok && owner == a.cfg.Owner {
+			out = append(out, alloc.Handle{Alloc: id, Ref: j.ID})
+		}
 	}
 	return out, nil
 }

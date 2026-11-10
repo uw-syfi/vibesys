@@ -24,8 +24,12 @@ var standingSizing = apptainer.Sizing{Partition: "part-a", Arguments: []string{"
 
 // newAllocator is an Allocator of the placement's scope over one process's view of the cluster.
 func newAllocator(t testing.TB, cl apptainer.Cluster) *apptainer.Allocator {
+	return newOwned(t, cl, "daemon1")
+}
+
+func newOwned(t testing.TB, cl apptainer.Cluster, owner string) *apptainer.Allocator {
 	t.Helper()
-	a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cl, Scope: scope, Sizing: standingSizing, MaxTime: 48 * time.Hour})
+	a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cl, Owner: owner, Scope: scope, Sizing: standingSizing, MaxTime: 48 * time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +57,7 @@ func contractWorld(queued int) func(allocatortest.TB) allocatortest.World {
 		cluster := clusterfake.New(w.MemoryGates)
 		cluster.Queue(queued, false)
 		client := cluster.Connect()
-		a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: client, Scope: scope, Sizing: standingSizing})
+		a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: client, Owner: "daemon1", Scope: scope, Sizing: standingSizing})
 		if err != nil {
 			panic(err)
 		}
@@ -106,7 +110,7 @@ func TestRequestingTheSameIDTwiceSubmitsOnce(t *testing.T) {
 		t.Fatalf("%d allocations submitted, want one: %+v", len(sub), sub)
 	}
 	want := apptainer.Allocation{
-		Name: "vibesys-apptainer-standing-a7", Comment: apptainer.RunComment(scope, "run-a"), Limit: 90 * time.Minute,
+		Name: "vibesys-apptainer-standing-daemon1-a7", Comment: apptainer.RunComment(scope, "run-a"), Limit: 90 * time.Minute,
 		Options: standingSizing.Options(true),
 	}
 	if got := sub[0]; got.Name != want.Name || got.Comment != want.Comment || got.Limit != want.Limit || got.Idle != 0 || !slices.Equal(got.Options, want.Options) {
@@ -164,7 +168,7 @@ func TestASupervisorExitDoesNotCancelAStandingAllocation(t *testing.T) {
 	_ = own
 	supervisor.Crash()
 	r.client.Crash()
-	if live := cluster.Live(); !slices.Equal(live, []string{"vibesys-apptainer-standing-a1"}) {
+	if live := cluster.Live(); !slices.Equal(live, []string{"vibesys-apptainer-standing-daemon1-a1"}) {
 		t.Fatalf("live after the supervisor died: %v, want the standing allocation alone", live)
 	}
 	// The next process finds it running, and adopts it.
@@ -229,7 +233,7 @@ func TestASweepNeverCancelsAStandingAllocation(t *testing.T) {
 			r := newRig(t, w, cluster, o)
 			at, _ := run(t, r.env, "exit", "0")
 			exited(t, at, 0)
-			want := []string{"vibesys-apptainer-standing-a1", "vibesys-apptainer-standing-a2", "vibesys-apptainer-standing-a3", "vibesys-apptainer-standing-a4"}
+			want := []string{"vibesys-apptainer-standing-daemon1-a1", "vibesys-apptainer-standing-daemon1-a2", "vibesys-apptainer-standing-daemon1-a3", "vibesys-apptainer-standing-daemon1-a4"}
 			if got := cluster.Live(); !slices.Equal(got, want) {
 				t.Errorf("live allocations %v after a run's sweep, want only the four standing ones", got)
 			}
@@ -246,7 +250,7 @@ func TestTheEngineDoesNotRemoveAStandingAllocationAsAContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRig(t, w, cluster, setup{})
-	err := r.engine.Remove(context.Background(), "standing-a1")
+	err := r.engine.Remove(context.Background(), "standing-daemon1-a1")
 	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput {
 		t.Fatalf("Remove = %v, want invalid input", err)
 	}
@@ -312,7 +316,7 @@ func TestAJobJoiningAStandingAllocationRunsThereAndLeavesItRunning(t *testing.T)
 		if running := cluster.Running(); len(running) != 0 {
 			t.Fatalf("processes left after the job ended: %v", running)
 		}
-		if live := cluster.Live(); !slices.Equal(live, []string{"vibesys-apptainer-standing-a1"}) {
+		if live := cluster.Live(); !slices.Equal(live, []string{"vibesys-apptainer-standing-daemon1-a1"}) {
 			t.Fatalf("live after the job ended: %v, want the standing allocation, still running", live)
 		}
 	}
@@ -434,6 +438,8 @@ func TestRandomLivesOfStandingAllocationsKeepTheContract(t *testing.T) {
 			a := newAllocator(t, cluster.Connect())
 			r := newRig(t, w, cluster, setup{})
 			handles := map[int]alloc.Handle{}
+			other := newOwned(t, cluster.Connect(), "daemon2") // another daemon of the same scope
+			theirs := map[int]alloc.Handle{}
 			over := map[int]bool{} // seen ended or released
 			cutNow := false
 			const ids = 5
@@ -444,7 +450,7 @@ func TestRandomLivesOfStandingAllocationsKeepTheContract(t *testing.T) {
 			for step := range 60 {
 				id := 1 + rng.IntN(ids)
 				h, have := handles[id]
-				switch op := rng.IntN(10); op {
+				switch op := rng.IntN(12); op {
 				case 0, 1: // request, again if it is live
 					if have && truth(h) == apptainer.Ended {
 						continue
@@ -513,6 +519,30 @@ func TestRandomLivesOfStandingAllocationsKeepTheContract(t *testing.T) {
 				case 8:
 					cutNow = !cutNow
 					cut(cluster, cutNow)
+				case 10: // the other daemon requests, under the same IDs
+					if cutNow {
+						continue
+					}
+					if oh, ok := theirs[id]; ok && truth(oh) == apptainer.Ended {
+						continue
+					}
+					oh, err := other.Request(ctx, spec(id, "run-x", time.Hour))
+					if err != nil {
+						t.Fatalf("step %d: the other daemon's Request: %v", step, err)
+					}
+					if prev, ok := theirs[id]; ok && prev != oh {
+						t.Fatalf("step %d: the other daemon's Request made %+v, want %+v", step, oh, prev)
+					}
+					if mine, ok := handles[id]; ok && mine.Ref == oh.Ref {
+						t.Fatalf("step %d: two daemons share the allocation %+v", step, oh)
+					}
+					theirs[id] = oh
+				case 11: // the other daemon releases one of its own
+					if oh, ok := theirs[id]; ok && !cutNow {
+						if err := other.Release(ctx, oh); err != nil {
+							t.Fatalf("step %d: the other daemon's Release: %v", step, err)
+						}
+					}
 				case 9: // a run's sweep
 					if cutNow {
 						continue
@@ -534,24 +564,29 @@ func TestRandomLivesOfStandingAllocationsKeepTheContract(t *testing.T) {
 				if cutNow {
 					continue
 				}
-				got, err := a.Adopt(ctx)
-				if err != nil {
-					t.Fatalf("step %d: Adopt: %v", step, err)
-				}
-				var want []alloc.Handle
-				for _, hh := range handles {
-					if truth(hh) != apptainer.Ended {
-						want = append(want, hh)
+				for who, c := range map[string]struct {
+					a  *apptainer.Allocator
+					hs map[int]alloc.Handle
+				}{"this daemon": {a, handles}, "the other daemon": {other, theirs}} {
+					got, err := c.a.Adopt(ctx)
+					if err != nil {
+						t.Fatalf("step %d: %s: Adopt: %v", step, who, err)
+					}
+					var want []alloc.Handle
+					for _, hh := range c.hs {
+						if truth(hh) != apptainer.Ended {
+							want = append(want, hh)
+						}
+					}
+					byID := func(x, y alloc.Handle) int { return strings.Compare(string(x.Alloc), string(y.Alloc)) }
+					slices.SortFunc(got, byID)
+					slices.SortFunc(want, byID)
+					if !slices.Equal(got, want) {
+						t.Fatalf("step %d: %s: Adopt = %+v, want exactly its own live ones, %+v", step, who, got, want)
 					}
 				}
-				byID := func(x, y alloc.Handle) int { return strings.Compare(string(x.Alloc), string(y.Alloc)) }
-				slices.SortFunc(got, byID)
-				slices.SortFunc(want, byID)
-				if !slices.Equal(got, want) {
-					t.Fatalf("step %d: Adopt = %+v, want the live ones, %+v", step, got, want)
-				}
 			}
-			if n := len(cluster.Submitted()); n != len(handles) {
+			if n := len(cluster.Submitted()); n != len(handles)+len(theirs) {
 				t.Fatalf("%d submissions for %d IDs", n, len(handles))
 			}
 		})
@@ -560,4 +595,50 @@ func TestRandomLivesOfStandingAllocationsKeepTheContract(t *testing.T) {
 
 func standingLive(c *clusterfake.Cluster) []string {
 	return slices.DeleteFunc(c.Live(), func(n string) bool { return !strings.HasPrefix(n, apptainer.StandingPrefix) })
+}
+
+// Two daemons of one scope, each with an owner of its own, never find, release or sweep one
+// another's allocations, though they ask for the same IDs.
+func TestDaemonsOfOneScopeNeverTakeEachOthersAllocations(t *testing.T) {
+	ctx := context.Background()
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	a, b := newOwned(t, cluster.Connect(), "daemon1"), newOwned(t, cluster.Connect(), "daemon2")
+	ha, err := a.Request(ctx, spec(1, "run-a", time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hb, err := b.Request(ctx, spec(1, "run-a", time.Hour))
+	if err != nil || hb == ha {
+		t.Fatalf("the same ID of two owners: %+v and %+v, %v; want two allocations", ha, hb, err)
+	}
+	if n := len(cluster.Submitted()); n != 2 {
+		t.Fatalf("%d submissions, want 2", n)
+	}
+	for who, c := range map[string]struct {
+		a *apptainer.Allocator
+		h alloc.Handle
+	}{"a": {a, ha}, "b": {b, hb}} {
+		if got, err := c.a.Adopt(ctx); err != nil || !slices.Equal(got, []alloc.Handle{c.h}) {
+			t.Errorf("%s adopted %+v, %v; want only %+v", who, got, err, c.h)
+		}
+	}
+	// A sweep of this scope, and a release by one, leave the other's.
+	r := newRig(t, w, cluster, setup{})
+	at, _ := run(t, r.env, "exit", "0")
+	exited(t, at, 0)
+	if err := a.Release(ctx, ha); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := b.Adopt(ctx); !slices.Equal(got, []alloc.Handle{hb}) {
+		t.Errorf("b adopted %+v after a's release and a sweep, want %+v", got, hb)
+	}
+	if o, err := b.Observe(ctx, hb); err != nil || !isRunning(o) {
+		t.Errorf("b's allocation is %+v, %v", o, err)
+	}
+	for _, owner := range []string{"", "a-b", "a b", strings.Repeat("x", 33)} {
+		if _, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cluster.Connect(), Owner: owner, Scope: scope}); err == nil {
+			t.Errorf("owner %q was accepted", owner)
+		}
+	}
 }

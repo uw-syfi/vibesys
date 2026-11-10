@@ -270,14 +270,14 @@ func recorded(t *testing.T, out func(argv []string) string) (*clustercli.Cluster
 func TestAStandingAllocationIsSubmittedWithTheSitesCommand(t *testing.T) {
 	c, r := recorded(t, func([]string) string { return "4242;cluster-a\n" })
 	id, err := c.Submit(context.Background(), apptainer.Allocation{
-		Name: apptainer.StandingName("a7"), Comment: apptainer.RunComment("scope-a", "run-a"), Limit: 150 * time.Minute,
+		Name: apptainer.StandingName("daemon1", "a7"), Comment: apptainer.RunComment("scope-a", "run-a"), Limit: 150 * time.Minute,
 		Options: []string{"--partition=part-a", "--account=acct-a", "--exclusive"},
 	})
 	if err != nil || id != "4242" {
 		t.Fatalf("Submit = %q, %v", id, err)
 	}
 	want := []string{
-		"submit-job", "--site-flag", "--parsable", "--job-name=vibesys-apptainer-standing-a7", "--comment=scope-a.run-a", "--no-requeue",
+		"submit-job", "--site-flag", "--parsable", "--job-name=vibesys-apptainer-standing-daemon1-a7", "--comment=scope-a.run-a", "--no-requeue",
 		"--time=150", "--nodes=1", "--ntasks=1", "--partition=part-a", "--account=acct-a", "--exclusive", "--output=/dev/null",
 		"--wrap=exec sleep infinity",
 	}
