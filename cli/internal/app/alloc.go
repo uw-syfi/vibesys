@@ -765,8 +765,19 @@ func (s *allocShell) adoptedBy(ctx context.Context, found adoption) {
 		case al.Handle == (alloc.Handle{}) && al.Stage() == alloc.StagePending:
 			s.apply(ctx, allocMsg{event: alloc.Submitted{ID: h.Alloc, Handle: h}})
 			s.observeAll(ctx)
+		case al.Handle != (alloc.Handle{}) && al.Handle.Ref != h.Ref:
+			// A second allocation at the backend for one record, such as a request whose answer was
+			// lost and that landed after the next one: the record keeps the one it has, and the
+			// other is released, so it does not hold capacity for its whole time limit.
+			s.app.cfg.Logf("releasing %s of allocation %s, which is recorded as %s", h.Ref, h.Alloc, al.Handle.Ref)
+			s.effect(ctx, "release duplicate "+h.Ref, func(ctx context.Context) {
+				err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, h) })
+				if err != nil && ctx.Err() == nil {
+					s.app.cfg.Logf("releasing %s of allocation %s, which is recorded as %s: %v", h.Ref, h.Alloc, al.Handle.Ref, err)
+				}
+			})
 		default:
-			// A record that has its handle.
+			// A record that has this handle.
 		}
 	}
 	// An allocation that ended before the backend took the request, and that the backend does not

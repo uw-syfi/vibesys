@@ -210,6 +210,17 @@ func (f *FakeAllocator) Plant(s alloc.Spec) alloc.Handle {
 	return h.handle
 }
 
+// Duplicate makes a second allocation of the spec as the allocator's own, beside one it holds for
+// the same ID: what a request whose answer was lost, and that landed after it was asked again,
+// leaves. Adopt returns both.
+func (f *FakeAllocator) Duplicate(s alloc.Spec) alloc.Handle {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h := f.newHeld(s, true, f.clock.Now())
+	f.allocs = append(f.allocs, h)
+	return h.handle
+}
+
 // Live is the handles of every allocation the backend holds now, made by the allocator or not, in
 // the order they were made.
 func (f *FakeAllocator) Live() []alloc.Handle {

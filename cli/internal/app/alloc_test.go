@@ -430,3 +430,28 @@ func TestAMovingEstimateOfAPendingAllocationIsNotLogged(t *testing.T) {
 		t.Fatalf("after a restart the allocation is %+v, want it pending with its handle", got)
 	}
 }
+
+// A second allocation at the backend for an ID whose record has another handle, such as a request
+// that timed out and landed after it was asked again, is released when the daemon adopts what the
+// backend holds; the record keeps its own, which goes on running. Before, adoption ignored it, and it
+// held its capacity for its whole time limit.
+func TestASecondAllocationForARecordedIDIsReleased(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	run := r.await(t, a, al.ID, app.UntilRunning)
+	dup := r.fake.Duplicate(alloc.Spec{ID: al.ID, Run: call.Run, Placement: "p", For: time.Hour})
+	a = r.restart(a)
+	ctx := ctxFor(t)
+	for slices.Contains(r.fake.Live(), dup) {
+		r.timers.tick()
+		// Each look is the daemon's; the wait only lets it run, bounded against a hang.
+		if _, _, err := a.WaitAllocation(ctx, al.ID, app.AllocUntil{Kind: app.UntilEnded}, time.Millisecond); err != nil {
+			t.Fatalf("the duplicate %s was never released: %v", dup.Ref, err)
+		}
+	}
+	got := mustAllocation(t, a, al.ID)
+	if got.Handle != run.Handle || got.Stage() != alloc.StageRunning || !slices.Contains(r.fake.Live(), run.Handle) {
+		t.Fatalf("after the duplicate's release the allocation is %+v (live %v), want it running on %s", got, r.fake.Live(), run.Handle.Ref)
+	}
+}
