@@ -16,11 +16,13 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -164,6 +166,9 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 	wrong := func(want string) error { return invalid("%s: want %s, got %v", at, want, v) }
 	switch fd.Kind() {
 	case protoreflect.MessageKind:
+		if fd.Message().FullName() == durationName {
+			return duration(v, at)
+		}
 		table, ok := v.(map[string]any)
 		if !ok {
 			return nil, wrong("a table")
@@ -243,6 +248,32 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 
 // structName is the message a section held as data is: its keys are not checked.
 const structName protoreflect.FullName = "google.protobuf.Struct"
+
+// durationName is the message a duration is. The file writes one as Go spells a duration, such as
+// "24h" or "90m", which is also how a command line flag takes it.
+const durationName protoreflect.FullName = "google.protobuf.Duration"
+
+// duration is a duration written as text, in the JSON protojson reads. A value that is not such text
+// is refused naming its key; whether the field may hold it is the message's rules' to say.
+func duration(v any, at string) (any, error) {
+	text, ok := v.(string)
+	if !ok {
+		return nil, invalid("%s: want a duration such as \"24h\", got %v", at, v)
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return nil, invalid("%s: want a duration such as \"24h\", got %q", at, text)
+	}
+	j, err := protojson.Marshal(durationpb.New(d))
+	if err != nil {
+		return nil, invalid("%s: %v", at, err)
+	}
+	var out any
+	if err := json.Unmarshal(j, &out); err != nil {
+		return nil, invalid("%s: %v", at, err)
+	}
+	return out, nil
+}
 
 // opaque is a TOML value as JSON: a date or a time becomes its TOML text. A data section holds
 // JSON, which has no nan or infinity, so a non-finite number is refused here naming its key, rather

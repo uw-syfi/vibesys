@@ -123,6 +123,7 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 		names := sectionNames{
 			kind: "placements." + name + ".kind", remote: "[placements." + name + ".remote]", slurm: "[placements." + name + ".slurm]",
 			apptainer: "[placements." + name + ".apptainer]", maxJobs: "placements." + name + ".max_jobs",
+			allocations: "[placements." + name + ".allocations]",
 		}
 		if legacy || (!named && sched.MaxJobs != nil) {
 			names = legacyNames
@@ -160,11 +161,11 @@ func fromLegacy(c *cliv1.OperatorConfig) (*cliv1.Placement, error) {
 }
 
 // sectionNames are how a placement's settings are spelled in the file, for its errors.
-type sectionNames struct{ kind, remote, slurm, apptainer, maxJobs string }
+type sectionNames struct{ kind, remote, slurm, apptainer, maxJobs, allocations string }
 
 // legacyNames are how the earlier shape spells its one placement's settings. It has no apptainer
 // section, which its one placement takes the defaults of.
-var legacyNames = sectionNames{kind: "docker.placement", remote: "[remote]", slurm: "[slurm]", apptainer: "[apptainer]", maxJobs: "scheduler.max_jobs"}
+var legacyNames = sectionNames{kind: "docker.placement", remote: "[remote]", slurm: "[slurm]", apptainer: "[apptainer]", maxJobs: "scheduler.max_jobs", allocations: "[allocations]"}
 
 // sections refuses a placement without a section its kind needs, or with one its kind does not
 // use: a setting quietly left out would run jobs somewhere the operator did not mean.
@@ -204,6 +205,11 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 	case p.GetSlurm().GetMaxTimeSeconds() > 0 && p.GetApptainer().GetAllocationLimitSeconds() > p.GetSlurm().GetMaxTimeSeconds():
 		return invalid("%s allocation_limit_seconds = %v is longer than %s max_time_seconds = %v, the longest allocation the cluster grants; lower it, or leave it unset for max_time_seconds",
 			n.apptainer, p.GetApptainer().GetAllocationLimitSeconds(), n.slurm, p.GetSlurm().GetMaxTimeSeconds())
+	case p.GetSlurm().GetMaxTimeSeconds() > 0 && p.GetAllocations().GetMaxFor().AsDuration().Seconds() > p.GetSlurm().GetMaxTimeSeconds():
+		// A standing allocation asked for longer than the cluster grants would be refused by the
+		// cluster after it was accepted here.
+		return invalid("%s max_for = %s is longer than %s max_time_seconds = %v, the longest allocation the cluster grants",
+			n.allocations, p.GetAllocations().GetMaxFor().AsDuration(), n.slurm, p.GetSlurm().GetMaxTimeSeconds())
 	case pyxis && p.GetApptainer().GetProgram() != "":
 		// The pyxis runtime runs no apptainer program on the nodes, and converts nothing on this
 		// machine: a setting of the other runtime would be quietly ignored.
