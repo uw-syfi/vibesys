@@ -64,11 +64,17 @@ class NamespacedRunner:
 class NamespacedDeployer:
     inner: InProcessDeployer
     namespace: str = NAMESPACE
+    failed: bool | None = None  # whether the deploy ended with an error (its teardown keeps diagnostics)
 
     @contextmanager
     def deploy(self, context: DeployContext) -> Iterator[NamespacedRunner]:
         with self.inner.deploy(context) as runner:
-            yield NamespacedRunner(runner, self.namespace)
+            try:
+                yield NamespacedRunner(runner, self.namespace)
+            except Exception:
+                self.failed = True
+                raise
+            self.failed = False
 
 
 @pytest.fixture
@@ -231,6 +237,7 @@ def test_a_failed_start_runs_no_load_and_says_why(tmp_path: Path, stitch: FakeSt
     assert stitch.verbs() == ["start"]
     assert deployer.inner.runner.jobs == []
     assert deployer.inner.torn_down == 1
+    assert deployer.failed  # torn down as failed: the pods' state and logs are kept
     readme = (artifacts / "trace" / "README.txt").read_text()
     assert readme.startswith("THE TRACE IS INCOMPLETE")
     assert "start failed on purpose" in readme
@@ -254,6 +261,7 @@ def test_a_failed_step_keeps_what_was_written_and_exits_1(
     assert stitch.verbs() == ran
     assert len(deployer.inner.runner.jobs) == 2
     assert deployer.inner.torn_down == 1
+    assert deployer.failed
     out = artifacts / "trace"
     readme = (out / "README.txt").read_text()
     assert readme.startswith("THE TRACE IS INCOMPLETE")
