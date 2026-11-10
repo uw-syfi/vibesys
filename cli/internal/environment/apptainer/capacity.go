@@ -20,8 +20,12 @@ type PartitionFacts struct {
 	Now time.Time
 	// User is the cluster user the reservations are checked against.
 	User string
-	// NodesTotal and NodesIdle count the partition's nodes, and the idle ones among them.
+	// NodesTotal and NodesIdle count the partition's nodes, and the idle ones among them as Slurm
+	// counts them, which includes a node it shows as reserved.
 	NodesTotal, NodesIdle uint32
+	// NodesReserved names the nodes Slurm shows in the state reserved: idle, but held by a
+	// reservation that is under way.
+	NodesReserved []string
 	// Nodes names the partition's nodes.
 	Nodes []string
 	// PendingJobs counts the jobs, of any user, that wait for the partition.
@@ -67,7 +71,9 @@ type CapacityQuery struct {
 // its Slurm detail: the nodes in all and idle, the jobs waiting, the reservations that are not over
 // and that overlap the partition (by its name, or by a node of it), each with whether the account
 // may use it, and the recent waits, newest first. The slots are the partition's nodes in all and
-// idle: the caller, which knows what the run holds, says what of them is the run's.
+// idle: the caller, which knows what the run holds, says what of them is the run's. A node Slurm
+// shows as reserved is not idle here unless a reservation that holds it is usable, as Slurm counts
+// it idle whoever the reservation is for.
 //
 // A reservation is usable when the user or the account is named in it, or when it only excludes
 // others and names neither; one that names groups alone is not taken to be, since the groups of the
@@ -79,8 +85,10 @@ func Capacity(ctx context.Context, q CapacityQuery) (*cliv1.PlacementCapacity, [
 	if err != nil {
 		return nil, nil, err
 	}
-	out := &cliv1.PlacementCapacity{Placement: q.Placement, SlotsTotal: f.NodesTotal, SlotsFree: min(f.NodesIdle, f.NodesTotal)}
-	slurm := &cliv1.SlurmCapacity{NodesTotal: f.NodesTotal, NodesIdle: min(f.NodesIdle, f.NodesTotal), PendingJobs: f.PendingJobs}
+	idle := min(f.NodesIdle, f.NodesTotal)
+	idle -= min(heldByOthers(f, q.Account), idle)
+	out := &cliv1.PlacementCapacity{Placement: q.Placement, SlotsTotal: f.NodesTotal, SlotsFree: idle}
+	slurm := &cliv1.SlurmCapacity{NodesTotal: f.NodesTotal, NodesIdle: idle, PendingJobs: f.PendingJobs}
 	for _, r := range f.Reservations {
 		if !r.End.After(f.Now) || !r.End.After(r.Start) || !overlaps(r, f, q.Partition) {
 			continue
@@ -105,6 +113,26 @@ func Capacity(ctx context.Context, q CapacityQuery) (*cliv1.PlacementCapacity, [
 		})
 	}
 	return out, f.Skipped, nil
+}
+
+// heldByOthers counts the nodes Slurm counts idle that this user cannot use: those it shows reserved,
+// unless a reservation under way that holds the node is one the user may use. A reserved node that
+// no reservation of the answer holds is not taken to be usable either, since nothing says it is.
+func heldByOthers(f PartitionFacts, account string) uint32 {
+	var held uint32
+	for _, n := range f.NodesReserved {
+		mine := false
+		for _, r := range f.Reservations {
+			if !f.Now.Before(r.Start) && f.Now.Before(r.End) && slices.Contains(r.Nodes, n) && usable(r, f.User, account) {
+				mine = true
+				break
+			}
+		}
+		if !mine {
+			held++
+		}
+	}
+	return held
 }
 
 // overlaps says whether the reservation holds nodes of the partition: it names the partition, or

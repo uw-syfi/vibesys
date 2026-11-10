@@ -230,7 +230,8 @@ func (c *Cluster) CancelJob(ctx context.Context, job string) error {
 
 // partitionScript prints, each as a section made by sec (its exit status, then what it printed): the
 // login node's clock, the user, the partition's node counts ("allocated/idle/other/total"), its
-// nodes, the pending jobs waiting for it, and the reservations, one a line.
+// nodes, the nodes Slurm shows as reserved, the pending jobs waiting for it, and the reservations,
+// one a line.
 const partitionScript = `sec() { n=$1; shift; o=$("$@" 2>&1); r=$?; printf '==vibesys:%s==\n%s\n%s\n' "$n" "$r" "$o"; }
 sec clock ` + clockLine + `
 sec user id -un
@@ -238,15 +239,17 @@ p="$1"
 if [ -n "$p" ]; then
   sec sinfo sinfo -h -p "$p" -o %F
   sec nodes sinfo -h -p "$p" -N -o %N
+  sec reserved sinfo -h -p "$p" -N -t reserved -o %N
   sec pending squeue -h -p "$p" -t PENDING -o %i
 else
   sec sinfo sinfo -h -o %F
   sec nodes sinfo -h -N -o %N
+  sec reserved sinfo -h -N -t reserved -o %N
   sec pending squeue -h -t PENDING -o %i
 fi
 sec res scontrol show reservation -o`
 
-var partitionSections = []string{"clock", "user", "sinfo", "nodes", "pending", "res"}
+var partitionSections = []string{"clock", "user", "sinfo", "nodes", "reserved", "pending", "res"}
 
 // Partition implements apptainer.Cluster.
 func (c *Cluster) Partition(ctx context.Context, partition string) (apptainer.PartitionFacts, error) {
@@ -308,6 +311,19 @@ func ParsePartition(out string) (apptainer.PartitionFacts, error) {
 	for _, n := range lines(text) {
 		if !slices.Contains(f.Nodes, n) {
 			f.Nodes = append(f.Nodes, n)
+		}
+	}
+	// The nodes Slurm shows as reserved, which its idle count includes. An answer without the section,
+	// or one that failed, names none, and a failed one is noted: the idle count is then Slurm's.
+	if _, ok := secs["reserved"]; ok {
+		if status, text, _ := strings.Cut(secs["reserved"], "\n"); strings.TrimSpace(status) != "0" {
+			f.Skipped = append(f.Skipped, "sinfo -t reserved: "+clip(text))
+		} else {
+			for _, n := range lines(text) {
+				if !slices.Contains(f.NodesReserved, n) {
+					f.NodesReserved = append(f.NodesReserved, n)
+				}
+			}
 		}
 	}
 	if text, err = body("pending"); err != nil {

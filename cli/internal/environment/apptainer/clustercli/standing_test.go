@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,6 +187,60 @@ func (p partitionOf) Partition(context.Context, string) (apptainer.PartitionFact
 	return p.f, nil
 }
 
+// Slurm counts a node it shows as reserved among the idle ones, whoever the reservation is for. For
+// the user it is idle only when a reservation under way that holds it is usable: here of six nodes,
+// five idle for Slurm, one reserved for another user and one for this user, four are.
+func TestAReservedNodeIsIdleOnlyForWhoMayUseItsReservation(t *testing.T) {
+	f, err := clustercli.ParsePartition(golden(t, "partition_reserved.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.NodesIdle != 5 || !slices.Equal(f.NodesReserved, []string{"node04", "node05"}) || len(f.Skipped) != 0 {
+		t.Fatalf("facts %+v", f)
+	}
+	c, _, err := apptainer.Capacity(context.Background(), apptainer.CapacityQuery{Cluster: partitionOf{f: f}, Placement: "p", Partition: "part-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.GetSlotsTotal() != 6 || c.GetSlotsFree() != 4 || c.GetSlurm().GetNodesIdle() != 4 {
+		t.Errorf("slots %d free of %d, Slurm idle %d; want 4 free of 6", c.GetSlotsFree(), c.GetSlotsTotal(), c.GetSlurm().GetNodesIdle())
+	}
+}
+
+// However the nodes are reserved, the idle count is never over Slurm's, never under zero, and a
+// node is lost from it only for a reservation of someone else's.
+func TestTheIdleNodesOfACapacityAreNeverMoreThanSlurmsOrNegative(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 11))
+	for range 500 {
+		total := uint32(r.IntN(8))
+		f := apptainer.PartitionFacts{Now: at(10, 16, 0, 0), User: "user-a", NodesTotal: total, NodesIdle: uint32(r.IntN(int(total) + 3))}
+		for i := range int(total) {
+			name := fmt.Sprintf("n%d", i)
+			f.Nodes = append(f.Nodes, name)
+			if r.IntN(2) == 0 {
+				f.NodesReserved = append(f.NodesReserved, name)
+			}
+			if r.IntN(2) == 0 {
+				users := []string{"user-a", "user-b"}[r.IntN(2)]
+				f.Reservations = append(f.Reservations, apptainer.ReservationFacts{
+					Name: "r" + name, Start: at(10, 8, 0, 0), End: at(10, 20, 0, 0), Nodes: []string{name}, Partition: "part-a", Users: []string{users},
+				})
+			}
+		}
+		c, _, err := apptainer.Capacity(context.Background(), apptainer.CapacityQuery{Cluster: partitionOf{f: f}, Placement: "p", Partition: "part-a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		free := c.GetSlotsFree()
+		if free > min(f.NodesIdle, f.NodesTotal) || free > total {
+			t.Fatalf("%d free of %d with Slurm idle %d: %+v", free, total, f.NodesIdle, f)
+		}
+		if len(f.NodesReserved) == 0 && free != min(f.NodesIdle, f.NodesTotal) {
+			t.Fatalf("no node is reserved and %d are free, Slurm says %d idle", free, f.NodesIdle)
+		}
+	}
+}
+
 func TestAPartitionWithNoReservationsOrJobs(t *testing.T) {
 	f, err := clustercli.ParsePartition(golden(t, "partition_none.txt"))
 	if err != nil || f.PendingJobs != 0 || f.NodesTotal != 4 || f.NodesIdle != 4 || len(f.Reservations) != 0 || len(f.Skipped) != 0 {
@@ -319,7 +374,7 @@ func TestTheStandingCallsSendTheCommandsTheParsersRead(t *testing.T) {
 	}
 	for call, needles := range map[int][]string{
 		0: {`squeue -h -j "$1" -o '%T|%r|%S|%N|%L|%l'`, `sacct -n -X -P -j "$1" -o State,End`, `scontrol show job -o "$1"`},
-		1: {`sinfo -h -p "$p" -o %F`, `sinfo -h -p "$p" -N -o %N`, `squeue -h -p "$p" -t PENDING -o %i`, `scontrol show reservation -o`, `id -un`},
+		1: {`sinfo -h -p "$p" -o %F`, `sinfo -h -p "$p" -N -o %N`, `sinfo -h -p "$p" -N -t reserved -o %N`, `squeue -h -p "$p" -t PENDING -o %i`, `scontrol show reservation -o`, `id -un`},
 	} {
 		for _, n := range needles {
 			if !strings.Contains(calls[call][2], n) {
@@ -388,7 +443,7 @@ func TestTheStandingScriptsRunInAShell(t *testing.T) {
 		"squeue":   "#!/bin/sh\nfor a do case \"$a\" in -j) [ -e \"$(dirname \"$0\")/cancelled\" ] && { echo 'slurm_load_jobs error: Invalid job id specified'; exit 1; }; echo 'RUNNING|None|2026-11-10T07:30:00|node-a|1:30:00|2:00:00'; exit 0;; -t) printf '5001\\n5002\\n'; exit 0;; esac; done\n",
 		"sacct":    "#!/bin/sh\nexit 0\n",
 		"scontrol": "#!/bin/sh\nif [ \"$2\" = reservation ]; then echo 'ReservationName=r StartTime=2030-01-01T00:00:00 EndTime=2030-01-02T00:00:00 Nodes=n[1-2] NodeCnt=2 PartitionName=part-a Users=user-a'; fi\nexit 0\n",
-		"sinfo":    "#!/bin/sh\nfor a do case \"$a\" in -N) printf 'n1\\nn2\\n'; exit 0;; esac; done\necho '1/1/0/2'\n",
+		"sinfo":    "#!/bin/sh\nfor a do case \"$a\" in -t) exit 0;; esac; done\nfor a do case \"$a\" in -N) printf 'n1\\nn2\\n'; exit 0;; esac; done\necho '1/1/0/2'\n",
 	}
 	for prog, text := range fakes {
 		if err := os.WriteFile(filepath.Join(sh.bin, prog), []byte(text), 0o755); err != nil {
