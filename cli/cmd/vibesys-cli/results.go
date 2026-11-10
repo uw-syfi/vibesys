@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
@@ -26,7 +28,9 @@ func withClient(ctx context.Context, d deps, asJSON bool, call func(*client.Clie
 	return call(cl)
 }
 
-// showCommand is `show <commit>`: every result saved for the commit.
+// showCommand is `show <commit>`: every result saved for the commit. A trace is printed with the
+// directory of its reports, resolved against the repository's main checkout where the daemon keeps
+// them, and the files it left there, oldest first, so the last trace printed is the newest.
 func showCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("show", d)
 	positional, err := parse(fs, args)
@@ -64,6 +68,15 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 		for _, r := range resp.GetResults() {
 			if r.GetCheck() != nil {
 				fmt.Fprintln(d.stdout, describeResult(r))
+			}
+		}
+		root := ""
+		if repo, err := d.git.Resolve(ctx, callCtx.GetRepository()); err == nil {
+			root = string(repo)
+		}
+		for _, r := range resp.GetResults() {
+			if r.GetTrace() != nil {
+				fmt.Fprintln(d.stdout, describeTrace(r, root))
 			}
 		}
 		placed := map[string]string{}
@@ -361,14 +374,41 @@ func describeMeasurement(m *cliv1.Measurement, placed map[string]string) string 
 	return line
 }
 
+// describeTrace is a saved trace: a line like describeResult's, then the directory of its reports,
+// joined to root, the repository's main checkout, when it is relative and root is known, and the
+// files the trace left in its trace/ directory.
+func describeTrace(r *cliv1.Result, root string) string {
+	tr := r.GetTrace()
+	dir := tr.GetArtifactsDir()
+	if root != "" && dir != "" && !filepath.IsAbs(dir) {
+		dir = filepath.Join(root, dir)
+	}
+	var b strings.Builder
+	b.WriteString(describeResult(r))
+	fmt.Fprintf(&b, "\n\t  artifacts: %s", dir)
+	if len(tr.GetFiles()) == 0 {
+		fmt.Fprintf(&b, "\n\t  %s/: no files", traceDir)
+	} else {
+		fmt.Fprintf(&b, "\n\t  %s/: %s", traceDir, strings.Join(tr.GetFiles(), " "))
+	}
+	return b.String()
+}
+
+// traceDir is the directory under a trace's artifacts directory that holds its reports.
+const traceDir = "trace"
+
 // describeResult is one saved result in a line, with its numbers rounded, and the placement it was
 // taken on, for telling where a number came from.
 func describeResult(r *cliv1.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
-	if m := r.GetMeasure(); m != nil {
+	switch {
+	case r.GetMeasure() != nil:
+		m := r.GetMeasure()
 		fmt.Fprintf(&b, "measure\t%s\tcheck %s", strings.Join(headlines(m), "\t"), m.GetCheckJobId())
-	} else {
+	case r.GetTrace() != nil:
+		fmt.Fprintf(&b, "trace\tsucceeded in %s", r.GetTrace().GetDuration().AsDuration().Round(time.Second))
+	default:
 		b.WriteString("check\tpassed")
 	}
 	fmt.Fprintf(&b, "\t%s\t%s", environmentName(r.GetEnvironment()), shortCommit(r.GetCommit()))
