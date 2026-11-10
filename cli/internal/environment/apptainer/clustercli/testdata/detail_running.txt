@@ -1,0 +1,6 @@
+clock 1794326400 2026-11-10T08:00:00
+squeue 0
+RUNNING|None|2026-11-10T07:30:00|node-a|1:30:00|2:00:00
+==sacct==
+RUNNING|Unknown
+==scontrol==

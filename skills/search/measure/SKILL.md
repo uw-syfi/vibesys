@@ -53,6 +53,9 @@ change one, edit that Dockerfile, commit, then run a cheap `submit command` (for
 print or an import) on the commit: the job builds the image from the commit and smoke-tests it
 before a measure pays for the build.
 
+On a placement where jobs wait hours in a cluster queue, hold capacity with a standing allocation and
+submit with `--alloc any`: `vibesys:allocations`.
+
 Everything that puts load on the machine goes through a job, so the daemon decides what runs
 together and the numbers stay clean: a measure job runs alone on its machine (it holds its
 placement alone, or, where each job gets a whole node of its own, its node), while checks and

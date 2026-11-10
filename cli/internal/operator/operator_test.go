@@ -203,6 +203,8 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"a max_for of nothing":                      {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"0s\"\n", "max_for"},
 		"a negative max_for":                        {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"-1h\"\n", "max_for"},
 		"too many held":                             {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 65\nmax_for = \"1h\"\n", "max_held"},
+		"a run_idle_end under a minute":             {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"1h\"\nrun_idle_end = \"30s\"\n", "run_idle_end"},
+		"a run_idle_end that is no duration":        {"[placements.x]\nkind = \"local\"\n[placements.x.allocations]\nmax_held = 1\nmax_for = \"1h\"\nrun_idle_end = 7200\n", "placements.x.allocations.run_idle_end"},
 		"a max_for over the cluster's cap":          {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.allocations]\nmax_held = 2\nmax_for = \"24h\"\n[placements.mi210.slurm]\nmax_time_seconds = 43200", 1), "[placements.mi210.allocations] max_for = 24h0m0s is longer than [placements.mi210.slurm] max_time_seconds = 43200"},
 		"a local scratch directory under pyxis":     {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nruntime = \"pyxis\"\nlocal_scratch_dir = \"/scratch/me\"", 1), "local_scratch_dir"},
 	}

@@ -318,7 +318,7 @@ func TestAJobsStateIsWhatSlurmSays(t *testing.T) {
 		{"squeue 0\nPENDING|Priority\n==sacct==\nPENDING\n", apptainer.Queued, "PENDING", false},
 		{"squeue 0\nCONFIGURING|None\n==sacct==\n", apptainer.Queued, "CONFIGURING", false},
 		{"squeue 0\nRUNNING|None\n==sacct==\nRUNNING\n", apptainer.Running, "RUNNING", false},
-		{"squeue 0\nCOMPLETING|None\n==sacct==\nCANCELLED by 1002\n", apptainer.Ended, "COMPLETING", false},
+		{"squeue 0\nCOMPLETING|None\n==sacct==\nCANCELLED by 1002\n", apptainer.Suspended, "COMPLETING", false},
 		{"squeue 0\n\n==sacct==\nCANCELLED by 1002\n", apptainer.Ended, "CANCELLED", false},
 		{"squeue 1\nslurm_load_jobs error: Invalid job id specified\n==sacct==\nFAILED\n", apptainer.Ended, "FAILED", false},
 		{"squeue 0\n\n==sacct==\n", apptainer.Ended, "", false},

@@ -111,7 +111,7 @@ var rules = map[string][]string{
 	// Containers placed on a Slurm cluster whose nodes run Apptainer and no Docker: an engine over
 	// the cluster's interface, the real cluster reached over ssh, and a fake kept in memory.
 	"internal/environment/apptainer": {
-		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
+		"gen/", "internal/alloc", "internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
 		"internal/environment/docker",
 		"internal/wire",
 	},
@@ -198,7 +198,7 @@ var rules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
 		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
-		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
+		"internal/gitwork", "internal/hostfs", "internal/lifecycle", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
 		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",
@@ -259,7 +259,7 @@ var testRules = map[string][]string{
 	"internal/resource/gpu":               {"internal/resource/resourcetest"},
 	"internal/resource/rocm":              {"internal/resource/resourcetest"},
 	"internal/environment/apptainer": {
-		"internal/backend/amd", "internal/environment/apptainer/clusterfake",
+		"internal/backend/amd", "internal/environment/allocatortest", "internal/environment/apptainer/clusterfake",
 		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",
 		"internal/environment/fakeenv", "internal/environment/fakeenv/fakeworld", "internal/resource",
 		"internal/resource/rocm", "internal/task",
@@ -317,6 +317,10 @@ var testRules = map[string][]string{
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
 		"internal/store", "internal/supervisor", "internal/lease", "internal/lease/fakelease",
+		// The standing allocations of an apptainer placement, through the production wiring over its fakes.
+		"internal/production", "internal/hostfs", "internal/operator", "internal/environment/apptainer", "internal/environment/apptainer/clusterfake",
+		"internal/environment/docker", "internal/environment/docker/dockerfake", "internal/environment/fakeenv/fakeworld",
+		"internal/store/filestore", "internal/task", "internal/task/tasktest",
 	},
 	"cmd/vibesys-cli": {
 		"internal/alloc", "internal/schedule", "internal/store/memstore",

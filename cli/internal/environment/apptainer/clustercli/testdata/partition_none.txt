@@ -1,0 +1,19 @@
+==vibesys:clock==
+0
+1794326400 2026-11-10T08:00:00
+==vibesys:user==
+0
+user-a
+==vibesys:sinfo==
+0
+0/4/0/4
+==vibesys:nodes==
+0
+n1
+n2
+==vibesys:pending==
+0
+
+==vibesys:res==
+1
+No reservations in the system

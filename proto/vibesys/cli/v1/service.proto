@@ -128,6 +128,20 @@ service DaemonService {
   // EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
   // once, and the run asks for no more. Whoever ends a run calls it.
   rpc EndRunAllocations(EndRunAllocationsRequest) returns (EndRunAllocationsResponse);
+  // ReadPlacementCapacity measures a placement's capacity now (allocation.proto): its slots, and for a
+  // Slurm cluster what the partition says, with the run's own allocations on it and the recent waits
+  // of the daemon's requests. It measures and predicts nothing, and changes nothing.
+  rpc ReadPlacementCapacity(ReadPlacementCapacityRequest) returns (ReadPlacementCapacityResponse);
+}
+
+message ReadPlacementCapacityRequest {
+  string placement = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+  // The run whose allocations on the placement are listed as held; empty lists none.
+  string run_id = 2 [(buf.validate.field).string.max_len = 256];
+}
+
+message ReadPlacementCapacityResponse {
+  PlacementCapacity capacity = 1 [(buf.validate.field).required = true];
 }
 
 message RequestAllocationRequest {

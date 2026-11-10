@@ -8,7 +8,10 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // AllocationView is an allocation with what the daemon knows of it besides its record.
@@ -70,10 +73,19 @@ func RefusalFailure(r alloc.Refusal) *core.Failure {
 	case alloc.UnknownAllocation, alloc.NotOwnedByRun:
 		kind = core.FailureNotFound
 	case alloc.RunNotLive, alloc.MaxHeldReached, alloc.NotRunning, alloc.DoesNotFit, alloc.DuplicateJob,
-		alloc.NotRenewable, alloc.NoEnd, alloc.AlreadyRenewed:
+		alloc.NotRenewable, alloc.NoEnd, alloc.AlreadyRenewed, alloc.NoAllocation:
 		kind = core.FailureConflict
 	}
 	return &core.Failure{Kind: kind, Message: r.Message()}
+}
+
+// RunSeen says the run made a call, so its allocations are not ended for its silence
+// (alloc.Limits.RunIdleEnd). Every call that names a run says so; one that names none says
+// nothing. It never blocks.
+func (a *App) RunSeen(run core.RunID) {
+	if a.alloc != nil && run != "" {
+		a.alloc.post(allocMsg{event: alloc.RunSeen{Run: run, At: a.now()}})
+	}
 }
 
 // ask gives the machine a request and returns the allocation it concerns.
@@ -94,6 +106,7 @@ func (s *allocShell) view(al alloc.Allocation) AllocationView {
 
 // RequestAllocation asks for a standing allocation of a placement for a run.
 func (a *App) RequestAllocation(ctx context.Context, run core.RunID, placement string, d time.Duration) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err
@@ -108,6 +121,7 @@ func (a *App) RequestAllocation(ctx context.Context, run core.RunID, placement s
 // Allocations lists the allocations of a run, or of every run when run is empty, oldest first. The
 // ones that ended are listed only when ended is set.
 func (a *App) Allocations(run core.RunID, ended bool) ([]AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return nil, err
@@ -210,6 +224,7 @@ func (a *App) waitOnce(ctx context.Context, wake, deadline <-chan struct{}, at, 
 
 // EndAllocation ends an allocation of the run, at once or when its jobs are done.
 func (a *App) EndAllocation(ctx context.Context, run core.RunID, id alloc.ID, afterJobs bool) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err
@@ -224,6 +239,7 @@ func (a *App) EndAllocation(ctx context.Context, run core.RunID, id alloc.ID, af
 // RenewAllocation gives an allocation of the run a renewal order, or takes its order away when
 // order is nil.
 func (a *App) RenewAllocation(ctx context.Context, run core.RunID, id alloc.ID, order *alloc.RenewalOrder) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err
@@ -258,26 +274,42 @@ func (a *App) EndRunAllocations(ctx context.Context, run core.RunID) ([]Allocati
 }
 
 // jobBound is the longest a job is taken to run, which is what it would ask a backend for on its
-// own: a command's timeout, and for a check or a measure the configured bound, since its plan is
-// made only when it launches.
-func (a *App) jobBound(spec core.JobSpec) time.Duration {
-	if c, ok := spec.Settings.(core.CommandSettings); ok {
-		if c.Timeout > 0 {
-			return c.Timeout
+// own: a command's own timeout, and for a check or a measure what its task holds it to (flow.Bound),
+// so a job of a task whose limits are minutes fits an allocation of minutes. A profile that has not
+// been through the daemon's flows yet is given the task's load and server as they will make it.
+func (a *App) jobBound(ctx context.Context, scope core.Scope, spec core.JobSpec) (time.Duration, error) {
+	read := func() (task.Task, error) {
+		return a.taskAt(ctx, string(scope.Repository()), spec.Commit, string(scope.Task()))
+	}
+	switch s := spec.Settings.(type) {
+	case core.CommandSettings:
+		if s.Profile != nil && len(s.Argv) == 0 {
+			t, err := read()
+			if err != nil {
+				return 0, err
+			}
+			if s, err = commandOfTwoImages(s, t); err != nil {
+				return 0, err
+			}
 		}
-		return a.cfg.DefaultTimeout
+		if s.Timeout > 0 {
+			return s.Timeout, nil
+		}
+		return a.cfg.DefaultTimeout, nil
+	default:
+		t, err := read()
+		if err != nil {
+			return 0, err
+		}
+		return flow.Bound(t, s), nil
 	}
-	if b := a.cfg.Allocations.JobBound; b > 0 {
-		return b
-	}
-	return DefaultCommandTimeout
 }
 
 // precheckAllocation refuses a submission into an allocation that cannot work before anything is
 // built or stored: the daemon keeps no allocations, the call has no run, or the allocation it names
 // is not one that takes the job. What it cannot know yet, the job's eligible placements, is judged
 // again when the job is stored.
-func (a *App) precheckAllocation(req SubmitRequest) error {
+func (a *App) precheckAllocation(ctx context.Context, req SubmitRequest) error {
 	if req.Spec.Allocation == "" {
 		return nil
 	}
@@ -296,8 +328,12 @@ func (a *App) precheckAllocation(req SubmitRequest) error {
 	if req.Spec.Allocation == core.AllocationAny {
 		into = ""
 	}
+	bound, err := a.jobBound(ctx, req.Context.Scope, req.Spec)
+	if err != nil {
+		return err
+	}
 	_, actions := alloc.Step(s.snapshot.Load().state, s.cfg, a.now(), alloc.JobSubmitted{
-		Run: req.Context.Run, Job: "precheck", Bound: a.jobBound(req.Spec), Into: into, Eligible: eligible,
+		Run: req.Context.Run, Job: "precheck", Bound: bound, Into: into, Eligible: eligible,
 	})
 	for _, act := range actions {
 		if r, ok := act.(alloc.Refuse); ok {
@@ -325,9 +361,12 @@ func (a *App) submitIntoAllocation(ctx context.Context, req SubmitRequest, ref l
 	if job.Spec.Allocation == core.AllocationAny {
 		into = ""
 	}
-	_, err = s.ask(ctx, alloc.JobSubmitted{
-		Run: req.Context.Run, Job: jobOfRef(ref), Bound: a.jobBound(job.Spec), Into: into, Eligible: eligible,
-	})
+	bound, err := a.jobBound(ctx, req.Context.Scope, job.Spec)
+	if err == nil {
+		_, err = s.ask(ctx, alloc.JobSubmitted{
+			Run: req.Context.Run, Job: jobOfRef(ref), Bound: bound, Into: into, Eligible: eligible,
+		})
+	}
 	if err == nil {
 		return nil
 	}
@@ -335,4 +374,37 @@ func (a *App) submitIntoAllocation(ctx context.Context, req SubmitRequest, ref l
 		a.cfg.Logf("cancelling job %s, which no allocation took: %v", ref, cancelErr)
 	}
 	return err
+}
+
+// PlacementSlots is the slots of a placement of the operator config, max_jobs of them, and how many
+// the jobs and standing allocations that hold the machine leave free. ok is false for a placement
+// the scheduler has no slots of.
+func (a *App) PlacementSlots(placement string) (total, free uint32, ok bool) {
+	id := schedule.PlacementOf(placement)
+	for _, r := range a.cfg.Scheduler.Resources {
+		if r.ID != id {
+			continue
+		}
+		used := a.view.Load().used[id]
+		return uint32(r.Capacity), uint32(max(r.Capacity-used, 0)), true
+	}
+	return 0, 0, false
+}
+
+// RecentWaits is how long recent allocations of the placement waited to start, newest first: the
+// requests of this daemon, kept for as long as it runs and rebuilt from its log when it starts.
+func (a *App) RecentWaits(placement string) []alloc.WaitSample {
+	if a.alloc == nil {
+		return nil
+	}
+	return slices.Clone(a.alloc.snapshot.Load().waits[placement])
+}
+
+// HasAllocations says whether the placement offers standing allocations.
+func (a *App) HasAllocations(placement string) bool {
+	if a.alloc == nil {
+		return false
+	}
+	_, ok := a.alloc.cfg.Placements[placement]
+	return ok
 }

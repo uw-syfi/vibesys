@@ -3,6 +3,7 @@ package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
@@ -67,6 +68,11 @@ message Launch {
   // batch allocations runs the job's containers inside it; any other ignores it. Empty for a job
   // that runs as it always has.
   string allocation = 7 [(buf.validate.field).string.max_bytes = 256];
+  // The latest time the job's first container may enter the allocation: its end less the fit
+  // margin and the job's bound, as the daemon decided it when it started the job there. A container
+  // that is ready later does not fit the time left (its preparation, such as an image build, took
+  // it), and does not enter. Unset: no bound, as for an allocation with no end.
+  google.protobuf.Timestamp allocation_enter_by = 8;
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
@@ -241,6 +247,20 @@ message SupervisorOutcome {
   // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
   // command that ended on its own before the request still reports how it ended.
   optional string cancel_reason = 3;
+  // The standing allocations where processes of a container this supervisor ran were not
+  // confirmed killed, and may still run beside the next job: the daemon ends and releases each.
+  repeated ProcessesLeft processes_left = 8 [(buf.validate.field).repeated.max_items = 64];
+}
+
+// ProcessesLeft names a standing allocation where processes may survive a container's removal.
+message ProcessesLeft {
+  // The backend's reference of the allocation (its batch job), as Launch.allocation names it.
+  string allocation = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_bytes = 256
+  ];
+  // What the failed kill said.
+  string detail = 2 [(buf.validate.field).string.max_bytes = 4096];
 }
 
 message HandshakeRequest {

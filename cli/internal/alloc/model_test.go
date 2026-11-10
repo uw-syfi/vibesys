@@ -318,6 +318,10 @@ func (md *model) apply(now time.Time, e alloc.Event) alloc.Refusal {
 				md.endIt(a)
 			}
 		}
+	case alloc.ProcessesLeft:
+		if a, ok := md.m[e.ID]; ok && md.live(a) {
+			md.endIt(a)
+		}
 	case alloc.Unreachable, alloc.Released, alloc.Tick:
 	}
 	return nil

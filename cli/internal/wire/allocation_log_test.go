@@ -24,6 +24,7 @@ func everyInput() []alloc.Input {
 		alloc.RenewAsk{Run: "run-a", ID: "a1", Order: alloc.RenewalOrder{Lead: time.Minute, For: time.Hour, Until: alloc.UntilRunEnd{}}},
 		alloc.RenewOffAsk{Run: "run-a", ID: "a1"},
 		alloc.RunEnded{Run: "run-a"},
+		alloc.RunSeen{Run: "run-a", At: logAt},
 		alloc.JobSubmitted{Run: "run-a", Job: "ab12-j3", Bound: 90 * time.Minute, Into: "a2", Eligible: []string{"p", "q"}},
 		alloc.JobSubmitted{Run: "run-a", Job: "ab12-j4", Bound: time.Minute},
 		alloc.JobStarted{Job: "ab12-j3"},
@@ -36,7 +37,12 @@ func everyInput() []alloc.Input {
 		alloc.Observed{ID: "a1", Seen: alloc.SeenEnded{Cause: alloc.EndedOtherwise}},
 		alloc.Unreachable{ID: "a1", Detail: "ssh: timed out"},
 		alloc.Released{ID: "a1"},
+		alloc.ProcessesLeft{ID: "a1", Job: "ab12-j3"},
 		alloc.Tick{},
+		alloc.DaemonStarted{Config: alloc.Config{Placements: map[string]alloc.Limits{
+			"p": {MaxHeld: 2, MaxFor: 24 * time.Hour, Margin: 2 * time.Minute, QueueTimeout: time.Hour, RunIdleEnd: 2 * time.Hour},
+			"m": {MaxHeld: 1, MaxFor: time.Hour, Margin: time.Minute, Endless: true},
+		}}},
 	}
 	out := make([]alloc.Input, len(events))
 	for i, e := range events {

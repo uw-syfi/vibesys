@@ -41,6 +41,17 @@ type RenewOffAsk struct {
 	ID  ID
 }
 
+// RunSeen is a call of the run's: it is alive now. A run that holds allocations and is not seen for
+// a placement's RunIdleEnd is ended by the first step from then on, a Tick if nothing else, as
+// RunEnded ends it. It is a fact, never refused, and changes nothing for a run that holds no
+// allocation or was seen within SeenGranularity.
+type RunSeen struct {
+	Run core.RunID
+	// At is when the call was made, which the shell may step a while after; one later than the
+	// step is taken as the step's time.
+	At time.Time
+}
+
 // RunEnded is the end of a run: each of its allocations that has not ended ends at once, and the
 // run asks for nothing more.
 type RunEnded struct{ Run core.RunID }
@@ -96,6 +107,24 @@ type Unreachable struct {
 // Released is the backend confirming that an ended allocation's Release is done.
 type Released struct{ ID ID }
 
+// DaemonStarted is the daemon starting with an operator config: the limits of Config apply from
+// this input on, until the next DaemonStarted. Every decision before it was taken under the limits
+// in force then, and Fold replays it under them, so a change of the config never renumbers, drops
+// or refuses anything that was accepted. An allocation of a placement that Config no longer offers
+// allocations of ends at once, EndExternal, and is released. It is a fact, never refused.
+type DaemonStarted struct{ Config Config }
+
+// ProcessesLeft is a job's end reporting that processes in a standing allocation were not
+// confirmed killed: they may still run there, beside the next job. A Running or Draining
+// allocation ends at once, EndExternal, and is released, so no job runs beside them: the jobs that
+// wait in it are given up as when it ends otherwise, and a running one is lost, but Job, the job
+// whose end reported them, is done and not lost. It is a fact, never refused, and changes nothing
+// for an allocation that is pending or has ended.
+type ProcessesLeft struct {
+	ID  ID
+	Job core.JobID
+}
+
 // Tick is time passing with nothing else happening. The shell sends one now and then, so what is
 // decided by time (renewals) is decided, and a Submit or Release that may not have arrived is asked
 // for again.
@@ -106,6 +135,7 @@ func (EndAsk) event()        {}
 func (RenewAsk) event()      {}
 func (RenewOffAsk) event()   {}
 func (RunEnded) event()      {}
+func (RunSeen) event()       {}
 func (JobSubmitted) event()  {}
 func (JobStarted) event()    {}
 func (JobFinished) event()   {}
@@ -114,4 +144,6 @@ func (SubmitRefused) event() {}
 func (Observed) event()      {}
 func (Unreachable) event()   {}
 func (Released) event()      {}
+func (ProcessesLeft) event() {}
 func (Tick) event()          {}
+func (DaemonStarted) event() {}

@@ -89,6 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"bound":      boundCommand,
 	"workstream": workstreamCommand,
 	"alloc":      allocCommand,
+	"placement":  placementCommand,
 	"task":       taskCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
@@ -145,6 +146,8 @@ commands:
                                                  ask for a successor once its time left is at most the
                                                  lead; alloc renew <id> --off takes the order away
   alloc end-run                                  end every allocation of the run, as its end does
+  placement capacity <placement> [--run r]      what the daemon measured of a placement's capacity:
+                                                 slots, a cluster's nodes and reservations, recent waits
   daemon status|stop|restart [--force]           manage the daemon
   upgrade                                        replace this binary with the newest release
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
 var epoch = time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
@@ -193,3 +194,13 @@ func kinds(actions []alloc.Action) []string {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// notPlaced says whether the actions leave the job without an allocation, with a reason.
+func notPlaced(actions []alloc.Action, job core.JobID) bool {
+	for _, a := range actions {
+		if n, ok := a.(alloc.NotPlaced); ok && n.Job == job && n.Why != nil {
+			return true
+		}
+	}
+	return false
+}

@@ -1,0 +1,5 @@
+clock 1794326400 2026-11-10T08:00:00
+squeue 1
+slurm_load_jobs error: Unable to contact slurm controller (connect failure)
+==sacct==
+==scontrol==

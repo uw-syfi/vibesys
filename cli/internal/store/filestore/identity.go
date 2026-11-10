@@ -13,7 +13,7 @@ const identityFile = "daemon-id" + recordSuffix
 
 // DaemonID returns who this user's daemon is, made once: the identity kept in the directory of the
 // index, or, when there is none, one that newID makes and the directory then keeps, so every later
-// start of the daemon, and every Allocator it makes, has the same one. newID must return 16 to 64
+// start of the daemon, and every Allocator it makes, has the same one. newID must return 16 to 32
 // characters of a-z and 0-9.
 func DaemonID(dir string, newID func() string, opts ...Option) (string, error) {
 	c := optionsOf(opts)

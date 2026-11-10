@@ -1,6 +1,7 @@
 package alloc
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"time"
@@ -14,6 +15,16 @@ type State struct {
 	allocs    []Allocation // In the order they were made, which is the order of their numbers.
 	last      uint64       // The number of the newest allocation.
 	endedRuns []core.RunID // Sorted.
+	// seen is when each run that asked for an allocation, and has not ended, was last seen, to
+	// SeenGranularity.
+	seen map[core.RunID]time.Time
+}
+
+// LastSeen is when the run was last seen, to SeenGranularity, and false for a run that asked for no
+// allocation or has ended.
+func (s State) LastSeen(run core.RunID) (time.Time, bool) {
+	at, ok := s.seen[run]
+	return at, ok
 }
 
 // Allocations returns a copy of every allocation, oldest first.
@@ -53,7 +64,28 @@ func (s State) RunEnded(run core.RunID) bool {
 // Equal says whether two states hold the same allocations, numbering and ended runs. The shell asks
 // it of the state before a step and after, to keep only the inputs that changed something.
 func (s State) Equal(o State) bool {
-	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && reflect.DeepEqual(s.Allocations(), o.Allocations())
+	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && maps.EqualFunc(s.seen, o.seen, time.Time.Equal) &&
+		reflect.DeepEqual(s.Allocations(), o.Allocations())
+}
+
+// Durable says whether a step from before to after changed what the log keeps: anything but the
+// words a backend gives a pending allocation for display (Pending.Reason and EstimatedStart), which
+// a backend such as Slurm may change at every look. The shell logs a step only when it is durable,
+// and keeps the display words in memory, so a restart shows them again at the next look instead of
+// replaying every change of an estimate.
+func Durable(before, after State) bool {
+	return !before.withoutDisplay().Equal(after.withoutDisplay())
+}
+
+// withoutDisplay is the state with the display words of every pending allocation cleared.
+func (s State) withoutDisplay() State {
+	out := s.clone()
+	for i, a := range out.allocs {
+		if _, ok := a.Phase.(Pending); ok {
+			out.allocs[i].Phase = Pending{}
+		}
+	}
+	return out
 }
 
 func (s State) index(id ID) int {
@@ -61,7 +93,7 @@ func (s State) index(id ID) int {
 }
 
 func (s State) clone() State {
-	out := State{allocs: make([]Allocation, len(s.allocs)), last: s.last, endedRuns: slices.Clone(s.endedRuns)}
+	out := State{allocs: make([]Allocation, len(s.allocs)), last: s.last, endedRuns: slices.Clone(s.endedRuns), seen: maps.Clone(s.seen)}
 	for i, a := range s.allocs {
 		out.allocs[i] = a.clone()
 	}
@@ -75,11 +107,16 @@ type Input struct {
 }
 
 // Fold runs Step over the inputs from the zero State, and returns the state and every action, in
-// order. The same inputs give the same state and actions, which is how the daemon recovers.
+// order. The same inputs give the same state and actions, which is how the daemon recovers. Each
+// input is stepped under the config of the last DaemonStarted before it, and the inputs before the
+// first one under cfg, so a log that records its configs folds the same whatever cfg is.
 func Fold(cfg Config, inputs []Input) (State, []Action) {
 	var s State
 	var all []Action
 	for _, in := range inputs {
+		if started, ok := in.Event.(DaemonStarted); ok {
+			cfg = started.Config
+		}
 		var actions []Action
 		s, actions = Step(s, cfg, in.At, in.Event)
 		all = append(all, actions...)
@@ -109,6 +146,14 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 		refusal = st.submitted(e)
 	case RunEnded:
 		st.runEnded(e.Run)
+	case RunSeen:
+		at := e.At
+		if at.IsZero() || at.After(st.now) {
+			at = st.now
+		}
+		if last, ok := st.s.seen[e.Run]; ok && at.Sub(last) >= SeenGranularity {
+			st.s.seen[e.Run] = at
+		}
 	case JobStarted:
 		st.jobStarted(e.Job)
 	case JobFinished:
@@ -132,8 +177,29 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 				a.Phase = p
 			}
 		}
+	case ProcessesLeft:
+		if a := st.find(e.ID); a != nil && (a.Stage() == StageRunning || a.Stage() == StageDraining) {
+			// The job that reported them is done in it: it is not lost with the allocation.
+			st.withLive(a, func(l *Live) {
+				if l.Current != nil && l.Current.Job == e.Job {
+					l.Current = nil
+				}
+			})
+			st.end(a, EndExternal)
+		}
 	case Tick:
 		st.retry()
+	case DaemonStarted:
+		st.cfg = e.Config
+		for run := range st.s.seen {
+			st.s.seen[run] = now
+		}
+		for i := range st.s.allocs {
+			a := &st.s.allocs[i]
+			if _, enabled := e.Config.Placements[a.Placement]; !enabled && a.holds() {
+				st.end(a, EndExternal)
+			}
+		}
 	}
 	if refusal != nil {
 		return s, []Action{Refuse{Event: e, Reason: refusal}}
@@ -197,7 +263,26 @@ func (st *stepper) ask(e Ask) Refusal {
 		return MaxHeldReached{Placement: e.Placement, Held: held, MaxHeld: lim.MaxHeld}
 	}
 	st.add(e.Run, e.Placement, e.For, nil)
+	if st.s.seen == nil {
+		st.s.seen = map[core.RunID]time.Time{}
+	}
+	st.s.seen[e.Run] = st.now
 	return nil
+}
+
+// endIdleRuns ends every run that holds allocations and was not seen for the RunIdleEnd of one of
+// their placements.
+func (st *stepper) endIdleRuns() {
+	for _, run := range slices.Sorted(maps.Keys(st.s.seen)) {
+		last := st.s.seen[run]
+		idle := slices.ContainsFunc(st.s.allocs, func(a Allocation) bool {
+			end := st.cfg.Placements[a.Placement].RunIdleEnd
+			return a.Run == run && a.holds() && end > 0 && st.now.Sub(last) >= end
+		})
+		if idle {
+			st.runEnded(run)
+		}
+	}
 }
 
 // add adds a new Pending allocation and asks the backend for it.
@@ -289,6 +374,7 @@ func (st *stepper) renewOff(e RenewOffAsk) Refusal {
 }
 
 func (st *stepper) runEnded(run core.RunID) {
+	delete(st.s.seen, run)
 	if !st.s.RunEnded(run) {
 		i, _ := slices.BinarySearch(st.s.endedRuns, run)
 		st.s.endedRuns = slices.Insert(st.s.endedRuns, i, run)
@@ -329,7 +415,7 @@ func (st *stepper) submitted(e JobSubmitted) Refusal {
 	if e.Into == "" {
 		id, ok := Choose(*st.s, st.cfg, e, st.now)
 		if !ok {
-			st.emit(NotPlaced{Job: e.Job})
+			st.emit(NotPlaced{Job: e.Job, Why: Declined(*st.s, st.cfg, e, st.now)})
 			return nil
 		}
 		st.enqueue(st.find(id), slot)
@@ -457,7 +543,7 @@ func (st *stepper) orphan(a *Allocation, l Live, reason EndReason) {
 // without an allocation does, and a strict one fails.
 func (st *stepper) unplace(a *Allocation, q Slot, why Refusal) {
 	if q.Any {
-		st.emit(NotPlaced{Job: q.Job})
+		st.emit(NotPlaced{Job: q.Job, Why: why})
 		return
 	}
 	st.emit(DropJob{Job: q.Job, ID: a.ID, Reason: why})
@@ -586,8 +672,10 @@ func (st *stepper) retry() {
 	}
 }
 
-// settle applies, at now, what follows from the state whatever the event was.
+// settle applies, at now, what follows from the state whatever the event was. A run silent for its
+// idle end is ended first, so that no step after that moment renews for it.
 func (st *stepper) settle() {
+	st.endIdleRuns()
 	for i := range st.s.allocs {
 		st.advance(&st.s.allocs[i])
 	}

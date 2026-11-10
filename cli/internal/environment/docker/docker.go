@@ -21,7 +21,10 @@ type Config struct {
 	// placement whose allocations are batch allocations to read. Empty leaves the target's
 	// allocation unused, as every placement but those has it.
 	AllocationLabel string
-	Engine          Engine
+	// Clock is the time a job's entry into its standing allocation is judged by
+	// (environment.Target.EnterBy). It is required with AllocationLabel, and unused without.
+	Clock  clock.Clock
+	Engine Engine
 	// Source reads the files of a task at a commit.
 	Source Source
 	// Backend describes the machine the engine runs containers on: what the fingerprint is made of.
@@ -101,6 +104,8 @@ func New(cfg Config) (*Provider, error) {
 		return nil, missing("Timers")
 	case cfg.IDs == nil:
 		return nil, missing("IDs")
+	case cfg.AllocationLabel != "" && cfg.Clock == nil:
+		return nil, missing("Clock")
 	case cfg.Probe != "" && cfg.Probe[0] != '/':
 		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the probe program %q is not an absolute path", cfg.Probe)}
 	case cfg.User.UID < 0 || cfg.User.GID < 0:
@@ -137,13 +142,16 @@ func New(cfg Config) (*Provider, error) {
 // Environment returns the docker environment for the target. It fits environment.Kinds. It reads
 // nothing and starts nothing: the Dockerfile is read when the environment is used.
 func (p *Provider) Environment(target environment.Target) (environment.Environment, error) {
-	return &env{p: p, target: target}, nil
+	return &env{p: p, target: target, entry: &entryWindow{}}, nil
 }
 
 // env is the docker environment of one target.
 type env struct {
 	p      *Provider
 	target environment.Target
+	// entry is the window in which the job's first container may enter its standing allocation
+	// (Target.EnterBy), shared by every run of the job.
+	entry *entryWindow
 }
 
 var _ environment.Environment = (*env)(nil)
@@ -345,4 +353,22 @@ func (p *Provider) sweep(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// entryWindow is whether a job entered its standing allocation. Once it entered, its later runs
+// enter too: the job's bound covers them.
+type entryWindow struct {
+	mu      sync.Mutex
+	entered bool
+}
+
+// admit says whether the job enters the allocation now: it entered already, or it is not later
+// than by.
+func (w *entryWindow) admit(now, by time.Time) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.entered && !now.After(by) {
+		w.entered = true
+	}
+	return w.entered
 }

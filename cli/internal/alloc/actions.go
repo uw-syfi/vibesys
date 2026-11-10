@@ -48,8 +48,11 @@ type DropJob struct {
 }
 
 // NotPlaced is a job submitted to any allocation of its run that none takes: it runs the way a job
-// submitted without an allocation does.
-type NotPlaced struct{ Job core.JobID }
+// submitted without an allocation does. Why is the refusal that came closest to taking it.
+type NotPlaced struct {
+	Job core.JobID
+	Why Refusal
+}
 
 // RecordWait is how long an allocation waited from its request to its start, a fact for
 // placement capacity.

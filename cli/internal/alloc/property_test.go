@@ -191,6 +191,16 @@ func (g *gen) next(s alloc.State, now time.Time) (time.Duration, alloc.Event) {
 		if g.c.IntN(4) == 0 {
 			return pass, alloc.RunEnded{Run: pick(g.c, runs...)}
 		}
+	case 35:
+		// Mostly reported by the end of the job that runs in it, before its JobFinished.
+		id := g.id(s)
+		job := g.job(s)
+		if a, ok := s.Get(id); ok {
+			if l, ok := liveOf(a); ok && l.Current != nil && g.c.IntN(4) != 0 {
+				job = l.Current.Job
+			}
+		}
+		return pass, alloc.ProcessesLeft{ID: id, Job: job}
 	}
 	return pass, alloc.Tick{}
 }
@@ -294,7 +304,7 @@ func history(c chooser, steps int, until func() bool) error {
 	md := newModel(config)
 	now := epoch
 	var s alloc.State
-	var log []alloc.Input
+	var log, durable []alloc.Input
 	var all []alloc.Action
 	for i := 0; i < steps && (until == nil || !until()); i++ {
 		pass, e := g.next(s, now)
@@ -314,9 +324,17 @@ func history(c chooser, steps int, until func() bool) error {
 		if err := md.agree(after); err != nil {
 			return fmt.Errorf("step %d, %T%+v at +%s: %w", i, e, e, now.Sub(epoch), err)
 		}
+		if alloc.Durable(s, after) {
+			durable = append(durable, alloc.Input{At: now, Event: e})
+		}
 		s = after
 		log = append(log, alloc.Input{At: now, Event: e})
 		all = append(all, actions...)
+	}
+	// The log the shell keeps has the durable steps alone: folding it gives the state but for the
+	// display words of pending allocations.
+	if sd, _ := alloc.Fold(config, durable); alloc.Durable(sd, s) {
+		return errors.New("folding the durable steps alone gave another state than the steps did")
 	}
 	s1, a1 := alloc.Fold(config, log)
 	s2, a2 := alloc.Fold(config, log)
@@ -403,7 +421,15 @@ func TestTheGeneratorReachesEveryKindOfStep(t *testing.T) {
 		var s alloc.State
 		for _, in := range log {
 			var actions []alloc.Action
+			before := s
 			s, actions = alloc.Step(s, config, in.At, in.Event)
+			if e, ok := in.Event.(alloc.ProcessesLeft); ok {
+				if a, ok := before.Get(e.ID); ok && a.Stage() == alloc.StageRunning {
+					if l, _ := liveOf(a); l.Current != nil && l.Current.Job == e.Job {
+						seen["processes left by the running job"] = true
+					}
+				}
+			}
 			for _, a := range actions {
 				seen[fmt.Sprintf("%T", a)] = true
 			}
@@ -421,6 +447,7 @@ func TestTheGeneratorReachesEveryKindOfStep(t *testing.T) {
 	for _, want := range []string{
 		"alloc.Submit", "alloc.Release", "alloc.StartJob", "alloc.LoseJob", "alloc.DropJob", "alloc.NotPlaced",
 		"alloc.RecordWait", "alloc.Refuse", "draining", "renewed", "skipped: max_held reached",
+		"processes left by the running job",
 	} {
 		if !seen[want] {
 			t.Errorf("no history reached %s", want)
