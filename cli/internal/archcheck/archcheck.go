@@ -78,9 +78,13 @@ var rules = map[string][]string{
 	"internal/resource/mounts":       {"envcodec", "gen/", "internal/core", "internal/resource"},
 	"internal/resource/kubernetes":   {"envcodec", "gen/", "internal/clock", "internal/core", "internal/remote", "internal/resource"},
 	// The pure rules of standing allocations: the state, Step and the fit. No I/O.
-	"internal/alloc":               {"internal/core"},
-	"internal/environment":         {"envcodec", "gen/", "internal/alloc", "internal/core"},
-	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
+	"internal/alloc":       {"internal/core"},
+	"internal/environment": {"envcodec", "gen/", "internal/alloc", "internal/core"},
+	// A backend of standing allocations in memory, and the contract every Allocator passes. Tests
+	// only.
+	"internal/environment/fakealloc":     {"internal/alloc", "internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/allocatortest": {"internal/alloc", "internal/core", "internal/environment"},
+	"internal/environment/fakeenv":       {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
@@ -235,6 +239,8 @@ var testRules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend/backendtest"},
 	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
+	// The fake allocator keeps the allocators' contract.
+	"internal/environment/fakealloc": {"internal/environment/allocatortest"},
 	// The core's records are checked against the contract's rules for them.
 	"internal/alloc":            {"gen/", "internal/wire"},
 	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
