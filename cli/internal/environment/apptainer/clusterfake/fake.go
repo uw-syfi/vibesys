@@ -62,6 +62,7 @@ type Cluster struct {
 	now       time.Duration // how long the cluster has run, which Advance moves
 	linger    bool          // a dead claim leaves its containers' processes running
 	maxTime   time.Duration // the longest time limit a job may ask for, as a site's QOS caps it; zero is none
+	partition apptainer.PartitionFacts
 }
 
 // job is a batch allocation.
@@ -249,7 +250,11 @@ func (c *Cluster) Advance(d time.Duration) {
 	}
 	c.mu.Unlock()
 	for _, j := range ending {
-		c.end(j, "COMPLETED")
+		state := "COMPLETED"
+		if c.now-j.ran >= j.limit {
+			state = "TIMEOUT"
+		}
+		c.end(j, state)
 	}
 }
 
@@ -459,14 +464,7 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 	if j == nil {
 		return apptainer.JobState{Phase: apptainer.Ended}, nil
 	}
-	if j.phase == apptainer.Queued {
-		if j.waits--; j.waits < 0 {
-			j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
-			if c.ends {
-				j.phase, j.state = apptainer.Ended, "FAILED"
-			}
-		}
-	}
+	c.advance(j)
 	switch j.phase {
 	case apptainer.Queued:
 		j.reads++
@@ -805,4 +803,129 @@ func lostProcess(why string) environment.Process {
 	p := &simple{exited: make(chan environment.Exit, 1)}
 	p.exited <- docker.Lost(why)
 	return p
+}
+
+// advance counts a read of a queued job's state, which starts it once it has waited for enough of
+// them. c.mu is held.
+func (c *Cluster) advance(j *job) {
+	if j.phase == apptainer.Queued {
+		if j.waits--; j.waits < 0 {
+			j.phase, j.state, j.ran, j.idleSince = apptainer.Running, "RUNNING", c.now, c.now
+			if c.ends {
+				j.phase, j.state = apptainer.Ended, "FAILED"
+			}
+		}
+	}
+}
+
+// Epoch is the instant at which the cluster's time, which Advance moves, begins.
+var Epoch = time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
+
+// Now is the login node's clock: Epoch, and as long as the cluster has run.
+func (c *Cluster) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Epoch.Add(c.now)
+}
+
+// Detail implements apptainer.Cluster. A queued job's reads count as State's do. A job that ended
+// says how, as sacct does: TIMEOUT by its time limit, and CANCELLED or NODE_FAIL otherwise.
+func (cl *Client) Detail(ctx context.Context, id string) (apptainer.JobDetail, error) {
+	if err := cl.enter(ctx, "detail"); err != nil {
+		return apptainer.JobDetail{}, err
+	}
+	c := cl.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil {
+		return apptainer.JobDetail{Phase: apptainer.Ended}, nil
+	}
+	c.advance(j)
+	d := apptainer.JobDetail{Phase: j.phase, Name: j.state}
+	switch j.phase {
+	case apptainer.Queued:
+		d.Reason = "Priority"
+		d.EstimatedStart = Epoch.Add(c.now + time.Hour)
+	case apptainer.Running:
+		d.Node = NodeName
+		d.StartedAt = Epoch.Add(j.ran)
+		d.EndsAt = d.StartedAt.Add(j.limit)
+	default:
+		d.TimeLimit = j.state == "TIMEOUT"
+		d.EndedAt = Epoch.Add(c.now)
+	}
+	return d, nil
+}
+
+// CancelJob implements apptainer.Cluster.
+func (cl *Client) CancelJob(ctx context.Context, id string) error {
+	if err := cl.enter(ctx, "canceljob"); err != nil {
+		return err
+	}
+	c := cl.c
+	c.mu.Lock()
+	j := c.jobs[id]
+	c.mu.Unlock()
+	if j != nil {
+		c.end(j, "CANCELLED")
+	}
+	return nil
+}
+
+// SetPartition sets what Slurm says of every partition's capacity; its Now and User are the
+// cluster's own when zero.
+func (c *Cluster) SetPartition(f apptainer.PartitionFacts) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.partition = f
+}
+
+// Partition implements apptainer.Cluster.
+func (cl *Client) Partition(ctx context.Context, _ string) (apptainer.PartitionFacts, error) {
+	if err := cl.enter(ctx, "partition"); err != nil {
+		return apptainer.PartitionFacts{}, err
+	}
+	c := cl.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f := c.partition
+	if f.Now.IsZero() {
+		f.Now = Epoch.Add(c.now)
+	}
+	if f.User == "" {
+		f.User = "user-a"
+	}
+	return f, nil
+}
+
+// CancelOutside ends the job as someone else's cancel does: the CLI did not ask for it.
+func (c *Cluster) CancelOutside(id string) { c.endOutside(id, "CANCELLED") }
+
+// FailNode ends the job as the failure of its node does.
+func (c *Cluster) FailNode(id string) { c.endOutside(id, "NODE_FAIL") }
+
+func (c *Cluster) endOutside(id, state string) {
+	c.mu.Lock()
+	j := c.jobs[id]
+	c.mu.Unlock()
+	if j != nil {
+		c.end(j, state)
+	}
+}
+
+// Job returns the job's name, comment and phase, and false for a job that was never made.
+func (c *Cluster) Job(id string) (name, comment string, phase apptainer.Phase, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil {
+		return "", "", 0, false
+	}
+	return j.name, j.comment, j.phase, true
+}
+
+// Reap implements apptainer.Node: the box's processes are killed, and none is left.
+func (n *node) Reap(ctx context.Context, name string) error {
+	return n.Signal(ctx, name, apptainer.SIGKILL)
 }

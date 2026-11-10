@@ -1,0 +1,15 @@
+==vibesys:clock==
+0
+1794326400 2026-11-10T08:00:00
+==vibesys:user==
+0
+user-a
+==vibesys:sinfo==
+1
+sinfo: error: slurm_load_partitions: Unable to contact slurm controller (connect failure)
+==vibesys:nodes==
+0
+==vibesys:pending==
+0
+==vibesys:res==
+0

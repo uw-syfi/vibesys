@@ -32,6 +32,11 @@
 //     each job's runs are a scope of their own under the placement's (Config.Runs), and a run
 //     removes the allocations of its own scope and of the placement's dead runs, never a live
 //     one's.
+//   - A standing allocation (standing.go) is a batch allocation of a run's, not of a container's: it
+//     runs no holder, so no caller's exit cancels it, and a run's sweep never removes it. A job
+//     whose container names one (LabelAllocation) runs in it as a second container joins the
+//     first one's allocation; removing the container kills its processes, confirmed, and leaves
+//     the allocation running.
 //   - An exit code that is the transport's own (ssh's 255), and a step that never started its
 //     command, are not the command's ending: the engine reports them as lost.
 package apptainer
@@ -85,6 +90,16 @@ type Cluster interface {
 
 	// Node is the node of the running job.
 	Node(job string) Node
+
+	// Detail is what Slurm says of the job now, with its times as instants: the state of a
+	// standing allocation. A job Slurm knows nothing of has ended.
+	Detail(ctx context.Context, job string) (JobDetail, error)
+	// CancelJob cancels the user's job of the id, and returns once Slurm confirms that it is
+	// neither pending nor running (squeue, then sacct). A job that is not there is cancelled.
+	CancelJob(ctx context.Context, job string) error
+	// Partition is what Slurm says of the partition's capacity now: its nodes, the jobs waiting
+	// for it and the reservations. The empty partition is the cluster's default.
+	Partition(ctx context.Context, partition string) (PartitionFacts, error)
 }
 
 // Allocation is a batch allocation to ask for.
@@ -165,6 +180,10 @@ type Node interface {
 	// Signal sends the signal to every process of the box's containers on the node. A box with no
 	// process is signalled.
 	Signal(ctx context.Context, box string, sig Signal) error
+	// Reap kills every process of the box's containers on the node and waits for none to be left,
+	// as long as a minute, and fails when some are left. A box with no process is reaped. The
+	// allocation is left as it is.
+	Reap(ctx context.Context, box string) error
 }
 
 // Signal is a signal Node.Signal sends.

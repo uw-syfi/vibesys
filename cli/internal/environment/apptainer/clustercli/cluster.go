@@ -486,31 +486,39 @@ func ParseJobs(out, scope string) []apptainer.Job {
 // ParseTimeLeft reads the time left as squeue writes it (%L): [days-][hours:]minutes:seconds,
 // UNLIMITED, or what says it is not known (NOT_SET, INVALID), which is no time left.
 func ParseTimeLeft(s string) time.Duration {
+	d, _ := ParseDuration(s)
+	return d
+}
+
+// ParseDuration reads a time as squeue writes it (%L, %l): [days-][hours:]minutes:seconds, or
+// UNLIMITED (math.MaxInt64). It reports false for any other text, such as NOT_SET and INVALID, and
+// then returns zero.
+func ParseDuration(s string) (time.Duration, bool) {
 	s = strings.TrimSpace(s)
 	if s == "UNLIMITED" {
-		return math.MaxInt64
+		return math.MaxInt64, true
 	}
 	var days int64
 	if d, rest, ok := strings.Cut(s, "-"); ok {
 		n, err := strconv.ParseInt(d, 10, 32)
 		if err != nil || n < 0 {
-			return 0
+			return 0, false
 		}
 		days, s = n, rest
 	}
 	parts := strings.Split(s, ":")
 	if len(parts) > 3 || (days > 0 && len(parts) != 3) {
-		return 0
+		return 0, false
 	}
 	var secs int64
 	for _, p := range parts {
 		n, err := strconv.ParseInt(p, 10, 32)
 		if err != nil || n < 0 || len(p) == 0 {
-			return 0
+			return 0, false
 		}
 		secs = secs*60 + n
 	}
-	return time.Duration(days*86400+secs) * time.Second
+	return time.Duration(days*86400+secs) * time.Second, true
 }
 
 // Cancel implements apptainer.Cluster: Slurm's cancel by name, confirmed by squeue and then sacct.

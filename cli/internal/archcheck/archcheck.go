@@ -111,7 +111,7 @@ var rules = map[string][]string{
 	// Containers placed on a Slurm cluster whose nodes run Apptainer and no Docker: an engine over
 	// the cluster's interface, the real cluster reached over ssh, and a fake kept in memory.
 	"internal/environment/apptainer": {
-		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
+		"gen/", "internal/alloc", "internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
 		"internal/environment/docker",
 		"internal/wire",
 	},
@@ -259,7 +259,7 @@ var testRules = map[string][]string{
 	"internal/resource/gpu":               {"internal/resource/resourcetest"},
 	"internal/resource/rocm":              {"internal/resource/resourcetest"},
 	"internal/environment/apptainer": {
-		"internal/backend/amd", "internal/environment/apptainer/clusterfake",
+		"internal/backend/amd", "internal/environment/allocatortest", "internal/environment/apptainer/clusterfake",
 		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",
 		"internal/environment/fakeenv", "internal/environment/fakeenv/fakeworld", "internal/resource",
 		"internal/resource/rocm", "internal/task",
