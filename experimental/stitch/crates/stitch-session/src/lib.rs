@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use stitch_core::{Graph, GraphError, Observation};
+use stitch_core::{Graph, GraphError, Observation, TimeWindow};
 use stitch_importer_api::{ImportError, ImporterRegistry, InputSpec};
 use stitch_source_api::{MappingError, MappingRegistry, SourceTarget};
 use thiserror::Error;
@@ -17,6 +17,10 @@ pub struct RunManifest {
     pub inputs: Vec<InputSpec>,
     pub source_root: Option<PathBuf>,
     pub source_revision: Option<String>,
+    /// Optional wall-clock measurement windows; analyses use them to select
+    /// the evidence recorded during, for example, a benchmark's load phase.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<TimeWindow>,
 }
 
 impl RunManifest {
@@ -38,6 +42,7 @@ impl RunManifest {
         if self.inputs.is_empty() {
             return Err(SessionError::Invalid("inputs cannot be empty".into()));
         }
+        TimeWindow::validate_all(&self.windows).map_err(SessionError::Invalid)?;
         for input in &self.inputs {
             if input.clock.trim().is_empty() {
                 return Err(SessionError::Invalid(format!(
@@ -115,6 +120,7 @@ pub fn ingest_with(
         ));
     }
     let mut graph = Graph::build(observations)?;
+    graph.windows.clone_from(&manifest.windows);
     let mut attributions = Vec::new();
     for activity in &graph.activities {
         attributions.extend(mappers.map(SourceTarget::Activity(activity))?);

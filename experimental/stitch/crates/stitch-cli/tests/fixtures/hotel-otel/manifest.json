@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "label": "hotel fixture",
+  "inputs": [{"format": "otlp_jsonl", "path": "otel.jsonl", "clock": "wall"}],
+  "source_root": null,
+  "source_revision": null,
+  "windows": [{"start_unix_nanos": 1700000000500000000, "end_unix_nanos": 1700000003000000000, "label": "measure"}]
+}

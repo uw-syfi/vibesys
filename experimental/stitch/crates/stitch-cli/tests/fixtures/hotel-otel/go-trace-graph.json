@@ -1,0 +1,978 @@
+{
+  "quality": {
+    "captured_traces": 20,
+    "eligible_traces": 17,
+    "excluded_traces": 3,
+    "exclusion_reasons": {
+      "clock_inconsistency": 1,
+      "duplicate_span_id": 1,
+      "missing_parent": 1
+    },
+    "matched_client_server_pairs": 58,
+    "unmatched_client_spans": 77,
+    "unmatched_server_spans": 0,
+    "async_relationships": 0
+  },
+  "roots": [
+    {
+      "service": "frontend",
+      "operation": "GET /hotels",
+      "trace_count": 12,
+      "error_count": 1,
+      "latency_ms": {
+        "count": 12,
+        "error_count": 1,
+        "mean_ms": 13.16713775,
+        "p50_ms": 12.348768,
+        "p95_ms": 20.28004025,
+        "p99_ms": 20.83254165,
+        "max_ms": 20.970667
+      },
+      "nodes": [
+        {
+          "id": "node-001",
+          "path": "frontend:GET /hotels",
+          "service": "frontend",
+          "operation": "GET /hotels",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 1,
+            "mean_ms": 13.16713775,
+            "p50_ms": 12.348768,
+            "p95_ms": 20.28004025,
+            "p99_ms": 20.83254165,
+            "max_ms": 20.970667
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 1,
+            "mean_ms": 1.316714,
+            "p50_ms": 1.234877,
+            "p95_ms": 2.02800395,
+            "p99_ms": 2.08325519,
+            "max_ms": 2.097068
+          }
+        },
+        {
+          "id": "node-002",
+          "path": "frontend:GET /hotels \u003e frontend:render",
+          "service": "frontend",
+          "operation": "render",
+          "kind": "internal",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.6583571666666668,
+            "p50_ms": 0.6174390000000001,
+            "p95_ms": 1.01400235,
+            "p99_ms": 1.04162687,
+            "max_ms": 1.048533
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.6583571666666668,
+            "p50_ms": 0.6174390000000001,
+            "p95_ms": 1.01400235,
+            "p99_ms": 1.04162687,
+            "max_ms": 1.048533
+          }
+        },
+        {
+          "id": "node-003",
+          "path": "frontend:GET /hotels \u003e profile:profile.Profile/GetProfiles",
+          "service": "profile",
+          "operation": "profile.Profile/GetProfiles",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 4.081813416666667,
+            "p50_ms": 3.828118,
+            "p95_ms": 6.2868134499999995,
+            "p99_ms": 6.45808829,
+            "max_ms": 6.500907
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.65835725,
+            "p50_ms": 0.6174379999999999,
+            "p95_ms": 1.0140029,
+            "p99_ms": 1.04162698,
+            "max_ms": 1.048533
+          }
+        },
+        {
+          "id": "node-004",
+          "path": "frontend:GET /hotels \u003e profile:profile.Profile/GetProfiles \u003e profile:memcached get",
+          "service": "profile",
+          "operation": "memcached get",
+          "kind": "client",
+          "inclusive_latency_ms": {
+            "count": 36,
+            "error_count": 0,
+            "mean_ms": 2.5017563055555554,
+            "p50_ms": 2.2968960000000003,
+            "p95_ms": 4.0726435,
+            "p99_ms": 4.516859149999999,
+            "max_ms": 4.613547
+          },
+          "exclusive_latency_ms": {
+            "count": 36,
+            "error_count": 0,
+            "mean_ms": 2.5017563055555554,
+            "p50_ms": 2.2968960000000003,
+            "p95_ms": 4.0726435,
+            "p99_ms": 4.516859149999999,
+            "max_ms": 4.613547
+          }
+        },
+        {
+          "id": "node-005",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby",
+          "service": "search",
+          "operation": "search.Search/Nearby",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 6.056884166666667,
+            "p50_ms": 5.680434,
+            "p95_ms": 9.3288193,
+            "p99_ms": 9.58296946,
+            "max_ms": 9.646507
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.7900286666666667,
+            "p50_ms": 0.7409265,
+            "p95_ms": 1.216803,
+            "p99_ms": 1.2499526,
+            "max_ms": 1.25824
+          }
+        },
+        {
+          "id": "node-006",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e geo:geo.Geo/Nearby",
+          "service": "geo",
+          "operation": "geo.Geo/Nearby",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 2.370086166666667,
+            "p50_ms": 2.2227795,
+            "p95_ms": 3.65040835,
+            "p99_ms": 3.7498584700000004,
+            "max_ms": 3.774721
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.7900296666666667,
+            "p50_ms": 0.7409275,
+            "p95_ms": 1.21680345,
+            "p99_ms": 1.24995349,
+            "max_ms": 1.258241
+          }
+        },
+        {
+          "id": "node-007",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e geo:geo.Geo/Nearby \u003e geo:mongodb find",
+          "service": "geo",
+          "operation": "mongodb find",
+          "kind": "client",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 1.5800565000000002,
+            "p50_ms": 1.481852,
+            "p95_ms": 2.4336048999999997,
+            "p99_ms": 2.49990498,
+            "max_ms": 2.51648
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 1.5800565000000002,
+            "p50_ms": 1.481852,
+            "p95_ms": 2.4336048999999997,
+            "p99_ms": 2.49990498,
+            "max_ms": 2.51648
+          }
+        },
+        {
+          "id": "node-008",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates",
+          "service": "rate",
+          "operation": "rate.Rate/GetRates",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 3.02844325,
+            "p50_ms": 2.8402184999999998,
+            "p95_ms": 4.664411149999999,
+            "p99_ms": 4.79148623,
+            "max_ms": 4.823255
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.6583585,
+            "p50_ms": 0.61744,
+            "p95_ms": 1.0140038,
+            "p99_ms": 1.04162876,
+            "max_ms": 1.048535
+          }
+        },
+        {
+          "id": "node-009",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates \u003e rate:memcached get",
+          "service": "rate",
+          "operation": "memcached get",
+          "kind": "client",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.7900282500000001,
+            "p50_ms": 0.740926,
+            "p95_ms": 1.2168024499999999,
+            "p99_ms": 1.24995249,
+            "max_ms": 1.25824
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 0.7900282500000001,
+            "p50_ms": 0.740926,
+            "p95_ms": 1.2168024499999999,
+            "p99_ms": 1.24995249,
+            "max_ms": 1.25824
+          }
+        },
+        {
+          "id": "node-010",
+          "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates \u003e rate:mongodb find",
+          "service": "rate",
+          "operation": "mongodb find",
+          "kind": "client",
+          "inclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 1.5800565000000002,
+            "p50_ms": 1.4818525,
+            "p95_ms": 2.4336048999999997,
+            "p99_ms": 2.49990498,
+            "max_ms": 2.51648
+          },
+          "exclusive_latency_ms": {
+            "count": 12,
+            "error_count": 0,
+            "mean_ms": 1.5800565000000002,
+            "p50_ms": 1.4818525,
+            "p95_ms": 2.4336048999999997,
+            "p99_ms": 2.49990498,
+            "max_ms": 2.51648
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "node-001",
+          "to": "node-002",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-001",
+          "to": "node-003",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-001",
+          "to": "node-005",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-003",
+          "to": "node-004",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-005",
+          "to": "node-006",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-005",
+          "to": "node-008",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-006",
+          "to": "node-007",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-008",
+          "to": "node-009",
+          "relationship": "sync",
+          "count": 12
+        },
+        {
+          "from": "node-008",
+          "to": "node-010",
+          "relationship": "sync",
+          "count": 12
+        }
+      ],
+      "representative_trace": {
+        "trace_id": "0000000000000000000000000000a000",
+        "duration_ms": 19.714982,
+        "spans": [
+          {
+            "node_id": "node-001",
+            "service": "frontend",
+            "operation": "GET /hotels",
+            "offset_ms": 0,
+            "duration_ms": 19.714982
+          },
+          {
+            "node_id": "node-005",
+            "service": "search",
+            "operation": "search.Search/Nearby",
+            "offset_ms": 1.380048,
+            "duration_ms": 9.068893
+          },
+          {
+            "node_id": "node-006",
+            "service": "geo",
+            "operation": "geo.Geo/Nearby",
+            "offset_ms": 2.168647,
+            "duration_ms": 3.548698
+          },
+          {
+            "node_id": "node-007",
+            "service": "geo",
+            "operation": "mongodb find",
+            "offset_ms": 2.562947,
+            "duration_ms": 2.365798
+          },
+          {
+            "node_id": "node-008",
+            "service": "rate",
+            "operation": "rate.Rate/GetRates",
+            "offset_ms": 5.125894,
+            "duration_ms": 4.534448
+          },
+          {
+            "node_id": "node-009",
+            "service": "rate",
+            "operation": "memcached get",
+            "offset_ms": 5.520195,
+            "duration_ms": 1.182899
+          },
+          {
+            "node_id": "node-010",
+            "service": "rate",
+            "operation": "mongodb find",
+            "offset_ms": 6.900243,
+            "duration_ms": 2.365798
+          },
+          {
+            "node_id": "node-003",
+            "service": "profile",
+            "operation": "profile.Profile/GetProfiles",
+            "offset_ms": 11.828989,
+            "duration_ms": 6.111646
+          },
+          {
+            "node_id": "node-004",
+            "service": "profile",
+            "operation": "memcached get",
+            "offset_ms": 12.223289,
+            "duration_ms": 3.154397
+          },
+          {
+            "node_id": "node-004",
+            "service": "profile",
+            "operation": "memcached get",
+            "offset_ms": 12.617588,
+            "duration_ms": 3.745847
+          },
+          {
+            "node_id": "node-004",
+            "service": "profile",
+            "operation": "memcached get",
+            "offset_ms": 13.011888,
+            "duration_ms": 4.337296
+          },
+          {
+            "node_id": "node-002",
+            "service": "frontend",
+            "operation": "render",
+            "offset_ms": 18.532083,
+            "duration_ms": 0.98575
+          }
+        ]
+      },
+      "critical_path": {
+        "algorithm": "wall_clock_active_leaf_v1",
+        "scope": "synchronous_request",
+        "trace_count": 12,
+        "async_relationships_excluded": 0,
+        "duration_ms": {
+          "count": 12,
+          "error_count": 1,
+          "mean_ms": 13.16713775,
+          "p50_ms": 12.348768,
+          "p95_ms": 20.28004025,
+          "p99_ms": 20.83254165,
+          "max_ms": 20.970667
+        },
+        "nodes_by_contribution": [
+          {
+            "node_id": "node-004",
+            "path": "frontend:GET /hotels \u003e profile:profile.Profile/GetProfiles \u003e profile:memcached get",
+            "service": "profile",
+            "operation": "memcached get",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 3.4234561666666665,
+              "p50_ms": 3.21068,
+              "p95_ms": 5.272810549999999,
+              "p99_ms": 5.416461310000001,
+              "max_ms": 5.452374
+            }
+          },
+          {
+            "node_id": "node-007",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e geo:geo.Geo/Nearby \u003e geo:mongodb find",
+            "service": "geo",
+            "operation": "mongodb find",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 1.5800565000000002,
+              "p50_ms": 1.481852,
+              "p95_ms": 2.4336048999999997,
+              "p99_ms": 2.49990498,
+              "max_ms": 2.51648
+            }
+          },
+          {
+            "node_id": "node-010",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates \u003e rate:mongodb find",
+            "service": "rate",
+            "operation": "mongodb find",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 1.5800565000000002,
+              "p50_ms": 1.4818525,
+              "p95_ms": 2.4336048999999997,
+              "p99_ms": 2.49990498,
+              "max_ms": 2.51648
+            }
+          },
+          {
+            "node_id": "node-001",
+            "path": "frontend:GET /hotels",
+            "service": "frontend",
+            "operation": "GET /hotels",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 1,
+              "mean_ms": 1.316714,
+              "p50_ms": 1.234877,
+              "p95_ms": 2.02800395,
+              "p99_ms": 2.08325519,
+              "max_ms": 2.097068
+            }
+          },
+          {
+            "node_id": "node-005",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby",
+            "service": "search",
+            "operation": "search.Search/Nearby",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 1.3167131666666667,
+              "p50_ms": 1.2348765,
+              "p95_ms": 2.0280036,
+              "p99_ms": 2.08325352,
+              "max_ms": 2.097066
+            }
+          },
+          {
+            "node_id": "node-003",
+            "path": "frontend:GET /hotels \u003e profile:profile.Profile/GetProfiles",
+            "service": "profile",
+            "operation": "profile.Profile/GetProfiles",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 1.1850417500000001,
+              "p50_ms": 1.111388,
+              "p95_ms": 1.8252035,
+              "p99_ms": 1.8749279,
+              "max_ms": 1.887359
+            }
+          },
+          {
+            "node_id": "node-008",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates",
+            "service": "rate",
+            "operation": "rate.Rate/GetRates",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 0.9217000000000001,
+              "p50_ms": 0.864414,
+              "p95_ms": 1.4196031,
+              "p99_ms": 1.4582782200000002,
+              "max_ms": 1.4679470000000001
+            }
+          },
+          {
+            "node_id": "node-009",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e rate:rate.Rate/GetRates \u003e rate:memcached get",
+            "service": "rate",
+            "operation": "memcached get",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 0.7900282500000001,
+              "p50_ms": 0.740926,
+              "p95_ms": 1.2168024499999999,
+              "p99_ms": 1.24995249,
+              "max_ms": 1.25824
+            }
+          },
+          {
+            "node_id": "node-002",
+            "path": "frontend:GET /hotels \u003e frontend:render",
+            "service": "frontend",
+            "operation": "render",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 0.6583571666666668,
+              "p50_ms": 0.6174390000000001,
+              "p95_ms": 1.01400235,
+              "p99_ms": 1.04162687,
+              "max_ms": 1.048533
+            }
+          },
+          {
+            "node_id": "node-006",
+            "path": "frontend:GET /hotels \u003e search:search.Search/Nearby \u003e geo:geo.Geo/Nearby",
+            "service": "geo",
+            "operation": "geo.Geo/Nearby",
+            "contribution_ms": {
+              "count": 12,
+              "error_count": 0,
+              "mean_ms": 0.39501425,
+              "p50_ms": 0.370463,
+              "p95_ms": 0.60840095,
+              "p99_ms": 0.6249761899999999,
+              "max_ms": 0.62912
+            }
+          }
+        ],
+        "representative": {
+          "trace_id": "0000000000000000000000000000a000",
+          "duration_ms": 19.714982,
+          "segments": [
+            {
+              "node_id": "node-001",
+              "offset_ms": 0,
+              "duration_ms": 0.985749
+            },
+            {
+              "node_id": "node-005",
+              "offset_ms": 0.985749,
+              "duration_ms": 0.985749
+            },
+            {
+              "node_id": "node-006",
+              "offset_ms": 1.971498,
+              "duration_ms": 0.591449
+            },
+            {
+              "node_id": "node-007",
+              "offset_ms": 2.562947,
+              "duration_ms": 2.365798
+            },
+            {
+              "node_id": "node-008",
+              "offset_ms": 4.928745,
+              "duration_ms": 0.59145
+            },
+            {
+              "node_id": "node-009",
+              "offset_ms": 5.520195,
+              "duration_ms": 1.182899
+            },
+            {
+              "node_id": "node-008",
+              "offset_ms": 6.703094,
+              "duration_ms": 0.197149
+            },
+            {
+              "node_id": "node-010",
+              "offset_ms": 6.900243,
+              "duration_ms": 2.365798
+            },
+            {
+              "node_id": "node-008",
+              "offset_ms": 9.266041,
+              "duration_ms": 0.59145
+            },
+            {
+              "node_id": "node-005",
+              "offset_ms": 9.857491,
+              "duration_ms": 0.985749
+            },
+            {
+              "node_id": "node-001",
+              "offset_ms": 10.84324,
+              "duration_ms": 0.59145
+            },
+            {
+              "node_id": "node-003",
+              "offset_ms": 11.43469,
+              "duration_ms": 0.788599
+            },
+            {
+              "node_id": "node-004",
+              "offset_ms": 12.223289,
+              "duration_ms": 5.125895
+            },
+            {
+              "node_id": "node-003",
+              "offset_ms": 17.349184,
+              "duration_ms": 0.98575
+            },
+            {
+              "node_id": "node-001",
+              "offset_ms": 18.334934,
+              "duration_ms": 0.197149
+            },
+            {
+              "node_id": "node-002",
+              "offset_ms": 18.532083,
+              "duration_ms": 0.98575
+            },
+            {
+              "node_id": "node-001",
+              "offset_ms": 19.517833,
+              "duration_ms": 0.197149
+            }
+          ]
+        }
+      }
+    },
+    {
+      "service": "frontend",
+      "operation": "HTTP GET /recommendations",
+      "trace_count": 5,
+      "error_count": 0,
+      "latency_ms": {
+        "count": 5,
+        "error_count": 0,
+        "mean_ms": 5.7806756,
+        "p50_ms": 5.698076,
+        "p95_ms": 7.1478728,
+        "p99_ms": 7.27550096,
+        "max_ms": 7.307408
+      },
+      "nodes": [
+        {
+          "id": "node-001",
+          "path": "frontend:HTTP GET /recommendations",
+          "service": "frontend",
+          "operation": "HTTP GET /recommendations",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 5.7806756,
+            "p50_ms": 5.698076,
+            "p95_ms": 7.1478728,
+            "p99_ms": 7.27550096,
+            "max_ms": 7.307408
+          },
+          "exclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 0.8671012000000001,
+            "p50_ms": 0.854711,
+            "p95_ms": 1.0721808,
+            "p99_ms": 1.0913249600000001,
+            "max_ms": 1.096111
+          }
+        },
+        {
+          "id": "node-002",
+          "path": "frontend:HTTP GET /recommendations \u003e profile:profile.Profile/GetProfiles",
+          "service": "profile",
+          "operation": "profile.Profile/GetProfiles",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 1.7342039999999996,
+            "p50_ms": 1.709425,
+            "p95_ms": 2.1443624,
+            "p99_ms": 2.1826508799999997,
+            "max_ms": 2.192223
+          },
+          "exclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 0.5780687999999999,
+            "p50_ms": 0.56981,
+            "p95_ms": 0.7147882,
+            "p99_ms": 0.72755124,
+            "max_ms": 0.730742
+          }
+        },
+        {
+          "id": "node-003",
+          "path": "frontend:HTTP GET /recommendations \u003e profile:profile.Profile/GetProfiles \u003e profile:memcached get",
+          "service": "profile",
+          "operation": "memcached get",
+          "kind": "client",
+          "inclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 1.1561352,
+            "p50_ms": 1.139615,
+            "p95_ms": 1.4295742,
+            "p99_ms": 1.45509964,
+            "max_ms": 1.461481
+          },
+          "exclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 1.1561352,
+            "p50_ms": 1.139615,
+            "p95_ms": 1.4295742,
+            "p99_ms": 1.45509964,
+            "max_ms": 1.461481
+          }
+        },
+        {
+          "id": "node-004",
+          "path": "frontend:HTTP GET /recommendations \u003e recommendation:recommendation.Recommendation/GetRecommendations",
+          "service": "recommendation",
+          "operation": "recommendation.Recommendation/GetRecommendations",
+          "kind": "server",
+          "inclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 2.4567883999999998,
+            "p50_ms": 2.421684,
+            "p95_ms": 3.0378476,
+            "p99_ms": 3.0920895199999996,
+            "max_ms": 3.10565
+          },
+          "exclusive_latency_ms": {
+            "count": 5,
+            "error_count": 0,
+            "mean_ms": 2.4567883999999998,
+            "p50_ms": 2.421684,
+            "p95_ms": 3.0378476,
+            "p99_ms": 3.0920895199999996,
+            "max_ms": 3.10565
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "node-001",
+          "to": "node-002",
+          "relationship": "sync",
+          "count": 5
+        },
+        {
+          "from": "node-001",
+          "to": "node-004",
+          "relationship": "sync",
+          "count": 5
+        },
+        {
+          "from": "node-002",
+          "to": "node-003",
+          "relationship": "sync",
+          "count": 5
+        }
+      ],
+      "representative_trace": {
+        "trace_id": "0000000000000000000000000000b001",
+        "duration_ms": 7.307408,
+        "spans": [
+          {
+            "node_id": "node-001",
+            "service": "frontend",
+            "operation": "HTTP GET /recommendations",
+            "offset_ms": 0,
+            "duration_ms": 7.307408
+          },
+          {
+            "node_id": "node-004",
+            "service": "recommendation",
+            "operation": "recommendation.Recommendation/GetRecommendations",
+            "offset_ms": 0.822082,
+            "duration_ms": 3.10565
+          },
+          {
+            "node_id": "node-002",
+            "service": "profile",
+            "operation": "profile.Profile/GetProfiles",
+            "offset_ms": 4.749814,
+            "duration_ms": 2.192223
+          },
+          {
+            "node_id": "node-003",
+            "service": "profile",
+            "operation": "memcached get",
+            "offset_ms": 4.9325,
+            "duration_ms": 1.461481
+          }
+        ]
+      },
+      "critical_path": {
+        "algorithm": "wall_clock_active_leaf_v1",
+        "scope": "synchronous_request",
+        "trace_count": 5,
+        "async_relationships_excluded": 0,
+        "duration_ms": {
+          "count": 5,
+          "error_count": 0,
+          "mean_ms": 5.7806756,
+          "p50_ms": 5.698076,
+          "p95_ms": 7.1478728,
+          "p99_ms": 7.27550096,
+          "max_ms": 7.307408
+        },
+        "nodes_by_contribution": [
+          {
+            "node_id": "node-004",
+            "path": "frontend:HTTP GET /recommendations \u003e recommendation:recommendation.Recommendation/GetRecommendations",
+            "service": "recommendation",
+            "operation": "recommendation.Recommendation/GetRecommendations",
+            "contribution_ms": {
+              "count": 5,
+              "error_count": 0,
+              "mean_ms": 2.8903375999999996,
+              "p50_ms": 2.849038,
+              "p95_ms": 3.5739364,
+              "p99_ms": 3.63775048,
+              "max_ms": 3.653704
+            }
+          },
+          {
+            "node_id": "node-003",
+            "path": "frontend:HTTP GET /recommendations \u003e profile:profile.Profile/GetProfiles \u003e profile:memcached get",
+            "service": "profile",
+            "operation": "memcached get",
+            "contribution_ms": {
+              "count": 5,
+              "error_count": 0,
+              "mean_ms": 1.1561352,
+              "p50_ms": 1.139615,
+              "p95_ms": 1.4295742,
+              "p99_ms": 1.45509964,
+              "max_ms": 1.461481
+            }
+          },
+          {
+            "node_id": "node-002",
+            "path": "frontend:HTTP GET /recommendations \u003e profile:profile.Profile/GetProfiles",
+            "service": "profile",
+            "operation": "profile.Profile/GetProfiles",
+            "contribution_ms": {
+              "count": 5,
+              "error_count": 0,
+              "mean_ms": 0.8671016,
+              "p50_ms": 0.8547119999999999,
+              "p95_ms": 1.0721814,
+              "p99_ms": 1.09132588,
+              "max_ms": 1.096112
+            }
+          },
+          {
+            "node_id": "node-001",
+            "path": "frontend:HTTP GET /recommendations",
+            "service": "frontend",
+            "operation": "HTTP GET /recommendations",
+            "contribution_ms": {
+              "count": 5,
+              "error_count": 0,
+              "mean_ms": 0.8671011999999999,
+              "p50_ms": 0.854711,
+              "p95_ms": 1.0721808,
+              "p99_ms": 1.09132496,
+              "max_ms": 1.0961109999999998
+            }
+          }
+        ],
+        "representative": {
+          "trace_id": "0000000000000000000000000000b001",
+          "duration_ms": 7.307408,
+          "segments": [
+            {
+              "node_id": "node-001",
+              "offset_ms": 0,
+              "duration_ms": 0.548055
+            },
+            {
+              "node_id": "node-004",
+              "offset_ms": 0.548055,
+              "duration_ms": 3.653704
+            },
+            {
+              "node_id": "node-001",
+              "offset_ms": 4.201759,
+              "duration_ms": 0.36537
+            },
+            {
+              "node_id": "node-002",
+              "offset_ms": 4.567129,
+              "duration_ms": 0.365371
+            },
+            {
+              "node_id": "node-003",
+              "offset_ms": 4.9325,
+              "duration_ms": 1.461481
+            },
+            {
+              "node_id": "node-002",
+              "offset_ms": 6.393981,
+              "duration_ms": 0.730741
+            },
+            {
+              "node_id": "node-001",
+              "offset_ms": 7.124722,
+              "duration_ms": 0.182686
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
