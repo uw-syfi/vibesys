@@ -77,8 +77,10 @@ var rules = map[string][]string{
 	"internal/resource/rocm":         {"internal/core", "internal/resource"},
 	"internal/resource/mounts":       {"envcodec", "gen/", "internal/core", "internal/resource"},
 	"internal/resource/kubernetes":   {"envcodec", "gen/", "internal/clock", "internal/core", "internal/remote", "internal/resource"},
-	"internal/environment":           {"envcodec", "gen/", "internal/core"},
-	"internal/environment/fakeenv":   {"internal/clock", "internal/core", "internal/environment"},
+	// The pure rules of standing allocations: the state, Step and the fit. No I/O.
+	"internal/alloc":               {"internal/core"},
+	"internal/environment":         {"envcodec", "gen/", "internal/alloc", "internal/core"},
+	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
@@ -144,7 +146,7 @@ var rules = map[string][]string{
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
-	"internal/wire": {"internal/core", "internal/flow", "internal/lifecycle", "internal/task", "gen/"},
+	"internal/wire": {"internal/alloc", "internal/core", "internal/flow", "internal/lifecycle", "internal/task", "gen/"},
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
 	"internal/supervisor": {
@@ -233,7 +235,9 @@ var testRules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend/backendtest"},
 	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
-	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
+	// The core's records are checked against the contract's rules for them.
+	"internal/alloc":            {"gen/", "internal/wire"},
+	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/slurm": {
 		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
 		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
