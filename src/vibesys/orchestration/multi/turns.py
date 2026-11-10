@@ -42,6 +42,7 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
 )
 from vibesys.orchestration.review import Verdict
+from vs_agent.api import AgentUsageLimitError
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     ResolvedSkillResources,
@@ -415,6 +416,8 @@ production path cannot be measured safely.
                 )
             except StructuredResponseError:
                 summary = _fallback_profiler()
+        except AgentUsageLimitError:
+            raise
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920440 [BLE001]; profiling is advisory; a failed specialist must not abort the policy round.
             self.run.observations.warning(f"[profiler] failed: {error}")
             return None

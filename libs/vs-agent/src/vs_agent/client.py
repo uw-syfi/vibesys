@@ -24,6 +24,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    AgentUsageLimitError,
     MCPServerSpec,
     SessionDisposition,
     session_spec_fingerprint,
@@ -543,6 +544,13 @@ class AgentClient:
         try:
             result = self._run_session(cached.session, turn, observer)
         except BaseException as error:
+            if isinstance(error, AgentUsageLimitError):
+                self._checkpoint(
+                    session_key,
+                    session_spec,
+                    fingerprint,
+                    AgentTurnResult("", provider_session_id=error.provider_session_id),
+                )
             # The checkpoint is deliberately kept. A turn can fail for reasons
             # that say nothing about the conversation's validity (a timeout, a
             # cancelled run), and a driver that finds its conversation

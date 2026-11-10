@@ -460,6 +460,7 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.review
     vibesys.orchestration.multi --> vibesys.plugin_registration
     vibesys.orchestration.multi --> vibesys.run.contracts
+    vibesys.orchestration.multi --> vs_agent
     vibesys.orchestration.multi --> vs_loop_state
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime

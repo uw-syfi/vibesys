@@ -20,6 +20,7 @@ from vibesys.orchestration.multi.contracts import (
 from vibesys.orchestration.multi.models import MultiState, PaidAttempt
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
+from vs_agent.api import AgentUsageLimitError
 from vs_runtime.api import (
     AgentCapability,
     AgentTool,
@@ -497,3 +498,118 @@ def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> No
     assert hypothesis.revert_commit == first.commit
     assert hypothesis.parent_commit == first.commit
     assert all(session.closed for session in run.agents.sessions)
+
+
+@pytest.mark.parametrize("no_paid_work", [False, True])
+@pytest.mark.parametrize("phase", ["implementer", "judge", "orchestrator"])
+def test_usage_limit_continues_logical_attempt_without_repeating_completed_implementation(
+    tmp_path: Path, phase: str, *, no_paid_work: bool
+) -> None:
+    async def scenario() -> tuple[FakeRun, _Script]:
+        quota = AgentUsageLimitError(resets_at=1791400000, no_paid_work=no_paid_work)
+        replies: list[object] = [_pre_round(), _plan("H-01")]
+        if phase == "orchestrator":
+            replies = [quota, *replies]
+        if phase == "implementer":
+            replies.append(quota)
+        replies.append(_implementation())
+        if phase == "judge":
+            replies.append(quota)
+        replies.append(_judge())
+        script = _Script(*replies)
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(AgentUsageLimitError):
+                await PLUGIN.orchestrate(run, _options(max_retries_per_round=1))
+            interrupted = await run.state.load(MultiState)
+            if phase != "orchestrator":
+                assert interrupted is not None
+                assert interrupted.search.rounds == []
+                assert interrupted.last_paid_attempt is not None
+                assert interrupted.last_paid_attempt.turn_number == 1
+                assert interrupted.usage_limited_attempt is not None
+                assert (interrupted.usage_limited_attempt.implementation is not None) is (
+                    phase == "judge"
+                )
+            assert (
+                await PLUGIN.orchestrate(run, _options(max_retries_per_round=1))
+                is RunStatus.SUCCEEDED
+            )
+            finished = await run.state.load(MultiState)
+            assert finished is not None
+            assert len(finished.search.rounds) == 1
+            assert finished.usage_limited_attempt is None
+            return run, script
+        finally:
+            await run.close()
+
+    _, script = asyncio.run(scenario())
+    implementer_calls = [
+        role for role, _history, _message in script.calls if role == IMPLEMENTER.id
+    ]
+    assert len(implementer_calls) == (2 if phase == "implementer" else 1)
+
+
+@pytest.mark.parametrize("field", ["round_number", "member_id", "turn_number"])
+def test_resume_rejects_mismatched_usage_limit_marker(tmp_path: Path, field: str) -> None:
+    async def scenario() -> None:
+        script = _Script(_pre_round(), _plan("H-01"), AgentUsageLimitError())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(AgentUsageLimitError):
+                await PLUGIN.orchestrate(run, _options())
+            state = await run.state.load(MultiState)
+            assert state is not None
+            assert state.usage_limited_attempt is not None
+            marker = state.usage_limited_attempt.attempt.model_copy(
+                update={field: "other-hypothesis" if field == "member_id" else 2}
+            )
+            altered = state.model_copy(
+                update={
+                    "usage_limited_attempt": state.usage_limited_attempt.model_copy(
+                        update={"attempt": marker}
+                    )
+                }
+            )
+            await run.state.commit(altered)
+            with pytest.raises(ValueError, match="does not match the resumed round reservation"):
+                await PLUGIN.orchestrate(run, _options())
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())
+
+
+def test_profiler_account_quota_propagates_without_consuming_attempt(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        script = _Script(_pre_round(need_profile=True), AgentUsageLimitError())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
+            facts=RunFacts(
+                domain_id="generic", objective="Improve candidate.", profiler_id="linux_cpu"
+            ),
+        )
+        try:
+            with pytest.raises(AgentUsageLimitError):
+                await PLUGIN.orchestrate(run, _options())
+            state = await run.state.load(MultiState)
+            assert state is None or state.last_paid_attempt is None
+            assert [role for role, _history, _message in script.calls] == [DESIGNER.id, PROFILER.id]
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())

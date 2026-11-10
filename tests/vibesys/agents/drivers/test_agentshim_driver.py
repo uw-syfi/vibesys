@@ -34,6 +34,7 @@ from agentshim.testing import (
     installed_mcp_servers,
     scripted_resume_failure,
     scripted_turn,
+    scripted_usage_limit,
 )
 
 from vibesys.events import CommandResultPayload
@@ -43,6 +44,7 @@ from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentTurnTimeoutError,
+    AgentUsageLimitError,
     MCPServerSpec,
 )
 from vs_agent.contracts import (
@@ -1577,3 +1579,39 @@ def test_the_launch_drops_the_inherited_pwd(
     env = fake.requests[-1].env
     assert "PWD" not in env
     assert env["GPU"] == "1"
+
+
+@pytest.mark.parametrize("output_tokens", [0, 99])
+def test_account_quota_keeps_resumed_conversation_without_fresh_retry(
+    tmp_path: Path, output_tokens: int
+) -> None:
+    sandbox = _FakeDockerSandbox(workspace=tmp_path, container_id="quota-test")
+    driver, fake = _driver(
+        "claude",
+        [
+            FakeRun(),
+            scripted_usage_limit(
+                session_id="conversation", resets_at=1791400000, output_tokens=output_tokens
+            ),
+            scripted_turn("claude", text="done", session_id="conversation"),
+        ],
+        docker_sandboxes={"implementer": sandbox},
+    )
+    session = driver.create_session(
+        _spec(tmp_path, policy=AgentExecutionPolicy(containerized=True))
+    )
+    try:
+        assert session.resume_provider_session("conversation")
+        with pytest.raises(AgentUsageLimitError) as caught:
+            session.run_turn(AgentTurnRequest("continue"))
+        assert caught.value.resets_at == 1791400000
+        assert caught.value.provider_session_id == "conversation"
+        assert caught.value.no_paid_work is (output_tokens == 0)
+        assert len(fake.requests) == 2
+        result = session.run_turn(AgentTurnRequest("continue after reset"))
+        assert result.text == "done"
+        assert result.disposition is SessionDisposition.REUSABLE
+        assert all("--resume" in request.argv for request in fake.requests[1:])
+    finally:
+        session.close()
+        driver.close()

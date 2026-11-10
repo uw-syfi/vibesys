@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis.state import HypothesisState
-from vs_runtime.api import AccuracyReceipt
+from vibesys.orchestration.multi.contracts import ImplementerResponse
+from vs_runtime.api import AccuracyReceipt, AgentBinding
 
 _ProfileGuidedInput = ProfileGuidedInput
 
@@ -50,6 +51,16 @@ class PaidAttempt(BaseModel):
     turn_number: Annotated[int, Field(gt=0)]
 
 
+class UsageLimitedAttempt(BaseModel):
+    """The logical attempt to continue after an account quota interruption."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    attempt: PaidAttempt
+    implementation: ImplementerResponse | None = None
+    implementation_binding: AgentBinding | None = None
+
+
 class MultiState(BaseModel):
     """The multi plugin's complete opaque durability aggregate."""
 
@@ -58,6 +69,7 @@ class MultiState(BaseModel):
     schema_version: Literal[1] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
     last_paid_attempt: PaidAttempt | None = None
+    usage_limited_attempt: UsageLimitedAttempt | None = None
     accuracy_receipt: AccuracyReceipt | None = None
 
 

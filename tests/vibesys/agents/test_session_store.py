@@ -23,6 +23,7 @@ from vs_agent.api import (
     AgentClient,
     AgentSessionKey,
     AgentSessionState,
+    AgentUsageLimitError,
     DurableSessionStore,
     NullSessionStore,
     SessionScope,
@@ -524,3 +525,33 @@ def test_in_process_spec_change_replaces_the_checkpoint(tmp_path: Path) -> None:
     assert record is not None
     assert record.session_id == "thread-2"
     assert record.model == "gpt-6"
+
+
+@pytest.mark.parametrize("previous", [None, "older-conversation"])
+def test_usage_limit_checkpoints_even_the_first_interrupted_turn(
+    tmp_path: Path, previous: str | None
+) -> None:
+    store = _store(tmp_path)
+    if previous is not None:
+        _checkpoint(store, previous)
+    failing = _FakeSession(
+        results=[],
+        error=AgentUsageLimitError(
+            resets_at=1791400000, limit_type="five_hour", provider_session_id="live-conversation"
+        ),
+    )
+    client = AgentClient(_FakeDriver([failing]), session_store=store)
+    with pytest.raises(AgentUsageLimitError):
+        client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
+    client.close()
+    record = store.get(HYPOTHESIS)
+    assert record is not None
+    assert record.session_id == "live-conversation"
+    resumed = _FakeSession(
+        results=[AgentTurnResult("done", provider_session_id="live-conversation")]
+    )
+    with AgentClient(_FakeDriver([resumed]), session_store=store) as replacement:
+        replacement.run(
+            session_spec=_spec(), turn=AgentTurnRequest("continue"), session_key=HYPOTHESIS
+        )
+    assert resumed.offered == ["live-conversation"]

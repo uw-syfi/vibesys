@@ -30,6 +30,7 @@ from vibesys.orchestration.multi.models import (
     MultiState,
     PaidAttempt,
     ProfileGuidedMultiOptions,
+    UsageLimitedAttempt,
 )
 from vibesys.orchestration.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
 from vibesys.orchestration.profile_focus import (
@@ -39,6 +40,7 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusState,
 )
 from vibesys.orchestration.review import Verdict
+from vs_agent.api import AgentUsageLimitError
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkObjective,
@@ -54,12 +56,15 @@ if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis import CarryOver, RollbackTarget
     from vibesys.orchestration.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.multi.contracts import ImplementerResponse
+    from vs_runtime.api import AgentBinding
 
 
 @dataclass(slots=True)
 class _SelectedRound:
     request: AttemptRequest
     attempt: AttemptState
+    implementation_binding: AgentBinding | None = None
 
 
 MultiRunOptions = MultiOptions | ProfileGuidedMultiOptions
@@ -353,6 +358,16 @@ class _MultiRun:
         return hypothesis
 
     def _first_attempt(self, selected: _SelectedRound) -> int:
+        suspended = self.state.usage_limited_attempt
+        if suspended is not None:
+            if (
+                suspended.attempt.round_number != self.round_number
+                or suspended.attempt.member_id != selected.request.plan.hypothesis_id
+                or suspended.attempt != self.state.last_paid_attempt
+            ):
+                message = "usage-limited attempt does not match the resumed round reservation"
+                raise ValueError(message)
+            return suspended.attempt.turn_number
         marker = self.state.last_paid_attempt
         if (
             marker is not None
@@ -391,7 +406,17 @@ class _MultiRun:
             attempt.official_reason = None
             attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
             await self._mark_paid(selected, retry)
-            response, synthesized = await self.turns.implement(selected.request, attempt)
+            suspended = self.state.usage_limited_attempt
+            try:
+                if suspended is not None and suspended.implementation is not None:
+                    response, synthesized = suspended.implementation, False
+                    selected.implementation_binding = suspended.implementation_binding
+                else:
+                    response, synthesized = await self.turns.implement(selected.request, attempt)
+            except AgentUsageLimitError:
+                await self._suspend_usage_limited_attempt(selected)
+                raise
+            self.state = self.state.model_copy(update={"usage_limited_attempt": None}, deep=True)
             attempt.implementation = response
             if synthesized:
                 attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
@@ -399,11 +424,42 @@ class _MultiRun:
                     f"[implementer] attempt {retry} returned no parseable response; retrying"
                 )
                 continue
-            decision = await self._review(selected)
+            try:
+                decision = await self._review(selected)
+            except AgentUsageLimitError:
+                await self._suspend_usage_limited_attempt(selected, response)
+                raise
             if decision is AttemptDecision.FINISH:
                 break
             if decision is AttemptDecision.OFFICIAL and await self._official_evaluation(selected):
                 break
+
+    async def _suspend_usage_limited_attempt(
+        self, selected: _SelectedRound, implementation: ImplementerResponse | None = None
+    ) -> None:
+        marker = self.state.last_paid_attempt
+        if marker is None:
+            message = "usage-limited implementer attempt has no paid-attempt reservation"
+            raise RuntimeError(message)
+        self.state = self.state.model_copy(
+            update={
+                "usage_limited_attempt": UsageLimitedAttempt(
+                    attempt=marker,
+                    implementation=implementation,
+                    implementation_binding=(
+                        selected.implementation_binding
+                        or self.turns.binding(selected.request.plan.hypothesis_id)
+                        if implementation is not None
+                        else None
+                    ),
+                )
+            },
+            deep=True,
+        )
+        await self._commit(
+            workspace=self.workspace,
+            label=f"{self.label_prefix}: preserve usage-limited round {self.round_number}",
+        )
 
     async def _review(self, selected: _SelectedRound) -> AttemptDecision:
         state = selected.attempt
@@ -618,7 +674,9 @@ class _MultiRun:
         candidate_revision = await self.workspace.snapshot(
             f"round-{self.round_number}-record-input"
         )
-        binding = self.turns.binding(selected.request.plan.hypothesis_id)
+        binding = selected.implementation_binding or self.turns.binding(
+            selected.request.plan.hypothesis_id
+        )
         record = build_round_record(
             RecordInput(
                 state=attempt.agent_run_state,

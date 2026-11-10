@@ -109,10 +109,17 @@ A raise carries no `AgentTurnResult`, so the turn cannot report
 offer a conversation again.
 
 This is a backstop, not the normal path. Codex recognizes its own
-missing-rollout message and raises `SessionResumeError`; Claude, Gemini and
-opencode make a refused resume indistinguishable from any other startup
-failure, so agentshim maps any nonzero exit of a resumed turn onto
-`SessionResumeError` for them. What is left over is a resumed turn that fails
+missing-rollout message and raises `SessionResumeError`; Gemini and opencode make a refused resume indistinguishable from any other
+startup failure, so agentshim maps any nonzero exit of a resumed turn onto
+`SessionResumeError` for them. Claude follows that rule except for its typed
+account-usage refusal: the campaign's local agentshim patch emits
+`UsageLimitError`, which the driver translates to `AgentUsageLimitError`.
+That error preserves the conversation and provider-reported reset timestamp.
+The agent client checkpoints even the first interrupted turn's session ID.
+The multi-agent loop durably continues the same logical attempt after reset;
+a quota interruption during judging also retains the completed implementation,
+so resume reruns review without paying for another implementer turn. Generic
+429s, authentication errors, and missing transcripts do not use this path. What is left over is a resumed turn that fails
 in a way no provider calls a resume failure, and resuming that conversation
 again on every later turn would make no progress. The price is that a genuine
 agent failure on a resumed turn also costs that conversation's history, which

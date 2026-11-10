@@ -30,6 +30,7 @@ from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentTurnTimeoutError,
     AgentUsage,
+    AgentUsageLimitError,
     MCPServerSpec,
 )
 from vs_agent.events import (
@@ -105,6 +106,7 @@ __all__ = [
     "AgentStatusData",
     "AgentTurnTimeoutError",
     "AgentUsage",
+    "AgentUsageLimitError",
     "CandidateProgress",
     "CommandResultPayload",
     "Driver",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -30,6 +31,31 @@ class AgentTurnTimeoutError(TimeoutError):
         """Record the configured budget, independent of driver mechanism."""
         self.timeout_seconds = timeout_seconds
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
+
+
+class AgentUsageLimitError(RuntimeError):
+    """An account allowance refused a turn; resume its conversation after reset."""
+
+    def __init__(
+        self,
+        *,
+        resets_at: int | None = None,
+        limit_type: str | None = None,
+        provider_session_id: str | None = None,
+        no_paid_work: bool = False,
+    ) -> None:
+        """Keep reset time in Unix seconds; absent metadata never implies free work."""
+        self.resets_at = resets_at
+        self.limit_type = limit_type
+        self.provider_session_id = provider_session_id
+        self.no_paid_work = no_paid_work
+        detail = {
+            "resets_at": resets_at,
+            "limit_type": limit_type,
+            "provider_session_id": provider_session_id,
+            "no_paid_work": no_paid_work,
+        }
+        super().__init__("agent_usage_limit " + json.dumps(detail, sort_keys=True))
 
 
 class SessionDisposition(StrEnum):

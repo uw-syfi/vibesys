@@ -37,6 +37,7 @@ from vs_agent.contracts import (
     AgentTurnResult,
     AgentTurnTimeoutError,
     AgentUsage,
+    AgentUsageLimitError,
     MCPServerSpec,
     SessionDisposition,
 )
@@ -561,6 +562,13 @@ class AgentShimSession:
         """Run one turn, translating the library timeout to the driver contract."""
         try:
             return self._session.turn(request)
+        except agentshim.UsageLimitError as error:
+            raise AgentUsageLimitError(
+                resets_at=error.resets_at,
+                limit_type=error.limit_type,
+                provider_session_id=self._session.session_id or error.session_id,
+                no_paid_work=error.no_paid_work,
+            ) from error
         except agentshim.CliTimeoutError as exc:
             raise AgentTurnTimeoutError(exc.timeout) from exc
 
