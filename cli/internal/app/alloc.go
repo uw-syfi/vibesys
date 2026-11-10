@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -43,6 +44,11 @@ type Allocations struct {
 	Log store.AllocLog
 	// Placements are the placements that offer allocations. One that is not here offers none.
 	Placements []AllocPlacement
+	// Former are placements that offer no allocations now and whose backend could still hold ones
+	// this daemon made before its config dropped their allocations section, such as an apptainer
+	// placement's cluster. Their Limits are unused: their allocations end and are released when the
+	// daemon starts, and what their backend holds of this daemon's is released when it is adopted.
+	Former []AllocPlacement
 	// Owner is who this daemon is across restarts (store/filestore DaemonID): it is what the
 	// allocator of the local placements is made with. Empty is allowed for a test.
 	Owner string
@@ -171,6 +177,12 @@ func newAllocShell(a *App, c Allocations) *allocShell {
 			s.backends[p.Name] = p.Allocator
 		}
 	}
+	for _, p := range c.Former {
+		if _, ok := s.cfg.Placements[p.Name]; !ok && p.Allocator != nil {
+			s.backends[p.Name] = p.Allocator
+			s.slurm[p.Name] = p.Slurm
+		}
+	}
 	s.snapshot.Store(&allocSnapshot{})
 	return s
 }
@@ -275,6 +287,12 @@ func (s *allocShell) start(ctx context.Context) error {
 			s.recordWait(w)
 		}
 	}
+	// The config this daemon started with is logged before anything is decided under it, so that a
+	// later start replays what this one decides under these limits, whatever its own are. It ends the
+	// allocations of a placement that no longer offers them.
+	if err := s.startWith(ctx); err != nil {
+		return err
+	}
 	s.publish()
 	// A slot an allocation held before the restart is held again at once, before any job takes it.
 	for _, al := range state.Allocations() {
@@ -295,9 +313,33 @@ func (s *allocShell) start(ctx context.Context) error {
 	return nil
 }
 
+// startWith steps the machine with the daemon's start, logged whatever it changed, and settles at
+// once what no backend can: an allocation that ended on a placement this daemon has no backend for
+// has nothing left that the daemon could release.
+func (s *allocShell) startWith(ctx context.Context) error {
+	now := s.app.now()
+	started := alloc.DaemonStarted{Config: s.cfg}
+	next, actions := alloc.Step(s.state, s.cfg, now, started)
+	err := s.app.retry(ctx, func(ctx context.Context) error {
+		return s.bounded(ctx, func(ctx context.Context) error { return s.conf.Log.Append(ctx, alloc.Input{At: now, Event: started}) })
+	})
+	if err != nil {
+		return fmt.Errorf("writing the allocation log: %w", err)
+	}
+	s.state = next
+	s.perform(ctx, actions)
+	for _, al := range s.state.Allocations() {
+		end, ended := al.Phase.(alloc.Ended)
+		if _, reachable := s.backends[al.Placement]; ended && !end.Released && !reachable {
+			s.apply(ctx, allocMsg{event: alloc.Released{ID: al.ID}})
+		}
+	}
+	return nil
+}
+
 // usesBackend says the placement has an allocator of its own, and not slots.
 func (s *allocShell) usesBackend(placement string) bool {
-	for _, p := range s.conf.Placements {
+	for _, p := range slices.Concat(s.conf.Placements, s.conf.Former) {
 		if p.Name == placement {
 			return p.Allocator != nil
 		}
@@ -357,9 +399,9 @@ func (s *allocShell) tick(ctx context.Context) {
 	s.retry = nil
 	s.apply(ctx, allocMsg{event: alloc.Tick{}})
 	s.observeAll(ctx)
-	for _, p := range s.conf.Placements {
-		if !s.reconciled[p.Name] || s.hasUnknownEnd(p.Name) {
-			s.adopt(ctx, p.Name)
+	for _, name := range slices.Sorted(maps.Keys(s.backends)) {
+		if !s.reconciled[name] || s.hasUnknownEnd(name) {
+			s.adopt(ctx, name)
 		}
 	}
 	s.resendReleases()
@@ -550,7 +592,12 @@ func (s *allocShell) release(ctx context.Context, r alloc.Release) {
 	if !ok {
 		return
 	}
-	b := s.backends[al.Placement]
+	b, reachable := s.backends[al.Placement]
+	if !reachable {
+		// A placement gone from the config with no backend left: nothing this daemon could reach
+		// holds the allocation, and startWith recorded it released.
+		return
+	}
 	s.effect(ctx, "release "+string(r.ID), func(ctx context.Context) {
 		err := s.bounded(ctx, func(ctx context.Context) error { return b.Release(ctx, r.Handle) })
 		switch {

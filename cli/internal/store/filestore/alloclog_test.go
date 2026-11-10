@@ -166,3 +166,22 @@ func TestTheDaemonIdentityIsMadeOnceAndKept(t *testing.T) {
 		t.Fatal("a damaged identity was read")
 	}
 }
+
+// HasAllocLog finds a log only once it holds an input: a directory with none, or an empty log,
+// keeps no allocations, and looking makes nothing.
+func TestHasAllocLogFindsALogWithAnInput(t *testing.T) {
+	mem := fsys.NewMemFS()
+	if has, err := filestore.HasAllocLog(allocDir, filestore.WithFS(mem)); err != nil || has {
+		t.Fatalf("HasAllocLog of nothing = %v, %v", has, err)
+	}
+	l := openAllocLog(t, mem)
+	if has, err := filestore.HasAllocLog(allocDir, filestore.WithFS(mem)); err != nil || has {
+		t.Fatalf("HasAllocLog of an empty log = %v, %v", has, err)
+	}
+	if err := l.Append(t.Context(), someInputs()[0]); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := filestore.HasAllocLog(allocDir, filestore.WithFS(mem)); err != nil || !has {
+		t.Fatalf("HasAllocLog of a log with an input = %v, %v", has, err)
+	}
+}

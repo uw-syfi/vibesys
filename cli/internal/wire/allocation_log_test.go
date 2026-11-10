@@ -37,6 +37,10 @@ func everyInput() []alloc.Input {
 		alloc.Unreachable{ID: "a1", Detail: "ssh: timed out"},
 		alloc.Released{ID: "a1"},
 		alloc.Tick{},
+		alloc.DaemonStarted{Config: alloc.Config{Placements: map[string]alloc.Limits{
+			"p": {MaxHeld: 2, MaxFor: 24 * time.Hour, Margin: 2 * time.Minute, QueueTimeout: time.Hour},
+			"m": {MaxHeld: 1, MaxFor: time.Hour, Margin: time.Minute, Endless: true},
+		}}},
 	}
 	out := make([]alloc.Input, len(events))
 	for i, e := range events {

@@ -96,6 +96,13 @@ type Unreachable struct {
 // Released is the backend confirming that an ended allocation's Release is done.
 type Released struct{ ID ID }
 
+// DaemonStarted is the daemon starting with an operator config: the limits of Config apply from
+// this input on, until the next DaemonStarted. Every decision before it was taken under the limits
+// in force then, and Fold replays it under them, so a change of the config never renumbers, drops
+// or refuses anything that was accepted. An allocation of a placement that Config no longer offers
+// allocations of ends at once, EndExternal, and is released. It is a fact, never refused.
+type DaemonStarted struct{ Config Config }
+
 // Tick is time passing with nothing else happening. The shell sends one now and then, so what is
 // decided by time (renewals) is decided, and a Submit or Release that may not have arrived is asked
 // for again.
@@ -115,3 +122,4 @@ func (Observed) event()      {}
 func (Unreachable) event()   {}
 func (Released) event()      {}
 func (Tick) event()          {}
+func (DaemonStarted) event() {}

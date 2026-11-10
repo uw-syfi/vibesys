@@ -33,6 +33,7 @@ message AllocationInput {
     AllocationUnreachable unreachable = 13;
     AllocationReleased released = 14;
     AllocationTick tick = 15;
+    AllocationDaemonStarted daemon_started = 16;
   }
 }
 
@@ -141,6 +142,24 @@ message AllocationReleased {
 }
 
 message AllocationTick {}
+
+// AllocationDaemonStarted is the daemon starting with its operator config: the limits of each
+// placement that offers standing allocations then. Every input after it, until the next one, is
+// replayed under these limits, so a later change of the config changes nothing that was decided.
+message AllocationDaemonStarted {
+  map<string, AllocationLimits> placements = 1 [(buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+}
+
+// AllocationLimits is what [placements.<name>.allocations] said, as the daemon judged by it.
+message AllocationLimits {
+  int32 max_held = 1 [(buf.validate.field).int32.gte = 0];
+  google.protobuf.Duration max_for = 2 [(buf.validate.field).required = true];
+  google.protobuf.Duration fit_margin = 3 [(buf.validate.field).required = true];
+  // Unset or zero: no queue timeout.
+  google.protobuf.Duration queue_timeout = 4;
+  // The placement's allocations have no end: slots of a machine.
+  bool endless = 5;
+}
 
 // AllocationLogRecord is allocations/<n>.json of the per-user state directory: the nth input of the
 // allocation log, written once.

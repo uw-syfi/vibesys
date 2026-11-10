@@ -2,6 +2,7 @@ package wire
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -52,10 +53,33 @@ func FromAllocationInput(in alloc.Input) (*cliv1.AllocationInput, error) {
 		out.Event = &cliv1.AllocationInput_Released{Released: &cliv1.AllocationReleased{Id: string(e.ID)}}
 	case alloc.Tick:
 		out.Event = &cliv1.AllocationInput_Tick{Tick: &cliv1.AllocationTick{}}
+	case alloc.DaemonStarted:
+		started := &cliv1.AllocationDaemonStarted{Placements: map[string]*cliv1.AllocationLimits{}}
+		for name, l := range e.Config.Placements {
+			started.Placements[name] = fromLimits(l)
+		}
+		out.Event = &cliv1.AllocationInput_DaemonStarted{DaemonStarted: started}
 	default:
 		return nil, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the allocation log has no message for an input of type %T", in.Event)}
 	}
 	return out, nil
+}
+
+func fromLimits(l alloc.Limits) *cliv1.AllocationLimits {
+	out := &cliv1.AllocationLimits{
+		MaxHeld: int32(min(l.MaxHeld, math.MaxInt32)), MaxFor: durationpb.New(l.MaxFor), FitMargin: durationpb.New(l.Margin), Endless: l.Endless,
+	}
+	if l.QueueTimeout > 0 {
+		out.QueueTimeout = durationpb.New(l.QueueTimeout)
+	}
+	return out
+}
+
+func toLimits(l *cliv1.AllocationLimits) alloc.Limits {
+	return alloc.Limits{
+		MaxHeld: int(l.GetMaxHeld()), MaxFor: l.GetMaxFor().AsDuration(), Margin: l.GetFitMargin().AsDuration(),
+		QueueTimeout: l.GetQueueTimeout().AsDuration(), Endless: l.GetEndless(),
+	}
 }
 
 func fromObservation(e alloc.Observed) (*cliv1.AllocationObserved, error) {
@@ -122,6 +146,12 @@ func ToAllocationInput(m *cliv1.AllocationInput) (alloc.Input, error) {
 		in.Event = alloc.Released{ID: alloc.ID(e.Released.GetId())}
 	case *cliv1.AllocationInput_Tick:
 		in.Event = alloc.Tick{}
+	case *cliv1.AllocationInput_DaemonStarted:
+		cfg := alloc.Config{Placements: map[string]alloc.Limits{}}
+		for name, l := range e.DaemonStarted.GetPlacements() {
+			cfg.Placements[name] = toLimits(l)
+		}
+		in.Event = alloc.DaemonStarted{Config: cfg}
 	default:
 		return alloc.Input{}, invalid("input.event: no event")
 	}

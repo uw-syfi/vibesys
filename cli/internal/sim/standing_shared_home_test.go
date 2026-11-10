@@ -1,6 +1,7 @@
 package sim_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -93,5 +94,32 @@ func TestTwoDaemonsOnASharedStateHomeKeepTheirAllocationsApart(t *testing.T) {
 				t.Fatalf("the daemons' identities are %q (%v) and %q (%v), want two", idA, errA, idB, errB)
 			}
 		})
+	}
+}
+
+// An operator who removes the allocations section of an apptainer placement, and restarts the
+// daemon, has the daemon cancel the batch jobs it held there: the records end, external, and the
+// cluster holds none of them, also when no placement offers allocations any more.
+func TestRemovingTheAllocationsSectionCancelsItsBatchJobs(t *testing.T) {
+	r := newStandingRig(t, standingConfig)
+	a, _ := r.start()
+	v, err := a.RequestAllocation(r.ctx(), standingCall.Run, clusterPlacement, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := r.await(a, v.ID, app.AllocUntil{Kind: app.UntilRunning}).Handle.Ref
+	a.Close()
+	r.op = parseConfig(t, strings.Split(standingConfig, "[placements.cluster-a.allocations]")[0])
+	a, _ = r.start()
+	r.settle("the batch job is cancelled", func() bool {
+		_, _, phase, ok := r.cluster.Job(ref)
+		return !ok || phase == apptainer.Ended
+	})
+	got, err := a.Allocation(v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end, ok := got.Phase.(alloc.Ended); !ok || end.Reason != alloc.EndExternal {
+		t.Fatalf("the allocation is %+v, want it ended external", got.Phase)
 	}
 }

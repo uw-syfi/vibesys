@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -453,5 +454,40 @@ func TestASecondAllocationForARecordedIDIsReleased(t *testing.T) {
 	got := mustAllocation(t, a, al.ID)
 	if got.Handle != run.Handle || got.Stage() != alloc.StageRunning || !slices.Contains(r.fake.Live(), run.Handle) {
 		t.Fatalf("after the duplicate's release the allocation is %+v (live %v), want it running on %s", got, r.fake.Live(), run.Handle.Ref)
+	}
+}
+
+// A daemon restarted with a config whose placement lost its allocations section ends that
+// placement's allocations, external, and releases them at the backend, and logs that it did; a
+// later start folds the log to the same ends. Before, the records were replayed under the new
+// config and the backend's allocations were left to run their time limit.
+func TestARemovedAllocationsSectionReleasesItsAllocationsAtStart(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	r.await(t, a, al.ID, app.UntilRunning)
+	a.Close()
+	former := r.w.allocations.Placements[0]
+	r.w.allocations.Placements, r.w.allocations.Former = nil, []app.AllocPlacement{{Name: former.Name, Allocator: r.fake}}
+	a = r.w.newApp()
+	got := r.await(t, a, al.ID, app.UntilEnded)
+	if end := got.Phase.(alloc.Ended); end.Reason != alloc.EndExternal {
+		t.Fatalf("the allocation ended as %s, want external", end.Reason)
+	}
+	// Its release is a step of the daemon's own, bounded against a hang.
+	ctx := ctxFor(t)
+	for len(r.fake.Live()) > 0 {
+		if ctx.Err() != nil {
+			t.Fatalf("the backend still holds %v", r.fake.Live())
+		}
+		r.timers.tick()
+		runtime.Gosched()
+	}
+	if _, err := a.RequestAllocation(ctx, call.Run, former.Name, time.Hour); err == nil {
+		t.Fatal("a placement with no allocations section took a request")
+	}
+	a = r.restart(a)
+	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StageEnded {
+		t.Fatalf("after another restart the allocation is %s, want ended", got.Stage())
 	}
 }

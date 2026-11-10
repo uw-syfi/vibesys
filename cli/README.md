@@ -1017,7 +1017,14 @@ Every command below needs a run (`--run` or `VIBESYS_RUN`) and `--json` gives th
 A refusal is a failure of the existing kinds: a request that cannot be right is `INVALID_INPUT`, one the
 state refuses is `CONFLICT`, an allocation nobody holds is `NOT_FOUND`. The daemon keeps its allocations
 in a log and rebuilds them on restart, adopting what the backend still holds and releasing what no record
-names. This needs protocol 6.
+names. The log and the daemon's identity are its own, under the state home's `vibesys/daemons/<key>`,
+keyed by the machine and the runtime directory as its run records are, so daemons that share a home
+never share them. The log records the limits each start ran under, and replays every decision under
+them, so changing `max_held`, `max_for` or `fit_margin` changes nothing already decided. A daemon
+started without an allocations section that a placement had ends that placement's allocations
+(`EXTERNAL`) and cancels what its cluster still holds of them. Only changes of what an allocation is
+are logged: why a pending one waits and when Slurm expects it to start are shown by `alloc show` and
+kept in memory. This needs protocol 6.
 
 ### Reused allocations
 

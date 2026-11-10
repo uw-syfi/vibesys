@@ -95,11 +95,16 @@ type Input struct {
 }
 
 // Fold runs Step over the inputs from the zero State, and returns the state and every action, in
-// order. The same inputs give the same state and actions, which is how the daemon recovers.
+// order. The same inputs give the same state and actions, which is how the daemon recovers. Each
+// input is stepped under the config of the last DaemonStarted before it, and the inputs before the
+// first one under cfg, so a log that records its configs folds the same whatever cfg is.
 func Fold(cfg Config, inputs []Input) (State, []Action) {
 	var s State
 	var all []Action
 	for _, in := range inputs {
+		if started, ok := in.Event.(DaemonStarted); ok {
+			cfg = started.Config
+		}
 		var actions []Action
 		s, actions = Step(s, cfg, in.At, in.Event)
 		all = append(all, actions...)
@@ -154,6 +159,14 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 		}
 	case Tick:
 		st.retry()
+	case DaemonStarted:
+		st.cfg = e.Config
+		for i := range st.s.allocs {
+			a := &st.s.allocs[i]
+			if _, enabled := e.Config.Placements[a.Placement]; !enabled && a.holds() {
+				st.end(a, EndExternal)
+			}
+		}
 	}
 	if refusal != nil {
 		return s, []Action{Refuse{Event: e, Reason: refusal}}

@@ -65,10 +65,14 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 	var out app.Allocations
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	var owner string
+	var former []string
 	for _, name := range names {
 		pl := op.GetPlacements()[name]
 		a := pl.GetAllocations()
 		if a == nil {
+			if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+				former = append(former, name)
+			}
 			continue
 		}
 		var backend environment.Allocator
@@ -105,7 +109,15 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 		out.Placements = append(out.Placements, app.AllocPlacement{Name: name, Limits: limits, Allocator: backend, Slurm: backend != nil})
 	}
 	if len(out.Placements) == 0 {
-		return app.Allocations{}, nil
+		// A daemon whose config offers no allocations keeps none, unless it kept some before: then
+		// it starts over its log to end and release them.
+		kept, err := filestore.HasAllocLog(daemonDir)
+		if err != nil {
+			return app.Allocations{}, fmt.Errorf("looking for the allocation log: %w", err)
+		}
+		if !kept {
+			return app.Allocations{}, nil
+		}
 	}
 	log, err := filestore.OpenAllocLog(daemonDir)
 	if err != nil {
@@ -114,6 +126,22 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 	out.Log = log
 	if out.Owner, err = filestore.DaemonID(daemonDir, newDaemonID); err != nil {
 		return app.Allocations{}, fmt.Errorf("reading the daemon's identity: %w", err)
+	}
+	// An apptainer placement with no allocations section may hold allocations this daemon made
+	// before the section was removed: it is given an allocator, made with the same owner, that only
+	// finds and releases them.
+	for _, name := range former {
+		side, ok := clusters[name]
+		if !ok {
+			continue
+		}
+		allocator, err := apptainer.NewAllocator(apptainer.AllocatorConfig{
+			Cluster: side.Cluster, Scope: side.Scope, Sizing: side.Sizing, MaxTime: side.MaxTime, Owner: out.Owner,
+		})
+		if err != nil {
+			return app.Allocations{}, fmt.Errorf("placements.%s: %w", name, err)
+		}
+		out.Former = append(out.Former, app.AllocPlacement{Name: name, Allocator: allocator, Slurm: true})
 	}
 	return out, nil
 }

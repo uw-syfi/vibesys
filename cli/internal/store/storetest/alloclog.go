@@ -127,6 +127,10 @@ func allocInputs(n int) []alloc.Input {
 		alloc.Released{ID: "a1"},
 		alloc.RunEnded{Run: "run-a"},
 		alloc.Tick{},
+		alloc.DaemonStarted{Config: alloc.Config{Placements: map[string]alloc.Limits{
+			"p": {MaxHeld: 2, MaxFor: 24 * time.Hour, Margin: 2 * time.Minute, QueueTimeout: time.Hour},
+			"m": {MaxHeld: 1, MaxFor: time.Hour, Margin: time.Minute, Endless: true},
+		}}},
 	}
 	out := make([]alloc.Input, n)
 	for i := range out {
