@@ -49,6 +49,8 @@ vibesys-cli alloc renew <id> --lead 4h --for 6h --until run-end
 
 - Lead: about the p90 of `recent_waits[].waited` plus a margin. With fewer than about five samples,
   use 2x the longest wait seen. Samples with a very different `requested_for` say less.
+- The lead must be shorter than `--for` (the CLI refuses it otherwise). If the wait you expect is
+  longer than an allocation lasts, one allocation cannot cover it: request another one now as well.
 - Read `placement capacity` at every check-in and call `alloc renew` again with the adjusted
   lead; the order is replaced, not stacked. Waits grow when `pending_jobs` grows or `nodes_idle`
   is 0.
@@ -82,7 +84,8 @@ Placement `gpu-a`; recent waits 1h, 3h, 2h, 5h, 2.5h; jobs run about 40 minutes.
    likely wait longer). Submit jobs with `--alloc any`.
 2. Lead: p90 is about 5h, margin 1h, so `alloc renew a1 --lead 6h --for 8h --until run-end`. The
    successor is requested when 6h are left, so it should start about when a1 ends. With only two
-   samples (longest 5h), use 2x, 10h: more than the 8h allocation, so request a second one now.
+   samples (longest 5h), 2x would be 10h, more than the 8h allocation allows as a lead: keep the
+   order at `--lead 6h` and request a second allocation now so one is queued early.
 3. At the next check-in `placement capacity` shows `pending_jobs` doubled and a reservation of the
    partition starting in 7h. a1 ends before then and a successor would wait behind it: lengthen
    the lead (`alloc renew a1 --lead 7h --for 8h --until run-end`) so it is queued first.
