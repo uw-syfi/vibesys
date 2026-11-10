@@ -34,6 +34,10 @@
   "clients/apps/desktop/src/main/ssh-config.ts": {
     "VIBESYS_DESKTOP_SSH_CONFIG": 1
   },
+  "clients/tools/scripts/property_seed.mjs": {
+    "VIBESYS_PROPERTY_PATH": 2,
+    "VIBESYS_PROPERTY_SEED": 3
+  },
   "orchestrator/gatewayroot/gatewayroot.go": {
     "VIBESYS_HOME": 1
   },

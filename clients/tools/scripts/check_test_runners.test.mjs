@@ -64,6 +64,8 @@ test('every runner and its shared policy invalidate cached package tests', () =>
     'tools/scripts/run_node_suite.mjs',
     'tools/scripts/run_vitest.mjs',
     'tools/scripts/test_runner_config.mjs',
+    'tools/scripts/property_seed.mjs',
+    'tools/scripts/property_seed.setup.mjs',
   ];
   assert.deepEqual(testRunnerCacheErrors({globalDependencies: files}), []);
   for (const missing of files) {
@@ -75,4 +77,27 @@ test('every runner and its shared policy invalidate cached package tests', () =>
     assert.match(errors[0], /turbo.json/);
   }
   assert.equal(testRunnerCacheErrors({}).length, files.length);
+});
+
+test('a package that depends on fast-check must test through a seeding runner', () => {
+  const seeded = 'node ../../tools/scripts/run_vitest.mjs ./src';
+  for (const field of ['dependencies', 'devDependencies']) {
+    const manifest = script => ({[field]: {'fast-check': '4.10.2'}, scripts: {test: script}});
+    assert.deepEqual(testRunnerErrors('libs/x/package.json', manifest(seeded)), []);
+    assert.deepEqual(
+      testRunnerErrors(
+        'libs/x/package.json',
+        manifest('node ../../tools/scripts/run_bun_tests.mjs ./src'),
+      ),
+      [],
+    );
+    for (const unseeded of ['node ../../tools/scripts/run_node_tests.mjs tests', 'echo none']) {
+      const errors = testRunnerErrors('libs/x/package.json', manifest(unseeded));
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /libs\/x\/package.json.*fast-check.*VIBESYS_PROPERTY_SEED/);
+    }
+    assert.equal(testRunnerErrors('libs/x/package.json', {[field]: {'fast-check': '4'}}).length, 1);
+    // The workspace root imports fast-check for the seed setup and runs no package tests.
+    assert.deepEqual(testRunnerErrors('package.json', {[field]: {'fast-check': '4'}}), []);
+  }
 });

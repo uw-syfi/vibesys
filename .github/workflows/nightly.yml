@@ -245,3 +245,24 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           if [[ -x "$LATEST_DIR/vibesys-cli" ]]; then "$LATEST_DIR/vibesys-cli" daemon stop || true; fi
+
+  # The fast-check property tests of the TypeScript clients (desktop, ui) with a fresh seed each
+  # night. A pull request runs them with a fixed seed (clients/tools/scripts/property_seed.mjs),
+  # so a counterexample found here is a new input and not a flake. A failure prints fast-check's
+  # `{ seed, path }`; replay it with VIBESYS_PROPERTY_SEED=<seed> VIBESYS_PROPERTY_PATH=<path>.
+  ts-property-seeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
+
+      - name: Run the property tests with a fresh seed
+        working-directory: clients
+        env:
+          VIBESYS_PROPERTY_SEED: random
+        # The packages that depend on fast-check; check_test_runners.mjs holds them to the
+        # seeding runners.
+        run: pnpm --filter ./apps/desktop --filter ./libs/ui run test
