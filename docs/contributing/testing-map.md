@@ -34,7 +34,12 @@ reason in a comment.
 (the Hypothesis `ci` profile, about 10, derandomized), crash and restart sweeps try a
 sample of their points, and every pinned past bug or planted fault is always replayed.
 `--depth=nightly` explores: more examples, every crash point, every restart step, and
-the tests marked `slow`. The nightly workflow runs it. A pull request still runs one
+the tests marked `slow`. The nightly workflow runs it. The fast-check property tests of the
+TypeScript clients follow the same policy: a fixed seed in a pull request, a fresh one
+nightly (`VIBESYS_PROPERTY_SEED=random`). The shared test runners apply it
+(`clients/tools/scripts/property_seed.mjs`); a failure's printed seed replays with
+`VIBESYS_PROPERTY_SEED=<seed>`, plus `VIBESYS_PROPERTY_PATH=<path>` for the shrunk case. A pull
+request still runs one
 case of each `slow` test under `libs/vs-core/tests` (the first
 case not marked `xfail`; the directories are the `sim_smoke_slow` setting), so a
 regression only a slow test catches fails the pull request that causes it. Run it yourself when you change

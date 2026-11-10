@@ -34,6 +34,9 @@ Guidelines:
   few examples, for speed. The nightly tier is randomized and draws more, and
   prints a `@reproduce_failure` line on failure; pin it with `@example(...)`.
   The per-tier counts live in the profile registration, never restated here.
+  The same holds in every language: a property library that seeds itself from
+  the clock (Go `testing/quick`, fast-check) is given a fixed seed in the PR
+  tier and a fresh one nightly, and a failure prints the seed that replays it.
 - A test whose misses are costly (rare branches, expensive-to-find states)
   should pin its own `@settings(max_examples=...)`; the profile count is only a
   default for tests that do not.

@@ -31,7 +31,7 @@ import {mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {PER_TEST_BOUND_MS} from './test_runner_config.mjs';
+import {PER_TEST_BOUND_MS, PROPERTY_SEED_SETUP} from './test_runner_config.mjs';
 
 const RUNNER = 'bun';
 /**
@@ -44,8 +44,10 @@ const BUN_PIN_FILE = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../../packaging/fetch_bun.py',
 );
-const RUNNER_ARGUMENTS = [
+export const RUNNER_ARGUMENTS = [
   'test',
+  '--preload',
+  PROPERTY_SEED_SETUP,
   '--conditions=@vibesys/source',
   '--max-concurrency',
   '1',

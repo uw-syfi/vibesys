@@ -9,6 +9,21 @@ import {workspaceLayout} from './workspace_layout.mjs';
 /** Pure manifest policy, shared by the workspace gate and synthetic manifest tests. */
 export function testRunnerErrors(path, manifest) {
   const errors = [];
+  // The runners that load the fast-check seed setup (`property_seed.setup.mjs`).
+  const seedingRunner = /(?:^|\/)run_(?:bun_tests|vitest)\.mjs(?:\s|$)/;
+  const usesFastCheck = Object.keys({
+    ...manifest.dependencies,
+    ...manifest.devDependencies,
+  }).includes('fast-check');
+  // The workspace root depends on fast-check only because the seed setup imports it; its own
+  // tool tests run through run_node_suite.mjs and pass explicit seeds.
+  const isWorkspaceRoot = path === 'package.json';
+  if (usesFastCheck && !isWorkspaceRoot && !seedingRunner.test(manifest.scripts?.test ?? '')) {
+    errors.push(
+      `test-runner-policy: ${path}: depends on fast-check, so scripts.test must use ` +
+        'run_bun_tests.mjs or run_vitest.mjs, which seed it from VIBESYS_PROPERTY_SEED',
+    );
+  }
   for (const [name, script] of Object.entries(manifest.scripts ?? {})) {
     for (const command of script.split(/&&|\|\||[;|]/)) {
       const words = command.trim().split(/\s+/);
@@ -41,6 +56,8 @@ export function testRunnerCacheErrors(turbo) {
     'tools/scripts/run_node_suite.mjs',
     'tools/scripts/run_vitest.mjs',
     'tools/scripts/test_runner_config.mjs',
+    'tools/scripts/property_seed.mjs',
+    'tools/scripts/property_seed.setup.mjs',
   ]
     .filter(path => !turbo.globalDependencies?.includes(path))
     .map(
