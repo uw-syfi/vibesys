@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -63,6 +65,19 @@ if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.multi.contracts import ImplementerResponse
     from vs_runtime.api import AgentBinding
+
+
+ROUNDS_BEFORE_ENV = "VIBESYS_ROUNDS_BEFORE"
+
+
+def rounds_before() -> int:
+    """Rounds that the seeded workspace already did in earlier runs (0 for a fresh run).
+
+    The first round of this run is numbered after them, so its plans, progress files and
+    measurement rows do not reuse an earlier round's label. ``--max-rounds`` counts them too.
+    """
+    raw = os.environ.get(ROUNDS_BEFORE_ENV, "").strip()
+    return max(int(raw), 0) if raw.isdigit() else 0
 
 
 @dataclass(slots=True)
@@ -224,7 +239,7 @@ class _MultiRun:
         resumed = self.search.resume(aggregate.search, self.options.metric_space)
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
         self.carry = self.search.initial_carry(self.records)
-        self.round_number = len(self.records) + 1
+        self.round_number = len(self.records) + 1 + rounds_before()
         self.files.write_pareto(
             self.search.archive_summary(self.records, space=self.state.search.metrics)
         )
