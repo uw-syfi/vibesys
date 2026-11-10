@@ -2,12 +2,15 @@ package apptainer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 )
@@ -72,11 +75,20 @@ type AllocatorConfig struct {
 	Sizing Sizing
 	// MaxTime is the longest time limit the cluster grants, as Config.MaxTime; zero is no cap.
 	MaxTime time.Duration
+	// Clock tells when a submit got no answer, so that Request does not submit the same allocation
+	// again while the first may still show up in squeue (see Request).
+	Clock clock.Clock
 }
 
 // Allocator is the environment.Allocator of a Slurm cluster whose nodes run Apptainer. Create it
 // with NewAllocator. It is safe for concurrent use.
-type Allocator struct{ cfg AllocatorConfig }
+type Allocator struct {
+	cfg AllocatorConfig
+
+	mu sync.Mutex
+	// unanswered is when the submit of each allocation got no answer: the cluster may have taken it.
+	unanswered map[alloc.ID]time.Time
+}
 
 var _ environment.Allocator = (*Allocator)(nil)
 
@@ -87,19 +99,47 @@ func NewAllocator(cfg AllocatorConfig) (*Allocator, error) {
 		return nil, invalid("the allocator's config has no Cluster")
 	case !ownerPattern.MatchString(cfg.Owner):
 		return nil, invalid("the allocator's owner %q is not 1 to 32 letters and digits", cfg.Owner)
+	case cfg.Clock == nil:
+		return nil, invalid("the allocator's config has no Clock")
 	case cfg.Scope == "" || strings.ContainsAny(cfg.Scope, "\n\x00"):
 		return nil, invalid("the allocator's scope %q is not a scope", cfg.Scope)
 	case cfg.MaxTime < 0 || cfg.MaxTime%time.Minute != 0:
 		return nil, invalid("the longest allocation, %v, is not a whole number of minutes, as Slurm counts a time limit", cfg.MaxTime)
 	}
-	return &Allocator{cfg: cfg}, nil
+	return &Allocator{cfg: cfg, unanswered: map[alloc.ID]time.Time{}}, nil
+}
+
+// own is the context of a call to the cluster: it ends when the caller's is cancelled, but not when
+// the caller's deadline passes. The cluster bounds each of its calls itself (CallTimeout, and the
+// bound of a call that did not answer), which is the budget a call needs: a caller that cuts it
+// shorter, as the daemon's per-call deadline does, would cut an sbatch off after the job was
+// taken, and leave the job to be found later.
+func own(ctx context.Context) (context.Context, func()) {
+	detached, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	cancelled := func() bool { return ctx.Err() != nil && !errors.Is(context.Cause(ctx), context.DeadlineExceeded) }
+	if cancelled() {
+		cancel()
+	}
+	stop := context.AfterFunc(ctx, func() {
+		if cancelled() {
+			cancel()
+		}
+	})
+	return detached, func() { stop(); cancel() }
 }
 
 // Request implements environment.Allocator: it submits the allocation unless the cluster has a live
 // one of the spec's ID for its run, which it returns instead. The time limit is spec.For rounded
 // down to whole minutes, so the allocation never outlives what was asked for; one shorter than a
 // minute is refused.
+//
+// A submit that got no answer may have been taken: the job then shows in squeue a little later, up to
+// the cluster's call budget after the call was cut off. Until that budget has passed, a Request of
+// the same ID that finds no job fails as unavailable, which the caller tries again, and never
+// submits a second job of the name.
 func (a *Allocator) Request(ctx context.Context, s alloc.Spec) (alloc.Handle, error) {
+	ctx, done := own(ctx)
+	defer done()
 	limit := s.For - s.For%time.Minute
 	switch {
 	case !s.ID.Valid():
@@ -118,16 +158,39 @@ func (a *Allocator) Request(ctx context.Context, s alloc.Spec) (alloc.Handle, er
 	}
 	for _, j := range jobs {
 		if j.Name == StandingName(a.cfg.Owner, s.ID) && j.Comment == comment && j.Phase != Ended {
+			a.settle(s.ID)
 			return alloc.Handle{Alloc: s.ID, Ref: j.ID}, nil
 		}
+	}
+	if since, ok := a.unansweredSince(s.ID); ok && a.cfg.Clock.Now().Sub(since) < CallTimeout {
+		return alloc.Handle{}, unavailable("the submit of the allocation %s got no answer and its job is not listed yet; looking again before submitting another", s.ID)
 	}
 	job, err := a.cfg.Cluster.Submit(ctx, Allocation{
 		Name: StandingName(a.cfg.Owner, s.ID), Comment: comment, Limit: limit, Options: a.cfg.Sizing.Options(true),
 	})
 	if err != nil {
+		if f := (*core.Failure)(nil); errors.As(err, &f) && f.Kind == core.FailureUnavailable {
+			a.mu.Lock()
+			a.unanswered[s.ID] = a.cfg.Clock.Now()
+			a.mu.Unlock()
+		}
 		return alloc.Handle{}, err
 	}
+	a.settle(s.ID)
 	return alloc.Handle{Alloc: s.ID, Ref: job}, nil
+}
+
+func (a *Allocator) settle(id alloc.ID) {
+	a.mu.Lock()
+	delete(a.unanswered, id)
+	a.mu.Unlock()
+}
+
+func (a *Allocator) unansweredSince(id alloc.ID) (time.Time, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, ok := a.unanswered[id]
+	return t, ok
 }
 
 // Observe implements environment.Allocator. A cluster that cannot be reached is an error of kind
@@ -140,6 +203,8 @@ func (a *Allocator) Observe(ctx context.Context, h alloc.Handle) (alloc.Observat
 	if err := checkHandle(h); err != nil {
 		return nil, err
 	}
+	ctx, done := own(ctx)
+	defer done()
 	d, err := a.cfg.Cluster.Detail(ctx, h.Ref)
 	if err != nil {
 		return nil, err
@@ -168,6 +233,8 @@ func (a *Allocator) Release(ctx context.Context, h alloc.Handle) error {
 	if err := checkHandle(h); err != nil {
 		return err
 	}
+	ctx, done := own(ctx)
+	defer done()
 	if err := a.cfg.Cluster.CancelJob(ctx, h.Ref); err != nil {
 		return fmt.Errorf("releasing the allocation %s (job %s): %w", h.Alloc, h.Ref, err)
 	}
@@ -178,6 +245,8 @@ func (a *Allocator) Release(ctx context.Context, h alloc.Handle) error {
 // scope and owner, found by their name; another owner's are never returned. A per-container allocation, a reusable one and any other job of the
 // user's are not standing allocations.
 func (a *Allocator) Adopt(ctx context.Context) ([]alloc.Handle, error) {
+	ctx, done := own(ctx)
+	defer done()
 	jobs, err := a.cfg.Cluster.Jobs(ctx, a.cfg.Scope)
 	if err != nil {
 		return nil, err

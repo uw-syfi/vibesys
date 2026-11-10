@@ -64,6 +64,8 @@ type Cluster struct {
 	linger    bool          // a dead claim leaves its containers' processes running
 	maxTime   time.Duration // the longest time limit a job may ask for, as a site's QOS caps it; zero is none
 	partition apptainer.PartitionFacts
+	lose      int // how many later submits take the job but lose the reply
+	unseen    int // how many listings of Jobs each of those jobs is left out of
 }
 
 // job is a batch allocation.
@@ -81,6 +83,7 @@ type job struct {
 	idleSince         time.Duration // when its last claim was released, or it started
 	claim             *claim        // the live claim of a reusable allocation
 	suspendedAt       time.Duration // when it was suspended, while it is
+	unseen            int           // how many listings by Jobs still leave it out, as a job squeue shows late
 }
 
 // box is a container's processes on the job's node.
@@ -459,7 +462,21 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	}
 	c.jobs[id] = j
 	c.submitted = append(c.submitted, a)
+	if c.lose > 0 {
+		c.lose--
+		j.unseen = c.unseen
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: the reply of sbatch was lost, though the job was taken"}
+	}
 	return id, nil
+}
+
+// LoseSubmitReplies makes the next n submits take their job and fail as unavailable, as an sbatch
+// whose reply was cut off does, and leaves each such job out of the next `unseen` listings of Jobs,
+// as a job squeue shows only a little later.
+func (c *Cluster) LoseSubmitReplies(n, unseen int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lose, c.unseen = n, unseen
 }
 
 // Suspend suspends a running job as `scontrol suspend` does: it lives, holds its node, runs
@@ -529,6 +546,10 @@ func (cl *Client) Jobs(ctx context.Context, scope string) ([]apptainer.Job, erro
 	defer c.mu.Unlock()
 	var out []apptainer.Job
 	for _, j := range c.jobs {
+		if j.unseen > 0 {
+			j.unseen--
+			continue
+		}
 		if _, ok := apptainer.InScope(j.comment, scope); ok && j.phase != apptainer.Ended {
 			job := apptainer.Job{ID: j.id, Name: j.name, Comment: j.comment, Phase: j.phase}
 			if j.phase == apptainer.Running {

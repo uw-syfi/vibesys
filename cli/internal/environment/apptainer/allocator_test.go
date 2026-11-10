@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/allocatortest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
@@ -29,7 +30,7 @@ func newAllocator(t testing.TB, cl apptainer.Cluster) *apptainer.Allocator {
 
 func newOwned(t testing.TB, cl apptainer.Cluster, owner string) *apptainer.Allocator {
 	t.Helper()
-	a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cl, Owner: owner, Scope: scope, Sizing: standingSizing, MaxTime: 48 * time.Hour})
+	a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cl, Owner: owner, Scope: scope, Sizing: standingSizing, MaxTime: 48 * time.Hour, Clock: clock.NewManual(clusterfake.Epoch, time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func contractWorld(queued int) func(allocatortest.TB) allocatortest.World {
 		cluster := clusterfake.New(w.MemoryGates)
 		cluster.Queue(queued, false)
 		client := cluster.Connect()
-		a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: client, Owner: "daemon1", Scope: scope, Sizing: standingSizing})
+		a, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: client, Owner: "daemon1", Scope: scope, Sizing: standingSizing, Clock: clock.NewManual(clusterfake.Epoch, time.Second)})
 		if err != nil {
 			panic(err)
 		}
@@ -646,7 +647,7 @@ func TestDaemonsOfOneScopeNeverTakeEachOthersAllocations(t *testing.T) {
 		t.Errorf("b's allocation is %+v, %v", o, err)
 	}
 	for _, owner := range []string{"", "a-b", "a b", strings.Repeat("x", 33)} {
-		if _, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cluster.Connect(), Owner: owner, Scope: scope}); err == nil {
+		if _, err := apptainer.NewAllocator(apptainer.AllocatorConfig{Cluster: cluster.Connect(), Owner: owner, Scope: scope, Clock: clock.NewManual(clusterfake.Epoch, time.Second)}); err == nil {
 			t.Errorf("owner %q was accepted", owner)
 		}
 	}

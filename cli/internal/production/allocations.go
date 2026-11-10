@@ -94,7 +94,7 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 				return app.Allocations{}, fmt.Errorf("placements.%s is an apptainer placement the daemon made no cluster for", name)
 			}
 			allocator, err := apptainer.NewAllocator(apptainer.AllocatorConfig{
-				Cluster: side.Cluster, Scope: side.Scope, Sizing: side.Sizing, MaxTime: side.MaxTime, Owner: owner,
+				Cluster: side.Cluster, Scope: side.Scope, Sizing: side.Sizing, MaxTime: side.MaxTime, Owner: owner, Clock: side.Clock,
 			})
 			if err != nil {
 				return app.Allocations{}, fmt.Errorf("the operator config: %s: %w", alloc.ConfigKey(name), err)
