@@ -1,6 +1,7 @@
 package alloc
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"time"
@@ -14,6 +15,16 @@ type State struct {
 	allocs    []Allocation // In the order they were made, which is the order of their numbers.
 	last      uint64       // The number of the newest allocation.
 	endedRuns []core.RunID // Sorted.
+	// seen is when each run that asked for an allocation, and has not ended, was last seen, to
+	// SeenGranularity.
+	seen map[core.RunID]time.Time
+}
+
+// LastSeen is when the run was last seen, to SeenGranularity, and false for a run that asked for no
+// allocation or has ended.
+func (s State) LastSeen(run core.RunID) (time.Time, bool) {
+	at, ok := s.seen[run]
+	return at, ok
 }
 
 // Allocations returns a copy of every allocation, oldest first.
@@ -53,7 +64,8 @@ func (s State) RunEnded(run core.RunID) bool {
 // Equal says whether two states hold the same allocations, numbering and ended runs. The shell asks
 // it of the state before a step and after, to keep only the inputs that changed something.
 func (s State) Equal(o State) bool {
-	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && reflect.DeepEqual(s.Allocations(), o.Allocations())
+	return s.last == o.last && slices.Equal(s.endedRuns, o.endedRuns) && maps.EqualFunc(s.seen, o.seen, time.Time.Equal) &&
+		reflect.DeepEqual(s.Allocations(), o.Allocations())
 }
 
 // Durable says whether a step from before to after changed what the log keeps: anything but the
@@ -81,7 +93,7 @@ func (s State) index(id ID) int {
 }
 
 func (s State) clone() State {
-	out := State{allocs: make([]Allocation, len(s.allocs)), last: s.last, endedRuns: slices.Clone(s.endedRuns)}
+	out := State{allocs: make([]Allocation, len(s.allocs)), last: s.last, endedRuns: slices.Clone(s.endedRuns), seen: maps.Clone(s.seen)}
 	for i, a := range s.allocs {
 		out.allocs[i] = a.clone()
 	}
@@ -134,6 +146,10 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 		refusal = st.submitted(e)
 	case RunEnded:
 		st.runEnded(e.Run)
+	case RunSeen:
+		if last, ok := st.s.seen[e.Run]; ok && st.now.Sub(last) >= SeenGranularity {
+			st.s.seen[e.Run] = st.now
+		}
 	case JobStarted:
 		st.jobStarted(e.Job)
 	case JobFinished:
@@ -161,6 +177,9 @@ func Step(s State, cfg Config, now time.Time, e Event) (State, []Action) {
 		st.retry()
 	case DaemonStarted:
 		st.cfg = e.Config
+		for run := range st.s.seen {
+			st.s.seen[run] = now
+		}
 		for i := range st.s.allocs {
 			a := &st.s.allocs[i]
 			if _, enabled := e.Config.Placements[a.Placement]; !enabled && a.holds() {
@@ -230,7 +249,26 @@ func (st *stepper) ask(e Ask) Refusal {
 		return MaxHeldReached{Placement: e.Placement, Held: held, MaxHeld: lim.MaxHeld}
 	}
 	st.add(e.Run, e.Placement, e.For, nil)
+	if st.s.seen == nil {
+		st.s.seen = map[core.RunID]time.Time{}
+	}
+	st.s.seen[e.Run] = st.now
 	return nil
+}
+
+// endIdleRuns ends every run that holds allocations and was not seen for the RunIdleEnd of one of
+// their placements.
+func (st *stepper) endIdleRuns() {
+	for _, run := range slices.Sorted(maps.Keys(st.s.seen)) {
+		last := st.s.seen[run]
+		idle := slices.ContainsFunc(st.s.allocs, func(a Allocation) bool {
+			end := st.cfg.Placements[a.Placement].RunIdleEnd
+			return a.Run == run && a.holds() && end > 0 && st.now.Sub(last) >= end
+		})
+		if idle {
+			st.runEnded(run)
+		}
+	}
 }
 
 // add adds a new Pending allocation and asks the backend for it.
@@ -322,6 +360,7 @@ func (st *stepper) renewOff(e RenewOffAsk) Refusal {
 }
 
 func (st *stepper) runEnded(run core.RunID) {
+	delete(st.s.seen, run)
 	if !st.s.RunEnded(run) {
 		i, _ := slices.BinarySearch(st.s.endedRuns, run)
 		st.s.endedRuns = slices.Insert(st.s.endedRuns, i, run)
@@ -619,8 +658,10 @@ func (st *stepper) retry() {
 	}
 }
 
-// settle applies, at now, what follows from the state whatever the event was.
+// settle applies, at now, what follows from the state whatever the event was. A run silent for its
+// idle end is ended first, so that no step after that moment renews for it.
 func (st *stepper) settle() {
+	st.endIdleRuns()
 	for i := range st.s.allocs {
 		st.advance(&st.s.allocs[i])
 	}

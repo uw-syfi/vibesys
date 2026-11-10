@@ -79,6 +79,15 @@ func RefusalFailure(r alloc.Refusal) *core.Failure {
 	return &core.Failure{Kind: kind, Message: r.Message()}
 }
 
+// RunSeen says the run made a call, so its allocations are not ended for its silence
+// (alloc.Limits.RunIdleEnd). Every call that names a run says so; one that names none says
+// nothing. It never blocks.
+func (a *App) RunSeen(run core.RunID) {
+	if a.alloc != nil && run != "" {
+		a.alloc.post(allocMsg{event: alloc.RunSeen{Run: run}})
+	}
+}
+
 // ask gives the machine a request and returns the allocation it concerns.
 func (s *allocShell) ask(ctx context.Context, e alloc.Event) (allocReply, error) {
 	r, err := s.call(ctx, e)
@@ -97,6 +106,7 @@ func (s *allocShell) view(al alloc.Allocation) AllocationView {
 
 // RequestAllocation asks for a standing allocation of a placement for a run.
 func (a *App) RequestAllocation(ctx context.Context, run core.RunID, placement string, d time.Duration) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err
@@ -111,6 +121,7 @@ func (a *App) RequestAllocation(ctx context.Context, run core.RunID, placement s
 // Allocations lists the allocations of a run, or of every run when run is empty, oldest first. The
 // ones that ended are listed only when ended is set.
 func (a *App) Allocations(run core.RunID, ended bool) ([]AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return nil, err
@@ -213,6 +224,7 @@ func (a *App) waitOnce(ctx context.Context, wake, deadline <-chan struct{}, at, 
 
 // EndAllocation ends an allocation of the run, at once or when its jobs are done.
 func (a *App) EndAllocation(ctx context.Context, run core.RunID, id alloc.ID, afterJobs bool) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err
@@ -227,6 +239,7 @@ func (a *App) EndAllocation(ctx context.Context, run core.RunID, id alloc.ID, af
 // RenewAllocation gives an allocation of the run a renewal order, or takes its order away when
 // order is nil.
 func (a *App) RenewAllocation(ctx context.Context, run core.RunID, id alloc.ID, order *alloc.RenewalOrder) (AllocationView, error) {
+	a.RunSeen(run)
 	s, err := a.allocations()
 	if err != nil {
 		return AllocationView{}, err

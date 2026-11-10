@@ -34,6 +34,7 @@ message AllocationInput {
     AllocationReleased released = 14;
     AllocationTick tick = 15;
     AllocationDaemonStarted daemon_started = 16;
+    AllocationRunSeen run_seen = 17;
   }
 }
 
@@ -58,6 +59,11 @@ message AllocationRenewAsked {
 message AllocationRenewOffAsked {
   string run = 1 [(buf.validate.field).string.min_len = 1];
   string id = 2 [(buf.validate.field).string.pattern = "^a[1-9][0-9]{0,17}$"];
+}
+
+// AllocationRunSeen is a call of the run's, which says it is alive.
+message AllocationRunSeen {
+  string run = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message AllocationRunEnded {
@@ -159,6 +165,9 @@ message AllocationLimits {
   google.protobuf.Duration queue_timeout = 4;
   // The placement's allocations have no end: slots of a machine.
   bool endless = 5;
+  // How long a run holding allocations may go unseen before it is taken to have ended. Unset or
+  // zero: never.
+  google.protobuf.Duration run_idle_end = 6;
 }
 
 // AllocationLogRecord is allocations/<n>.json of the per-user state directory: the nth input of the

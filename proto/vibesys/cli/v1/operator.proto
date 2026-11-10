@@ -103,6 +103,10 @@ message AllocationSettings {
   // The time a job's fit keeps free before its allocation ends: a job fits when the work ahead of
   // it and its own bound are at most the time left less this. Unset means 2m.
   google.protobuf.Duration fit_margin = 3 [(buf.validate.field).duration.gte = {}];
+  // How long a run that holds allocations of the placement may make no call (no command with its
+  // --run) before the daemon takes it to have ended, as alloc end-run does: its allocations end and
+  // no renewal order of it asks for more. At least a minute. Unset means 2h.
+  google.protobuf.Duration run_idle_end = 4 [(buf.validate.field).duration.gte = {seconds: 60}];
 }
 
 // RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node

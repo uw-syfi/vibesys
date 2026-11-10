@@ -41,6 +41,12 @@ type RenewOffAsk struct {
 	ID  ID
 }
 
+// RunSeen is a call of the run's: it is alive now. A run that holds allocations and is not seen for
+// a placement's RunIdleEnd is ended by the first step from then on, a Tick if nothing else, as
+// RunEnded ends it. It is a fact, never refused, and changes nothing for a run that holds no
+// allocation or was seen within SeenGranularity.
+type RunSeen struct{ Run core.RunID }
+
 // RunEnded is the end of a run: each of its allocations that has not ended ends at once, and the
 // run asks for nothing more.
 type RunEnded struct{ Run core.RunID }
@@ -113,6 +119,7 @@ func (EndAsk) event()        {}
 func (RenewAsk) event()      {}
 func (RenewOffAsk) event()   {}
 func (RunEnded) event()      {}
+func (RunSeen) event()       {}
 func (JobSubmitted) event()  {}
 func (JobStarted) event()    {}
 func (JobFinished) event()   {}

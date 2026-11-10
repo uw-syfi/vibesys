@@ -25,6 +25,10 @@ import (
 // does not say (placements.<name>.allocations.fit_margin).
 const defaultFitMargin = 2 * time.Minute
 
+// defaultRunIdleEnd is how long a run holding allocations may make no call before it is taken to
+// have ended, when the config does not say (placements.<name>.allocations.run_idle_end).
+const defaultRunIdleEnd = 2 * time.Hour
+
 // newDaemonID makes the identity of a daemon: random, so that two users' daemons, or a daemon after
 // its state directory was cleared, are never taken for one another.
 func newDaemonID() string {
@@ -105,7 +109,11 @@ func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[stri
 		if a.GetFitMargin() != nil {
 			margin = a.GetFitMargin().AsDuration()
 		}
-		limits := alloc.Limits{MaxHeld: int(a.GetMaxHeld()), MaxFor: a.GetMaxFor().AsDuration(), Margin: margin, Endless: backend == nil}
+		idleEnd := defaultRunIdleEnd
+		if a.GetRunIdleEnd() != nil {
+			idleEnd = a.GetRunIdleEnd().AsDuration()
+		}
+		limits := alloc.Limits{MaxHeld: int(a.GetMaxHeld()), MaxFor: a.GetMaxFor().AsDuration(), Margin: margin, Endless: backend == nil, RunIdleEnd: idleEnd}
 		out.Placements = append(out.Placements, app.AllocPlacement{Name: name, Limits: limits, Allocator: backend, Slurm: backend != nil})
 	}
 	if len(out.Placements) == 0 {

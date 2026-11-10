@@ -268,7 +268,16 @@ type Limits struct {
 	// Endless says the placement's allocations have no end, such as a slot of this machine: they
 	// never get an EndsAt, every job fits, and a renewal order is refused.
 	Endless bool
+	// RunIdleEnd, when positive, is how long a run that holds allocations of the placement may go
+	// unseen (RunSeen) before it is taken to have ended, as if it had said so (RunEnded): a run
+	// whose agent died ends its allocations and renews none. Zero never ends a run for silence.
+	RunIdleEnd time.Duration
 }
+
+// SeenGranularity is how finely a run's last sighting is kept: a RunSeen within this of the last
+// one changes nothing, so that a run calling every few seconds adds a log record a minute at most.
+// A run is taken to have ended up to this much before RunIdleEnd after its very last call.
+const SeenGranularity = time.Minute
 
 // Config is the limits of every placement that offers standing allocations, by name. A placement
 // that is not here offers none.

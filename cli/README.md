@@ -833,6 +833,7 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (`gres`, and `exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (`[slurm] max_time_seconds` by default, or a day without it; at most the partition's, and at most `max_time_seconds`). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
 | `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
 | `[placements.<name>.allocations] max_held`, `max_for` | Optional: lets a run hold standing allocations of the placement, at most `max_held` at once (1 to 64, pending and running, renewals included), each asked for at most `max_for`, a duration such as `"24h"` (for `apptainer`, at most `[slurm] max_time_seconds`). Unset, the placement offers none. See "Standing allocations". |
+| `[placements.<name>.allocations] fit_margin`, `run_idle_end` | Optional: the time a job's fit keeps free before its allocation ends (`"2m"` by default), and how long a run holding allocations of the placement may make no call before it is taken to have ended, as `alloc end-run` ends it (`"2h"` by default, at least `"1m"`). |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -997,7 +998,16 @@ the placement. To turn them on for an apptainer placement, add to it:
 max_held = 2        # at most two allocations at once, pending and running
 max_for = "24h"     # each asked for at most this; at most [slurm] max_time_seconds
 fit_margin = "2m"   # a job fits only when this much time is left after its bound
+run_idle_end = "2h" # a run that makes no call this long is taken to have ended
 ```
+
+A run is alive while it calls: every command that carries its `--run` (or `VIBESYS_RUN`) counts as
+a sighting, kept to the minute. A run that holds allocations and makes no call for the
+placement's `run_idle_end` is taken to have ended, as if it had run `alloc end-run`: its
+allocations end (`REQUESTED`) and a renewal order `--until run-end` asks for no more. So an agent
+that dies without ending its run holds its allocations for at most `run_idle_end` after its last
+call, and the backend's time limit bounds them in any case. A daemon start counts as a sighting
+of every run, since no run can be heard while the daemon is down.
 
 Every command below needs a run (`--run` or `VIBESYS_RUN`) and `--json` gives the typed message, except
 `placement capacity`, which names no run unless it is to list the run's held allocations.
@@ -1009,7 +1019,7 @@ Every command below needs a run (`--run` or `VIBESYS_RUN`) and `--json` gives th
 | `alloc show <id>` | One allocation: placement, phase, start and end, renewal order, jobs. |
 | `alloc wait <id> --until running\|ended --timeout <dur>`, `alloc wait <id> --until ending-in <dur>` | Return when the allocation is in the state; bounded by `--timeout`. Exit `0` met, `1` ended first, `3` timed out. |
 | `alloc end <id> [--after-jobs]` | End now, or once its jobs are done. |
-| `alloc renew <id> --lead <dur> --for <dur> [--until <RFC3339>\|run-end]`, `alloc renew <id> --off` | Ask for a successor once the time left is at most `--lead`; `--off` takes the order away. |
+| `alloc renew <id> --lead <dur> --for <dur> [--until <RFC3339>\|run-end]`, `alloc renew <id> --off` | Ask for a successor once the time left is at most `--lead`; `--off` takes the order away. `run-end` stops at `alloc end-run`, or once the run has made no call for `run_idle_end`. |
 | `alloc end-run` | End every allocation of the run and ask for no more. |
 | `placement capacity <placement> [--run <id>]` | What the daemon measured of a placement: slots free and in all, for a cluster its nodes, waiting jobs and the reservations the account may use, the run's held allocations, and how long recent allocations waited. Facts only, no prediction. For a cluster, a node Slurm counts idle that it shows as reserved is free only when a reservation under way that holds it is one the account may use. |
 | `submit ... --alloc <id>\|any` | Run the job inside that allocation. A named one that cannot fit the job's bound is refused (`CONFLICT`) with both durations; `any` falls back to the placement's own capacity when nothing fits, and the job's notes and the head of its output say why (`allocation any: ...; queued without one`). A job's bound is what it is held to: a command's own timeout, and for a check, a measure or a profile the limits of its task's commands and servers added up, so a task of minutes fits an allocation of minutes. With no flag a job runs as before. |

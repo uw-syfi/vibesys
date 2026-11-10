@@ -95,6 +95,7 @@ type AllocationInput struct {
 	//	*AllocationInput_Released
 	//	*AllocationInput_Tick
 	//	*AllocationInput_DaemonStarted
+	//	*AllocationInput_RunSeen
 	Event         isAllocationInput_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -279,6 +280,15 @@ func (x *AllocationInput) GetDaemonStarted() *AllocationDaemonStarted {
 	return nil
 }
 
+func (x *AllocationInput) GetRunSeen() *AllocationRunSeen {
+	if x != nil {
+		if x, ok := x.Event.(*AllocationInput_RunSeen); ok {
+			return x.RunSeen
+		}
+	}
+	return nil
+}
+
 type isAllocationInput_Event interface {
 	isAllocationInput_Event()
 }
@@ -343,6 +353,10 @@ type AllocationInput_DaemonStarted struct {
 	DaemonStarted *AllocationDaemonStarted `protobuf:"bytes,16,opt,name=daemon_started,json=daemonStarted,proto3,oneof"`
 }
 
+type AllocationInput_RunSeen struct {
+	RunSeen *AllocationRunSeen `protobuf:"bytes,17,opt,name=run_seen,json=runSeen,proto3,oneof"`
+}
+
 func (*AllocationInput_Ask) isAllocationInput_Event() {}
 
 func (*AllocationInput_EndAsk) isAllocationInput_Event() {}
@@ -372,6 +386,8 @@ func (*AllocationInput_Released) isAllocationInput_Event() {}
 func (*AllocationInput_Tick) isAllocationInput_Event() {}
 
 func (*AllocationInput_DaemonStarted) isAllocationInput_Event() {}
+
+func (*AllocationInput_RunSeen) isAllocationInput_Event() {}
 
 type AllocationAsked struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -605,6 +621,51 @@ func (x *AllocationRenewOffAsked) GetId() string {
 	return ""
 }
 
+// AllocationRunSeen is a call of the run's, which says it is alive.
+type AllocationRunSeen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Run           string                 `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AllocationRunSeen) Reset() {
+	*x = AllocationRunSeen{}
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AllocationRunSeen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AllocationRunSeen) ProtoMessage() {}
+
+func (x *AllocationRunSeen) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AllocationRunSeen.ProtoReflect.Descriptor instead.
+func (*AllocationRunSeen) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AllocationRunSeen) GetRun() string {
+	if x != nil {
+		return x.Run
+	}
+	return ""
+}
+
 type AllocationRunEnded struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Run           string                 `protobuf:"bytes,1,opt,name=run,proto3" json:"run,omitempty"`
@@ -614,7 +675,7 @@ type AllocationRunEnded struct {
 
 func (x *AllocationRunEnded) Reset() {
 	*x = AllocationRunEnded{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +687,7 @@ func (x *AllocationRunEnded) String() string {
 func (*AllocationRunEnded) ProtoMessage() {}
 
 func (x *AllocationRunEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +700,7 @@ func (x *AllocationRunEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationRunEnded.ProtoReflect.Descriptor instead.
 func (*AllocationRunEnded) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AllocationRunEnded) GetRun() string {
@@ -663,7 +724,7 @@ type AllocationJobSubmitted struct {
 
 func (x *AllocationJobSubmitted) Reset() {
 	*x = AllocationJobSubmitted{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -675,7 +736,7 @@ func (x *AllocationJobSubmitted) String() string {
 func (*AllocationJobSubmitted) ProtoMessage() {}
 
 func (x *AllocationJobSubmitted) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -688,7 +749,7 @@ func (x *AllocationJobSubmitted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationJobSubmitted.ProtoReflect.Descriptor instead.
 func (*AllocationJobSubmitted) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AllocationJobSubmitted) GetRun() string {
@@ -735,7 +796,7 @@ type AllocationJobStarted struct {
 
 func (x *AllocationJobStarted) Reset() {
 	*x = AllocationJobStarted{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -747,7 +808,7 @@ func (x *AllocationJobStarted) String() string {
 func (*AllocationJobStarted) ProtoMessage() {}
 
 func (x *AllocationJobStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -760,7 +821,7 @@ func (x *AllocationJobStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationJobStarted.ProtoReflect.Descriptor instead.
 func (*AllocationJobStarted) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AllocationJobStarted) GetJob() string {
@@ -779,7 +840,7 @@ type AllocationJobFinished struct {
 
 func (x *AllocationJobFinished) Reset() {
 	*x = AllocationJobFinished{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -791,7 +852,7 @@ func (x *AllocationJobFinished) String() string {
 func (*AllocationJobFinished) ProtoMessage() {}
 
 func (x *AllocationJobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -804,7 +865,7 @@ func (x *AllocationJobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationJobFinished.ProtoReflect.Descriptor instead.
 func (*AllocationJobFinished) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AllocationJobFinished) GetJob() string {
@@ -826,7 +887,7 @@ type AllocationBackendTook struct {
 
 func (x *AllocationBackendTook) Reset() {
 	*x = AllocationBackendTook{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +899,7 @@ func (x *AllocationBackendTook) String() string {
 func (*AllocationBackendTook) ProtoMessage() {}
 
 func (x *AllocationBackendTook) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +912,7 @@ func (x *AllocationBackendTook) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationBackendTook.ProtoReflect.Descriptor instead.
 func (*AllocationBackendTook) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AllocationBackendTook) GetId() string {
@@ -878,7 +939,7 @@ type AllocationBackendRefused struct {
 
 func (x *AllocationBackendRefused) Reset() {
 	*x = AllocationBackendRefused{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -890,7 +951,7 @@ func (x *AllocationBackendRefused) String() string {
 func (*AllocationBackendRefused) ProtoMessage() {}
 
 func (x *AllocationBackendRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -903,7 +964,7 @@ func (x *AllocationBackendRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationBackendRefused.ProtoReflect.Descriptor instead.
 func (*AllocationBackendRefused) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AllocationBackendRefused) GetId() string {
@@ -936,7 +997,7 @@ type AllocationObserved struct {
 
 func (x *AllocationObserved) Reset() {
 	*x = AllocationObserved{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -948,7 +1009,7 @@ func (x *AllocationObserved) String() string {
 func (*AllocationObserved) ProtoMessage() {}
 
 func (x *AllocationObserved) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -961,7 +1022,7 @@ func (x *AllocationObserved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationObserved.ProtoReflect.Descriptor instead.
 func (*AllocationObserved) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AllocationObserved) GetId() string {
@@ -1038,7 +1099,7 @@ type SeenPending struct {
 
 func (x *SeenPending) Reset() {
 	*x = SeenPending{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1050,7 +1111,7 @@ func (x *SeenPending) String() string {
 func (*SeenPending) ProtoMessage() {}
 
 func (x *SeenPending) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1063,7 +1124,7 @@ func (x *SeenPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeenPending.ProtoReflect.Descriptor instead.
 func (*SeenPending) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SeenPending) GetReason() string {
@@ -1092,7 +1153,7 @@ type SeenRunning struct {
 
 func (x *SeenRunning) Reset() {
 	*x = SeenRunning{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1165,7 @@ func (x *SeenRunning) String() string {
 func (*SeenRunning) ProtoMessage() {}
 
 func (x *SeenRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1178,7 @@ func (x *SeenRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeenRunning.ProtoReflect.Descriptor instead.
 func (*SeenRunning) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SeenRunning) GetNode() string {
@@ -1151,7 +1212,7 @@ type SeenEnded struct {
 
 func (x *SeenEnded) Reset() {
 	*x = SeenEnded{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1163,7 +1224,7 @@ func (x *SeenEnded) String() string {
 func (*SeenEnded) ProtoMessage() {}
 
 func (x *SeenEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1176,7 +1237,7 @@ func (x *SeenEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeenEnded.ProtoReflect.Descriptor instead.
 func (*SeenEnded) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SeenEnded) GetCause() SeenEndedCause {
@@ -1203,7 +1264,7 @@ type AllocationUnreachable struct {
 
 func (x *AllocationUnreachable) Reset() {
 	*x = AllocationUnreachable{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1215,7 +1276,7 @@ func (x *AllocationUnreachable) String() string {
 func (*AllocationUnreachable) ProtoMessage() {}
 
 func (x *AllocationUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1228,7 +1289,7 @@ func (x *AllocationUnreachable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationUnreachable.ProtoReflect.Descriptor instead.
 func (*AllocationUnreachable) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *AllocationUnreachable) GetId() string {
@@ -1254,7 +1315,7 @@ type AllocationReleased struct {
 
 func (x *AllocationReleased) Reset() {
 	*x = AllocationReleased{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1327,7 @@ func (x *AllocationReleased) String() string {
 func (*AllocationReleased) ProtoMessage() {}
 
 func (x *AllocationReleased) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1340,7 @@ func (x *AllocationReleased) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationReleased.ProtoReflect.Descriptor instead.
 func (*AllocationReleased) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AllocationReleased) GetId() string {
@@ -1297,7 +1358,7 @@ type AllocationTick struct {
 
 func (x *AllocationTick) Reset() {
 	*x = AllocationTick{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1309,7 +1370,7 @@ func (x *AllocationTick) String() string {
 func (*AllocationTick) ProtoMessage() {}
 
 func (x *AllocationTick) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1322,7 +1383,7 @@ func (x *AllocationTick) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationTick.ProtoReflect.Descriptor instead.
 func (*AllocationTick) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{18}
 }
 
 // AllocationDaemonStarted is the daemon starting with its operator config: the limits of each
@@ -1337,7 +1398,7 @@ type AllocationDaemonStarted struct {
 
 func (x *AllocationDaemonStarted) Reset() {
 	*x = AllocationDaemonStarted{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[18]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1349,7 +1410,7 @@ func (x *AllocationDaemonStarted) String() string {
 func (*AllocationDaemonStarted) ProtoMessage() {}
 
 func (x *AllocationDaemonStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[18]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1362,7 +1423,7 @@ func (x *AllocationDaemonStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationDaemonStarted.ProtoReflect.Descriptor instead.
 func (*AllocationDaemonStarted) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{18}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AllocationDaemonStarted) GetPlacements() map[string]*AllocationLimits {
@@ -1381,14 +1442,17 @@ type AllocationLimits struct {
 	// Unset or zero: no queue timeout.
 	QueueTimeout *durationpb.Duration `protobuf:"bytes,4,opt,name=queue_timeout,json=queueTimeout,proto3" json:"queue_timeout,omitempty"`
 	// The placement's allocations have no end: slots of a machine.
-	Endless       bool `protobuf:"varint,5,opt,name=endless,proto3" json:"endless,omitempty"`
+	Endless bool `protobuf:"varint,5,opt,name=endless,proto3" json:"endless,omitempty"`
+	// How long a run holding allocations may go unseen before it is taken to have ended. Unset or
+	// zero: never.
+	RunIdleEnd    *durationpb.Duration `protobuf:"bytes,6,opt,name=run_idle_end,json=runIdleEnd,proto3" json:"run_idle_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AllocationLimits) Reset() {
 	*x = AllocationLimits{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[19]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1400,7 +1464,7 @@ func (x *AllocationLimits) String() string {
 func (*AllocationLimits) ProtoMessage() {}
 
 func (x *AllocationLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[19]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1413,7 +1477,7 @@ func (x *AllocationLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationLimits.ProtoReflect.Descriptor instead.
 func (*AllocationLimits) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{19}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AllocationLimits) GetMaxHeld() int32 {
@@ -1451,6 +1515,13 @@ func (x *AllocationLimits) GetEndless() bool {
 	return false
 }
 
+func (x *AllocationLimits) GetRunIdleEnd() *durationpb.Duration {
+	if x != nil {
+		return x.RunIdleEnd
+	}
+	return nil
+}
+
 // AllocationLogRecord is allocations/<n>.json of the per-user state directory: the nth input of the
 // allocation log, written once.
 type AllocationLogRecord struct {
@@ -1465,7 +1536,7 @@ type AllocationLogRecord struct {
 
 func (x *AllocationLogRecord) Reset() {
 	*x = AllocationLogRecord{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[20]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +1548,7 @@ func (x *AllocationLogRecord) String() string {
 func (*AllocationLogRecord) ProtoMessage() {}
 
 func (x *AllocationLogRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[20]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +1561,7 @@ func (x *AllocationLogRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocationLogRecord.ProtoReflect.Descriptor instead.
 func (*AllocationLogRecord) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{20}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AllocationLogRecord) GetFormat() int32 {
@@ -1528,7 +1599,7 @@ type DaemonIdentity struct {
 
 func (x *DaemonIdentity) Reset() {
 	*x = DaemonIdentity{}
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[21]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1540,7 +1611,7 @@ func (x *DaemonIdentity) String() string {
 func (*DaemonIdentity) ProtoMessage() {}
 
 func (x *DaemonIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[21]
+	mi := &file_vibesys_cli_v1_allocation_log_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1553,7 +1624,7 @@ func (x *DaemonIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonIdentity.ProtoReflect.Descriptor instead.
 func (*DaemonIdentity) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{21}
+	return file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DaemonIdentity) GetFormat() int32 {
@@ -1574,7 +1645,7 @@ var File_vibesys_cli_v1_allocation_log_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"\n" +
-	"#vibesys/cli/v1/allocation_log.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/cli/v1/allocation.proto\"\xf5\b\n" +
+	"#vibesys/cli/v1/allocation_log.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/cli/v1/allocation.proto\"\xb5\t\n" +
 	"\x0fAllocationInput\x122\n" +
 	"\x02at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x123\n" +
 	"\x03ask\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.AllocationAskedH\x00R\x03ask\x12=\n" +
@@ -1593,7 +1664,8 @@ const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"\vunreachable\x18\r \x01(\v2%.vibesys.cli.v1.AllocationUnreachableH\x00R\vunreachable\x12@\n" +
 	"\breleased\x18\x0e \x01(\v2\".vibesys.cli.v1.AllocationReleasedH\x00R\breleased\x124\n" +
 	"\x04tick\x18\x0f \x01(\v2\x1e.vibesys.cli.v1.AllocationTickH\x00R\x04tick\x12P\n" +
-	"\x0edaemon_started\x18\x10 \x01(\v2'.vibesys.cli.v1.AllocationDaemonStartedH\x00R\rdaemonStartedB\x0e\n" +
+	"\x0edaemon_started\x18\x10 \x01(\v2'.vibesys.cli.v1.AllocationDaemonStartedH\x00R\rdaemonStarted\x12>\n" +
+	"\brun_seen\x18\x11 \x01(\v2!.vibesys.cli.v1.AllocationRunSeenH\x00R\arunSeenB\x0e\n" +
 	"\x05event\x12\x05\xbaH\x02\b\x01\"\xb5\x01\n" +
 	"\x0fAllocationAsked\x12\x19\n" +
 	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\x12?\n" +
@@ -1610,7 +1682,9 @@ const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"\x05order\x18\x03 \x01(\v2\x1c.vibesys.cli.v1.RenewalOrderB\x06\xbaH\x03\xc8\x01\x01R\x05order\"`\n" +
 	"\x17AllocationRenewOffAsked\x12\x19\n" +
 	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\x12*\n" +
-	"\x02id\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\"/\n" +
+	"\x02id\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\".\n" +
+	"\x11AllocationRunSeen\x12\x19\n" +
+	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\"/\n" +
 	"\x12AllocationRunEnded\x12\x19\n" +
 	"\x03run\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x03run\"\xd6\x01\n" +
 	"\x16AllocationJobSubmitted\x12\x19\n" +
@@ -1659,14 +1733,16 @@ const file_vibesys_cli_v1_allocation_log_proto_rawDesc = "" +
 	"placements\x1a_\n" +
 	"\x0fPlacementsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
-	"\x05value\x18\x02 \x01(\v2 .vibesys.cli.v1.AllocationLimitsR\x05value:\x028\x01\"\x8e\x02\n" +
+	"\x05value\x18\x02 \x01(\v2 .vibesys.cli.v1.AllocationLimitsR\x05value:\x028\x01\"\xcb\x02\n" +
 	"\x10AllocationLimits\x12\"\n" +
 	"\bmax_held\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\amaxHeld\x12:\n" +
 	"\amax_for\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\x06maxFor\x12@\n" +
 	"\n" +
 	"fit_margin\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\tfitMargin\x12>\n" +
 	"\rqueue_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\fqueueTimeout\x12\x18\n" +
-	"\aendless\x18\x05 \x01(\bR\aendless\"\x90\x01\n" +
+	"\aendless\x18\x05 \x01(\bR\aendless\x12;\n" +
+	"\frun_idle_end\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\n" +
+	"runIdleEnd\"\x90\x01\n" +
 	"\x13AllocationLogRecord\x12\x1f\n" +
 	"\x06format\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00R\x06format\x12\x19\n" +
 	"\x03seq\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12=\n" +
@@ -1692,7 +1768,7 @@ func file_vibesys_cli_v1_allocation_log_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_allocation_log_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_cli_v1_allocation_log_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_vibesys_cli_v1_allocation_log_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_vibesys_cli_v1_allocation_log_proto_goTypes = []any{
 	(SeenEndedCause)(0),              // 0: vibesys.cli.v1.SeenEndedCause
 	(*AllocationInput)(nil),          // 1: vibesys.cli.v1.AllocationInput
@@ -1700,67 +1776,70 @@ var file_vibesys_cli_v1_allocation_log_proto_goTypes = []any{
 	(*AllocationEndAsked)(nil),       // 3: vibesys.cli.v1.AllocationEndAsked
 	(*AllocationRenewAsked)(nil),     // 4: vibesys.cli.v1.AllocationRenewAsked
 	(*AllocationRenewOffAsked)(nil),  // 5: vibesys.cli.v1.AllocationRenewOffAsked
-	(*AllocationRunEnded)(nil),       // 6: vibesys.cli.v1.AllocationRunEnded
-	(*AllocationJobSubmitted)(nil),   // 7: vibesys.cli.v1.AllocationJobSubmitted
-	(*AllocationJobStarted)(nil),     // 8: vibesys.cli.v1.AllocationJobStarted
-	(*AllocationJobFinished)(nil),    // 9: vibesys.cli.v1.AllocationJobFinished
-	(*AllocationBackendTook)(nil),    // 10: vibesys.cli.v1.AllocationBackendTook
-	(*AllocationBackendRefused)(nil), // 11: vibesys.cli.v1.AllocationBackendRefused
-	(*AllocationObserved)(nil),       // 12: vibesys.cli.v1.AllocationObserved
-	(*SeenPending)(nil),              // 13: vibesys.cli.v1.SeenPending
-	(*SeenRunning)(nil),              // 14: vibesys.cli.v1.SeenRunning
-	(*SeenEnded)(nil),                // 15: vibesys.cli.v1.SeenEnded
-	(*AllocationUnreachable)(nil),    // 16: vibesys.cli.v1.AllocationUnreachable
-	(*AllocationReleased)(nil),       // 17: vibesys.cli.v1.AllocationReleased
-	(*AllocationTick)(nil),           // 18: vibesys.cli.v1.AllocationTick
-	(*AllocationDaemonStarted)(nil),  // 19: vibesys.cli.v1.AllocationDaemonStarted
-	(*AllocationLimits)(nil),         // 20: vibesys.cli.v1.AllocationLimits
-	(*AllocationLogRecord)(nil),      // 21: vibesys.cli.v1.AllocationLogRecord
-	(*DaemonIdentity)(nil),           // 22: vibesys.cli.v1.DaemonIdentity
-	nil,                              // 23: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
-	(*timestamppb.Timestamp)(nil),    // 24: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),      // 25: google.protobuf.Duration
-	(*RenewalOrder)(nil),             // 26: vibesys.cli.v1.RenewalOrder
+	(*AllocationRunSeen)(nil),        // 6: vibesys.cli.v1.AllocationRunSeen
+	(*AllocationRunEnded)(nil),       // 7: vibesys.cli.v1.AllocationRunEnded
+	(*AllocationJobSubmitted)(nil),   // 8: vibesys.cli.v1.AllocationJobSubmitted
+	(*AllocationJobStarted)(nil),     // 9: vibesys.cli.v1.AllocationJobStarted
+	(*AllocationJobFinished)(nil),    // 10: vibesys.cli.v1.AllocationJobFinished
+	(*AllocationBackendTook)(nil),    // 11: vibesys.cli.v1.AllocationBackendTook
+	(*AllocationBackendRefused)(nil), // 12: vibesys.cli.v1.AllocationBackendRefused
+	(*AllocationObserved)(nil),       // 13: vibesys.cli.v1.AllocationObserved
+	(*SeenPending)(nil),              // 14: vibesys.cli.v1.SeenPending
+	(*SeenRunning)(nil),              // 15: vibesys.cli.v1.SeenRunning
+	(*SeenEnded)(nil),                // 16: vibesys.cli.v1.SeenEnded
+	(*AllocationUnreachable)(nil),    // 17: vibesys.cli.v1.AllocationUnreachable
+	(*AllocationReleased)(nil),       // 18: vibesys.cli.v1.AllocationReleased
+	(*AllocationTick)(nil),           // 19: vibesys.cli.v1.AllocationTick
+	(*AllocationDaemonStarted)(nil),  // 20: vibesys.cli.v1.AllocationDaemonStarted
+	(*AllocationLimits)(nil),         // 21: vibesys.cli.v1.AllocationLimits
+	(*AllocationLogRecord)(nil),      // 22: vibesys.cli.v1.AllocationLogRecord
+	(*DaemonIdentity)(nil),           // 23: vibesys.cli.v1.DaemonIdentity
+	nil,                              // 24: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
+	(*timestamppb.Timestamp)(nil),    // 25: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 26: google.protobuf.Duration
+	(*RenewalOrder)(nil),             // 27: vibesys.cli.v1.RenewalOrder
 }
 var file_vibesys_cli_v1_allocation_log_proto_depIdxs = []int32{
-	24, // 0: vibesys.cli.v1.AllocationInput.at:type_name -> google.protobuf.Timestamp
+	25, // 0: vibesys.cli.v1.AllocationInput.at:type_name -> google.protobuf.Timestamp
 	2,  // 1: vibesys.cli.v1.AllocationInput.ask:type_name -> vibesys.cli.v1.AllocationAsked
 	3,  // 2: vibesys.cli.v1.AllocationInput.end_ask:type_name -> vibesys.cli.v1.AllocationEndAsked
 	4,  // 3: vibesys.cli.v1.AllocationInput.renew_ask:type_name -> vibesys.cli.v1.AllocationRenewAsked
 	5,  // 4: vibesys.cli.v1.AllocationInput.renew_off_ask:type_name -> vibesys.cli.v1.AllocationRenewOffAsked
-	6,  // 5: vibesys.cli.v1.AllocationInput.run_ended:type_name -> vibesys.cli.v1.AllocationRunEnded
-	7,  // 6: vibesys.cli.v1.AllocationInput.job_submitted:type_name -> vibesys.cli.v1.AllocationJobSubmitted
-	8,  // 7: vibesys.cli.v1.AllocationInput.job_started:type_name -> vibesys.cli.v1.AllocationJobStarted
-	9,  // 8: vibesys.cli.v1.AllocationInput.job_finished:type_name -> vibesys.cli.v1.AllocationJobFinished
-	10, // 9: vibesys.cli.v1.AllocationInput.submitted:type_name -> vibesys.cli.v1.AllocationBackendTook
-	11, // 10: vibesys.cli.v1.AllocationInput.submit_refused:type_name -> vibesys.cli.v1.AllocationBackendRefused
-	12, // 11: vibesys.cli.v1.AllocationInput.observed:type_name -> vibesys.cli.v1.AllocationObserved
-	16, // 12: vibesys.cli.v1.AllocationInput.unreachable:type_name -> vibesys.cli.v1.AllocationUnreachable
-	17, // 13: vibesys.cli.v1.AllocationInput.released:type_name -> vibesys.cli.v1.AllocationReleased
-	18, // 14: vibesys.cli.v1.AllocationInput.tick:type_name -> vibesys.cli.v1.AllocationTick
-	19, // 15: vibesys.cli.v1.AllocationInput.daemon_started:type_name -> vibesys.cli.v1.AllocationDaemonStarted
-	25, // 16: vibesys.cli.v1.AllocationAsked.requested_for:type_name -> google.protobuf.Duration
-	26, // 17: vibesys.cli.v1.AllocationRenewAsked.order:type_name -> vibesys.cli.v1.RenewalOrder
-	25, // 18: vibesys.cli.v1.AllocationJobSubmitted.bound:type_name -> google.protobuf.Duration
-	13, // 19: vibesys.cli.v1.AllocationObserved.pending:type_name -> vibesys.cli.v1.SeenPending
-	14, // 20: vibesys.cli.v1.AllocationObserved.running:type_name -> vibesys.cli.v1.SeenRunning
-	15, // 21: vibesys.cli.v1.AllocationObserved.ended:type_name -> vibesys.cli.v1.SeenEnded
-	24, // 22: vibesys.cli.v1.SeenPending.estimated_start:type_name -> google.protobuf.Timestamp
-	24, // 23: vibesys.cli.v1.SeenRunning.started_at:type_name -> google.protobuf.Timestamp
-	24, // 24: vibesys.cli.v1.SeenRunning.ends_at:type_name -> google.protobuf.Timestamp
-	0,  // 25: vibesys.cli.v1.SeenEnded.cause:type_name -> vibesys.cli.v1.SeenEndedCause
-	24, // 26: vibesys.cli.v1.SeenEnded.at:type_name -> google.protobuf.Timestamp
-	23, // 27: vibesys.cli.v1.AllocationDaemonStarted.placements:type_name -> vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
-	25, // 28: vibesys.cli.v1.AllocationLimits.max_for:type_name -> google.protobuf.Duration
-	25, // 29: vibesys.cli.v1.AllocationLimits.fit_margin:type_name -> google.protobuf.Duration
-	25, // 30: vibesys.cli.v1.AllocationLimits.queue_timeout:type_name -> google.protobuf.Duration
-	1,  // 31: vibesys.cli.v1.AllocationLogRecord.input:type_name -> vibesys.cli.v1.AllocationInput
-	20, // 32: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry.value:type_name -> vibesys.cli.v1.AllocationLimits
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	7,  // 5: vibesys.cli.v1.AllocationInput.run_ended:type_name -> vibesys.cli.v1.AllocationRunEnded
+	8,  // 6: vibesys.cli.v1.AllocationInput.job_submitted:type_name -> vibesys.cli.v1.AllocationJobSubmitted
+	9,  // 7: vibesys.cli.v1.AllocationInput.job_started:type_name -> vibesys.cli.v1.AllocationJobStarted
+	10, // 8: vibesys.cli.v1.AllocationInput.job_finished:type_name -> vibesys.cli.v1.AllocationJobFinished
+	11, // 9: vibesys.cli.v1.AllocationInput.submitted:type_name -> vibesys.cli.v1.AllocationBackendTook
+	12, // 10: vibesys.cli.v1.AllocationInput.submit_refused:type_name -> vibesys.cli.v1.AllocationBackendRefused
+	13, // 11: vibesys.cli.v1.AllocationInput.observed:type_name -> vibesys.cli.v1.AllocationObserved
+	17, // 12: vibesys.cli.v1.AllocationInput.unreachable:type_name -> vibesys.cli.v1.AllocationUnreachable
+	18, // 13: vibesys.cli.v1.AllocationInput.released:type_name -> vibesys.cli.v1.AllocationReleased
+	19, // 14: vibesys.cli.v1.AllocationInput.tick:type_name -> vibesys.cli.v1.AllocationTick
+	20, // 15: vibesys.cli.v1.AllocationInput.daemon_started:type_name -> vibesys.cli.v1.AllocationDaemonStarted
+	6,  // 16: vibesys.cli.v1.AllocationInput.run_seen:type_name -> vibesys.cli.v1.AllocationRunSeen
+	26, // 17: vibesys.cli.v1.AllocationAsked.requested_for:type_name -> google.protobuf.Duration
+	27, // 18: vibesys.cli.v1.AllocationRenewAsked.order:type_name -> vibesys.cli.v1.RenewalOrder
+	26, // 19: vibesys.cli.v1.AllocationJobSubmitted.bound:type_name -> google.protobuf.Duration
+	14, // 20: vibesys.cli.v1.AllocationObserved.pending:type_name -> vibesys.cli.v1.SeenPending
+	15, // 21: vibesys.cli.v1.AllocationObserved.running:type_name -> vibesys.cli.v1.SeenRunning
+	16, // 22: vibesys.cli.v1.AllocationObserved.ended:type_name -> vibesys.cli.v1.SeenEnded
+	25, // 23: vibesys.cli.v1.SeenPending.estimated_start:type_name -> google.protobuf.Timestamp
+	25, // 24: vibesys.cli.v1.SeenRunning.started_at:type_name -> google.protobuf.Timestamp
+	25, // 25: vibesys.cli.v1.SeenRunning.ends_at:type_name -> google.protobuf.Timestamp
+	0,  // 26: vibesys.cli.v1.SeenEnded.cause:type_name -> vibesys.cli.v1.SeenEndedCause
+	25, // 27: vibesys.cli.v1.SeenEnded.at:type_name -> google.protobuf.Timestamp
+	24, // 28: vibesys.cli.v1.AllocationDaemonStarted.placements:type_name -> vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry
+	26, // 29: vibesys.cli.v1.AllocationLimits.max_for:type_name -> google.protobuf.Duration
+	26, // 30: vibesys.cli.v1.AllocationLimits.fit_margin:type_name -> google.protobuf.Duration
+	26, // 31: vibesys.cli.v1.AllocationLimits.queue_timeout:type_name -> google.protobuf.Duration
+	26, // 32: vibesys.cli.v1.AllocationLimits.run_idle_end:type_name -> google.protobuf.Duration
+	1,  // 33: vibesys.cli.v1.AllocationLogRecord.input:type_name -> vibesys.cli.v1.AllocationInput
+	21, // 34: vibesys.cli.v1.AllocationDaemonStarted.PlacementsEntry.value:type_name -> vibesys.cli.v1.AllocationLimits
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_allocation_log_proto_init() }
@@ -1785,8 +1864,9 @@ func file_vibesys_cli_v1_allocation_log_proto_init() {
 		(*AllocationInput_Released)(nil),
 		(*AllocationInput_Tick)(nil),
 		(*AllocationInput_DaemonStarted)(nil),
+		(*AllocationInput_RunSeen)(nil),
 	}
-	file_vibesys_cli_v1_allocation_log_proto_msgTypes[11].OneofWrappers = []any{
+	file_vibesys_cli_v1_allocation_log_proto_msgTypes[12].OneofWrappers = []any{
 		(*AllocationObserved_Pending)(nil),
 		(*AllocationObserved_Running)(nil),
 		(*AllocationObserved_Ended)(nil),
@@ -1797,7 +1877,7 @@ func file_vibesys_cli_v1_allocation_log_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_allocation_log_proto_rawDesc), len(file_vibesys_cli_v1_allocation_log_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   23,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

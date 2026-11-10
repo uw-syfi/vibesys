@@ -29,6 +29,8 @@ func FromAllocationInput(in alloc.Input) (*cliv1.AllocationInput, error) {
 		out.Event = &cliv1.AllocationInput_RenewOffAsk{RenewOffAsk: &cliv1.AllocationRenewOffAsked{Run: string(e.Run), Id: string(e.ID)}}
 	case alloc.RunEnded:
 		out.Event = &cliv1.AllocationInput_RunEnded{RunEnded: &cliv1.AllocationRunEnded{Run: string(e.Run)}}
+	case alloc.RunSeen:
+		out.Event = &cliv1.AllocationInput_RunSeen{RunSeen: &cliv1.AllocationRunSeen{Run: string(e.Run)}}
 	case alloc.JobSubmitted:
 		out.Event = &cliv1.AllocationInput_JobSubmitted{JobSubmitted: &cliv1.AllocationJobSubmitted{
 			Run: string(e.Run), Job: string(e.Job), Bound: durationpb.New(e.Bound), Into: string(e.Into), Eligible: append([]string(nil), e.Eligible...),
@@ -72,13 +74,16 @@ func fromLimits(l alloc.Limits) *cliv1.AllocationLimits {
 	if l.QueueTimeout > 0 {
 		out.QueueTimeout = durationpb.New(l.QueueTimeout)
 	}
+	if l.RunIdleEnd > 0 {
+		out.RunIdleEnd = durationpb.New(l.RunIdleEnd)
+	}
 	return out
 }
 
 func toLimits(l *cliv1.AllocationLimits) alloc.Limits {
 	return alloc.Limits{
 		MaxHeld: int(l.GetMaxHeld()), MaxFor: l.GetMaxFor().AsDuration(), Margin: l.GetFitMargin().AsDuration(),
-		QueueTimeout: l.GetQueueTimeout().AsDuration(), Endless: l.GetEndless(),
+		QueueTimeout: l.GetQueueTimeout().AsDuration(), Endless: l.GetEndless(), RunIdleEnd: l.GetRunIdleEnd().AsDuration(),
 	}
 }
 
@@ -119,6 +124,8 @@ func ToAllocationInput(m *cliv1.AllocationInput) (alloc.Input, error) {
 		in.Event = alloc.RenewOffAsk{Run: core.RunID(e.RenewOffAsk.GetRun()), ID: alloc.ID(e.RenewOffAsk.GetId())}
 	case *cliv1.AllocationInput_RunEnded:
 		in.Event = alloc.RunEnded{Run: core.RunID(e.RunEnded.GetRun())}
+	case *cliv1.AllocationInput_RunSeen:
+		in.Event = alloc.RunSeen{Run: core.RunID(e.RunSeen.GetRun())}
 	case *cliv1.AllocationInput_JobSubmitted:
 		j := e.JobSubmitted
 		in.Event = alloc.JobSubmitted{
