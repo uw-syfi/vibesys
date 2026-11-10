@@ -27,7 +27,7 @@ func DaemonID(dir string, newID func() string, opts ...Option) (string, error) {
 	data, err := c.fs.ReadFile(name)
 	switch {
 	case err == nil:
-		var file cliv1.DaemonIdentityFile
+		var file cliv1.DaemonIdentity
 		if err := decode(name, data, &file); err != nil {
 			return "", err
 		}
@@ -36,7 +36,7 @@ func DaemonID(dir string, newID func() string, opts ...Option) (string, error) {
 		return "", unavailable(dir, err)
 	}
 	id := newID()
-	if err := b.publish(name, &cliv1.DaemonIdentityFile{Format: formatVersion, Id: id}); err != nil {
+	if err := b.publish(name, &cliv1.DaemonIdentity{Format: formatVersion, Id: id}); err != nil {
 		return "", unavailable(dir, err)
 	}
 	return id, nil

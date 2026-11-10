@@ -104,12 +104,14 @@ message AllocationObserved {
 }
 
 message SeenPending {
-  string reason = 1;
+  // Why the backend still has it waiting, as the backend words it. May be empty.
+  string reason = 1 [(buf.validate.field).string.max_len = 4096];
   google.protobuf.Timestamp estimated_start = 2;
 }
 
 message SeenRunning {
-  string node = 1;
+  // The node it runs on. Empty for slots of the machine.
+  string node = 1 [(buf.validate.field).string.max_len = 4096];
   google.protobuf.Timestamp started_at = 2;
   google.protobuf.Timestamp ends_at = 3;
 }
@@ -140,19 +142,19 @@ message AllocationReleased {
 
 message AllocationTick {}
 
-// AllocationLogFile is allocations/<n>.json of the per-user state directory: the nth input of the
+// AllocationLogRecord is allocations/<n>.json of the per-user state directory: the nth input of the
 // allocation log, written once.
-message AllocationLogFile {
+message AllocationLogRecord {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
   // The input's place in the log, from 1 with no gaps.
   uint64 seq = 2 [(buf.validate.field).uint64.gt = 0];
   AllocationInput input = 3 [(buf.validate.field).required = true];
 }
 
-// DaemonIdentityFile is daemon-id.json of the per-user state directory: who this user's daemon is
+// DaemonIdentity is daemon-id.json of the per-user state directory: who this user's daemon is
 // across restarts, made once. Allocations a daemon makes at a backend carry it, so a daemon finds
 // its own again after a restart (environment.Allocator.Adopt) and never another daemon's.
-message DaemonIdentityFile {
+message DaemonIdentity {
   int32 format = 1 [(buf.validate.field).int32.gt = 0];
   // A name made once, 16 to 64 characters of a-z and 0-9.
   string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,64}$"];

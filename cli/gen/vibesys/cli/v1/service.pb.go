@@ -6320,10 +6320,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x18RequestAllocationRequest\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\x05runId\x12C\n" +
-	"\arequest\x18\x02 \x01(\v2!.vibesys.cli.v1.AllocationRequestB\x06\xbaH\x03\xc8\x01\x01R\arequest\"W\n" +
-	"\x19RequestAllocationResponse\x12:\n" +
+	"\arequest\x18\x02 \x01(\v2!.vibesys.cli.v1.AllocationRequestB\x06\xbaH\x03\xc8\x01\x01R\arequest\"_\n" +
+	"\x19RequestAllocationResponse\x12B\n" +
 	"\n" +
-	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationR\n" +
+	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"allocation\"O\n" +
 	"\x16ListAllocationsRequest\x12\x1f\n" +
 	"\x06run_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x05runId\x12\x14\n" +
@@ -6331,10 +6331,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x17ListAllocationsResponse\x12G\n" +
 	"\vallocations\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.AllocationB\t\xbaH\x06\x92\x01\x03\x10\x80 R\vallocations\"C\n" +
 	"\x15ShowAllocationRequest\x12*\n" +
-	"\x02id\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\"T\n" +
-	"\x16ShowAllocationResponse\x12:\n" +
+	"\x02id\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\"\\\n" +
+	"\x16ShowAllocationResponse\x12B\n" +
 	"\n" +
-	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationR\n" +
+	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"allocation\"\x9f\x02\n" +
 	"\x15WaitAllocationRequest\x12*\n" +
 	"\x02id\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\x12#\n" +
@@ -6342,19 +6342,19 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\tending_in\x18\x03 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x022\x00H\x00R\bendingIn\x12\x1f\n" +
 	"\x05ended\x18\x04 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\x05ended\x12@\n" +
 	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xc8\x01\x01\xaa\x01\x02*\x00R\atimeoutB\x0e\n" +
-	"\x05until\x12\x05\xbaH\x02\b\x01\"\x95\x01\n" +
-	"\x16WaitAllocationResponse\x12:\n" +
+	"\x05until\x12\x05\xbaH\x02\b\x01\"\xa7\x01\n" +
+	"\x16WaitAllocationResponse\x12B\n" +
 	"\n" +
-	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationR\n" +
-	"allocation\x12?\n" +
-	"\aoutcome\x18\x02 \x01(\x0e2%.vibesys.cli.v1.AllocationWaitOutcomeR\aoutcome\"r\n" +
+	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationB\x06\xbaH\x03\xc8\x01\x01R\n" +
+	"allocation\x12I\n" +
+	"\aoutcome\x18\x02 \x01(\x0e2%.vibesys.cli.v1.AllocationWaitOutcomeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aoutcome\"r\n" +
 	"\x14EndAllocationRequest\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\x05runId\x127\n" +
-	"\x03end\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.AllocationEndB\x06\xbaH\x03\xc8\x01\x01R\x03end\"S\n" +
-	"\x15EndAllocationResponse\x12:\n" +
+	"\x03end\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.AllocationEndB\x06\xbaH\x03\xc8\x01\x01R\x03end\"[\n" +
+	"\x15EndAllocationResponse\x12B\n" +
 	"\n" +
-	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationR\n" +
+	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"allocation\"\xce\x01\n" +
 	"\x16RenewAllocationRequest\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +
@@ -6362,10 +6362,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x02id\x18\x02 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\x128\n" +
 	"\arenewal\x18\x03 \x01(\v2\x1c.vibesys.cli.v1.RenewalOrderH\x00R\arenewal\x12\x1b\n" +
 	"\x03off\x18\x04 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\x03offB\x0e\n" +
-	"\x05order\x12\x05\xbaH\x02\b\x01\"U\n" +
-	"\x17RenewAllocationResponse\x12:\n" +
+	"\x05order\x12\x05\xbaH\x02\b\x01\"]\n" +
+	"\x17RenewAllocationResponse\x12B\n" +
 	"\n" +
-	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationR\n" +
+	"allocation\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.AllocationB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"allocation\"=\n" +
 	"\x18EndRunAllocationsRequest\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +

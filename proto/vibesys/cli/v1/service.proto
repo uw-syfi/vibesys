@@ -140,7 +140,7 @@ message RequestAllocationRequest {
 }
 
 message RequestAllocationResponse {
-  Allocation allocation = 1;
+  Allocation allocation = 1 [(buf.validate.field).required = true];
 }
 
 message ListAllocationsRequest {
@@ -160,7 +160,7 @@ message ShowAllocationRequest {
 }
 
 message ShowAllocationResponse {
-  Allocation allocation = 1;
+  Allocation allocation = 1 [(buf.validate.field).required = true];
 }
 
 // AllocationWaitOutcome says how a wait on an allocation ended.
@@ -193,8 +193,8 @@ message WaitAllocationRequest {
 }
 
 message WaitAllocationResponse {
-  Allocation allocation = 1;
-  AllocationWaitOutcome outcome = 2;
+  Allocation allocation = 1 [(buf.validate.field).required = true];
+  AllocationWaitOutcome outcome = 2 [(buf.validate.field).enum.defined_only = true];
 }
 
 message EndAllocationRequest {
@@ -206,7 +206,7 @@ message EndAllocationRequest {
 }
 
 message EndAllocationResponse {
-  Allocation allocation = 1;
+  Allocation allocation = 1 [(buf.validate.field).required = true];
 }
 
 message RenewAllocationRequest {
@@ -225,7 +225,7 @@ message RenewAllocationRequest {
 }
 
 message RenewAllocationResponse {
-  Allocation allocation = 1;
+  Allocation allocation = 1 [(buf.validate.field).required = true];
 }
 
 message EndRunAllocationsRequest {

@@ -16,7 +16,7 @@ import (
 )
 
 // allocationsDir is the directory of the allocation log, beside the index's tasks directory:
-// allocations/<n>.json is the nth input, as an AllocationLogFile, written once and never changed.
+// allocations/<n>.json is the nth input, as an AllocationLogRecord, written once and never changed.
 // A restart finds the inputs by listing it, and they are contiguous from 1: a gap is a record
 // that was lost, which Load refuses to read past.
 const allocationsDir = "allocations"
@@ -93,7 +93,7 @@ func (l *AllocLog) Append(ctx context.Context, in alloc.Input) error {
 		}
 		l.next = uint64(len(places)) + 1
 	}
-	if err := l.b.publish(l.file(l.next), &cliv1.AllocationLogFile{Format: formatVersion, Seq: l.next, Input: m}); err != nil {
+	if err := l.b.publish(l.file(l.next), &cliv1.AllocationLogRecord{Format: formatVersion, Seq: l.next, Input: m}); err != nil {
 		var f *core.Failure
 		if errors.As(err, &f) {
 			return err
@@ -122,7 +122,7 @@ func (l *AllocLog) Load(ctx context.Context) ([]alloc.Input, error) {
 		if err != nil {
 			return nil, unavailable(l.dir, err)
 		}
-		var file cliv1.AllocationLogFile
+		var file cliv1.AllocationLogRecord
 		if err := decode(name, data, &file); err != nil {
 			return nil, err
 		}
