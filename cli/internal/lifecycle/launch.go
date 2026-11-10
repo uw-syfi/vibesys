@@ -21,6 +21,9 @@ type Launch struct {
 	// OutputBase is where this attempt's output starts in the job's stored output, which holds what
 	// earlier attempts of a job queued again wrote. The supervisor's output offsets count from it.
 	OutputBase uint64
+	// Allocation is the backend's reference for the standing allocation the job runs inside, empty
+	// for a job that runs as it always has (environment.Target.Allocation).
+	Allocation string
 }
 
 // Ref is the job's identity.

@@ -25,6 +25,12 @@ import (
 // its jobs starts, a run of it is not released and its outcome is not discarded, the store is tried
 // again, and when it returns the run is taken up. The same goes for a store another daemon has.
 func (a *App) Start(ctx context.Context) error {
+	// The allocations are rebuilt first: the slots they hold are held again before any job takes one.
+	if a.alloc != nil {
+		if err := a.alloc.start(ctx); err != nil {
+			return err
+		}
+	}
 	var scopes []core.Scope
 	err := a.retry(ctx, func(ctx context.Context) error {
 		var err error
@@ -165,7 +171,7 @@ func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
 // demand says of the job in the environment it runs in, and the run that submitted it first, whose
 // use of the machine it counts as.
 func (a *App) workOf(job core.Job) lifecycle.Work {
-	w := lifecycle.Work{Options: a.cfg.Scheduler.Demand.Options(job), Kind: job.Spec.Settings.Kind()}
+	w := lifecycle.Work{Options: a.cfg.Scheduler.Demand.Options(job), Kind: job.Spec.Settings.Kind(), Allocated: job.Spec.Allocation != ""}
 	if len(job.Submitters) > 0 {
 		w.Run = job.Submitters[0].Run
 	}

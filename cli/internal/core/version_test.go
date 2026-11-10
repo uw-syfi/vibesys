@@ -23,11 +23,11 @@ func TestThisBuildSpeaksItself(t *testing.T) {
 	}
 }
 
-// The handshake, over every pair of builds with protocols 1 to 5 whose minimum is at most their
-// protocol: 15 builds, 225 pairs.
+// The handshake, over every pair of builds with protocols 1 to 6 whose minimum is at most their
+// protocol: 21 builds, 441 pairs.
 func TestCompatibilityOverEveryPairOfBuilds(t *testing.T) {
 	var builds []core.Versions
-	for protocol := uint32(1); protocol <= 5; protocol++ {
+	for protocol := uint32(1); protocol <= 6; protocol++ {
 		for minimum := uint32(1); minimum <= protocol; minimum++ {
 			builds = append(builds, core.Versions{Protocol: protocol, MinProtocol: minimum, Schema: 1})
 		}

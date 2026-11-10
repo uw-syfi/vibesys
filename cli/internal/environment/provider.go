@@ -19,6 +19,12 @@ type Target struct {
 	// Placement is the placement of the operator config a docker job runs on, the one the
 	// scheduler chose among those it may run on when it started. The host has none.
 	Placement string
+	// Allocation is the backend's reference for the standing allocation the job runs inside
+	// (alloc.Handle.Ref), set when the daemon started the job in one, and empty for a job that runs
+	// as it always has. It is the seam of a placement whose allocations are batch allocations of a
+	// cluster: its environment runs the job's containers inside that allocation, and does not ask
+	// the cluster for one of its own. An environment of any other kind ignores it.
+	Allocation string
 }
 
 // Environments hands out the Environment of a kind for a target. The daemon asks it for a job's

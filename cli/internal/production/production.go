@@ -140,6 +140,10 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if here := filestore.StateHome(p.Getenv, p.Home); here != places.GetStateHome() {
 		logf("this daemon keeps its state in %s, as %s records; this environment alone would say %s", places.GetStateHome(), dir.Path(), here)
 	}
+	allocations, err := allocationsOf(op, indexDir)
+	if err != nil {
+		return err
+	}
 	hold, err := p.daemonMachine(dir, clk)
 	if err != nil {
 		return err
@@ -179,6 +183,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			CardFiles:       gitwork.CardFiles{},
 			Scheduler:       scheduler,
 			Leasing:         p.leasingOf(op, scope, machines.claims, clk, logf),
+			Allocations:     allocations,
 			Neighbors:       neighborsOf,
 		},
 	})

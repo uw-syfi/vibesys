@@ -55,6 +55,8 @@ type App struct {
 	tasksChanged changed.Signal
 	// epoch names this boot of the daemon, for the streams that report a task's state.
 	epoch string
+	// alloc keeps the standing allocations (alloc.go); nil when the daemon keeps none.
+	alloc *allocShell
 }
 
 // storeReadiness separates a successful write from a complete recovery read.
@@ -106,6 +108,11 @@ type view struct {
 	// store the machine knows, to name the jobs in a wait's way.
 	queue map[lifecycle.Ref]lifecycle.Queued
 	tasks map[lifecycle.StoreID]core.TaskName
+	// slots is the slots standing allocations hold or wait for, by allocation, and whether the
+	// scheduler granted each.
+	slots map[string]bool
+	// unplaced is the jobs held back for the allocation machine to decide where they run.
+	unplaced []lifecycle.Ref
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
@@ -125,6 +132,9 @@ func New(cfg Config) *App {
 		a.epoch = strconv.FormatInt(a.startedAt.UnixNano(), 36)
 	}
 	a.view.Store(&view{})
+	if cfg.Allocations.Log != nil {
+		a.alloc = newAllocShell(a, cfg.Allocations)
+	}
 	a.group.Go(a.loop)
 	return a
 }
@@ -232,6 +242,9 @@ func (a *App) loop() {
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
 		a.publish(state, scopes, m.changed)
+		if a.alloc != nil {
+			a.alloc.noteJob(m.event)
+		}
 		a.letGoLeases(state)
 		keepHandle(handles, m, reqs, state)
 		dropLetGo(handles, before, state, reqs)
@@ -336,6 +349,10 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	next := &view{
 		trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{},
 		queue: map[lifecycle.Ref]lifecycle.Queued{}, tasks: map[lifecycle.StoreID]core.TaskName{},
+		slots: map[string]bool{}, unplaced: s.AllocationWaiting(),
+	}
+	for _, sl := range s.Slots() {
+		next.slots[sl.Slot] = sl.Granted
 	}
 	for _, q := range s.Queue() {
 		next.queue[q.Ref] = q
@@ -360,6 +377,9 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	}
 	last := a.view.Load()
 	a.view.Store(next)
+	if a.alloc != nil && !reflect.DeepEqual(next.slots, last.slots) {
+		a.alloc.poke()
+	}
 	if !reflect.DeepEqual(next.trouble, last.trouble) || !reflect.DeepEqual(next.waits, last.waits) {
 		a.tasksChanged.Notify()
 	}

@@ -55,6 +55,8 @@ type world struct {
 	// leasing is how they share what they hold alone with other daemons; the zero value leases
 	// nothing.
 	leasing app.Leasing
+	// allocations is how the daemons keep standing allocations; the zero value keeps none.
+	allocations app.Allocations
 	// timers and slowPeriod, when set, replace the instant timers and the slow period of an hour.
 	timers     clock.Timers
 	slowPeriod time.Duration
@@ -122,6 +124,7 @@ func (w *world) newApp() *app.App {
 		Repositories: w.git,
 		Scheduler:    w.scheduler,
 		Leasing:      w.leasing,
+		Allocations:  w.allocations,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	})
 	if w.timers != nil {

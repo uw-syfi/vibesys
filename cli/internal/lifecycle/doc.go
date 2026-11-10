@@ -16,5 +16,7 @@
 //   - ids.go: Ref, the identity of one job across every store the daemon serves.
 //   - launch.go: Launch and Outcome, what a supervisor is given and what it reports.
 //   - machine.go: State and Step, the scheduler and the recovery table.
+//   - slots.go: the slots of a placement that standing allocations hold, which jobs in an allocation
+//     do not claim again.
 //   - settle.go: Settle, the transition that an outcome means.
 package lifecycle

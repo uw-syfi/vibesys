@@ -19,38 +19,45 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_Hello_FullMethodName            = "/vibesys.cli.v1.DaemonService/Hello"
-	DaemonService_Status_FullMethodName           = "/vibesys.cli.v1.DaemonService/Status"
-	DaemonService_Stop_FullMethodName             = "/vibesys.cli.v1.DaemonService/Stop"
-	DaemonService_Submit_FullMethodName           = "/vibesys.cli.v1.DaemonService/Submit"
-	DaemonService_Watch_FullMethodName            = "/vibesys.cli.v1.DaemonService/Watch"
-	DaemonService_Wait_FullMethodName             = "/vibesys.cli.v1.DaemonService/Wait"
-	DaemonService_WatchTask_FullMethodName        = "/vibesys.cli.v1.DaemonService/WatchTask"
-	DaemonService_Cancel_FullMethodName           = "/vibesys.cli.v1.DaemonService/Cancel"
-	DaemonService_AddNote_FullMethodName          = "/vibesys.cli.v1.DaemonService/AddNote"
-	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
-	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
-	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
-	DaemonService_Show_FullMethodName             = "/vibesys.cli.v1.DaemonService/Show"
-	DaemonService_Compare_FullMethodName          = "/vibesys.cli.v1.DaemonService/Compare"
-	DaemonService_Promote_FullMethodName          = "/vibesys.cli.v1.DaemonService/Promote"
-	DaemonService_CurrentResult_FullMethodName    = "/vibesys.cli.v1.DaemonService/CurrentResult"
-	DaemonService_AddToFrontier_FullMethodName    = "/vibesys.cli.v1.DaemonService/AddToFrontier"
-	DaemonService_ListFrontier_FullMethodName     = "/vibesys.cli.v1.DaemonService/ListFrontier"
-	DaemonService_CreatePlan_FullMethodName       = "/vibesys.cli.v1.DaemonService/CreatePlan"
-	DaemonService_ListPlans_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListPlans"
-	DaemonService_ViewPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/ViewPlan"
-	DaemonService_EditPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/EditPlan"
-	DaemonService_CommentPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/CommentPlan"
-	DaemonService_ClosePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/ClosePlan"
-	DaemonService_StartWorkstream_FullMethodName  = "/vibesys.cli.v1.DaemonService/StartWorkstream"
-	DaemonService_ListWorkstreams_FullMethodName  = "/vibesys.cli.v1.DaemonService/ListWorkstreams"
-	DaemonService_EditWorkstream_FullMethodName   = "/vibesys.cli.v1.DaemonService/EditWorkstream"
-	DaemonService_DeclareBound_FullMethodName     = "/vibesys.cli.v1.DaemonService/DeclareBound"
-	DaemonService_ListBounds_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListBounds"
-	DaemonService_DescribeTask_FullMethodName     = "/vibesys.cli.v1.DaemonService/DescribeTask"
-	DaemonService_DescribeSetup_FullMethodName    = "/vibesys.cli.v1.DaemonService/DescribeSetup"
-	DaemonService_ListPlacements_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListPlacements"
+	DaemonService_Hello_FullMethodName             = "/vibesys.cli.v1.DaemonService/Hello"
+	DaemonService_Status_FullMethodName            = "/vibesys.cli.v1.DaemonService/Status"
+	DaemonService_Stop_FullMethodName              = "/vibesys.cli.v1.DaemonService/Stop"
+	DaemonService_Submit_FullMethodName            = "/vibesys.cli.v1.DaemonService/Submit"
+	DaemonService_Watch_FullMethodName             = "/vibesys.cli.v1.DaemonService/Watch"
+	DaemonService_Wait_FullMethodName              = "/vibesys.cli.v1.DaemonService/Wait"
+	DaemonService_WatchTask_FullMethodName         = "/vibesys.cli.v1.DaemonService/WatchTask"
+	DaemonService_Cancel_FullMethodName            = "/vibesys.cli.v1.DaemonService/Cancel"
+	DaemonService_AddNote_FullMethodName           = "/vibesys.cli.v1.DaemonService/AddNote"
+	DaemonService_ListJobs_FullMethodName          = "/vibesys.cli.v1.DaemonService/ListJobs"
+	DaemonService_ForgetRepository_FullMethodName  = "/vibesys.cli.v1.DaemonService/ForgetRepository"
+	DaemonService_ReadLogs_FullMethodName          = "/vibesys.cli.v1.DaemonService/ReadLogs"
+	DaemonService_Show_FullMethodName              = "/vibesys.cli.v1.DaemonService/Show"
+	DaemonService_Compare_FullMethodName           = "/vibesys.cli.v1.DaemonService/Compare"
+	DaemonService_Promote_FullMethodName           = "/vibesys.cli.v1.DaemonService/Promote"
+	DaemonService_CurrentResult_FullMethodName     = "/vibesys.cli.v1.DaemonService/CurrentResult"
+	DaemonService_AddToFrontier_FullMethodName     = "/vibesys.cli.v1.DaemonService/AddToFrontier"
+	DaemonService_ListFrontier_FullMethodName      = "/vibesys.cli.v1.DaemonService/ListFrontier"
+	DaemonService_CreatePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/CreatePlan"
+	DaemonService_ListPlans_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListPlans"
+	DaemonService_ViewPlan_FullMethodName          = "/vibesys.cli.v1.DaemonService/ViewPlan"
+	DaemonService_EditPlan_FullMethodName          = "/vibesys.cli.v1.DaemonService/EditPlan"
+	DaemonService_CommentPlan_FullMethodName       = "/vibesys.cli.v1.DaemonService/CommentPlan"
+	DaemonService_ClosePlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/ClosePlan"
+	DaemonService_StartWorkstream_FullMethodName   = "/vibesys.cli.v1.DaemonService/StartWorkstream"
+	DaemonService_ListWorkstreams_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListWorkstreams"
+	DaemonService_EditWorkstream_FullMethodName    = "/vibesys.cli.v1.DaemonService/EditWorkstream"
+	DaemonService_DeclareBound_FullMethodName      = "/vibesys.cli.v1.DaemonService/DeclareBound"
+	DaemonService_ListBounds_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListBounds"
+	DaemonService_DescribeTask_FullMethodName      = "/vibesys.cli.v1.DaemonService/DescribeTask"
+	DaemonService_DescribeSetup_FullMethodName     = "/vibesys.cli.v1.DaemonService/DescribeSetup"
+	DaemonService_ListPlacements_FullMethodName    = "/vibesys.cli.v1.DaemonService/ListPlacements"
+	DaemonService_RequestAllocation_FullMethodName = "/vibesys.cli.v1.DaemonService/RequestAllocation"
+	DaemonService_ListAllocations_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListAllocations"
+	DaemonService_ShowAllocation_FullMethodName    = "/vibesys.cli.v1.DaemonService/ShowAllocation"
+	DaemonService_WaitAllocation_FullMethodName    = "/vibesys.cli.v1.DaemonService/WaitAllocation"
+	DaemonService_EndAllocation_FullMethodName     = "/vibesys.cli.v1.DaemonService/EndAllocation"
+	DaemonService_RenewAllocation_FullMethodName   = "/vibesys.cli.v1.DaemonService/RenewAllocation"
+	DaemonService_EndRunAllocations_FullMethodName = "/vibesys.cli.v1.DaemonService/EndRunAllocations"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -136,6 +143,27 @@ type DaemonServiceClient interface {
 	DescribeSetup(ctx context.Context, in *DescribeSetupRequest, opts ...grpc.CallOption) (*DescribeSetupResponse, error)
 	// ListPlacements reports every placement and the hardware it gives.
 	ListPlacements(ctx context.Context, in *ListPlacementsRequest, opts ...grpc.CallOption) (*ListPlacementsResponse, error)
+	// RequestAllocation asks for a standing allocation of a placement for a run (allocation.proto). It
+	// returns once the request is recorded and the backend asked, usually with the allocation PENDING.
+	// A request the rules refuse (a placement with no allocations section, a time over its max_for,
+	// max_held reached) fails with the reason. Protocol 6.
+	RequestAllocation(ctx context.Context, in *RequestAllocationRequest, opts ...grpc.CallOption) (*RequestAllocationResponse, error)
+	// ListAllocations lists a run's allocations with the live state the daemon holds.
+	ListAllocations(ctx context.Context, in *ListAllocationsRequest, opts ...grpc.CallOption) (*ListAllocationsResponse, error)
+	// ShowAllocation returns one allocation.
+	ShowAllocation(ctx context.Context, in *ShowAllocationRequest, opts ...grpc.CallOption) (*ShowAllocationResponse, error)
+	// WaitAllocation returns once the allocation is in the state asked for, ended, or the timeout
+	// passed, whichever is first. The daemon measures the timeout; the call never changes the
+	// allocation.
+	WaitAllocation(ctx context.Context, in *WaitAllocationRequest, opts ...grpc.CallOption) (*WaitAllocationResponse, error)
+	// EndAllocation ends an allocation of the caller's run at once, or with after_jobs once the jobs it
+	// holds are done.
+	EndAllocation(ctx context.Context, in *EndAllocationRequest, opts ...grpc.CallOption) (*EndAllocationResponse, error)
+	// RenewAllocation gives an allocation a standing renewal order, or takes its order away.
+	RenewAllocation(ctx context.Context, in *RenewAllocationRequest, opts ...grpc.CallOption) (*RenewAllocationResponse, error)
+	// EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
+	// once, and the run asks for no more. Whoever ends a run calls it.
+	EndRunAllocations(ctx context.Context, in *EndRunAllocationsRequest, opts ...grpc.CallOption) (*EndRunAllocationsResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -502,6 +530,76 @@ func (c *daemonServiceClient) ListPlacements(ctx context.Context, in *ListPlacem
 	return out, nil
 }
 
+func (c *daemonServiceClient) RequestAllocation(ctx context.Context, in *RequestAllocationRequest, opts ...grpc.CallOption) (*RequestAllocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestAllocationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_RequestAllocation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListAllocations(ctx context.Context, in *ListAllocationsRequest, opts ...grpc.CallOption) (*ListAllocationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAllocationsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListAllocations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ShowAllocation(ctx context.Context, in *ShowAllocationRequest, opts ...grpc.CallOption) (*ShowAllocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShowAllocationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ShowAllocation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) WaitAllocation(ctx context.Context, in *WaitAllocationRequest, opts ...grpc.CallOption) (*WaitAllocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WaitAllocationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_WaitAllocation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) EndAllocation(ctx context.Context, in *EndAllocationRequest, opts ...grpc.CallOption) (*EndAllocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EndAllocationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_EndAllocation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) RenewAllocation(ctx context.Context, in *RenewAllocationRequest, opts ...grpc.CallOption) (*RenewAllocationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RenewAllocationResponse)
+	err := c.cc.Invoke(ctx, DaemonService_RenewAllocation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) EndRunAllocations(ctx context.Context, in *EndRunAllocationsRequest, opts ...grpc.CallOption) (*EndRunAllocationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EndRunAllocationsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_EndRunAllocations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -585,6 +683,27 @@ type DaemonServiceServer interface {
 	DescribeSetup(context.Context, *DescribeSetupRequest) (*DescribeSetupResponse, error)
 	// ListPlacements reports every placement and the hardware it gives.
 	ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error)
+	// RequestAllocation asks for a standing allocation of a placement for a run (allocation.proto). It
+	// returns once the request is recorded and the backend asked, usually with the allocation PENDING.
+	// A request the rules refuse (a placement with no allocations section, a time over its max_for,
+	// max_held reached) fails with the reason. Protocol 6.
+	RequestAllocation(context.Context, *RequestAllocationRequest) (*RequestAllocationResponse, error)
+	// ListAllocations lists a run's allocations with the live state the daemon holds.
+	ListAllocations(context.Context, *ListAllocationsRequest) (*ListAllocationsResponse, error)
+	// ShowAllocation returns one allocation.
+	ShowAllocation(context.Context, *ShowAllocationRequest) (*ShowAllocationResponse, error)
+	// WaitAllocation returns once the allocation is in the state asked for, ended, or the timeout
+	// passed, whichever is first. The daemon measures the timeout; the call never changes the
+	// allocation.
+	WaitAllocation(context.Context, *WaitAllocationRequest) (*WaitAllocationResponse, error)
+	// EndAllocation ends an allocation of the caller's run at once, or with after_jobs once the jobs it
+	// holds are done.
+	EndAllocation(context.Context, *EndAllocationRequest) (*EndAllocationResponse, error)
+	// RenewAllocation gives an allocation a standing renewal order, or takes its order away.
+	RenewAllocation(context.Context, *RenewAllocationRequest) (*RenewAllocationResponse, error)
+	// EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
+	// once, and the run asks for no more. Whoever ends a run calls it.
+	EndRunAllocations(context.Context, *EndRunAllocationsRequest) (*EndRunAllocationsResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -690,6 +809,27 @@ func (UnimplementedDaemonServiceServer) DescribeSetup(context.Context, *Describe
 }
 func (UnimplementedDaemonServiceServer) ListPlacements(context.Context, *ListPlacementsRequest) (*ListPlacementsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListPlacements not implemented")
+}
+func (UnimplementedDaemonServiceServer) RequestAllocation(context.Context, *RequestAllocationRequest) (*RequestAllocationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestAllocation not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListAllocations(context.Context, *ListAllocationsRequest) (*ListAllocationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAllocations not implemented")
+}
+func (UnimplementedDaemonServiceServer) ShowAllocation(context.Context, *ShowAllocationRequest) (*ShowAllocationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShowAllocation not implemented")
+}
+func (UnimplementedDaemonServiceServer) WaitAllocation(context.Context, *WaitAllocationRequest) (*WaitAllocationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WaitAllocation not implemented")
+}
+func (UnimplementedDaemonServiceServer) EndAllocation(context.Context, *EndAllocationRequest) (*EndAllocationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndAllocation not implemented")
+}
+func (UnimplementedDaemonServiceServer) RenewAllocation(context.Context, *RenewAllocationRequest) (*RenewAllocationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenewAllocation not implemented")
+}
+func (UnimplementedDaemonServiceServer) EndRunAllocations(context.Context, *EndRunAllocationsRequest) (*EndRunAllocationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndRunAllocations not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1260,6 +1400,132 @@ func _DaemonService_ListPlacements_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_RequestAllocation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestAllocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).RequestAllocation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_RequestAllocation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).RequestAllocation(ctx, req.(*RequestAllocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListAllocations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAllocationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListAllocations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListAllocations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListAllocations(ctx, req.(*ListAllocationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ShowAllocation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShowAllocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ShowAllocation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ShowAllocation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ShowAllocation(ctx, req.(*ShowAllocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_WaitAllocation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WaitAllocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).WaitAllocation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_WaitAllocation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).WaitAllocation(ctx, req.(*WaitAllocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_EndAllocation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EndAllocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).EndAllocation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_EndAllocation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).EndAllocation(ctx, req.(*EndAllocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_RenewAllocation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenewAllocationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).RenewAllocation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_RenewAllocation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).RenewAllocation(ctx, req.(*RenewAllocationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_EndRunAllocations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EndRunAllocationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).EndRunAllocations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_EndRunAllocations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).EndRunAllocations(ctx, req.(*EndRunAllocationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1378,6 +1644,34 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListPlacements",
 			Handler:    _DaemonService_ListPlacements_Handler,
+		},
+		{
+			MethodName: "RequestAllocation",
+			Handler:    _DaemonService_RequestAllocation_Handler,
+		},
+		{
+			MethodName: "ListAllocations",
+			Handler:    _DaemonService_ListAllocations_Handler,
+		},
+		{
+			MethodName: "ShowAllocation",
+			Handler:    _DaemonService_ShowAllocation_Handler,
+		},
+		{
+			MethodName: "WaitAllocation",
+			Handler:    _DaemonService_WaitAllocation_Handler,
+		},
+		{
+			MethodName: "EndAllocation",
+			Handler:    _DaemonService_EndAllocation_Handler,
+		},
+		{
+			MethodName: "RenewAllocation",
+			Handler:    _DaemonService_RenewAllocation_Handler,
+		},
+		{
+			MethodName: "EndRunAllocations",
+			Handler:    _DaemonService_EndRunAllocations_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

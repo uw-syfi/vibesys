@@ -84,7 +84,11 @@ var rules = map[string][]string{
 	// only.
 	"internal/environment/fakealloc":     {"internal/alloc", "internal/clock", "internal/core", "internal/environment"},
 	"internal/environment/allocatortest": {"internal/alloc", "internal/core", "internal/environment"},
-	"internal/environment/fakeenv":       {"internal/clock", "internal/core", "internal/environment"},
+	// The allocator of a placement's slots of a machine, over the slots the daemon's scheduler has, and
+	// those slots in memory for tests.
+	"internal/environment/localalloc": {"internal/alloc", "internal/core", "internal/environment"},
+	"internal/environment/fakeslots":  {"internal/alloc", "internal/environment/localalloc"},
+	"internal/environment/fakeenv":    {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
@@ -140,13 +144,13 @@ var rules = map[string][]string{
 	"internal/proctable": {},
 
 	// Storage.
-	"internal/store":           {"internal/core"},
+	"internal/store":           {"internal/alloc", "internal/core"},
 	"internal/store/ledger":    {"internal/core", "internal/store"},
-	"internal/store/storetest": {"internal/core", "internal/store"},
-	"internal/store/memstore":  {"internal/core", "internal/store", "internal/store/ledger"},
+	"internal/store/storetest": {"internal/alloc", "internal/core", "internal/store"},
+	"internal/store/memstore":  {"internal/alloc", "internal/core", "internal/store", "internal/store/ledger"},
 	// The files of a store are the contract's messages in protojson, so the filestore speaks gen/
 	// and translates through wire; see storageEncoding for what it may not use instead.
-	"internal/store/filestore":      {"gen/", "internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys", "internal/wire"},
+	"internal/store/filestore":      {"gen/", "internal/alloc", "internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys", "internal/wire"},
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
@@ -167,6 +171,7 @@ var rules = map[string][]string{
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
+		"internal/alloc", "internal/environment/localalloc",
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/gitrepo",
 		"internal/lease", "internal/lifecycle", "internal/owned", "internal/schedule", "internal/store", "internal/supervisor",
 		"internal/task",
@@ -174,7 +179,7 @@ var rules = map[string][]string{
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
-		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
+		"gen/", "internal/alloc", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
 		"internal/gitrepo", "internal/runtimedir", "internal/supervisor", "internal/task", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
@@ -189,7 +194,7 @@ var rules = map[string][]string{
 
 	// The wiring of the shipped binary.
 	"internal/production": {
-		"envcodec",
+		"envcodec", "internal/alloc",
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
 		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
@@ -240,7 +245,8 @@ var testRules = map[string][]string{
 	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
 	// The fake allocator keeps the allocators' contract.
-	"internal/environment/fakealloc": {"internal/environment/allocatortest"},
+	"internal/environment/fakealloc":  {"internal/environment/allocatortest"},
+	"internal/environment/localalloc": {"internal/environment/allocatortest", "internal/environment/fakeslots"},
 	// The core's records are checked against the contract's rules for them.
 	"internal/alloc":            {"gen/", "internal/wire"},
 	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
@@ -290,13 +296,14 @@ var testRules = map[string][]string{
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/app": {
+		"internal/alloc", "internal/environment/fakealloc", "internal/store/memstore",
 		"internal/app/filestores", "internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv",
 		"internal/hostfs", "internal/store/filestore", "internal/store/filestore/fsys", "internal/store/storetest", "internal/task/tasktest",
 		"internal/lease/fakelease",
 	},
 	"internal/app/filestores": {"internal/core"},
 	"internal/daemon": {
-		"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
+		"internal/store", "internal/store/memstore", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
 		"internal/lease", "internal/lease/fakelease", "internal/schedule", "internal/task/tasktest",
 	},
 	"internal/client": {
@@ -305,12 +312,14 @@ var testRules = map[string][]string{
 	},
 	// The whole daemon, over Fakes, in one process.
 	"internal/sim": {
+		"internal/alloc", "internal/environment", "internal/environment/fakealloc", "internal/store/memstore", "internal/wire",
 		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
 		"internal/store", "internal/supervisor", "internal/lease", "internal/lease/fakelease",
 	},
 	"cmd/vibesys-cli": {
+		"internal/alloc", "internal/schedule", "internal/store/memstore",
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/docker", "internal/environment/fakeenv",
 		"internal/lifecycle", "internal/runtimedir", "internal/store", "internal/store/filestore",

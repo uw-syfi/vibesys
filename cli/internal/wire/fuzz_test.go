@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
@@ -578,6 +579,62 @@ func FuzzDecodeNodeReadingJSON(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if _, out, err := wire.DecodeNodeReading(data); err != nil && (out != nil || !wire.IsInvalidInput(err)) {
 			t.Fatalf("%q refused as %v with %v", data, err, out)
+		}
+	})
+}
+
+func FuzzDecodeAllocationInput(f *testing.F) {
+	var seeds []proto.Message
+	for _, in := range everyInput() {
+		m, err := wire.FromAllocationInput(in)
+		if err != nil {
+			f.Fatal(err)
+		}
+		seeds = append(seeds, m)
+	}
+	seedMessages(f, seeds...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.AllocationInput{}
+		decode(t, data, message)
+		first, err := wire.ToAllocationInput(message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused input gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		encoded, err := wire.FromAllocationInput(first)
+		if err != nil {
+			t.Fatalf("a decoded input %+v does not encode: %v", first, err)
+		}
+		again, err := wire.ToAllocationInput(encoded)
+		if err != nil {
+			t.Fatalf("a decoded input changed when encoded and decoded again: %v", err)
+		}
+		reencoded, err := wire.FromAllocationInput(again)
+		if err != nil || !proto.Equal(reencoded, encoded) {
+			t.Fatalf("a decoded input changed when encoded and decoded again: %v, %v; want %v", reencoded, err, encoded)
+		}
+	})
+}
+
+func FuzzDecodeRenewalOrder(f *testing.F) {
+	seedMessages(f,
+		wire.FromRenewalOrder(alloc.RenewalOrder{Lead: time.Hour, For: 12 * time.Hour, Until: alloc.UntilRunEnd{}}),
+		wire.FromRenewalOrder(alloc.RenewalOrder{Lead: time.Minute, For: time.Hour, Until: alloc.UntilTime{At: logAt}}))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.RenewalOrder{}
+		decode(t, data, message)
+		first, err := wire.ToRenewalOrder(message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused order gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		again, err := wire.ToRenewalOrder(wire.FromRenewalOrder(first))
+		if err != nil || again.Lead != first.Lead || again.For != first.For {
+			t.Fatalf("a decoded order changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
 		}
 	})
 }

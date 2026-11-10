@@ -78,7 +78,7 @@ func submitProfile(ctx context.Context, d deps, args []string) int {
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
 		Spec: &cliv1.JobSpec{
-			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_DOCKER, Placement: c.placement,
+			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_DOCKER, Placement: c.placement, Allocation: c.alloc,
 			Settings: &cliv1.JobSpec_Command{Command: settings},
 		},
 		Note: *note, Plan: uint32(*plan),
@@ -145,7 +145,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: c.placement}
+	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: c.placement, Allocation: c.alloc}
 	if kind == "check" {
 		spec.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
 	} else {
@@ -231,7 +231,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
 		Spec: &cliv1.JobSpec{
-			Commit: commit, Environment: kind, Placement: c.placement,
+			Commit: commit, Environment: kind, Placement: c.placement, Allocation: c.alloc,
 			Settings: &cliv1.JobSpec_Command{Command: settings},
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),

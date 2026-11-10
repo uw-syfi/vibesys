@@ -145,8 +145,16 @@ type JobSpec struct {
 	// chooses when the job starts; the placement it ran on is in its pinned environment
 	// (Fingerprint.Placement). A host job has none.
 	Placement string
-	Settings  Settings
+	// Allocation is the standing allocation of the submitting run the job runs in: an allocation's
+	// name (alloc.ID), which refuses the job unless it fits that one, or AllocationAny, which puts it
+	// in a running allocation of the run that it fits and otherwise queues it as a job with no
+	// allocation is queued. Empty runs it as it always has.
+	Allocation string
+	Settings   Settings
 }
+
+// AllocationAny is JobSpec.Allocation for a job that takes any allocation of its run it fits.
+const AllocationAny = "any"
 
 // KeyInputs is everything a cache key is made of. Notes, plans and the caller never are. The
 // digest over these is a pure rule that lives in this package.
