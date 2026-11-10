@@ -16,7 +16,12 @@ import (
 
 // Config configures New. Every field but ProbePause is required.
 type Config struct {
-	Engine Engine
+	// AllocationLabel is the label a job's first container carries naming the backend's reference
+	// for the standing allocation it runs inside (environment.Target.Allocation), for the engine of a
+	// placement whose allocations are batch allocations to read. Empty leaves the target's
+	// allocation unused, as every placement but those has it.
+	AllocationLabel string
+	Engine          Engine
 	// Source reads the files of a task at a commit.
 	Source Source
 	// Backend describes the machine the engine runs containers on: what the fingerprint is made of.

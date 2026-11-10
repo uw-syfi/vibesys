@@ -368,6 +368,11 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		Limit:    r.x.Timeout,
 		Measured: r.x.Measured,
 	}
+	// A job that runs inside a standing allocation names it on its first container, which the
+	// placement's engine reads (Config.AllocationLabel) to run the container inside it.
+	if key := p.cfg.AllocationLabel; key != "" && r.e.target.Allocation != "" && b == r.boxes[0] {
+		cs.Labels[key] = r.e.target.Allocation
+	}
 	switch as {
 	case roleBeside:
 		cs.Network = NetworkOf(r.boxes[0].name)

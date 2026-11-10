@@ -84,7 +84,11 @@ var rules = map[string][]string{
 	// only.
 	"internal/environment/fakealloc":     {"internal/alloc", "internal/clock", "internal/core", "internal/environment"},
 	"internal/environment/allocatortest": {"internal/alloc", "internal/core", "internal/environment"},
-	"internal/environment/fakeenv":       {"internal/clock", "internal/core", "internal/environment"},
+	// The allocator of a placement's slots of a machine, over the slots the daemon's scheduler has, and
+	// those slots in memory for tests.
+	"internal/environment/localalloc": {"internal/alloc", "internal/core", "internal/environment"},
+	"internal/environment/fakeslots":  {"internal/alloc", "internal/environment/localalloc"},
+	"internal/environment/fakeenv":    {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
@@ -140,13 +144,13 @@ var rules = map[string][]string{
 	"internal/proctable": {},
 
 	// Storage.
-	"internal/store":           {"internal/core"},
+	"internal/store":           {"internal/alloc", "internal/core"},
 	"internal/store/ledger":    {"internal/core", "internal/store"},
-	"internal/store/storetest": {"internal/core", "internal/store"},
-	"internal/store/memstore":  {"internal/core", "internal/store", "internal/store/ledger"},
+	"internal/store/storetest": {"internal/alloc", "internal/core", "internal/store"},
+	"internal/store/memstore":  {"internal/alloc", "internal/core", "internal/store", "internal/store/ledger"},
 	// The files of a store are the contract's messages in protojson, so the filestore speaks gen/
 	// and translates through wire; see storageEncoding for what it may not use instead.
-	"internal/store/filestore":      {"gen/", "internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys", "internal/wire"},
+	"internal/store/filestore":      {"gen/", "internal/alloc", "internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys", "internal/wire"},
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
@@ -240,7 +244,8 @@ var testRules = map[string][]string{
 	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
 	// The fake allocator keeps the allocators' contract.
-	"internal/environment/fakealloc": {"internal/environment/allocatortest"},
+	"internal/environment/fakealloc":  {"internal/environment/allocatortest"},
+	"internal/environment/localalloc": {"internal/environment/allocatortest", "internal/environment/fakeslots"},
 	// The core's records are checked against the contract's rules for them.
 	"internal/alloc":            {"gen/", "internal/wire"},
 	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},

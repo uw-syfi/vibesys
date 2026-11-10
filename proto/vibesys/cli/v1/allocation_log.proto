@@ -148,3 +148,12 @@ message AllocationLogFile {
   uint64 seq = 2 [(buf.validate.field).uint64.gt = 0];
   AllocationInput input = 3 [(buf.validate.field).required = true];
 }
+
+// DaemonIdentityFile is daemon-id.json of the per-user state directory: who this user's daemon is
+// across restarts, made once. Allocations a daemon makes at a backend carry it, so a daemon finds
+// its own again after a restart (environment.Allocator.Adopt) and never another daemon's.
+message DaemonIdentityFile {
+  int32 format = 1 [(buf.validate.field).int32.gt = 0];
+  // A name made once, 16 to 64 characters of a-z and 0-9.
+  string id = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]{16,64}$"];
+}
