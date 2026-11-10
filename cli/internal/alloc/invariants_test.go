@@ -198,6 +198,11 @@ func checkStep(cfg alloc.Config, now time.Time, before alloc.State, e alloc.Even
 			// First in, first out: every job queued ahead of it is gone from the queue.
 			if bl, ok := liveOf(prev[x.ID]); ok {
 				ahead := true
+				for _, act := range actions {
+					if n, ok := act.(alloc.NotPlaced); ok && n.Why == nil {
+						fail("job %s was left without an allocation and nothing says why", n.Job)
+					}
+				}
 				for _, q := range bl.Queue {
 					if q.Job == x.Job {
 						ahead = false
@@ -233,8 +238,23 @@ func checkStep(cfg alloc.Config, now time.Time, before alloc.State, e alloc.Even
 	// A job running in an allocation that ends is lost with its end reason, and a job queued there
 	// is dropped or placed elsewhere.
 	finished := core.JobID("")
-	if f, ok := e.(alloc.JobFinished); ok {
+	switch f := e.(type) {
+	case alloc.JobFinished:
 		finished = f.Job
+	case alloc.ProcessesLeft:
+		// The job whose end reported them is done: it is not lost with the allocation.
+		finished = f.Job
+		// No job starts in the allocation whose processes may survive.
+		for _, act := range actions {
+			if x, ok := act.(alloc.StartJob); ok && x.ID == f.ID {
+				fail("%s started in %s, where processes left by a job may still run", x.Job, f.ID)
+			}
+		}
+		if b, ok := prev[f.ID]; ok && (b.Stage() == alloc.StageRunning || b.Stage() == alloc.StageDraining) {
+			if p, ok := cur[f.ID].Phase.(alloc.Ended); !ok || p.Reason != alloc.EndExternal {
+				fail("%s held processes left by a job and is %+v, want ended external", f.ID, cur[f.ID].Phase)
+			}
+		}
 	}
 	for id, b := range prev {
 		ae, ended := cur[id].Phase.(alloc.Ended)

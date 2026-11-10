@@ -2,6 +2,7 @@ package environment
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -25,6 +26,12 @@ type Target struct {
 	// cluster: its environment runs the job's containers inside that allocation, and does not ask
 	// the cluster for one of its own. An environment of any other kind ignores it.
 	Allocation string
+	// EnterBy, when set, is the latest time the job's first container may enter the allocation: one
+	// ready later does not fit what is left of it. A job submitted into it by name then does not run; one of any allocation
+	// (AllocationAny) runs as a job with no allocation does, saying why in its output.
+	EnterBy time.Time
+	// AllocationAny says the job was submitted to any allocation of its run.
+	AllocationAny bool
 }
 
 // Environments hands out the Environment of a kind for a target. The daemon asks it for a job's

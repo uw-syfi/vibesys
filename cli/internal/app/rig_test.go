@@ -61,6 +61,9 @@ type world struct {
 	timers     clock.Timers
 	slowPeriod time.Duration
 	apps       []*app.App
+	// wrap, when set, wraps the supervisors each daemon starts jobs with, as a test that looks at
+	// the launches does.
+	wrap func(supervisor.Supervisors) supervisor.Supervisors
 }
 
 func newWorld(t *testing.T) *world {
@@ -104,11 +107,25 @@ var rigMachine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64",
 
 func (w *world) supervisors() supervisor.Supervisors {
 	host := supervisor.Host{Files: w.files, Clock: w.clock}
-	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
+	var s supervisor.Supervisors = supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
+	if w.wrap != nil {
+		s = w.wrap(s)
+	}
+	return s
 }
 
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.
 func (w *world) newApp() *app.App {
+	w.t.Helper()
+	a, err := w.tryNewApp()
+	if err != nil {
+		w.t.Fatalf("Start: %v", err)
+	}
+	return a
+}
+
+// tryNewApp is newApp that returns the error the daemon could not start with.
+func (w *world) tryNewApp() (*app.App, error) {
 	w.t.Helper()
 	var branches gitrepo.Branches
 	if w.branches != nil {
@@ -135,10 +152,7 @@ func (w *world) newApp() *app.App {
 	}
 	a := app.New(cfg)
 	w.apps = append(w.apps, a)
-	if err := a.Start(context.Background()); err != nil {
-		w.t.Fatalf("Start: %v", err)
-	}
-	return a
+	return a, a.Start(context.Background())
 }
 
 // instant makes every wait of a retry end at once, so a test sees the retries and not their pace,

@@ -88,8 +88,7 @@
     "CommandEnd",
     "ExecutionOutcome",
     "HandshakeResponse",
-    "OutputChunk",
-    "SupervisorOutcome"
+    "OutputChunk"
   ],
   "proto/vibesys/cli/v1/task.proto": [
     "TaskResultV02",

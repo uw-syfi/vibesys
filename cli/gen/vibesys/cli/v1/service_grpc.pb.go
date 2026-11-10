@@ -19,45 +19,46 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_Hello_FullMethodName             = "/vibesys.cli.v1.DaemonService/Hello"
-	DaemonService_Status_FullMethodName            = "/vibesys.cli.v1.DaemonService/Status"
-	DaemonService_Stop_FullMethodName              = "/vibesys.cli.v1.DaemonService/Stop"
-	DaemonService_Submit_FullMethodName            = "/vibesys.cli.v1.DaemonService/Submit"
-	DaemonService_Watch_FullMethodName             = "/vibesys.cli.v1.DaemonService/Watch"
-	DaemonService_Wait_FullMethodName              = "/vibesys.cli.v1.DaemonService/Wait"
-	DaemonService_WatchTask_FullMethodName         = "/vibesys.cli.v1.DaemonService/WatchTask"
-	DaemonService_Cancel_FullMethodName            = "/vibesys.cli.v1.DaemonService/Cancel"
-	DaemonService_AddNote_FullMethodName           = "/vibesys.cli.v1.DaemonService/AddNote"
-	DaemonService_ListJobs_FullMethodName          = "/vibesys.cli.v1.DaemonService/ListJobs"
-	DaemonService_ForgetRepository_FullMethodName  = "/vibesys.cli.v1.DaemonService/ForgetRepository"
-	DaemonService_ReadLogs_FullMethodName          = "/vibesys.cli.v1.DaemonService/ReadLogs"
-	DaemonService_Show_FullMethodName              = "/vibesys.cli.v1.DaemonService/Show"
-	DaemonService_Compare_FullMethodName           = "/vibesys.cli.v1.DaemonService/Compare"
-	DaemonService_Promote_FullMethodName           = "/vibesys.cli.v1.DaemonService/Promote"
-	DaemonService_CurrentResult_FullMethodName     = "/vibesys.cli.v1.DaemonService/CurrentResult"
-	DaemonService_AddToFrontier_FullMethodName     = "/vibesys.cli.v1.DaemonService/AddToFrontier"
-	DaemonService_ListFrontier_FullMethodName      = "/vibesys.cli.v1.DaemonService/ListFrontier"
-	DaemonService_CreatePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/CreatePlan"
-	DaemonService_ListPlans_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListPlans"
-	DaemonService_ViewPlan_FullMethodName          = "/vibesys.cli.v1.DaemonService/ViewPlan"
-	DaemonService_EditPlan_FullMethodName          = "/vibesys.cli.v1.DaemonService/EditPlan"
-	DaemonService_CommentPlan_FullMethodName       = "/vibesys.cli.v1.DaemonService/CommentPlan"
-	DaemonService_ClosePlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/ClosePlan"
-	DaemonService_StartWorkstream_FullMethodName   = "/vibesys.cli.v1.DaemonService/StartWorkstream"
-	DaemonService_ListWorkstreams_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListWorkstreams"
-	DaemonService_EditWorkstream_FullMethodName    = "/vibesys.cli.v1.DaemonService/EditWorkstream"
-	DaemonService_DeclareBound_FullMethodName      = "/vibesys.cli.v1.DaemonService/DeclareBound"
-	DaemonService_ListBounds_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListBounds"
-	DaemonService_DescribeTask_FullMethodName      = "/vibesys.cli.v1.DaemonService/DescribeTask"
-	DaemonService_DescribeSetup_FullMethodName     = "/vibesys.cli.v1.DaemonService/DescribeSetup"
-	DaemonService_ListPlacements_FullMethodName    = "/vibesys.cli.v1.DaemonService/ListPlacements"
-	DaemonService_RequestAllocation_FullMethodName = "/vibesys.cli.v1.DaemonService/RequestAllocation"
-	DaemonService_ListAllocations_FullMethodName   = "/vibesys.cli.v1.DaemonService/ListAllocations"
-	DaemonService_ShowAllocation_FullMethodName    = "/vibesys.cli.v1.DaemonService/ShowAllocation"
-	DaemonService_WaitAllocation_FullMethodName    = "/vibesys.cli.v1.DaemonService/WaitAllocation"
-	DaemonService_EndAllocation_FullMethodName     = "/vibesys.cli.v1.DaemonService/EndAllocation"
-	DaemonService_RenewAllocation_FullMethodName   = "/vibesys.cli.v1.DaemonService/RenewAllocation"
-	DaemonService_EndRunAllocations_FullMethodName = "/vibesys.cli.v1.DaemonService/EndRunAllocations"
+	DaemonService_Hello_FullMethodName                 = "/vibesys.cli.v1.DaemonService/Hello"
+	DaemonService_Status_FullMethodName                = "/vibesys.cli.v1.DaemonService/Status"
+	DaemonService_Stop_FullMethodName                  = "/vibesys.cli.v1.DaemonService/Stop"
+	DaemonService_Submit_FullMethodName                = "/vibesys.cli.v1.DaemonService/Submit"
+	DaemonService_Watch_FullMethodName                 = "/vibesys.cli.v1.DaemonService/Watch"
+	DaemonService_Wait_FullMethodName                  = "/vibesys.cli.v1.DaemonService/Wait"
+	DaemonService_WatchTask_FullMethodName             = "/vibesys.cli.v1.DaemonService/WatchTask"
+	DaemonService_Cancel_FullMethodName                = "/vibesys.cli.v1.DaemonService/Cancel"
+	DaemonService_AddNote_FullMethodName               = "/vibesys.cli.v1.DaemonService/AddNote"
+	DaemonService_ListJobs_FullMethodName              = "/vibesys.cli.v1.DaemonService/ListJobs"
+	DaemonService_ForgetRepository_FullMethodName      = "/vibesys.cli.v1.DaemonService/ForgetRepository"
+	DaemonService_ReadLogs_FullMethodName              = "/vibesys.cli.v1.DaemonService/ReadLogs"
+	DaemonService_Show_FullMethodName                  = "/vibesys.cli.v1.DaemonService/Show"
+	DaemonService_Compare_FullMethodName               = "/vibesys.cli.v1.DaemonService/Compare"
+	DaemonService_Promote_FullMethodName               = "/vibesys.cli.v1.DaemonService/Promote"
+	DaemonService_CurrentResult_FullMethodName         = "/vibesys.cli.v1.DaemonService/CurrentResult"
+	DaemonService_AddToFrontier_FullMethodName         = "/vibesys.cli.v1.DaemonService/AddToFrontier"
+	DaemonService_ListFrontier_FullMethodName          = "/vibesys.cli.v1.DaemonService/ListFrontier"
+	DaemonService_CreatePlan_FullMethodName            = "/vibesys.cli.v1.DaemonService/CreatePlan"
+	DaemonService_ListPlans_FullMethodName             = "/vibesys.cli.v1.DaemonService/ListPlans"
+	DaemonService_ViewPlan_FullMethodName              = "/vibesys.cli.v1.DaemonService/ViewPlan"
+	DaemonService_EditPlan_FullMethodName              = "/vibesys.cli.v1.DaemonService/EditPlan"
+	DaemonService_CommentPlan_FullMethodName           = "/vibesys.cli.v1.DaemonService/CommentPlan"
+	DaemonService_ClosePlan_FullMethodName             = "/vibesys.cli.v1.DaemonService/ClosePlan"
+	DaemonService_StartWorkstream_FullMethodName       = "/vibesys.cli.v1.DaemonService/StartWorkstream"
+	DaemonService_ListWorkstreams_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListWorkstreams"
+	DaemonService_EditWorkstream_FullMethodName        = "/vibesys.cli.v1.DaemonService/EditWorkstream"
+	DaemonService_DeclareBound_FullMethodName          = "/vibesys.cli.v1.DaemonService/DeclareBound"
+	DaemonService_ListBounds_FullMethodName            = "/vibesys.cli.v1.DaemonService/ListBounds"
+	DaemonService_DescribeTask_FullMethodName          = "/vibesys.cli.v1.DaemonService/DescribeTask"
+	DaemonService_DescribeSetup_FullMethodName         = "/vibesys.cli.v1.DaemonService/DescribeSetup"
+	DaemonService_ListPlacements_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListPlacements"
+	DaemonService_RequestAllocation_FullMethodName     = "/vibesys.cli.v1.DaemonService/RequestAllocation"
+	DaemonService_ListAllocations_FullMethodName       = "/vibesys.cli.v1.DaemonService/ListAllocations"
+	DaemonService_ShowAllocation_FullMethodName        = "/vibesys.cli.v1.DaemonService/ShowAllocation"
+	DaemonService_WaitAllocation_FullMethodName        = "/vibesys.cli.v1.DaemonService/WaitAllocation"
+	DaemonService_EndAllocation_FullMethodName         = "/vibesys.cli.v1.DaemonService/EndAllocation"
+	DaemonService_RenewAllocation_FullMethodName       = "/vibesys.cli.v1.DaemonService/RenewAllocation"
+	DaemonService_EndRunAllocations_FullMethodName     = "/vibesys.cli.v1.DaemonService/EndRunAllocations"
+	DaemonService_ReadPlacementCapacity_FullMethodName = "/vibesys.cli.v1.DaemonService/ReadPlacementCapacity"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -164,6 +165,10 @@ type DaemonServiceClient interface {
 	// EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
 	// once, and the run asks for no more. Whoever ends a run calls it.
 	EndRunAllocations(ctx context.Context, in *EndRunAllocationsRequest, opts ...grpc.CallOption) (*EndRunAllocationsResponse, error)
+	// ReadPlacementCapacity measures a placement's capacity now (allocation.proto): its slots, and for a
+	// Slurm cluster what the partition says, with the run's own allocations on it and the recent waits
+	// of the daemon's requests. It measures and predicts nothing, and changes nothing.
+	ReadPlacementCapacity(ctx context.Context, in *ReadPlacementCapacityRequest, opts ...grpc.CallOption) (*ReadPlacementCapacityResponse, error)
 }
 
 type daemonServiceClient struct {
@@ -600,6 +605,16 @@ func (c *daemonServiceClient) EndRunAllocations(ctx context.Context, in *EndRunA
 	return out, nil
 }
 
+func (c *daemonServiceClient) ReadPlacementCapacity(ctx context.Context, in *ReadPlacementCapacityRequest, opts ...grpc.CallOption) (*ReadPlacementCapacityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadPlacementCapacityResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ReadPlacementCapacity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonServiceServer is the server API for DaemonService service.
 // All implementations must embed UnimplementedDaemonServiceServer
 // for forward compatibility.
@@ -704,6 +719,10 @@ type DaemonServiceServer interface {
 	// EndRunAllocations is what a run's end does to its allocations: each that has not ended ends at
 	// once, and the run asks for no more. Whoever ends a run calls it.
 	EndRunAllocations(context.Context, *EndRunAllocationsRequest) (*EndRunAllocationsResponse, error)
+	// ReadPlacementCapacity measures a placement's capacity now (allocation.proto): its slots, and for a
+	// Slurm cluster what the partition says, with the run's own allocations on it and the recent waits
+	// of the daemon's requests. It measures and predicts nothing, and changes nothing.
+	ReadPlacementCapacity(context.Context, *ReadPlacementCapacityRequest) (*ReadPlacementCapacityResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
 
@@ -830,6 +849,9 @@ func (UnimplementedDaemonServiceServer) RenewAllocation(context.Context, *RenewA
 }
 func (UnimplementedDaemonServiceServer) EndRunAllocations(context.Context, *EndRunAllocationsRequest) (*EndRunAllocationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndRunAllocations not implemented")
+}
+func (UnimplementedDaemonServiceServer) ReadPlacementCapacity(context.Context, *ReadPlacementCapacityRequest) (*ReadPlacementCapacityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReadPlacementCapacity not implemented")
 }
 func (UnimplementedDaemonServiceServer) mustEmbedUnimplementedDaemonServiceServer() {}
 func (UnimplementedDaemonServiceServer) testEmbeddedByValue()                       {}
@@ -1526,6 +1548,24 @@ func _DaemonService_EndRunAllocations_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_ReadPlacementCapacity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadPlacementCapacityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ReadPlacementCapacity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ReadPlacementCapacity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ReadPlacementCapacity(ctx, req.(*ReadPlacementCapacityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonService_ServiceDesc is the grpc.ServiceDesc for DaemonService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1672,6 +1712,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EndRunAllocations",
 			Handler:    _DaemonService_EndRunAllocations_Handler,
+		},
+		{
+			MethodName: "ReadPlacementCapacity",
+			Handler:    _DaemonService_ReadPlacementCapacity_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

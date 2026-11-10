@@ -1,6 +1,7 @@
 package alloc_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -224,17 +225,17 @@ func TestAnUnreachableBackendPastTheEndStartsNothingThatDoesNotFit(t *testing.T)
 // allocation that ends or no longer fits it.
 func TestAJobOfAnyFallsBackToTheSchedulerWhereverItDoesNotFit(t *testing.T) {
 	w := newWorld(t)
-	if a := w.submit("j0", time.Hour, ""); !has(a, alloc.NotPlaced{Job: "j0"}) {
+	if a := w.submit("j0", time.Hour, ""); !notPlaced(a, "j0") {
 		t.Fatalf("with no allocation: %+v", a)
 	}
 	id := w.running(gpu, 4*time.Hour)
-	if a := w.submit("j1", 5*time.Hour, ""); !has(a, alloc.NotPlaced{Job: "j1"}) {
+	if a := w.submit("j1", 5*time.Hour, ""); !notPlaced(a, "j1") {
 		t.Fatalf("too long for the one there is: %+v", a)
 	}
 	w.submit("j2", time.Hour, "")
 	w.submit("j3", time.Hour, "")
 	actions := w.do(alloc.Observed{ID: id, Seen: alloc.SeenEnded{Cause: alloc.EndedOtherwise}})
-	if !has(actions, alloc.LoseJob{Job: "j2", ID: id, Reason: alloc.EndExternal}) || !has(actions, alloc.NotPlaced{Job: "j3"}) {
+	if !has(actions, alloc.LoseJob{Job: "j2", ID: id, Reason: alloc.EndExternal}) || !notPlaced(actions, "j3") {
 		t.Fatalf("its allocation cancelled outside: %+v", actions)
 	}
 }
@@ -292,7 +293,7 @@ func TestAJobThatNoLongerFitsWhenItsTurnComesIsNotStarted(t *testing.T) {
 	w.submit("j3", 4*time.Hour, "")
 	w.do(alloc.Observed{ID: id, Seen: alloc.SeenRunning{EndsAt: w.now.Add(3 * time.Hour)}})
 	actions := w.do(alloc.JobFinished{Job: "j1"})
-	if !has(actions, alloc.NotPlaced{Job: "j3"}) || !slicesHasType[alloc.DropJob](actions) {
+	if !notPlaced(actions, "j3") || !slicesHasType[alloc.DropJob](actions) {
 		t.Fatalf("actions %+v", actions)
 	}
 	if l := w.live(id); l.Current != nil || len(l.Queue) != 0 {
@@ -324,5 +325,13 @@ func TestFoldIsTheStepsAndIsDeterministic(t *testing.T) {
 	s2, a2 := alloc.Fold(w.cfg, w.log)
 	if !equalStates(s1, w.s) || !equalStates(s1, s2) || !equalActions(a1, w.actions) || !equalActions(a1, a2) {
 		t.Fatalf("the fold differs from the steps, or from itself")
+	}
+}
+
+// A message says a duration to the whole second.
+func TestARefusalSaysItsDurationsInWholeSeconds(t *testing.T) {
+	m := alloc.DoesNotFit{ID: "a1", TimeLeft: 10*time.Minute + 33*time.Second + 554376622, Margin: time.Minute, Bound: 30 * time.Minute, Ahead: 0}.Message()
+	if !strings.Contains(m, "it has 10m34s left") || strings.Contains(m, "554") {
+		t.Fatalf("message %q", m)
 	}
 }

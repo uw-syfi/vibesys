@@ -23,6 +23,7 @@ type InProcess struct {
 	checkouts Checkouts
 	alive     *Survivors
 	host      Host
+	left      func() []lifecycle.ProcessesLeft
 }
 
 var _ Supervisors = (*InProcess)(nil)
@@ -188,6 +189,12 @@ func (p *InProcess) WithHost(h Host) *InProcess {
 	return p
 }
 
+// WithProcessesLeft gives the supervisors their Config.ProcessesLeft, and returns p.
+func (p *InProcess) WithProcessesLeft(left func() []lifecycle.ProcessesLeft) *InProcess {
+	p.left = left
+	return p
+}
+
 // Spawn implements Supervisors.
 func (p *InProcess) Spawn(ctx context.Context, launch lifecycle.Launch) (Handle, error) {
 	if err := ctx.Err(); err != nil {
@@ -200,7 +207,7 @@ func (p *InProcess) Spawn(ctx context.Context, launch lifecycle.Launch) (Handle,
 		return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s already has a run", ref)}
 	}
 	proc := &process{killed: make(chan struct{}), launch: launch,
-		sup: New(Config{Launch: launch, Environments: p.env, Checkouts: p.checkouts, Spool: &MemorySpool{}, Host: p.host})}
+		sup: New(Config{Launch: launch, Environments: p.env, Checkouts: p.checkouts, Spool: &MemorySpool{}, Host: p.host, ProcessesLeft: p.left})}
 	p.alive.runs[ref] = proc
 	return &inProcessHandle{proc: proc}, nil
 }

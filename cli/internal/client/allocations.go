@@ -75,3 +75,12 @@ func (c *Client) EndRunAllocations(ctx context.Context, req *cliv1.EndRunAllocat
 	resp, err := c.rpc.EndRunAllocations(ctx, req)
 	return resp, c.fail(err)
 }
+
+// ReadPlacementCapacity measures a placement's capacity.
+func (c *Client) ReadPlacementCapacity(ctx context.Context, req *cliv1.ReadPlacementCapacityRequest) (*cliv1.ReadPlacementCapacityResponse, error) {
+	if err := c.needAllocations("a placement's capacity"); err != nil {
+		return nil, err
+	}
+	resp, err := c.rpc.ReadPlacementCapacity(ctx, req)
+	return resp, c.fail(err)
+}

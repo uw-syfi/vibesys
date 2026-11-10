@@ -38,7 +38,7 @@ func versionTwo(t *testing.T) *fsys.MemFS {
 	return image
 }
 
-// A store of version 2 opens as it was, and is a store of version 6 from then on: its format file
+// A store of version 2 opens as it was, and is a store of version 7 from then on: its format file
 // says 5, it holds a frontier, and a program of version 2 would refuse it. A crash at any step of
 // the migration leaves a store that the next Open migrates and that shows the same.
 func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
@@ -57,7 +57,7 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 		mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 		opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err == nil {
-			if got := unspaced(file(t, mem, "state/format")); got != `{"format":6}` {
+			if got := unspaced(file(t, mem, "state/format")); got != `{"format":7}` {
 				t.Fatalf("format file after the migration = %s", got)
 			}
 			if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
@@ -73,14 +73,14 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 			if got := storetest.Observe(t, again, runs...); !reflect.DeepEqual(got, want) {
 				t.Fatalf("after a crash at step %d (power loss %v) the store shows\n%+v\nwant\n%+v", step, power, got, want)
 			}
-			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":6}` {
+			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":7}` {
 				t.Fatalf("format file after a crash at step %d = %s", step, got)
 			}
 		}
 	}
 }
 
-// A store of version 3 opens as it was, and is a store of version 6 from then on: version 4 only
+// A store of version 3 opens as it was, and is a store of version 7 from then on: version 4 only
 // added a job's placement and version 5 a job's needs, so every record of version 3 reads as it
 // was written. Its results run in no docker environment, so they keep their keys.
 func TestAStoreOfVersionThreeIsMigrated(t *testing.T) {
@@ -99,7 +99,7 @@ func TestAStoreOfVersionThreeIsMigrated(t *testing.T) {
 		}
 	}
 	opened := openOn(t, image)
-	if got := unspaced(file(t, image, "state/format")); got != `{"format":6}` {
+	if got := unspaced(file(t, image, "state/format")); got != `{"format":7}` {
 		t.Fatalf("format file after the migration = %s", got)
 	}
 	if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
@@ -138,7 +138,7 @@ func checkedOn(t *testing.T, s *filestore.Store, placement string, key core.JobK
 	return id
 }
 
-// A store of version 4 opens as a store of version 6, in which where a docker result ran takes no
+// A store of version 4 opens as a store of version 7, in which where a docker result ran takes no
 // part in its key: two passes of one commit and image that a version 4 program keyed apart, as they
 // ran on two placements, answer the one key the current rule gives them, as do the jobs that saved
 // them, and a check of that key, submitted from any placement, reuses them. The records are read,
@@ -165,7 +165,7 @@ func TestAStoreOfVersionFourHasWhereItsResultsRanLeaveTheirKeys(t *testing.T) {
 	}
 
 	opened := openOn(t, image)
-	if got := unspaced(file(t, image, "state/format")); got != `{"format":6}` {
+	if got := unspaced(file(t, image, "state/format")); got != `{"format":7}` {
 		t.Fatalf("format file after the migration = %s", got)
 	}
 	results, err := opened.Results(t.Context(), core.ResultFilter{Key: want})

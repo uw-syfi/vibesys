@@ -27,6 +27,7 @@ import (
 	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/slurm"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
@@ -46,6 +47,39 @@ type machines struct {
 	// claims are what the resources of each placement claim for a job that runs on it.
 	claims map[string][]core.Claim
 	probes map[string]app.Placement
+	// clusters are what the apptainer placements ask their cluster, by placement: the daemon makes
+	// their standing allocators and capacity readers from them.
+	clusters map[string]clusterSide
+}
+
+// clusterSide is what an apptainer placement's cluster is asked through, beside its engine: the
+// cluster, the scope its allocations are found by, and what each is sized for.
+type clusterSide struct {
+	Cluster   apptainer.Cluster
+	Scope     string
+	Sizing    apptainer.Sizing
+	MaxTime   time.Duration
+	Partition string
+	// QueueTimeout is how long an allocation may wait in Slurm's queue: the placement's slurm
+	// queue_timeout_seconds, as its engine bounds the wait for a container's allocation.
+	QueueTimeout time.Duration
+	// Clock is the time the placement's allocator reads.
+	Clock clock.Clock
+	// Survivors takes the boxes of standing allocations whose processes the placement's engine
+	// did not confirm killed (apptainer.Engine.TakeSurvivors).
+	Survivors func() []apptainer.Survivor
+}
+
+// processesLeft takes, of every apptainer placement's engine, the standing allocations where
+// processes of a container were not confirmed killed: supervisor.Config.ProcessesLeft.
+func (m machines) processesLeft() []lifecycle.ProcessesLeft {
+	var out []lifecycle.ProcessesLeft
+	for _, name := range slices.Sorted(maps.Keys(m.clusters)) {
+		for _, s := range m.clusters[name].Survivors() {
+			out = append(out, lifecycle.ProcessesLeft{Allocation: s.Job, Detail: s.Err.Error()})
+		}
+	}
+	return out
 }
 
 // machineEnvironments are the environments this machine has: the host, and docker on each
@@ -67,7 +101,7 @@ type machines struct {
 // that a run clears what a dead job of the placement left and never what a live one uses. Another
 // machine runs one job of the daemon at a time (operator.Parse refuses more), so there the
 // containers and the Slurm allocations stay in the placement's scope, which a run sweeps whole.
-func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string) (machines, error) {
+func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, containerKey string) (machines, error) {
 	local := cpu.New(cpu.Host(), clk)
 	// One per process, shared by its placements' engines and machines: a second one would wait on
 	// the lock the first holds for the same run.
@@ -76,16 +110,19 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	// placements that need one image build it once (engineBuilds).
 	builds := engineBuilds{}
 	providers := map[string]*docker.Provider{}
-	out := machines{claims: map[string][]core.Claim{}, probes: map[string]app.Placement{}}
+	out := machines{claims: map[string][]core.Claim{}, probes: map[string]app.Placement{}, clusters: map[string]clusterSide{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
 	for _, name := range names {
-		provider, err := p.placement(clk, dir, containerKey, runs, builds, local, name, op.GetPlacements()[name], grace)
+		provider, side, err := p.placement(clk, dir, containerKey, runs, builds, local, name, op.GetPlacements()[name], grace)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		providers[name] = provider
+		if side != nil {
+			out.clusters[name] = *side
+		}
 		probe, err := placementProbe(op.GetPlacements()[name], provider)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
@@ -114,6 +151,9 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 // whatever libraries their image has. Any other build has none, and its placements run no task
 // of two images.
 func (p Process) probe() string {
+	if p.Outside.Probe != "" {
+		return p.Outside.Probe
+	}
 	if runtime.GOOS != "linux" || !path.IsAbs(p.Executable) || !static() {
 		return ""
 	}
@@ -169,12 +209,20 @@ func (e engineBuilds) of(host string) *docker.Builds {
 }
 
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
+func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, *clusterSide, error) {
 	scope := scopeOf(dir.Path(), name)
+	var source docker.Source = docker.TaskSource{Tasks: gitwork.Tasks{}}
+	if p.Outside.Source != nil {
+		source = p.Outside.Source
+	}
+	var files task.Files = gitwork.Tasks{}
+	if p.Outside.Files != nil {
+		files = p.Outside.Files
+	}
 	cfg := docker.Config{
-		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
+		Source: source, Timers: clk, Clock: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
-		Candidates: docker.CandidateFiles{Files: gitwork.Tasks{}},
+		Candidates: docker.CandidateFiles{Files: files},
 	}
 	engineCfg := dockercli.Config{Timers: clk}
 	var shell remote.Shell = remote.Local{}
@@ -203,6 +251,9 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 			cfg.Builds = builds.of("")
 		}
 		cfg.Machine = staging
+		if p.Outside.Machine != nil {
+			cfg.Machine = p.Outside.Machine
+		}
 	}
 	s := pl.GetSlurm()
 	if s != nil {
@@ -217,7 +268,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 	}
 	engine, err := dockercli.New(engineCfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg.Engine = engine
 	if s != nil {
@@ -227,9 +278,10 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		}
 	}
 	if cfg.Resources, err = resources(pl.GetResources(), shell, where, where, clk, &amd.GPUs{Shell: shell, Timers: clk}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return docker.New(cfg)
+	provider, err := docker.New(cfg)
+	return provider, nil, err
 }
 
 // exclusiveOf says whether a measured container's allocation holds its whole node: [slurm]
@@ -257,10 +309,14 @@ const gpuScript = "gpu"
 // machine and the GPUs are what the nodes say inside the allocations, never the login node.
 //
 // cfg.Scope is the run's, and scope the placement's, under which runs says which runs live.
-func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope string, runs docker.Runs, pl *cliv1.Placement) (*docker.Provider, error) {
-	local, err := dockercli.New(dockercli.Config{Timers: clk})
+func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string, runs docker.Runs, pl *cliv1.Placement) (*docker.Provider, *clusterSide, error) {
+	var local interface {
+		docker.Engine
+		apptainer.Exporter
+	}
+	local, err := p.localDocker(clk)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s, a := pl.GetSlurm(), pl.GetApptainer()
 	runtime := apptainer.RuntimeApptainer
@@ -269,43 +325,53 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 	if a.GetRuntime() == cliv1.ContainerRuntime_CONTAINER_RUNTIME_PYXIS {
 		// The login node makes each image's squashfs from its files, streamed from here.
 		runtime = apptainer.RuntimePyxis
+	} else if p.Outside.Converter != nil {
+		converter, localDir = p.Outside.Converter, p.localScratch(a)
 	} else {
 		// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
 		sif, err := localsif.New(p.Getenv("PATH"), clk, cfg.Grace)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		converter, localDir = sif, p.localScratch(a)
 	}
 	ssh := remote.SSH{Host: pl.GetRemote().GetHost(), Program: orDefault(pl.GetRemote().GetSshCommand(), "ssh")}
-	cluster, err := clustercli.New(clustercli.Config{
-		Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
-		Runtime: runtime, Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
-	})
-	if err != nil {
-		return nil, err
+	var cluster apptainer.Cluster
+	if p.Outside.Cluster != nil {
+		cluster = p.Outside.Cluster(ssh.Host)
+	} else {
+		cluster, err = clustercli.New(clustercli.Config{
+			Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
+			Runtime: runtime, Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
+		})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	var scripts map[string]string
 	if pl.GetResources().GetRocm() != nil {
 		scripts = map[string]string{gpuScript: amd.Script}
 	}
+	sizing := apptainer.Sizing{
+		Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s),
+		CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
+	}
 	eng, err := apptainer.New(apptainer.Config{
 		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: scope, Runs: runs,
 		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
-		Sizing: apptainer.Sizing{
-			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s),
-			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
-		},
-		NodeScripts: scripts, Runtime: runtime, Converter: converter, LocalDir: localDir,
+		Sizing:       sizing,
+		NodeScripts:  scripts, Runtime: runtime, Converter: converter, LocalDir: localDir,
 		Idle: seconds(a.GetIdleReleaseSeconds(), 0), AllocationLimit: seconds(a.GetAllocationLimitSeconds(), 0),
 		MaxTime:        seconds(s.GetMaxTimeSeconds(), 0),
 		ConvertTimeout: seconds(a.GetConvertTimeoutSeconds(), apptainer.DefaultConvertTimeout),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg.Engine, cfg.Backend, cfg.Probe = eng, eng.Backend(), p.probe()
+	// A job started in a standing allocation names it by this label, and its container runs inside it.
+	cfg.AllocationLabel = apptainer.LabelAllocation
 	unread := map[string]string{amd.FactModel: apptainer.Unread, amd.FactCount: apptainer.Unread, amd.FactDriver: apptainer.Unread}
 	facts := apptainer.Facts{Engine: eng, Script: gpuScript, Parse: amd.Parse, Unread: unread}
 	// The GPUs a job gets are its own allocation's: Slurm keeps two allocations off one GPU, and
@@ -313,15 +379,35 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, scope s
 	// by the placement and the cluster's login node: a measure holds its own placement's GPUs alone,
 	// and the jobs of the cluster's other placements run beside it, in allocations of their own.
 	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, cfg.Placement+"@"+ssh.Host, clk, facts); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return docker.New(cfg)
+	provider, err := docker.New(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, &clusterSide{
+		Cluster: cluster, Scope: scope, Sizing: sizing, MaxTime: seconds(s.GetMaxTimeSeconds(), 0), Partition: s.GetPartition(),
+		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout), Clock: clk,
+		Survivors: eng.TakeSurvivors,
+	}, nil
+}
+
+// localDocker is this machine's Docker, which builds and exports the images of an apptainer
+// placement.
+func (p Process) localDocker(clk Clocks) (interface {
+	docker.Engine
+	apptainer.Exporter
+}, error) {
+	if p.Outside.Docker != nil {
+		return p.Outside.Docker, nil
+	}
+	return dockercli.New(dockercli.Config{Timers: clk})
 }
 
 // resources are the resources of a placement, each made by its own package from its section. where
 // names the machine the placement reaches, and gpus whose GPUs a job of it gets, which names their
 // claim. The AMD GPUs' facts are read by amdFacts.
-func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk clock.System, amdFacts rocm.Facts) ([]resource.Resource, error) {
+func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk Clocks, amdFacts rocm.Facts) ([]resource.Resource, error) {
 	var out []resource.Resource
 	if r.GetRocm() != nil {
 		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts})

@@ -104,7 +104,7 @@
 // read, with an error of kind core.FailureIncompatible that names the file: a newer version says to
 // upgrade, and version 1, the hand-written encoding that came before protojson, says the store is
 // to be removed, because nothing migrates it and no release wrote it. This program reads versions 2
-// to 6. The refusal of version 1 names the store's directory and, when the index records it, the
+// to 7. The refusal of version 1 names the store's directory and, when the index records it, the
 // index entry to remove. The index reads an entry of another version for its task when it has this
 // version's shape, so such a store stays known and is refused alone. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
 // promotion and a refusal), so Open migrates a store of version 2 under the owner's lock: it makes
@@ -115,7 +115,8 @@
 // store of 2 to 5 is migrated to 6 the same way too: every directory it lacks is made, and the
 // format file is written last. Version 6 also keeps the unit of a measurement's metric and observations
 // (an absent unit is an unknown one, so a result saved without it reads as it did); it needed no version
-// of its own because no release read a store of 6 before the unit was added. A program of an older version refuses the store from then on, since
+// of its own because no release read a store of 6 before the unit was added. Version 7 added the
+// standing allocation of a job's spec, and a store of 2 to 6 is migrated to 7 the same way. A program of an older version refuses the store from then on, since
 // it would otherwise open it and ignore the directories it does not know. A record keeps the version
 // it was written with.
 // It refuses a record it cannot decode, one with a field it does not know, and one whose name and
