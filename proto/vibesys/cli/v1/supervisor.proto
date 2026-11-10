@@ -3,6 +3,7 @@ package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
@@ -67,6 +68,11 @@ message Launch {
   // batch allocations runs the job's containers inside it; any other ignores it. Empty for a job
   // that runs as it always has.
   string allocation = 7 [(buf.validate.field).string.max_bytes = 256];
+  // The latest time the job's first container may enter the allocation: its end less the fit
+  // margin and the job's bound, as the daemon decided it when it started the job there. A container
+  // that is ready later does not fit the time left (its preparation, such as an image build, took
+  // it), and does not enter. Unset: no bound, as for an allocation with no end.
+  google.protobuf.Timestamp allocation_enter_by = 8;
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its

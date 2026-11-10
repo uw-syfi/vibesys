@@ -17,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/store/memstore"
+	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
 // allocPeriod is the period of the allocation clock in these tests. No other wait asks for exactly
@@ -489,5 +490,52 @@ func TestARemovedAllocationsSectionReleasesItsAllocationsAtStart(t *testing.T) {
 	a = r.restart(a)
 	if got := mustAllocation(t, a, al.ID); got.Stage() != alloc.StageEnded {
 		t.Fatalf("after another restart the allocation is %s, want ended", got.Stage())
+	}
+}
+
+// launches records the launch of every job the daemon starts.
+type launches struct {
+	supervisor.Supervisors
+	mu   *sync.Mutex
+	seen *[]lifecycle.Launch
+}
+
+func (l launches) Spawn(ctx context.Context, launch lifecycle.Launch) (supervisor.Handle, error) {
+	l.mu.Lock()
+	*l.seen = append(*l.seen, launch)
+	l.mu.Unlock()
+	return l.Supervisors.Spawn(ctx, launch)
+}
+
+// The reviewer's case: an allocation with 60m left and a fit margin of 2m takes a job of a 55m
+// bound, and the job's launch carries the latest time its first container may enter it, 3m on,
+// so that a preparation of 10m (an image build) does not start a job the allocation's end would
+// kill. Before, the bound was counted from the launch, and the job was killed at the time limit.
+func TestAJobInAnAllocationLaunchesWithTheWindowItMustEnterIn(t *testing.T) {
+	r := newAllocRig(t, true, fakealloc.Options{})
+	var mu sync.Mutex
+	var seen []lifecycle.Launch
+	r.w.wrap = func(s supervisor.Supervisors) supervisor.Supervisors {
+		return launches{Supervisors: s, mu: &mu, seen: &seen}
+	}
+	a := r.w.newApp()
+	al := r.request(t, a, time.Hour)
+	ends := running(t, r.await(t, a, al.ID, app.UntilRunning)).EndsAt
+	spec := command("mark", "in", ";", "exit", "0")
+	spec.Allocation = string(al.ID)
+	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: 55 * time.Minute}
+	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	awaitState(t, a, out.Job.ID, core.JobSucceeded)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("%d launches, want the job's", len(seen))
+	}
+	// The latest entry is the allocation's end less the margin and the bound.
+	if got, want := seen[0].AllocationEnterBy, ends.Add(-2*time.Minute-55*time.Minute); !got.Equal(want) {
+		t.Fatalf("the launch's latest entry is %v, want %v (60m left, 2m margin, 55m bound)", got, want)
 	}
 }

@@ -198,7 +198,7 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 		files = p.Outside.Files
 	}
 	cfg := docker.Config{
-		Source: source, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
+		Source: source, Timers: clk, Clock: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
 		Candidates: docker.CandidateFiles{Files: files},
 	}

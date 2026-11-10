@@ -618,11 +618,19 @@ func (s *allocShell) startJob(act alloc.StartJob) {
 	if !ok || !isRef {
 		return
 	}
-	s.releaseJob(ref, al)
+	s.releaseJob(ref, al, act.Bound)
 }
 
-func (s *allocShell) releaseJob(ref lifecycle.Ref, al alloc.Allocation) {
-	s.tell(lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref})
+// releaseJob lets the job machine launch a job in the allocation. The job's first container must
+// enter it in time for its bound and the margin before the allocation's end: its preparation (an
+// image build, a conversion) counts against the allocation, and not against the job's bound, which
+// starts when it enters.
+func (s *allocShell) releaseJob(ref lifecycle.Ref, al alloc.Allocation, bound time.Duration) {
+	var by time.Time
+	if l, ok := liveOf(al); ok && !l.EndsAt.IsZero() {
+		by = l.EndsAt.Add(-s.cfg.Placements[al.Placement].Margin - bound)
+	}
+	s.tell(lifecycle.AllocReleased{Ref: ref, Placement: al.Placement, Allocation: al.Handle.Ref, EnterBy: by})
 }
 
 // tell sends the job machine an event, in the order the allocation machine decided them: one
@@ -690,7 +698,7 @@ func (s *allocShell) resendReleases() {
 			continue
 		}
 		if ref, ok := refOfJob(l.Current.Job); ok {
-			s.releaseJob(ref, al)
+			s.releaseJob(ref, al, l.Current.Bound)
 		}
 	}
 }

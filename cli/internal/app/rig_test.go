@@ -61,6 +61,9 @@ type world struct {
 	timers     clock.Timers
 	slowPeriod time.Duration
 	apps       []*app.App
+	// wrap, when set, wraps the supervisors each daemon starts jobs with, as a test that looks at
+	// the launches does.
+	wrap func(supervisor.Supervisors) supervisor.Supervisors
 }
 
 func newWorld(t *testing.T) *world {
@@ -104,7 +107,11 @@ var rigMachine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64",
 
 func (w *world) supervisors() supervisor.Supervisors {
 	host := supervisor.Host{Files: w.files, Clock: w.clock}
-	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
+	var s supervisor.Supervisors = supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
+	if w.wrap != nil {
+		s = w.wrap(s)
+	}
+	return s
 }
 
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.

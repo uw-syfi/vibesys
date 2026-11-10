@@ -24,6 +24,9 @@ type Launch struct {
 	// Allocation is the backend's reference for the standing allocation the job runs inside, empty
 	// for a job that runs as it always has (environment.Target.Allocation).
 	Allocation string
+	// AllocationEnterBy is the latest time the job's first container may enter the allocation
+	// (environment.Target.EnterBy); zero for none.
+	AllocationEnterBy time.Time
 }
 
 // Ref is the job's identity.
