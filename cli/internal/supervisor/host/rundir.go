@@ -103,8 +103,15 @@ func readLaunch(dir runDir) (lifecycle.Launch, error) {
 // the runtime directory. A home directory can be shared between machines and hold several runtime
 // directories, each with its own daemon and its own runs.
 func RecordsDir(state, machine, runtimeDir string) string {
+	return filepath.Join(state, "run-records", DaemonKey(machine, runtimeDir))
+}
+
+// DaemonKey names one daemon among those that share a state directory: the machine it runs on and
+// its runtime directory, which no two daemons running at once share. What a daemon keeps for itself
+// under a shared state directory (its run records, its allocation log and identity) is keyed by it.
+func DaemonKey(machine, runtimeDir string) string {
 	sum := sha256.Sum256([]byte(machine + "\x00" + runtimeDir))
-	return filepath.Join(state, "run-records", hex.EncodeToString(sum[:6]))
+	return hex.EncodeToString(sum[:6])
 }
 
 // record is what is known of a run outside its directory. Start is what its start mark proves.

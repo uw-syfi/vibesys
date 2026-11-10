@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
+	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
 )
 
 // defaultFitMargin is the time a job's fit keeps free before its allocation ends, when the config
@@ -35,10 +37,19 @@ func newDaemonID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// AllocationsDir is where one daemon keeps its allocation log and its identity, under the index
+// directory of a state home: keyed by the daemon (host.DaemonKey), as its run records are, since a
+// state home can be shared by several daemons, on one machine or on several, and two daemons that
+// shared a log or an identity would number their allocations alike, overwrite each other's inputs,
+// and adopt and release each other's allocations at a backend they share.
+func AllocationsDir(indexDir, machine, runtimeDir string) string {
+	return filepath.Join(indexDir, "daemons", host.DaemonKey(machine, runtimeDir))
+}
+
 // allocationsOf is how the daemon keeps standing allocations: the placements of the operator config
 // that have an allocations section, each with the limits it gives, over the allocation log in the
-// index directory. The identity the daemon keeps there is the Owner every allocator is made with,
-// so that after a restart a backend returns only this daemon's allocations.
+// daemon's own directory (AllocationsDir). The identity the daemon keeps there is the Owner every
+// allocator is made with, so that after a restart a backend returns only this daemon's allocations.
 //
 // A placement whose capacity is slots of a machine, local or over ssh, takes its allocations as
 // slots of its own max_jobs, so it needs no allocator of its own and its allocations have no end.
@@ -50,7 +61,7 @@ func newDaemonID() string {
 // A placement of kind slurm has no allocator: its containers run in one Docker daemon outside the
 // allocations Slurm makes, so it refuses to start with an allocations section, which says so,
 // instead of keeping allocations it cannot back.
-func allocationsOf(op *cliv1.OperatorConfig, indexDir string, clusters map[string]clusterSide) (app.Allocations, error) {
+func allocationsOf(op *cliv1.OperatorConfig, daemonDir string, clusters map[string]clusterSide) (app.Allocations, error) {
 	var out app.Allocations
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	var owner string
@@ -66,7 +77,7 @@ func allocationsOf(op *cliv1.OperatorConfig, indexDir string, clusters map[strin
 		case cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER:
 			if owner == "" {
 				var err error
-				if owner, err = filestore.DaemonID(indexDir, newDaemonID); err != nil {
+				if owner, err = filestore.DaemonID(daemonDir, newDaemonID); err != nil {
 					return app.Allocations{}, fmt.Errorf("reading the daemon's identity: %w", err)
 				}
 			}
@@ -96,12 +107,12 @@ func allocationsOf(op *cliv1.OperatorConfig, indexDir string, clusters map[strin
 	if len(out.Placements) == 0 {
 		return app.Allocations{}, nil
 	}
-	log, err := filestore.OpenAllocLog(indexDir)
+	log, err := filestore.OpenAllocLog(daemonDir)
 	if err != nil {
 		return app.Allocations{}, fmt.Errorf("opening the allocation log: %w", err)
 	}
 	out.Log = log
-	if out.Owner, err = filestore.DaemonID(indexDir, newDaemonID); err != nil {
+	if out.Owner, err = filestore.DaemonID(daemonDir, newDaemonID); err != nil {
 		return app.Allocations{}, fmt.Errorf("reading the daemon's identity: %w", err)
 	}
 	return out, nil

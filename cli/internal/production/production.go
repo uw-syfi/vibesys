@@ -157,7 +157,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		return err
 	}
 	// The daemon runs no container: it only fingerprints the environments.
-	wired, err := p.Wire(op, clk, dir, indexDir)
+	wired, err := p.Wire(op, clk, dir, AllocationsDir(indexDir, machine, dir.Path()))
 	if err != nil {
 		return err
 	}
@@ -246,9 +246,10 @@ type Clocks interface {
 }
 
 // Wire makes the daemon's environments, scheduler, allocations and capacity readers from the operator
-// config. indexDir is the directory of the per-user index, which keeps the allocation log and the
-// identity of the daemon. Making them touches neither Docker nor another machine.
-func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, indexDir string) (Wired, error) {
+// config. daemonDir is where the daemon keeps its own allocation log and identity: AllocationsDir
+// of the per-user index, the machine and the runtime directory. Making them touches neither Docker
+// nor another machine.
+func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, daemonDir string) (Wired, error) {
 	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
 	if err != nil {
 		return Wired{}, err
@@ -257,7 +258,7 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 	if err != nil {
 		return Wired{}, err
 	}
-	allocations, err := allocationsOf(op, indexDir, machines.clusters)
+	allocations, err := allocationsOf(op, daemonDir, machines.clusters)
 	if err != nil {
 		return Wired{}, err
 	}

@@ -104,8 +104,13 @@ type standingRig struct {
 	survivors *supervisor.Survivors
 	checkouts *fakeenv.Checkouts
 	indexes   string
-	process   production.Process
-	op        *cliv1.OperatorConfig
+	// runtime names the runtime directory of the rig's daemon, which a restart keeps, as a daemon's
+	// restart on one machine does: what it keeps for itself under the state home is keyed by it. Each
+	// start opens a directory of its own, so that what an earlier daemon's survivors hold there is
+	// not in the way of the next.
+	runtime string
+	process production.Process
+	op      *cliv1.OperatorConfig
 }
 
 func newStandingRig(t *testing.T, config string) *standingRig {
@@ -114,7 +119,7 @@ func newStandingRig(t *testing.T, config string) *standingRig {
 	r := &standingRig{
 		t: t, cluster: clusterfake.New(w.MemoryGates), gates: w.MemoryGates,
 		clock: clock.NewManual(clusterfake.Epoch, time.Millisecond), timers: newObserveTimers(),
-		stores: memstores.New(app.Rules(5)), repos: gitrepo.NewFake(), tasks: task.NewMemorySource(), survivors: supervisor.NewSurvivors(), checkouts: &fakeenv.Checkouts{}, indexes: t.TempDir(), op: parseConfig(t, config),
+		stores: memstores.New(app.Rules(5)), repos: gitrepo.NewFake(), tasks: task.NewMemorySource(), survivors: supervisor.NewSurvivors(), checkouts: &fakeenv.Checkouts{}, indexes: t.TempDir(), runtime: "/run/user/1000/vibesys-cli", op: parseConfig(t, config),
 	}
 	r.repos.AddRepo("/repo", nil)
 	t.Cleanup(r.survivors.Close)
@@ -136,8 +141,18 @@ type rigClocks struct {
 	clock.Timers
 }
 
+// rigMachine is the machine the rig's daemon runs on.
+const rigMachine = "host-a"
+
 // start is a daemon of the wiring, started on what the earlier ones left.
 func (r *standingRig) start() (*app.App, *daemon.Server) {
+	r.t.Helper()
+	return r.startAs(rigMachine, r.runtime)
+}
+
+// startAs is a daemon of the wiring on the machine named, whose runtime directory is named runtime,
+// over the rig's state home and cluster. Its clock is the rig's from then on: tick lets it go.
+func (r *standingRig) startAs(machine, runtime string) (*app.App, *daemon.Server) {
 	r.t.Helper()
 	dir, err := runtimedir.Open(shortDir(r.t), r.process.UID, runtimedir.System())
 	if err != nil {
@@ -146,7 +161,7 @@ func (r *standingRig) start() (*app.App, *daemon.Server) {
 	// Each daemon waits on a clock of its own, so that a tick is never let go to one that is gone.
 	r.timers = newObserveTimers()
 	clk := rigClocks{r.clock, r.timers}
-	wired, err := r.process.Wire(r.op, clk, dir, r.indexes)
+	wired, err := r.process.Wire(r.op, clk, dir, production.AllocationsDir(r.indexes, machine, runtime))
 	if err != nil {
 		r.t.Fatal(err)
 	}

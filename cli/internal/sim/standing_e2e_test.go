@@ -2,9 +2,6 @@ package sim_test
 
 import (
 	"context"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
-	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
-	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,6 +12,10 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
+	"github.com/uw-syfi/vibesys/cli/internal/production"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 )
 
 // The operator config of a user who turned allocations on for an apptainer placement is the
@@ -162,7 +163,7 @@ func TestTheDaemonsIdentityIsAnOwnerTheAllocatorAccepts(t *testing.T) {
 	for range 50 {
 		r := newStandingRig(t, standingConfig)
 		a, _ := r.start()
-		id, err := filestore.DaemonID(r.indexes, func() string { return "" })
+		id, err := filestore.DaemonID(production.AllocationsDir(r.indexes, rigMachine, r.runtime), func() string { return "" })
 		if err != nil {
 			t.Fatal(err)
 		}
