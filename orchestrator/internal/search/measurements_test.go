@@ -9,11 +9,13 @@ import (
 	"testing"
 	"testing/quick"
 
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 // These tests hold the rules of the one projection of a run's measure results: what the series, the
@@ -233,7 +235,7 @@ func TestABoundedObservationIsChartedAndBoundedAlike(t *testing.T) {
 		}
 		return !slices.ContainsFunc(s.Series, func(x *pb.ObjectiveSeries) bool { return x.Objective == "noise" })
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 400, Rand: rand.New(rand.NewSource(21))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 400})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -270,7 +272,7 @@ func TestTheSeriesHoldsEachCountedMeasurementOnce(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 400, Rand: rand.New(rand.NewSource(22))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 400})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -310,7 +312,7 @@ func TestTheHeadReadsAResultAsTheSeriesDoes(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 400, Rand: rand.New(rand.NewSource(23))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 400})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -494,7 +496,7 @@ func TestACutSeriesKeepsItsBestPointsBeforeItsNewestOnes(t *testing.T) {
 		best := byJob[corners[len(corners)-1]]
 		return slices.ContainsFunc(series.Points, func(p *pb.MeasuredPoint) bool { return p.BestSoFar && p.At.Seconds == best.at })
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40, Rand: rand.New(rand.NewSource(24))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -611,7 +613,7 @@ func TestTheByteBudgetKeepsTheBestAndTheFrontierBeforeAnythingElse(t *testing.T)
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 36, Rand: rand.New(rand.NewSource(25))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 36})); err != nil {
 		t.Fatal(err)
 	}
 }

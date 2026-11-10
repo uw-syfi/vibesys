@@ -19,6 +19,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/proctable"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // hangBound only guards against a process the kernel will not end. A passing run never gets near it.
@@ -117,7 +118,7 @@ func TestProcArgs2ReadsBackWhatTheKernelLayoutHolds(t *testing.T) {
 		raw := encodeProcArgs2(text(execPath), int(padding%16), args, environ, apple, int(trailing%16))
 		gotArgs, gotEnviron, err := proctable.ParseProcArgs2(raw)
 		return err == nil && slices.Equal(gotArgs, args) && slices.Equal(gotEnviron, environ)
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestProcArgs2OfAProtectedProgramHasNoEnvironment(t *testing.T) {
 		}
 		gotArgs, gotEnviron, err := proctable.ParseProcArgs2(b.Bytes())
 		return err == nil && slices.Equal(gotArgs, args) && len(gotEnviron) == 0
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +161,7 @@ func TestProcArgs2CutShortInTheArgumentsIsAnError(t *testing.T) {
 		}
 		_, _, err := proctable.ParseProcArgs2(raw[:int(cut)%end])
 		return err != nil
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

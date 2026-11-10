@@ -137,6 +137,33 @@ jobs:
           VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
         run: ./support/repoctl/repoctl run-checks --group ${{ matrix.group }}
 
+  # The Go property tests (testing/quick) with a fresh seed each night. A pull request runs them from a
+  # seed fixed by each test's name (internal/propcheck in each module), so a result there is a pure
+  # function of the code. A failure logs its seed and the command that reruns it; pin the failing
+  # input as an example case so the pull-request tier replays it.
+  go-properties:
+    name: go-properties (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [cli, gateway, orchestrator, support/repoctl]
+    env:
+      VIBESYS_PROPERTY_SEED: random
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Run the module's Go tests with fresh property seeds
+        working-directory: ${{ matrix.module }}
+        run: go test -count=1 -timeout 1200s ./...
+
   # The published install path of vibesys-cli, run as a user runs it: the install script from main
   # against the live GitHub releases. No other workflow reads the releases after they are made, so a
   # missing or stale cli-latest (it is made only by a stable cli-v* tag, see cli-release.yml) or a

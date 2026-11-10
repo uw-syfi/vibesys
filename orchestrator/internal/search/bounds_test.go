@@ -9,11 +9,13 @@ import (
 	"testing/quick"
 
 	"buf.build/go/protovalidate"
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 const (
@@ -95,7 +97,7 @@ func TestPercentIsMoreForABetterValueInEitherDirection(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000, Rand: rand.New(rand.NewSource(5))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := search.PercentOfBound(maximize, 15600, 11076); math.Abs(p-71) > 0.01 {

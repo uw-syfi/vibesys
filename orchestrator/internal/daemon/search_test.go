@@ -2,11 +2,12 @@ package daemon_test
 
 import (
 	"context"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
-	"math/rand"
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -108,7 +109,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 		}
 		return latest.Revision == current.Revision
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30, Rand: rand.New(rand.NewSource(1))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }

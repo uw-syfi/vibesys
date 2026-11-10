@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // quoteWord is how a shell user writes any word so that it reaches the command as it is.
@@ -21,7 +23,7 @@ func TestAQuotedArgvSplitsBackIntoItself(t *testing.T) {
 		got, err := splitWords("--service", strings.Join(quoted, " \t"))
 		return err == nil && slices.Equal(got, argv) || (len(argv) == 0 && err == nil && len(got) == 0)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 }

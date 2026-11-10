@@ -36,6 +36,7 @@ var boundaries = map[string]allowance{
 	"gateway/internal/hostmain/orchestrator.go":       {reason: "a host takes its root from VIBESYS_HOME by gatewayroot.Rule; process-boundaries.md, host control", env: 1},
 	"gateway/internal/lifecycle/socket.go":            {reason: "the host's socket path, lock and stale socket handling, and the typed lock record a client reads while the lock is held; process-boundaries.md, host control", reads: 3, writes: 2},
 	"gateway/internal/machinestats/host.go":           {reason: "external:/proc readings for MachineStats", reads: 1},
+	"gateway/internal/propcheck/propcheck.go":         {reason: "test support only: reads VIBESYS_PROPERTY_SEED, which fixes the seed of every property test in a pull request and draws a fresh one in the nightly run", env: 1},
 	"gateway/internal/runindex/index.go":              {reason: "the Python run store's disk input; deleted with the Python path", reads: 2},
 	"gateway/internal/runlog/follow.go":               {reason: "the Python run store's run.log; deleted with the Python path", reads: 2, writes: 1},
 	"gateway/internal/server/files.go":                {reason: "the Python run store's disk input; deleted with the Python path", reads: 2},

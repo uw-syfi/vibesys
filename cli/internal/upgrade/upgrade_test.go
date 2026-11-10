@@ -14,6 +14,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/upgrade"
 	"github.com/uw-syfi/vibesys/cli/internal/upgrade/upgradetest"
 )
@@ -125,7 +126,7 @@ func TestAnyTruncatedDownloadIsRefused(t *testing.T) {
 		_, err := i.upgrade()
 		return errors.Is(err, upgrade.ErrChecksumMismatch) && sameFiles(before, i.snapshot(t))
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -145,7 +146,7 @@ func TestAnyCorruptedDownloadIsRefused(t *testing.T) {
 		_, err := i.upgrade()
 		return errors.Is(err, upgrade.ErrChecksumMismatch) && sameFiles(before, i.snapshot(t))
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -160,7 +161,7 @@ func TestAnyDroppedConnectionLeavesTheInstallationAsItWas(t *testing.T) {
 		_, err := i.upgrade()
 		return errors.Is(err, upgradetest.ErrInjected) && sameFiles(before, i.snapshot(t))
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

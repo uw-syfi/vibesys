@@ -6,10 +6,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 )
 
 func TestSequenceMatchesGeneratedEnvelope(t *testing.T) {
@@ -24,7 +26,7 @@ func TestSequenceMatchesGeneratedEnvelope(t *testing.T) {
 		got, err := runlog.Sequence(payload)
 		return err == nil && got == seq && bytes.Equal(payload, before)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -37,7 +39,7 @@ func TestSequenceUsesLastValue(t *testing.T) {
 		payload = protowire.AppendVarint(payload, last)
 		got, err := runlog.Sequence(payload)
 		return err == nil && got == last
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

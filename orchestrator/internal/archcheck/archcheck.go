@@ -49,25 +49,32 @@ var rules = map[string][]string{
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs", "hostlock"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
 	"internal/localfs":                 {"privatesocket"},
-	"gatewayroot":                      {"internal/localfs", "release"},
-	"hostconfig":                       {"gen/vibesys/orchestrator/"},
-	"release":                          {"gen/vibesys/orchestrator/"},
-	"hostlock":                         {"gen/vibesys/orchestrator/"},
-	"privatesocket":                    {},
-	"release/releasetest":              {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
-	"release/assemble":                 {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
-	"cmd/release-manifest":             {"release", "release/assemble"},
-	"clientcli":                        {"clientcli/attachview", "internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
-	"clientcli/attachview":             {"gen/vibesys/orchestrator/"},
-	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
-	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
-	"internal/names":                   {"gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/fit", "internal/protocol", "internal/search", "internal/setup", "internal/core", "internal/cost", "internal/window", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
-	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/search", "internal/setup", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
+	// Test support only: the seed of every quick.Check, fixed in a pull request and fresh in the
+	// nightly run.
+	"internal/propcheck":         {},
+	"gatewayroot":                {"internal/localfs", "release"},
+	"hostconfig":                 {"gen/vibesys/orchestrator/"},
+	"release":                    {"gen/vibesys/orchestrator/"},
+	"hostlock":                   {"gen/vibesys/orchestrator/"},
+	"privatesocket":              {},
+	"release/releasetest":        {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
+	"release/assemble":           {"release", "gen/vibesys/orchestrator/", "gen/vibesys/cli/"},
+	"cmd/release-manifest":       {"release", "release/assemble"},
+	"clientcli":                  {"clientcli/attachview", "internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
+	"clientcli/attachview":       {"gen/vibesys/orchestrator/"},
+	"internal/hub":               {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/client":            {"internal/protocol", "gen/vibesys/orchestrator/"},
+	"internal/mcp":               {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
+	"internal/names":             {"gen/vibesys/orchestrator/"},
+	"internal/daemon":            {"internal/fit", "internal/protocol", "internal/search", "internal/setup", "internal/core", "internal/cost", "internal/window", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon/daemontest": {"internal/core", "internal/daemon", "internal/search", "internal/setup", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
 }
+
+// testSupport lists the packages every test file may import: the seed of a property test, which no
+// product code reaches.
+var testSupport = []string{"internal/propcheck"}
 
 // testRules lists, for each package directory, the packages only its test files may import in
 // addition to rules. The core's simulation replays through the wire and draws jobs from the fake
@@ -226,6 +233,7 @@ func layering(name, source string) []string {
 		allowed = append(slices.Clone(listed), dir)
 		if strings.HasSuffix(name, "_test.go") {
 			allowed = append(allowed, testRules[dir]...)
+			allowed = append(allowed, testSupport...)
 		}
 	}
 	var found []string

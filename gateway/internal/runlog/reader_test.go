@@ -8,6 +8,8 @@ import (
 	"io"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 )
 
 func framed(payload []byte) []byte {
@@ -58,7 +60,7 @@ func TestEveryAppendBoundary(t *testing.T) {
 		}
 		return yielded == len(records)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -74,7 +76,7 @@ func TestPayloadCorruption(t *testing.T) {
 		var corruption *Corruption
 		return errors.As(err, &corruption)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

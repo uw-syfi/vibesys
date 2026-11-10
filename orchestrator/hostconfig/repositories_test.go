@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 )
 
 func configWith(t *testing.T, directory string) []byte {
@@ -57,7 +58,7 @@ func TestTheHostsRepositoriesDirectoryIsTheConfiguredOneOrTheDefault(t *testing.
 			}
 		}
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

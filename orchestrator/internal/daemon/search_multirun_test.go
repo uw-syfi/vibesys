@@ -2,11 +2,14 @@ package daemon_test
 
 import (
 	"fmt"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
-	"math/rand"
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+
+	"google.golang.org/protobuf/proto"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -15,7 +18,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T) {
@@ -121,7 +123,7 @@ func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T
 		}
 		return len(views) == 6
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 15, Rand: rand.New(rand.NewSource(33))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 15})); err != nil {
 		t.Fatal(err)
 	}
 }

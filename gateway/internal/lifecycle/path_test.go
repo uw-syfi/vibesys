@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 )
 
 // A root's socket is a function of the root alone, inside it whenever it fits in a socket address on
@@ -38,7 +39,7 @@ func TestTheSocketOfARootIsOneShortPathDerivedFromTheRootAlone(t *testing.T) {
 		}
 		seen[socket] = root
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -146,7 +147,7 @@ func TestSecondListenPreservesFirstSocket(t *testing.T) {
 		}
 		accepted.Close()
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

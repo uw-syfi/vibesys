@@ -9,11 +9,13 @@ import (
 	"testing"
 	"testing/quick"
 
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 // These tests hold the rules of the ideas a run's view derives from the task's plans. Each oracle
@@ -185,7 +187,7 @@ func TestTheVerdictMappingIsTotal(t *testing.T) {
 		s := project(t, &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: 1, Status: status}}})
 		return len(s.Ideas) == 1 && s.Ideas[0].Verdict == expected
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 300, Rand: rand.New(rand.NewSource(3))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 300})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -243,7 +245,7 @@ func TestTheCountsAddUpToTheIdeasOfTheRun(t *testing.T) {
 		}
 		return sum == total && inRun == total && !s.Truncated
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(5))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -291,7 +293,7 @@ func TestAPlanIsInARunByItsRecordedOriginAndTransitions(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(7))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -369,7 +371,7 @@ func TestGainsAreOrientedSoThatMoreThanOneIsBetter(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 120, Rand: rand.New(rand.NewSource(11))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 120})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -405,7 +407,7 @@ func TestAGainDoesNotDependOnTheDirectionOfTheObjective(t *testing.T) {
 		up, down := gainOf(maximize, false), gainOf(minimize, true)
 		return up > 0 && math.Abs(up-down) <= 1e-9*up
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 100, Rand: rand.New(rand.NewSource(13))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 100})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -436,7 +438,7 @@ func TestAWorkstreamsBestIsTheBestGainOfItsCountedIdeas(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(17))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -457,7 +459,7 @@ func TestTheMeasuredCandidatesThatNameNoPlanAreCounted(t *testing.T) {
 		}
 		return s.Unplanned == want && s.UnattributedJobs == unclaimed
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 80, Rand: rand.New(rand.NewSource(19))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -523,7 +525,7 @@ func TestACutKeepsTheRunsPlansBeforeTheOthers(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40, Rand: rand.New(rand.NewSource(23))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -579,7 +581,7 @@ func TestWorkstreamsAreCutToTheLimitAndTheRunsStay(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30, Rand: rand.New(rand.NewSource(29))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -646,7 +648,7 @@ func TestTheByteBudgetBoundsIdeasAndWorkstreams(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20, Rand: rand.New(rand.NewSource(31))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -658,7 +660,7 @@ func TestEveryProjectedIdeaHoldsTheContractsRules(t *testing.T) {
 		project(t, w.facts...) // validates the state against protovalidate
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 60, Rand: rand.New(rand.NewSource(37))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 60})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -2,13 +2,13 @@ package hub_test
 
 import (
 	"fmt"
-	"math/rand"
 	"testing"
 	"testing/quick"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 )
 
 func TestLatestNeverLagsAndNeverRegresses(t *testing.T) {
@@ -50,7 +50,7 @@ func TestLatestNeverLagsAndNeverRegresses(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(1))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -139,7 +139,7 @@ func TestSetupNotesNeverLagAndNeverRegress(t *testing.T) {
 		msgs, _ := other.Take()
 		return len(msgs) == 0
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(2))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -52,6 +52,12 @@ uv run pytest libs tests/system tests/vibesys --depth=nightly -n 16 --no-cov
 An example count above the default needs a reason; use `vs_sim.api.testing.examples(pr=..., nightly=...)`
 to state both depths.
 
+Go property tests (`testing/quick`) follow the same policy: a pull request seeds each from its
+test name through the module's `internal/propcheck`, and the nightly workflow sets
+`VIBESYS_PROPERTY_SEED=random`. A failure logs its seed; rerun it with that variable set to the number.
+`TestQuickChecksUseConfig` in each module's `internal/propcheck` rejects a `quick.Check` that
+does not take its config from there.
+
 ## Where a new test goes
 
 New tests go next to the package they test. The top-level `tests/` holds only cross-package

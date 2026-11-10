@@ -9,6 +9,7 @@ import (
 	"testing/quick"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // A task name is one path element: never empty, ".", "..", or anything with a separator. Every
@@ -23,7 +24,7 @@ func TestATaskNameIsOnePathElementOrRefused(t *testing.T) {
 		return string(name) == s && s != "" && s != "." && s != ".." && !strings.ContainsAny(s, `/\`) &&
 			filepath.Base(s) == s && !strings.HasPrefix(s, ".") && len(s) <= 128
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 	for _, good := range []string{"kv-store", "task", "a.b_c-1", strings.Repeat("x", 128)} {
@@ -55,7 +56,7 @@ func TestAScopeIsACleanAbsoluteRepositoryAndATaskName(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := core.ResolvedScope("/repo/../repo", "task"); err == nil {

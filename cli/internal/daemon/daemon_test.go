@@ -23,6 +23,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -232,7 +233,7 @@ func TestHelloAnswersWhatCoreSays(t *testing.T) {
 			Component: cliv1.Component_COMPONENT_CLI, Versions: wire.BuildVersions("test", theirs)})
 		return err == nil && wire.ToCompatibility(resp.GetCompatibility()) == core.CheckCompatibility(theirs, ours)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -349,7 +350,7 @@ func TestStatusReportsWhatAJobInheritsAndHidesOtherValues(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 300})); err != nil {
 		t.Fatal(err)
 	}
 }

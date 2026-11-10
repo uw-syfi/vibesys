@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // siteMax is the longest time limit the fake site's QOS grants a job, as one site refuses anything
@@ -215,7 +216,7 @@ func TestNoAllocationAsksForMoreThanTheCap(t *testing.T) {
 			}
 		}
 		return true
-	}, &quick.Config{MaxCount: 40})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 40}))
 	if err != nil {
 		t.Error(err)
 	}

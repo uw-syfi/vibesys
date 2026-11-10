@@ -5,6 +5,7 @@ import (
 	"testing/quick"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
 )
 
@@ -29,7 +30,7 @@ func TestAClientThatNeedsSummariesIsRefusedByAnyOlderHost(t *testing.T) {
 		host := build(older, older)
 		return protocol.Judge(host, protocol.Build("app")) == pb.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
@@ -382,7 +383,7 @@ func TestTheTimeLeftIsReadAsSqueueWritesIt(t *testing.T) {
 			text = fmt.Sprintf("%d:%02d", m%60, sec%60)
 		}
 		return clustercli.ParseTimeLeft(text) == d
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Error(err)
 	}

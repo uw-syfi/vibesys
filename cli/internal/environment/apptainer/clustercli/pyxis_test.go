@@ -16,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // pyxisNode is the node of the job 77 of a cluster whose boxes run under the pyxis runtime, and the
@@ -135,7 +136,7 @@ func TestUnderPyxisAProcessGetsItsArgumentsAndVariablesAsTheyAre(t *testing.T) {
 			return false
 		}
 		return true
-	}, &quick.Config{MaxCount: 25})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 25}))
 	if err != nil {
 		t.Error(err)
 	}

@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // test-isolation: marked chooses which processes a sweep kills, over trees no test can start at will:
@@ -52,7 +54,7 @@ func TestMarkedChoosesAcceptedProcessesAndTheirDescendantsExceptTheCaller(t *tes
 		}
 		got := marked(procs, self, func(environ []string) bool { return len(environ) > 0 })
 		return slices.Equal(got, want)
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

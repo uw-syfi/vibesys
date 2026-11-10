@@ -10,6 +10,7 @@ import (
 	"testing/quick"
 
 	"repoctl/execution"
+	"repoctl/internal/propcheck"
 )
 
 type recordingRunner struct{ checks []execution.Check }
@@ -324,7 +325,7 @@ func TestTheRunFailsExactlyWhenAGroupFailed(t *testing.T) {
 			return false
 		}
 		return failFast || len(runner.ran) == 5
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

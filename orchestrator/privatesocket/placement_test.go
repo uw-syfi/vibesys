@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
@@ -35,7 +36,7 @@ func TestAPlaceAlwaysFitsAndOnlyMovesWhatDoesNot(t *testing.T) {
 		}
 		seen[place] = natural
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

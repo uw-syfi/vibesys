@@ -10,9 +10,11 @@ import (
 	"testing"
 	"testing/quick"
 
-	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/protobuf/proto"
+
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 )
 
 type countedReader struct {
@@ -92,7 +94,7 @@ func TestSparseSeekingCountsReaderWork(t *testing.T) {
 		// replayed; constant work reads magic and tests EOF. No timing assertion.
 		return next == count+1 && source.reads <= 2*(count-int(from)+1+128)+2
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

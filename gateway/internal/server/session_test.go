@@ -5,14 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
-	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +12,16 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 )
 
 func TestSessionDiscoveryTailFenceAndBlobReads(t *testing.T) {
@@ -134,7 +136,7 @@ func TestGeneratedChatListingUsesOnlyCommittedSessionPrefixes(t *testing.T) {
 		}
 		return reflect.DeepEqual(got, want)
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(0))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

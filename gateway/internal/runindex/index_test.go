@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 )
 
 func TestPublishedIndex(t *testing.T) {
@@ -34,7 +36,7 @@ func TestRejectTraversal(t *testing.T) {
 	if err := quick.Check(func(s string) bool {
 		_, err := Resolve(root, "../"+s)
 		return err != nil
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"", ".", "..", "/absolute", "a/b", "a\\b", "a\x00b"} {

@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 )
 
 func TestIdleGenerations(t *testing.T) {
@@ -29,7 +31,7 @@ func TestIdleGenerations(t *testing.T) {
 			}
 		}
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

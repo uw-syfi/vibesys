@@ -12,6 +12,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -35,7 +36,7 @@ func TestEveryEndingHasACodeAndOnlySuccessIsZero(t *testing.T) {
 		return valid(c) && (c == exitOK) == successes[k] && (named || c == exitNoAnswer)
 	}
 	for _, p := range []func(int32) bool{failure, wait} {
-		if err := quick.Check(p, &quick.Config{MaxCount: 2000}); err != nil {
+		if err := quick.Check(p, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 			t.Fatal(err)
 		}
 		for n := range int32(16) {

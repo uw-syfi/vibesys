@@ -2,16 +2,17 @@ package search_test
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 	"testing"
 	"testing/quick"
 
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 func TestCapBoundsBytesAndDropsOldest(t *testing.T) {
@@ -33,7 +34,7 @@ func TestCapBoundsBytesAndDropsOldest(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 50, Rand: rand.New(rand.NewSource(12))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 50})); err != nil {
 		t.Fatal(err)
 	}
 	// A single huge singleton must not defeat the bound after lists are removed.

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"repoctl/internal/propcheck"
 )
 
 func kinds(steps []Step) []StepKind {
@@ -109,7 +111,7 @@ func TestPlanInvariants(t *testing.T) {
 		localOnly := in.Remote != nil || (pos[StepSync] == 0 && pos[StepShipGit] == 0 && pos[StepShipFiles] == 0)
 		return last && buildFirst && remoteOrder && localOnly
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 500}); err != nil {
+	if err := quick.Check(check, propcheck.Config(t, &quick.Config{MaxCount: 500})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -138,7 +140,7 @@ func TestFingerprintIgnoresOrderAndSeesChanges(t *testing.T) {
 		renamed[k] = File{renamed[k].Path + "2", renamed[k].Content}
 		return Fingerprint(changed) != base && Fingerprint(renamed) != base
 	}
-	if err := quick.Check(check, nil); err != nil {
+	if err := quick.Check(check, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

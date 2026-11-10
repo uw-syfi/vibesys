@@ -10,6 +10,7 @@ import (
 	"testing/quick"
 
 	"repoctl/internal/doctor"
+	"repoctl/internal/propcheck"
 )
 
 const root = "/work/repo"
@@ -712,7 +713,7 @@ func TestEveryProblemNamesItsFix(t *testing.T) {
 			}
 		}
 		return true
-	}, &quick.Config{MaxCount: 500})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 500}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +724,7 @@ func TestEvaluatingTwiceGivesTheSameFindings(t *testing.T) {
 	err := quick.Check(func(seed int64) bool {
 		facts := doctor.Gather(cfg, root, randomHost(seed))
 		return fmt.Sprintf("%+v", doctor.Evaluate(cfg, facts)) == fmt.Sprintf("%+v", doctor.Evaluate(cfg, facts))
-	}, &quick.Config{MaxCount: 200})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 200}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +753,7 @@ func TestEvaluatingEnvExportsResolvesEveryExportFinding(t *testing.T) {
 			return false
 		}
 		return doctor.Failed(after) <= doctor.Failed(before)
-	}, &quick.Config{MaxCount: 500})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 500}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -778,7 +779,7 @@ func TestFixNeverLeavesMoreFailuresThanItFound(t *testing.T) {
 		_ = doctor.Run(cfg, root, h, doctor.Options{Fix: true}, &bytes.Buffer{})
 		after := doctor.Failed(doctor.Evaluate(cfg, doctor.Gather(cfg, root, h)))
 		return after <= before
-	}, &quick.Config{MaxCount: 300})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 300}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +800,7 @@ func TestFixThenTheExportsAlwaysLeaveThePinnedBunResolvable(t *testing.T) {
 			return false
 		}
 		return true
-	}, &quick.Config{MaxCount: 300})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 300}))
 	if err != nil {
 		t.Fatal(err)
 	}
