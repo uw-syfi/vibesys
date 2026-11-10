@@ -80,6 +80,7 @@ type job struct {
 	ran               time.Duration // when it started running
 	idleSince         time.Duration // when its last claim was released, or it started
 	claim             *claim        // the live claim of a reusable allocation
+	suspendedAt       time.Duration // when it was suspended, while it is
 }
 
 // box is a container's processes on the job's node.
@@ -461,6 +462,33 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	return id, nil
 }
 
+// Suspend suspends a running job as `scontrol suspend` does: it lives, holds its node, runs
+// nothing and counts no time against its limit. It reports false for a job that does not run.
+func (c *Cluster) Suspend(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil || j.phase != apptainer.Running {
+		return false
+	}
+	j.phase, j.state, j.suspendedAt = apptainer.Suspended, "SUSPENDED", c.now
+	return true
+}
+
+// Resume resumes a suspended job; the time it was suspended is not counted against its limit.
+func (c *Cluster) Resume(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	j := c.jobs[id]
+	if j == nil || j.phase != apptainer.Suspended {
+		return false
+	}
+	j.phase, j.state = apptainer.Running, "RUNNING"
+	j.ran += c.now - j.suspendedAt
+	j.idleSince += c.now - j.suspendedAt
+	return true
+}
+
 // State implements apptainer.Cluster.
 func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, error) {
 	if err := cl.enter(ctx, "state"); err != nil {
@@ -484,6 +512,8 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 		}
 		return apptainer.JobState{Phase: j.phase, Name: j.state, Reason: "Priority"}, nil
 	case apptainer.Running:
+		return apptainer.JobState{Phase: j.phase, Name: j.state, Node: NodeName}, nil
+	case apptainer.Suspended:
 		return apptainer.JobState{Phase: j.phase, Name: j.state, Node: NodeName}, nil
 	}
 	return apptainer.JobState{Phase: j.phase, Name: j.state}, nil
@@ -861,6 +891,8 @@ func (cl *Client) Detail(ctx context.Context, id string) (apptainer.JobDetail, e
 		d.Node = NodeName
 		d.StartedAt = Epoch.Add(j.ran)
 		d.EndsAt = d.StartedAt.Add(j.limit)
+	case apptainer.Suspended:
+		d.Node = NodeName
 	default:
 		d.TimeLimit = j.state == "TIMEOUT"
 		d.EndedAt = Epoch.Add(c.now)

@@ -54,11 +54,15 @@ func TestParseDetailReadsWhatSlurmSaysOfAJob(t *testing.T) {
 		"detail_running_days.txt": {
 			Phase: apptainer.Running, Name: "RUNNING", Reason: "None", Node: "node-a", StartedAt: now.Add(-30 * time.Minute), EndsAt: now.Add(23*time.Hour + 30*time.Minute),
 		},
-		"detail_running_unlimited.txt":  {Phase: apptainer.Running, Name: "RUNNING", Reason: "None", Node: "node-a", StartedAt: now.Add(-30 * time.Minute)},
-		"detail_timeout.txt":            {Phase: apptainer.Ended, Name: "TIMEOUT", TimeLimit: true, EndedAt: at(10, 15, 59, 58)},
-		"detail_cancelled.txt":          {Phase: apptainer.Ended, Name: "CANCELLED", EndedAt: at(10, 15, 0, 0)},
-		"detail_node_fail.txt":          {Phase: apptainer.Ended, Name: "NODE_FAIL", EndedAt: at(10, 15, 10, 0)},
-		"detail_completing_timeout.txt": {Phase: apptainer.Ended, Name: "COMPLETING", Reason: "None", TimeLimit: true},
+		"detail_running_unlimited.txt": {Phase: apptainer.Running, Name: "RUNNING", Reason: "None", Node: "node-a", StartedAt: now.Add(-30 * time.Minute)},
+		"detail_timeout.txt":           {Phase: apptainer.Ended, Name: "TIMEOUT", TimeLimit: true, EndedAt: at(10, 15, 59, 58)},
+		"detail_cancelled.txt":         {Phase: apptainer.Ended, Name: "CANCELLED", EndedAt: at(10, 15, 0, 0)},
+		"detail_node_fail.txt":         {Phase: apptainer.Ended, Name: "NODE_FAIL", EndedAt: at(10, 15, 10, 0)},
+		// Still listed, so it lives, taking no new work, until squeue stops listing it.
+		"detail_completing_timeout.txt": {Phase: apptainer.Suspended, Name: "COMPLETING", Reason: "None", Node: "node-a"},
+		"detail_suspended.txt":          {Phase: apptainer.Suspended, Name: "SUSPENDED", Reason: "None", Node: "node-a"},
+		"detail_preempted_listed.txt":   {Phase: apptainer.Queued, Name: "PREEMPTED", Reason: "None", EstimatedStart: at(10, 15, 30, 0)},
+		"detail_preempted_gone.txt":     {Phase: apptainer.Ended, Name: "PREEMPTED", EndedAt: at(10, 15, 59, 0)},
 		"detail_scontrol_only.txt":      {Phase: apptainer.Ended, Name: "TIMEOUT", TimeLimit: true, EndedAt: at(10, 15, 59, 59)},
 		"detail_unknown.txt":            {Phase: apptainer.Ended},
 	} {
@@ -498,5 +502,92 @@ func TestReapKillsEveryProcessOfTheBoxAndWaitsForNone(t *testing.T) {
 	failing.exit = "1"
 	if err := newCluster(t, failing).Node("77").Reap(ctx(t), "b"); err == nil {
 		t.Error("a reap that failed was taken for one that did not")
+	}
+}
+
+// slurmStates are every job state `man squeue` documents, and what a job in each is, as squeue lists
+// it (a definite end is ended; anything else lives: waiting, running, or suspended) and as it is when
+// squeue no longer lists it and only the records speak (a definite end, and a PREEMPTED job that was
+// not requeued, are ended; a state of a job that lives is no answer).
+var slurmStates = []struct {
+	state    string
+	listed   apptainer.Phase
+	recorded apptainer.Phase // or alive, when the records' word says the job lives
+	alive    bool
+}{
+	{"BOOT_FAIL", apptainer.Ended, apptainer.Ended, false},
+	{"CANCELLED", apptainer.Ended, apptainer.Ended, false},
+	{"COMPLETED", apptainer.Ended, apptainer.Ended, false},
+	{"COMPLETING", apptainer.Suspended, 0, true},
+	{"CONFIGURING", apptainer.Queued, 0, true},
+	{"DEADLINE", apptainer.Ended, apptainer.Ended, false},
+	{"FAILED", apptainer.Ended, apptainer.Ended, false},
+	{"NODE_FAIL", apptainer.Ended, apptainer.Ended, false},
+	{"OUT_OF_MEMORY", apptainer.Ended, apptainer.Ended, false},
+	{"PENDING", apptainer.Queued, 0, true},
+	{"PREEMPTED", apptainer.Queued, apptainer.Ended, false},
+	{"REQUEUE_FED", apptainer.Queued, 0, true},
+	{"REQUEUE_HOLD", apptainer.Queued, 0, true},
+	{"REQUEUED", apptainer.Queued, 0, true},
+	{"RESIZING", apptainer.Queued, 0, true},
+	{"RESV_DEL_HOLD", apptainer.Queued, 0, true},
+	{"REVOKED", apptainer.Ended, apptainer.Ended, false},
+	{"RUNNING", apptainer.Running, 0, true},
+	{"SIGNALING", apptainer.Running, 0, true},
+	{"SPECIAL_EXIT", apptainer.Queued, 0, true},
+	{"STAGE_OUT", apptainer.Suspended, 0, true},
+	{"STOPPED", apptainer.Suspended, 0, true},
+	{"SUSPENDED", apptainer.Suspended, 0, true},
+	{"TIMEOUT", apptainer.Ended, apptainer.Ended, false},
+	// A state Slurm adds later is alive: only the definite ends end a job.
+	{"SOME_NEW_STATE", apptainer.Queued, 0, true},
+}
+
+func listedDetail(state string) string {
+	return "clock 1794326400 2026-11-10T08:00:00\nsqueue 0\n" + state + "|None|2026-11-10T07:30:00|node-a|1:30:00|2:00:00\n==sacct==\n==scontrol==\n"
+}
+
+func goneDetail(state string) string {
+	return "clock 1794326400 2026-11-10T08:00:00\nsqueue 1\nslurm_load_jobs error: Invalid job id specified\n==sacct==\n" +
+		state + "|2026-11-10T07:59:00\n==scontrol==\n"
+}
+
+// Regression: only the definite ends of a Slurm job end it. A job squeue still lists in any other
+// state lives (SUSPENDED and PREEMPTED used to read as ended, so a standing allocation was marked
+// released without a cancel and its job went on, untracked), whichever of Detail, State and Jobs
+// reads it; and a job it does not list is ended by the records only for a definite end or a PREEMPTED
+// job, and any other record of it is no answer.
+func TestOnlyADefiniteEndOfASlurmJobEndsIt(t *testing.T) {
+	for _, c := range slurmStates {
+		t.Run(c.state, func(t *testing.T) {
+			d, err := clustercli.ParseDetail(listedDetail(c.state))
+			if err != nil || d.Phase != c.listed || d.Name != c.state {
+				t.Errorf("listed, Detail = %+v, %v; want %v", d, err, c.listed)
+			}
+			st, err := clustercli.ParseState("squeue 0\n" + c.state + "|None|N/A|node-a\n==sacct==\n")
+			if err != nil || st.Phase != c.listed {
+				t.Errorf("listed, State = %+v, %v; want %v", st, err, c.listed)
+			}
+			jobs := clustercli.ParseJobs("vibesys-apptainer-x|d1|7|"+c.state+"|1:00\n", "d1")
+			if len(jobs) != 1 || jobs[0].Phase != c.listed {
+				t.Errorf("listed, Jobs = %+v; want %v", jobs, c.listed)
+			}
+			d, err = clustercli.ParseDetail(goneDetail(c.state))
+			if c.alive {
+				if !isUnavailable(err) {
+					t.Errorf("unlisted, Detail = %+v, %v; want no answer for a job the records say lives", d, err)
+				}
+			} else if err != nil || d.Phase != apptainer.Ended || d.TimeLimit != (c.state == "TIMEOUT") {
+				t.Errorf("unlisted, Detail = %+v, %v; want ended", d, err)
+			}
+			st, err = clustercli.ParseState("squeue 1\nslurm_load_jobs error: Invalid job id specified\n==sacct==\n" + c.state + "\n")
+			wantPhase := c.recorded
+			if c.alive {
+				wantPhase = c.listed
+			}
+			if err != nil || st.Phase != wantPhase {
+				t.Errorf("unlisted, State = %+v, %v; want %v", st, err, wantPhase)
+			}
+		})
 	}
 }

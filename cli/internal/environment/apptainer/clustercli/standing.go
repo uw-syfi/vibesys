@@ -139,6 +139,10 @@ func listed(line, sacct string, clk loginClock) (apptainer.JobDetail, error) {
 			d.EndsAt = clk.now.Add(left)
 			d.StartedAt = d.EndsAt.Add(-limit)
 		}
+	case apptainer.Suspended:
+		// It holds its node and counts no time of the suspension: no start and no end are said, which
+		// adds none to what the caller knows.
+		d.Node = strings.TrimSpace(tail[1])
 	default:
 		d.TimeLimit = strings.EqualFold(state, "TIMEOUT") || sacctSays(sacct, "TIMEOUT")
 	}
@@ -184,7 +188,7 @@ func unlisted(sacct, scontrol string, clk loginClock) (apptainer.JobDetail, erro
 			}
 		}
 	}
-	if state != "" && phaseOf(state) != apptainer.Ended {
+	if state != "" && recordedPhaseOf(state) != apptainer.Ended {
 		return apptainer.JobDetail{}, unavailable("squeue does not list the job, and the records say it is %s", state)
 	}
 	d := apptainer.JobDetail{Phase: apptainer.Ended, Name: state, TimeLimit: state == "TIMEOUT"}

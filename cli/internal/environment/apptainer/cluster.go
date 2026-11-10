@@ -138,6 +138,10 @@ const (
 	Running
 	// Ended is a job that runs no more, or that Slurm no longer knows.
 	Ended
+	// Suspended is a job that lives and takes no new work: it holds its node and runs nothing for now
+	// (Slurm's SUSPENDED and STOPPED, whose time limit does not count the suspension), or it is
+	// closing (COMPLETING, STAGE_OUT) and squeue still lists it. It is never ended while squeue lists it.
+	Suspended
 )
 
 // JobState is a job's state.

@@ -259,6 +259,16 @@ func TestTheEngineDoesNotRemoveAStandingAllocationAsAContainer(t *testing.T) {
 	}
 }
 
+func containerSpec(t testing.TB, r *rig, name, network string, labels docker.Labels) docker.ContainerSpec {
+	t.Helper()
+	return docker.ContainerSpec{Name: name, Image: mustFingerprint(t, r), Dir: "/work", Limit: limit, Network: network, Labels: labels}
+}
+
+// containerIn is the spec of a container of the standing allocation of the job.
+func containerIn(t testing.TB, r *rig, name, ref string) docker.ContainerSpec {
+	return containerSpec(t, r, name, "", docker.Labels{docker.LabelScope: scope, apptainer.LabelAllocation: ref})
+}
+
 // startIn starts a container of the job in the standing allocation.
 func startIn(t testing.TB, r *rig, name, ref, network string) docker.Container {
 	t.Helper()
@@ -266,9 +276,8 @@ func startIn(t testing.TB, r *rig, name, ref, network string) docker.Container {
 	if ref != "" {
 		labels[apptainer.LabelAllocation] = ref
 	}
-	c, err := r.engine.Start(context.Background(), docker.ContainerSpec{
-		Name: name, Image: mustFingerprint(t, r), Dir: "/work", Limit: limit, Network: network, Labels: labels,
-	})
+	c, err := r.engine.Start(context.Background(), containerSpec(t, r, name, network, labels))
+
 	if err != nil {
 		t.Fatalf("starting %s: %v", name, err)
 	}

@@ -778,6 +778,8 @@ func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 					_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
 					said = &st
 				}
+			case Suspended:
+				// It ran and is suspended: its caller waits for it, as for a queued one, until the queue timeout.
 			case Ended:
 				return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 			}

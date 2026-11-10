@@ -131,7 +131,9 @@ func (a *Allocator) Request(ctx context.Context, s alloc.Spec) (alloc.Handle, er
 }
 
 // Observe implements environment.Allocator. A cluster that cannot be reached is an error of kind
-// unavailable, and never an end; a job Slurm knows nothing of is ended. An end is by the time limit
+// unavailable, and never an end; a job Slurm knows nothing of is ended, and so is one in a state that
+// ends a job for good. A job squeue lists in any other state (SUSPENDED, PREEMPTED, REQUEUED, ...)
+// lives: pending or running, and a SUSPENDED one is running with no time added. An end is by the time limit
 // when Slurm says TIMEOUT, and otherwise "otherwise": a cancel by anyone, a node's failure or a
 // job Slurm no longer keeps a record of.
 func (a *Allocator) Observe(ctx context.Context, h alloc.Handle) (alloc.Observation, error) {
@@ -147,6 +149,11 @@ func (a *Allocator) Observe(ctx context.Context, h alloc.Handle) (alloc.Observat
 		return alloc.SeenPending{Reason: d.Reason, EstimatedStart: d.EstimatedStart}, nil
 	case Running:
 		return alloc.SeenRunning{Node: d.Node, StartedAt: d.StartedAt, EndsAt: d.EndsAt}, nil
+	case Suspended:
+		// A suspended job lives and keeps its node: it is running, with no start or end said, so the
+		// core neither ends it nor adds time to it (the core never moves an end later). It starts
+		// nothing while suspended: Engine.enter refuses a container of a job that is not Running.
+		return alloc.SeenRunning{Node: d.Node}, nil
 	}
 	cause := alloc.EndedOtherwise
 	if d.TimeLimit {

@@ -435,20 +435,48 @@ func ParseState(out string) (apptainer.JobState, error) {
 		if f := strings.Fields(line); len(f) > 0 {
 			// sacct writes "CANCELLED by 1002"; the first word is the state.
 			name := strings.TrimRight(f[0], "+")
-			return apptainer.JobState{Phase: phaseOf(name), Name: name}, nil
+			return apptainer.JobState{Phase: recordedPhaseOf(name), Name: name}, nil
 		}
 	}
 	return apptainer.JobState{Phase: apptainer.Ended}, nil
 }
 
+// definitelyEnded are the Slurm job states that end a job for good, as `man squeue` lists them.
+// Every other state is a job that lives, and phaseOf never calls it ended: a state this package does
+// not know, or one that only looks like an end (PREEMPTED while squeue still lists the job, which
+// Slurm then requeues or is about to cancel), must not make a caller let go of a job that runs on.
+var definitelyEnded = map[string]bool{
+	"BOOT_FAIL": true, "CANCELLED": true, "COMPLETED": true, "DEADLINE": true, "FAILED": true,
+	"NODE_FAIL": true, "OUT_OF_MEMORY": true, "REVOKED": true, "TIMEOUT": true,
+}
+
+// phaseOf is the phase of a job squeue lists in the state. A listed job is ended only in a state
+// that ends a job for good; PREEMPTED, SUSPENDED, STOPPED, REQUEUED, RESIZING, CONFIGURING,
+// COMPLETING, SIGNALING and the rest live (see recordedPhaseOf for a job squeue no longer lists).
+// SUSPENDED and STOPPED jobs, and those that are closing (COMPLETING, STAGE_OUT), hold their node and
+// take no new work: apptainer.Suspended.
 func phaseOf(state string) apptainer.Phase {
-	switch strings.ToUpper(strings.TrimSpace(state)) {
-	case "PENDING", "CONFIGURING", "REQUEUED", "RESIZING":
-		return apptainer.Queued
-	case "RUNNING":
+	switch s := strings.ToUpper(strings.TrimSpace(state)); {
+	case definitelyEnded[s]:
+		return apptainer.Ended
+	case s == "SUSPENDED" || s == "STOPPED" || s == "COMPLETING" || s == "STAGE_OUT":
+		return apptainer.Suspended
+	case s == "RUNNING" || s == "SIGNALING":
 		return apptainer.Running
 	}
-	return apptainer.Ended
+	// PENDING, CONFIGURING, REQUEUED, REQUEUE_FED, REQUEUE_HOLD, RESIZING, RESV_DEL_HOLD, SPECIAL_EXIT,
+	// PREEMPTED, and any state Slurm adds: it waits, and may run.
+	return apptainer.Queued
+}
+
+// recordedPhaseOf is the phase of a job that squeue does not list, from the state sacct or scontrol
+// recorded for it. Such a job that was preempted is gone: a preempted job that is requeued is
+// listed again as pending, so a record that still says PREEMPTED is a job that will not come back.
+func recordedPhaseOf(state string) apptainer.Phase {
+	if strings.ToUpper(strings.TrimSpace(state)) == "PREEMPTED" {
+		return apptainer.Ended
+	}
+	return phaseOf(state)
 }
 
 // Jobs implements apptainer.Cluster.
