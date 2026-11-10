@@ -70,7 +70,7 @@ type machine struct{ system, arch, sysctlArm64 string }
 // script is one run of install.sh.
 type script struct {
 	shell      string
-	url        string
+	url        string // VIBESYS_CLI_RELEASES_URL; empty leaves it unset, so the script uses GitHub
 	installDir string
 	home       string
 	version    string
@@ -94,13 +94,20 @@ func (s script) run(t *testing.T) run {
 	write("uname", fmt.Sprintf("case \"$1\" in -s) echo '%s';; -m) echo '%s';; esac\n", s.machine.system, s.machine.arch))
 	if s.machine.sysctlArm64 != "" {
 		write("sysctl", fmt.Sprintf("echo %s\n", s.machine.sysctlArm64))
+	} else {
+		// A machine without the key, which sysctl reports as an error. Without this fake the real
+		// sysctl of an Apple Silicon host would answer 1.
+		write("sysctl", "exit 1\n")
 	}
 	tmp := t.TempDir()
 	path := os.Getenv("PATH")
 	if s.path != "" {
 		path = s.path
 	}
-	env := []string{"PATH=" + tools + ":" + path, "TMPDIR=" + tmp, "VIBESYS_CLI_RELEASES_URL=" + s.url}
+	env := []string{"PATH=" + tools + ":" + path, "TMPDIR=" + tmp}
+	if s.url != "" {
+		env = append(env, "VIBESYS_CLI_RELEASES_URL="+s.url)
+	}
 	if s.home != "" {
 		env = append(env, "HOME="+s.home)
 	}
@@ -441,5 +448,244 @@ func TestAScriptCutShortInstallsNothing(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 25}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A fetcher is a download tool install.sh may find on PATH: a Fake of curl, of GNU wget or of
+// BusyBox wget. Each serves the URLs under one releases URL from a directory the way the real tool
+// reports an HTTP server's answers: a file that exists is 200, a missing one is 404, and
+// <file>.status, when present, holds another status to answer with (000 is a refused connection).
+// Any other URL fails to resolve, so no test reaches a network. The fakes print what the real tools
+// print on stdout and stderr and exit with their codes, which is all install.sh reads.
+type fetcher struct {
+	name string
+	// fake is the text of the tool's script, given the releases URL and the directory serving it.
+	fake func(releases, root string) string
+	// tool is the name the script is installed under.
+	tool string
+}
+
+// fakeLookup is shared by the fakes: it parses no flags, only maps $url to $path and sets $code.
+const fakeLookup = `
+case "$url" in
+  "$releases"/*) path="$root/${url#"$releases"/}" ;;
+  *) unresolved ;;
+esac
+if [ -f "$path.status" ]; then read -r code <"$path.status"
+elif [ -f "$path" ]; then code=200
+else code=404
+fi
+case "$code" in 404) reason="Not Found" ;; 503) reason="Service Unavailable" ;; *) reason="Error" ;; esac
+`
+
+var fetchers = []fetcher{
+	{name: "curl", tool: "curl", fake: func(releases, root string) string {
+		return fmt.Sprintf(`releases='%s' root='%s'
+out= format= fail=0 url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    -w) format="$2"; shift ;;
+    --*) echo "fake curl: unsupported option $1" >&2; exit 2 ;;
+    -*) case "$1" in *f*) fail=1 ;; esac ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+case "$format" in "" | "%%{http_code}") ;; *) echo "fake curl: unsupported -w $format" >&2; exit 2 ;; esac
+status() { [ -z "$format" ] || printf %%s "$1"; }
+unresolved() { echo "curl: (6) Could not resolve host" >&2; status 000; exit 6; }
+%s
+case "$code" in
+  200) cp "$path" "$out"; status 200; exit 0 ;;
+  000) echo "curl: (7) Failed to connect: Connection refused" >&2; status 000; exit 7 ;;
+esac
+status "$code"
+if [ "$fail" = 1 ]; then echo "curl: (22) The requested URL returned error: $code" >&2; exit 22; fi
+printf '%%s\n' "$reason" >"$out"
+`, releases, root, fakeLookup)
+	}},
+	{name: "gnu-wget", tool: "wget", fake: func(releases, root string) string {
+		return fakeWget(releases, root, `
+unresolved() { echo "wget: unable to resolve host address" >&2; exit 4; }
+refused() { echo "failed: Connection refused." >&2; exit 4; }
+refuse() { echo "ERROR $code: $reason." >&2; exit 8; }`)
+	}},
+	{name: "busybox-wget", tool: "wget", fake: func(releases, root string) string {
+		return fakeWget(releases, root, `
+unresolved() { echo "wget: bad address" >&2; exit 1; }
+refused() { echo "wget: can't connect to remote host: Connection refused" >&2; exit 1; }
+refuse() { echo "wget: server returned error: HTTP/1.1 $code $reason" >&2; exit 1; }`)
+	}},
+}
+
+// fakeWget is a wget that answers as the given functions say; with -S it prints each response's
+// status line, as both GNU wget and BusyBox do. Like the real tool it creates the output file even
+// when the server refuses.
+func fakeWget(releases, root, answers string) string {
+	return fmt.Sprintf(`releases='%s' root='%s'
+out= headers=0 url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -O) out="$2"; shift ;;
+    -S) headers=1 ;;
+    -q) ;;
+    -*) echo "fake wget: unsupported option $1" >&2; exit 2 ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+%s
+%s
+[ "$code" = 000 ] && refused
+[ "$headers" = 0 ] || echo "  HTTP/1.1 $code $reason" >&2
+if [ "$code" = 200 ]; then cp "$path" "$out"; exit 0; fi
+: >"$out"
+refuse
+`, releases, root, answers, fakeLookup)
+}
+
+// pathWith returns a PATH holding the fetcher's fake and only the tools install.sh needs besides a
+// download tool, so the fake is the one download tool the script finds.
+func (f fetcher) pathWith(t *testing.T, releases, root string) string {
+	t.Helper()
+	fakes := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(fakes, f.tool), []byte("#!/bin/sh\n"+f.fake(releases, root)), 0o755))
+	tools := t.TempDir()
+	linked := 0
+	for _, name := range []string{"awk", "cat", "chmod", "cp", "mkdir", "mktemp", "mv", "rm", "tail", "sha256sum", "shasum"} {
+		real, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		must(t, os.Symlink(real, filepath.Join(tools, name)))
+		linked++
+	}
+	if linked < 10 {
+		t.Fatalf("install.sh's tests need its tools on PATH; found %d of them", linked)
+	}
+	return fakes + ":" + tools
+}
+
+// githubReleases is the releases URL install.sh uses when none is set.
+const githubReleases = "https://github.com/uw-syfi/vibesys/releases/download"
+
+// Only pre-releases are published, as when the rolling cli-latest does not exist yet. The script
+// names the release it looked for and what to set instead, through every download tool and
+// shell, and installs nothing: in particular not the pre-release.
+func TestInstallSaysWhenNoStableReleaseIsPublished(t *testing.T) {
+	const listed = " (versions are listed at https://github.com/uw-syfi/vibesys/releases)"
+	const mirror = "https://mirror.invalid/vibesys"
+	cases := []struct {
+		label, url, served, version, want string
+	}{
+		{"github", "", githubReleases, "", "no stable vibesys-cli release is published at " + githubReleases +
+			"/cli-latest; to install a specific version, set VIBESYS_CLI_VERSION=<version>" + listed},
+		{"github-set", githubReleases + "/", githubReleases, "", "no stable vibesys-cli release is published at " + githubReleases +
+			"/cli-latest; to install a specific version, set VIBESYS_CLI_VERSION=<version>" + listed},
+		{"mirror", mirror, mirror, "", "no stable vibesys-cli release is published at " + mirror +
+			"/cli-latest; to install a specific version, set VIBESYS_CLI_VERSION=<version>"},
+		{"github-pinned", "", githubReleases, "v4.0.0", "vibesys-cli version 4.0.0 is not published: there is no release cli-v4.0.0 at " +
+			githubReleases + "; set VIBESYS_CLI_VERSION to a published version" + listed},
+		{"mirror-pinned", mirror, mirror, "4.0.0", "vibesys-cli version 4.0.0 is not published: there is no release cli-v4.0.0 at " +
+			mirror + "; set VIBESYS_CLI_VERSION to a published version"},
+	}
+	root := strings.TrimPrefix(serve(t, releaseFor("0.1.0-rc.3"), "cli-v0.1.0-rc.3"), "file://")
+	for _, shell := range shells(t) {
+		for _, f := range fetchers {
+			for _, c := range cases {
+				t.Run(shell+"/"+f.name+"/"+c.label, func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "bin")
+					r := script{
+						shell: shell, url: c.url, installDir: dir, version: c.version,
+						machine: machine{"Linux", "x86_64", ""}, path: f.pathWith(t, c.served, root),
+					}.run(t)
+					if r.ok {
+						t.Fatalf("install succeeded; output %q", r.out)
+					}
+					if want := "install.sh: " + c.want + "\n"; r.errOut != want {
+						t.Fatalf("error =\n%q\nwant\n%q", r.errOut, want)
+					}
+					if _, err := os.Stat(dir); err == nil {
+						t.Error("the install directory was created")
+					}
+					r.requireClean(t)
+				})
+			}
+		}
+	}
+	// The real curl reading a mirror of plain files says the same.
+	dir := filepath.Join(t.TempDir(), "bin")
+	r := script{url: "file://" + root, installDir: dir, machine: machine{"Linux", "x86_64", ""}}.run(t)
+	want := "install.sh: no stable vibesys-cli release is published at file://" + root +
+		"/cli-latest; to install a specific version, set VIBESYS_CLI_VERSION=<version>\n"
+	if r.ok || r.errOut != want {
+		t.Fatalf("real curl: ok = %v, error =\n%q\nwant\n%q", r.ok, r.errOut, want)
+	}
+	r.requireClean(t)
+	// And the version it suggests pinning installs.
+	r = script{url: "file://" + root, installDir: dir, version: "0.1.0-rc.3", machine: machine{"Linux", "x86_64", ""}}.run(t)
+	if !r.ok || !strings.Contains(r.out, "vibesys-cli 0.1.0-rc.3 ") {
+		t.Fatalf("pinned pre-release: ok = %v, output %q, error %q", r.ok, r.out, r.errOut)
+	}
+}
+
+// Only a 404 means a release is missing. A server error or a refused connection is reported as
+// a failed download, naming the URL, through every download tool.
+func TestInstallTellsAFailedDownloadFromAMissingRelease(t *testing.T) {
+	const releases = "https://mirror.invalid/vibesys"
+	for _, f := range fetchers {
+		for _, status := range []string{"500", "503", "403", "000"} {
+			t.Run(f.name+"/"+status, func(t *testing.T) {
+				root := strings.TrimPrefix(serve(t, releaseFor("3.0.0"), "cli-latest"), "file://")
+				must(t, os.WriteFile(filepath.Join(root, "cli-latest", "checksums.txt.status"), []byte(status+"\n"), 0o644))
+				dir := installed(t)
+				r := script{url: releases, installDir: dir, machine: machine{"Linux", "x86_64", ""}, path: f.pathWith(t, releases, root)}.run(t)
+				if r.ok {
+					t.Fatalf("install succeeded; output %q", r.out)
+				}
+				if !strings.Contains(r.errOut, "cannot download "+releases+"/cli-latest/checksums.txt") || strings.Contains(r.errOut, "published") {
+					t.Fatalf("error %q, want a failed download of checksums.txt and no claim about what is published", r.errOut)
+				}
+				requireOldInstall(t, dir)
+				r.requireClean(t)
+			})
+		}
+	}
+}
+
+// A release that exists but has no binary for this machine says so, and installs nothing.
+func TestInstallSaysWhenTheReleaseLacksThisMachinesBinary(t *testing.T) {
+	const releases = "https://mirror.invalid/vibesys"
+	asset, _ := upgrade.AssetName(upgrade.Platform{OS: "linux", Arch: "amd64"})
+	for _, f := range fetchers {
+		t.Run(f.name, func(t *testing.T) {
+			root := strings.TrimPrefix(serve(t, releaseFor("3.0.0"), "cli-latest"), "file://")
+			must(t, os.Remove(filepath.Join(root, "cli-latest", asset)))
+			dir := installed(t)
+			r := script{url: releases, installDir: dir, machine: machine{"Linux", "x86_64", ""}, path: f.pathWith(t, releases, root)}.run(t)
+			want := "install.sh: release cli-latest at " + releases + " has no " + asset + ", the binary for this machine\n"
+			if r.ok || r.errOut != want {
+				t.Fatalf("ok = %v, error =\n%q\nwant\n%q", r.ok, r.errOut, want)
+			}
+			requireOldInstall(t, dir)
+			r.requireClean(t)
+		})
+	}
+}
+
+// Through every download tool, a published release installs.
+func TestInstallDownloadsWithEveryTool(t *testing.T) {
+	const releases = "https://mirror.invalid/vibesys"
+	root := strings.TrimPrefix(serve(t, releaseFor("3.0.0"), "cli-latest"), "file://")
+	for _, f := range fetchers {
+		t.Run(f.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			r := script{url: releases, installDir: dir, machine: machine{"Linux", "x86_64", ""}, path: f.pathWith(t, releases, root)}.run(t)
+			if !r.ok || !strings.Contains(r.out, "vibesys-cli 3.0.0 vibesys-cli_linux_amd64") {
+				t.Fatalf("ok = %v, output %q, error %q", r.ok, r.out, r.errOut)
+			}
+			r.requireClean(t)
+		})
 	}
 }

@@ -18,6 +18,8 @@ const (
 	DefaultReleasesURL = "https://github.com/uw-syfi/vibesys/releases/download"
 	// LatestTag is the tag whose assets are always those of the newest release.
 	LatestTag = "cli-latest"
+	// ReleasesPage lists every release of the repository, for a person choosing a version.
+	ReleasesPage = "https://github.com/uw-syfi/vibesys/releases"
 	// ReleasesURLEnv names the environment variable that replaces DefaultReleasesURL, for a mirror
 	// or a prerelease check. install.sh reads the same variable.
 	ReleasesURLEnv = "VIBESYS_CLI_RELEASES_URL"

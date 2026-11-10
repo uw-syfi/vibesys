@@ -27,7 +27,8 @@ arm64), checks it against the SHA-256 the release publishes, and installs it as
 `~/.local/bin/vibesys-cli`. It needs `curl` or `wget` and `sha256sum` or `shasum`, never asks for
 root, and does not edit your shell profile; if `~/.local/bin` is not on your `PATH` it says so.
 A download that does not match the published checksum installs nothing and leaves any earlier
-install in place.
+install in place. If no stable release is published yet, or the pinned version is not, the script
+says so and installs nothing; it never falls back to a pre-release.
 
 | Setting | Effect |
 | --- | --- |
@@ -61,7 +62,8 @@ over the running file. The rename is atomic, so a process that is starting sees 
 the new one, never half of one. A download that is cut short, corrupted, or has no published
 checksum is refused with an error and the installed binary is untouched. If the directory holding
 the binary is not writable (for example `/usr/local/bin`), the command says so; reinstall with
-`install.sh` into a directory you own. A development build reports version `dev` and upgrades to
+`install.sh` into a directory you own. If no stable release is published yet, the command says so
+and suggests pinning a version with `install.sh`. A development build reports version `dev` and upgrades to
 the newest release.
 
 ## Releases

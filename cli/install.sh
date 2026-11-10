@@ -19,15 +19,32 @@ fail() {
   exit 1
 }
 
-# fetch URL DEST: download one file or fail.
+# fetch URL DEST: download one file. It returns 0 when the file arrived and 1 when the server says
+# there is no such file (HTTP 404, or a file:// path that does not exist), so the caller can say
+# what is missing; any other failure ends the script. The tool's own messages go to DEST.log, in
+# the temporary directory, so a missing file is reported once, in words the caller chooses.
 fetch() {
+  log="$2.log"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$2" "$1" || fail "cannot download $1"
+    # -w prints the status of the last response, after any redirect, even when -f fails the
+    # transfer; it prints 000 when no HTTP response came. curl exits 37 for a file:// path it
+    # cannot open.
+    http_status="$(curl -fsSL -w '%{http_code}' -o "$2" "$1" 2>"$log")" && return 0
+    tool_status=$?
+    [ "$http_status" = 404 ] && return 1
+    case "$1" in file://*) [ "$tool_status" -eq 37 ] && return 1 ;; esac
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$2" "$1" || fail "cannot download $1"
+    # wget's exit status does not tell a missing file from a server error, so read the status
+    # lines -S prints: "HTTP/1.1 404 Not Found" (GNU wget, and BusyBox's "server returned error:
+    # HTTP/1.1 404 Not Found"). The last one counts, since a redirect prints one per response.
+    LC_ALL=C wget -S -O "$2" "$1" 2>"$log" && return 0
+    http_status="$(awk '{ for (i = 1; i < NF; i++) if ($i ~ /^HTTP\/[0-9.]+$/ && $(i + 1) ~ /^[0-9][0-9][0-9]$/) code = $(i + 1) } END { print code }' "$log")"
+    [ "$http_status" = 404 ] && return 1
   else
     fail "needs curl or wget"
   fi
+  detail="$(tail -n 1 "$log" 2>/dev/null)"
+  fail "cannot download $1${detail:+ ($detail)}"
 }
 
 # sha256_of FILE: print the file's SHA-256 as lowercase hex.
@@ -66,7 +83,8 @@ detect_arch() {
 }
 
 main() {
-  releases_url="${VIBESYS_CLI_RELEASES_URL:-https://github.com/uw-syfi/vibesys/releases/download}"
+  default_releases_url=https://github.com/uw-syfi/vibesys/releases/download
+  releases_url="${VIBESYS_CLI_RELEASES_URL:-$default_releases_url}"
   releases_url="${releases_url%/}"
   if [ -n "${VIBESYS_CLI_INSTALL_DIR:-}" ]; then
     install_dir="$VIBESYS_CLI_INSTALL_DIR"
@@ -93,8 +111,21 @@ main() {
   staged=""
   trap 'rm -rf "$work"; [ -z "$staged" ] || rm -f "$staged"' EXIT HUP INT TERM
 
-  fetch "$releases_url/$tag/checksums.txt" "$work/checksums.txt"
-  fetch "$releases_url/$tag/$asset" "$work/$asset"
+  # Every release publishes checksums.txt, so a 404 for it means the release itself is missing.
+  # A missing stable release is an error and never a quiet install of a pre-release instead.
+  if ! fetch "$releases_url/$tag/checksums.txt" "$work/checksums.txt"; then
+    if [ "$releases_url" = "$default_releases_url" ]; then
+      listed=" (versions are listed at https://github.com/uw-syfi/vibesys/releases)"
+    else
+      listed=""
+    fi
+    case "$tag" in
+      cli-latest) fail "no stable vibesys-cli release is published at $releases_url/$tag; to install a specific version, set VIBESYS_CLI_VERSION=<version>$listed" ;;
+      *) fail "vibesys-cli version $version is not published: there is no release $tag at $releases_url; set VIBESYS_CLI_VERSION to a published version$listed" ;;
+    esac
+  fi
+  fetch "$releases_url/$tag/$asset" "$work/$asset" ||
+    fail "release $tag at $releases_url has no $asset, the binary for this machine"
 
   # The checksum line for exactly this file, once. sha256sum marks binary mode with a "*".
   expected="$(awk -v name="$asset" '{ n = $2; sub(/^\*/, "", n) } n == name { print $1 }' "$work/checksums.txt")"
