@@ -5,13 +5,15 @@
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
+import type { Duration } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_duration } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/cli/v1/operator.proto.
  */
 export const file_vibesys_cli_v1_operator: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL2NsaS92MS9vcGVyYXRvci5wcm90bxIOdmliZXN5cy5jbGkudjEi1QMKDk9wZXJhdG9yQ29uZmlnEmoKCnBsYWNlbWVudHMYASADKAsyLi52aWJlc3lzLmNsaS52MS5PcGVyYXRvckNvbmZpZy5QbGFjZW1lbnRzRW50cnlCJrpII5oBICIechwyGl5bYS16MC05XVthLXowLTlfLV17MCw2Mn0kEiwKBmRvY2tlchgCIAEoCzIcLnZpYmVzeXMuY2xpLnYxLkxlZ2FjeURvY2tlchIuCgZyZW1vdGUYAyABKAsyHi52aWJlc3lzLmNsaS52MS5SZW1vdGVTZXR0aW5ncxIsCgVzbHVybRgEIAEoCzIdLnZpYmVzeXMuY2xpLnYxLlNsdXJtU2V0dGluZ3MSLAoJc2NoZWR1bGVyGAUgASgLMhkudmliZXN5cy5jbGkudjEuU2NoZWR1bGVyEjgKEnN0b3BfZ3JhY2Vfc2Vjb25kcxgGIAEoAUIXukgUEhIZAAAAAAAAbkAp/Knx0k1iUD9IAIgBARpMCg9QbGFjZW1lbnRzRW50cnkSCwoDa2V5GAEgASgJEigKBXZhbHVlGAIgASgLMhkudmliZXN5cy5jbGkudjEuUGxhY2VtZW50OgI4AUIVChNfc3RvcF9ncmFjZV9zZWNvbmRzImQKCVNjaGVkdWxlchIcCgZwb2xpY3kYASABKAlCB7pIBHICEAFIAIgBARIhCghtYXhfam9icxgCIAEoDUIKukgHKgUYgAgoAUgBiAEBQgkKB19wb2xpY3lCCwoJX21heF9qb2JzIqICCglQbGFjZW1lbnQSNwoEa2luZBgBIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASGgoIbWF4X2pvYnMYAiABKA1CCLpIBSoDGIAIEi4KBnJlbW90ZRgDIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlJlbW90ZVNldHRpbmdzEiwKBXNsdXJtGAQgASgLMh0udmliZXN5cy5jbGkudjEuU2x1cm1TZXR0aW5ncxIsCglyZXNvdXJjZXMYBSABKAsyGS52aWJlc3lzLmNsaS52MS5SZXNvdXJjZXMSNAoJYXBwdGFpbmVyGAYgASgLMiEudmliZXN5cy5jbGkudjEuQXBwdGFpbmVyU2V0dGluZ3MivwEKDlJlbW90ZVNldHRpbmdzEjIKBGhvc3QYASABKAlCJLpIIXIfMh1eW0EtWmEtejAtOV1bQS1aYS16MC05Xy5ALV0qJBIhCgtzc2hfY29tbWFuZBgCIAMoCUIMukgJkgEGIgRyAhABEiMKDXJzeW5jX2NvbW1hbmQYAyADKAlCDLpICZIBBiIEcgIQARIxChVyZW1vdGVfd29ya3NwYWNlX3Jvb3QYBCABKAlCErpID3INMgteLy4qW14vXS4qJCLMAwoNU2x1cm1TZXR0aW5ncxIwCglwYXJ0aXRpb24YASABKAlCHbpIGnIYMhZeW0EtWmEtejAtOT0sOi5fLystXSokEisKBGdyZXMYAiABKAlCHbpIGnIYMhZeW0EtWmEtejAtOT0sOi5fLystXSokEjIKC3NoYXJlZF9ncmVzGAMgASgJQh26SBpyGDIWXltBLVphLXowLTk9LDouXy8rLV0qJBIWCglleGNsdXNpdmUYBCABKAhIAIgBARIaCgRjcHVzGAUgASgFQge6SAQaAigBSAGIAQESLQoGbWVtb3J5GAYgASgJQh26SBpyGDIWXihbMS05XVswLTldKltLTUdUXSk/JBImCg5zcnVuX2FyZ3VtZW50cxgHIAMoCUIOukgLkgEIIgZyBDICXi0SLQoVcG9sbF9pbnRlcnZhbF9zZWNvbmRzGAggASgBQg66SAsSCSkAAAAAAAAAABItChVxdWV1ZV90aW1lb3V0X3NlY29uZHMYCSABKAFCDrpICxIJKQAAAAAAAAAAEigKEG1heF90aW1lX3NlY29uZHMYCiABKAFCDrpICxIJKQAAAAAAAAAAQgwKCl9leGNsdXNpdmVCBwoFX2NwdXMijgMKEUFwcHRhaW5lclNldHRpbmdzEiQKDnN1Ym1pdF9jb21tYW5kGAEgAygJQgy6SAmSAQYiBHICEAESKAoQc3VibWl0X2FyZ3VtZW50cxgCIAMoCUIOukgLkgEIIgZyBDICXi0SKwoHcHJvZ3JhbRgDIAEoCUIaukgXchUyE15bQS1aYS16MC05Xy4vKy1dKiQSLgoRbG9jYWxfc2NyYXRjaF9kaXIYBCABKAlCE7pIEHIOMgxeKC8uKlteL10pPyQSLwoXY29udmVydF90aW1lb3V0X3NlY29uZHMYBSABKAFCDrpICxIJKQAAAAAAAAAAEjsKB3J1bnRpbWUYBiABKA4yIC52aWJlc3lzLmNsaS52MS5Db250YWluZXJSdW50aW1lQgi6SAWCAQIQARIsChRpZGxlX3JlbGVhc2Vfc2Vjb25kcxgHIAEoAUIOukgLEgkpAAAAAAAAAAASMAoYYWxsb2NhdGlvbl9saW1pdF9zZWNvbmRzGAggASgBQg66SAsSCSkAAAAAAAAAACK7AgoJUmVzb3VyY2VzEigKA2dwdRgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkdwdVJlc291cmNlEjYKCmt1YmVybmV0ZXMYAiABKAsyIi52aWJlc3lzLmNsaS52MS5LdWJlcm5ldGVzUmVzb3VyY2UScQoGbW91bnRzGAMgAygLMiUudmliZXN5cy5jbGkudjEuUmVzb3VyY2VzLk1vdW50c0VudHJ5Qjq6SDeaATQiHnIcMhpeW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9JCoSchAyDl4vW146LCJcblxyXSokEioKBHJvY20YBCABKAsyHC52aWJlc3lzLmNsaS52MS5Sb2NtUmVzb3VyY2UaLQoLTW91bnRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIOCgxSb2NtUmVzb3VyY2UiZQoLR3B1UmVzb3VyY2USLgoHZGV2aWNlcxgBIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKyQSJgoHcnVudGltZRgCIAEoCUIVukgSchAyDl5bYS16MC05Ll8tXSokItcBChJLdWJlcm5ldGVzUmVzb3VyY2USKQoKa3ViZWNvbmZpZxgBIAEoCUIVukgSchAyDl4vW146LCJcblxyXSokEi4KCHJlZ2lzdHJ5GAIgASgJQhy6SBlyFzIVXltBLVphLXowLTkuXzovQCstXSokEi0KB2J1aWxkZXIYAyABKAlCHLpIGXIXMhVeW0EtWmEtejAtOS5fOi9AKy1dKiQSNwoHbmV0d29yaxgEIAEoCUImukgjciEyH14oW0EtWmEtejAtOV1bQS1aYS16MC05Xy4tXSopPyQixAIKDExlZ2FjeURvY2tlchI6CglwbGFjZW1lbnQYASABKA4yHS52aWJlc3lzLmNsaS52MS5QbGFjZW1lbnRLaW5kQgi6SAWCAQIQARIrCgRncHVzGAIgASgJQh26SBpyGDIWXltBLVphLXowLTk9LDouXy8rLV0qJBImCgdydW50aW1lGAMgASgJQhW6SBJyEDIOXlthLXowLTkuXy1dKiQSdAoGbW91bnRzGAQgAygLMigudmliZXN5cy5jbGkudjEuTGVnYWN5RG9ja2VyLk1vdW50c0VudHJ5Qjq6SDeaATQiHnIcMhpeW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9JCoSchAyDl4vW146LCJcblxyXSokGi0KC01vdW50c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEqmQEKDVBsYWNlbWVudEtpbmQSHgoaUExBQ0VNRU5UX0tJTkRfVU5TUEVDSUZJRUQQABIYChRQTEFDRU1FTlRfS0lORF9MT0NBTBABEhYKElBMQUNFTUVOVF9LSU5EX1NTSBACEhgKFFBMQUNFTUVOVF9LSU5EX1NMVVJNEAMSHAoYUExBQ0VNRU5UX0tJTkRfQVBQVEFJTkVSEAQqcwoQQ29udGFpbmVyUnVudGltZRIhCh1DT05UQUlORVJfUlVOVElNRV9VTlNQRUNJRklFRBAAEh8KG0NPTlRBSU5FUl9SVU5USU1FX0FQUFRBSU5FUhABEhsKF0NPTlRBSU5FUl9SVU5USU1FX1BZWElTEAJCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("Ch12aWJlc3lzL2NsaS92MS9vcGVyYXRvci5wcm90bxIOdmliZXN5cy5jbGkudjEi1QMKDk9wZXJhdG9yQ29uZmlnEmoKCnBsYWNlbWVudHMYASADKAsyLi52aWJlc3lzLmNsaS52MS5PcGVyYXRvckNvbmZpZy5QbGFjZW1lbnRzRW50cnlCJrpII5oBICIechwyGl5bYS16MC05XVthLXowLTlfLV17MCw2Mn0kEiwKBmRvY2tlchgCIAEoCzIcLnZpYmVzeXMuY2xpLnYxLkxlZ2FjeURvY2tlchIuCgZyZW1vdGUYAyABKAsyHi52aWJlc3lzLmNsaS52MS5SZW1vdGVTZXR0aW5ncxIsCgVzbHVybRgEIAEoCzIdLnZpYmVzeXMuY2xpLnYxLlNsdXJtU2V0dGluZ3MSLAoJc2NoZWR1bGVyGAUgASgLMhkudmliZXN5cy5jbGkudjEuU2NoZWR1bGVyEjgKEnN0b3BfZ3JhY2Vfc2Vjb25kcxgGIAEoAUIXukgUEhIZAAAAAAAAbkAp/Knx0k1iUD9IAIgBARpMCg9QbGFjZW1lbnRzRW50cnkSCwoDa2V5GAEgASgJEigKBXZhbHVlGAIgASgLMhkudmliZXN5cy5jbGkudjEuUGxhY2VtZW50OgI4AUIVChNfc3RvcF9ncmFjZV9zZWNvbmRzImQKCVNjaGVkdWxlchIcCgZwb2xpY3kYASABKAlCB7pIBHICEAFIAIgBARIhCghtYXhfam9icxgCIAEoDUIKukgHKgUYgAgoAUgBiAEBQgkKB19wb2xpY3lCCwoJX21heF9qb2JzItsCCglQbGFjZW1lbnQSNwoEa2luZBgBIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASGgoIbWF4X2pvYnMYAiABKA1CCLpIBSoDGIAIEi4KBnJlbW90ZRgDIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlJlbW90ZVNldHRpbmdzEiwKBXNsdXJtGAQgASgLMh0udmliZXN5cy5jbGkudjEuU2x1cm1TZXR0aW5ncxIsCglyZXNvdXJjZXMYBSABKAsyGS52aWJlc3lzLmNsaS52MS5SZXNvdXJjZXMSNAoJYXBwdGFpbmVyGAYgASgLMiEudmliZXN5cy5jbGkudjEuQXBwdGFpbmVyU2V0dGluZ3MSNwoLYWxsb2NhdGlvbnMYByABKAsyIi52aWJlc3lzLmNsaS52MS5BbGxvY2F0aW9uU2V0dGluZ3MiowEKEkFsbG9jYXRpb25TZXR0aW5ncxIbCghtYXhfaGVsZBgBIAEoDUIJukgGKgQYQCgBEjcKB21heF9mb3IYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CC7pICMgBAaoBAioAEjcKCmZpdF9tYXJnaW4YAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CCLpIBaoBAjIAIr8BCg5SZW1vdGVTZXR0aW5ncxIyCgRob3N0GAEgASgJQiS6SCFyHzIdXltBLVphLXowLTldW0EtWmEtejAtOV8uQC1dKiQSIQoLc3NoX2NvbW1hbmQYAiADKAlCDLpICZIBBiIEcgIQARIjCg1yc3luY19jb21tYW5kGAMgAygJQgy6SAmSAQYiBHICEAESMQoVcmVtb3RlX3dvcmtzcGFjZV9yb290GAQgASgJQhK6SA9yDTILXi8uKlteL10uKiQizAMKDVNsdXJtU2V0dGluZ3MSMAoJcGFydGl0aW9uGAEgASgJQh26SBpyGDIWXltBLVphLXowLTk9LDouXy8rLV0qJBIrCgRncmVzGAIgASgJQh26SBpyGDIWXltBLVphLXowLTk9LDouXy8rLV0qJBIyCgtzaGFyZWRfZ3JlcxgDIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKiQSFgoJZXhjbHVzaXZlGAQgASgISACIAQESGgoEY3B1cxgFIAEoBUIHukgEGgIoAUgBiAEBEi0KBm1lbW9yeRgGIAEoCUIdukgachgyFl4oWzEtOV1bMC05XSpbS01HVF0pPyQSJgoOc3J1bl9hcmd1bWVudHMYByADKAlCDrpIC5IBCCIGcgQyAl4tEi0KFXBvbGxfaW50ZXJ2YWxfc2Vjb25kcxgIIAEoAUIOukgLEgkpAAAAAAAAAAASLQoVcXVldWVfdGltZW91dF9zZWNvbmRzGAkgASgBQg66SAsSCSkAAAAAAAAAABIoChBtYXhfdGltZV9zZWNvbmRzGAogASgBQg66SAsSCSkAAAAAAAAAAEIMCgpfZXhjbHVzaXZlQgcKBV9jcHVzIo4DChFBcHB0YWluZXJTZXR0aW5ncxIkCg5zdWJtaXRfY29tbWFuZBgBIAMoCUIMukgJkgEGIgRyAhABEigKEHN1Ym1pdF9hcmd1bWVudHMYAiADKAlCDrpIC5IBCCIGcgQyAl4tEisKB3Byb2dyYW0YAyABKAlCGrpIF3IVMhNeW0EtWmEtejAtOV8uLystXSokEi4KEWxvY2FsX3NjcmF0Y2hfZGlyGAQgASgJQhO6SBByDjIMXigvLipbXi9dKT8kEi8KF2NvbnZlcnRfdGltZW91dF9zZWNvbmRzGAUgASgBQg66SAsSCSkAAAAAAAAAABI7CgdydW50aW1lGAYgASgOMiAudmliZXN5cy5jbGkudjEuQ29udGFpbmVyUnVudGltZUIIukgFggECEAESLAoUaWRsZV9yZWxlYXNlX3NlY29uZHMYByABKAFCDrpICxIJKQAAAAAAAAAAEjAKGGFsbG9jYXRpb25fbGltaXRfc2Vjb25kcxgIIAEoAUIOukgLEgkpAAAAAAAAAAAiuwIKCVJlc291cmNlcxIoCgNncHUYASABKAsyGy52aWJlc3lzLmNsaS52MS5HcHVSZXNvdXJjZRI2CgprdWJlcm5ldGVzGAIgASgLMiIudmliZXN5cy5jbGkudjEuS3ViZXJuZXRlc1Jlc291cmNlEnEKBm1vdW50cxgDIAMoCzIlLnZpYmVzeXMuY2xpLnYxLlJlc291cmNlcy5Nb3VudHNFbnRyeUI6ukg3mgE0Ih5yHDIaXlthLXowLTldW2EtejAtOV8tXXswLDYyfSQqEnIQMg5eL1teOiwiXG5ccl0qJBIqCgRyb2NtGAQgASgLMhwudmliZXN5cy5jbGkudjEuUm9jbVJlc291cmNlGi0KC01vdW50c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiDgoMUm9jbVJlc291cmNlImUKC0dwdVJlc291cmNlEi4KB2RldmljZXMYASABKAlCHbpIGnIYMhZeW0EtWmEtejAtOT0sOi5fLystXSskEiYKB3J1bnRpbWUYAiABKAlCFbpIEnIQMg5eW2EtejAtOS5fLV0qJCLXAQoSS3ViZXJuZXRlc1Jlc291cmNlEikKCmt1YmVjb25maWcYASABKAlCFbpIEnIQMg5eL1teOiwiXG5ccl0qJBIuCghyZWdpc3RyeRgCIAEoCUIcukgZchcyFV5bQS1aYS16MC05Ll86L0ArLV0qJBItCgdidWlsZGVyGAMgASgJQhy6SBlyFzIVXltBLVphLXowLTkuXzovQCstXSokEjcKB25ldHdvcmsYBCABKAlCJrpII3IhMh9eKFtBLVphLXowLTldW0EtWmEtejAtOV8uLV0qKT8kIsQCCgxMZWdhY3lEb2NrZXISOgoJcGxhY2VtZW50GAEgASgOMh0udmliZXN5cy5jbGkudjEuUGxhY2VtZW50S2luZEIIukgFggECEAESKwoEZ3B1cxgCIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKiQSJgoHcnVudGltZRgDIAEoCUIVukgSchAyDl5bYS16MC05Ll8tXSokEnQKBm1vdW50cxgEIAMoCzIoLnZpYmVzeXMuY2xpLnYxLkxlZ2FjeURvY2tlci5Nb3VudHNFbnRyeUI6ukg3mgE0Ih5yHDIaXlthLXowLTldW2EtejAtOV8tXXswLDYyfSQqEnIQMg5eL1teOiwiXG5ccl0qJBotCgtNb3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBKpkBCg1QbGFjZW1lbnRLaW5kEh4KGlBMQUNFTUVOVF9LSU5EX1VOU1BFQ0lGSUVEEAASGAoUUExBQ0VNRU5UX0tJTkRfTE9DQUwQARIWChJQTEFDRU1FTlRfS0lORF9TU0gQAhIYChRQTEFDRU1FTlRfS0lORF9TTFVSTRADEhwKGFBMQUNFTUVOVF9LSU5EX0FQUFRBSU5FUhAEKnMKEENvbnRhaW5lclJ1bnRpbWUSIQodQ09OVEFJTkVSX1JVTlRJTUVfVU5TUEVDSUZJRUQQABIfChtDT05UQUlORVJfUlVOVElNRV9BUFBUQUlORVIQARIbChdDT05UQUlORVJfUlVOVElNRV9QWVhJUxACQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration]);
 
 /**
  * OperatorConfig is the operator config, cli.toml: the settings of the machines that run
@@ -151,6 +153,14 @@ export type Placement = Message<"vibesys.cli.v1.Placement"> & {
    * @generated from field: vibesys.cli.v1.ApptainerSettings apptainer = 6;
    */
   apptainer?: ApptainerSettings | undefined;
+
+  /**
+   * When set, a run may hold standing allocations of the placement (allocation.proto). Unset, a
+   * request for one is refused, naming this section.
+   *
+   * @generated from field: vibesys.cli.v1.AllocationSettings allocations = 7;
+   */
+  allocations?: AllocationSettings | undefined;
 };
 
 /**
@@ -159,6 +169,44 @@ export type Placement = Message<"vibesys.cli.v1.Placement"> & {
  */
 export const PlacementSchema: GenMessage<Placement> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_operator, 2);
+
+/**
+ * AllocationSettings is the [placements.<name>.allocations] section: how much of a placement a run
+ * may hold as standing allocations.
+ *
+ * @generated from message vibesys.cli.v1.AllocationSettings
+ */
+export type AllocationSettings = Message<"vibesys.cli.v1.AllocationSettings"> & {
+  /**
+   * How many standing allocations one run may hold on the placement at once, PENDING and RUNNING
+   * (DRAINING counts as RUNNING), renewals included.
+   *
+   * @generated from field: uint32 max_held = 1;
+   */
+  maxHeld: number;
+
+  /**
+   * The longest an allocation may be asked for, written as a duration such as "24h".
+   *
+   * @generated from field: google.protobuf.Duration max_for = 2;
+   */
+  maxFor?: Duration | undefined;
+
+  /**
+   * The time a job's fit keeps free before its allocation ends: a job fits when the work ahead of
+   * it and its own bound are at most the time left less this. Unset means 2m.
+   *
+   * @generated from field: google.protobuf.Duration fit_margin = 3;
+   */
+  fitMargin?: Duration | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.AllocationSettings.
+ * Use `create(AllocationSettingsSchema)` to create a new message.
+ */
+export const AllocationSettingsSchema: GenMessage<AllocationSettings> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_operator, 3);
 
 /**
  * RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node
@@ -200,7 +248,7 @@ export type RemoteSettings = Message<"vibesys.cli.v1.RemoteSettings"> & {
  * Use `create(RemoteSettingsSchema)` to create a new message.
  */
 export const RemoteSettingsSchema: GenMessage<RemoteSettings> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 3);
+  messageDesc(file_vibesys_cli_v1_operator, 4);
 
 /**
  * SlurmSettings is how an allocation is asked for: with srun for the slurm kind, and with the submit
@@ -287,7 +335,7 @@ export type SlurmSettings = Message<"vibesys.cli.v1.SlurmSettings"> & {
  * Use `create(SlurmSettingsSchema)` to create a new message.
  */
 export const SlurmSettingsSchema: GenMessage<SlurmSettings> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 4);
+  messageDesc(file_vibesys_cli_v1_operator, 5);
 
 /**
  * ApptainerSettings is how the apptainer kind makes an allocation and runs a container in it.
@@ -370,7 +418,7 @@ export type ApptainerSettings = Message<"vibesys.cli.v1.ApptainerSettings"> & {
  * Use `create(ApptainerSettingsSchema)` to create a new message.
  */
 export const ApptainerSettingsSchema: GenMessage<ApptainerSettings> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 5);
+  messageDesc(file_vibesys_cli_v1_operator, 6);
 
 /**
  * Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
@@ -408,7 +456,7 @@ export type Resources = Message<"vibesys.cli.v1.Resources"> & {
  * Use `create(ResourcesSchema)` to create a new message.
  */
 export const ResourcesSchema: GenMessage<Resources> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 6);
+  messageDesc(file_vibesys_cli_v1_operator, 7);
 
 /**
  * RocmResource passes the machine's AMD GPUs into the container, for tasks of the rocm backend: the
@@ -427,7 +475,7 @@ export type RocmResource = Message<"vibesys.cli.v1.RocmResource"> & {
  * Use `create(RocmResourceSchema)` to create a new message.
  */
 export const RocmResourceSchema: GenMessage<RocmResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 7);
+  messageDesc(file_vibesys_cli_v1_operator, 8);
 
 /**
  * GpuResource passes GPUs into the container.
@@ -456,7 +504,7 @@ export type GpuResource = Message<"vibesys.cli.v1.GpuResource"> & {
  * Use `create(GpuResourceSchema)` to create a new message.
  */
 export const GpuResourceSchema: GenMessage<GpuResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 8);
+  messageDesc(file_vibesys_cli_v1_operator, 9);
 
 /**
  * KubernetesResource gives the container a Kubernetes cluster: its kubeconfig, read-only, at the
@@ -503,7 +551,7 @@ export type KubernetesResource = Message<"vibesys.cli.v1.KubernetesResource"> & 
  * Use `create(KubernetesResourceSchema)` to create a new message.
  */
 export const KubernetesResourceSchema: GenMessage<KubernetesResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 9);
+  messageDesc(file_vibesys_cli_v1_operator, 10);
 
 /**
  * LegacyDocker is the [docker] section of the earlier shape.
@@ -543,7 +591,7 @@ export type LegacyDocker = Message<"vibesys.cli.v1.LegacyDocker"> & {
  * Use `create(LegacyDockerSchema)` to create a new message.
  */
 export const LegacyDockerSchema: GenMessage<LegacyDocker> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 10);
+  messageDesc(file_vibesys_cli_v1_operator, 11);
 
 /**
  * PlacementKind is where a placement's Docker engine runs containers.

@@ -162,6 +162,11 @@ type world struct {
 	// alone are the tokens of the commands that claim the machine alone.
 	alone sync.Map
 
+	// alloc is the standing allocations' side of the world, and launches the allocation each job was
+	// launched in (its backend reference), for the invariants. Both are for a profile of allocations.
+	alloc    *allocWorld
+	launches map[lifecycle.Ref]string
+
 	ops     []*op
 	opCount int
 	tokens  map[string]*script
@@ -215,6 +220,10 @@ func newWorld(seed uint64, pick func(*rand.Rand) profile) *world {
 		appendedAt: map[lifecycle.Ref]time.Duration{}, appends: map[lifecycle.Ref]int{},
 		tokens: map[string]*script{},
 		ctx:    ctx, stop: stop,
+	}
+	w.launches = map[lifecycle.Ref]string{}
+	if w.profile.allocs {
+		w.alloc = newAllocWorld(w)
 	}
 	mem := memstores.New(w.rules)
 	for _, s := range scopes {
@@ -420,6 +429,10 @@ func (w *world) Start(ctx context.Context) error {
 		Supervisors:  gatedSupervisors{supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors), w, d},
 		Repositories: simRepositories(),
 		Scheduler:    w.scheduler(),
+		Allocations:  w.allocations(d),
+		// A command of a profile of allocations is taken to need this long in the one it runs in, and
+		// the simulation's environment never times a command out.
+		DefaultTimeout: w.commandTimeout(),
 	})
 	w.group.Go(func() { w.process(d) })
 	select {
@@ -440,6 +453,9 @@ func (w *world) scheduler() app.Scheduler {
 	policy := fifo.New()
 	if w.profile.fair {
 		policy = fairshare.New()
+	}
+	if w.profile.allocs {
+		return w.allocScheduler(policy)
 	}
 	return app.Scheduler{
 		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: w.profile.slots}},

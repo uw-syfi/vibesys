@@ -106,6 +106,14 @@ type entry struct {
 	// leased is the lease another holder had when the job last tried to take it. The job waits
 	// for a RetryDue to try again.
 	leased *schedule.LeasedOut
+	// released says the allocation machine let a job of work that is Allocated go (AllocReleased),
+	// and inAlloc that it let it go into a standing allocation, which holds the job's capacity for
+	// it: the job runs on allocPlacement, claims nothing of its own and launches inside the
+	// allocation whose backend reference is allocRef. A job released with no allocation runs as any
+	// other does.
+	released, inAlloc bool
+	allocPlacement    string
+	allocRef          string
 }
 
 // Work is what a job asks of the machine, as the shell read it from the job: the places it may run,
@@ -118,6 +126,10 @@ type Work struct {
 	Options []schedule.Option
 	Run     core.RunID
 	Kind    core.JobKind
+	// Allocated says the job was submitted into a standing allocation of its run, or to any of
+	// them. The machine does not start it until the allocation machine has decided where it runs
+	// (AllocReleased): in an allocation, which holds its capacity, or as a job with no allocation.
+	Allocated bool
 }
 
 func (w Work) told() bool { return len(w.Options) > 0 || w.Kind != "" }
@@ -159,6 +171,11 @@ type State struct {
 	// policy shares the machine by.
 	scheduling Scheduling
 	recent     []schedule.Grant
+	// slots are the slots of a placement that standing allocations hold or wait for. A granted one
+	// is a holding, with the claim of a job's slot of its placement, until it is dropped; one that
+	// is not waits for the scheduler as a job does.
+	slots   []slot
+	slotSeq uint64
 }
 
 // Recovering returns the state of a daemon that is starting: it launches nothing until it has
@@ -451,6 +468,35 @@ type LeftRun struct {
 // that it needs nothing more.
 type Closed struct{ Ref Ref }
 
+// AllocReleased says the allocation machine decided where a job of work that is Allocated runs, or
+// confirms it again: in the standing allocation whose backend reference is Allocation, on
+// Placement, where the allocation holds the job's capacity so the job claims none of its own, or,
+// with Placement empty, as a job with no allocation does. It changes nothing for a job the machine
+// does not hold, and the shell may send it again at any time: the shell sends it for every job an
+// allocation holds, so a restart finds the job in its allocation again.
+type AllocReleased struct {
+	Ref        Ref
+	Placement  string
+	Allocation string
+}
+
+// SlotWanted says a standing allocation wants one slot of a placement, for a run: the slot waits
+// for the scheduler as a job does, and once granted it is held until SlotDropped. Slot names the
+// allocation. Restored says the allocation held its slot before a restart, so the slot is held at
+// once, and not decided again, since what a restart found running was within the placement's
+// capacity. Wanting a slot already wanted changes nothing.
+type SlotWanted struct {
+	Slot      string
+	Placement string
+	Run       core.RunID
+	At        time.Time
+	Restored  bool
+}
+
+// SlotDropped says a standing allocation gave its slot back, or never will use it. It changes
+// nothing for a slot the machine does not hold.
+type SlotDropped struct{ Slot string }
+
 // Requeued says the store took a settlement that queues the job again (see Settlement.Requeues):
 // the attempt that was cut off is recorded, and the job waits for its turn.
 type Requeued struct{ Ref Ref }
@@ -476,6 +522,9 @@ func (StoreRead) event()      {}
 func (StoreForgotten) event() {}
 func (Closed) event()         {}
 func (Requeued) event()       {}
+func (AllocReleased) event()  {}
+func (SlotWanted) event()     {}
+func (SlotDropped) event()    {}
 
 // Request is something the machine asks the shell to do. Each names the job it is about, and the
 // shell answers it with an event. The set is closed.
@@ -494,6 +543,10 @@ type LaunchRequest struct {
 	Ref       Ref
 	Placement string
 	Leases    []schedule.ResourceID
+	// Allocation is the backend's reference for the standing allocation the job runs inside, empty
+	// for a job that is not in one. The job's supervisor carries it to its environment
+	// (Launch.Allocation).
+	Allocation string
 }
 
 // Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
@@ -629,7 +682,7 @@ func (Discard) request()       {}
 func Step(s State, e Event) (State, []Request) {
 	out := State{
 		entries: slices.Clone(s.entries), seq: s.seq, recovering: s.recovering, unread: slices.Clone(s.unread),
-		scheduling: s.scheduling, recent: s.recent,
+		scheduling: s.scheduling, recent: s.recent, slots: slices.Clone(s.slots), slotSeq: s.slotSeq,
 	}
 	var reqs []Request
 	switch e := e.(type) {
@@ -677,6 +730,12 @@ func Step(s State, e Event) (State, []Request) {
 		out.remove(e.Ref)
 	case Requeued:
 		reqs = out.requeued(e.Ref)
+	case AllocReleased:
+		out.allocReleased(e)
+	case SlotWanted:
+		out.wantSlot(e)
+	case SlotDropped:
+		out.dropSlot(e.Slot)
 	}
 	reqs = append(reqs, out.schedule()...)
 	return out, reqs
@@ -1302,12 +1361,29 @@ func (s *State) schedule() []Request {
 			st.Holdings = append(st.Holdings, schedule.Holding{ID: idOf(e.ref), Claims: s.heldClaims(e), Run: e.work.Run})
 		case e.parked:
 			st.Waiting = append(st.Waiting, s.candidate(e, true))
-		case e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store):
+		case e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store) && !e.heldForAllocation():
 			st.Waiting = append(st.Waiting, s.candidate(e, false))
+		}
+	}
+	for _, sl := range s.slots {
+		if sl.granted {
+			st.Holdings = append(st.Holdings, schedule.Holding{ID: slotIDOf(sl.id), Claims: slotClaims(sl), Run: sl.run})
+		} else {
+			st.Waiting = append(st.Waiting, schedule.Candidate{
+				ID: slotIDOf(sl.id), Options: []schedule.Option{{Placement: sl.placement, Claims: slotClaims(sl)}},
+				Run: sl.run, Submitted: sl.at, Seq: sl.seq,
+			})
 		}
 	}
 	rules := schedule.Rules{Policy: s.scheduling.Policy, Placer: s.scheduling.Placer, Filters: s.scheduling.Filters}
 	for _, d := range schedule.Step(st, rules) {
+		if j := slices.IndexFunc(s.slots, func(sl slot) bool { return slotIDOf(sl.id) == d.Target() }); j >= 0 {
+			if start, ok := d.(schedule.Start); ok {
+				s.slots[j].granted = true
+				s.recent = schedule.Remember(s.recent, schedule.Grant{Run: s.slots[j].run, Claims: start.Option.Claims})
+			}
+			continue
+		}
 		i := slices.IndexFunc(s.entries, func(e entry) bool { return idOf(e.ref) == d.Target() })
 		cur := &s.entries[i]
 		switch d := d.(type) {
@@ -1320,7 +1396,7 @@ func (s *State) schedule() []Request {
 				continue
 			}
 			cur.phase = PhaseLaunching
-			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur)})
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur), Allocation: cur.allocRefOf()})
 		case schedule.Wait:
 			cur.wait, cur.waits = d.Reason, true
 		case schedule.Refuse:
@@ -1360,6 +1436,9 @@ func (s *State) leasesOf(e entry) []schedule.ResourceID {
 // optionsOf is where a job may run: its work's options, or, for a job whose work the machine was
 // not told, anywhere, holding every resource for itself alone.
 func (s *State) optionsOf(e entry) []schedule.Option {
+	if e.inAlloc {
+		return []schedule.Option{{Placement: e.allocPlacement}}
+	}
 	if e.work.told() {
 		return e.work.Options
 	}
@@ -1395,6 +1474,31 @@ func (s *State) heldClaims(e entry) []schedule.Claim {
 		}
 	}
 	return out
+}
+
+// heldForAllocation says a job submitted into an allocation waits for the allocation machine to
+// decide where it runs.
+func (e entry) heldForAllocation() bool { return e.work.Allocated && !e.released }
+
+// allocRefOf is the backend's reference for the allocation a job launches inside, empty for a job
+// that is not in one.
+func (e entry) allocRefOf() string {
+	if e.inAlloc {
+		return e.allocRef
+	}
+	return ""
+}
+
+// allocReleased records where the allocation machine put a job the machine holds.
+func (s *State) allocReleased(e AllocReleased) {
+	i := s.find(e.Ref)
+	if i < 0 {
+		return
+	}
+	cur := &s.entries[i]
+	cur.released = true
+	cur.inAlloc = e.Placement != ""
+	cur.allocPlacement, cur.allocRef = e.Placement, e.Allocation
 }
 
 // holdsMachine reports whether a job holds its claims: its command may run, or its end is on its
@@ -1617,7 +1721,9 @@ func (s State) Stranded(at time.Time) []Ref {
 		leaseRetry := e.phase == PhaseQueued && e.leased != nil && e.armed && e.waiting
 		return leaseRetry || (e.holdsMachine() && (!bounded || e.holdUntil.IsZero() || at.Before(e.holdUntil)))
 	}
-	if s.recovering || slices.ContainsFunc(s.entries, owed) {
+	// A granted slot is capacity a standing allocation holds, and its end is owed by the
+	// allocation machine, so a job that waits for it is not stranded.
+	if s.recovering || slices.ContainsFunc(s.entries, owed) || slices.ContainsFunc(s.slots, func(sl slot) bool { return sl.granted }) {
 		return nil
 	}
 	var out []Ref

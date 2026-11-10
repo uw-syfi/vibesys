@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/alloc"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
@@ -102,7 +103,7 @@ func toServiceSpec(s *cliv1.ServiceSpec) *core.ServiceSpec {
 
 // JobSpec returns the contract's message for a job spec.
 func JobSpec(s core.JobSpec) *cliv1.JobSpec {
-	out := &cliv1.JobSpec{Commit: string(s.Commit), Environment: EnvironmentKind(s.Environment), Placement: s.Placement}
+	out := &cliv1.JobSpec{Commit: string(s.Commit), Environment: EnvironmentKind(s.Environment), Placement: s.Placement, Allocation: s.Allocation}
 	switch settings := s.Settings.(type) {
 	case core.CheckSettings:
 		out.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
@@ -143,7 +144,12 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 			return core.JobSpec{}, invalid("%s.placement: %v", field, err)
 		}
 	}
-	out := core.JobSpec{Commit: commit, Environment: env, Placement: s.GetPlacement()}
+	if a := s.GetAllocation(); a != "" && a != core.AllocationAny {
+		if id := alloc.ID(a); !id.Valid() {
+			return core.JobSpec{}, invalid("%s.allocation: %q is not an allocation (a name such as a7, or %q)", field, a, core.AllocationAny)
+		}
+	}
+	out := core.JobSpec{Commit: commit, Environment: env, Placement: s.GetPlacement(), Allocation: s.GetAllocation()}
 	switch settings := s.GetSettings().(type) {
 	case *cliv1.JobSpec_Check:
 		out.Settings = core.CheckSettings{}

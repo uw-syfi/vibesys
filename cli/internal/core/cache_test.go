@@ -363,3 +363,19 @@ func TestAMeasurementThatRanItsCheckAnswersAChecksCacheQuery(t *testing.T) {
 		}
 	}
 }
+
+// A submission into an allocation does not join a job that runs elsewhere, and the other way round:
+// the job it lands on is the one that runs where it asked.
+func TestJoinRequiresTheSameAllocation(t *testing.T) {
+	check := core.CheckSettings{}
+	for _, held := range []string{"", "any", "a1", "a2"} {
+		for _, asked := range []string{"", "any", "a1", "a2"} {
+			existing := queuedJob(core.JobCheck, "k", check, core.JobQueued)
+			existing.Spec.Allocation = held
+			sub := core.Submission{Key: "k", Spec: core.JobSpec{Commit: commitN(1), Settings: check, Allocation: asked}}
+			if got := core.CanJoin(existing, sub, 3); got != (held == asked) {
+				t.Errorf("a job in allocation %q joined by a submission into %q: %v", held, asked, got)
+			}
+		}
+	}
+}

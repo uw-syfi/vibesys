@@ -88,6 +88,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"plan":       planCommand,
 	"bound":      boundCommand,
 	"workstream": workstreamCommand,
+	"alloc":      allocCommand,
 	"task":       taskCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
@@ -104,6 +105,7 @@ commands:
                                                  queue the task's benchmark and print the job
   submit command <commit> [--wrap prefix] [flags] -- <argv...>
                                                  queue a command and print the job
+  submit ... --alloc <id>|any                    run the job in a standing allocation of the run
   submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
                                                  candidate's server started under the prefix
   submit trace <commit> [--no-cache] [--plan n] [flags]
@@ -133,6 +135,16 @@ commands:
   task card <task> [--revision rev | --working-tree | --folder dir]
                                                  print what a client shows of a task: domain,
                                                  hardware, model, objectives and heading
+  alloc request <placement> --for <duration>     ask for a standing allocation of a placement
+  alloc ls [--ended] [--all-runs]                the run's allocations
+  alloc show <id>                                one allocation
+  alloc wait <id> --until running|ending-in <duration>|ended [--timeout 30m]
+                                                 block until it is in that state
+  alloc end <id> [--after-jobs]                  end an allocation, now or once its jobs are done
+  alloc renew <id> --lead <d> --for <d> --until <time>|run-end
+                                                 ask for a successor once its time left is at most the
+                                                 lead; alloc renew <id> --off takes the order away
+  alloc end-run                                  end every allocation of the run, as its end does
   daemon status|stop|restart [--force]           manage the daemon
   upgrade                                        replace this binary with the newest release
 

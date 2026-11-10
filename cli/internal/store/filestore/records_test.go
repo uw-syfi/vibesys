@@ -101,6 +101,10 @@ func fill(m protoreflect.Message, variant int) {
 		v := core.Headline(ob.Values)
 		ob.Value = &v
 	}
+	// A job's allocation is an allocation's name or any.
+	if md.FullName() == "vibesys.cli.v1.JobSpec" {
+		m.Interface().(*cliv1.JobSpec).Allocation = "a7"
+	}
 	// A plan's status is the status of its last transition, and a file whose two disagree is refused.
 	if md.FullName() == "vibesys.cli.v1.Plan" {
 		plan := m.Interface().(*cliv1.Plan)

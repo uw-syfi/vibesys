@@ -35,6 +35,8 @@ type common struct {
 	agent   string
 	// placement restricts a docker job a submit queues to one placement of the operator config.
 	placement string
+	// alloc is the standing allocation a job a submit queues runs in: its name, or "any".
+	alloc string
 	// environment is why the context variables could not be read, which a command that needs the
 	// context says when it builds the call's context.
 	environment error
@@ -59,6 +61,7 @@ func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	fs.StringVar(&c.harness, "harness", agent.GetHarness(), "the agent harness, such as claude-code")
 	fs.StringVar(&c.agent, "agent", agent.GetAgent(), "the agent making the call")
 	fs.StringVar(&c.placement, "placement", operator.GetPlacement(), "submit: the one placement of the operator config a docker job may run on (default: any that gives what the task needs, chosen when it starts)")
+	fs.StringVar(&c.alloc, "alloc", "", "submit: run the job in the standing allocation of the run with this name, such as a7, which refuses the job unless it fits; or \"any\", which uses a running allocation it fits and otherwise queues it as a job with no allocation is queued")
 	return fs, c
 }
 
