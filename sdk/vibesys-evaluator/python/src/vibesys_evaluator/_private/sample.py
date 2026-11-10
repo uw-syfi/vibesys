@@ -1,6 +1,6 @@
 """The sample lifecycle every domain shares: seed, artifacts, records, errors, signals.
 
-A sample runs in one of three modes (``docs/spec.md``, "The sample"):
+A sample runs in one of four modes (``docs/spec.md``, "The sample"):
 
 - ``benchmark``: ``hello`` first, then exactly one outcome on ``--vs-output``:
   the result the task reports, or an error record naming what failed.
@@ -8,6 +8,9 @@ A sample runs in one of three modes (``docs/spec.md``, "The sample"):
 - ``profile``: the standard load for a profiler; never scored, so nothing may
   be reported; its files go to the artifacts directory, which vibesys-cli
   copies back.
+- ``trace``: a short load with the system's spans captured (a domain's own
+  command, such as the microservices ``trace``); never scored, so nothing may
+  be reported; its reports go to the artifacts directory.
 
 A domain supplies the body (deploy the system under test if it owns one, run
 the task's function on a ``Run``); this module owns everything around it.
@@ -48,6 +51,7 @@ class Mode(StrEnum):
     CHECK = "check"
     BENCHMARK = "benchmark"
     PROFILE = "profile"
+    TRACE = "trace"
 
 
 def log(message: str) -> None:
@@ -225,7 +229,7 @@ def unscored_sample(
     env: Mapping[str, str],
     body: Callable[[Sample], str | None],
 ) -> int:
-    """Run a check or profile sample: exit 0 when ``body`` returns None, else 1 with its reason."""
+    """Run a check, profile or trace sample: exit 0 when ``body`` returns None, else 1 with its reason."""
     with tempfile.TemporaryDirectory(prefix="vibesys-evaluator-") as scratch:
         try:
             sample = _new_sample(mode, seed_flag=seed_flag, env=env, scratch=Path(scratch))

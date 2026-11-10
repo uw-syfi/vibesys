@@ -11,7 +11,8 @@ reply that is not JSON, or a missing binary is a ``CoreError`` of the core itsel
 The binary is found in the wheel (``vibesys_evaluator/_bin``, where the platform wheels bundle the
 Go binaries), then ``$VIBESYS_EVALUATOR_BIN``, then ``PATH``. ``loadgen`` and ``otelcapture`` are
 found the same way (``find_binary(name)``), with ``$VIBESYS_EVALUATOR_LOADGEN`` and
-``$VIBESYS_EVALUATOR_OTELCAPTURE``.
+``$VIBESYS_EVALUATOR_OTELCAPTURE``; so is ``stitch`` (the trace analyser, a Rust program the wheels
+do not bundle yet), with ``$VIBESYS_EVALUATOR_STITCH``.
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ ENV_VARS = {
     BIN_NAME: BIN_ENV,
     "loadgen": "VIBESYS_EVALUATOR_LOADGEN",
     "otelcapture": "VIBESYS_EVALUATOR_OTELCAPTURE",
+    "stitch": "VIBESYS_EVALUATOR_STITCH",
+}
+#: How to provide each binary that is not one of this module's Go commands.
+_BUILD_HINTS = {
+    "stitch": "build it from the repository's experimental/stitch (`cargo build --release -p stitch-cli`)",
 }
 _BUNDLED_DIR = Path(__file__).resolve().parent.parent / "_bin"
 _DOMAIN_EXIT = 1
@@ -72,8 +78,8 @@ class CoreDomainError(CoreError):
 def find_binary(name: str = BIN_NAME) -> str:
     """The binary ``name``: the wheel's own, then its environment variable, then ``PATH``.
 
-    ``name`` is one of the wheel's binaries (``vibesys-evaluator``, ``loadgen``, ``otelcapture``);
-    each has its own variable (``ENV_VARS``).
+    ``name`` is one of the wheel's binaries (``vibesys-evaluator``, ``loadgen``, ``otelcapture``)
+    or ``stitch``; each has its own variable (``ENV_VARS``).
     """
     suffix = ".exe" if sys.platform == "win32" else ""
     bundled = _BUNDLED_DIR / (name + suffix)
@@ -86,13 +92,21 @@ def find_binary(name: str = BIN_NAME) -> str:
     found = shutil.which(name)
     if found:
         return found
-    msg = (
-        f"the {name} binary is not bundled in this installation of vibesys-evaluator, ${env} is "
-        f"unset and it is not on PATH. The platform wheels bundle it (pip install vibesys-evaluator "
-        f"on Linux or macOS, x86_64 or arm64); a source distribution or another platform does not. "
-        f"Set ${env} to the binary, or build it: "
-        f"`go install github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/cmd/{name}@<tag>`"
+    build = _BUILD_HINTS.get(
+        name, f"`go install github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/cmd/{name}@<tag>`"
     )
+    if name in _BUILD_HINTS:
+        msg = (
+            f"the {name} binary is not bundled in this installation of vibesys-evaluator, ${env} is "
+            f"unset and it is not on PATH. Set ${env} to the binary, or {build}"
+        )
+    else:
+        msg = (
+            f"the {name} binary is not bundled in this installation of vibesys-evaluator, ${env} "
+            f"is unset and it is not on PATH. The platform wheels bundle it (pip install "
+            f"vibesys-evaluator on Linux or macOS, x86_64 or arm64); a source distribution or "
+            f"another platform does not. Set ${env} to the binary, or build it: {build}"
+        )
     raise CoreNotFoundError(msg)
 
 

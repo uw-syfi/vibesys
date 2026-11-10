@@ -72,6 +72,11 @@ class KubePhaseRunner:
     task: TaskCommand
     scratch: Path
 
+    @property
+    def namespace(self) -> str:
+        """The sample's namespace (a `NamespacedRunner`, so a trace can instrument it)."""
+        return self.deployment.namespace
+
     def run_phase(self, job: PhaseJob, out_dir: Path) -> None:
         """Run the phase; copy the files it left in its work directory and its log into out_dir."""
         input_file = self.scratch / f"{job.name}.{PHASE_INPUT_FILE}"

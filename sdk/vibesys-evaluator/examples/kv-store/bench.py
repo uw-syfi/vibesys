@@ -159,6 +159,18 @@ ACCURACY = ms.Accuracy(
 )
 
 
+# ------------------------------------------------------------- the trace
+# `bench.py trace`: the system deployed as for a sample, its restartable Deployments (kv) sending
+# OpenTelemetry spans to a collector in the namespace, a short load at the benchmark's rate, and
+# stitch's reports (call tree, critical path, per-hop latency) in trace/ of the artifacts.
+
+def trace(run: ms.Run) -> None:
+    run.open_loop(rate=RATE, secs=20, warmup=5)
+
+
+TRACE = ms.Trace(body=trace, sampler_ratio=0.1)
+
+
 # ------------------------------------------------------------- (5) validity
 
 if __name__ == "__main__":
@@ -174,4 +186,5 @@ if __name__ == "__main__":
         },
         validity=vse.Validity(max_error_rate=0.001, min_sustained_ratio=0.99),
         accuracy=ACCURACY,
+        trace=TRACE,
     )
