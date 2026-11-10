@@ -863,7 +863,9 @@ func (s *allocShell) lookAtJobs() {
 	}
 	var unplaced, lost []lifecycle.Ref
 	for _, ref := range v.unplaced {
-		if !held[jobOfRef(ref)] && !s.isExpected(ref) {
+		// A job whose why is being written is let go by that effect, once its output says why: let
+		// go here as well, it could launch before the line is in its output.
+		if !held[jobOfRef(ref)] && !s.isExpected(ref) && !s.inflight["unplaced "+ref.String()] {
 			unplaced = append(unplaced, ref)
 		}
 	}
