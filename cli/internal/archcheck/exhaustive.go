@@ -22,6 +22,8 @@ import (
 // and says after the switch, not in a default, what a value from a newer peer does.
 var closedEnums = []string{
 	"cli/cmd/vibesys-cli.answer",
+	"cli/gen/vibesys/cli/v1.AllocationEndReason",
+	"cli/gen/vibesys/cli/v1.AllocationState",
 	"cli/gen/vibesys/cli/v1.FailureKind",
 	"cli/gen/vibesys/cli/v1.WaitOutcomeKind",
 	"cli/internal/core.ExecKind",

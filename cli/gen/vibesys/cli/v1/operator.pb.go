@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -309,7 +310,10 @@ type Placement struct {
 	// What the placement gives every container it runs.
 	Resources *Resources `protobuf:"bytes,5,opt,name=resources,proto3" json:"resources,omitempty"`
 	// How a batch allocation is submitted and Apptainer run, for the apptainer kind.
-	Apptainer     *ApptainerSettings `protobuf:"bytes,6,opt,name=apptainer,proto3" json:"apptainer,omitempty"`
+	Apptainer *ApptainerSettings `protobuf:"bytes,6,opt,name=apptainer,proto3" json:"apptainer,omitempty"`
+	// When set, a run may hold standing allocations of the placement (allocation.proto). Unset, a
+	// request for one is refused, naming this section.
+	Allocations   *AllocationSettings `protobuf:"bytes,7,opt,name=allocations,proto3" json:"allocations,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -386,6 +390,70 @@ func (x *Placement) GetApptainer() *ApptainerSettings {
 	return nil
 }
 
+func (x *Placement) GetAllocations() *AllocationSettings {
+	if x != nil {
+		return x.Allocations
+	}
+	return nil
+}
+
+// AllocationSettings is the [placements.<name>.allocations] section: how much of a placement a run
+// may hold as standing allocations.
+type AllocationSettings struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many standing allocations one run may hold on the placement at once, PENDING and RUNNING
+	// (DRAINING counts as RUNNING), renewals included.
+	MaxHeld uint32 `protobuf:"varint,1,opt,name=max_held,json=maxHeld,proto3" json:"max_held,omitempty"`
+	// The longest an allocation may be asked for, written as a duration such as "24h".
+	MaxFor        *durationpb.Duration `protobuf:"bytes,2,opt,name=max_for,json=maxFor,proto3" json:"max_for,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AllocationSettings) Reset() {
+	*x = AllocationSettings{}
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AllocationSettings) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AllocationSettings) ProtoMessage() {}
+
+func (x *AllocationSettings) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AllocationSettings.ProtoReflect.Descriptor instead.
+func (*AllocationSettings) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AllocationSettings) GetMaxHeld() uint32 {
+	if x != nil {
+		return x.MaxHeld
+	}
+	return 0
+}
+
+func (x *AllocationSettings) GetMaxFor() *durationpb.Duration {
+	if x != nil {
+		return x.MaxFor
+	}
+	return nil
+}
+
 // RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node
 // of the cluster for the apptainer kind, where remote_workspace_root is on the file system the
 // compute nodes share.
@@ -404,7 +472,7 @@ type RemoteSettings struct {
 
 func (x *RemoteSettings) Reset() {
 	*x = RemoteSettings{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -416,7 +484,7 @@ func (x *RemoteSettings) String() string {
 func (*RemoteSettings) ProtoMessage() {}
 
 func (x *RemoteSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -429,7 +497,7 @@ func (x *RemoteSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteSettings.ProtoReflect.Descriptor instead.
 func (*RemoteSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RemoteSettings) GetHost() string {
@@ -494,7 +562,7 @@ type SlurmSettings struct {
 
 func (x *SlurmSettings) Reset() {
 	*x = SlurmSettings{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +574,7 @@ func (x *SlurmSettings) String() string {
 func (*SlurmSettings) ProtoMessage() {}
 
 func (x *SlurmSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +587,7 @@ func (x *SlurmSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlurmSettings.ProtoReflect.Descriptor instead.
 func (*SlurmSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SlurmSettings) GetPartition() string {
@@ -630,7 +698,7 @@ type ApptainerSettings struct {
 
 func (x *ApptainerSettings) Reset() {
 	*x = ApptainerSettings{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -642,7 +710,7 @@ func (x *ApptainerSettings) String() string {
 func (*ApptainerSettings) ProtoMessage() {}
 
 func (x *ApptainerSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -655,7 +723,7 @@ func (x *ApptainerSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApptainerSettings.ProtoReflect.Descriptor instead.
 func (*ApptainerSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ApptainerSettings) GetSubmitCommand() []string {
@@ -730,7 +798,7 @@ type Resources struct {
 
 func (x *Resources) Reset() {
 	*x = Resources{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -742,7 +810,7 @@ func (x *Resources) String() string {
 func (*Resources) ProtoMessage() {}
 
 func (x *Resources) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -755,7 +823,7 @@ func (x *Resources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Resources.ProtoReflect.Descriptor instead.
 func (*Resources) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Resources) GetGpu() *GpuResource {
@@ -799,7 +867,7 @@ type RocmResource struct {
 
 func (x *RocmResource) Reset() {
 	*x = RocmResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +879,7 @@ func (x *RocmResource) String() string {
 func (*RocmResource) ProtoMessage() {}
 
 func (x *RocmResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +892,7 @@ func (x *RocmResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RocmResource.ProtoReflect.Descriptor instead.
 func (*RocmResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{8}
 }
 
 // GpuResource passes GPUs into the container.
@@ -841,7 +909,7 @@ type GpuResource struct {
 
 func (x *GpuResource) Reset() {
 	*x = GpuResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -853,7 +921,7 @@ func (x *GpuResource) String() string {
 func (*GpuResource) ProtoMessage() {}
 
 func (x *GpuResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -866,7 +934,7 @@ func (x *GpuResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuResource.ProtoReflect.Descriptor instead.
 func (*GpuResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GpuResource) GetDevices() string {
@@ -905,7 +973,7 @@ type KubernetesResource struct {
 
 func (x *KubernetesResource) Reset() {
 	*x = KubernetesResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +985,7 @@ func (x *KubernetesResource) String() string {
 func (*KubernetesResource) ProtoMessage() {}
 
 func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +998,7 @@ func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubernetesResource.ProtoReflect.Descriptor instead.
 func (*KubernetesResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *KubernetesResource) GetKubeconfig() string {
@@ -977,7 +1045,7 @@ type LegacyDocker struct {
 
 func (x *LegacyDocker) Reset() {
 	*x = LegacyDocker{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +1057,7 @@ func (x *LegacyDocker) String() string {
 func (*LegacyDocker) ProtoMessage() {}
 
 func (x *LegacyDocker) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1070,7 @@ func (x *LegacyDocker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LegacyDocker.ProtoReflect.Descriptor instead.
 func (*LegacyDocker) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *LegacyDocker) GetPlacement() PlacementKind {
@@ -1037,7 +1105,7 @@ var File_vibesys_cli_v1_operator_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xa1\x04\n" +
+	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\"\xa1\x04\n" +
 	"\x0eOperatorConfig\x12v\n" +
 	"\n" +
 	"placements\x18\x01 \x03(\v2..vibesys.cli.v1.OperatorConfig.PlacementsEntryB&\xbaH#\x9a\x01 \"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\n" +
@@ -1056,7 +1124,7 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\bmax_jobs\x18\x02 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80\b(\x01H\x01R\amaxJobs\x88\x01\x01B\t\n" +
 	"\a_policyB\v\n" +
-	"\t_max_jobs\"\xd6\x02\n" +
+	"\t_max_jobs\"\x9c\x03\n" +
 	"\tPlacement\x12=\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.PlacementKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12#\n" +
@@ -1064,7 +1132,11 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x06remote\x18\x03 \x01(\v2\x1e.vibesys.cli.v1.RemoteSettingsR\x06remote\x123\n" +
 	"\x05slurm\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.SlurmSettingsR\x05slurm\x127\n" +
 	"\tresources\x18\x05 \x01(\v2\x19.vibesys.cli.v1.ResourcesR\tresources\x12?\n" +
-	"\tapptainer\x18\x06 \x01(\v2!.vibesys.cli.v1.ApptainerSettingsR\tapptainer\"\xf4\x01\n" +
+	"\tapptainer\x18\x06 \x01(\v2!.vibesys.cli.v1.ApptainerSettingsR\tapptainer\x12D\n" +
+	"\vallocations\x18\a \x01(\v2\".vibesys.cli.v1.AllocationSettingsR\vallocations\"{\n" +
+	"\x12AllocationSettings\x12$\n" +
+	"\bmax_held\x18\x01 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\amaxHeld\x12?\n" +
+	"\amax_for\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\v\xbaH\b\xc8\x01\x01\xaa\x01\x02*\x00R\x06maxFor\"\xf4\x01\n" +
 	"\x0eRemoteSettings\x128\n" +
 	"\x04host\x18\x01 \x01(\tB$\xbaH!r\x1f2\x1d^[A-Za-z0-9][A-Za-z0-9_.@-]*$R\x04host\x12-\n" +
 	"\vssh_command\x18\x02 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\n" +
@@ -1149,49 +1221,53 @@ func file_vibesys_cli_v1_operator_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_operator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_vibesys_cli_v1_operator_proto_goTypes = []any{
-	(PlacementKind)(0),         // 0: vibesys.cli.v1.PlacementKind
-	(ContainerRuntime)(0),      // 1: vibesys.cli.v1.ContainerRuntime
-	(*OperatorConfig)(nil),     // 2: vibesys.cli.v1.OperatorConfig
-	(*Scheduler)(nil),          // 3: vibesys.cli.v1.Scheduler
-	(*Placement)(nil),          // 4: vibesys.cli.v1.Placement
-	(*RemoteSettings)(nil),     // 5: vibesys.cli.v1.RemoteSettings
-	(*SlurmSettings)(nil),      // 6: vibesys.cli.v1.SlurmSettings
-	(*ApptainerSettings)(nil),  // 7: vibesys.cli.v1.ApptainerSettings
-	(*Resources)(nil),          // 8: vibesys.cli.v1.Resources
-	(*RocmResource)(nil),       // 9: vibesys.cli.v1.RocmResource
-	(*GpuResource)(nil),        // 10: vibesys.cli.v1.GpuResource
-	(*KubernetesResource)(nil), // 11: vibesys.cli.v1.KubernetesResource
-	(*LegacyDocker)(nil),       // 12: vibesys.cli.v1.LegacyDocker
-	nil,                        // 13: vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	nil,                        // 14: vibesys.cli.v1.Resources.MountsEntry
-	nil,                        // 15: vibesys.cli.v1.LegacyDocker.MountsEntry
+	(PlacementKind)(0),          // 0: vibesys.cli.v1.PlacementKind
+	(ContainerRuntime)(0),       // 1: vibesys.cli.v1.ContainerRuntime
+	(*OperatorConfig)(nil),      // 2: vibesys.cli.v1.OperatorConfig
+	(*Scheduler)(nil),           // 3: vibesys.cli.v1.Scheduler
+	(*Placement)(nil),           // 4: vibesys.cli.v1.Placement
+	(*AllocationSettings)(nil),  // 5: vibesys.cli.v1.AllocationSettings
+	(*RemoteSettings)(nil),      // 6: vibesys.cli.v1.RemoteSettings
+	(*SlurmSettings)(nil),       // 7: vibesys.cli.v1.SlurmSettings
+	(*ApptainerSettings)(nil),   // 8: vibesys.cli.v1.ApptainerSettings
+	(*Resources)(nil),           // 9: vibesys.cli.v1.Resources
+	(*RocmResource)(nil),        // 10: vibesys.cli.v1.RocmResource
+	(*GpuResource)(nil),         // 11: vibesys.cli.v1.GpuResource
+	(*KubernetesResource)(nil),  // 12: vibesys.cli.v1.KubernetesResource
+	(*LegacyDocker)(nil),        // 13: vibesys.cli.v1.LegacyDocker
+	nil,                         // 14: vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	nil,                         // 15: vibesys.cli.v1.Resources.MountsEntry
+	nil,                         // 16: vibesys.cli.v1.LegacyDocker.MountsEntry
+	(*durationpb.Duration)(nil), // 17: google.protobuf.Duration
 }
 var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
-	13, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	12, // 1: vibesys.cli.v1.OperatorConfig.docker:type_name -> vibesys.cli.v1.LegacyDocker
-	5,  // 2: vibesys.cli.v1.OperatorConfig.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	6,  // 3: vibesys.cli.v1.OperatorConfig.slurm:type_name -> vibesys.cli.v1.SlurmSettings
+	14, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	13, // 1: vibesys.cli.v1.OperatorConfig.docker:type_name -> vibesys.cli.v1.LegacyDocker
+	6,  // 2: vibesys.cli.v1.OperatorConfig.remote:type_name -> vibesys.cli.v1.RemoteSettings
+	7,  // 3: vibesys.cli.v1.OperatorConfig.slurm:type_name -> vibesys.cli.v1.SlurmSettings
 	3,  // 4: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
 	0,  // 5: vibesys.cli.v1.Placement.kind:type_name -> vibesys.cli.v1.PlacementKind
-	5,  // 6: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	6,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
-	8,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
-	7,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
-	1,  // 10: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
-	10, // 11: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
-	11, // 12: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	14, // 13: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	9,  // 14: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
-	0,  // 15: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
-	15, // 16: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
-	4,  // 17: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	6,  // 6: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
+	7,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
+	9,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
+	8,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
+	5,  // 10: vibesys.cli.v1.Placement.allocations:type_name -> vibesys.cli.v1.AllocationSettings
+	17, // 11: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
+	1,  // 12: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
+	11, // 13: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
+	12, // 14: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	15, // 15: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	10, // 16: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
+	0,  // 17: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
+	16, // 18: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
+	4,  // 19: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
@@ -1201,14 +1277,14 @@ func file_vibesys_cli_v1_operator_proto_init() {
 	}
 	file_vibesys_cli_v1_operator_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[1].OneofWrappers = []any{}
-	file_vibesys_cli_v1_operator_proto_msgTypes[4].OneofWrappers = []any{}
+	file_vibesys_cli_v1_operator_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_operator_proto_rawDesc), len(file_vibesys_cli_v1_operator_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
