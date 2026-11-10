@@ -31,6 +31,10 @@ using the run's declared measurement tolerance; every later reader consumes
 the stored answer instead of recomputing it from a tolerance it would have to
 be handed.
 
+``perf_gain`` records the same reading against the same baseline asked only
+whether it is better beyond noise. ``perf_comparison`` answers the plan's bar,
+so the two differ exactly for a real gain smaller than the plan expected.
+
 ``RoundHistory`` owns only in-memory collection behavior and rollback-base
 resolution. The application-level project-state library owns persistence and
 the on-disk layout.
@@ -53,6 +57,7 @@ __all__ = [
     "HypothesisResolution",
     "ImplementerStatus",
     "JudgeVerdict",
+    "MechanismVerdict",
     "PerfDeltaReason",
     "PerfProvenance",
     "RoundHistory",
@@ -118,6 +123,24 @@ _DECLARED = {
     ImplementerStatus.IMPLEMENTATION_FAILED: HypothesisOutcome.IMPLEMENTATION_FAILED,
     ImplementerStatus.BLOCKED: HypothesisOutcome.BLOCKED,
 }
+
+
+class MechanismVerdict(StrEnum):
+    """Judge-owned verdict on whether the plan's mechanism is what the evidence shows.
+
+    It answers a different question from the framework's measurement: a candidate can be
+    faster for a reason other than the one the plan proposed (``refuted`` with a gain), or
+    its mechanism can hold while the gain misses the plan's bar. The judge decides it from
+    the plan's activation evidence and falsifier against the cited evidence, never from
+    performance arithmetic, which stays the framework's.
+    """
+
+    SUPPORTED = "supported"
+    """The activation evidence holds and no falsifier fired."""
+    REFUTED = "refuted"
+    """A falsifier fired, or the evidence shows the change works by another mechanism."""
+    UNTESTED = "untested"
+    """The evidence cannot tell: no falsifier was run, or its result is not on record."""
 
 
 class CandidateDisposition(StrEnum):
@@ -250,6 +273,18 @@ class RoundRecord:
     # framework stored the comparison; readers then re-derive it from the
     # run's persisted metric space.
     perf_comparison: MetricComparison | None = None
+    # The same reading against the same baseline, asked only whether it is better
+    # beyond noise (a bar of one). ``perf_comparison`` holds the plan's bar, so a
+    # candidate that beat its base by less than the plan expected is ``better``
+    # here and ``within_noise`` or ``worse`` there. ``None`` identifies a record
+    # with no trusted comparison, or one written before the framework stored it.
+    perf_gain: MetricComparison | None = None
+    # The judge's verdict on the plan's mechanism and its account of what produced the
+    # measured change (``MechanismVerdict``), kept apart from the framework's measurement so
+    # a designer can tell a wrong explanation from a failed idea. ``None`` when no judge
+    # ruled on the round's final attempt, or for a record written before judges stated it.
+    mechanism_verdict: MechanismVerdict | None = None
+    mechanism_attribution: str | None = None
 
     # Who produced ``perf_metric``. ``None`` identifies a legacy record written
     # before provenance was tracked; consumers treat those as trusted so

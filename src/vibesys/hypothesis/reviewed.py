@@ -29,9 +29,9 @@ from vibesys.hypothesis.search import HypothesisSearch
 if TYPE_CHECKING:
     from vibesys.hypothesis.config import HypothesisConfig
     from vibesys.hypothesis.plan import OrchestratorPlan
+    from vibesys.hypothesis.record import MeasuredEffect
     from vibesys.hypothesis.state import Hypothesis
     from vibesys.metrics import FrameworkBenchmarkOutcome
-    from vs_core.api import EffectVerdict
 
 _CODE_OUTCOMES = frozenset({HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED})
 
@@ -128,8 +128,8 @@ class ReviewedClosing:
     revalidation_required: bool = False
     evaluated_only: bool = False
     """The gates measured a revision the agent evaluated, with no ready candidate (`AttemptState`)."""
-    effect: EffectVerdict | None = None
-    """The framework's verdict on the plan's typed bar, derived from its own comparison."""
+    effect: MeasuredEffect | None = None
+    """The framework's verdicts on the plan's typed bar and on any gain, from its comparison."""
 
 
 def _projection(hypothesis: Hypothesis, state: AttemptState) -> PerformanceProjection:

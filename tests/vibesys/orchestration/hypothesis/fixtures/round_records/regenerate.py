@@ -3,7 +3,12 @@
 import json
 from pathlib import Path
 
-from vibesys.hypothesis import RoundRecord, parse_round_record, serialize_round_record
+from vibesys.hypothesis import (
+    MechanismVerdict,
+    RoundRecord,
+    parse_round_record,
+    serialize_round_record,
+)
 from vibesys.metrics import MetricComparison
 
 out = Path(__file__).parent
@@ -39,6 +44,9 @@ cases = {
         perf_baseline_metric=100.0,
         perf_delta_pct=12.5,
         perf_comparison=MetricComparison.BETTER,
+        perf_gain=MetricComparison.BETTER,
+        mechanism_verdict=MechanismVerdict.REFUTED,
+        mechanism_attribution="fused epilogue, not the removed barrier",
         perf_provenance="framework",
         implementer_provider="codex",
         implementer_model="gpt-5.6-sol",

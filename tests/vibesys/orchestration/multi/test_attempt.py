@@ -16,7 +16,7 @@ from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vibesys.candidates.api import NotConfigured
-from vibesys.hypothesis import JudgeReviewed, OrchestratorPlan, rounds
+from vibesys.hypothesis import JudgeReviewed, MechanismVerdict, OrchestratorPlan, rounds
 from vibesys.metrics import AcceptedReading
 from vibesys.orchestration.multi.search.api import (
     ArchiveConflictView,
@@ -218,7 +218,8 @@ def test_a_candidate_whose_review_passed_and_whose_gates_passed_is_eligible() ->
     taken.judged(reviewed(), JUDGE_TURN)
     taken.gated(PASSING_GATES)
     _, assessment = taken.asserted()
-    assert taken.judge_outcome() == JudgeReviewed("pass")
+    # The reply states no mechanism, so the review records it as untested.
+    assert taken.judge_outcome() == JudgeReviewed("pass", mechanism=MechanismVerdict.UNTESTED)
     assert assessment.eligible
 
 

@@ -413,3 +413,34 @@ def test_the_planning_prompt_states_what_the_implementer_can_read_of_an_evaluati
     text = _render(PlanTemplate.PLAN, context)
     assert "cannot read the benchmark's server or process logs" in text
     assert "the round ends without a measurement" in text
+
+
+_BAR_RETAINS = (
+    "the justified minimum decides causal retention",
+    "Grade causal success\nagainst the independent minimum",
+    "that justifies keeping the change",
+)
+"""Wordings that told an agent the plan's bar decides which code is kept (pre-#3134 retention)."""
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(implement=_IMPLEMENT, judge=_JUDGE, planning=_PLANNING)
+def test_no_role_is_told_that_the_plans_bar_decides_which_code_is_kept(
+    implement: ImplementPrompt, judge: JudgePrompt, planning: PlanPrompt
+) -> None:
+    """The bar decides the outcome; retention is the framework's measurement against noise.
+
+    In the 2026-10-09 multimodal campaign implementers restored the base after arms that beat
+    their control in every same-job run (Waypoint round 7, pi0.5 round 16) because the plan's
+    minimum was not met, so the framework never measured the gain.
+    """
+    implementation = _render(PromptTemplate.IMPLEMENT, implement)
+    texts = (
+        implementation,
+        _render(PromptTemplate.JUDGE, judge),
+        _render(PlanTemplate.PLAN, planning),
+    )
+    for text in texts:
+        for wording in _BAR_RETAINS:
+            assert wording not in text
+    assert "even when it misses" in implementation

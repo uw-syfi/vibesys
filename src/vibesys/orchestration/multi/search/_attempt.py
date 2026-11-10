@@ -27,7 +27,10 @@ from vibesys.hypothesis import (
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
+    MeasuredEffect,
+    MechanismVerdict,
     OrchestratorPlan,
+    measure_effect,
     reviewed,
     rounds,
 )
@@ -54,7 +57,6 @@ from vs_core.api.search import (
     LocalValidationReport,
     RevisionRef,
     Settlement,
-    effect_verdict,
     terms_policy,
 )
 
@@ -64,7 +66,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
     from vibesys.orchestration.multi.search._config import MultiConfig
     from vibesys.serial_search.api import GateResult
-    from vs_core.api.search import EffectVerdict, TaskTerms
+    from vs_core.api.search import TaskTerms
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """Implementer outcomes that make a candidate ineligible however well it measures."""
@@ -168,8 +170,8 @@ class Evaluated:
 
     revision: RevisionRef
     readings: tuple[AcceptedReading, ...]
-    effect: EffectVerdict | None
-    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    effect: MeasuredEffect | None
+    """What the framework's comparison says of the plan's bar and of any gain; None without one."""
 
 
 @dataclass
@@ -198,10 +200,13 @@ class MultiAttempt:
     review_skipped: bool = False
     judge_pass: bool | None = None
     judge_invocation: InvocationRef | None = None
+    judge_mechanism: MechanismVerdict | None = None
+    """The judge's verdict on the plan's mechanism, recorded beside its pass or fail."""
+    judge_attribution: str = ""
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
-    effect: EffectVerdict | None = None
-    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    effect: MeasuredEffect | None = None
+    """What the framework's comparison says of the plan's bar and of any gain; None without one."""
     measurement_noise: serial.MeasurementNoise | None = None
     """The noise the latest trusted comparison stated, which the next designer is shown."""
     evaluated: Evaluated | None = None
@@ -256,6 +261,8 @@ class MultiAttempt:
         self.effect = None
         self.judge_pass = None
         self.judge_invocation = None
+        self.judge_mechanism = None
+        self.judge_attribution = ""
         self.review_skipped = False
         self.official_reason = None
 
@@ -315,6 +322,8 @@ class MultiAttempt:
         passing = verdict.verdict is Verdict.PASS and conflict is None
         self.judge_pass = passing
         self.judge_invocation = invocation
+        self.judge_mechanism = verdict.mechanism
+        self.judge_attribution = verdict.mechanism_attribution
         if passing:
             return self._after_review()
         feedback = verdict.feedback or (DOMINATED if conflict is not None else "review failed")
@@ -331,6 +340,8 @@ class MultiAttempt:
         """
         self.judge_pass = None
         self.judge_invocation = None
+        self.judge_mechanism = None
+        self.judge_attribution = ""
         return Next.SETTLE
 
     def _after_review(self) -> Next:
@@ -392,7 +403,7 @@ class MultiAttempt:
                 self.effect = (
                     None
                     if comparison is None
-                    else effect_verdict(
+                    else measure_effect(
                         comparison, self.plan.minimum_ratio, terms_policy(self.terms)
                     )
                 )
@@ -449,7 +460,7 @@ class MultiAttempt:
             readings=result.readings,
             effect=None
             if comparison is None
-            else effect_verdict(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
+            else measure_effect(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
         )
 
     def _gate_failed(self, feedback: str) -> None:
@@ -509,7 +520,11 @@ class MultiAttempt:
     def judge_outcome(self) -> JudgeOutcome:
         """The round's review as the ledger records it."""
         if self.judge_pass is not None:
-            return JudgeReviewed("pass" if self.judge_pass else "fail")
+            return JudgeReviewed(
+                "pass" if self.judge_pass else "fail",
+                mechanism=self.judge_mechanism,
+                attribution=self.judge_attribution,
+            )
         if self.response is None:
             return JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
         if self.review_skipped:

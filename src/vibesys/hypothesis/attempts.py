@@ -13,6 +13,7 @@ if TYPE_CHECKING:
         CandidateDisposition,
         HypothesisOutcome,
         JudgeVerdict,
+        MechanismVerdict,
         PerfProvenance,
     )
     from vibesys.hypothesis.state import HypothesisState
@@ -145,6 +146,10 @@ class JudgeReviewed:
     """
 
     verdict: Literal["pass", "fail"]
+    mechanism: MechanismVerdict | None = None
+    """The judge's verdict on the plan's mechanism; None for a judge that does not state one."""
+    attribution: str = ""
+    """The judge's account of what produced the measured change, when it states one."""
 
 
 @dataclass(frozen=True, slots=True)
