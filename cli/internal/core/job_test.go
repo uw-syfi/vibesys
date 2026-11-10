@@ -24,10 +24,43 @@ func TestSettingsKnowTheirKind(t *testing.T) {
 		core.JobCheck:   core.CheckSettings{},
 		core.JobCommand: core.CommandSettings{},
 		core.JobMeasure: core.MeasureSettings{},
+		core.JobTrace:   core.TraceSettings{},
 	}
 	for kind, settings := range cases {
 		if got := settings.Kind(); got != kind {
 			t.Errorf("%T.Kind() = %s, want %s", settings, got, kind)
 		}
+	}
+}
+
+// A trace is run again after its supervisor is proved gone, as a check and a measure are, since it
+// saves nothing until it passes; and it holds its placement alone, as a measure does, since it
+// deploys and loads the system. A check and a command share their placement.
+func TestATraceIsRerunAndHoldsItsPlacementAlone(t *testing.T) {
+	cases := []struct {
+		kind  core.JobKind
+		rerun core.RerunPolicy
+		alone bool
+	}{
+		{core.JobCheck, core.RerunAfterProvenDeath, false},
+		{core.JobCommand, core.RerunBeforeStartOnly, false},
+		{core.JobMeasure, core.RerunAfterProvenDeath, true},
+		{core.JobTrace, core.RerunAfterProvenDeath, true},
+	}
+	for _, c := range cases {
+		if got := core.RerunPolicyOf(c.kind); got != c.rerun {
+			t.Errorf("RerunPolicyOf(%s) = %s, want %s", c.kind, got, c.rerun)
+		}
+		if got := core.HoldsPlacementAlone(c.kind); got != c.alone {
+			t.Errorf("HoldsPlacementAlone(%s) = %v, want %v", c.kind, got, c.alone)
+		}
+	}
+	for _, s := range []core.JobStage{core.StageBuild, core.StageCheck, core.StageMeasure, core.StageTrace} {
+		if !s.Valid() {
+			t.Errorf("stage %q is not valid", s)
+		}
+	}
+	if core.JobStage("").Valid() || core.JobStage("benchmark").Valid() {
+		t.Error("a stage that is not one of the stages is valid")
 	}
 }

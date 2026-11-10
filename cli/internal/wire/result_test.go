@@ -3,7 +3,11 @@ package wire_test
 import (
 	"fmt"
 	"math"
+	"slices"
 	"testing"
+	"time"
+
+	"buf.build/go/protovalidate"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -111,12 +115,15 @@ func TestResultsCrossTheWireWithEverythingTheyRecorded(t *testing.T) {
 			RecordedAt: epoch.Add(5),
 		}
 		samples := []float64{r.Float64() * 1e9, r.Float64(), math.SmallestNonzeroFloat64}
-		if seed%2 == 0 {
+		switch seed % 3 {
+		case 2:
+			res.Outcome = core.TraceOutcome{ArtifactsDir: "state/artifacts/kv/j3/02-trace", Files: []string{"README.txt", "report.txt"}, Duration: 90 * time.Second}
+		case 0:
 			res.Outcome = core.MeasureOutcome{
 				Metric: core.Metric{Name: "ops", Direction: core.Minimize}, Samples: samples, CheckJob: "j2",
 				Observations: []core.Observation{{Name: "latency", Values: []float64{1.5, 2.5}}},
 			}
-		} else {
+		default:
 			res.Outcome = core.CheckOutcome{Duration: 1500 * 1e6}
 		}
 		got := wire.Result(res)
@@ -140,6 +147,14 @@ func TestResultsCrossTheWireWithEverythingTheyRecorded(t *testing.T) {
 				if math.Float64bits(g.GetSamples()[i]) != math.Float64bits(samples[i]) {
 					t.Fatalf("seed %d: sample %d changed", seed, i)
 				}
+			}
+		} else if tr, ok := res.Outcome.(core.TraceOutcome); ok {
+			g := got.GetTrace()
+			if g == nil || g.GetArtifactsDir() != tr.ArtifactsDir || !slices.Equal(g.GetFiles(), tr.Files) || g.GetDuration().AsDuration() != tr.Duration {
+				t.Fatalf("seed %d: trace became %+v", seed, g)
+			}
+			if err := protovalidate.Validate(got); err != nil {
+				t.Fatalf("seed %d: a trace result is not valid: %v", seed, err)
 			}
 		} else if got.GetCheck() == nil || got.GetCheck().GetDuration().AsDuration() != res.Outcome.(core.CheckOutcome).Duration {
 			t.Fatalf("seed %d: check became %+v", seed, got.GetCheck())

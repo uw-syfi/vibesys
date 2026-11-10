@@ -16,6 +16,7 @@ func TestOnlyTheBuildCheckAndBenchmarkStepsNameAStageOfTheJob(t *testing.T) {
 		flow.StageCandidate:   core.StageBuild,
 		flow.StageCheck:       core.StageCheck,
 		flow.StageBenchmark:   core.StageMeasure,
+		flow.StageTrace:       core.StageTrace,
 		flow.StageCheckout:    "",
 		flow.StageObserve:     "",
 		flow.StageService:     "",

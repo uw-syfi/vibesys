@@ -55,6 +55,32 @@ func TestACheckJobAlwaysRunsItsCheck(t *testing.T) {
 	}
 }
 
+// A trace job always runs its trace, even with a trace saved under its key, and runs no check, even
+// with no pass saved: it carries the task's [trace] and nothing to sample. A task with no [trace]
+// gives it no plan.
+func TestATraceJobAlwaysRunsItsTraceAndNoCheck(t *testing.T) {
+	tk := theTask()
+	tk.Trace = &task.Command{Argv: []string{"python", "/task/bench.py", "trace"}, Timeout: 10 * time.Minute}
+	job := queued(t, core.TraceSettings{}, tk, print_)
+	saved := []core.Result{{Job: "j1", Key: job.Key, Outcome: core.TraceOutcome{ArtifactsDir: "a"}}}
+	for _, noCache := range []bool{false, true} {
+		p, err := flow.Prepare(flow.Starting{Job: job, NoCache: noCache, Task: tk, Environment: print_, Saved: saved})
+		if err != nil || p.Kind != core.JobTrace || p.RunsCheck() || p.Build == nil || p.Samples != 0 || p.CheckPass != "" {
+			t.Fatalf("no cache %v: %+v, %v", noCache, p, err)
+		}
+		if p.Key != job.Key || strings.Join(p.Trace.Argv, " ") != "python /task/bench.py trace" || p.Trace.Timeout != 10*time.Minute {
+			t.Fatalf("no cache %v: key %s, trace %+v", noCache, p.Key, p.Trace)
+		}
+		if err := p.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tk.Trace = nil
+	if _, err := flow.Prepare(flow.Starting{Job: job, Task: tk, Environment: print_}); core.AsFailure(err).Kind != core.FailureInvalidInput || !strings.Contains(err.Error(), "[trace]") {
+		t.Fatalf("a task with no [trace]: %v", err)
+	}
+}
+
 // A job that starts in another environment than it was keyed in, such as on a placement whose
 // engine built the task's image to another digest, runs under the key of what it runs in now, and
 // the cache answers it from what was saved under that key alone. So does a job of an older store,

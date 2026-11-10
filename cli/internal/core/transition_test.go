@@ -12,7 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-var jobKinds = []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand}
+var jobKinds = []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand, core.JobTrace}
 
 // newJob builds a job of a kind in a state. It is built the same way every time, so a test can
 // build a second copy to compare a job against after something was done to the first.
@@ -30,6 +30,8 @@ func newJob(kind core.JobKind, state core.JobState) core.Job {
 		j.Spec.Settings, j.Key = core.MeasureSettings{Samples: 3}, "key-measure"
 	case core.JobCommand:
 		j.Spec.Settings = core.CommandSettings{Argv: []string{"true"}}
+	case core.JobTrace:
+		j.Spec.Settings, j.Key = core.TraceSettings{}, "key-trace"
 	}
 	if state != core.JobQueued {
 		pinned := hostEnv
@@ -56,6 +58,8 @@ func resultFor(j core.Job) *core.Result {
 		r.Outcome = core.MeasureOutcome{
 			Metric: core.Metric{Name: "throughput", Direction: core.Maximize}, Samples: []float64{1, 2, 3}, CheckJob: j.ID,
 		}
+	case core.JobTrace:
+		r.Outcome = core.TraceOutcome{ArtifactsDir: "state/artifacts/kv/job-1/02-trace", Files: []string{"report.txt", "tree.txt"}, Duration: time.Minute}
 	default:
 		return nil
 	}
@@ -290,6 +294,14 @@ func TestApplyRefusesAMoveThatLeavesOutWhatItNeeds(t *testing.T) {
 func TestApplyRefusesAResultThatIsNotTheJobs(t *testing.T) {
 	measure := newJob(core.JobMeasure, core.JobRunning)
 	check := newJob(core.JobCheck, core.JobRunning)
+	trace := newJob(core.JobTrace, core.JobRunning)
+	traced := func(f func(*core.TraceOutcome)) core.Transition {
+		tr := moveTo(trace, core.JobSucceeded)
+		outcome := tr.Result.Outcome.(core.TraceOutcome)
+		f(&outcome)
+		tr.Result.Outcome = outcome
+		return tr
+	}
 	measured := func(f func(*core.Result, *core.MeasureOutcome)) core.Transition {
 		tr := moveTo(measure, core.JobSucceeded)
 		outcome := tr.Result.Outcome.(core.MeasureOutcome)
@@ -322,6 +334,31 @@ func TestApplyRefusesAResultThatIsNotTheJobs(t *testing.T) {
 		"a measure outcome for a check": {check, func() core.Transition {
 			tr := moveTo(check, core.JobSucceeded)
 			tr.Result.Outcome = resultFor(measure).Outcome
+			return tr
+		}()},
+		"a trace with no artifacts directory": {trace, traced(func(o *core.TraceOutcome) { o.ArtifactsDir = "" })},
+		"a trace file that is a path":         {trace, traced(func(o *core.TraceOutcome) { o.Files = []string{"report.txt", "../x"} })},
+		"an empty trace file name":            {trace, traced(func(o *core.TraceOutcome) { o.Files = []string{""} })},
+		"a negative trace duration":           {trace, traced(func(o *core.TraceOutcome) { o.Duration = -time.Second })},
+		"too many trace files": {trace, traced(func(o *core.TraceOutcome) {
+			o.Files = make([]string, core.MaxTraceFiles+1)
+			for i := range o.Files {
+				o.Files[i] = fmt.Sprintf("f%d", i)
+			}
+		})},
+		"a trace outcome for a check": {check, func() core.Transition {
+			tr := moveTo(check, core.JobSucceeded)
+			tr.Result.Outcome = resultFor(trace).Outcome
+			return tr
+		}()},
+		"a check outcome for a trace": {trace, func() core.Transition {
+			tr := moveTo(trace, core.JobSucceeded)
+			tr.Result.Outcome = core.CheckOutcome{}
+			return tr
+		}()},
+		"a check job linked by a trace": {trace, func() core.Transition {
+			tr := moveTo(trace, core.JobSucceeded)
+			tr.CheckJob = "check-elsewhere"
 			return tr
 		}()},
 		"no outcome": {check, func() core.Transition {
