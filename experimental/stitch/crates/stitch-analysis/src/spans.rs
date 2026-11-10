@@ -10,7 +10,10 @@ pub(crate) struct SpanRef<'g> {
     /// Empty for a root span, as in OTLP.
     pub parent_id: &'g str,
     pub service: &'g str,
+    /// The aggregation name: the raw operation, or its family's pattern.
     pub operation: &'g str,
+    /// The operation as the importer named it.
+    pub raw_operation: &'g str,
     pub kind: SpanKind,
     pub start: u64,
     pub end: u64,
@@ -27,12 +30,14 @@ pub(crate) fn spans(graph: &Graph) -> Vec<SpanRef<'_>> {
         .filter(|a| a.kind == ActivityKind::Span)
         .filter_map(|a| {
             let detail = a.span.as_deref();
+            let operation = detail.map_or(a.name.as_str(), |d| d.operation.as_str());
             Some(SpanRef {
                 trace_id: a.trace_id.as_deref()?,
                 span_id: a.span_id.as_deref()?,
                 parent_id: a.parent_span_id.as_deref().unwrap_or(""),
                 service: a.service.as_deref().unwrap_or("unknown"),
-                operation: detail.map_or(a.name.as_str(), |d| d.operation.as_str()),
+                operation,
+                raw_operation: operation,
                 kind: detail.map_or(SpanKind::Internal, |d| d.kind),
                 start: a.interval.start_ns,
                 end: a.interval.end_ns,

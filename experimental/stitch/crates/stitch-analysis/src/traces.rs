@@ -604,6 +604,8 @@ fn waterfall(
                 .flatten(),
             service: span.service.to_owned(),
             operation: span.operation.to_owned(),
+            raw_operation: (span.raw_operation != span.operation)
+                .then(|| span.raw_operation.to_owned()),
             kind: span.kind,
             failed: span.failed,
             offset_ms: duration_ms(root_start, span.start),

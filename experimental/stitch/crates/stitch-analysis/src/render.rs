@@ -87,6 +87,38 @@ fn kind_name(kind: SpanKind) -> &'static str {
     }
 }
 
+/// One loud paragraph per operation family, or nothing.
+fn family_warnings(analysis: &Analysis) -> String {
+    let mut output = String::new();
+    for family in &analysis.operation_families {
+        out!(
+            output,
+            "WARNING: {} span names of service {} look like one operation with request data in \
+             the name (e.g. {}); aggregated as {}. Fix the instrumentation: put the data in an \
+             attribute.\n",
+            family.distinct_names,
+            family.service,
+            family.examples.join(", "),
+            family.pattern
+        );
+    }
+    if !output.is_empty() {
+        output.push('\n');
+    }
+    output
+}
+
+/// A one-line pointer to the warnings, for files other than README and report.
+fn family_note(analysis: &Analysis) -> String {
+    match analysis.operation_families.len() {
+        0 => String::new(),
+        n => format!(
+            "NOTE: {} aggregated as `prefix*`; operation names embed request data (see README.txt).\n",
+            plural(n, "span-name family is", "span-name families are")
+        ),
+    }
+}
+
 fn windows_text(analysis: &Analysis) -> String {
     if analysis.windows.is_empty() {
         return "none (every span in the graph)".into();
@@ -179,6 +211,7 @@ fn table(output: &mut String, title: &str, column: &str, rows: &[LatencyRow], to
 fn report_text(analysis: &Analysis, options: &RenderOptions) -> String {
     let report = &analysis.report;
     let mut output = String::from("STITCH TRACE REPORT\n");
+    output.push_str(&family_warnings(analysis));
     out!(output, "windows: {}\n", windows_text(analysis));
     let error_rate = if report.span_count == 0 {
         0.0
@@ -377,6 +410,7 @@ fn no_roots(output: &mut String, analysis: &Analysis) {
 
 fn tree_text(analysis: &Analysis, options: &RenderOptions) -> String {
     let mut output = String::from("STITCH CALL GRAPH\n");
+    output.push_str(&family_note(analysis));
     output.push_str(
         "Per root endpoint, every eligible trace merged into one tree. Each node is \
          `service: operation  [kind]  ×calls per root request`.\n\
@@ -427,6 +461,7 @@ fn tree_text(analysis: &Analysis, options: &RenderOptions) -> String {
 
 fn critical_text(analysis: &Analysis, options: &RenderOptions) -> String {
     let mut output = String::from("STITCH CRITICAL PATH\n");
+    output.push_str(&family_note(analysis));
     out!(
         output,
         "Algorithm {CRITICAL_PATH_ALGORITHM}: at each instant of the root span, the deepest span \
@@ -571,6 +606,9 @@ fn waterfall(output: &mut String, trace: &RepresentativeTrace, target: f64, widt
         if span.kind != SpanKind::Internal {
             out!(label, " ({})", kind_name(span.kind));
         }
+        if let Some(raw) = &span.raw_operation {
+            out!(label, " [{}]", truncate(raw, NAME_LIMIT));
+        }
         if span.failed {
             label.push_str(" ERROR");
         }
@@ -594,6 +632,7 @@ fn waterfall(output: &mut String, trace: &RepresentativeTrace, target: f64, widt
 
 fn waterfall_text(analysis: &Analysis, options: &RenderOptions) -> String {
     let mut output = String::from("STITCH WATERFALLS\n");
+    output.push_str(&family_note(analysis));
     output.push_str(
         "Per root endpoint, the eligible trace closest to the root's p50 latency and the one closest \
          to its p95 (preferring traces without a root error). One line per span, indented by depth, \
@@ -617,6 +656,7 @@ fn waterfall_text(analysis: &Analysis, options: &RenderOptions) -> String {
 
 fn readme_text(analysis: &Analysis, options: &RenderOptions) -> String {
     let mut output = String::from("STITCH TRACE ANALYSIS\n\n");
+    output.push_str(&family_warnings(analysis));
     output.push_str(
         "Files (read the .txt files first; the .json files hold the same data unbounded):\n\
          \x20 report.txt          span, trace and error counts; latency tables by service, by\n\
@@ -687,7 +727,10 @@ fn readme_text(analysis: &Analysis, options: &RenderOptions) -> String {
          clock_inconsistency (a child starts before or ends after its parent, typically clock skew\n\
          between hosts or work that outlives its request), cycle.\n\
          The latency tables cover every span inside the windows; the call graph, critical path\n\
-         and waterfalls cover eligible traces only.\n",
+         and waterfalls cover eligible traces only.\n\
+         Span names of one service that share a prefix of 8+ characters and differ in a later\n\
+         token containing digits are aggregated as `prefix*` when there are 50+ such names\n\
+         averaging at most 10 spans each; waterfall.txt and the JSON keep the raw names.\n",
     );
     output
 }
@@ -698,6 +741,7 @@ struct GraphSummary<'a> {
     critical_path_algorithm: &'static str,
     windows: &'a [crate::NamedWindow],
     quality: &'a crate::TraceQuality,
+    operation_families: &'a [crate::OperationFamily],
     roots: &'a [RootGraph],
 }
 
@@ -706,6 +750,7 @@ struct ReportJson<'a> {
     schema_version: u32,
     windows: &'a [crate::NamedWindow],
     quality: &'a crate::TraceQuality,
+    operation_families: &'a [crate::OperationFamily],
     #[serde(flatten)]
     report: &'a crate::LatencyReport,
 }
@@ -751,6 +796,7 @@ pub fn render(
                 schema_version: 1,
                 windows: &analysis.windows,
                 quality: &analysis.quality,
+                operation_families: &analysis.operation_families,
                 report: &analysis.report,
             })?,
         },
@@ -773,6 +819,7 @@ pub fn render(
                 critical_path_algorithm: CRITICAL_PATH_ALGORITHM,
                 windows: &analysis.windows,
                 quality: &analysis.quality,
+                operation_families: &analysis.operation_families,
                 roots: &analysis.roots,
             })?,
         },

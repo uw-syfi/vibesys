@@ -3,11 +3,13 @@
 //! representative traces, plus their bounded text rendering.
 #![forbid(unsafe_code)]
 
+mod families;
 mod render;
 mod spans;
 mod stats;
 mod traces;
 
+pub use families::OperationFamily;
 pub use render::{render, RenderOptions, RenderedFile};
 pub use spans::{NamedWindow, WindowSelection};
 pub use stats::Distribution;
@@ -153,6 +155,9 @@ pub struct WaterfallSpan {
     pub node_id: Option<String>,
     pub service: String,
     pub operation: String,
+    /// The name before family aggregation, when it differs from `operation`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_operation: Option<String>,
     pub kind: SpanKind,
     pub failed: bool,
     pub offset_ms: f64,
@@ -188,6 +193,8 @@ pub struct Analysis {
     pub windows: Vec<NamedWindow>,
     pub report: LatencyReport,
     pub quality: TraceQuality,
+    /// Operation names that embed request data, aggregated by pattern.
+    pub operation_families: Vec<OperationFamily>,
     /// Root endpoints, most requested first.
     pub roots: Vec<RootGraph>,
 }
@@ -255,6 +262,9 @@ fn latency_report(spans: &[&spans::SpanRef], windows: &[NamedWindow]) -> Latency
 
 /// Analyze the spans of `graph` that fall inside the selected windows.
 ///
+/// Operation names that embed request data (see [`OperationFamily`]) are
+/// aggregated under one pattern before any grouping.
+///
 /// A trace joins the call graph only if it is complete: one root span inside
 /// a window, every span inside that same window and nested in its parent, and
 /// no repeated span IDs or cycles. Excluded traces are counted by reason.
@@ -266,6 +276,16 @@ fn latency_report(spans: &[&spans::SpanRef], windows: &[NamedWindow]) -> Latency
 pub fn analyze(graph: &Graph, selection: &WindowSelection) -> Result<Analysis, AnalysisError> {
     let (windows, bounded) = spans::select_windows(&graph.windows, selection)?;
     let all = spans::spans(graph);
+    let (renames, operation_families) = families::detect(&all);
+    let all: Vec<spans::SpanRef> = all
+        .into_iter()
+        .map(|mut span| {
+            if let Some(pattern) = renames.get(&(span.service, span.operation)) {
+                span.operation = pattern;
+            }
+            span
+        })
+        .collect();
     let selected: Vec<&spans::SpanRef> = all
         .iter()
         .filter(|s| windows.iter().any(|w| w.overlaps(s.start, s.end)))
@@ -295,6 +315,7 @@ pub fn analyze(graph: &Graph, selection: &WindowSelection) -> Result<Analysis, A
         windows: if bounded { windows } else { Vec::new() },
         report,
         quality,
+        operation_families,
         roots,
     })
 }

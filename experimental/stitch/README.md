@@ -101,6 +101,16 @@ one root, its root and every span lie in one window, every parent is present
 and contains its children, span IDs are unique, and there is no cycle. The
 latency tables count every span inside the windows.
 
+Some applications put request data into span names (for example
+`mongodb_get_number687684_2028-09-19`), which splits one operation into
+thousands of single-call rows and graph nodes. Within a service, `render`
+treats 50 or more names that average at most 10 spans each and differ only
+after a shared prefix of 8 or more characters, in a token containing digits,
+as one operation `prefix*`. It aggregates them, keeps the raw names in
+`waterfall.txt` and the JSON (`operation_families`, `raw_operation`), and puts a
+warning at the top of `README.txt` and `report.txt` asking for the data to move
+into an attribute.
+
 Limits: the capture is one collector replica writing one file; a restart of the
 collector pod loses what it had written. Spans are sampled at the SDK by
 `--sampler-ratio`, so counts are of sampled requests. Clock skew between nodes
