@@ -27,3 +27,6 @@ clock_inconsistency (a child starts before or ends after its parent, typically c
 between hosts or work that outlives its request), cycle.
 The latency tables cover every span inside the windows; the call graph, critical path
 and waterfalls cover eligible traces only.
+Span names of one service that share a prefix of 8+ characters and differ in a later
+token containing digits are aggregated as `prefix*` when there are 50+ such names
+averaging at most 10 spans each; waterfall.txt and the JSON keep the raw names.

@@ -30,6 +30,7 @@
       }
     ]
   },
+  "operation_families": [],
   "roots": [
     {
       "service": "frontend",

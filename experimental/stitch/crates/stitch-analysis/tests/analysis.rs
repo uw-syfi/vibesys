@@ -358,3 +358,134 @@ fn clock_inconsistent_and_duplicate_traces_are_excluded() {
     );
     assert!(analysis.roots.is_empty());
 }
+
+/// One trace per request whose datastore span name embeds the request's data.
+fn family_spans(names: &[String], repeats: usize) -> Vec<S> {
+    let names: Vec<&'static str> = names
+        .iter()
+        .map(|n| &*Box::leak(n.clone().into_boxed_str()))
+        .collect();
+    let mut spans = Vec::new();
+    for repeat in 0..repeats {
+        for (index, name) in names.iter().enumerate() {
+            let trace: &'static str = Box::leak(format!("trace-{repeat}-{index}").into_boxed_str());
+            let start = u64::try_from(index * 10).unwrap();
+            for (id, parent, operation, kind, offset, duration) in [
+                ("root", "", "GET /hotels", Server, 0, 10),
+                (
+                    "stable",
+                    "root",
+                    "mongodb_capacity_get_multi_number",
+                    Client,
+                    1,
+                    2,
+                ),
+                ("data", "root", *name, Client, 4, 5),
+            ] {
+                let mut span = s(
+                    if id == "root" {
+                        "frontend"
+                    } else {
+                        "reservation"
+                    },
+                    id,
+                    parent,
+                    operation,
+                    kind,
+                    start + offset,
+                    duration,
+                );
+                span.trace = trace;
+                spans.push(span);
+            }
+        }
+    }
+    spans
+}
+
+#[test]
+fn operation_names_with_request_data_are_aggregated_as_one_family() {
+    let names: Vec<String> = (0..60)
+        .map(|i| {
+            if i % 2 == 0 {
+                format!(
+                    "mongodb_capacity_get_multi_number{}_2028-09-{:02}",
+                    680_000 + i,
+                    i % 28 + 1
+                )
+            } else {
+                format!("mongodb_capacity_get_multi_numbera99266{i}-3_2028-02-10")
+            }
+        })
+        .collect();
+    let analysis = run(&family_spans(&names, 1));
+    assert_eq!(analysis.operation_families.len(), 1);
+    let family = &analysis.operation_families[0];
+    assert_eq!(family.service, "reservation");
+    assert_eq!(family.pattern, "mongodb_capacity_get_multi_number*");
+    assert_eq!((family.distinct_names, family.spans), (60, 60));
+    assert_eq!(family.examples.len(), 3);
+    let root = &analysis.roots[0];
+    let operations: Vec<&str> = root.nodes.iter().map(|n| n.operation.as_str()).collect();
+    assert_eq!(
+        operations,
+        [
+            "GET /hotels",
+            "mongodb_capacity_get_multi_number",
+            "mongodb_capacity_get_multi_number*",
+        ]
+    );
+    assert_contributions(
+        root,
+        &[("reservation", "mongodb_capacity_get_multi_number*", 5.0)],
+    );
+    let rows: Vec<&str> = analysis
+        .report
+        .spans
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(rows.contains(&"reservation: mongodb_capacity_get_multi_number*"));
+    assert_eq!(rows.len(), 3);
+    let waterfall = &root.representatives[0].spans;
+    let data = waterfall
+        .iter()
+        .find(|s| s.operation.ends_with('*'))
+        .unwrap();
+    assert!(names.contains(data.raw_operation.as_ref().unwrap()));
+
+    let files =
+        stitch_analysis::render(&analysis, &stitch_analysis::RenderOptions::default()).unwrap();
+    let warning = "WARNING: 60 span names of service reservation look like one operation with \
+                   request data in the name (e.g. ";
+    for name in ["README.txt", "report.txt"] {
+        let text = &files.iter().find(|f| f.name == name).unwrap().contents;
+        let top: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
+        assert!(top.contains(warning), "{name}: {top}");
+        assert!(top.contains(
+            "aggregated as mongodb_capacity_get_multi_number*. Fix the instrumentation: put the \
+             data in an attribute."
+        ));
+    }
+    let summary = &files
+        .iter()
+        .find(|f| f.name == "graph-summary.json")
+        .unwrap()
+        .contents;
+    assert!(summary.contains("\"operation_families\""));
+}
+
+#[test]
+fn repeated_short_or_few_names_are_not_aggregated() {
+    // Names that repeat across many requests are real operations.
+    let repeated: Vec<String> = (0..60).map(|i| format!("mongodb_find_shard{i}")).collect();
+    assert!(run(&family_spans(&repeated, 11))
+        .operation_families
+        .is_empty());
+    // Too few distinct names.
+    let few: Vec<String> = (0..49).map(|i| format!("mongodb_find_shard{i}")).collect();
+    assert!(run(&family_spans(&few, 1)).operation_families.is_empty());
+    // The shared prefix is too short to name an operation.
+    let short: Vec<String> = (0..60).map(|i| format!("get_u{i}")).collect();
+    assert!(run(&family_spans(&short, 1)).operation_families.is_empty());
+}

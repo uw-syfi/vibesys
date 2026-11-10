@@ -29,6 +29,7 @@
       }
     ]
   },
+  "operation_families": [],
   "span_count": 256,
   "trace_count": 20,
   "error_count": 1,
