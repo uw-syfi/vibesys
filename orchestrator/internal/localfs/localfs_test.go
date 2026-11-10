@@ -19,6 +19,18 @@ var (
 
 func noEnv(string) string { return "" }
 
+// TestTheRemedyNamesBothConfigureAndRestart: a host that is already running keeps the state
+// directory it started with until it is told to restart (see hostRestart in
+// orchestrator/clientcli/host.go), so the remedy must not stop at `host configure` — an operator who
+// only runs that against a running host sees the same refusal again.
+func TestTheRemedyNamesBothConfigureAndRestart(t *testing.T) {
+	for _, want := range []string{"host configure --state-directory PATH", "host restart"} {
+		if !strings.Contains(localfs.Remedy, want) {
+			t.Errorf("Remedy %q does not say %q", localfs.Remedy, want)
+		}
+	}
+}
+
 func TestEveryNetworkTypeIsRefusedAndNamed(t *testing.T) {
 	linux := map[string]uint32{
 		"nfs": 0x6969, "smb": 0x517b, "smb2": 0xfe534d42, "cifs": 0xff534d42, "ceph": 0xc36400, "afs": 0x5346414f,
