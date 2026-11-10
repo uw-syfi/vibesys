@@ -89,7 +89,7 @@ def _task(
     trace_spec: ms.Trace | None,
     *,
     system: object = SYSTEM,
-    validity: vse.Validity = vse.Validity(),  # noqa: B008  # LW-150406 [B008]; a frozen dataclass
+    validity: vse.Validity = vse.Validity(),  # noqa: B008  # LW-731726 [B008]; a frozen dataclass
 ) -> Task:
     return Task(
         dataset=kv.Data,
