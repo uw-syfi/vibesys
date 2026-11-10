@@ -62,9 +62,11 @@ parse() {
   pre=""
   [ "$core" = "$v" ] || pre="${v#*-}"
   maj="${core%%.*}"
-  rest="${core#*.}"
-  mnr="${rest%%.*}"
-  pat="${rest#*.}"
+  # POSIX sh has no local variables, so a scratch name here is prefixed to keep it from
+  # overwriting a caller's (newest_compatible's list of candidates once lost its tail this way).
+  parse_minor_patch="${core#*.}"
+  mnr="${parse_minor_patch%%.*}"
+  pat="${parse_minor_patch#*.}"
 }
 
 # num_lt A B: true when the digit string A (no leading zeros) is below B, at any length.
@@ -202,21 +204,21 @@ newest_compatible() {
   done
   # Newest first: take the highest candidate left, probe its release, and drop it if missing.
   while [ -n "$candidates" ]; do
-    best="" rest=""
+    best="" others=""
     for tag in $candidates; do
       parse "$tag"
       if [ -z "$best" ] || core_lt "$best_maj" "$best_mnr" "$best_pat" "$maj" "$mnr" "$pat"; then
-        [ -z "$best" ] || rest="$rest $best"
+        [ -z "$best" ] || others="$others $best"
         best="$tag" best_maj="$maj" best_mnr="$mnr" best_pat="$pat"
       else
-        rest="$rest $tag"
+        others="$others $tag"
       fi
     done
     if fetch "$releases_url/cli-v$best/checksums.txt" "$work/checksums.txt"; then
       printf '%s\n' "$best"
       return 0
     fi
-    candidates="$rest"
+    candidates="$others"
   done
   fail "no published stable release is within the supported range $range"
 }

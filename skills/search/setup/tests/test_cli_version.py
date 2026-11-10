@@ -80,7 +80,7 @@ def run(
     shell: str, script: Path, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     environment = {"PATH": os.environ.get("PATH", ""), **(env or {})}
-    return subprocess.run(  # noqa: S603  # the helper is the system under test
+    return subprocess.run(  # noqa: S603  # LW-100377; the helper script is the system under test.
         [shell, str(script), *args],
         capture_output=True,
         text=True,
@@ -359,6 +359,9 @@ needs_a_fetcher = pytest.mark.skipif(
     indent=st.sampled_from([None, 2]),
 )
 @example(minimum=Version(0, 1, 0), tags=[("0.1.0", False), ("0.1.0-rc.2", True)], indent=2)
+# Two supported tags whose releases both failed: once looped forever, because parse overwrote the
+# list of candidates still to probe.
+@example(minimum=Version(3, 0, 0), tags=[("3.3.0", False), ("3.3.3", False)], indent=None)
 def test_newest_compatible_is_the_highest_supported_release_that_is_published(
     github: FakeGitHub,
     shell: str,
