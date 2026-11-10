@@ -372,44 +372,6 @@ func (*CheckSettings) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{0}
 }
 
-// TraceSettings configures a trace job. It has none yet: the command and its time limit are the
-// task's [trace].
-type TraceSettings struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TraceSettings) Reset() {
-	*x = TraceSettings{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TraceSettings) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TraceSettings) ProtoMessage() {}
-
-func (x *TraceSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TraceSettings.ProtoReflect.Descriptor instead.
-func (*TraceSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{1}
-}
-
 // ServiceSpec is a long-lived process a command job runs against. The environment owns its
 // lifecycle: it starts the service, waits for the probe to succeed, and kills the whole process
 // group when the job ends.
@@ -424,7 +386,7 @@ type ServiceSpec struct {
 
 func (x *ServiceSpec) Reset() {
 	*x = ServiceSpec{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +398,7 @@ func (x *ServiceSpec) String() string {
 func (*ServiceSpec) ProtoMessage() {}
 
 func (x *ServiceSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +411,7 @@ func (x *ServiceSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceSpec.ProtoReflect.Descriptor instead.
 func (*ServiceSpec) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ServiceSpec) GetArgv() []string {
@@ -485,7 +447,7 @@ type CommandSettings struct {
 
 func (x *CommandSettings) Reset() {
 	*x = CommandSettings{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +459,7 @@ func (x *CommandSettings) String() string {
 func (*CommandSettings) ProtoMessage() {}
 
 func (x *CommandSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +472,7 @@ func (x *CommandSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandSettings.ProtoReflect.Descriptor instead.
 func (*CommandSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CommandSettings) GetArgv() []string {
@@ -560,7 +522,7 @@ type ProfileRequest struct {
 
 func (x *ProfileRequest) Reset() {
 	*x = ProfileRequest{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +534,7 @@ func (x *ProfileRequest) String() string {
 func (*ProfileRequest) ProtoMessage() {}
 
 func (x *ProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +547,7 @@ func (x *ProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileRequest.ProtoReflect.Descriptor instead.
 func (*ProfileRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProfileRequest) GetWrap() []string {
@@ -610,7 +572,7 @@ type CandidateBuild struct {
 
 func (x *CandidateBuild) Reset() {
 	*x = CandidateBuild{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +584,7 @@ func (x *CandidateBuild) String() string {
 func (*CandidateBuild) ProtoMessage() {}
 
 func (x *CandidateBuild) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +597,7 @@ func (x *CandidateBuild) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CandidateBuild.ProtoReflect.Descriptor instead.
 func (*CandidateBuild) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CandidateBuild) GetDockerfile() string {
@@ -675,7 +637,7 @@ type CandidateServe struct {
 
 func (x *CandidateServe) Reset() {
 	*x = CandidateServe{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +649,7 @@ func (x *CandidateServe) String() string {
 func (*CandidateServe) ProtoMessage() {}
 
 func (x *CandidateServe) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +662,7 @@ func (x *CandidateServe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CandidateServe.ProtoReflect.Descriptor instead.
 func (*CandidateServe) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CandidateServe) GetArgv() []string {
@@ -737,7 +699,7 @@ type CandidateSetup struct {
 
 func (x *CandidateSetup) Reset() {
 	*x = CandidateSetup{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -749,7 +711,7 @@ func (x *CandidateSetup) String() string {
 func (*CandidateSetup) ProtoMessage() {}
 
 func (x *CandidateSetup) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -762,7 +724,7 @@ func (x *CandidateSetup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CandidateSetup.ProtoReflect.Descriptor instead.
 func (*CandidateSetup) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CandidateSetup) GetBuild() *CandidateBuild {
@@ -791,7 +753,7 @@ type MeasureSettings struct {
 
 func (x *MeasureSettings) Reset() {
 	*x = MeasureSettings{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -803,7 +765,7 @@ func (x *MeasureSettings) String() string {
 func (*MeasureSettings) ProtoMessage() {}
 
 func (x *MeasureSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -816,7 +778,7 @@ func (x *MeasureSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeasureSettings.ProtoReflect.Descriptor instead.
 func (*MeasureSettings) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *MeasureSettings) GetSamples() uint32 {
@@ -859,7 +821,7 @@ type JobSpec struct {
 
 func (x *JobSpec) Reset() {
 	*x = JobSpec{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +833,7 @@ func (x *JobSpec) String() string {
 func (*JobSpec) ProtoMessage() {}
 
 func (x *JobSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +846,7 @@ func (x *JobSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobSpec.ProtoReflect.Descriptor instead.
 func (*JobSpec) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *JobSpec) GetCommit() string {
@@ -992,7 +954,7 @@ type Note struct {
 
 func (x *Note) Reset() {
 	*x = Note{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +966,7 @@ func (x *Note) String() string {
 func (*Note) ProtoMessage() {}
 
 func (x *Note) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +979,7 @@ func (x *Note) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Note.ProtoReflect.Descriptor instead.
 func (*Note) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Note) GetText() string {
@@ -1056,7 +1018,7 @@ type Submitter struct {
 
 func (x *Submitter) Reset() {
 	*x = Submitter{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1068,7 +1030,7 @@ func (x *Submitter) String() string {
 func (*Submitter) ProtoMessage() {}
 
 func (x *Submitter) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1081,7 +1043,7 @@ func (x *Submitter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Submitter.ProtoReflect.Descriptor instead.
 func (*Submitter) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Submitter) GetRunId() string {
@@ -1124,7 +1086,7 @@ type Attempt struct {
 
 func (x *Attempt) Reset() {
 	*x = Attempt{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1136,7 +1098,7 @@ func (x *Attempt) String() string {
 func (*Attempt) ProtoMessage() {}
 
 func (x *Attempt) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1149,7 +1111,7 @@ func (x *Attempt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attempt.ProtoReflect.Descriptor instead.
 func (*Attempt) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Attempt) GetStartedAt() *timestamppb.Timestamp {
@@ -1265,7 +1227,7 @@ type Job struct {
 
 func (x *Job) Reset() {
 	*x = Job{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1277,7 +1239,7 @@ func (x *Job) String() string {
 func (*Job) ProtoMessage() {}
 
 func (x *Job) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1290,7 +1252,7 @@ func (x *Job) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Job.ProtoReflect.Descriptor instead.
 func (*Job) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Job) GetId() string {
@@ -1448,7 +1410,7 @@ type LeaseHolder struct {
 
 func (x *LeaseHolder) Reset() {
 	*x = LeaseHolder{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1422,7 @@ func (x *LeaseHolder) String() string {
 func (*LeaseHolder) ProtoMessage() {}
 
 func (x *LeaseHolder) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1435,7 @@ func (x *LeaseHolder) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaseHolder.ProtoReflect.Descriptor instead.
 func (*LeaseHolder) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *LeaseHolder) GetUser() string {
@@ -1527,7 +1489,7 @@ type WaitHolder struct {
 
 func (x *WaitHolder) Reset() {
 	*x = WaitHolder{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1539,7 +1501,7 @@ func (x *WaitHolder) String() string {
 func (*WaitHolder) ProtoMessage() {}
 
 func (x *WaitHolder) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1552,7 +1514,7 @@ func (x *WaitHolder) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitHolder.ProtoReflect.Descriptor instead.
 func (*WaitHolder) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *WaitHolder) GetJobId() string {
@@ -1602,7 +1564,7 @@ type WaitReason struct {
 
 func (x *WaitReason) Reset() {
 	*x = WaitReason{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1614,7 +1576,7 @@ func (x *WaitReason) String() string {
 func (*WaitReason) ProtoMessage() {}
 
 func (x *WaitReason) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1627,7 +1589,7 @@ func (x *WaitReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitReason.ProtoReflect.Descriptor instead.
 func (*WaitReason) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *WaitReason) GetKind() WaitKind {
@@ -1676,7 +1638,7 @@ type JobWait struct {
 
 func (x *JobWait) Reset() {
 	*x = JobWait{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1688,7 +1650,7 @@ func (x *JobWait) String() string {
 func (*JobWait) ProtoMessage() {}
 
 func (x *JobWait) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1701,7 +1663,7 @@ func (x *JobWait) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobWait.ProtoReflect.Descriptor instead.
 func (*JobWait) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *JobWait) GetJobId() string {
@@ -1718,13 +1680,50 @@ func (x *JobWait) GetReason() *WaitReason {
 	return nil
 }
 
+// TraceSettings configures a trace job. It has none yet: the command and its time limit are the
+// task's [trace].
+type TraceSettings struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceSettings) Reset() {
+	*x = TraceSettings{}
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceSettings) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceSettings) ProtoMessage() {}
+
+func (x *TraceSettings) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceSettings.ProtoReflect.Descriptor instead.
+func (*TraceSettings) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{17}
+}
+
 var File_vibesys_cli_v1_job_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\n" +
 	"\x18vibesys/cli/v1/job.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\x0f\n" +
-	"\rCheckSettings\"\x0f\n" +
-	"\rTraceSettings\"7\n" +
+	"\rCheckSettings\"7\n" +
 	"\vServiceSpec\x12\x12\n" +
 	"\x04argv\x18\x01 \x03(\tR\x04argv\x12\x14\n" +
 	"\x05probe\x18\x02 \x03(\tR\x05probe\"\x89\x02\n" +
@@ -1830,7 +1829,8 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\x11wait_reason.shape\x12\x94\x01a wait on a resource names the resource and its holders, a held or trouble wait says why, and a leased wait names the resource and its holder or why\x1a\xbf\x01this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.kind == 7 ? (this.resource != '' && (has(this.elsewhere) || this.detail != '')) : (this.resource != '' && size(this.holders) > 0))\"e\n" +
 	"\aJobWait\x12\x1e\n" +
 	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12:\n" +
-	"\x06reason\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.WaitReasonB\x06\xbaH\x03\xc8\x01\x01R\x06reason*w\n" +
+	"\x06reason\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.WaitReasonB\x06\xbaH\x03\xc8\x01\x01R\x06reason\"\x0f\n" +
+	"\rTraceSettings*w\n" +
 	"\aJobKind\x12\x18\n" +
 	"\x14JOB_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eJOB_KIND_CHECK\x10\x01\x12\x14\n" +
@@ -1886,23 +1886,23 @@ var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(JobStage)(0),                  // 3: vibesys.cli.v1.JobStage
 	(WaitKind)(0),                  // 4: vibesys.cli.v1.WaitKind
 	(*CheckSettings)(nil),          // 5: vibesys.cli.v1.CheckSettings
-	(*TraceSettings)(nil),          // 6: vibesys.cli.v1.TraceSettings
-	(*ServiceSpec)(nil),            // 7: vibesys.cli.v1.ServiceSpec
-	(*CommandSettings)(nil),        // 8: vibesys.cli.v1.CommandSettings
-	(*ProfileRequest)(nil),         // 9: vibesys.cli.v1.ProfileRequest
-	(*CandidateBuild)(nil),         // 10: vibesys.cli.v1.CandidateBuild
-	(*CandidateServe)(nil),         // 11: vibesys.cli.v1.CandidateServe
-	(*CandidateSetup)(nil),         // 12: vibesys.cli.v1.CandidateSetup
-	(*MeasureSettings)(nil),        // 13: vibesys.cli.v1.MeasureSettings
-	(*JobSpec)(nil),                // 14: vibesys.cli.v1.JobSpec
-	(*Note)(nil),                   // 15: vibesys.cli.v1.Note
-	(*Submitter)(nil),              // 16: vibesys.cli.v1.Submitter
-	(*Attempt)(nil),                // 17: vibesys.cli.v1.Attempt
-	(*Job)(nil),                    // 18: vibesys.cli.v1.Job
-	(*LeaseHolder)(nil),            // 19: vibesys.cli.v1.LeaseHolder
-	(*WaitHolder)(nil),             // 20: vibesys.cli.v1.WaitHolder
-	(*WaitReason)(nil),             // 21: vibesys.cli.v1.WaitReason
-	(*JobWait)(nil),                // 22: vibesys.cli.v1.JobWait
+	(*ServiceSpec)(nil),            // 6: vibesys.cli.v1.ServiceSpec
+	(*CommandSettings)(nil),        // 7: vibesys.cli.v1.CommandSettings
+	(*ProfileRequest)(nil),         // 8: vibesys.cli.v1.ProfileRequest
+	(*CandidateBuild)(nil),         // 9: vibesys.cli.v1.CandidateBuild
+	(*CandidateServe)(nil),         // 10: vibesys.cli.v1.CandidateServe
+	(*CandidateSetup)(nil),         // 11: vibesys.cli.v1.CandidateSetup
+	(*MeasureSettings)(nil),        // 12: vibesys.cli.v1.MeasureSettings
+	(*JobSpec)(nil),                // 13: vibesys.cli.v1.JobSpec
+	(*Note)(nil),                   // 14: vibesys.cli.v1.Note
+	(*Submitter)(nil),              // 15: vibesys.cli.v1.Submitter
+	(*Attempt)(nil),                // 16: vibesys.cli.v1.Attempt
+	(*Job)(nil),                    // 17: vibesys.cli.v1.Job
+	(*LeaseHolder)(nil),            // 18: vibesys.cli.v1.LeaseHolder
+	(*WaitHolder)(nil),             // 19: vibesys.cli.v1.WaitHolder
+	(*WaitReason)(nil),             // 20: vibesys.cli.v1.WaitReason
+	(*JobWait)(nil),                // 21: vibesys.cli.v1.JobWait
+	(*TraceSettings)(nil),          // 22: vibesys.cli.v1.TraceSettings
 	(*durationpb.Duration)(nil),    // 23: google.protobuf.Duration
 	(EnvironmentKind)(0),           // 24: vibesys.cli.v1.EnvironmentKind
 	(*timestamppb.Timestamp)(nil),  // 25: google.protobuf.Timestamp
@@ -1910,41 +1910,41 @@ var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(ResourceKind)(0),              // 27: vibesys.cli.v1.ResourceKind
 }
 var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
-	7,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
+	6,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
 	23, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
-	9,  // 2: vibesys.cli.v1.CommandSettings.profile:type_name -> vibesys.cli.v1.ProfileRequest
-	12, // 3: vibesys.cli.v1.CommandSettings.candidate:type_name -> vibesys.cli.v1.CandidateSetup
+	8,  // 2: vibesys.cli.v1.CommandSettings.profile:type_name -> vibesys.cli.v1.ProfileRequest
+	11, // 3: vibesys.cli.v1.CommandSettings.candidate:type_name -> vibesys.cli.v1.CandidateSetup
 	23, // 4: vibesys.cli.v1.CandidateServe.startup_timeout:type_name -> google.protobuf.Duration
-	10, // 5: vibesys.cli.v1.CandidateSetup.build:type_name -> vibesys.cli.v1.CandidateBuild
-	11, // 6: vibesys.cli.v1.CandidateSetup.serve:type_name -> vibesys.cli.v1.CandidateServe
+	9,  // 5: vibesys.cli.v1.CandidateSetup.build:type_name -> vibesys.cli.v1.CandidateBuild
+	10, // 6: vibesys.cli.v1.CandidateSetup.serve:type_name -> vibesys.cli.v1.CandidateServe
 	24, // 7: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
 	5,  // 8: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
-	8,  // 9: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
-	13, // 10: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
-	6,  // 11: vibesys.cli.v1.JobSpec.trace:type_name -> vibesys.cli.v1.TraceSettings
+	7,  // 9: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
+	12, // 10: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
+	22, // 11: vibesys.cli.v1.JobSpec.trace:type_name -> vibesys.cli.v1.TraceSettings
 	25, // 12: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
 	25, // 13: vibesys.cli.v1.Submitter.at:type_name -> google.protobuf.Timestamp
 	25, // 14: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
 	25, // 15: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
 	2,  // 16: vibesys.cli.v1.Attempt.cut_before_start:type_name -> vibesys.cli.v1.CutCause
 	2,  // 17: vibesys.cli.v1.Attempt.cut_mid_command:type_name -> vibesys.cli.v1.CutCause
-	14, // 18: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
+	13, // 18: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
 	1,  // 19: vibesys.cli.v1.Job.state:type_name -> vibesys.cli.v1.JobState
 	26, // 20: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	15, // 21: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
+	14, // 21: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
 	25, // 22: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
 	25, // 23: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
 	25, // 24: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	17, // 25: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
-	16, // 26: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
+	16, // 25: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
+	15, // 26: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
 	27, // 27: vibesys.cli.v1.Job.needs:type_name -> vibesys.cli.v1.ResourceKind
 	3,  // 28: vibesys.cli.v1.Job.failed_stage:type_name -> vibesys.cli.v1.JobStage
 	25, // 29: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
 	0,  // 30: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
 	4,  // 31: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
-	20, // 32: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
-	19, // 33: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
-	21, // 34: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
+	19, // 32: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
+	18, // 33: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
+	20, // 34: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
 	35, // [35:35] is the sub-list for method output_type
 	35, // [35:35] is the sub-list for method input_type
 	35, // [35:35] is the sub-list for extension type_name
@@ -1958,17 +1958,17 @@ func file_vibesys_cli_v1_job_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
-	file_vibesys_cli_v1_job_proto_msgTypes[9].OneofWrappers = []any{
+	file_vibesys_cli_v1_job_proto_msgTypes[8].OneofWrappers = []any{
 		(*JobSpec_Check)(nil),
 		(*JobSpec_Command)(nil),
 		(*JobSpec_Measure)(nil),
 		(*JobSpec_Trace)(nil),
 	}
-	file_vibesys_cli_v1_job_proto_msgTypes[12].OneofWrappers = []any{
+	file_vibesys_cli_v1_job_proto_msgTypes[11].OneofWrappers = []any{
 		(*Attempt_CutBeforeStart)(nil),
 		(*Attempt_CutMidCommand)(nil),
 	}
-	file_vibesys_cli_v1_job_proto_msgTypes[13].OneofWrappers = []any{}
+	file_vibesys_cli_v1_job_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

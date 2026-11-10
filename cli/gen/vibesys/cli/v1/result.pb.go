@@ -441,74 +441,6 @@ func (x *CheckResult) GetDuration() *durationpb.Duration {
 	return nil
 }
 
-// TraceResult is a trace job whose [trace] command exited 0: where its reports are. A failed trace
-// saves no result.
-type TraceResult struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The artifacts directory of the trace command, relative to the repository's root when it is
-	// inside it (the job's artifacts directory in the state directory, then the command's own, such
-	// as 03-trace) and absolute otherwise.
-	ArtifactsDir string `protobuf:"bytes,1,opt,name=artifacts_dir,json=artifactsDir,proto3" json:"artifacts_dir,omitempty"`
-	// The names of the entries directly under the trace/ directory of artifacts_dir, sorted, such as
-	// report.txt and tree.txt. Empty when the command left no trace/ directory.
-	Files []string `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
-	// How long the trace command ran.
-	Duration      *durationpb.Duration `protobuf:"bytes,3,opt,name=duration,proto3" json:"duration,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TraceResult) Reset() {
-	*x = TraceResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TraceResult) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TraceResult) ProtoMessage() {}
-
-func (x *TraceResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TraceResult.ProtoReflect.Descriptor instead.
-func (*TraceResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *TraceResult) GetArtifactsDir() string {
-	if x != nil {
-		return x.ArtifactsDir
-	}
-	return ""
-}
-
-func (x *TraceResult) GetFiles() []string {
-	if x != nil {
-		return x.Files
-	}
-	return nil
-}
-
-func (x *TraceResult) GetDuration() *durationpb.Duration {
-	if x != nil {
-		return x.Duration
-	}
-	return nil
-}
-
 // MeasureResult is the official measurement of a commit.
 type MeasureResult struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
@@ -534,7 +466,7 @@ type MeasureResult struct {
 
 func (x *MeasureResult) Reset() {
 	*x = MeasureResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -546,7 +478,7 @@ func (x *MeasureResult) String() string {
 func (*MeasureResult) ProtoMessage() {}
 
 func (x *MeasureResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -559,7 +491,7 @@ func (x *MeasureResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeasureResult.ProtoReflect.Descriptor instead.
 func (*MeasureResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MeasureResult) GetMetric() *Metric {
@@ -629,7 +561,7 @@ type Measurement struct {
 
 func (x *Measurement) Reset() {
 	*x = Measurement{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +573,7 @@ func (x *Measurement) String() string {
 func (*Measurement) ProtoMessage() {}
 
 func (x *Measurement) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +586,7 @@ func (x *Measurement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Measurement.ProtoReflect.Descriptor instead.
 func (*Measurement) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Measurement) GetCommit() string {
@@ -724,7 +656,7 @@ type Result struct {
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -736,7 +668,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -749,7 +681,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Result) GetJobId() string {
@@ -885,6 +817,74 @@ func (*Result_Measure) isResult_Outcome() {}
 
 func (*Result_Trace) isResult_Outcome() {}
 
+// TraceResult is a trace job whose [trace] command exited 0: where its reports are. A failed trace
+// saves no result.
+type TraceResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The artifacts directory of the trace command, relative to the repository's root when it is
+	// inside it (the job's artifacts directory in the state directory, then the command's own, such
+	// as 03-trace) and absolute otherwise.
+	ArtifactsDir string `protobuf:"bytes,1,opt,name=artifacts_dir,json=artifactsDir,proto3" json:"artifacts_dir,omitempty"`
+	// The names of the entries directly under the trace/ directory of artifacts_dir, sorted, such as
+	// report.txt and tree.txt. Empty when the command left no trace/ directory.
+	Files []string `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
+	// How long the trace command ran.
+	Duration      *durationpb.Duration `protobuf:"bytes,3,opt,name=duration,proto3" json:"duration,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceResult) Reset() {
+	*x = TraceResult{}
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceResult) ProtoMessage() {}
+
+func (x *TraceResult) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceResult.ProtoReflect.Descriptor instead.
+func (*TraceResult) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TraceResult) GetArtifactsDir() string {
+	if x != nil {
+		return x.ArtifactsDir
+	}
+	return ""
+}
+
+func (x *TraceResult) GetFiles() []string {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *TraceResult) GetDuration() *durationpb.Duration {
+	if x != nil {
+		return x.Duration
+	}
+	return nil
+}
+
 var File_vibesys_cli_v1_result_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_result_proto_rawDesc = "" +
@@ -909,11 +909,7 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"D\n" +
 	"\vCheckResult\x125\n" +
-	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\x93\x01\n" +
-	"\vTraceResult\x12,\n" +
-	"\rartifacts_dir\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fartifactsDir\x12\x1f\n" +
-	"\x05files\x18\x02 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\bR\x05files\x125\n" +
-	"\bduration\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xed\x04\n" +
+	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xed\x04\n" +
 	"\rMeasureResult\x12.\n" +
 	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x12\x18\n" +
 	"\asamples\x18\x02 \x03(\x01R\asamples\x12?\n" +
@@ -950,7 +946,11 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\ameasure\x18\f \x01(\v2\x1d.vibesys.cli.v1.MeasureResultH\x00R\ameasure\x123\n" +
 	"\x05trace\x18\x0e \x01(\v2\x1b.vibesys.cli.v1.TraceResultH\x00R\x05trace\x12'\n" +
 	"\x0fcandidate_image\x18\r \x01(\tR\x0ecandidateImageB\t\n" +
-	"\aoutcome*V\n" +
+	"\aoutcome\"\x93\x01\n" +
+	"\vTraceResult\x12,\n" +
+	"\rartifacts_dir\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fartifactsDir\x12\x1f\n" +
+	"\x05files\x18\x02 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\bR\x05files\x125\n" +
+	"\bduration\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\bduration*V\n" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12DIRECTION_MAXIMIZE\x10\x01\x12\x16\n" +
@@ -983,10 +983,10 @@ var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(*Objectives)(nil),             // 4: vibesys.cli.v1.Objectives
 	(*ObjectiveNoise)(nil),         // 5: vibesys.cli.v1.ObjectiveNoise
 	(*CheckResult)(nil),            // 6: vibesys.cli.v1.CheckResult
-	(*TraceResult)(nil),            // 7: vibesys.cli.v1.TraceResult
-	(*MeasureResult)(nil),          // 8: vibesys.cli.v1.MeasureResult
-	(*Measurement)(nil),            // 9: vibesys.cli.v1.Measurement
-	(*Result)(nil),                 // 10: vibesys.cli.v1.Result
+	(*MeasureResult)(nil),          // 7: vibesys.cli.v1.MeasureResult
+	(*Measurement)(nil),            // 8: vibesys.cli.v1.Measurement
+	(*Result)(nil),                 // 9: vibesys.cli.v1.Result
+	(*TraceResult)(nil),            // 10: vibesys.cli.v1.TraceResult
 	(*durationpb.Duration)(nil),    // 11: google.protobuf.Duration
 	(*EnvironmentFingerprint)(nil), // 12: vibesys.cli.v1.EnvironmentFingerprint
 	(*MachineFacts)(nil),           // 13: vibesys.cli.v1.MachineFacts
@@ -998,20 +998,20 @@ var file_vibesys_cli_v1_result_proto_depIdxs = []int32{
 	2,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
 	5,  // 2: vibesys.cli.v1.Objectives.noise:type_name -> vibesys.cli.v1.ObjectiveNoise
 	11, // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
-	11, // 4: vibesys.cli.v1.TraceResult.duration:type_name -> google.protobuf.Duration
-	2,  // 5: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
-	3,  // 6: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
-	4,  // 7: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
-	1,  // 8: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
-	12, // 9: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	8,  // 10: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
-	12, // 11: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	13, // 12: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
-	14, // 13: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
-	15, // 14: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
-	6,  // 15: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
-	8,  // 16: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
-	7,  // 17: vibesys.cli.v1.Result.trace:type_name -> vibesys.cli.v1.TraceResult
+	2,  // 4: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
+	3,  // 5: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
+	4,  // 6: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
+	1,  // 7: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
+	12, // 8: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	7,  // 9: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
+	12, // 10: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	13, // 11: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
+	14, // 12: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
+	15, // 13: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
+	6,  // 14: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
+	7,  // 15: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
+	10, // 16: vibesys.cli.v1.Result.trace:type_name -> vibesys.cli.v1.TraceResult
+	11, // 17: vibesys.cli.v1.TraceResult.duration:type_name -> google.protobuf.Duration
 	18, // [18:18] is the sub-list for method output_type
 	18, // [18:18] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name
@@ -1026,7 +1026,7 @@ func file_vibesys_cli_v1_result_proto_init() {
 	}
 	file_vibesys_cli_v1_environment_proto_init()
 	file_vibesys_cli_v1_result_proto_msgTypes[1].OneofWrappers = []any{}
-	file_vibesys_cli_v1_result_proto_msgTypes[8].OneofWrappers = []any{
+	file_vibesys_cli_v1_result_proto_msgTypes[7].OneofWrappers = []any{
 		(*Result_Check)(nil),
 		(*Result_Measure)(nil),
 		(*Result_Trace)(nil),

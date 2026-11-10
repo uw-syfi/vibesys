@@ -38,10 +38,6 @@ enum JobState {
 
 message CheckSettings {}
 
-// TraceSettings configures a trace job. It has none yet: the command and its time limit are the
-// task's [trace].
-message TraceSettings {}
-
 // ServiceSpec is a long-lived process a command job runs against. The environment owns its
 // lifecycle: it starts the service, waits for the probe to succeed, and kills the whole process
 // group when the job ends.
@@ -320,3 +316,7 @@ message JobWait {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   WaitReason reason = 2 [(buf.validate.field).required = true];
 }
+
+// TraceSettings configures a trace job. It has none yet: the command and its time limit are the
+// task's [trace].
+message TraceSettings {}
