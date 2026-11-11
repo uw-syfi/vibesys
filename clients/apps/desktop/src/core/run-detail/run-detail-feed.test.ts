@@ -10,6 +10,7 @@ import {
 } from '../../testing/orchestrator/index.js';
 import {
   rawSkeleton,
+  representativeRun,
   runHeader,
   runMetric,
   SKELETON,
@@ -35,6 +36,101 @@ const calls = (h: Harness, method: string) =>
   h.fake.calls().filter(call => call.target.method === method);
 
 describe('the generic run detail feed', () => {
+  it.effect('replays one representative recorded run through the public typed service', () =>
+    Effect.gen(function* () {
+      const recorded = representativeRun(RUN);
+      const h = yield* harness(
+        () => [skeleton(recorded.prefix, recorded.committedSequence)],
+        () => [tail(recorded.continuation), {hang: true}],
+      );
+      h.mount(h.session.runDetail.watch(RUN));
+      const state = yield* h.read(h.session.runDetail.state(RUN));
+      expect(state._tag).toBe('Live');
+      if (state._tag !== 'Live') return;
+
+      expect(state.projection.freshness).toEqual({
+        kind: 'current',
+        throughSequence: recorded.committedSequence,
+      });
+      expect(state.projection.agents).toMatchObject({
+        availability: {kind: 'available'},
+        values: [
+          {
+            agentId: 'agent:dynamic',
+            role: recorded.dynamicRole,
+            model: 'model-x',
+            provider: 'provider-y',
+            providerSessionIds: ['session-open'],
+            source: {kind: 'run-record', sequence: 2n, epoch: 1},
+            scope: {kind: 'span', runId: RUN, spanId: 'agent-dynamic'},
+          },
+        ],
+      });
+      expect(state.projection.workstreams.values).toMatchObject([
+        {
+          spanId: 'work-root',
+          hypothesisId: 'hypothesis-a',
+          parentRevision: 'revision-base',
+          source: {sequence: 3n, epoch: 1},
+        },
+      ]);
+      expect(state.projection.correctness.values).toMatchObject([
+        {
+          spanId: 'gate-root',
+          stage: 'measurement',
+          subject: 'candidate',
+          failedCheck: {check: 'correctness', completed: 93n, required: 100n, unit: 'trials'},
+          frameworkSource: 'gpu',
+          source: {kind: 'run-record', sequence: 4n, epoch: 1},
+          scope: {kind: 'span', runId: RUN, spanId: 'gate-root'},
+        },
+      ]);
+      expect(state.projection.unprojectedSpans).toMatchObject({
+        availability: {kind: 'available'},
+        values: [
+          {
+            spanId: 'opaque-root',
+            reason: 'descriptor-unknown',
+            source: {kind: 'run-record', sequence: 5n, epoch: 1},
+          },
+        ],
+      });
+
+      const throughput = state.projection.metrics.values.find(
+        series => series.name === 'throughput',
+      );
+      expect(throughput).toMatchObject({
+        unit: 'items/s',
+        role: 'objective',
+        omittedPoints: 1,
+        scope: {kind: 'run', runId: RUN},
+      });
+      expect(throughput?.points).toHaveLength(512);
+      expect(throughput?.points.at(0)?.value).toBe(1);
+      expect(throughput?.points.at(-1)?.value).toBe(512);
+      expect(state.projection.metrics.availability).toEqual({
+        kind: 'partial',
+        reasons: ['state-truncated'],
+      });
+      expect(state.projection.metrics.values).toContainEqual(
+        expect.objectContaining({
+          name: 'gpu_utilization',
+          unit: 'percent',
+          role: 'resource',
+          source: {kind: 'run-record', sequence: 1n, epoch: 1},
+          scope: {kind: 'run', runId: RUN},
+          points: [
+            expect.objectContaining({
+              value: 75,
+              source: {kind: 'run-record', sequence: recorded.committedSequence, epoch: 1},
+              scope: {kind: 'run', runId: RUN},
+            }),
+          ],
+        }),
+      );
+    }),
+  );
+
   it.effect('acquires Skeleton, tails from next_seq, and releases the Tail on interruption', () =>
     Effect.gen(function* () {
       const h = yield* harness(
