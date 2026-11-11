@@ -16,6 +16,7 @@ import {ms} from '../time.js';
 import {type AgentsStrip, agentsStrip} from './agents-strip.js';
 import {type IdeasReport, ideasReport} from './ideas.js';
 import {type ObjectiveReport, objectiveReports} from './objectives.js';
+import {type PlansReport, plansReport} from './plans.js';
 import {type SummaryView, summaryReport} from './summary.js';
 import {type TradeoffReport, tradeoffReport} from './tradeoff.js';
 
@@ -55,6 +56,8 @@ export interface RunReport {
   readonly tradeoff: TradeoffReport | undefined;
   /** The run's ideas and workstreams, once a search state has been served. */
   readonly ideas: IdeasReport | undefined;
+  /** The run's plans counted by status and the jobs no run claimed, once a search state has been served. */
+  readonly plans: PlansReport | undefined;
   readonly agents: AgentsStrip;
   readonly search: SearchReading;
   /** The span of the charts' time axis: the run's start to its end, or to now while it lives. */
@@ -106,6 +109,7 @@ export function runReport(
         : objectiveReports(search, state.summaries[runId]?.objectives ?? []),
     tradeoff: search === undefined ? undefined : tradeoffReport(search),
     ideas: ideasReport(search),
+    plans: plansReport(search),
     agents: agentsStrip(state, runId),
     search: searchReading(search),
     span: {fromMs: startedMs, toMs},

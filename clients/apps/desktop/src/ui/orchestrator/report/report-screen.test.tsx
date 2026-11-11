@@ -13,6 +13,7 @@ import {
   Direction,
   ObjectiveStandingSchema,
   oneofIs,
+  PlanStatus,
   ReceiptSchema,
   ReportKind,
   SearchStateSchema,
@@ -50,6 +51,7 @@ import {runTitle} from '../fleet-words.js';
 import {agentNames} from '../names.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
 import {ObjectiveTiles} from './objective-tiles.js';
+import {PlansSummary} from './plans-summary.js';
 import {ReportScreen} from './report-screen.js';
 
 installDom();
@@ -274,6 +276,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
       'Lead summary',
       'Trade-off',
       'Over time',
+      'Plan status',
       'Workstreams',
       'Spend',
       'By agent type',
@@ -808,5 +811,84 @@ describe('the objective tiles and the bound’s unit', () => {
     expect(tileText(BoundUnitCheck.MATCH)).toContain('40% of bound');
     expect(tileText(BoundUnitCheck.MATCH)).not.toContain('unverified');
     expect(tileText(BoundUnitCheck.UNKNOWN)).toContain('40% of bound · unverified');
+  });
+});
+
+describe('the plan status of the report', () => {
+  /** The word the card shows for each plan status, as a person reads it off the chip. */
+  const WORD: Readonly<Record<PlanStatus, string>> = {
+    [PlanStatus.UNSPECIFIED]: 'Unknown',
+    [PlanStatus.OPEN]: 'Open',
+    [PlanStatus.CHOSEN]: 'Chosen',
+    [PlanStatus.WON]: 'Won',
+    [PlanStatus.PARKED]: 'Parked',
+    [PlanStatus.REJECTED]: 'Rejected',
+  };
+
+  it('counts the run’s plans by status on the page, keeping Chosen and Won apart', () => {
+    const {screen} = render({ideas: 12});
+    const plans = stateOf({ideas: 12}).searches[RUN]?.plans ?? [];
+    expect(plans).toHaveLength(12);
+    const card = cardText(screen.container, 'Plan status');
+    for (const status of [
+      PlanStatus.OPEN,
+      PlanStatus.CHOSEN,
+      PlanStatus.WON,
+      PlanStatus.PARKED,
+      PlanStatus.REJECTED,
+    ]) {
+      const count = plans.filter(plan => plan.status === status).length;
+      // The fixture exercises every status, so each has a chip with the host's own count.
+      expect(count).toBeGreaterThan(0);
+      expect(card).toContain(`${WORD[status]} ${count}`);
+    }
+    // Chosen and Won are the distinction the ideas table's verdict folds into Open and Kept.
+    expect(card).toContain('Chosen');
+    expect(card).toContain('Won');
+    screen.unmount();
+  });
+
+  it('says there are no plans for a run with none, and still appears beside the empty ideas', () => {
+    const {screen} = render({ideas: 0});
+    expect(cardText(screen.container, 'Plan status')).toContain('No plans');
+    screen.unmount();
+  });
+
+  const plansView = (
+    tallies: readonly {status: PlanStatus; label: string; count: number}[],
+    withoutRun: number,
+  ) => ({tallies, total: tallies.reduce((sum, tally) => sum + tally.count, 0), withoutRun});
+
+  it('shows each status as a chip in order and says the jobs with no run, with the right plural', () => {
+    const screen = mount(
+      <PlansSummary
+        plans={plansView(
+          [
+            {status: PlanStatus.OPEN, label: 'Open', count: 2},
+            {status: PlanStatus.WON, label: 'Won', count: 3},
+          ],
+          4,
+        )}
+      />,
+    );
+    expect(
+      [...screen.container.querySelectorAll('.vs-chip')].map(chip => chip.textContent),
+    ).toEqual(['Open 2', 'Won 3']);
+    expect(screen.text()).toContain('4 jobs with no run');
+    screen.unmount();
+
+    const one = mount(
+      <PlansSummary plans={plansView([{status: PlanStatus.OPEN, label: 'Open', count: 1}], 1)} />,
+    );
+    expect(one.text()).toContain('1 job with no run');
+    expect(one.text()).not.toContain('1 jobs with no run');
+    one.unmount();
+  });
+
+  it('says there are no plans when none has been made, and still counts the jobs with no run', () => {
+    const screen = mount(<PlansSummary plans={plansView([], 0)} />);
+    expect(screen.text()).toContain('No plans');
+    expect(screen.text()).toContain('0 jobs with no run');
+    screen.unmount();
   });
 });
