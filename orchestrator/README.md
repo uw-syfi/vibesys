@@ -6,11 +6,11 @@ them, and wakes a lead agent when a subagent or a job finishes. It sits beside t
 shares nothing with them: it has its own contract under `proto/vibesys/orchestrator/v1/`, its own
 module here, and it reaches `vibesys-cli` only through that tool's public contract.
 
-Work is landing in stages. This module holds the contract, the pure decision core, the interface
-over `vibesys-cli` jobs, the code that converts between the two, the store, the daemon with its
-live hub, the MCP server and the sidecar launcher, all hosted by `vibesys-host`, and the verbs of `vibesys-client`. The
-plan reader is a placeholder in production and the job source is left unwired until their items land
-(`internal/production`); both say so when asked.
+This module holds the contract, the pure decision core, the interface over `vibesys-cli` jobs, the
+code that converts between the two, the store, the daemon with its live hub, the MCP server and the
+sidecar launcher, all hosted by `vibesys-host`, and the verbs of `vibesys-client`. Production follows
+the CLI task stream into one reconciled search store, opens a fresh task stream for each check-in,
+and uses the reconciled store as the level-triggered job source (`internal/production`).
 
 ## Vocabulary
 

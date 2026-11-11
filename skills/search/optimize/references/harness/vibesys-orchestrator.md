@@ -38,11 +38,13 @@ re-spawn an agent that `list_agents` still shows working.
 
 ## Run a long command as a tracked background task
 
-Submit jobs with `vibesys-cli submit`; the CLI queues and runs them. Nothing notifies you when a
-job ends. Plan or dispatch while it runs, and read it with `vibesys-cli jobs` or `show` when a
-handoff wakes you. Wait in the foreground with `vibesys-cli wait` only when you have nothing
-else to do. Workers and judges do the same inside their own turn: they submit, `wait` and
-measure before they hand off.
+Submit jobs with `vibesys-cli submit`; the CLI queues and runs them. The orchestrator checks the
+run's job feed. When it observes a job in a final state while the run is live, it sends one
+completion message and wakes you; repeated checks do not send it again. Plan or dispatch while the
+job runs, then read it with `vibesys-cli jobs` or `show` after that wake. Do not add a polling loop
+or provider timer to detect completion. Wait in the foreground with `vibesys-cli wait` only when
+you have nothing else to do. Workers and judges do the same inside their own turn: they submit,
+`wait` and measure before they hand off.
 
 Every measure you or an agent submits in this run says what it tests: `--plan <n>` for the plan
 it is a try of, `--no-plan` only for the baseline and a re-measure of the head. `vibesysd` refuses
