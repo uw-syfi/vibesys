@@ -10,23 +10,24 @@
  * A figure nobody reported is `unknown` (or `—` where there is nothing yet to report), never a zero.
  */
 import type {RunStatus} from '@vibesys/orchestrator-proto';
-import type {BarMark} from '@vibesys/ui';
 import {
   bucketsInRange,
   type CostUsage,
   type HostCostView,
+  type RunSort,
   rangeOf,
   rangesOf,
-  type RunSort,
   type SpendRange,
   sortRuns,
 } from '../../state/index.js';
 import {
-  type BarMarker,
+  bucketWords,
   type CostWords,
   FLOOR,
   formatCount,
   formatUsd,
+  isModelId,
+  modelKey,
   modelName,
   NOT_REPORTED,
   type Precision,
@@ -61,7 +62,19 @@ export interface RunLine {
   readonly cost: CostCell;
   /** This run's part of the host's total cost, in whole percent. */
   readonly share: string;
-  readonly budget: string | null;
+  readonly budget: BudgetCell | null;
+  /** When the run began, as the client holds it; null for a run it holds no card for. */
+  readonly started: {readonly text: string; readonly hint: string} | null;
+}
+
+/** A run's budget, and how far along it the spend is. */
+export interface BudgetCell {
+  readonly text: string;
+  /** The share of the budget the cost is (a floor, while unpriced turns are behind it), in whole percent. */
+  readonly used: string | null;
+  /** The cost is past the budget: a problem, drawn as one. */
+  readonly over: boolean;
+  readonly hint: string;
 }
 
 /** One row of the host's cost by type of agent. */
@@ -78,6 +91,10 @@ export interface TypeLine {
 export interface ModelLine {
   readonly key: string;
   readonly name: string;
+  /** The name is an id (drawn in the code face), not words. */
+  readonly id: boolean;
+  /** The palette slot of its bars; null for a model with no priced turn, which has none. */
+  readonly series: number | null;
   /** The model's id and harness, whole, for the pointer. */
   readonly title: string;
   readonly tokens: TokenCells;
@@ -88,9 +105,12 @@ export interface ModelLine {
 export interface TotalFigures {
   /** The cost of the priced turns, or null when no turn is priced. */
   readonly figure: string | null;
+  /** The spend leaves out turns without a price (or a host not yet read): it and the last hour are floors. */
   readonly floor: boolean;
   /** What the turns of the last hour cost, as the hosts served it; null when none served one. */
   readonly lastHour: string | null;
+  /** The last hour's spend is a floor too, on the same ground as the spend. */
+  readonly lastHourFloor: boolean;
   readonly runs: {readonly count: string; readonly what: string};
   readonly turns: {readonly count: string; readonly what: string};
   /** The turns with tokens and no price, or null when there are none. */
@@ -100,13 +120,13 @@ export interface TotalFigures {
 }
 
 /** A range of the chart as a segment names it. */
-export interface RangeChoice {
+interface RangeChoice {
   readonly value: SpendRange;
   readonly label: string;
 }
 
 /** Where the host's page stands: its view not read yet, read and holding no turn, or read. */
-export type HostCostState = 'reading' | 'empty' | 'served';
+type HostCostState = 'reading' | 'empty' | 'served';
 
 export interface HostCostScreenModel {
   readonly state: HostCostState;
@@ -114,6 +134,8 @@ export interface HostCostScreenModel {
   readonly asOf: string | null;
   /** The bars of the chart for the chosen range; null while no priced turn is in it. */
   readonly chart: SpendChart | null;
+  /** How long each bar lasts, for the chart's header (`per 3 hours`); null with no chart. */
+  readonly bucketWords: string | null;
   /** The ranges offered, none while the spend spans a day or less. */
   readonly ranges: readonly RangeChoice[];
   /** The range the chart shows, which is the whole span whenever the one chosen is not offered. */
@@ -129,12 +151,13 @@ export interface HostCostScreenModel {
 export interface CostOverviewModelWords extends CostWords {
   /** The label of a tick of a time axis that spans `spanMs`, in ticks `stepMs` apart. */
   readonly tick: (atMs: number, spanMs: number, stepMs: number) => string;
+  /** How far the display zone's clock is ahead of UTC at a moment, so the axis ticks at its midnights. */
+  readonly offset: (atMs: number) => number;
+  /** The day a run began, short: `Tue 3`. */
+  readonly started: (atMs: number) => string;
 }
 
 const RANGE_LABELS: Readonly<Record<SpendRange, string>> = {'1d': '1d', '7d': '7d', all: 'All'};
-
-/** About this many labels under the bars; the chart draws fewer when the width cannot hold them. */
-const LABELS = 6;
 
 const unpricedHint = (turns: number): string =>
   `${formatCount(turns)} ${plural(turns, 'turn', 'turns')} reported tokens and no price. ` +
@@ -156,8 +179,10 @@ function costCell(
       ? {text: NOT_REPORTED, hint: undefined}
       : {text: UNKNOWN, hint: 'No turn reported a price.'};
   }
+  // The mark and the figure are one word to the eye: a no-break space, so it never reads as a
+  // comparison with the cell beside it.
   return unpricedTurns > 0
-    ? {text: `${FLOOR}${usd}`, hint: unpricedHint(unpricedTurns)}
+    ? {text: `${FLOOR.trim()}\u00a0${usd}`, hint: unpricedHint(unpricedTurns)}
     : {text: usd, hint: undefined};
 }
 
@@ -180,6 +205,7 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
   return {
     figure: costs.length === 0 ? null : (usdOrNothing(sum, precision) ?? null),
     floor: costs.length > 0 && (unpriced > 0 || views.length < hostCount),
+    lastHourFloor: hours.length > 0 && (unpriced > 0 || views.length < hostCount),
     lastHour:
       hours.length === 0
         ? null
@@ -200,28 +226,22 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
   };
 }
 
+/** What a `≥` on a figure of the facts line says on hover. */
+export const FLOOR_HINT =
+  'At least this much: turns that reported tokens and no price are not in it.';
+
 /** What the facts line's unpriced fact says on hover. */
 export const UNPRICED_FACT_HINT =
   'Turns that reported tokens and no price. Their tokens are counted and their cost is not, so ' +
   'the spend is at least what is shown.';
 
-/** Labels under the bars: about six, every `n`th bar from the first, each as fine as the step between them needs. */
-const markerOf =
-  (words: CostOverviewModelWords): BarMarker =>
-  ({buckets, bucketMs}): readonly BarMark[] => {
-    const stride = Math.max(1, Math.ceil(buckets.length / LABELS));
-    const spanMs = buckets.length * bucketMs;
-    return buckets.flatMap((bucket, at): BarMark[] =>
-      at % stride === 0 ? [{at, text: words.tick(bucket.startMs, spanMs, stride * bucketMs)}] : [],
-    );
-  };
-
 const runLine = (
   host: string,
   run: HostCostView['runs'][number],
-  total: number | null,
-  precision: Precision,
+  money: {readonly total: number | null; readonly precision: Precision},
   titles: Readonly<Record<string, string>>,
+  startedMs: number | undefined,
+  words: CostOverviewModelWords,
 ): RunLine => ({
   key: `${host}/${run.runId}`,
   runId: run.runId,
@@ -229,16 +249,46 @@ const runLine = (
   status: run.status,
   turns: formatCount(run.turns),
   tokens: tokenSplit(run.usage, run.turns),
-  cost: costCell(run.usage, run.turns, run.unpricedTurns, precision),
-  share: shareOf(run.usage.costUsd, total),
-  budget: run.maxCostUsd === null ? null : usdOrNothing(run.maxCostUsd, precision),
+  cost: costCell(run.usage, run.turns, run.unpricedTurns, money.precision),
+  share: shareOf(run.usage.costUsd, money.total),
+  budget: budgetCell(run.usage.costUsd, run.maxCostUsd, run.unpricedTurns > 0, money.precision),
+  started:
+    startedMs === undefined
+      ? null
+      : {text: words.started(startedMs), hint: words.moment(startedMs)},
 });
+
+/**
+ * A run's budget and how far along it the spend is. Spend past the budget is a problem, whatever
+ * unpriced turns are behind it (the cost is at least what is shown, so it is over by at least that).
+ */
+function budgetCell(
+  costUsd: number | null,
+  maxCostUsd: number | null,
+  floor: boolean,
+  precision: Precision,
+): BudgetCell | null {
+  if (maxCostUsd === null) return null;
+  const text = formatUsd(maxCostUsd, precision);
+  if (costUsd === null) return {text, used: null, over: false, hint: 'No turn reported a price.'};
+  const used = `${floor ? FLOOR : ''}${Math.round((costUsd / maxCostUsd) * 100)}%`;
+  const over = costUsd > maxCostUsd;
+  return {
+    text,
+    used,
+    over,
+    hint: over
+      ? `Over budget by ${floor ? 'at least ' : ''}${formatUsd(costUsd - maxCostUsd, precision)}`
+      : `${used} of the budget spent`,
+  };
+}
 
 /** What the model keeps of a view before one is served: every panel empty, in its place. */
 export const NO_VIEW: HostCostScreenModel = {
   state: 'reading',
   asOf: null,
   chart: null,
+  bucketWords: null,
   ranges: [],
   range: 'all',
   runs: [],
@@ -258,6 +308,8 @@ export function hostCostModel(
   words: CostOverviewModelWords,
   choices: {
     readonly titles?: Readonly<Record<string, string>>;
+    /** When each run the client holds a card for began, by run id. */
+    readonly started?: Readonly<Record<string, number>>;
     readonly range: SpendRange;
     readonly sort: RunSort;
   },
@@ -267,8 +319,14 @@ export function hostCostModel(
   const range = rangeOf(view.series, choices.range);
   const slots = slotsOf(view);
   const total = view.total.costUsd;
+  const chart = spendChart(
+    {...view, series: {...view.series, buckets: bucketsInRange(view.series, view.asOfMs, range)}},
+    slots,
+    words,
+    () => [],
+  );
   const runs = sortRuns(view.runs, choices.sort).map(run =>
-    runLine(host, run, total, precision, titles),
+    runLine(host, run, {total, precision}, titles, choices.started?.[run.runId], words),
   );
   const {otherRuns} = view;
   const lines: RunLine[] =
@@ -286,20 +344,14 @@ export function hostCostModel(
             cost: costCell(otherRuns.usage, otherRuns.turns, otherRuns.unpricedTurns, precision),
             share: shareOf(otherRuns.usage.costUsd, total),
             budget: null,
+            started: null,
           },
         ];
   return {
     state: view.turns === 0 ? 'empty' : 'served',
     asOf: words.moment(view.asOfMs),
-    chart: spendChart(
-      {
-        ...view,
-        series: {...view.series, buckets: bucketsInRange(view.series, view.asOfMs, range)},
-      },
-      slots,
-      words,
-      markerOf(words),
-    ),
+    chart,
+    bucketWords: chart === null ? null : bucketWords(chart.bucketMs),
     ranges: rangesOf(view.series).map(value => ({value, label: RANGE_LABELS[value]})),
     range,
     unpricedNote:
@@ -318,6 +370,8 @@ export function hostCostModel(
     models: view.models.map(cost => ({
       key: `${cost.model.harness}/${cost.model.model}`,
       name: modelName(cost.model, words),
+      id: isModelId(cost.model),
+      series: cost.usage.costUsd === null ? null : (slots.get(modelKey(cost.model)) ?? 0),
       title:
         cost.model.model === ''
           ? `${words.harness(cost.model.harness)} default model`

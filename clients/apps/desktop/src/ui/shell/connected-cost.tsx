@@ -8,6 +8,7 @@ import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
 import {hostStatusOf, staleForMs} from '../../state/index.js';
+import {ms} from '../../state/orchestrator/time.js';
 import {type CostOverviewHost, CostOverviewScreen} from '../cost-overview/index.js';
 import {useDisplayClock} from '../display-clock.js';
 import {nowMs} from '../orchestrator/clock.js';
@@ -35,6 +36,12 @@ const hostsOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly CostOvervi
         view,
         titles: Object.fromEntries(
           Object.values(data.runs).map(run => [run.id, runTitle(run.taskCard ?? null, run.task)]),
+        ),
+        started: Object.fromEntries(
+          Object.values(data.runs).flatMap(run => {
+            const startedMs = ms(run.createdAt);
+            return startedMs === null ? [] : [[run.id, startedMs] as const];
+          }),
         ),
         feed,
         status: hostStatusOf({

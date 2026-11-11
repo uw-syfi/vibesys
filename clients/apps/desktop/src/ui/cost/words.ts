@@ -80,7 +80,12 @@ function decimalsOf(step: number): number {
  * numbers, so each reads exactly.
  */
 export function formatAxisUsd(usd: number, step: number): string {
-  return `$${usd.toFixed(decimalsOf(step))}`;
+  const decimals = decimalsOf(step);
+  const figure = usd.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `$${figure}`;
 }
 
 const UNITS = [
@@ -158,40 +163,28 @@ export function labelStride(bucketMs: number, buckets: number): number {
   return Math.max(1, Math.round(step / bucketMs));
 }
 
-/** Words an id spells in capitals. */
-const ACRONYMS = new Set(['gpt', 'glm', 'llm']);
+/** How long each bar of the spend chart is, in the words of its header: `per hour`, `per 3 hours`, `per day`. */
+export function bucketWords(bucketMs: number): string {
+  const per = (count: number, unit: string): string =>
+    count === 1 ? `per ${unit}` : `per ${formatCount(count)} ${unit}s`;
+  const minutes = Math.round(bucketMs / MINUTE);
+  if (minutes < 60) return per(minutes, 'minute');
+  if (minutes < 24 * 60) return per(Math.round(minutes / 60), 'hour');
+  return per(Math.round(minutes / (24 * 60)), 'day');
+}
 
 /**
- * A model id as a person says it: `claude-opus-5-5` is `Claude Opus 5.5`, `gpt-5-codex-20260115` is
- * `GPT 5 Codex`. The host serves ids and no names, so this words the common shapes of an id: a date
- * suffix is dropped, digits that follow each other make one version (`5-5` is `5.5`), a word is
- * capitalised and an acronym is not lowercase. An id of another shape keeps its words, spaced.
+ * The name of a model: the id the host served, an identifier drawn in the code face wherever it
+ * appears (`isModelId`). No source of display names for models exists (they are agentshim's and the
+ * host does not serve them), so none is made up here. A harness's own default model has no id: it is
+ * the harness's name and the word `default`.
  */
-export function modelDisplayName(id: string): string {
-  const named = id.slice(id.lastIndexOf('/') + 1);
-  const parts = named.split(/[-_\s]+/).filter(part => part !== '' && !/^\d{8}$/.test(part));
-  const words: string[] = [];
-  for (const part of parts) {
-    const last = words.at(-1);
-    if (/^\d{1,2}$/.test(part) && last !== undefined && /^\d{1,2}(\.\d{1,2})*$/.test(last)) {
-      words[words.length - 1] = `${last}.${part}`;
-    } else {
-      words.push(part);
-    }
-  }
-  return words
-    .map(word =>
-      ACRONYMS.has(word.toLowerCase())
-        ? word.toUpperCase()
-        : `${word.charAt(0).toUpperCase()}${word.slice(1)}`,
-    )
-    .join(' ');
+export function modelName(model: CostModel, words: CostWords): string {
+  return model.model === '' ? `${words.harness(model.harness)} default` : model.model;
 }
 
-/** The name of a model: its id said as a person says it, or the harness's own words for its default. */
-export function modelName(model: CostModel, words: CostWords): string {
-  return model.model === '' ? words.harness(model.harness) : modelDisplayName(model.model);
-}
+/** Whether the model is named by an id, which is drawn in the code face, and not by words. */
+export const isModelId = (model: CostModel): boolean => model.model !== '';
 
 /** What identifies a model across views of a run. */
 export const modelKey = (model: CostModel): string => `${model.harness}/${model.model}`;

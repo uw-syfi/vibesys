@@ -1,4 +1,5 @@
 import {describe, expect, expectTypeOf, it} from '@effect/vitest';
+import {Harness} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {costViewArb} from '../../testing/orchestrator/cost-arbitrary.js';
 import {
@@ -14,6 +15,7 @@ import {
   costScreenModel,
   KIND_COLUMNS,
   MODEL_COLUMNS,
+  slotsOf,
   TYPE_COLUMNS,
 } from './cost-model.js';
 import {formatTokens} from './words.js';
@@ -225,18 +227,47 @@ describe('the cost screen model', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
-  it('names a model as a person says it, and the harness for its own default', () => {
+  it('names a model by the id the host served, in the code face, and a default by its harness', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
-      'Model A',
-      'Model B',
-      'Codex',
+      'model-a',
+      'model-b',
+      'Codex default',
     ]);
     const long = costScreenModel(LONG_NAMES, COST_WORDS);
-    const id = LONG_NAMES.models[0]?.model.model ?? '';
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
-    // The legend and the rows say the same words, and neither is the id as the host served it.
-    expect(long.chart?.legend[0]?.label).toBe(long.models[0]?.name);
-    expect(long.models[0]?.name).not.toBe(id);
-    expect(long.chart?.legend.map(item => item.label)).not.toContain(id);
+    expect(long.models[0]?.mono).toBe(true);
+    expect(long.chart?.legend[0]?.mono).toBe(true);
+    const own = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.at(-1);
+    expect(own?.mono).toBeUndefined();
+  });
+
+  it('gives a model a color that is its own: the same in every view, whoever else is on the page', () => {
+    const colors = (ids: readonly string[]) => {
+      const view = {
+        ...PRICED_AND_UNPRICED,
+        models: ids.map(model => ({
+          ...(PRICED_AND_UNPRICED.models[0] as (typeof PRICED_AND_UNPRICED.models)[number]),
+          model: {harness: Harness.CODEX, model},
+        })),
+        series: {...PRICED_AND_UNPRICED.series, buckets: []},
+      };
+      return slotsOf(view);
+    };
+    const key = (model: string) => `${Harness.CODEX}/${model}`;
+    // Alone or with others, a model that no other holds the slot of keeps it.
+    const alone = colors(['claude-opus-5-5']).get(key('claude-opus-5-5'));
+    for (const others of [['gpt-5-codex'], ['model-a', 'model-b'], ['claude-haiku-5-5', 'zzz']]) {
+      const together = colors(['claude-opus-5-5', ...others]);
+      const slots = [...together.values()];
+      // No two models of a view draw alike, and all are in the palette.
+      expect(new Set(slots).size).toBe(slots.length);
+      for (const slot of slots) expect(slot).toBeLessThan(8);
+      if (together.get(key('claude-opus-5-5')) !== alone) {
+        // Only a clash of the hash moves a model, and then to a slot nobody else holds.
+        expect(others.some(other => together.get(key(other)) === alone)).toBe(true);
+      }
+    }
+    // The same models in any order are the same colors.
+    expect(colors(['a1', 'b2', 'c3'])).toEqual(colors(['c3', 'a1', 'b2']));
   });
 });

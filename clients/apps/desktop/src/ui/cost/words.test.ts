@@ -2,14 +2,16 @@ import {describe, expect, it} from '@effect/vitest';
 import {niceScale} from '@vibesys/ui';
 import fc from 'fast-check';
 import {
+  bucketWords,
   formatAxisUsd,
   formatCount,
   formatElapsed,
   formatRate,
   formatTokens,
   formatUsd,
+  isModelId,
   labelStride,
-  modelDisplayName,
+  modelName,
   type Precision,
   precisionOf,
 } from './words.js';
@@ -82,7 +84,9 @@ describe('writing dollars', () => {
         const step = ticks[1] ?? 1;
         const written = ticks.map(tick => formatAxisUsd(tick, step));
         ticks.forEach((tick, at) => {
-          expect(Math.abs(Number((written[at] ?? '').slice(1)) - tick)).toBeLessThan(1e-9);
+          expect(
+            Math.abs(Number((written[at] ?? '').slice(1).replaceAll(',', '')) - tick),
+          ).toBeLessThan(1e-9);
         });
         // One axis, one number of decimals.
         expect(new Set(written.map(text => text.split('.')[1]?.length ?? 0)).size).toBe(1);
@@ -91,6 +95,8 @@ describe('writing dollars', () => {
     expect([0.05, 0.1, 0.15].map(v => formatAxisUsd(v, 0.05))).toEqual(['$0.05', '$0.10', '$0.15']);
     expect([20, 40].map(v => formatAxisUsd(v, 20))).toEqual(['$20', '$40']);
     expect([2.5, 5, 7.5].map(v => formatAxisUsd(v, 2.5))).toEqual(['$2.5', '$5.0', '$7.5']);
+    // Thousands are separated, as every other figure of the page is.
+    expect([1000, 2000].map(v => formatAxisUsd(v, 1000))).toEqual(['$1,000', '$2,000']);
   });
 });
 
@@ -135,29 +141,25 @@ describe('which buckets are labelled', () => {
 });
 
 describe('naming a model', () => {
-  it('words the ids of the common shapes as a person says them', () => {
-    expect(modelDisplayName('claude-opus-5-5')).toBe('Claude Opus 5.5');
-    expect(modelDisplayName('claude-sonnet-5-5-20260115')).toBe('Claude Sonnet 5.5');
-    expect(modelDisplayName('gpt-5-codex')).toBe('GPT 5 Codex');
-    expect(modelDisplayName('gemini-2.5-pro')).toBe('Gemini 2.5 Pro');
-    expect(modelDisplayName('model-a')).toBe('Model A');
-    expect(modelDisplayName('vendor/some-model-7b')).toBe('Some Model 7b');
-  });
+  const words = {harness: () => 'Codex'};
 
-  it('never leaves a kebab-case id, a lowercase first letter or a stray separator in the name', () => {
-    const word = fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/);
-    const id = fc
-      .array(fc.oneof(word, fc.stringMatching(/^[0-9]{1,2}$/)), {minLength: 1, maxLength: 6})
-      .map(parts => parts.join('-'));
-    fc.assert(
-      fc.property(id, raw => {
-        const name = modelDisplayName(raw);
-        expect(name).not.toMatch(/[-_]/);
-        expect(name).not.toMatch(/\s{2}|^\s|\s$/);
-        expect(name.charAt(0)).toBe(name.charAt(0).toUpperCase());
-        // Said twice, it is the same words: naming is a function of the id alone.
-        expect(modelDisplayName(raw)).toBe(name);
-      }),
-    );
+  it('is the id the host served, drawn as an id, and for a harness default the harness and the word default', () => {
+    const named = {harness: 1, model: 'claude-opus-5-5'};
+    const own = {harness: 1, model: ''};
+    expect(modelName(named, words as never)).toBe('claude-opus-5-5');
+    expect(isModelId(named)).toBe(true);
+    expect(modelName(own, words as never)).toBe('Codex default');
+    expect(isModelId(own)).toBe(false);
+  });
+});
+
+describe('the words of a bucket of the spend chart', () => {
+  it('says how long it lasts in the unit it is closest to', () => {
+    const MIN = 60_000;
+    expect(bucketWords(MIN)).toBe('per minute');
+    expect(bucketWords(15 * MIN)).toBe('per 15 minutes');
+    expect(bucketWords(60 * MIN)).toBe('per hour');
+    expect(bucketWords(180 * MIN)).toBe('per 3 hours');
+    expect(bucketWords(24 * 60 * MIN)).toBe('per day');
   });
 });

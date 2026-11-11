@@ -29,6 +29,7 @@ function page(
           feed: {_tag: 'Live'},
           view,
           titles: {},
+          started: {},
         },
       ]}
       words={COST_OVERVIEW_WORDS}
@@ -86,10 +87,10 @@ describe('the Cost page of one host', () => {
     expect(meta?.querySelectorAll('.vs-factline')).toHaveLength(1);
     expect(meta?.querySelector('.vs-factline .vs-chip')?.textContent).toBe('Live');
     const text = meta?.textContent ?? '';
-    expect(text).toMatch(/≥ \$2\.35\s*spent/);
-    expect(text).toMatch(/in the last hour/);
-    expect(text).toMatch(/1\s*run/);
-    expect(text).toMatch(/9\s*turns/);
+    expect(text).toContain('≥\u00a0$2.35 spent');
+    expect(text).toContain('≥\u00a0$2.35 in the last hour');
+    expect(text).toContain('1 run');
+    expect(text).toContain('9 turns');
     expect(text).toContain('4 turns unpriced');
     const unpriced = [...(meta?.querySelectorAll('.vs-fact') ?? [])].find(fact =>
       fact.textContent?.includes('unpriced'),
@@ -120,13 +121,93 @@ describe('the Cost page of one host', () => {
     screen.unmount();
   });
 
-  it('names models by display name only: no id of a model is drawn', () => {
-    const screen = mount(page(views.week));
-    const text = screen.text();
-    for (const id of ['claude-opus-5-5', 'gpt-5-codex', 'claude-sonnet-5-5']) {
-      expect(text).not.toContain(id);
+  it('writes each figure of the facts line one space from its words, never against them', () => {
+    for (const view of [views.none, views.short, views.week]) {
+      const screen = mount(page(view));
+      const facts = [...screen.container.querySelectorAll('.vs-page-meta .vs-fact')];
+      expect(facts.length).toBeGreaterThanOrEqual(3);
+      for (const fact of facts) {
+        const text = fact.textContent ?? '';
+        // A figure is followed by a space (or ends the fact), and no word is joined to a figure.
+        expect(text, text).not.toMatch(/[\d%]\p{L}/u);
+        expect(text, text).toMatch(/^[^ ]+( [^ ]+)*$/);
+      }
+      expect(screen.container.querySelector('.vs-factline')?.getAttribute('data-spaced')).toBe(
+        'true',
+      );
+      screen.unmount();
     }
-    expect(text).toContain('Claude Opus 5.5');
+  });
+
+  it('draws a model by its id in the code face, with its color beside it in the table, and no made-up name', () => {
+    const screen = mount(page(views.week));
+    const table = screen.container.querySelector('table[aria-label="Cost by model on Host A"]');
+    const names = [...(table?.querySelectorAll('tbody td:first-child [data-mono-id]') ?? [])].map(
+      each => each.textContent,
+    );
+    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
+    expect(table?.querySelectorAll('tbody .vs-series-swatch').length).toBe(
+      table?.querySelectorAll('tbody tr').length,
+    );
+    expect(screen.text()).not.toContain('Claude Opus');
+    screen.unmount();
+  });
+
+  it('draws a run that finished as a neutral chip, and keeps tone for what wants a look', () => {
+    const screen = mount(page(views.week));
+    const chips = [...screen.container.querySelectorAll('tbody .vs-chip')];
+    const tones = new Map(chips.map(chip => [chip.textContent, chip.getAttribute('data-tone')]));
+    expect(tones.get('Finished')).toBe('neutral');
+    expect(tones.get('Running')).toBe('live');
+    expect(tones.get('Failed')).toBe('err');
+    screen.unmount();
+  });
+
+  it('flags the budget of a run that is over it, with how far over on hover', () => {
+    const screen = mount(page(views.week));
+    const over = [...screen.container.querySelectorAll('tbody [data-tone="err"][title]')].filter(
+      each => each.getAttribute('title')?.startsWith('Over budget by'),
+    );
+    expect(over.length).toBeGreaterThan(0);
+    screen.unmount();
+  });
+
+  it('names the unit of every column of tokens, and the basis of the percentages', () => {
+    const screen = mount(page(views.week));
+    const headers = [
+      ...screen.container.querySelectorAll('table[aria-label="Cost by run on Host A"] th'),
+    ].map(each => each.textContent);
+    expect(headers).toEqual(expect.arrayContaining(['Input', '% cached', 'Output', '% of total']));
+    // The unit of a column of tokens is in its header's hint, which names tokens.
+    const hints = new Map(
+      [...screen.container.querySelectorAll('table[aria-label="Cost by run on Host A"] th')].map(
+        th => [th.textContent, th.getAttribute('title')],
+      ),
+    );
+    expect(hints.get('Input')).toMatch(/tokens/);
+    expect(hints.get('Output')).toMatch(/tokens/);
+    expect(hints.get('% cached')).toMatch(/input tokens/);
+    expect(hints.get('% of total')).toMatch(/cost of every run/);
+    screen.unmount();
+  });
+
+  it('says how long each bar lasts, and writes the axis with a zero and thousands separated', () => {
+    const screen = mount(page(views.week));
+    expect(screen.text()).toMatch(/per (\d+ )?(minute|hour|day)s?/);
+    const axis = [...screen.container.querySelectorAll('.vs-bars-scale .vs-bars-tick')].map(
+      each => each.textContent,
+    );
+    expect(axis).toContain('$0');
+    expect(axis.join(' ')).toMatch(/\$\d{1,3},\d{3}/);
+    screen.unmount();
+  });
+
+  it('stands each bar at its time with the width of its bucket, on an axis of days for a week', () => {
+    const screen = mount(page(views.week));
+    const bars = [...screen.container.querySelectorAll<HTMLElement>('.vs-bars-bar')];
+    const lefts = bars.map(bar => Number.parseFloat(bar.style.left));
+    expect(lefts).toEqual([...lefts].sort((a, b) => a - b));
+    expect(new Set(bars.map(bar => bar.style.width)).size).toBe(1);
     screen.unmount();
   });
 

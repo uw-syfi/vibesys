@@ -45,7 +45,7 @@ function Problem(props: {
 }
 
 /** The spend over time as bars by model, with the models' legend; the same for a run and for a host. */
-export function SpendOverTime(props: {
+function SpendOverTime(props: {
   readonly chart: NonNullable<CostScreenModel['chart']>;
 }): JSX.Element {
   const {chart} = props;

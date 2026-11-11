@@ -5,6 +5,8 @@ import {COST_CASES, type CostCase, costCaseView} from '../../testing/orchestrato
 import {COST_OVERVIEW_WORDS} from '../test-display-clock.js';
 import {hostCostModel, totalFigures} from './cost-overview-model.js';
 
+type Chart = NonNullable<ReturnType<typeof model>['chart']>;
+
 const model = (view: HostCostView, range: SpendRange = 'all') =>
   hostCostModel('host-a', view, COST_OVERVIEW_WORDS, {range, sort: HOST_ORDER});
 
@@ -22,6 +24,20 @@ const usage = (fields: Partial<CostUsage>): CostUsage => ({
   costUsd: null,
   ...fields,
 });
+
+/** Every bar stands at its own moment and lasts a bucket; the bars are in time order and the axis holds them. */
+function expectBarsAtTheirMoments(chart: Chart): void {
+  const starts = chart.bars.map(bar => bar.startMs ?? Number.NaN);
+  expect(starts).toEqual([...starts].sort((a, b) => a - b));
+  expect(new Set(starts).size).toBe(starts.length);
+  for (const bar of chart.bars) expect(bar.widthMs).toBe(chart.bucketMs);
+  expect(chart.domain.fromMs).toBe(starts[0]);
+  expect(chart.domain.toMs).toBeGreaterThanOrEqual((starts.at(-1) ?? 0) + chart.bucketMs);
+  // Gaps in time between bars are whole buckets: nothing is spaced by its place in the list.
+  for (const [at, start] of starts.entries()) {
+    if (at > 0) expect((start - (starts[at - 1] ?? 0)) % chart.bucketMs).toBe(0);
+  }
+}
 
 describe('the figures over the hosts', () => {
   it('say what a host that has served no view leaves out: the spend is then a floor', () => {
@@ -148,15 +164,78 @@ describe('the screen model of a host', () => {
     expect(short.ranges).toEqual([]);
   });
 
-  it('names every model by display name, in the chart legend and the table, and keeps the id for the pointer', () => {
+  it('names a model by the id the host served, drawn as an id, and keeps the harness default in words', () => {
     const week = model(views.week);
     const names = week.chart?.legend.map(item => item.label) ?? [];
-    expect(names).toEqual(expect.arrayContaining(['Claude Opus 5.5', 'GPT 5 Codex']));
-    for (const name of [...names, ...week.models.map(line => line.name)]) {
-      expect(name).not.toMatch(/[-_]/);
-    }
-    const opus = week.models.find(line => line.name === 'Claude Opus 5.5');
+    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
+    expect(names).toContain('Codex default');
+    expect(week.chart?.legend.filter(item => item.mono).length).toBe(names.length - 1);
+    const opus = week.models.find(line => line.name === 'claude-opus-5-5');
+    expect(opus?.id).toBe(true);
     expect(opus?.title).toBe('claude-opus-5-5 on Claude Code');
+    expect(week.models.find(line => line.name === 'Codex default')?.id).toBe(false);
+  });
+
+  it('puts every bucket at its own moment: bars grow in time, last as long as the host cut them, and the axis holds them all', () => {
+    for (const name of COST_CASES) {
+      for (const range of ['all', '1d'] as const) {
+        const chart = model(views[name], range).chart;
+        if (chart !== null) expectBarsAtTheirMoments(chart);
+      }
+    }
+  });
+
+  it("says in the chart's header how long each bar lasts", () => {
+    expect(model(views.week).bucketWords).toMatch(/^per (\d+ )?(minute|hour|day)s?$/);
+    expect(model(views.none).bucketWords).toBeNull();
+  });
+
+  it('draws a model with no priced turn muted and says so, and gives the others their color', () => {
+    const short = model(views.short);
+    const legend = short.chart?.legend ?? [];
+    const unpriced = legend.filter(item => item.label.endsWith('(unpriced)'));
+    expect(unpriced).toHaveLength(1);
+    expect(unpriced[0]?.muted).toBe(true);
+    expect(unpriced[0]?.series).toBeUndefined();
+    expect(short.models.filter(line => line.series === null)).toHaveLength(1);
+    for (const line of short.models.filter(each => each.series !== null)) {
+      const item = legend.find(each => each.label === line.name);
+      expect(item?.series).toBe(line.series);
+    }
+  });
+
+  it('carries the mark of a floor on every figure that leaves out unpriced turns, the last hour too', () => {
+    const short = totalFigures([views.short], 1);
+    expect([short.floor, short.lastHourFloor]).toEqual([true, true]);
+    const clean = totalFigures([{...views.short, unpricedTurns: 0}], 1);
+    expect([clean.floor, clean.lastHourFloor]).toEqual([false, false]);
+    // The mark and its figure are held together by a no-break space.
+    const cell = model(views.short).runs[0]?.cost.text ?? '';
+    expect(cell).toMatch(/^≥ \$/);
+  });
+
+  it('flags a run whose cost is past its budget, and says how far along it every other one is', () => {
+    const week = model(views.week);
+    const budgeted = week.runs.flatMap(line => (line.budget === null ? [] : [line.budget]));
+    expect(budgeted.length).toBeGreaterThan(0);
+    for (const budget of budgeted) {
+      if (budget.over) expect(budget.hint).toMatch(/^Over budget by /);
+      else expect(budget.hint).toMatch(/of the budget spent$|^No turn reported/);
+    }
+    expect(budgeted.some(budget => budget.over)).toBe(true);
+    expect(budgeted.some(budget => !budget.over)).toBe(true);
+  });
+
+  it('dates a run where the client holds its card, and leaves a run it holds none of undated', () => {
+    const run = views.week.runs[0];
+    if (run === undefined) throw new Error('the week has runs');
+    const started = hostCostModel('host-a', views.week, COST_OVERVIEW_WORDS, {
+      range: 'all',
+      sort: HOST_ORDER,
+      started: {[run.runId]: Date.UTC(2026, 10, 3, 15)},
+    });
+    expect(started.runs[0]?.started?.text).toBe('Tue 3');
+    expect(started.runs[1]?.started).toBeNull();
   });
 
   it("keeps a model's color when the range changes: it follows the model, not what is in view", () => {

@@ -12,6 +12,7 @@ import {
   Stack,
   StackedBars,
   type StatusTone,
+  Swatch,
   SwatchLegend,
   Table,
   type TableColumn,
@@ -28,9 +29,10 @@ import {
   type RunSortKey,
   type SpendRange,
 } from '../../state/index.js';
-import {Counted, FactDot, formatAxisUsd, MutedFact} from '../cost/index.js';
+import {Counted, FLOOR, formatAxisUsd, MutedFact} from '../cost/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {
+  type BudgetCell,
   type CostCell,
   type CostOverviewModelWords,
   type HostCostScreenModel,
@@ -42,6 +44,7 @@ import {
   type TotalFigures,
   totalFigures,
   type TypeLine,
+  FLOOR_HINT,
   UNPRICED_FACT_HINT,
 } from './cost-overview-model.js';
 
@@ -63,6 +66,8 @@ export interface CostOverviewHost {
   readonly view: HostCostView | undefined;
   /** What each run the client holds a card for is called, by run id; other runs keep the host's name. */
   readonly titles: Readonly<Record<string, string>>;
+  /** When each run the client holds a card for began, by run id. */
+  readonly started: Readonly<Record<string, number>>;
 }
 
 function Problem(props: {
@@ -106,6 +111,22 @@ const InputText = (props: {readonly tokens: TokenCells}): JSX.Element => (
   </Text>
 );
 
+/** A run's budget: its figure, in the problem tone and with the word `over` once the cost is past it; how far along it is, on hover. */
+function BudgetText(props: {readonly budget: BudgetCell | null}): JSX.Element | null {
+  const {budget} = props;
+  if (budget === null)
+    return (
+      <Text variant="code" tone="muted">
+        —
+      </Text>
+    );
+  return (
+    <Text variant="code" tone={budget.over ? 'err' : 'muted'} title={budget.hint}>
+      {budget.over ? `${budget.text} · over` : budget.text}
+    </Text>
+  );
+}
+
 const SORT_KEYS: readonly RunSortKey[] = ['run', 'turns', 'tokens', 'cost', 'budget'];
 
 function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
@@ -128,30 +149,18 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       },
     },
     {
-      key: 'turns',
-      header: 'Turns',
-      sortable: true,
+      key: 'started',
+      header: 'Started',
       mono: true,
-      align: 'end',
-      cell: line => line.turns,
+      cell: line =>
+        line.started === null ? (
+          '—'
+        ) : (
+          <Text variant="code" tone="muted" title={line.started.hint}>
+            {line.started.text}
+          </Text>
+        ),
     },
-    {
-      key: 'tokens',
-      header: 'Input',
-      sortable: true,
-      mono: true,
-      align: 'end',
-      cell: line => line.tokens.input,
-    },
-    {
-      key: 'cached',
-      header: 'Cached',
-      mono: true,
-      align: 'end',
-      wide: true,
-      cell: line => line.tokens.cached,
-    },
-    {key: 'output', header: 'Output', mono: true, align: 'end', cell: line => line.tokens.output},
     {
       key: 'cost',
       header: 'Cost',
@@ -162,7 +171,8 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
     },
     {
       key: 'share',
-      header: 'Share',
+      header: '% of total',
+      hint: 'This run’s part of the cost of every run on the host',
       mono: true,
       align: 'end',
       wide: true,
@@ -171,27 +181,100 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
     {
       key: 'budget',
       header: 'Budget',
+      hint: 'The run’s cost limit, and how much of it is spent',
       sortable: true,
       mono: true,
       align: 'end',
       wide: true,
-      cell: line => line.budget ?? '—',
+      cell: line => <BudgetText budget={line.budget} />,
+    },
+    {
+      key: 'turns',
+      header: 'Turns',
+      sortable: true,
+      mono: true,
+      align: 'end',
+      cell: line => line.turns,
+    },
+    {
+      key: 'tokens',
+      header: 'Input',
+      hint: 'Input tokens: fresh input, cache reads and cache writes',
+      sortable: true,
+      mono: true,
+      align: 'end',
+      cell: line => line.tokens.input,
+    },
+    {
+      key: 'cached',
+      header: '% cached',
+      hint: 'The share of the input tokens that were read from a cache',
+      mono: true,
+      align: 'end',
+      wide: true,
+      cell: line => line.tokens.cached,
+    },
+    {
+      key: 'output',
+      header: 'Output',
+      hint: 'Output tokens',
+      mono: true,
+      align: 'end',
+      cell: line => line.tokens.output,
     },
   ];
 }
 
+const INPUT_HINT = 'Input tokens: fresh input, cache reads and cache writes';
+
 const TYPE_COLUMNS: readonly TableColumn<TypeLine>[] = [
   {key: 'type', header: 'Type', lead: true, clip: line => line.name, cell: line => line.name},
+  {
+    key: 'cost',
+    header: 'Cost',
+    mono: true,
+    align: 'end',
+    cell: line => <CostText cost={line.cost} />,
+  },
   {key: 'agents', header: 'Agents', mono: true, align: 'end', cell: line => line.agents},
   {key: 'turns', header: 'Turns', mono: true, align: 'end', cell: line => line.turns},
   {
     key: 'input',
     header: 'Input',
+    hint: INPUT_HINT,
     mono: true,
     align: 'end',
     cell: line => <InputText tokens={line.tokens} />,
   },
-  {key: 'output', header: 'Output', mono: true, align: 'end', cell: line => line.tokens.output},
+  {
+    key: 'output',
+    header: 'Output',
+    hint: 'Output tokens',
+    mono: true,
+    align: 'end',
+    cell: line => line.tokens.output,
+  },
+];
+
+/** A model's name, in the code face when it is an id, after the swatch of its color on the chart. */
+function ModelName(props: {readonly line: ModelLine}): JSX.Element {
+  const {line} = props;
+  return (
+    <Row gap="space-2">
+      {line.series === null ? <Swatch muted /> : <Swatch series={line.series} />}
+      <Text variant={line.id ? 'code' : 'body'}>{line.name}</Text>
+    </Row>
+  );
+}
+
+const MODEL_COLUMNS: readonly TableColumn<ModelLine>[] = [
+  {
+    key: 'model',
+    header: 'Model',
+    lead: true,
+    clip: line => line.title,
+    cell: line => <ModelName line={line} />,
+  },
   {
     key: 'cost',
     header: 'Cost',
@@ -199,19 +282,29 @@ const TYPE_COLUMNS: readonly TableColumn<TypeLine>[] = [
     align: 'end',
     cell: line => <CostText cost={line.cost} />,
   },
-];
-
-const MODEL_COLUMNS: readonly TableColumn<ModelLine>[] = [
-  {key: 'model', header: 'Model', lead: true, clip: line => line.title, cell: line => line.name},
-  {key: 'input', header: 'Input', mono: true, align: 'end', cell: line => line.tokens.input},
-  {key: 'cached', header: 'Cached', mono: true, align: 'end', cell: line => line.tokens.cached},
-  {key: 'output', header: 'Output', mono: true, align: 'end', cell: line => line.tokens.output},
   {
-    key: 'cost',
-    header: 'Cost',
+    key: 'input',
+    header: 'Input',
+    hint: INPUT_HINT,
     mono: true,
     align: 'end',
-    cell: line => <CostText cost={line.cost} />,
+    cell: line => line.tokens.input,
+  },
+  {
+    key: 'cached',
+    header: '% cached',
+    hint: 'The share of the input tokens that were read from a cache',
+    mono: true,
+    align: 'end',
+    cell: line => line.tokens.cached,
+  },
+  {
+    key: 'output',
+    header: 'Output',
+    hint: 'Output tokens',
+    mono: true,
+    align: 'end',
+    cell: line => line.tokens.output,
   },
 ];
 
@@ -230,6 +323,7 @@ function chartWords(model: HostCostScreenModel): string {
 
 function SpendChartCard(props: {
   readonly model: HostCostScreenModel;
+  readonly words: CostOverviewWords;
   readonly range: (range: SpendRange) => void;
 }): JSX.Element {
   const {model} = props;
@@ -239,15 +333,22 @@ function SpendChartCard(props: {
       dense
       section="Spend over time"
       action={
-        model.ranges.length === 0 ? undefined : (
-          <SegmentedControl
-            label="Range of the spend chart"
-            size="xs"
-            options={model.ranges}
-            value={model.range}
-            change={props.range}
-          />
-        )
+        <Row gap="space-3">
+          {model.bucketWords === null ? null : (
+            <Text variant="small" tone="muted">
+              {model.bucketWords}
+            </Text>
+          )}
+          {model.ranges.length === 0 ? null : (
+            <SegmentedControl
+              label="Range of the spend chart"
+              size="xs"
+              options={model.ranges}
+              value={model.range}
+              change={props.range}
+            />
+          )}
+        </Row>
       }
     >
       {chart === null ? (
@@ -262,7 +363,13 @@ function SpendChartCard(props: {
             unit="dollars"
             size="compact"
             bars={chart.bars}
-            marks={chart.marks}
+            timeAxis={{
+              fromMs: chart.domain.fromMs,
+              toMs: chart.domain.toMs,
+              label: props.words.tick,
+              zone: props.words.offset,
+            }}
+            zeroLabel="$0"
             valueFormat={formatAxisUsd}
           />
         </Stack>
@@ -362,13 +469,18 @@ function HostPanels(props: {
   const model =
     host.view === undefined
       ? NO_VIEW
-      : hostCostModel(host.key, host.view, words, {titles: host.titles, range, sort});
+      : hostCostModel(host.key, host.view, words, {
+          titles: host.titles,
+          started: host.started,
+          range,
+          sort,
+        });
   return (
     <MainSide
       label={`Cost on ${host.label}`}
       main={
         <>
-          <SpendChartCard model={model} range={setRange} />
+          <SpendChartCard model={model} words={words} range={setRange} />
           <RunsCard
             host={host}
             model={model}
@@ -394,32 +506,34 @@ function Facts(props: {
   readonly status: HostStatus | undefined;
 }): JSX.Element {
   const {totals} = props;
+  const floored = (figure: string, floor: boolean): string =>
+    floor ? `${FLOOR.trim()}\u00a0${figure}` : figure;
   return (
-    <FactLine>
+    <FactLine spaced>
       {props.status === undefined ? null : <HostStatusChip status={props.status} />}
       {totals.figure === null ? (
         <MutedFact text={totals.complete ? 'nothing spent yet' : 'reading cost'} />
       ) : (
-        <Counted count={`${totals.floor ? '≥ ' : ''}${totals.figure}`} what="spent" />
+        <Counted
+          figure={floored(totals.figure, totals.floor)}
+          words="spent"
+          {...(totals.floor ? {hint: FLOOR_HINT} : {})}
+        />
       )}
       {totals.lastHour === null ? null : (
-        <>
-          <FactDot />
-          <Counted count={totals.lastHour} what="in the last hour" />
-        </>
+        <Counted
+          figure={floored(totals.lastHour, totals.lastHourFloor)}
+          words="in the last hour"
+          {...(totals.lastHourFloor ? {hint: FLOOR_HINT} : {})}
+        />
       )}
-      <FactDot />
-      <Counted count={totals.runs.count} what={totals.runs.what} />
-      <FactDot />
-      <Counted count={totals.turns.count} what={totals.turns.what} />
+      <Counted figure={totals.runs.count} words={totals.runs.what} />
+      <Counted figure={totals.turns.count} words={totals.turns.what} />
       {totals.unpriced === null ? null : (
-        <>
-          <FactDot />
-          <MutedFact
-            text={`${totals.unpriced.count} ${totals.unpriced.what}`}
-            hint={UNPRICED_FACT_HINT}
-          />
-        </>
+        <MutedFact
+          text={`${totals.unpriced.count} ${totals.unpriced.what}`}
+          hint={UNPRICED_FACT_HINT}
+        />
       )}
     </FactLine>
   );

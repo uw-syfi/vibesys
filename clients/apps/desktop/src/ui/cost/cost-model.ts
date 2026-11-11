@@ -15,6 +15,7 @@ import {
   formatRate,
   formatTokens,
   formatUsd,
+  isModelId,
   labelStride,
   modelKey,
   modelName,
@@ -43,9 +44,15 @@ export interface SpendFigures {
 }
 
 export interface SpendChart {
+  /** One bar for each bucket the host served, with the moment it begins and how long it lasts. */
   readonly bars: readonly StackedBar[];
+  /** Labels by place under the bars, for a chart that is not on a time axis. */
   readonly marks: readonly BarMark[];
   readonly legend: readonly SwatchItem[];
+  /** The span the bars cover, from the start of the first to the end of the last. */
+  readonly domain: {readonly fromMs: number; readonly toMs: number};
+  /** How long each bar lasts, as the host cut the series. */
+  readonly bucketMs: number;
 }
 
 /** The kinds of tokens, in the order the screen lists them. */
@@ -59,15 +66,6 @@ const KINDS = [
 
 /** What the splits and the chart are drawn from: the lists a run's cost view and a host's both carry. */
 export type CostSplitSource = Pick<CostView, 'total' | 'roles' | 'models' | 'series'>;
-
-/** The chart and the two splits every cost screen draws, from the lists of a served view. */
-export interface CostSplits {
-  readonly chart: SpendChart | null;
-  /** By agent type: agents, turns, tokens, cost. */
-  readonly types: readonly BarRow<4>[];
-  /** By model: turns, tokens, cost. */
-  readonly models: readonly BarRow<3>[];
-}
 
 export interface CostScreenModel {
   /** No turn has finished: there is nothing to split yet. */
@@ -128,15 +126,39 @@ function noteOf(usage: CostUsage, unpricedTurns: number): string | undefined {
 }
 
 /**
- * The slot of the palette each model draws in. It follows the models' names, not their cost, so a
- * model keeps its color while the run goes on and another overtakes it.
+ * The slot of the palette each model draws in. It follows the model's own key (its harness and id),
+ * never the order of the data or what else is on the page, so a model keeps its color while a run
+ * goes on, from one view to another and from one host to the next. A model starts at the slot its key
+ * hashes to; only when another model of the same view already holds that slot does it take the next
+ * free one, the keys taken in order so the same models always share the palette the same way.
  */
 export function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
   const keys = new Set<string>(view.models.map(each => modelKey(each.model)));
   for (const bucket of view.series.buckets) {
     for (const spend of bucket.byModel) keys.add(modelKey(spend.model));
   }
-  return new Map([...keys].sort().map((key, at) => [key, at]));
+  const slots = new Map<string, number>();
+  const taken = new Set<number>();
+  for (const key of [...keys].sort()) {
+    let slot = slotOfKey(key);
+    // More models than colors share one: the palette repeats rather than a model going without.
+    for (let tried = 0; taken.has(slot) && tried < PALETTE; tried += 1) slot = (slot + 1) % PALETTE;
+    taken.add(slot);
+    slots.set(key, slot);
+  }
+  return slots;
+}
+
+/** How many colors the series palette has (`--series-0` to `--series-7`). */
+const PALETTE = 8;
+
+/** The slot a key hashes to (FNV-1a), the same for the same key in every run of the program. */
+function slotOfKey(key: string): number {
+  let hash = 0x811c9dc5;
+  for (const char of key) {
+    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01000193) >>> 0;
+  }
+  return hash % PALETTE;
 }
 
 function spendOf(view: CostView, precision: Precision): SpendFigures {
@@ -166,6 +188,9 @@ function bucketTitle(
     ...byModel.map(spend => `${modelName(spend.model, words)} ${formatUsd(spend.costUsd, 2)}`),
   ].join('\n');
 }
+
+/** The axis is at least this many bars long, so a lone bar is one bar of a few and not the whole plot. */
+const MIN_BARS = 8;
 
 /** The labels under the bars: which bars of a series are named, and how. */
 export type BarMarker = (series: SpendSeriesView) => readonly BarMark[];
@@ -197,6 +222,8 @@ export function spendChart(
   const bars = buckets.map(
     (bucket): StackedBar => ({
       id: String(bucket.startMs),
+      startMs: bucket.startMs,
+      widthMs: view.series.bucketMs,
       total: bucket.costUsd,
       title: bucketTitle(words, bucket.startMs, bucket.costUsd, bucket.byModel),
       // Stacked in the palette's order, so a model keeps its place in the stack while the run goes on.
@@ -210,9 +237,25 @@ export function spendChart(
     }),
   );
   const legend = view.models.map(
-    (cost): SwatchItem => ({label: modelName(cost.model, words), series: slot(cost.model)}),
+    (cost): SwatchItem => ({
+      // A model with no priced turn has no bar: its swatch is the flat grey of a series with none.
+      label:
+        cost.usage.costUsd === null
+          ? `${modelName(cost.model, words)} (unpriced)`
+          : modelName(cost.model, words),
+      ...(cost.usage.costUsd === null ? {muted: true} : {series: slot(cost.model)}),
+      ...(isModelId(cost.model) ? {mono: true} : {}),
+    }),
   );
-  return {bars, marks: marker(view.series), legend};
+  const fromMs = buckets[0]?.startMs ?? view.series.startMs;
+  const endMs = (buckets.at(-1)?.startMs ?? view.series.startMs) + view.series.bucketMs;
+  return {
+    bars,
+    marks: marker(view.series),
+    legend,
+    domain: {fromMs, toMs: Math.max(endMs, fromMs + MIN_BARS * view.series.bucketMs)},
+    bucketMs: view.series.bucketMs,
+  };
 }
 
 /**
@@ -258,6 +301,7 @@ const modelRows = (
     (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
+      ...(isModelId(cost.model) ? {mono: true} : {}),
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),
@@ -280,17 +324,6 @@ const kindRows = (view: CostView): BarRow<1>[] =>
 /** `{note}` when there is one, so a row without a note has no `note` key at all. */
 const optionalNote = (note: string | undefined): {readonly note?: string} =>
   note === undefined ? {} : {note};
-
-/** The chart and the splits of any served view that has the lists (a run's, or a host's). */
-export function costSplits(view: CostSplitSource, words: CostWords): CostSplits {
-  const precision = precisionOf(view.total.costUsd);
-  const slots = slotsOf(view);
-  return {
-    chart: spendChart(view, slots, words, elapsedMarks),
-    types: typeRows(view, precision, words),
-    models: modelRows(view, precision, slots, words),
-  };
-}
 
 /** The screen's model of one run's cost view. */
 export function costScreenModel(view: CostView, words: CostWords): CostScreenModel {
