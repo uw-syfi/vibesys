@@ -15,8 +15,8 @@ import {FactsLine} from './facts-line.js';
 import {IdeasPanel} from './ideas-panel.js';
 import {LatestMeasurements} from './latest-measurements.js';
 import {LeadSummary} from './lead-summary.js';
-import {PlansSummary} from './plans-summary.js';
 import {PerformancePanel} from './performance.js';
+import {PlansSummary} from './plans-summary.js';
 import {isStoppable, ReportActions, ReportMeta} from './report-title.js';
 import {TradeOff} from './trade-off.js';
 import {WorkstreamsCard} from './workstreams-card.js';
@@ -46,7 +46,7 @@ function SideColumn(props: {
         latestMs={report.facts.measured.latestMs}
         runOver={props.over}
       />
-      {props.report.plans === undefined ? null : <PlansSummary plans={props.report.plans} />}
+      {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}
       <WorkstreamsCard workstreams={report.ideas?.workstreams ?? []} runOver={props.over} />
       <AgentsAndCost
         agents={report.agents}
