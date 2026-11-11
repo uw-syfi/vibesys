@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {FileDescriptorSetSchema} from '@bufbuild/protobuf/wkt';
-import {descriptorRegistry, WorkstreamAttrsSchema} from '@vibesys/proto';
+import {
+  descriptorRegistry,
+  verifiedDescriptorMessages,
+  WorkstreamAttrsSchema,
+} from '@vibesys/proto';
 
 function descriptorSet() {
   const files = new Map();
@@ -43,4 +48,14 @@ test('missing, duplicate and cyclic descriptor files are rejected by name', () =
     ],
   });
   assert.throws(() => descriptorRegistry(cycle), /cycle/);
+});
+test('wire-addressed descriptor bytes are verified before their messages are exposed', () => {
+  const data = toBinary(FileDescriptorSetSchema, descriptorSet());
+  const sha256 = createHash('sha256').update(data).digest('hex');
+  assert.ok(
+    verifiedDescriptorMessages(sha256, data).some(
+      descriptor => descriptor.typeName === WorkstreamAttrsSchema.typeName,
+    ),
+  );
+  assert.throws(() => verifiedDescriptorMessages('0'.repeat(64), data), /expected 0000/);
 });

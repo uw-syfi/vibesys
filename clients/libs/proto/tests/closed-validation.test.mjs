@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {DesktopHostsSchema, validatedExactFromBinary, validatedFromBinary} from '@vibesys/proto';
+import {anyPack} from '@bufbuild/protobuf/wkt';
+import {
+  AgentTurnAttrsSchema,
+  DesktopHostsSchema,
+  validatedAnyUnpack,
+  validatedExactFromBinary,
+  validatedFromBinary,
+} from '@vibesys/proto';
+
+test('packed attributes are type-checked and validated before projection', () => {
+  const invalid = anyPack(AgentTurnAttrsSchema, create(AgentTurnAttrsSchema));
+  assert.throws(() => validatedAnyUnpack(invalid, AgentTurnAttrsSchema), /agent|role|stage/);
+
+  const valid = create(AgentTurnAttrsSchema, {
+    agent: 'agent-a',
+    role: 'bespoke-reviewer',
+    stage: 'implementation',
+  });
+  const packed = anyPack(AgentTurnAttrsSchema, valid);
+  assert.deepEqual(validatedAnyUnpack(packed, AgentTurnAttrsSchema), valid);
+  assert.equal(
+    validatedAnyUnpack({...packed, typeUrl: 'type.example/other.Attrs'}, AgentTurnAttrsSchema),
+    undefined,
+  );
+});
 
 test('closed config inputs reject unknown fields at root and nested paths; retained readers preserve them', () => {
   for (const nested of [false, true]) {
