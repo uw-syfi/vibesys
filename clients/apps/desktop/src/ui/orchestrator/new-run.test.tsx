@@ -5,9 +5,13 @@ import {
   EvalPlaceSchema,
   ListEvalPlacesResponseSchema,
   ReceiptSchema,
+  RunSchema,
+  RunStatus,
 } from '@vibesys/orchestrator-proto';
 import {act, useState} from 'react';
 import {
+  applyChange,
+  emptyState,
   initialNavigation,
   type Navigation,
   type NavigationAction,
@@ -17,6 +21,7 @@ import {
 } from '../../state/index.js';
 import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
+import {generateScenario} from '../../testing/orchestrator/index.js';
 import {richCatalogueResponse, richPlaces} from '../../testing/orchestrator/new-run-catalogue.js';
 import type {AppCommands, HostSnapshot} from './app.js';
 import {OrchestratorApp} from './app.js';
@@ -39,8 +44,9 @@ function Window(props: {
   readonly hosts: readonly HostSnapshot[];
   readonly commands: AppCommands;
   readonly seen: NavigationAction[];
+  readonly initial?: Navigation;
 }) {
-  const [navigation, setNavigation] = useState<Navigation>(initialNavigation);
+  const [navigation, setNavigation] = useState<Navigation>(props.initial ?? initialNavigation);
   return (
     <OrchestratorApp
       hosts={props.hosts}
@@ -166,6 +172,57 @@ describe('the New run page', () => {
     screen.press(screen.control('New run'));
     expect(cleared).toEqual(['start', 'local']);
     expect(listed).toEqual([true]);
+    screen.unmount();
+  });
+
+  it('opens fresh from a failed report through Run again, using the same preparation as New run', () => {
+    const scenario = generateScenario({seed: 8, subagents: 1, live: false});
+    const data = scenario.changes.reduce(applyChange, emptyState);
+    const run = data.runs[scenario.runId];
+    if (run === undefined) throw new Error('the fixture has its run');
+    const failed = {
+      ...data,
+      runs: {
+        ...data.runs,
+        [scenario.runId]: create(RunSchema, {...run, status: RunStatus.FAILED}),
+      },
+    };
+    const cleared: string[] = [];
+    const loaded: string[] = [];
+    const listed: string[] = [];
+    const seen: NavigationAction[] = [];
+    const screen = mount(
+      <Window
+        hosts={[
+          read({model: {data: failed, agentCursors: {}}, repositoriesDirectory: '/srv/repos/'}),
+          read({key: 'ssh:host-a', label: 'host-a'}),
+        ]}
+        commands={appCommandsOf({
+          clearStart: () => cleared.push('start'),
+          forgetProvision: host => cleared.push(host),
+          loadNewRun: host => loaded.push(host),
+          listDirectory: (host, folder) => listed.push(`${host}:${folder}`),
+        })}
+        seen={seen}
+        initial={{
+          ...initialNavigation,
+          runs: {
+            screen: 'run',
+            host: 'local',
+            runId: scenario.runId,
+            view: 'report',
+            agentId: null,
+            ideas: null,
+          },
+        }}
+      />,
+    );
+    screen.press(screen.control('Run again'));
+    expect(seen).toEqual([{type: 'open-new-run'}]);
+    expect(cleared).toEqual(['start', 'local', 'ssh:host-a']);
+    expect(loaded).toEqual(['local', 'ssh:host-a']);
+    expect(listed).toEqual(['local:/srv/repos/']);
+    expect(screen.text()).toContain('New run');
     screen.unmount();
   });
 

@@ -137,7 +137,7 @@ function render(
     stopProgress?: CommandProgress;
   } = {},
 ) {
-  const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
+  const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0, again: 0};
   const state = stateOf(world);
   const nowMs = world.nowMs ?? (world.live === false ? END + 60_000 : NOW);
   const report = runReport(state, RUN, nowMs);
@@ -158,6 +158,9 @@ function render(
       retryStop={() => undefined}
       openCatchUp={() => {
         probe.catchUps += 1;
+      }}
+      runAgain={() => {
+        probe.again += 1;
       }}
       goRuns={() => {
         probe.runs += 1;
@@ -309,10 +312,14 @@ describe('the header of a report', () => {
     screen.unmount();
   });
 
-  it('keeps Catch me up when the run is over, which has no Stop', () => {
-    const {screen} = render({live: false});
+  it('keeps Catch me up when the run is over, replaces Stop with the leading Run again action', () => {
+    const {screen, probe} = render({live: false});
     expect(screen.controls('Catch me up')).toHaveLength(1);
     expect(screen.controls('Stop run')).toHaveLength(0);
+    const again = screen.control('Run again');
+    expect(again.getAttribute('data-variant')).toBe('primary');
+    screen.press(again);
+    expect(probe.again).toBe(1);
     screen.unmount();
   });
 });
@@ -866,6 +873,7 @@ describe('what the header says about the host’s data', () => {
         stop={() => undefined}
         retryStop={() => undefined}
         openCatchUp={() => undefined}
+        runAgain={() => undefined}
         goRuns={() => undefined}
         openAgents={() => undefined}
         openCost={() => undefined}
