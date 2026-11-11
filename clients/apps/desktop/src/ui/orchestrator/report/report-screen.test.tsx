@@ -1331,8 +1331,19 @@ describe('the lead’s block', () => {
   });
 });
 
+/** Every text node of a screen, in document order. */
+function textRuns(root: HTMLElement): string[] {
+  const runs: string[] = [];
+  const walk = (node: Node): void => {
+    if (node.nodeType === 3) runs.push(node.textContent ?? '');
+    for (const child of node.childNodes) walk(child);
+  };
+  walk(root);
+  return runs;
+}
+
 describe('words that run together', () => {
-  it('never glue a figure to the word after it, on the facts line or in any panel, for any data', () => {
+  it('never glue a figure to the word after it nor split a figure ($0.10, 310.0M), on the facts line or in any panel, for any data', () => {
     const spec = fc.record({
       candidates: fc.constantFrom(0, 1, 40),
       ideas: fc.constantFrom(0, 12),
@@ -1345,6 +1356,10 @@ describe('words that run together', () => {
         const {screen} = render({...data});
         const text = screen.container.textContent ?? '';
         expect(text).not.toMatch(/\d(measured|ideas|idea|agents?|spent|turns?)\b/);
+        // A figure is one unbroken run of text: nothing (an element, a break) comes between a dollar
+        // sign and its digits, or around a decimal point or a thousands comma.
+        const runs = textRuns(screen.container).join('§');
+        expect(runs).not.toMatch(/\$§|\d§[.,]\d|\d[.,]§\d/);
         screen.unmount();
       }),
       {numRuns: 20, seed: 4052},

@@ -5,6 +5,7 @@
  */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
@@ -541,5 +542,15 @@ describe('round three parts', () => {
     const root = await mount(<Chip label="Parked" tone="alt" dot />);
     expect(root.querySelector('.vs-chip')?.getAttribute('data-tone')).toBe('alt');
     expect(root.querySelector('.vs-dot')?.getAttribute('data-tone')).toBe('alt');
+  });
+});
+
+describe('figures in a line of facts', () => {
+  test('are not set in tabular figures, which widen a dot and a dollar sign in the face and gap a figure', () => {
+    const css = readFileSync(new URL('./frame.css', import.meta.url), 'utf8');
+    const start = css.indexOf('\n.vs-fact {');
+    const rule = css.slice(start, css.indexOf('}', start));
+    expect(start).toBeGreaterThan(-1);
+    expect(rule).not.toContain('tabular-nums');
   });
 });

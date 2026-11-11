@@ -1894,7 +1894,8 @@ button.vs-dotlegend-item:focus-visible {
   align-items: center;
   gap: var(--space-1);
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  /* No tabular figures here: the facts are not in columns, and the face's tabular form widens the dot
+     and the dollar sign ("$0.10" a third wider), which reads as gaps in the figure. */
 }
 /* It takes what the others leave, down to nothing; on a wrapping line it stays on the line while
    a field's width is left and goes to a line of its own below that. */
