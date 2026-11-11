@@ -17,6 +17,12 @@ import {
   type TaskCard,
 } from '@vibesys/orchestrator-proto';
 import type {Freshness} from '../freshness.js';
+import type {
+  GenericRunEntry,
+  GenericRunIndex,
+  GenericRunIndexUnavailable,
+  GenericRunState,
+} from '../generic-run-index.js';
 import type {HostStatus} from '../host-status.js';
 import {inSetup} from '../setup/setup.js';
 import {type ObjectiveReport, objectiveReports} from './report/objectives.js';
@@ -75,6 +81,8 @@ export interface FleetHostInput {
   /** What the host is called on screen. */
   readonly label: string;
   readonly data: OrchestratorState;
+  /** The host gateway's atomic generic run index, separate from the managed model above. */
+  readonly runIndex: GenericRunIndex;
   readonly freshness: Freshness;
   /** The one status the host has on every screen. */
   readonly status: HostStatus;
@@ -137,7 +145,7 @@ export const ATTENTION_KINDS: readonly FleetAttention['kind'][] = [
   'kept',
 ];
 
-export interface FleetRow {
+interface FleetRowBase {
   /** Unique across hosts: the host and the run, the same key a route is made from. */
   readonly key: string;
   readonly host: FleetHostRef;
@@ -147,11 +155,10 @@ export interface FleetRow {
   /** What the host read of the run's task when it started; null for a run recorded before cards. */
   readonly card: TaskCard | null;
   readonly repository: string;
-  /** The run is in its setup phase: a chat that makes its task, with no task yet. */
-  readonly setup: boolean;
-  readonly status: RunStatus;
   /** Still working: starting, running or stopping. */
   readonly live: boolean;
+  /** The section supported by typed state; unknown is shown only by the All filter. */
+  readonly section: 'live' | 'history' | 'unknown';
   readonly startedMs: number | null;
   /** When the run left RUNNING; null while it is live. */
   readonly endedMs: number | null;
@@ -179,8 +186,45 @@ export interface FleetRow {
   readonly attention: readonly FleetAttention[];
 }
 
+/** A row backed by the managed orchestrator model. */
+export interface ManagedFleetRow extends FleetRowBase {
+  readonly source: 'managed';
+  /** The run is in its setup phase: a chat that makes its task, with no task yet. */
+  readonly setup: boolean;
+  readonly status: RunStatus;
+}
+
+/** A row backed only by the host gateway's generic run index. */
+export interface GenericFleetRow extends FleetRowBase {
+  readonly source: 'generic';
+  readonly state: GenericRunState;
+  readonly projectRoot: string | null;
+  /** Whether this row came from the current atomic index or the last whole stale snapshot. */
+  readonly indexFreshness: 'current' | 'stale';
+  readonly needsUser: boolean;
+}
+
+export type FleetRow = ManagedFleetRow | GenericFleetRow;
+
+/** Where one host's generic run-index stream stands. */
+export type GenericDiscoveryStatus =
+  | {readonly kind: 'opening'}
+  | {readonly kind: 'current'}
+  | {readonly kind: 'stale'}
+  | {readonly kind: 'unavailable'; readonly reason: GenericRunIndexUnavailable};
+
+/** The two independent discovery streams behind a host in the filter strip. */
+export interface FleetDiscoveryStatus {
+  readonly managed: Pick<FleetHostRef, 'freshness' | 'status'>;
+  readonly generic: GenericDiscoveryStatus;
+}
+
 /** A host as the filter strip shows it, with its run count under the state filter. */
-export interface FleetHostView extends FleetHostRef {
+export interface FleetHostView {
+  readonly key: string;
+  readonly label: string;
+  /** Per-source status: neither discovery stream is allowed to speak for the other. */
+  readonly discovery: FleetDiscoveryStatus;
   readonly runs: number;
   /**
    * How many of the host's runs its last snapshot did not list, because listing them would pass its
@@ -194,9 +238,19 @@ export interface FleetView {
   readonly live: readonly FleetRow[];
   /** Runs that are over, newest end first. */
   readonly history: readonly FleetRow[];
+  /** Runs whose phase-one entry cannot truthfully be called live or ended. */
+  readonly unknown: readonly FleetRow[];
   /** Every host, in the order given, whether or not it has a row. */
   readonly hosts: readonly FleetHostView[];
+  /** Whether an empty filtered union is proven, or why it is not. */
+  readonly absence: FleetAbsence;
 }
+
+export type FleetAbsence =
+  | {readonly kind: 'complete'}
+  | {readonly kind: 'opening'}
+  | {readonly kind: 'unconfirmed'}
+  | {readonly kind: 'unavailable'; readonly reason: GenericRunIndexUnavailable | null};
 
 const LIVE_STATUSES: ReadonlySet<RunStatus> = new Set([
   RunStatus.STARTING,
@@ -235,8 +289,10 @@ function rowOf(
   summary: RunSummary | undefined,
   search: SearchState | undefined,
   run: Run,
-): FleetRow {
+): ManagedFleetRow {
+  const live = isLive(run.status);
   return {
+    source: 'managed',
     key: fleetKey(host.key, run.id),
     host,
     runId: run.id,
@@ -245,7 +301,8 @@ function rowOf(
     repository: run.repository,
     setup: inSetup(run),
     status: run.status,
-    live: isLive(run.status),
+    live,
+    section: live ? 'live' : 'history',
     startedMs: ms(run.createdAt),
     endedMs: ms(run.endedAt),
     objectives: summary?.objectives.map(objectiveOf) ?? [],
@@ -256,6 +313,57 @@ function rowOf(
     reportUnavailable: summary?.reportUnavailable ?? false,
     deadlineMs: ms(run.deadline),
     attention: attentionOf(run, search),
+  };
+}
+
+function genericRowOf(
+  host: FleetHostRef,
+  run: GenericRunEntry,
+  freshness: 'current' | 'stale',
+): GenericFleetRow {
+  // A generic row's host status belongs to the generic index. The managed WatchRuns feed may be
+  // failed at the same time and must not make a current generic row say its own discovery failed.
+  const genericHost: FleetHostRef = {
+    ...host,
+    status:
+      freshness === 'current'
+        ? {kind: 'live', cause: null, staleForMs: null}
+        : {kind: 'stale', cause: null, staleForMs: null},
+  };
+  return {
+    source: 'generic',
+    key: fleetKey(host.key, run.runId),
+    host: genericHost,
+    runId: run.runId,
+    name: 'Run',
+    card: null,
+    repository: run.projectRoot ?? '',
+    state: run.state,
+    projectRoot: run.projectRoot,
+    indexFreshness: freshness,
+    needsUser: run.needsUser,
+    live: run.activity === 'live',
+    section: run.activity === 'live' ? 'live' : run.activity === 'ended' ? 'history' : 'unknown',
+    startedMs: null,
+    endedMs: null,
+    objectives:
+      run.objective === null
+        ? []
+        : [
+            {
+              name: run.objective.name,
+              value: run.objective.bestValue,
+              unit: run.objective.unit,
+              percentOfBound: null,
+            },
+          ],
+    costUsd: run.costUsd,
+    budgetUsd: null,
+    agentsRunning: null,
+    lastReportMs: null,
+    reportUnavailable: false,
+    deadlineMs: null,
+    attention: [],
   };
 }
 
@@ -271,9 +379,16 @@ export function fleetRows(hosts: readonly FleetHostInput[]): readonly FleetRow[]
       freshness: host.freshness,
       status: host.status,
     };
-    return Object.values(host.data.runs)
+    const managed = Object.values(host.data.runs)
       .filter(run => !run.neverOpened)
       .map(run => rowOf(ref, host.data.summaries[run.id], host.data.searches[run.id], run));
+    const {runIndex} = host;
+    if (runIndex._tag !== 'Ready') return managed;
+    const managedIds = new Set(managed.map(row => row.runId));
+    const generic = [...runIndex.runs.values()]
+      .filter(run => !managedIds.has(run.runId))
+      .map(run => genericRowOf(ref, run, runIndex.freshness));
+    return [...managed, ...generic];
   });
 }
 
@@ -289,7 +404,62 @@ const startedFirst = newestFirst(row => row.startedMs);
 const endedFirst = newestFirst(row => row.endedMs ?? row.startedMs);
 
 const inState = (state: FleetState, row: FleetRow): boolean =>
-  state === 'all' || (state === 'live') === row.live;
+  state === 'all' || row.section === (state === 'live' ? 'live' : 'history');
+
+const absenceRank: Readonly<Record<FleetAbsence['kind'], number>> = {
+  complete: 0,
+  opening: 1,
+  unconfirmed: 2,
+  unavailable: 3,
+};
+
+/** The less conclusive evidence; on a tie, retain an unavailable stream's typed reason. */
+function worseAbsence(left: FleetAbsence, right: FleetAbsence): FleetAbsence {
+  const difference = absenceRank[left.kind] - absenceRank[right.kind];
+  if (difference !== 0) return difference > 0 ? left : right;
+  if (left.kind !== 'unavailable' || right.kind !== 'unavailable') return left;
+  return left.reason === null && right.reason !== null ? right : left;
+}
+
+/** What one host can prove about the absence of runs in its two disjoint discovery streams. */
+function hostAbsence(host: FleetHostInput): FleetAbsence {
+  const managed: FleetAbsence =
+    host.freshness === 'live'
+      ? {kind: 'complete'}
+      : host.freshness === 'empty'
+        ? {kind: 'opening'}
+        : host.freshness === 'stale'
+          ? {kind: 'unconfirmed'}
+          : {kind: 'unavailable', reason: null};
+  const generic: FleetAbsence = (() => {
+    switch (host.runIndex._tag) {
+      case 'Dormant':
+      case 'Loading':
+        return {kind: 'opening'};
+      case 'Ready':
+        return host.runIndex.freshness === 'current' ? {kind: 'complete'} : {kind: 'unconfirmed'};
+      case 'Unavailable':
+        return {kind: 'unavailable', reason: host.runIndex.reason};
+    }
+  })();
+  return worseAbsence(managed, generic);
+}
+
+function combinedAbsence(hosts: readonly FleetHostInput[]): FleetAbsence {
+  return hosts.map(hostAbsence).reduce<FleetAbsence>(worseAbsence, {kind: 'complete'});
+}
+
+const genericDiscoveryStatus = (index: GenericRunIndex): GenericDiscoveryStatus => {
+  switch (index._tag) {
+    case 'Dormant':
+    case 'Loading':
+      return {kind: 'opening'};
+    case 'Ready':
+      return {kind: index.freshness};
+    case 'Unavailable':
+      return {kind: 'unavailable', reason: index.reason};
+  }
+};
 
 /**
  * The fleet under `filter`: live runs, then history, and every host with the number of runs it
@@ -297,19 +467,29 @@ const inState = (state: FleetState, row: FleetRow): boolean =>
  * appears in `hosts` (its freshness says so), and one whose link is down keeps the rows it had.
  */
 export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter): FleetView {
-  const byState = fleetRows(hosts).filter(row => inState(filter.state, row));
+  const includedHosts = hosts.filter(host => filter.host === null || host.key === filter.host);
+  const allRows = fleetRows(hosts);
+  const includedRows = allRows.filter(row => filter.host === null || row.host.key === filter.host);
+  const byState = allRows.filter(row => inState(filter.state, row));
   const shown = byState.filter(row => filter.host === null || row.host.key === filter.host);
+  const statusUncertain =
+    filter.state !== 'all' && includedRows.some(row => row.section === 'unknown');
+  const evidence = combinedAbsence(includedHosts);
   return {
-    live: shown.filter(row => row.live).sort(startedFirst),
-    history: shown.filter(row => !row.live).sort(endedFirst),
+    live: shown.filter(row => row.section === 'live').sort(startedFirst),
+    history: shown.filter(row => row.section === 'history').sort(endedFirst),
+    unknown: shown.filter(row => row.section === 'unknown').sort(byKey),
     hosts: hosts.map(host => ({
       key: host.key,
       label: host.label,
-      freshness: host.freshness,
-      status: host.status,
+      discovery: {
+        managed: {freshness: host.freshness, status: host.status},
+        generic: genericDiscoveryStatus(host.runIndex),
+      },
       runs: byState.filter(row => row.host.key === host.key).length,
       runsLeftOut: host.data.cut.runsLeftOut,
     })),
+    absence: evidence.kind === 'complete' && statusUncertain ? {kind: 'unconfirmed'} : evidence,
   };
 }
 

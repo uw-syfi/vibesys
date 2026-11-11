@@ -6,7 +6,7 @@
 
 import {HostService} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
-import type * as Atom from 'effect/reactivity/Atom';
+import * as Atom from 'effect/reactivity/Atom';
 import type * as Scope from 'effect/Scope';
 import type {HostKey, HostModel} from '../state/index.js';
 import {type AgentHistory, makeAgentHistory} from './agent-history.js';
@@ -51,6 +51,8 @@ export interface HostSession {
   readonly runIndex: RunsTopicFeed;
   /** One generic run's typed Skeleton/Tail projection, opened only while that run is mounted. */
   readonly runDetail: RunDetailFeed;
+  /** Both disjoint run-discovery streams, mounted for exactly the run navigator's lifetime. */
+  readonly runNavigation: Atom.Atom<void>;
   readonly commands: Commands;
   /** The host's answer about the repository path being typed in the Start form. */
   readonly repositoryCheck: RepositoryCheck;
@@ -74,10 +76,20 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const commands = yield* makeCommands(parts);
   const directories = yield* makeDirectoryListings(parts);
   const hostClient = yield* makeClient(HostService, host);
+  const runs = yield* makeRunsView(parts);
+  const runIndex = yield* makeRunsTopicFeed({
+    client: hostClient,
+    connection,
+    ambient,
+  });
+  const runNavigation = Atom.make(get => {
+    get(runs.watch);
+    get(runIndex.watch);
+  });
   return {
     connection,
     model: store.atom,
-    runs: yield* makeRunsView(parts),
+    runs,
     agents: yield* makeAgentView(parts),
     history: yield* makeAgentHistory(parts),
     runHistory: yield* makeRunHistory(parts),
@@ -88,16 +100,13 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
       connection,
       ambient,
     }),
-    runIndex: yield* makeRunsTopicFeed({
-      client: hostClient,
-      connection,
-      ambient,
-    }),
+    runIndex,
     runDetail: yield* makeRunDetailFeed({
       client: hostClient,
       connection,
       ambient,
     }),
+    runNavigation,
     commands,
     repositoryCheck: yield* makeRepositoryCheck(parts),
     directories,

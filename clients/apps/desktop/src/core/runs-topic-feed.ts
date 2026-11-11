@@ -1,10 +1,24 @@
 /** The gateway's `runs` topic as a thin value adapter over the shared keyed-topic lifecycle. */
-import {type HostService, type RunEntry, type TopicEntry, topicPolicies} from '@vibesys/proto';
+import {
+  DrainGoal,
+  type HostService,
+  Outcome,
+  type RunEntry,
+  RunLiveness,
+  type TopicEntry,
+  topicPolicies,
+} from '@vibesys/proto';
 import type * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
+import type {
+  GenericRunActivity,
+  GenericRunEntry,
+  GenericRunIndex,
+  GenericRunState,
+} from '../state/generic-run-index.js';
 import {
   applyKeyedTopicEvent,
   dormantKeyedTopic,
@@ -26,6 +40,8 @@ export interface RunsTopicFeed {
   readonly watch: Atom.Atom<AsyncResult.AsyncResult<never, never>>;
   /** The current run index and its explicit freshness/failure state. */
   readonly state: Atom.Atom<RunsTopicState>;
+  /** The renderer-safe run-index facts at the last atomic publication boundary. */
+  readonly index: Atom.Atom<GenericRunIndex>;
 }
 
 export interface RunsTopicParts {
@@ -35,6 +51,145 @@ export interface RunsTopicParts {
 }
 
 const POLICY = topicPolicies.runs;
+
+const LIVENESS_STATE: Readonly<Record<RunLiveness, GenericRunState>> = {
+  [RunLiveness.UNSPECIFIED]: 'unknown',
+  [RunLiveness.ALIVE]: 'alive',
+  [RunLiveness.INTERRUPTED]: 'interrupted',
+  [RunLiveness.ENDED]: 'ended',
+  [RunLiveness.PARKED]: 'parked',
+};
+
+const ENDED_STATE: Readonly<Record<Outcome, GenericRunState>> = {
+  [Outcome.UNSPECIFIED]: 'unknown',
+  [Outcome.FINISHED]: 'finished',
+  [Outcome.FAILED]: 'failed',
+  [Outcome.STOPPED]: 'stopped',
+  [Outcome.INTERRUPTED]: 'interrupted',
+};
+
+/**
+ * The generic lifecycle. A terminal persisted lifecycle stays authoritative; otherwise the
+ * gateway's lock-derived interruption overrides a stale nonterminal head left by a crashed writer.
+ */
+function runState(entry: RunEntry): GenericRunState {
+  const {head} = entry;
+  const lifecycle = head?.lifecycle?.state;
+  switch (lifecycle?.case) {
+    case 'parked':
+      return 'parked';
+    case 'ended':
+      return ENDED_STATE[lifecycle.value.outcome];
+    case 'starting':
+    case 'running':
+    case 'draining':
+    case undefined:
+      break;
+    default:
+      lifecycle satisfies never;
+  }
+  if (entry.liveness === RunLiveness.INTERRUPTED) return 'interrupted';
+  if (entry.liveness === RunLiveness.PARKED) return 'parked';
+  if (entry.liveness === RunLiveness.ENDED) return 'ended';
+  if (head?.awaitingLifecycle === true) return 'preparing';
+  switch (lifecycle?.case) {
+    case 'starting':
+      return 'starting';
+    case 'running':
+      return lifecycle.value.hold === undefined ? 'running' : 'held';
+    case 'draining':
+      switch (lifecycle.value.goal) {
+        case DrainGoal.PARK:
+          return 'parking';
+        case DrainGoal.STOP:
+          return 'stopping';
+        case DrainGoal.UNSPECIFIED:
+          return 'unknown';
+        default:
+          lifecycle.value.goal satisfies never;
+          return 'unknown';
+      }
+    case undefined:
+      return LIVENESS_STATE[entry.liveness];
+    default:
+      lifecycle satisfies never;
+      return 'unknown';
+  }
+}
+
+const activityOf = (state: GenericRunState): GenericRunActivity => {
+  switch (state) {
+    case 'preparing':
+    case 'starting':
+    case 'running':
+    case 'held':
+    case 'parking':
+    case 'stopping':
+    case 'alive':
+      return 'live';
+    case 'parked':
+    case 'finished':
+    case 'failed':
+    case 'stopped':
+    case 'interrupted':
+    case 'ended':
+      return 'ended';
+    case 'unknown':
+      return 'unknown';
+  }
+};
+
+function genericEntry(runId: string, entry: RunEntry): GenericRunEntry {
+  const state = runState(entry);
+  const activity =
+    state === 'preparing' ? activityOf(LIVENESS_STATE[entry.liveness]) : activityOf(state);
+  const objective = entry.head?.objective;
+  const series = objective?.series;
+  return {
+    runId,
+    projectRoot: entry.projectRoot ?? null,
+    state,
+    activity,
+    objective:
+      series === undefined
+        ? null
+        : {name: series.name, unit: series.unit, bestValue: objective?.bestValue ?? null},
+    costUsd: entry.head?.usage?.costUsd ?? null,
+    needsUser: entry.head?.needsUser ?? false,
+  };
+}
+
+const ready = (
+  value: ReadonlyMap<string, RunEntry>,
+  freshness: 'current' | 'stale',
+): GenericRunIndex => ({
+  _tag: 'Ready',
+  freshness,
+  runs: new Map([...value].map(([runId, entry]) => [runId, genericEntry(runId, entry)])),
+});
+
+/** Select only stable renderer facts; never expose a reconnect's partial replacement snapshot. */
+function genericIndex(state: RunsTopicState): GenericRunIndex {
+  switch (state._tag) {
+    case 'Dormant':
+      return {_tag: 'Dormant'};
+    case 'Connecting':
+      return {_tag: 'Loading'};
+    case 'Live':
+      return ready(state.value, 'current');
+    case 'Stale':
+      return state.value === null
+        ? {_tag: 'Unavailable', reason: 'stale'}
+        : ready(state.value, 'stale');
+    case 'Refused':
+      return {_tag: 'Unavailable', reason: state.refusal};
+    case 'Failed':
+      return {
+        _tag: 'Unavailable',
+        reason: state.failure._tag === 'InvalidFrame' ? 'invalid' : 'transport',
+      };
+  }
+}
 
 function entryOf(
   entry: TopicEntry,
@@ -72,6 +227,7 @@ function endEvent(end: TopicEnd): KeyedTopicEvent<RunEntry> {
 
 export const makeRunsTopicFeed = Effect.fn('RunsTopicFeed.make')(function* (parts: RunsTopicParts) {
   const state = yield* SubscriptionRef.make<RunsTopicState>(dormantKeyedTopic());
+  const stateAtom = Atom.keepAlive(Atom.subscriptionRef(state));
   const apply = (event: KeyedTopicEvent<RunEntry>) =>
     SubscriptionRef.updateAndGet(state, current =>
       applyKeyedTopicEvent(current, event, POLICY.maxKeys),
@@ -94,7 +250,8 @@ export const makeRunsTopicFeed = Effect.fn('RunsTopicFeed.make')(function* (part
   };
   const feed: RunsTopicFeed = {
     watch: makeKeyedTopicWatch(parts, descriptor),
-    state: Atom.keepAlive(Atom.subscriptionRef(state)),
+    state: stateAtom,
+    index: Atom.make(get => genericIndex(get(stateAtom))),
   };
   return feed;
 });

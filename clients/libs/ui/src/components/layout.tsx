@@ -101,11 +101,21 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
 /**
  * The room `children` would take, kept empty: it is invisible, unreachable and unannounced. A line
  * that appears and disappears (a state's name before there is a state) is drawn here while absent,
- * so what shares its column never moves when it comes.
+ * so what shares its column never moves when it comes. `collapseInNarrowWindow` gives that room back
+ * below the app's narrow-window breakpoint, where a wrapped invisible item would make an empty row;
+ * the real child still appears normally when the caller has something to show.
  */
-export function Reserve(props: {readonly children: ReactNode}): JSX.Element {
+export function Reserve(props: {
+  readonly children: ReactNode;
+  readonly collapseInNarrowWindow?: boolean;
+}): JSX.Element {
   return (
-    <div className="vs-reserve" aria-hidden="true" inert>
+    <div
+      className="vs-reserve"
+      aria-hidden="true"
+      inert
+      data-collapse-narrow={props.collapseInNarrowWindow || undefined}
+    >
       {props.children}
     </div>
   );

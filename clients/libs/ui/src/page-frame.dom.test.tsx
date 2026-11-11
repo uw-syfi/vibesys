@@ -18,6 +18,7 @@ import {
   MetricTile,
   MetricTiles,
   Page,
+  Reserve,
   Split,
   StackedBars,
 } from './index.js';
@@ -58,6 +59,23 @@ function one(container: HTMLElement, selector: string): HTMLElement {
 }
 
 const css = (name: string): string => readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
+
+describe('Reserved layout room', () => {
+  test('can give its invisible room back in the app narrow-window layout', async () => {
+    const container = await mount(
+      <Reserve collapseInNarrowWindow>
+        <button type="button">Late action</button>
+      </Reserve>,
+    );
+    const reserve = one(container, '.vs-reserve');
+    expect(reserve.getAttribute('aria-hidden')).toBe('true');
+    expect(reserve.hasAttribute('inert')).toBe(true);
+    expect(reserve.getAttribute('data-collapse-narrow')).toBe('true');
+    expect(css('base.css')).toMatch(
+      /@media \(max-width: 799px\)[^@]*\.vs-reserve\[data-collapse-narrow\]\s*\{[^}]*display:\s*none/,
+    );
+  });
+});
 
 describe('Page with a title', () => {
   test('draws the trail band, then the title row with its heading, actions and meta', async () => {

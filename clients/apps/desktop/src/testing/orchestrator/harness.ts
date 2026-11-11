@@ -54,6 +54,8 @@ export const hostHarness = (daemon: FakeDaemon, options: HarnessOptions = {}) =>
     return {
       session,
       fake,
+      /** The registry a component test can provide to React to observe this same session lifetime. */
+      registry,
       /** Subscribe like a mounted screen; calling the result unmounts. */
       mount: <A>(atom: Atom.Atom<A>): (() => void) => registry.mount(atom),
       /** The atom's value after the fibers that feed it have had their turn. */

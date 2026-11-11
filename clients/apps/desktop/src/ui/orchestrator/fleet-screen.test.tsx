@@ -26,9 +26,12 @@ import fc from 'fast-check';
 import {act, type JSX, useReducer} from 'react';
 import {
   applySnapshot,
+  DORMANT_GENERIC_RUN_INDEX,
   emptyState,
   type FleetHostInput,
   type Freshness,
+  type GenericRunEntry,
+  type GenericRunIndex,
   type HostStatus,
   type HostStatusKind,
   initialNavigation,
@@ -227,6 +230,23 @@ const withHost = (runs: Parameters<typeof stateOf>[0]): FleetHostInput => ({
   freshness: 'live',
   status: statusFor('live', null, null),
   data: stateOf(runs),
+  runIndex: DORMANT_GENERIC_RUN_INDEX,
+});
+
+const readyGenericIndex = (freshness: 'current' | 'stale' = 'current'): GenericRunIndex => ({
+  _tag: 'Ready',
+  freshness,
+  runs: new Map(),
+});
+
+const genericEntry = (runId: string): GenericRunEntry => ({
+  runId,
+  projectRoot: `/projects/${runId}`,
+  state: 'running',
+  activity: 'live',
+  objective: null,
+  costUsd: null,
+  needsUser: false,
 });
 
 const hostA: FleetHostInput = {
@@ -251,6 +271,7 @@ const hostA: FleetHostInput = {
       cost: 12.4,
     },
   ]),
+  runIndex: DORMANT_GENERIC_RUN_INDEX,
 };
 
 const hostB: FleetHostInput = {
@@ -259,6 +280,7 @@ const hostB: FleetHostInput = {
   freshness: 'stale',
   status: statusFor('stale', 14 * MINUTE, null),
   data: stateOf([live('b1', 'KV cache kernel', {cost: 1204.5})]),
+  runIndex: DORMANT_GENERIC_RUN_INDEX,
 };
 
 /** The screen as the window composes it over the navigation fold, recording every intent. */
@@ -417,38 +439,119 @@ describe('the fleet screen', () => {
     );
     expect(
       [...screen.container.querySelectorAll('option')].map(option => option.textContent),
-    ).toContain('gpu-cluster-1 · Stale 14m');
-    expect(screen.controls('Retry')).toHaveLength(1);
+    ).toContain('gpu-cluster-1 · Managed details · Stale 14m · Generic index · Opening');
+    expect(screen.controls('Retry managed')).toHaveLength(1);
     expect(screen.container.querySelector('[role="alert"], .vs-banner')).toBeNull();
     screen.unmount();
   });
 
-  it('never claims a host has no runs before it has been read', () => {
-    for (const freshness of ['empty', 'unavailable'] as const) {
-      const {screen} = open([
-        {
-          key: 'local',
-          label: 'This Mac',
-          freshness,
-          status: statusFor(freshness, null, null),
-          data: emptyState,
-        },
-      ]);
-      expect(screen.text()).not.toContain('No runs');
-      expect(screen.text()).toContain('Not read yet');
-      screen.unmount();
-    }
-    const {screen} = open([
+  it('claims there are no runs only after both disjoint indexes prove it', () => {
+    const opening = open([
       {
         key: 'local',
         label: 'This Mac',
         freshness: 'live',
         status: statusFor('live', null, null),
         data: emptyState,
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
       },
     ]);
-    expect(screen.text()).toContain('No runs');
-    screen.unmount();
+    expect(opening.screen.text()).not.toContain('No runs');
+    expect(opening.screen.text()).toContain('Not read yet');
+    opening.screen.unmount();
+
+    const unavailable = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'unavailable',
+        status: statusFor('unavailable', null, null),
+        data: emptyState,
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
+      },
+    ]);
+    expect(unavailable.screen.text()).not.toContain('No runs');
+    expect(unavailable.screen.text()).toContain('Run index unavailable');
+    unavailable.screen.unmount();
+
+    const complete = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data: emptyState,
+        runIndex: readyGenericIndex(),
+      },
+    ]);
+    expect(complete.screen.text()).toContain('No runs');
+    complete.screen.unmount();
+  });
+
+  it('names stale and unavailable generic indexes instead of overstating an empty list', () => {
+    const stale = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data: emptyState,
+        runIndex: readyGenericIndex('stale'),
+      },
+    ]);
+    expect(stale.screen.text()).toContain('Run count unconfirmed');
+    stale.screen.unmount();
+
+    const unavailable = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data: emptyState,
+        runIndex: {_tag: 'Unavailable', reason: 'unsupported'},
+      },
+    ]);
+    expect(unavailable.screen.text()).toContain('Run index unavailable');
+    expect(unavailable.screen.text()).toContain(
+      'This host does not support generic run discovery.',
+    );
+    unavailable.screen.unmount();
+  });
+
+  it('keeps each discovery source explicit beside nonempty rows and retries only managed data', () => {
+    const generic = genericEntry('generic-only');
+    const managedUnavailable = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'unavailable',
+        status: statusFor('unavailable', null, null),
+        data: emptyState,
+        runIndex: {_tag: 'Ready', freshness: 'current', runs: new Map([[generic.runId, generic]])},
+      },
+    ]);
+    expect(managedUnavailable.screen.text()).toContain('Managed details · Unavailable');
+    expect(managedUnavailable.screen.text()).toContain('Up to date');
+    expect(managedUnavailable.screen.controls('Retry managed')).toHaveLength(1);
+    managedUnavailable.screen.unmount();
+
+    const genericUnavailable = open([
+      {...hostA, runIndex: {_tag: 'Unavailable', reason: 'unsupported'}},
+    ]);
+    expect(genericUnavailable.screen.text()).toContain('Generic index · Unavailable');
+    expect(
+      genericUnavailable.screen.container.querySelector(
+        '.vs-chip[aria-description="This host does not support generic run discovery."]',
+      ),
+    ).not.toBeNull();
+    expect(rows(genericUnavailable.screen)).not.toHaveLength(0);
+    expect(
+      genericUnavailable.screen
+        .controls('Retry managed')
+        .filter(control => control.closest('.vs-reserve') === null),
+    ).toHaveLength(0);
+    genericUnavailable.screen.unmount();
   });
 
   it('says why a host that refuses for good cannot be read, in a short label of its own, with no banner', () => {
@@ -462,13 +565,14 @@ describe('the fleet screen', () => {
           freshness: 'unavailable',
           status: statusFor('unavailable', null, cause),
           data: emptyState,
+          runIndex: DORMANT_GENERIC_RUN_INDEX,
         },
       ]);
       const text = only.screen.text();
       expect(text, cause).toContain(label);
       expect(text, cause).not.toContain('Not read yet');
       expect(text, cause).not.toContain('Unavailable');
-      expect(only.screen.controls('Retry'), cause).toHaveLength(1);
+      expect(only.screen.controls('Retry managed'), cause).toHaveLength(1);
       expect(only.screen.container.querySelector('[role="alert"], .vs-banner'), cause).toBeNull();
       only.screen.unmount();
       // Beside another host: the host filter names the cause, and the other host is still read.
@@ -479,13 +583,14 @@ describe('the fleet screen', () => {
           freshness: 'unavailable',
           status: statusFor('unavailable', null, cause),
           data: emptyState,
+          runIndex: DORMANT_GENERIC_RUN_INDEX,
         },
         hostA,
       ]);
       expect(
         [...beside.screen.container.querySelectorAll('option')].map(option => option.textContent),
         cause,
-      ).toContain(`host-a · ${label}`);
+      ).toContain(`host-a · Managed details · ${label} · Generic index · Opening`);
       beside.screen.unmount();
     }
   });
@@ -498,6 +603,7 @@ describe('the fleet screen', () => {
         freshness: 'empty',
         status: statusFor('empty', null, 'job-tool-too-old'),
         data: emptyState,
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
       },
     ]);
     expect(screen.text()).toContain('Not read yet');
@@ -525,6 +631,7 @@ describe('the fleet screen', () => {
       freshness: 'live',
       status: statusFor('live', null, null),
       data: emptyState,
+      runIndex: readyGenericIndex(),
     };
     const titles = {all: 'No runs', live: 'No live runs', ended: 'No ended runs'} as const;
     for (const filter of ['all', 'live', 'ended'] as const) {
@@ -601,6 +708,7 @@ describe('the fleet screen', () => {
         freshness: 'live',
         status: statusFor('live', null, null),
         data: stateOf([live('x1', 'flint', {cost: 1, card})]),
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
       },
     ]);
     const row = rows(screen)[0];
@@ -631,6 +739,7 @@ describe('the fleet screen', () => {
         freshness: 'live' as const,
         status: statusFor('live', null, null),
         data: stateOf([live(`x${index}`, `run ${index}`)]),
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
       })),
     );
     const tails = rows(screen).map(
@@ -722,6 +831,7 @@ describe('the fleet screen', () => {
         freshness: 'live',
         status: statusFor('live', null, null),
         data: stateOf([live('x1', name, {cost: 1})]),
+        runIndex: DORMANT_GENERIC_RUN_INDEX,
       },
     ]);
     const row = rows(screen)[0];
@@ -745,6 +855,7 @@ describe('the fleet screen', () => {
           freshness: 'live',
           status: statusFor('live', null, null),
           data,
+          runIndex: DORMANT_GENERIC_RUN_INDEX,
         },
       ]);
       try {
@@ -1141,23 +1252,28 @@ describe('the candidates cell of the fleet screen', () => {
       {seed: 21, numRuns: 40},
     );
   });
-  it('says how many older runs the host left out, as the host said it, and nothing when it listed every run', () => {
+  it('says how many older runs lack managed details, and nothing when every run has them', () => {
     const cut = (runsLeftOut: number): FleetHostInput => ({
       ...hostA,
       data: {...hostA.data, cut: {truncated: runsLeftOut > 0, runsLeftOut}},
     });
     const some = open([cut(7)]);
-    expect(some.screen.text()).toContain('7 older runs not shown');
+    expect(some.screen.text()).toContain('7 older runs lack managed details');
     some.screen.unmount();
     const none = open([cut(0)]);
     // Its room is kept, empty and hidden, so the chip never moves what is under it.
     expect(none.screen.container.querySelector('.vs-reserve [class~="vs-chip"]')).not.toBeNull();
-    expect(none.screen.container.querySelector('.vs-reserve')?.getAttribute('aria-hidden')).toBe(
-      'true',
-    );
+    const reserves = [...none.screen.container.querySelectorAll('.vs-reserve')];
+    expect(reserves).toHaveLength(2);
+    for (const reserve of reserves) {
+      expect(reserve.getAttribute('aria-hidden')).toBe('true');
+      expect(reserve.getAttribute('data-collapse-narrow')).toBe('true');
+    }
     expect(
       [...none.screen.container.querySelectorAll('.vs-chip')].filter(
-        chip => chip.closest('.vs-reserve') === null && chip.textContent?.includes('not shown'),
+        chip =>
+          chip.closest('.vs-reserve') === null &&
+          chip.textContent?.includes('lack managed details'),
       ),
     ).toHaveLength(0);
     none.screen.unmount();
@@ -1166,7 +1282,7 @@ describe('the candidates cell of the fleet screen', () => {
       cut(7),
       {...hostB, data: {...hostB.data, cut: {truncated: true, runsLeftOut: 5}}},
     ]);
-    expect(both.screen.text()).toContain('12 older runs not shown');
+    expect(both.screen.text()).toContain('12 older runs lack managed details');
     both.screen.unmount();
   });
 
