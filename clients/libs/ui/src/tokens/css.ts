@@ -30,7 +30,7 @@ export const LEGACY_ALIASES: Readonly<Record<string, string>> = {
   selected: 'var(--selection)',
 };
 
-const TONES = ['accent', 'ok', 'warn', 'err'] as const;
+const TONES = ['accent', 'ok', 'warn', 'err', 'alt'] as const;
 /** How much of a role is mixed into its surface: selection, chip fill, chip border, banner fill. */
 const MIX = {
   selection: 14,

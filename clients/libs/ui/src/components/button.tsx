@@ -10,6 +10,8 @@ export type ButtonFace =
   | {
       readonly text: string;
       readonly icon?: IconName;
+      /** An icon after the text (a chevron on a link that goes elsewhere). */
+      readonly end?: IconName;
       /** The accessible name when it says more than the text does ("Retry upload"); it starts with the text. */
       readonly label?: string;
     }
@@ -37,11 +39,12 @@ export type ButtonProps = ButtonFace &
     readonly hint?: string;
   };
 
-function Face(props: ButtonFace): JSX.Element {
+function Face(props: ButtonFace & {readonly end?: IconName}): JSX.Element {
   return (
     <>
       {props.icon === undefined ? null : <Icon name={props.icon} />}
       {props.text === undefined ? null : <span>{props.text}</span>}
+      {props.end === undefined ? null : <Icon name={props.end} />}
     </>
   );
 }

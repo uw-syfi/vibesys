@@ -76,7 +76,7 @@ describe('the agents screen', () => {
 
   it('draws the lead, its counts and its machine tag, and folds a big group of workers into one row', () => {
     const html = screenOf(5, 20, false, true);
-    expect(html).toContain('lead');
+    expect(html).toContain('Lead');
     expect(html).toContain('host-a');
     expect(html).toMatch(/×12/);
     expect(html).toMatch(/\d+ total/);

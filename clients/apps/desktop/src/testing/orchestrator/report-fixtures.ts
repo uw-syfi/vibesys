@@ -45,6 +45,16 @@ export interface MeasuredOptions {
   readonly revisedBound?: boolean;
   /** The lead's agents made this many plans, linked to the candidates, in a few workstreams. */
   readonly ideas?: number;
+  /** The agents that made the plans, by id, in turn; `impl-1`… when absent. */
+  readonly agents?: readonly string[];
+  /** More titles for the plans, after the usual ones: a very long one, say. */
+  readonly extraTitles?: readonly string[];
+  /**
+   * Measure like a real search: a candidate is mostly worse than the best so far (some of them well
+   * worse, for noise), a few set a new best, and the pace slows as the run goes on, so the points
+   * lie across the whole run instead of on the best line.
+   */
+  readonly spread?: boolean;
 }
 
 /** The two objectives of a serving task, with their declared bounds. */
@@ -61,6 +71,26 @@ export const SERVING: readonly ObjectiveSpec[] = [
 ];
 
 const RUN_AGENT = 'lead';
+
+/**
+ * What the host serves of a run that measured more than fits: at most this many points of a series
+ * and of the trade-off, and this many jobs and results. A cut series keeps its best-so-far points
+ * before the others, the oldest of each going first, and the state is marked truncated.
+ */
+export const SERIES_LIMIT = 400;
+const RECORDS_LIMIT = 500;
+
+/** `items` cut to `limit`: those `first` wants kept before the others, the oldest of each going first. */
+function keptWithin<T>(items: readonly T[], first: (item: T) => boolean, limit: number): T[] {
+  if (items.length <= limit) return [...items];
+  const wanted = items.filter(first).slice(-limit);
+  const others = items.filter(item => !first(item));
+  const kept = new Set([
+    ...wanted,
+    ...others.slice(Math.max(0, others.length - (limit - wanted.length))),
+  ]);
+  return items.filter(item => kept.has(item));
+}
 
 /** The workstreams of the Fake's ideas: the last has a title longer than any column. */
 const WORKSTREAMS = [
@@ -102,24 +132,121 @@ interface Candidate {
   readonly values: readonly number[];
 }
 
+const PLAN_VERBS = [
+  'Try',
+  'Replace',
+  'Pad',
+  'Batch',
+  'Split',
+  'Inline',
+  'Pin',
+  'Relax',
+  'Prefetch',
+  'Coalesce',
+  'Shard',
+  'Reuse',
+];
+const PLAN_THINGS = [
+  'the head index',
+  'the tail CAS loop',
+  'consumer wake-ups',
+  'node allocation',
+  'the slot array',
+  'sequentially consistent fences',
+  'producer batches of 32',
+  'per-core queues',
+  'futex waits',
+  'the spin budget',
+  'false sharing on counters',
+  'hazard pointers',
+];
+
+/**
+ * A title no other plan has: a verb and a thing, the usual long ones in two places and the options'
+ * own (very long) titles on the newest plans.
+ */
+function distinctTitle(options: MeasuredOptions, at: number, count: number): string {
+  const extra = options.extraTitles ?? [];
+  const newest = count - 1 - at;
+  if (newest % 8 === 0 && newest / 8 < extra.length) return extra[newest / 8] ?? '';
+  if (at === 2 || at === 20) return IDEA_TITLES[2] ?? '';
+  return `${PLAN_VERBS[at % PLAN_VERBS.length]} ${PLAN_THINGS[(Math.floor(at / PLAN_VERBS.length) + at) % PLAN_THINGS.length]}`;
+}
+
+/** Where a plan ends up: a verdict drawn at random, weighted toward being turned down. */
+function statusOf(rng: Rng): PlanStatus {
+  const draw = rng.next();
+  return draw < 0.22
+    ? PlanStatus.WON
+    : draw < 0.6
+      ? PlanStatus.REJECTED
+      : draw < 0.82
+        ? PlanStatus.PARKED
+        : PlanStatus.OPEN;
+}
+
+/** The workstream of a plan `along` the run: the early lines of work take the early plans. */
+function workstreamOf(rng: Rng, along: number): number {
+  const weights =
+    along < 0.4 ? [1, 5, 2.5, 1.5, 0] : along < 0.7 ? [0.5, 3, 4, 2.5, 0] : [0.5, 1.5, 2.5, 5, 0];
+  const draw = rng.next() * weights.reduce((sum, weight) => sum + weight, 0);
+  let passed = 0;
+  for (const [at, weight] of weights.entries()) {
+    passed += weight;
+    if (draw < passed) return at;
+  }
+  return 1;
+}
+
+/** The agent that made plan number `at`: one of the options' agents in turn. */
+function agentOf(options: MeasuredOptions, at: number): string {
+  const agents = options.agents ?? [];
+  return agents.length === 0 ? `impl-${(at % 3) + 1}` : (agents[at % agents.length] ?? '');
+}
+
+/** The titles the plans take in turn: the usual ones, then the options' own. */
+const titlesOf = (options: MeasuredOptions): readonly string[] => [
+  ...IDEA_TITLES,
+  ...(options.extraTitles ?? []),
+];
+
 function hex40(rng: Rng): string {
   return Array.from({length: 40}, () => rng.int(16).toString(16)).join('');
+}
+
+/** How much worse than the best so far a candidate is: most a little, a fifth well, a few not at all. */
+function shortfallOf(rng: Rng): number {
+  const draw = rng.next();
+  return draw < 0.12 ? -0.01 : draw < 0.6 ? 0.03 + 0.1 * rng.next() : 0.15 + 0.4 * rng.next();
 }
 
 function candidatesOf(options: MeasuredOptions): readonly Candidate[] {
   const rng = new Rng(options.seed);
   return Array.from({length: options.candidates}, (_, index) => {
     const progress = (index + 1) / options.candidates;
+    const commit = hex40(rng);
+    // The time: the early candidates come fast, the later ones slower, when the run is spread.
+    const along = options.spread === true ? progress ** 2.4 : Math.sqrt(progress);
+    const atMs = Math.round(options.startMs + (options.endMs - options.startMs) * along * 0.98);
+    // How much worse than the best so far this candidate is: most a little, a fifth well, a few not at all.
+    const worse = options.spread === true ? shortfallOf(rng) : 0;
     return {
       jobId: `job-${options.seed}-${index + 1}`,
-      commit: hex40(rng),
-      atMs: Math.round(
-        options.startMs + (options.endMs - options.startMs) * Math.sqrt(progress) * 0.98,
-      ),
-      values: options.objectives.map(
-        objective =>
-          objective.base + (objective.best - objective.base) * progress * (0.7 + 0.3 * rng.next()),
-      ),
+      commit,
+      atMs,
+      values: options.objectives.map(objective => {
+        if (options.spread !== true) {
+          return (
+            objective.base + (objective.best - objective.base) * progress * (0.7 + 0.3 * rng.next())
+          );
+        }
+        // The best so far at this point of the run, and the candidate's own shortfall from it.
+        const level = objective.base + (objective.best - objective.base) * Math.sqrt(progress);
+        const shortfall = worse * (0.8 + 0.4 * rng.next());
+        return objective.direction === Direction.MINIMIZE
+          ? level * (1 + shortfall)
+          : level * (1 - shortfall);
+      }),
     };
   });
 }
@@ -135,18 +262,22 @@ function seriesOf(options: MeasuredOptions, candidates: readonly Candidate[]) {
       objective: objective.name,
       direction: objective.direction,
       unit: objective.unit,
-      points: candidates.map(candidate => {
-        const value = candidate.values[at] ?? 0;
-        const bestSoFar = best === undefined || beats(objective.direction, value, best);
-        if (bestSoFar) best = value;
-        return {
-          jobId: candidate.jobId,
-          commit: candidate.commit,
-          at: timestampFromMs(candidate.atMs),
-          value,
-          bestSoFar,
-        };
-      }),
+      points: keptWithin(
+        candidates.map(candidate => {
+          const value = candidate.values[at] ?? 0;
+          const bestSoFar = best === undefined || beats(objective.direction, value, best);
+          if (bestSoFar) best = value;
+          return {
+            jobId: candidate.jobId,
+            commit: candidate.commit,
+            at: timestampFromMs(candidate.atMs),
+            value,
+            bestSoFar,
+          };
+        }),
+        point => point.bestSoFar,
+        SERIES_LIMIT,
+      ),
     };
   });
 }
@@ -159,13 +290,17 @@ function tradeoffOf(options: MeasuredOptions, candidates: readonly Candidate[]) 
     directions.some((d, i) => beats(d, a.values[i] ?? 0, b.values[i] ?? 0));
   return {
     objectives: options.objectives.map(({name, direction}) => ({name, direction})),
-    points: candidates.map(candidate => ({
-      jobId: candidate.jobId,
-      commit: candidate.commit,
-      at: timestampFromMs(candidate.atMs),
-      values: [...candidate.values],
-      onFrontier: !candidates.some(other => other !== candidate && dominates(other, candidate)),
-    })),
+    points: keptWithin(
+      candidates.map(candidate => ({
+        jobId: candidate.jobId,
+        commit: candidate.commit,
+        at: timestampFromMs(candidate.atMs),
+        values: [...candidate.values],
+        onFrontier: !candidates.some(other => other !== candidate && dominates(other, candidate)),
+      })),
+      point => point.onFrontier,
+      SERIES_LIMIT,
+    ),
   };
 }
 
@@ -238,22 +373,33 @@ function gainsAgainst(options: MeasuredOptions, candidates: readonly Candidate[]
  */
 function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], runId: string) {
   const count = options.ideas ?? 0;
-  const planOf = (index: number): number | undefined =>
-    count === 0 || index === 0 || index % 7 === 6 ? undefined : (index % count) + 1;
+  const spread = options.spread === true;
+  const rng = new Rng(options.seed + 101);
+  // A spread search tries its plans one after another, so a plan's candidates are near in time.
+  const planOf = (index: number): number | undefined => {
+    if (count === 0 || index === 0 || index % 7 === 6) return undefined;
+    return spread
+      ? Math.min(count, Math.floor((index / candidates.length) * count) + 1)
+      : (index % count) + 1;
+  };
   const plans = Array.from({length: count}, (_, at) => {
     const number = at + 1;
-    const status = PLAN_STATUSES[at % PLAN_STATUSES.length] ?? PlanStatus.OPEN;
+    const status = spread
+      ? statusOf(rng)
+      : (PLAN_STATUSES[at % PLAN_STATUSES.length] ?? PlanStatus.OPEN);
     const when = timestampFromMs(
       options.startMs + Math.round(((options.endMs - options.startMs) * number) / (count + 1)),
     );
     return {
       number,
-      title: IDEA_TITLES[at % IDEA_TITLES.length] ?? '',
+      title: spread
+        ? distinctTitle(options, at, count)
+        : (titlesOf(options)[at % titlesOf(options).length] ?? ''),
       status,
       createdAt: when,
       updatedAt: when,
-      workstream: at % (WORKSTREAMS.length + 1),
-      origin: {runId, agent: `impl-${(at % 3) + 1}`, at: when},
+      workstream: spread ? workstreamOf(rng, at / count) : at % (WORKSTREAMS.length + 1),
+      origin: {runId, agent: agentOf(options, at), at: when},
     };
   });
   const linked = (number: number): readonly Candidate[] =>
@@ -409,22 +555,27 @@ export function measuredSearch(
           }
         : {case: 'liveSince', value: timestampFromMs(options.startMs)},
     },
-    jobs: candidates.map((candidate, index) => ({
-      id: candidate.jobId,
-      plans: (() => {
-        const plan = served.jobPlans[index];
-        return plan === undefined ? [] : [plan];
-      })(),
-      state: JobState.SUCCEEDED,
-      submittedAt: timestampFromMs(candidate.atMs - 60_000),
-      submitters: [submitter],
-    })),
-    results: candidates.map(candidate => ({
+    jobs: candidates.flatMap((candidate, index) => {
+      const plan = served.jobPlans[index];
+      return index < candidates.length - RECORDS_LIMIT
+        ? []
+        : [
+            {
+              id: candidate.jobId,
+              plans: plan === undefined ? [] : [plan],
+              state: JobState.SUCCEEDED,
+              submittedAt: timestampFromMs(candidate.atMs - 60_000),
+              submitters: [submitter],
+            },
+          ];
+    }),
+    results: candidates.slice(-RECORDS_LIMIT).map(candidate => ({
       jobId: candidate.jobId,
       commit: candidate.commit,
       recordedAt: timestampFromMs(candidate.atMs),
       outcome: measureOf(options, candidate),
     })),
+    truncated: candidates.length > SERIES_LIMIT,
     ...(head === undefined
       ? {}
       : {

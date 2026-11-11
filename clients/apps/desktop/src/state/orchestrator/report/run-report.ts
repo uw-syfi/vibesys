@@ -14,7 +14,9 @@ import {oneofIs} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from '../state.js';
 import {ms} from '../time.js';
 import {type AgentsStrip, agentsStrip} from './agents-strip.js';
+import {type RunFacts, runFacts} from './facts.js';
 import {type IdeasReport, ideasReport} from './ideas.js';
+import {type LatestMeasurement, latestMeasurements} from './latest.js';
 import {type ObjectiveReport, objectiveReports} from './objectives.js';
 import {type PlansReport, plansReport} from './plans.js';
 import {type SummaryView, summaryReport} from './summary.js';
@@ -59,6 +61,10 @@ export interface RunReport {
   /** The run's plans counted by status and the jobs no run claimed, once a search state has been served. */
   readonly plans: PlansReport | undefined;
   readonly agents: AgentsStrip;
+  /** The facts line's numbers: the whole run in four counts. */
+  readonly facts: RunFacts;
+  /** The newest measurements, newest first, one value for each of `objectives`. */
+  readonly latest: readonly LatestMeasurement[];
   readonly search: SearchReading;
   /** The span of the charts' time axis: the run's start to its end, or to now while it lives. */
   readonly span: {readonly fromMs: number; readonly toMs: number};
@@ -91,6 +97,10 @@ export function runReport(
   const startedMs = ms(run.createdAt) ?? nowMs;
   const endedMs = ms(run.endedAt);
   const toMs = Math.max(startedMs, endedMs ?? nowMs);
+  const objectives =
+    search === undefined ? [] : objectiveReports(search, state.summaries[runId]?.objectives ?? []);
+  const ideas = ideasReport(search);
+  const agents = agentsStrip(state, runId);
   return {
     runId,
     header: {
@@ -103,14 +113,13 @@ export function runReport(
       elapsedMs: toMs - startedMs,
     },
     summary: summaryReport(state, runId),
-    objectives:
-      search === undefined
-        ? []
-        : objectiveReports(search, state.summaries[runId]?.objectives ?? []),
+    objectives,
     tradeoff: search === undefined ? undefined : tradeoffReport(search),
-    ideas: ideasReport(search),
+    ideas,
     plans: plansReport(search),
-    agents: agentsStrip(state, runId),
+    agents,
+    facts: runFacts(search, ideas, agents, state.costs[runId]),
+    latest: latestMeasurements(objectives, ideas?.plansOfJob),
     search: searchReading(search),
     span: {fromMs: startedMs, toMs},
     truncated: search?.truncated ?? false,

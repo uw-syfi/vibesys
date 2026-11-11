@@ -41,6 +41,16 @@
   /* The link's own height is not the card's: the heading keeps the card's usual distance from its top. */
   margin-block: calc(-1 * var(--space-2));
 }
+.vs-card-beside {
+  /* Left-aligned right after the heading, whatever else is in the line. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The action keeps the end of the line whatever stands between it and the heading. */
+.vs-card-action {
+  margin-left: auto;
+  min-width: 0;
+}
 .vs-card[data-flush] .vs-card-head {
   margin-block: 0;
   padding-inline-end: var(--space-4);
@@ -313,6 +323,93 @@
 .vs-table[data-middle] td {
   vertical-align: middle;
 }
+/* Rows set close: the least padding of the scale, a row as tall as a dense control. The first and
+   last cells have none at the table's edges, so the table starts and ends where the heading above it
+   does (one left edge), and a name cut with an ellipsis takes what the other columns leave. */
+.vs-table[data-dense] th,
+.vs-table[data-dense] td {
+  padding: var(--space-2) calc(var(--space-2) + var(--space-1));
+}
+.vs-table-unit {
+  display: block;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.vs-table[data-dense] tr > :first-child {
+  padding-left: 0;
+}
+.vs-table[data-dense] tr > :last-child {
+  padding-right: 0;
+}
+.vs-table[data-dense] td[data-lead][data-clip] {
+  max-width: 0;
+  width: 100%;
+}
+.vs-table[data-dense] td[data-clip]:not([data-lead]) {
+  /* A name that is not the row's own title gives way early, so the title has the room. */
+  max-width: calc(var(--space-8) * 3.75);
+}
+/* A wide table gives the cell after a right-aligned one a gap of its own, so a number and the word after it are apart. */
+@container (min-width: 600px) {
+  .vs-table[data-dense] [data-align="end"] + :not([data-align="end"]) {
+    padding-left: var(--space-5);
+  }
+}
+/* The header of the title column takes the flexible width too, so an empty table spreads as a full one. */
+.vs-table[data-dense] th[data-lead] {
+  width: 100%;
+}
+/* A table of many rows: a box of its own height, scrolling down, with its header kept in view. */
+.vs-table-scroll[data-down] {
+  max-height: var(--table-rows);
+}
+/* A header that sorts: its words as a plain control, the arrow of the order beside it. */
+.vs-table-sort {
+  display: inline-flex;
+  /* An inline-flex box sits on the baseline of the box that is its first item, which is the arrow, and
+     that would lift the words above the headers that have no arrow: top-aligned, they share a line. */
+  vertical-align: top;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.vs-table-sort:hover,
+.vs-table-sort[data-active] {
+  color: var(--text);
+}
+.vs-table-sort:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+/* The arrow takes its room whether or not the column is the sorted one, so a header never moves. */
+.vs-table-sort-arrow {
+  display: inline-flex;
+  width: var(--icon);
+  height: var(--icon);
+  opacity: 0;
+}
+.vs-table-sort[data-active] .vs-table-sort-arrow {
+  opacity: 1;
+}
+.vs-table-sort[data-direction="descending"] .vs-table-sort-arrow {
+  transform: rotate(180deg);
+}
+.vs-table [data-align="end"] .vs-table-sort {
+  flex-direction: row-reverse;
+}
 .vs-table td[data-mono] {
   font-family: var(--text-code-family);
   font-size: var(--text-code-size);
@@ -331,7 +428,8 @@
 .vs-table tr[aria-current="true"] {
   background: var(--selection);
 }
-.vs-table tr[data-kind="sub"] td {
+.vs-table tr[data-kind="sub"] td,
+.vs-table tr[data-kind="empty"] td {
   color: var(--muted);
 }
 .vs-table tr[data-kind="sub"] td:first-child {

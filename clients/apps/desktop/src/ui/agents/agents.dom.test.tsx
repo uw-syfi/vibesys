@@ -74,17 +74,17 @@ describe('the agents screen', () => {
 
   it('shows the big group of workers as one folded row, and a press on it unfolds the agents', () => {
     const screen = view();
-    const folded = labels(screen.container).find(label => label.startsWith('worker ×'));
+    const folded = labels(screen.container).find(label => label.startsWith('Worker ×'));
     expect(folded).toMatch(/folded$/);
     const before = options(screen.container).length;
     const row = options(screen.container).find(one => one.getAttribute('aria-label') === folded);
     if (row === undefined) throw new Error('the group row is drawn');
     screen.press(row);
-    expect(labels(screen.container).find(label => label.startsWith('worker ×'))).toMatch(/open$/);
+    expect(labels(screen.container).find(label => label.startsWith('Worker ×'))).toMatch(/open$/);
     expect(options(screen.container).length).toBeGreaterThan(before);
     screen.press(
       options(screen.container).find(one =>
-        one.getAttribute('aria-label')?.startsWith('worker ×'),
+        one.getAttribute('aria-label')?.startsWith('Worker ×'),
       ) ?? row,
     );
     expect(options(screen.container)).toHaveLength(before);
@@ -95,13 +95,13 @@ describe('the agents screen', () => {
     opened.length = 0;
     const screen = view();
     const planner = options(screen.container).find(one =>
-      one.getAttribute('aria-label')?.startsWith('planner-2'),
+      one.getAttribute('aria-label')?.startsWith('Planner 2'),
     );
-    if (planner === undefined) throw new Error('planner-2 is drawn');
+    if (planner === undefined) throw new Error('Planner 2 is drawn');
     screen.press(planner);
     expect(opened).toHaveLength(1);
     const chevron = planner.querySelector<HTMLElement>('.vs-gantt-fold');
-    if (chevron === null) throw new Error('planner-2 holds agents');
+    if (chevron === null) throw new Error('Planner 2 holds agents');
     expect(planner.getAttribute('aria-label')).toMatch(/open$/);
     screen.press(chevron);
     expect(opened).toHaveLength(1);
@@ -226,7 +226,7 @@ describe('an agent page', () => {
       screen.container.querySelector('nav[aria-label="Place in the spawn tree"]');
     const top = page(lead);
     expect(place(top)).toBeNull();
-    expect(top.container.querySelector('h1')?.textContent).toBe('lead');
+    expect(top.container.querySelector('h1')?.textContent).toBe('Lead');
     top.unmount();
     const below = page(child);
     expect(place(below)?.querySelectorAll('li').length).toBeGreaterThan(1);

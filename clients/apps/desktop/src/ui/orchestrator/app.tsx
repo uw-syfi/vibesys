@@ -668,7 +668,6 @@ function ReportDestination(props: {
       report={report}
       host={host.label}
       nowMs={nowMs}
-      status={runsStatus(host, nowMs)}
       cost={state.costs[runId]}
       costFeed={host.costFeeds[runId] ?? OPENING_COST}
       retryCost={() => props.retryCost(host.key, runId)}

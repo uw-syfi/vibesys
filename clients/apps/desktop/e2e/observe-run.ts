@@ -165,6 +165,9 @@ async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
   await expect(page.getByRole('button', {name: 'New run'})).toBeVisible();
 }
 
+/** The name `seen` records the run report's title under. */
+const REPORT_SHOT = '2-report';
+
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
   // The lead's final report ended the run, so it is in the run history; a row is named by its run
   // (the task) and says the rest, its state first, in its description.
@@ -176,7 +179,7 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await checkTheNewRunPageOpensAndCloses(page);
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
-  await seen(page, '2-report');
+  await seen(page, REPORT_SHOT);
   // Stop is offered only while a run runs.
   await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
@@ -242,7 +245,10 @@ async function checkEveryAgentShowsItsHarness(page: Page, world: World): Promise
     await expect(title).not.toHaveText('Agents');
     if (at === 0) await seen(page, '5-agent');
     const name = (await title.textContent()) ?? '';
-    const role = Object.entries(ROLE_WORD).find(([, word]) => name.startsWith(word.toLowerCase()));
+    // An agent is named by its capitalised role and number (`Worker 3`, `Lead`), as every screen says it.
+    const role = Object.entries(ROLE_WORD).find(([, word]) =>
+      name.toLowerCase().startsWith(word.toLowerCase()),
+    );
     expect(role, `the page of ${name} names a role`).toBeDefined();
     let harness: string | undefined;
     for (const [id, word] of Object.entries(HARNESS_WORD)) {
@@ -316,9 +322,14 @@ async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'Settings'}).click();
   await expect(page.getByRole('heading', {level: 1})).toHaveText('Settings');
   await seen(page, '7-settings');
-  // Every destination has its title where every other has it, left and top.
-  const places = new Set(titles.map(each => `${each.left},${each.top}`));
-  expect(places.size, JSON.stringify(titles)).toBe(1);
+  // Every destination has its title where every other has it, left and top, except the run report:
+  // it fills the window, so its title keeps the page gutter as its left edge while the others are
+  // centred, and its top is the same as theirs. The exception is recorded under law 1 of the visual
+  // spec (`.agents/skills/verify-desktop-ui/references/visual-spec.md`).
+  const top = new Set(titles.map(each => each.top));
+  expect(top.size, JSON.stringify(titles)).toBe(1);
+  const left = new Set(titles.filter(each => each.name !== REPORT_SHOT).map(each => each.left));
+  expect(left.size, JSON.stringify(titles)).toBe(1);
 }
 
 /**

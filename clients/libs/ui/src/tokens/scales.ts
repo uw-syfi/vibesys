@@ -42,6 +42,7 @@ export type SizeToken =
   | 'content-narrow'
   | 'column-main'
   | 'column-aside'
+  | 'column-side'
   | 'column-field'
   | 'column-tile'
   | 'column-swatch'
@@ -58,6 +59,10 @@ export type SizeToken =
   | 'pane-master'
   | 'panes-floor'
   | 'row-dense'
+  | 'table-rows'
+  | 'overview-strip'
+  | 'band-summary'
+  | 'brief'
   | 'gantt-label'
   | 'gantt-label-max'
   | 'gantt-figure'
@@ -87,6 +92,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'content-narrow': 900,
   'column-main': 520,
   'column-aside': 300,
+  'column-side': 400,
   'column-field': 240,
   'column-tile': 200,
   'column-swatch': 160,
@@ -103,6 +109,10 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'pane-master': 480,
   'panes-floor': 288,
   'row-dense': 28,
+  'table-rows': 372,
+  'overview-strip': 32,
+  'band-summary': 200,
+  brief: 760,
   'gantt-label': 220,
   'gantt-label-max': 420,
   'gantt-figure': 96,
@@ -151,6 +161,7 @@ export type TextStyle =
   | 'title'
   | 'heading'
   | 'item'
+  | 'lead'
   | 'body'
   | 'body-strong'
   | 'small'
@@ -191,6 +202,8 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   heading: text('sans', 18, 24, 600),
   // The name of a card, an option or a settings row.
   item: text('sans', 15, 20, 600),
+  // One step above the body for text of unknown length that must stand first (a summary's headline): medium, not bold.
+  lead: text('sans', 15, 22, 500),
   body: text('sans', 14, 20, 400),
   'body-strong': text('sans', 14, 20, 500),
   small: text('sans', 13, 18, 400),

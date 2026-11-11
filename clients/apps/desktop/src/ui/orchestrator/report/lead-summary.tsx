@@ -1,56 +1,55 @@
-import {Card, Chip, KeyValue, Row, Text} from '@vibesys/ui';
+import {Brief, type BriefField, Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
 import {withShortCommits} from '../../commit-text.js';
-import {useDisplayClock} from '../../display-clock.js';
 import {formatAge} from './format.js';
 
-const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
-  changed: 'Changed',
-  inFlight: 'Running',
-  decisions: 'Decided',
-};
+/** The parts' labels: what was running is past tense once the run is over, or it would contradict its state. */
+const fieldLabel = (field: SummaryField, over: boolean): string =>
+  ({changed: 'Changed', inFlight: over ? 'Was running' : 'Running', decisions: 'Decided'})[field];
+
+/** Whose it is and how old; for a run that is over, a report that was not the final one is the last it wrote, not a state of now. */
+function labelOf(summary: SummaryView, nowMs: number, over: boolean): string {
+  if (over && !summary.final) return "Lead's last summary · before the run ended";
+  return `Lead's ${summary.final ? 'final ' : ''}summary · ${formatAge(nowMs - summary.atMs)}`;
+}
 
 /**
- * The lead's latest report as the run's summary: a compact card whose heading line carries how long
- * ago it was written, over the lead's own words (the headline, then the parts it filled in). A run
- * whose lead has not reported says only that. What the lead wrote is its own words and wraps.
+ * The lead's latest report as one block under the facts: whose it is and how old, its headline (cut
+ * at two lines) and the parts it filled in, each under its label (cut at three lines; a part the
+ * lead left empty is left out, label and all). What the lead writes has no bound on its length, so
+ * it is set in body sizes only, a long word breaks inside itself, and whatever is cut is whole on
+ * hover and in Catch me up, which one link under the block opens, when anything is cut. A run whose
+ * lead has not reported says only that, in one line.
  */
 export function LeadSummary(props: {
   readonly summary: SummaryView | undefined;
   readonly nowMs: number;
+  /** The run has ended or failed: its last report is not about now. */
+  readonly over: boolean;
+  /** Open the run's Catch me up page, where the whole report is. */
+  readonly openCatchUp: () => void;
 }): JSX.Element {
   const {summary} = props;
-  const clock = useDisplayClock();
-  const rest = (summary?.fields ?? []).map(({field, text}) => ({
-    key: FIELD_LABELS[field],
-    value: withShortCommits(text),
-  }));
+  if (summary === undefined) return <Brief empty="The lead has not reported yet" />;
+  const fields: BriefField[] = summary.fields
+    .filter(({text}) => text.trim() !== '')
+    .map(({field, text}) => ({
+      label: fieldLabel(field, props.over),
+      text: withShortCommits(text),
+      title: text,
+    }));
   return (
-    <Card
-      dense
-      section="Lead summary"
-      {...(summary === undefined
+    <Brief
+      name="Lead summary"
+      label={labelOf(summary, props.nowMs, props.over)}
+      {...(summary.headline.trim() === ''
         ? {}
-        : {
-            action: (
-              <Row gap="space-3">
-                {summary.final ? <Chip label="Final" tone="ok" /> : null}
-                <Text variant="small" tone="muted" title={clock.reportMoment(summary.atMs)}>
-                  {`Updated ${formatAge(props.nowMs - summary.atMs)}`}
-                </Text>
-              </Row>
-            ),
-          })}
-    >
-      {summary === undefined ? (
-        <Text tone="muted">No report yet</Text>
-      ) : (
-        <>
-          <Text as="p">{withShortCommits(summary.headline)}</Text>
-          {rest.length === 0 ? null : <KeyValue items={rest} />}
-        </>
-      )}
-    </Card>
+        : {lead: withShortCommits(summary.headline), leadTitle: summary.headline})}
+      fields={fields}
+      more={
+        <Button text="Read the whole report" variant="quiet" size="sm" press={props.openCatchUp} />
+      }
+    />
   );
 }

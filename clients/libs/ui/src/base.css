@@ -301,6 +301,10 @@ body > div:first-child {
   flex: none;
   width: var(--column-figure);
 }
+.vs-flex[data-width="summary"] {
+  flex: none;
+  width: min(100%, var(--band-summary));
+}
 .vs-spacer {
   /* Grows into the free room along the container's axis, and never below one step. */
   flex: 1 0 var(--space-4);
@@ -375,6 +379,35 @@ body > div:first-child {
   position: sticky;
   top: var(--space-4);
   max-height: var(--thread);
+}
+/* A main column and a side column of a fixed width; the container is the pair's own box, so it is
+   the room the page gives them, not the window, that decides when the side goes under. */
+.vs-mainside {
+  min-width: 0;
+  container-type: inline-size;
+}
+.vs-mainside-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--column-side);
+  align-items: start;
+  gap: var(--space-4);
+}
+.vs-mainside-main,
+.vs-mainside-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+@container (max-width: 1180px) {
+  .vs-mainside-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-mainside-side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-aside)), 1fr));
+    align-items: start;
+  }
 }
 .vs-section-container {
   min-width: 0;
@@ -505,6 +538,9 @@ body > div:first-child {
 }
 .vs-text[data-tone="muted"] {
   color: var(--muted);
+}
+.vs-text[data-tone="accent"] {
+  color: var(--accent);
 }
 .vs-text[data-tone="ok"] {
   color: var(--ok);

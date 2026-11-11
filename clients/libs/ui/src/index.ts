@@ -11,6 +11,7 @@ export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-ch
 export {type BarColumn, type BarFigures, type BarRow, BarRows} from './components/bar-rows.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {Breadcrumb, type Crumb} from './components/breadcrumb.js';
+export {Brief, type BriefField} from './components/brief.js';
 export {
   Button,
   type ButtonAction,
@@ -27,12 +28,16 @@ export {
   ChartLegend,
   type ChartLegendItem,
   type ChartLegendMark,
+  type ChartMarker,
+  type ChartNote,
   ChartPanel,
   type ChartPoint,
   type ChartReference,
   type ChartSize,
   type ChartTick,
+  type ChartTimeAxis,
   type ChartTip,
+  chartPlotMargins,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
@@ -94,6 +99,7 @@ export {
   Grid,
   type GridColumn,
   type Justify,
+  MainSide,
   Page,
   type PageState,
   type PageWidth,
@@ -168,6 +174,13 @@ export {
   type RowTrail,
 } from './components/pick-list.js';
 export {RailFrame, RailItem} from './components/rail.js';
+export {
+  RangeStrip,
+  type RangeWindow,
+  type StripPoint,
+  windowMoved,
+  windowOfDrag,
+} from './components/range-strip.js';
 export {type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
@@ -199,7 +212,7 @@ export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
-export {Table, type TableColumn} from './components/table.js';
+export {Table, type TableColumn, type TableSort} from './components/table.js';
 export {Tabs} from './components/tabs.js';
 export {
   Text,

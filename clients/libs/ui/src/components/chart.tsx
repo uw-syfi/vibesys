@@ -3,6 +3,7 @@ import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
 import type {StyleWithVars} from './css-vars.js';
 import {useInlineSize} from './label-fit.js';
 import {Text} from './text.js';
+import {fittedTimeTicks, type ZoneOffset} from './time-ticks.js';
 
 /**
  * What hovering a point says, short enough to stay inside the plot: its `detail` (the figures) is
@@ -47,7 +48,7 @@ export interface ChartTick {
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 240;
-const HEIGHT = {default: 260, strip: 150, compact: 136} as const;
+const HEIGHT = {default: 260, tall: 200, strip: 150, compact: 136} as const;
 export type ChartSize = keyof typeof HEIGHT;
 /** The x labels sit in the band below the plot; a caption adds a line under them. */
 const X_BAND = 20;
@@ -61,6 +62,35 @@ const LABEL_GAP = 8;
 const EDGE = 4;
 /** How far a mark on the x axis rises from it. */
 const MARK_HEIGHT = 8;
+
+/**
+ * A short word written beside a place on the plot (the value at a corner of the line): to the right
+ * of and above it, or to its left when there is no room on the right. A note that would cover
+ * another is left out, the later ones first kept, so no two overlap; each is drawn over a halo of
+ * the panel, so no line or dot cuts it.
+ */
+export interface ChartNote {
+  readonly x: number;
+  readonly y: number;
+  readonly label: string;
+}
+
+/** A place on the x axis worth a rule and a word. */
+export interface ChartMarker {
+  readonly x: number;
+  readonly label: string;
+  readonly hint: string;
+}
+
+/**
+ * The x axis as moments of a clock: the labels are chosen to fit the width the chart is drawn at,
+ * so each tick is a tidy step of the axis (seconds on an axis of seconds, days on one of days) and
+ * no two read alike. `label` writes a moment at the step the axis chose. Needs an `xDomain`.
+ */
+export interface ChartTimeAxis {
+  readonly label: (at: number, span: number, step: number) => string;
+  readonly zone: ZoneOffset;
+}
 
 interface Plot {
   readonly left: number;
@@ -92,6 +122,21 @@ function plotFor(
   };
 }
 
+/** How far a mark at the very end of the x axis stands from the frame: room for a dot and its ring. */
+const END_ROOM = 8;
+
+/**
+ * The room a chart leaves for its y labels and at its right edge, in pixels: where its plot starts
+ * and how far it stops short of the drawing's right edge. For what is drawn to line up with a plot
+ * (a strip over the same axis), told the longest y label in characters.
+ */
+export function chartPlotMargins(yLabelChars: number): {
+  readonly left: number;
+  readonly right: number;
+} {
+  return {left: plotFor([], yLabelChars, 'default', 0, false, false).left, right: MARGIN_RIGHT};
+}
+
 interface Scale {
   readonly x: (value: number) => number;
   readonly y: (value: number) => number;
@@ -121,8 +166,10 @@ function scale(
 ): Scale {
   const [x0, x1] = widened(xDomain ?? extent(xs));
   const [y0, y1] = widened(yDomain ?? extent(ys));
+  // The ends of the axis stand a little inside the frame, so a mark at either end is drawn whole.
+  const [from, to] = [plot.left + END_ROOM, plot.right - END_ROOM];
   return {
-    x: value => plot.left + ((value - x0) / (x1 - x0)) * (plot.right - plot.left),
+    x: value => from + ((value - x0) / (x1 - x0)) * (to - from),
     y: value => plot.bottom - ((value - y0) / (y1 - y0)) * (plot.bottom - plot.top),
   };
 }
@@ -393,7 +440,21 @@ interface ChartProps {
   /** The unit the y axis reads in, written above its top. */
   readonly unit?: string;
   readonly xTicks?: readonly ChartTick[];
+  /** The x axis as a clock's moments, fitted to the width drawn (instead of `xTicks`). */
+  readonly timeAxis?: ChartTimeAxis;
   readonly yTicks?: readonly ChartTick[];
+  /**
+   * A faint vertical rule at `x` with a short `label` along the axis, and `hint` on hover: where
+   * something about the data changes (the point from which every measurement is drawn).
+   */
+  readonly marker?: ChartMarker;
+  /** Words beside places on the plot: the value at each corner of the best-so-far line. */
+  readonly notes?: readonly ChartNote[];
+  /**
+   * Nothing to draw yet: the frame and the x axis stay, and these words stand in the middle of the
+   * plot, so the chart holds its place and its size from the first minute.
+   */
+  readonly empty?: string;
   /**
    * At least this many characters of room for the y labels: charts stacked on one time axis give
    * every chart the longest label of any, so their plots start at one left edge.
@@ -457,7 +518,6 @@ function layoutOf(
 export function Chart(props: ChartProps): JSX.Element {
   const size = props.size ?? 'default';
   const steps = props.steps ?? [];
-  const xTicks = props.xTicks ?? [];
   const yTicks = props.yTicks ?? [];
   const marks = props.marks ?? [];
   const references = props.references ?? [];
@@ -466,6 +526,7 @@ export function Chart(props: ChartProps): JSX.Element {
   const clip = useId().replaceAll(':', '');
   const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const {plot, at, stop} = layoutOf(props, width);
+  const xTicks = xTicksOf(props, plot, measured === null ? null : plot.right - plot.left);
   const cursor = props.cursor === undefined ? undefined : at.x(props.cursor);
   const height = HEIGHT[size];
   const first = steps[0];
@@ -498,22 +559,17 @@ export function Chart(props: ChartProps): JSX.Element {
             {props.start}
           </text>
         )}
-        {steps.length === 0 ? null : (
-          <Line d={stepPath(steps, at)} cursor={cursor} plot={plot} height={height} id={clip} />
-        )}
-        {drawnPoints(props.points).map(point => (
-          <Point
-            key={point.key ?? point.id ?? `${point.x}:${point.y}`}
-            point={point}
-            at={at}
-            after={props.cursor !== undefined && point.x > props.cursor}
-            stop={point.id !== undefined && point.id === stop}
-            dense={props.points.length > DENSE_ABOVE}
-            pick={props.pick}
-            hover={props.hover}
-            tell={setTip}
-          />
-        ))}
+        <Annotations props={props} plot={plot} at={at} />
+        <Plotted
+          props={props}
+          plot={plot}
+          at={at}
+          clip={clip}
+          cursor={cursor}
+          height={height}
+          stop={stop}
+          tell={setTip}
+        />
         {cursor === undefined ? null : (
           <line
             className="vs-chart-cursor"
@@ -527,6 +583,216 @@ export function Chart(props: ChartProps): JSX.Element {
       </svg>
       <ReferenceLabels lines={references} plot={plot} at={at} width={width} />
     </div>
+  );
+}
+
+/**
+ * What is drawn on the plot, cut to it (a little over its edges, for a dot and its ring), so no dot
+ * or line ever reaches the labels of an axis and strikes them through: the best-so-far line, the
+ * points and the notes beside the corners.
+ */
+function Plotted(args: {
+  readonly props: ChartProps;
+  readonly plot: Plot;
+  readonly at: Scale;
+  readonly clip: string;
+  readonly cursor: number | undefined;
+  readonly height: number;
+  readonly stop: string | undefined;
+  readonly tell: (tip: Told | undefined) => void;
+}): JSX.Element {
+  const {props, plot, at, clip, cursor, height, stop} = args;
+  const steps = props.steps ?? [];
+  return (
+    <>
+      <clipPath id={`${clip}-plot`}>
+        <rect
+          x={plot.left - EDGE}
+          y={plot.top - PLOT_BLEED}
+          width={plot.right - plot.left + EDGE + PLOT_BLEED}
+          height={plot.bottom - plot.top + PLOT_BLEED + EDGE}
+        />
+      </clipPath>
+      <g clipPath={`url(#${clip}-plot)`}>
+        {steps.length === 0 ? null : (
+          <Line d={stepPath(steps, at)} cursor={cursor} plot={plot} height={height} id={clip} />
+        )}
+        {drawnPoints(props.points).map(point => (
+          <Point
+            key={point.key ?? point.id ?? `${point.x}:${point.y}`}
+            point={point}
+            at={at}
+            after={props.cursor !== undefined && point.x > props.cursor}
+            stop={point.id !== undefined && point.id === stop}
+            dense={props.points.length > DENSE_ABOVE}
+            pick={props.pick}
+            hover={props.hover}
+            tell={args.tell}
+          />
+        ))}
+        <Notes notes={props.notes ?? []} plot={plot} at={at} />
+      </g>
+    </>
+  );
+}
+
+/** What stands on the plot beside the data: the words of an empty chart, and a marker. */
+function Annotations(args: {
+  readonly props: ChartProps;
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {props, plot, at} = args;
+  return (
+    <>
+      {props.empty === undefined ? null : <EmptyState plot={plot} words={props.empty} />}
+      {props.marker === undefined ? null : <Marker marker={props.marker} plot={plot} at={at} />}
+    </>
+  );
+}
+
+/** The rule of a marker and its word, written beside the rule on the side that has room, along the bottom of the plot. */
+function Marker(props: {
+  readonly marker: ChartMarker;
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {marker, plot} = props;
+  const x = props.at.x(marker.x);
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  const width = marker.label.length * glyph;
+  const onRight = x + NOTE_GAP + width <= plot.right;
+  return (
+    <g className="vs-chart-marker">
+      <title>{marker.hint}</title>
+      <line className="vs-chart-marker-rule" x1={x} x2={x} y1={plot.top} y2={plot.bottom} />
+      <text
+        className="vs-chart-note"
+        x={onRight ? x + NOTE_GAP : x - NOTE_GAP}
+        y={plot.bottom - NOTE_GAP}
+        textAnchor={onRight ? 'start' : 'end'}
+      >
+        {marker.label}
+      </text>
+    </g>
+  );
+}
+
+/** How far past the plot's edges what is drawn is still shown: a dot and its ring on the frame. */
+const PLOT_BLEED = 8;
+
+/** The x ticks: the caller's, or those of a time axis fitted to the plot's width (none until measured). */
+function xTicksOf(props: ChartProps, plot: Plot, plotWidth: number | null): readonly ChartTick[] {
+  const axis = props.timeAxis;
+  const domain = props.xDomain;
+  if (axis === undefined || domain === undefined) return props.xTicks ?? [];
+  return fittedTimeTicks(
+    domain[0],
+    domain[1],
+    plotWidth ?? plot.right - plot.left,
+    axis.label,
+    axis.zone,
+  ).map(tick => ({value: tick.at, label: tick.label}));
+}
+
+/** The words of an empty chart, in the middle of its plot, cut with an ellipsis to the room there is. */
+function EmptyState(props: {readonly plot: Plot; readonly words: string}): JSX.Element {
+  const {plot} = props;
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  const room = Math.max(8, Math.floor((plot.right - plot.left - 2 * TIP_PAD) / glyph));
+  return (
+    <>
+      <rect
+        className="vs-chart-frame"
+        x={plot.left}
+        y={plot.top}
+        width={plot.right - plot.left}
+        height={plot.bottom - plot.top}
+      />
+      <text
+        className="vs-chart-state"
+        x={(plot.left + plot.right) / 2}
+        y={(plot.top + plot.bottom) / 2}
+        textAnchor="middle"
+        dominantBaseline="middle"
+      >
+        {cut(props.words, room)}
+      </text>
+    </>
+  );
+}
+
+/** The height of a note's box, the room its line of text takes. */
+const NOTE_HEIGHT = 14;
+/** How far a note stands from the place it names. */
+const NOTE_GAP = 6;
+
+interface PlacedNote {
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly anchor: 'start' | 'end';
+  readonly left: number;
+  readonly right: number;
+}
+
+/**
+ * Where each note is written: right of and above its place, or left of it when it would pass the
+ * plot's right edge. The newest note is placed first and a note that would cover one placed is left
+ * out, so the value the line ends at is always written.
+ */
+function placeNotes(notes: readonly ChartNote[], plot: Plot, at: Scale): readonly PlacedNote[] {
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  const placed: PlacedNote[] = [];
+  for (const note of [...notes].reverse()) {
+    const width = note.label.length * glyph;
+    const px = at.x(note.x);
+    const py = Math.max(plot.top + NOTE_HEIGHT, at.y(note.y) - NOTE_GAP);
+    const onRight = px + NOTE_GAP + width <= plot.right;
+    const left = onRight ? px + NOTE_GAP : px - NOTE_GAP - width;
+    const box = {left, right: left + width, top: py - NOTE_HEIGHT, bottom: py};
+    const covers = placed.some(
+      other =>
+        box.left < other.right &&
+        box.right > other.left &&
+        box.top < other.y &&
+        box.bottom > other.y - NOTE_HEIGHT,
+    );
+    if (!covers) {
+      placed.push({
+        label: note.label,
+        x: onRight ? left : left + width,
+        y: py,
+        anchor: onRight ? 'start' : 'end',
+        left: box.left,
+        right: box.right,
+      });
+    }
+  }
+  return placed;
+}
+
+/** The notes beside places of the plot, each over a halo of the panel. */
+function Notes(props: {
+  readonly notes: readonly ChartNote[];
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element | null {
+  if (props.notes.length === 0) return null;
+  return (
+    <g className="vs-chart-notes">
+      {placeNotes(props.notes, props.plot, props.at).map(note => (
+        <text
+          key={`${note.x}:${note.y}`}
+          className="vs-chart-note"
+          x={note.x}
+          y={note.y}
+          textAnchor={note.anchor}
+        >
+          {note.label}
+        </text>
+      ))}
+    </g>
   );
 }
 
@@ -778,8 +1044,8 @@ function Tip(props: {readonly tip: Told; readonly plot: Plot}): JSX.Element {
   );
 }
 
-/** A mark of a key: the line, a dot, or a ring. */
-export type ChartLegendMark = 'line' | 'dot' | 'ring';
+/** A mark of a key: the line, a dashed line (a reference), a dot, a ring, or the accent ring of a chain. */
+export type ChartLegendMark = 'line' | 'dash' | 'dot' | 'ring' | 'chain';
 
 /** One entry of a `ChartLegend`. */
 export interface ChartLegendItem {

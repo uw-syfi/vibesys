@@ -11,6 +11,8 @@ import type {JSX, ReactNode} from 'react';
 export function FactLine(props: {
   readonly fit?: 'content' | 'parent';
   readonly wrap?: boolean;
+  /** Facts that are whole sentences of their own, apart by the width of a group gap and with no mark between. */
+  readonly spaced?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   const fit = props.fit ?? 'content';
@@ -19,6 +21,7 @@ export function FactLine(props: {
       className="vs-factline"
       data-fit={fit}
       data-wrap={(props.wrap ?? fit === 'content') || undefined}
+      data-spaced={props.spaced === true || undefined}
     >
       {props.children}
     </div>

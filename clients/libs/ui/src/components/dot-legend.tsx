@@ -6,6 +6,8 @@ import {Text} from './text.js';
 export interface LegendItem {
   readonly tone: StatusTone;
   readonly label: string;
+  /** How many rows the state has, written after the label in the same quiet voice. */
+  readonly count?: number;
   readonly on?: boolean;
   readonly toggle?: (on: boolean) => void;
   /** A chip with nothing behind it (a count of zero) cannot be pressed. */
@@ -27,6 +29,11 @@ export function DotLegend(props: {readonly items: readonly LegendItem[]}): JSX.E
             <Text variant="small" tone="muted">
               {item.label}
             </Text>
+            {item.count === undefined ? null : (
+              <Text variant="small" tone="muted">
+                {item.count}
+              </Text>
+            )}
           </>
         );
         return toggle === undefined ? (

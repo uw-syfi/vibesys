@@ -117,4 +117,31 @@ describe('fittedTimeTicks', () => {
       for (const tick of ticks) expect((tick.at + offset) % 3_600_000).toBe(0);
     }
   });
+
+  test('write each label as fine as its step, so no two ticks of an axis read alike, from seconds to a week', () => {
+    const byStep = (at: number, _span: number, step: number): string =>
+      new Date(at)
+        .toISOString()
+        .slice(0, step < 1000 ? 23 : step < 60_000 ? 19 : step < 86_400_000 ? 16 : 10);
+    const next = random(77);
+    for (let trial = 0; trial < 600; trial += 1) {
+      const from = 1_700_000_000_000 + Math.floor(next() * 31_536_000_000);
+      // A length from a second to a week, spread evenly over the decades.
+      const length = Math.round(10 ** (3 + next() * 5.8));
+      const width = 120 + next() * 1500;
+      const labels = fittedTimeTicks(from, from + length, width, byStep).map(tick => tick.label);
+      expect(new Set(labels).size).toBe(labels.length);
+    }
+  });
+
+  test('pass the step the axis chose to the label, and no coarser than the span allows', () => {
+    const from = Date.UTC(2026, 10, 6, 22, 56, 12);
+    const seen: number[] = [];
+    fittedTimeTicks(from, from + 40_000, 800, (_at, _span, step) => {
+      seen.push(step);
+      return String(step);
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(40_000);
+  });
 });

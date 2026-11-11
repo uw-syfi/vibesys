@@ -62,6 +62,13 @@ function gridTicks(
   return ticks.slice(0, take);
 }
 
+/** The finest tidy step that gives at most `limit` ticks inside the span. */
+function stepFor(from: number, to: number, limit: number, zone: ZoneOffset): number {
+  return (
+    STEPS.find(step => countAt(from, to, step, zone) <= limit) ?? STEPS[STEPS.length - 1] ?? DAY
+  );
+}
+
 /** The moments, ascending, from `from` to `to` (both included when they fall on a step). At most `most` of them. */
 export function timeTicks(
   from: number,
@@ -71,10 +78,7 @@ export function timeTicks(
 ): readonly number[] {
   if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || most < 1) return [];
   const limit = Math.floor(most);
-  for (const step of STEPS) {
-    if (countAt(from, to, step, zone) <= limit) return gridTicks(from, to, step, zone, limit);
-  }
-  return gridTicks(from, to, STEPS[STEPS.length - 1] ?? DAY, zone, limit);
+  return gridTicks(from, to, stepFor(from, to, limit, zone), zone, limit);
 }
 
 /** The most ticks an axis draws when its width is not known. */
@@ -99,22 +103,26 @@ export function fittedTimeTicks(
   from: number,
   to: number,
   width: number | null,
-  label: (at: number, span: number) => string,
+  label: (at: number, span: number, step: number) => string,
   zone: ZoneOffset = UTC,
 ): readonly LabelledTick[] {
   const span = to - from;
-  const labelled = (moments: readonly number[]): LabelledTick[] =>
-    moments.map(at => ({at, label: label(at, span)}));
   if (!Number.isFinite(span) || span <= 0) return [];
-  if (width === null) return labelled(timeTicks(from, to, UNMEASURED, zone));
+  const labelled = (moments: readonly number[], step: number): LabelledTick[] =>
+    moments.map(at => ({at, label: label(at, span, step)}));
+  if (width === null) {
+    const step = stepFor(from, to, UNMEASURED, zone);
+    return labelled(gridTicks(from, to, step, zone, UNMEASURED), step);
+  }
   let best: LabelledTick[] = [];
   for (const step of STEPS) {
     if (countAt(from, to, step, zone) > MOST) continue;
     const share = (tick: LabelledTick) => ({share: (tick.at - from) / span, text: tick.label});
     // Only the first and last ticks can lie too near an end to be centred inside the axis.
-    const kept = labelled(gridTicks(from, to, step, zone, MOST)).filter(tick =>
+    const kept = labelled(gridTicks(from, to, step, zone, MOST), step).filter(tick =>
       labelsFit([share(tick)], width),
     );
+    // A label is written as fine as its step (seconds under a minute), so two ticks never read alike.
     if (kept.length > best.length && labelsFit(kept.map(share), width)) best = kept;
   }
   return best;

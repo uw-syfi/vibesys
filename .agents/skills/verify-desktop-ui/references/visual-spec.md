@@ -17,6 +17,14 @@ invent them, and do not move a value in the name of this spec.
    empty padding does not count). The sidebar and the window's own controls are
    not part of the page, and a box counts by its outer edge, not its inset text.
    A reader allows 2 CSS pixels.
+
+   *Exception: the run report's width.* A page is centred at its content width, so its title sits
+   at the same left edge as every other page's; the run report instead fills the window, so its
+   title sits at the page gutter. The reason: its dense grid of charts, tables and a side column
+   needs all the width the window gives it, and its title still shares one top with every other
+   page's. Enforced by the desktop path end-to-end spec, which requires one top for every title
+   and one left edge for every title but the report's; that this exception is worth it is a
+   judgment the user made.
 2. **Size follows depth.** A child is never larger than its parent, and a screen
    has one focal point: the title is the largest text in its page, and a heading
    is never larger than a heading above it. A figure is text here, so a tile's
@@ -51,6 +59,16 @@ invent them, and do not move a value in the name of this spec.
    reads a progress bar with no value as a box with nothing in it. Unenforced: "no
    card of its own" needs to know what a box means, and a state that says what is
    happening and how far along it is needs a reader.
+
+   *Exception: the run report's panels.* A panel of the report with nothing in it yet (the
+   performance chart before the first measurement, the ideas table before the first idea) keeps its
+   frame, its axes and its headers, and says in one line what it waits for. This is as large as
+   the panel will be with data, on purpose: the user chose one layout for every state, so that a
+   live run's panels never move or change height as the first measurement or idea arrives. The
+   empty frame has no card of its own beyond the panel's, and still says how long it has waited.
+   Enforced for the chart's height by the report's tests (one height whatever the number of
+   points); that this exception is worth its room is a judgment the user made.
+
 6. **Labels earn their place.** A group label appears only with a parallel
    sibling; a label or a control says what it does in the words of the user's
    task. Unenforced: whether two groups are parallel is a judgment of meaning, so

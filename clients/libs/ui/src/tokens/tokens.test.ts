@@ -105,7 +105,7 @@ describe('contrast floors', () => {
     const {share, into} = CHIP_FILL_MIX;
     const failures = THEME_NAMES.flatMap(name => {
       const {colors} = THEMES[name];
-      return (['accent', 'ok', 'warn', 'err'] as const).flatMap(tone => {
+      return (['accent', 'ok', 'warn', 'err', 'alt'] as const).flatMap(tone => {
         const ratio = contrastRatio(colors[tone], mixHex(colors[tone], share, colors[into]));
         return ratio >= TEXT_FLOOR ? [] : [`${name}: ${tone} chip text is ${ratio.toFixed(2)}:1`];
       });
@@ -166,7 +166,7 @@ describe('renderTokensCss', () => {
 
   test('derives fills from the roles with color-mix, never from literals', () => {
     expect(css).toContain('--selection: color-mix(in srgb, var(--accent)');
-    for (const tone of ['accent', 'ok', 'warn', 'err']) {
+    for (const tone of ['accent', 'ok', 'warn', 'err', 'alt']) {
       expect(css).toContain(`--chip-${tone}-bg: color-mix(`);
       expect(css).toContain(`--chip-${tone}-border: color-mix(`);
       expect(css).toContain(`--banner-${tone}-bg: color-mix(`);

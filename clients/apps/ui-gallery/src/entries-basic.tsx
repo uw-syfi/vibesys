@@ -2,6 +2,7 @@ import {
   ActionPanel,
   BRAND_MARK_NAMES,
   BrandMark,
+  Brief,
   Button,
   type ButtonVariant,
   Card,
@@ -14,10 +15,13 @@ import {
   Grid,
   ICON_NAMES,
   Icon,
+  MainSide,
   Measure,
   PathInput,
   PickCard,
   PickCards,
+  RangeStrip,
+  type RangeWindow,
   Row,
   SectionLayout,
   SegmentedControl,
@@ -63,6 +67,28 @@ const COMPLETIONS: readonly Completion[] = [
   {value: '~/src/queue', detail: '0.1.1'},
   {value: '~/work/queue', detail: '0.1.0'},
 ];
+
+/** The overview strip with a window the reader drags out, kept in state as a page would keep it. */
+function RangeStripExample(): JSX.Element {
+  const [window, setWindow] = useState<RangeWindow | null>(null);
+  return (
+    <RangeStrip
+      label="The whole span, to choose a window of it"
+      valueText={
+        window === null ? 'Everything' : `${Math.round(window[0])} to ${Math.round(window[1])}`
+      }
+      domain={[0, 1000]}
+      window={window}
+      steps={[
+        {x: 0, y: 1},
+        {x: 300, y: 2},
+        {x: 700, y: 5},
+        {x: 1000, y: 5},
+      ]}
+      change={setWindow}
+    />
+  );
+}
 
 function Box(props: {readonly label: string}): JSX.Element {
   return (
@@ -340,6 +366,53 @@ export const BASIC_ENTRIES = {
         <Split main={<Box label="main" />} aside={<Box label="aside first" />} asideFirst />
       </Stack>
     ),
+  },
+  MainSide: {
+    render: () => (
+      <MainSide
+        label="Example columns"
+        main={
+          <>
+            <Box label="main: the panels that grow" />
+            <Box label="main: a second panel" />
+          </>
+        }
+        side={
+          <>
+            <Box label="side: 400 px" />
+            <Box label="side: a second panel" />
+          </>
+        }
+      />
+    ),
+  },
+  Brief: {
+    render: () => (
+      <Stack>
+        <Brief empty="The lead has not reported yet" />
+        <Brief
+          label="Lead's summary · 2h ago"
+          lead="Throughput is up 2.4 times on the input; the ring buffer and batching carry most of it."
+          leadTitle="Throughput is up 2.4 times on the input; the ring buffer and batching carry most of it."
+          fields={[
+            {
+              label: 'Changed',
+              text: 'Kept #52 after 3 confirming measures.',
+              title: 'Kept #52 after 3 confirming measures.',
+            },
+            {
+              label: 'Running',
+              text: '6 implementers on backoff tuning.',
+              title: '6 implementers on backoff tuning.',
+            },
+          ]}
+          more={<Text>Read the whole report</Text>}
+        />
+      </Stack>
+    ),
+  },
+  RangeStrip: {
+    render: () => <RangeStripExample />,
   },
   SectionLayout: {
     render: () => (

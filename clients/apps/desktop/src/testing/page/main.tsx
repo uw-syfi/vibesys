@@ -22,6 +22,10 @@
  * `measured`), and `staleDetail=<words>` gives its own words about it (with `measured`); a name
  * that is no reason fails the page; `appearance=<mode>-<light theme>-<dark theme>` sets what is
  * saved. Saved appearance lives in memory, so a reload starts again from the address.
+ * `case=<started|failed|week>` is one of three runs the report must hold in one layout (a run that has
+ * just started with nothing measured; one that failed within a minute and a half with three
+ * measurements; one of six days with two objectives, 400 measurements served of 3,000, 64 ideas and 28
+ * agents): it replaces the scenario, the search view and the cost, and no other parameter changes them.
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
@@ -78,6 +82,8 @@ import {
   generateScenario,
   measuredSearch,
   methodPathOf,
+  REPORT_CASES,
+  reportCaseWorld,
   SERVING,
   START_MS,
   withReport,
@@ -133,7 +139,12 @@ const setupFlavor: SetupFlavor | undefined = SETUP_FLAVORS.find(
   each => each === query.get('setup'),
 );
 
+/** The report case the address names, with its scripted world; none when it names none. */
+const reportCase = REPORT_CASES.find(each => each === query.get('case'));
+const caseWorld = reportCase === undefined ? undefined : reportCaseWorld(reportCase);
+
 function baseScenario() {
+  if (caseWorld !== undefined) return caseWorld.scenario;
   return setupFlavor === undefined ? scenarioOf(window.location.search) : setupScenario();
 }
 
@@ -143,6 +154,14 @@ function baseScenario() {
  * against it and the screens read it as Effect's `Clock`.
  */
 const NOW_MS = baseScenario().endMs + 60_000;
+// The moment the page means by "now". The screens read their ages from the browser's clock, which would
+// say the scenario (a fixed date) is days or years old, so the page sets that clock to the scenario's
+// "now" when it loads and lets it run on from there. This is the fixture page only: no product code
+// reads a clock differently, and a test never reaches it.
+const clockOrigin = Date.now();
+const realNow = Date.now.bind(Date);
+Date.now = () => NOW_MS + (realNow() - clockOrigin);
+document.documentElement.dataset.nowMs = String(NOW_MS);
 const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.defaultValue()), {
   currentTimeMillisUnsafe: () => NOW_MS,
   currentTimeMillis: Effect.succeed(NOW_MS),
@@ -195,15 +214,16 @@ function fleetRecording(spec: string): Recording {
 }
 
 const base = baseScenario();
-const scenario = query.has('report')
-  ? withReport(base, {
-      sequence: 1,
-      kind: ReportKind.PROGRESS,
-      atMs: base.endMs - 20 * 60_000,
-      headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
-      changed: 'Fused expert dispatch landed.',
-    })
-  : base;
+const scenario =
+  caseWorld === undefined && query.has('report')
+    ? withReport(base, {
+        sequence: 1,
+        kind: ReportKind.PROGRESS,
+        atMs: base.endMs - 20 * 60_000,
+        headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
+        changed: 'Fused expert dispatch landed.',
+      })
+    : base;
 const measured = query.get('measured');
 /** The reason `stale=<name>` names: the link lost when it names none; a wrong name fails the page. */
 function staleReason(name: string): UnreadableReason {
@@ -222,7 +242,8 @@ const daemon = new FakeDaemon({
   search: true,
   searchStale: query.has('stale'),
   searchTruncated: query.has('truncated'),
-  ...(measured === null
+  ...(caseWorld === undefined ? {} : {searches: [caseWorld.search]}),
+  ...(measured === null || caseWorld !== undefined
     ? {}
     : {
         searches: [
@@ -244,7 +265,10 @@ const daemon = new FakeDaemon({
 const world = new FakeSetup(daemon.ledger(), setupFlavor ?? 'ticks');
 daemon.setup = world;
 if (setupFlavor !== undefined) world.adopt(scenario.runId);
-const cost = COSTS[query.get('cost') ?? (setupFlavor === undefined ? 'priced' : 'empty')];
+const cost =
+  caseWorld === undefined
+    ? COSTS[query.get('cost') ?? (setupFlavor === undefined ? 'priced' : 'empty')]
+    : caseWorld.cost;
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
 daemon.publishHostCost(servedHostCost(scenario.changes, NOW_MS));
 const shape = query.get('catchUp') ?? 'none';

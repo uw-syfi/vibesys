@@ -10,6 +10,8 @@ import {Text} from './text.js';
 export function Card(props: {
   readonly section?: string;
   readonly action?: ReactNode;
+  /** What stands right after the heading, left-aligned with it (a key to what the card draws). */
+  readonly beside?: ReactNode;
   readonly flush?: boolean;
   /** Less padding and a closer gap, for a page that packs many cards; the default is for the rest. */
   readonly dense?: boolean;
@@ -32,12 +34,13 @@ export function Card(props: {
   );
   return (
     <section className="vs-card" data-flush={flush} data-dense={dense} aria-labelledby={titleId}>
-      {props.action === undefined ? (
+      {props.action === undefined && props.beside === undefined ? (
         title
       ) : (
         <div className="vs-card-head">
           {title}
-          {props.action}
+          {props.beside === undefined ? null : <div className="vs-card-beside">{props.beside}</div>}
+          {props.action === undefined ? null : <div className="vs-card-action">{props.action}</div>}
         </div>
       )}
       {props.children}
