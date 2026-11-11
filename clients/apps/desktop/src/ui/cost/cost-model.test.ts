@@ -225,15 +225,18 @@ describe('the cost screen model', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
-  it('shows the model id as the host served it, and the harness for its own default', () => {
+  it('names a model as a person says it, and the harness for its own default', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
-      'model-a',
-      'model-b',
+      'Model A',
+      'Model B',
       'Codex',
     ]);
     const long = costScreenModel(LONG_NAMES, COST_WORDS);
+    const id = LONG_NAMES.models[0]?.model.model ?? '';
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
-    expect(long.models[0]?.mono).toBe(true);
-    expect(long.chart?.legend[0]?.mono).toBe(true);
+    // The legend and the rows say the same words, and neither is the id as the host served it.
+    expect(long.chart?.legend[0]?.label).toBe(long.models[0]?.name);
+    expect(long.models[0]?.name).not.toBe(id);
+    expect(long.chart?.legend.map(item => item.label)).not.toContain(id);
   });
 });

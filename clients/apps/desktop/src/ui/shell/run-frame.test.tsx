@@ -162,12 +162,12 @@ describe('the pages of a run and the pages of the window', () => {
       title: 'Settings',
     });
     settings.unmount();
-    // Machines, like the report and the Cost page, is a table or a grid that needs the whole area.
+    // The report, Machines and Cost are tables or grids that need the whole area, and fill it.
     for (const [name, width, page] of [
       ['Machines', 'fill', <MachinesScreen key="m" rows={[]} />],
       [
         'Cost',
-        'wide',
+        'fill',
         <CostOverviewScreen
           key="c"
           hosts={[]}

@@ -9,6 +9,7 @@ import {
   formatTokens,
   formatUsd,
   labelStride,
+  modelDisplayName,
   type Precision,
   precisionOf,
 } from './words.js';
@@ -130,5 +131,33 @@ describe('which buckets are labelled', () => {
 
   it('has no stride for a bucket of no length', () => {
     expect(labelStride(0, 10)).toBe(1);
+  });
+});
+
+describe('naming a model', () => {
+  it('words the ids of the common shapes as a person says them', () => {
+    expect(modelDisplayName('claude-opus-5-5')).toBe('Claude Opus 5.5');
+    expect(modelDisplayName('claude-sonnet-5-5-20260115')).toBe('Claude Sonnet 5.5');
+    expect(modelDisplayName('gpt-5-codex')).toBe('GPT 5 Codex');
+    expect(modelDisplayName('gemini-2.5-pro')).toBe('Gemini 2.5 Pro');
+    expect(modelDisplayName('model-a')).toBe('Model A');
+    expect(modelDisplayName('vendor/some-model-7b')).toBe('Some Model 7b');
+  });
+
+  it('never leaves a kebab-case id, a lowercase first letter or a stray separator in the name', () => {
+    const word = fc.stringMatching(/^[a-z][a-z0-9]{0,8}$/);
+    const id = fc
+      .array(fc.oneof(word, fc.stringMatching(/^[0-9]{1,2}$/)), {minLength: 1, maxLength: 6})
+      .map(parts => parts.join('-'));
+    fc.assert(
+      fc.property(id, raw => {
+        const name = modelDisplayName(raw);
+        expect(name).not.toMatch(/[-_]/);
+        expect(name).not.toMatch(/\s{2}|^\s|\s$/);
+        expect(name.charAt(0)).toBe(name.charAt(0).toUpperCase());
+        // Said twice, it is the same words: naming is a function of the id alone.
+        expect(modelDisplayName(raw)).toBe(name);
+      }),
+    );
   });
 });

@@ -158,9 +158,39 @@ export function labelStride(bucketMs: number, buckets: number): number {
   return Math.max(1, Math.round(step / bucketMs));
 }
 
-/** The name of a model: the id the host served, or the harness's own words for its default. */
+/** Words an id spells in capitals. */
+const ACRONYMS = new Set(['gpt', 'glm', 'llm']);
+
+/**
+ * A model id as a person says it: `claude-opus-5-5` is `Claude Opus 5.5`, `gpt-5-codex-20260115` is
+ * `GPT 5 Codex`. The host serves ids and no names, so this words the common shapes of an id: a date
+ * suffix is dropped, digits that follow each other make one version (`5-5` is `5.5`), a word is
+ * capitalised and an acronym is not lowercase. An id of another shape keeps its words, spaced.
+ */
+export function modelDisplayName(id: string): string {
+  const named = id.slice(id.lastIndexOf('/') + 1);
+  const parts = named.split(/[-_\s]+/).filter(part => part !== '' && !/^\d{8}$/.test(part));
+  const words: string[] = [];
+  for (const part of parts) {
+    const last = words.at(-1);
+    if (/^\d{1,2}$/.test(part) && last !== undefined && /^\d{1,2}(\.\d{1,2})*$/.test(last)) {
+      words[words.length - 1] = `${last}.${part}`;
+    } else {
+      words.push(part);
+    }
+  }
+  return words
+    .map(word =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : `${word.charAt(0).toUpperCase()}${word.slice(1)}`,
+    )
+    .join(' ');
+}
+
+/** The name of a model: its id said as a person says it, or the harness's own words for its default. */
 export function modelName(model: CostModel, words: CostWords): string {
-  return model.model === '' ? words.harness(model.harness) : model.model;
+  return model.model === '' ? words.harness(model.harness) : modelDisplayName(model.model);
 }
 
 /** What identifies a model across views of a run. */

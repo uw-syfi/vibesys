@@ -25,7 +25,7 @@ import {
 import {FakeDaemon, generateScenario, hostHarness} from '../../testing/orchestrator/index.js';
 import {COST_WORDS} from '../test-display-clock.js';
 import {CostScreen} from './cost-screen.js';
-import {formatCount} from './words.js';
+import {formatCount, modelDisplayName} from './words.js';
 
 const LIVE: FeedStatus = {_tag: 'Live'};
 /** The host status a feed freshness is shown as. */
@@ -85,7 +85,8 @@ describe('the Cost screen over served views', () => {
     }
     expect(text).toMatch(/Profiler No price/);
     // By model, as the host named them.
-    expect(text).toContain('model-a');
+    expect(text).toContain('Model A');
+    expect(text).not.toContain('model-a');
     expect(text).toContain('$206');
     // By kind, from the host's own totals.
     for (const word of ['Cache read', '212.4M', 'Reasoning', '5.2M', 'Cache write', '9.6M']) {
@@ -203,8 +204,9 @@ describe('the Cost screen over served views', () => {
     const html = screen(LONG_NAMES);
     const longest = LONG_NAMES.models[0]?.model.model ?? '';
     expect(longest.length).toBeGreaterThan(60);
-    expect(html).toContain(`title="${longest}"`);
-    expect(html).toContain('data-mono="true"');
+    // The pointer shows the whole name, said as a person says it; the id itself is not drawn.
+    expect(html).toContain(`title="${modelDisplayName(longest)}"`);
+    expect(html).not.toContain(longest);
   });
 
   it('reads any view the contract allows without a word of the protocol, a NaN or a missing value', () => {

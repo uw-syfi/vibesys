@@ -6,7 +6,8 @@
  * which buckets get a label.
  */
 import type {BarColumn, BarMark, BarRow, StackedBar, SwatchItem} from '@vibesys/ui';
-import type {CostModel, CostUsage, CostView} from '../../state/index.js';
+import type {CostModel, CostUsage, CostView, SpendSeriesView} from '../../state/index.js';
+import {UNKNOWN} from '../plain-words.js';
 import {
   type CostWords,
   formatCount,
@@ -17,6 +18,7 @@ import {
   labelStride,
   modelKey,
   modelName,
+  NOT_REPORTED,
   type Precision,
   precisionOf,
   tokensOrNothing,
@@ -40,7 +42,7 @@ export interface SpendFigures {
   readonly unpricedTurns: string;
 }
 
-interface SpendChart {
+export interface SpendChart {
   readonly bars: readonly StackedBar[];
   readonly marks: readonly BarMark[];
   readonly legend: readonly SwatchItem[];
@@ -80,6 +82,45 @@ export interface CostScreenModel {
   readonly kinds: readonly BarRow<1>[];
 }
 
+/**
+ * A usage's tokens as principle 19 writes them: the input apart from the output, the input with the
+ * share of it that was read from a cache, and a kind nobody reported as `unknown`, never zero. The
+ * host's kinds do not overlap (`total_tokens` is their sum), so the input is the sum of its three
+ * kinds: fresh input, cache reads and cache writes. Tokens are counts, not costs: this sums counts
+ * the host served and prices nothing. Before a turn has finished every part is `—`, not `unknown`.
+ */
+export interface TokenSplit {
+  readonly input: string;
+  /** The cache reads' share of the input, in whole percent. */
+  readonly cached: string;
+  readonly output: string;
+}
+
+export function tokenSplit(usage: CostUsage, turns: number): TokenSplit {
+  // No turn has finished: there is nothing to report yet, which is not the same as nobody reporting.
+  if (turns === 0) return {input: NOT_REPORTED, cached: NOT_REPORTED, output: NOT_REPORTED};
+  const kinds = [usage.inputTokens, usage.cacheReadTokens, usage.cacheCreationTokens].filter(
+    (tokens): tokens is number => tokens !== null,
+  );
+  const input = kinds.length === 0 ? null : kinds.reduce((sum, tokens) => sum + tokens, 0);
+  const share =
+    input === null || input === 0 || usage.cacheReadTokens === null
+      ? null
+      : usage.cacheReadTokens / input;
+  return {
+    input: input === null ? UNKNOWN : formatTokens(input),
+    cached:
+      usage.cacheReadTokens === null
+        ? UNKNOWN
+        : share === null
+          ? NOT_REPORTED
+          : share > 0 && share < 0.005
+            ? '<1%'
+            : `${Math.round(share * 100)}%`,
+    output: usage.outputTokens === null ? UNKNOWN : formatTokens(usage.outputTokens),
+  };
+}
+
 /** What a row says is missing from its cost: all of it, or the turns that left it a floor. */
 function noteOf(usage: CostUsage, unpricedTurns: number): string | undefined {
   if (usage.costUsd === null) return 'No price';
@@ -90,7 +131,7 @@ function noteOf(usage: CostUsage, unpricedTurns: number): string | undefined {
  * The slot of the palette each model draws in. It follows the models' names, not their cost, so a
  * model keeps its color while the run goes on and another overtakes it.
  */
-function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
+export function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
   const keys = new Set<string>(view.models.map(each => modelKey(each.model)));
   for (const bucket of view.series.buckets) {
     for (const spend of bucket.byModel) keys.add(modelKey(spend.model));
@@ -126,12 +167,29 @@ function bucketTitle(
   ].join('\n');
 }
 
-function chartOf(
+/** The labels under the bars: which bars of a series are named, and how. */
+export type BarMarker = (series: SpendSeriesView) => readonly BarMark[];
+
+/** Elapsed time from the start of the series (`0`, `6 h`, `1 d 4 h`), for one run's own chart. */
+const elapsedMarks: BarMarker = ({buckets, startMs, bucketMs}) => {
+  const stride = labelStride(bucketMs, buckets.length);
+  return buckets.flatMap((bucket, at): BarMark[] =>
+    at % stride === 0 ? [{at, text: formatElapsed(bucket.startMs - startMs)}] : [],
+  );
+};
+
+/**
+ * The bars of the spend over time, stacked by model, with the legend of the models and the labels
+ * `marker` puts under them. `slots` is the palette slot of each model, worked out from the whole
+ * view so a range of the chart never recolors a model.
+ */
+export function spendChart(
   view: CostSplitSource,
   slots: ReadonlyMap<string, number>,
   words: CostWords,
+  marker: BarMarker,
 ): SpendChart | null {
-  const {buckets, startMs, bucketMs} = view.series;
+  const {buckets} = view.series;
   // A bucket has a model's spend only where a turn was priced: with none anywhere there is no
   // spend to draw, and an axis would make up a scale for it.
   if (buckets.every(bucket => bucket.byModel.length === 0)) return null;
@@ -151,18 +209,10 @@ function chartOf(
         .sort((a, b) => a.series - b.series),
     }),
   );
-  const stride = labelStride(bucketMs, buckets.length);
-  const marks = buckets.flatMap((bucket, at): BarMark[] =>
-    at % stride === 0 ? [{at, text: formatElapsed(bucket.startMs - startMs)}] : [],
-  );
   const legend = view.models.map(
-    (cost): SwatchItem => ({
-      label: modelName(cost.model, words),
-      series: slot(cost.model),
-      ...(cost.model.model === '' ? {} : {mono: true}),
-    }),
+    (cost): SwatchItem => ({label: modelName(cost.model, words), series: slot(cost.model)}),
   );
-  return {bars, marks, legend};
+  return {bars, marks: marker(view.series), legend};
 }
 
 /**
@@ -208,7 +258,6 @@ const modelRows = (
     (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
-      ...(cost.model.model === '' ? {} : {mono: true}),
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),
@@ -237,7 +286,7 @@ export function costSplits(view: CostSplitSource, words: CostWords): CostSplits 
   const precision = precisionOf(view.total.costUsd);
   const slots = slotsOf(view);
   return {
-    chart: chartOf(view, slots, words),
+    chart: spendChart(view, slots, words, elapsedMarks),
     types: typeRows(view, precision, words),
     models: modelRows(view, precision, slots, words),
   };
@@ -250,7 +299,7 @@ export function costScreenModel(view: CostView, words: CostWords): CostScreenMod
   return {
     empty: view.turns === 0,
     spend: spendOf(view, precision),
-    chart: chartOf(view, slots, words),
+    chart: spendChart(view, slots, words, elapsedMarks),
     types: typeRows(view, precision, words),
     models: modelRows(view, precision, slots, words),
     kinds: kindRows(view),

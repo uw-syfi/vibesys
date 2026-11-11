@@ -8,19 +8,32 @@
 export {AgentTypeTable, agentTypeLine} from './agent-types.js';
 export {FLOOR_HINT, floored} from './cost-cell.js';
 export {
+  type BarMarker,
   type CostSplits,
   costSplits,
   MODEL_COLUMNS,
+  type SpendChart,
+  slotsOf,
+  spendChart,
+  type TokenSplit,
   TYPE_COLUMNS,
+  tokenSplit,
 } from './cost-model.js';
+export {Counted, FactDot, MutedFact} from './fact-parts.js';
 export {CostScreen, SpendOverTime} from './cost-screen.js';
 export {SpendCard} from './spend-card.js';
 export {
   type CostWords,
   FLOOR,
+  formatAxisUsd,
   formatCount,
   formatRate,
+  formatUsd,
+  modelDisplayName,
+  modelKey,
+  modelName,
   NOT_REPORTED,
+  type Precision,
   precisionOf,
   usdOrNothing,
 } from './words.js';

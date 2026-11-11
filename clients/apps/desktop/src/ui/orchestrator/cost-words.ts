@@ -15,4 +15,5 @@ export const costWords = (clock: DisplayClock): CostWords => ({
 export const costOverviewWords = (clock: DisplayClock): CostOverviewWords => ({
   ...costWords(clock),
   run: runWord,
+  tick: clock.reportTick,
 });
