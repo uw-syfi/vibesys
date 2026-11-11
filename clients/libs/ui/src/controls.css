@@ -35,10 +35,11 @@
   opacity: 0;
   cursor: inherit;
 }
-.vs-choice-tile:hover {
-  color: var(--text);
+/* A hover is a tint of the ground only: text and border are the selection's. */
+.vs-choice-tile:not([data-selected], [data-unavailable]):hover {
+  background: var(--panel-2);
 }
-.vs-choice-tile:has(:checked) {
+.vs-choice-tile[data-selected] {
   border-color: var(--text);
   color: var(--text);
   font-weight: var(--text-body-strong-weight);
@@ -100,7 +101,7 @@
 .vs-choice-tiles[data-layout='cards'] .vs-choice-tile[data-unavailable] {
   color: var(--muted);
 }
-.vs-choice-tiles[data-layout='cards'] .vs-choice-tile:has(:checked) {
+.vs-choice-tiles[data-layout='cards'] .vs-choice-tile[data-selected] {
   background: var(--selection);
 }
 

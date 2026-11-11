@@ -90,10 +90,13 @@ function frameOf(container: HTMLElement) {
   return {
     pages: pages.length,
     width: content?.getAttribute('data-width'),
-    // The trail band is the header's first child and the heading's row follows it at once.
-    trailThenTitle:
-      header?.firstElementChild?.classList.contains('vs-page-trail') === true &&
-      header.children[1]?.querySelector('h1') !== null,
+    // The heading's row follows the trail band at once; a page with no trail has no band at all.
+    titleFirst:
+      header !== null &&
+      (header.firstElementChild?.classList.contains('vs-page-trail') === true
+        ? header.children[1]
+        : header.firstElementChild
+      )?.querySelector('h1') !== null,
     headings: container.querySelectorAll('h1').length,
     title: container.querySelector('h1')?.textContent ?? '',
   };
@@ -133,7 +136,7 @@ describe('the pages of a run and the pages of the window', () => {
             // stack under 1180 px, which a page of 1100 px never reaches: it takes the window's width.
             // Its trail band, title row and left edge are the frame every other page has.
             width: name === 'report' ? 'fill' : 'wide',
-            trailThenTitle: true,
+            titleFirst: true,
             headings: 1,
           });
           expect(frame.title, name).not.toBe('');
@@ -157,7 +160,7 @@ describe('the pages of a run and the pages of the window', () => {
     expect(frameOf(settings.container)).toMatchObject({
       pages: 1,
       width: 'wide',
-      trailThenTitle: true,
+      titleFirst: true,
       headings: 1,
       title: 'Settings',
     });
@@ -181,7 +184,7 @@ describe('the pages of a run and the pages of the window', () => {
       expect(frameOf(screen.container), name).toMatchObject({
         pages: 1,
         width,
-        trailThenTitle: true,
+        titleFirst: true,
         headings: 1,
         title: name,
       });
@@ -204,7 +207,7 @@ describe('the pages of a run and the pages of the window', () => {
     expect(frameOf(catchUp.container)).toMatchObject({
       pages: 1,
       width: 'wide',
-      trailThenTitle: true,
+      titleFirst: true,
       headings: 1,
       title: 'Catch me up',
     });

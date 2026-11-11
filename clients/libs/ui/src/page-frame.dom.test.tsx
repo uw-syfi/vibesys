@@ -93,7 +93,7 @@ describe('Page with a title', () => {
     expect(one(container, 'main').getAttribute('data-state')).toBe('ready');
   });
 
-  test('keeps the trail band without a trail, so a title is at one place on every page', async () => {
+  test("has no trail band without a trail, so the title is the header's first row", async () => {
     const titled = await mount(
       <Page state="ready" title="Settings">
         Body
@@ -104,13 +104,18 @@ describe('Page with a title', () => {
         Body
       </Page>,
     );
-    for (const container of [titled, own]) {
+    const empty = await mount(
+      <Page state="ready" title="Machines" trail={[]}>
+        Body
+      </Page>,
+    );
+    for (const container of [titled, own, empty]) {
       const header = one(container, '.vs-page-header');
-      expect(header.firstElementChild?.className).toBe('vs-page-trail');
-      expect(header.querySelector('.vs-crumb')).toBeNull();
+      expect(header.querySelector('.vs-page-trail')).toBeNull();
       expect(header.querySelector('h1')).not.toBeNull();
     }
-    // The band is as tall wherever it is, so the heading below it never moves between pages.
+    expect(one(titled, '.vs-page-header').firstElementChild?.className).toBe('vs-page-title-row');
+    // A page with a trail keeps its band as tall as ever, so it never moves when the crumbs load.
     expect(css('base.css')).toMatch(/\.vs-page-trail \{[^}]*min-height: var\(--row-dense\)/);
     // And the title row is a control tall, so a title with a button beside it is where one without is.
     expect(css('base.css')).toMatch(/\.vs-page-title-row \{[^}]*min-height: var\(--control\)/);

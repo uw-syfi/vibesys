@@ -77,9 +77,9 @@ export const OVERVIEW_ENTRIES: Pick<
       <RailFrame
         label="Rail"
         state="ready"
+        mark={{icon: 'mark', label: 'Home'}}
         top={
           <>
-            <RailItem icon="mark" label="Home" hideLabel press={noop} />
             <RailItem icon="list" label="Runs" active press={noop} />
             <RailItem icon="usage" label="Cost" press={noop} />
             <RailItem icon="monitor" label="Machines" press={noop} />

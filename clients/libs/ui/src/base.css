@@ -141,7 +141,7 @@ body > div:first-child {
   gap: var(--space-3);
   min-width: 0;
 }
-/* The room of the breadcrumb, kept when there is none: a title is at the same place on every page. */
+/* The breadcrumb's band: drawn only by a page that has a trail, so a page without one has no dead row. */
 .vs-page-trail {
   display: flex;
   align-items: center;

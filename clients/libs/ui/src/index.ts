@@ -57,7 +57,11 @@ export {
 } from './components/column-list.js';
 export {
   type ColumnTier,
+  type ColumnWidths,
+  clampColumnWidth,
   columnTier,
+  MAX_COLUMN_WIDTH,
+  MIN_COLUMN_WIDTH,
   type TrackedColumn,
   widthToShowAll,
 } from './components/column-tracks.js';

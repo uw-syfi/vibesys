@@ -657,9 +657,6 @@
   padding-inline: 0;
   text-align: start;
 }
-.vs-empty-action {
-  padding-top: var(--space-3);
-}
 
 /* What the point a reader chose is: one line under the charts, always as tall as a small control, so
    choosing a point moves nothing below it. */

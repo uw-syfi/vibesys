@@ -143,9 +143,22 @@ function hardwareWords(card: TaskCard): string {
  * field: the title is worded here from the card, and never names a variant.
  */
 export function runTitle(card: TaskCard | null, task: string): string {
-  if (card === null) return task;
+  const {subject, hardware} = runTitleParts(card, task);
+  return [subject, hardware].filter(part => part !== '').join(' · ');
+}
+
+/**
+ * The two halves of `runTitle`: the model or workload (what gives way when a title is cut short)
+ * and the hardware, `1× MI300X` (what tells runs of one model apart, so it is kept whole).
+ * `hardware` is empty when the card names none.
+ */
+export function runTitleParts(
+  card: TaskCard | null,
+  task: string,
+): {readonly subject: string; readonly hardware: string} {
+  if (card === null) return {subject: task, hardware: ''};
   const subject = [card.modelName, card.workloadName, card.heading, card.task, task].find(
     word => word.trim() !== '',
   );
-  return [subject?.trim() ?? task, hardwareWords(card)].filter(part => part !== '').join(' · ');
+  return {subject: subject?.trim() ?? task, hardware: hardwareWords(card)};
 }

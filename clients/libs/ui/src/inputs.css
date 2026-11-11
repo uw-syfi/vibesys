@@ -153,8 +153,10 @@
   opacity: 0;
   cursor: inherit;
 }
-.vs-segment:hover {
-  color: var(--text);
+/* A hover is a tint of the ground only: the text and the border are the selection's, so a hovered
+   segment never reads as the chosen one. */
+.vs-segment:not([data-selected]):hover {
+  background: var(--panel-2);
 }
 .vs-segmented[data-size="sm"] .vs-segment,
 .vs-segmented[data-size="xs"] .vs-segment {
@@ -169,7 +171,7 @@
 .vs-segmented[data-size="xs"] .vs-segment {
   padding: 0 var(--space-3);
 }
-.vs-segment:has(:checked) {
+.vs-segment[data-selected] {
   border-color: var(--text);
   color: var(--text);
   font-weight: var(--text-body-strong-weight);

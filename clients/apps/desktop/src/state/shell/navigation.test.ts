@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {FLEET_STATES} from '../orchestrator/fleet.js';
+import {FLEET_COLUMNS, FLEET_STATES} from '../orchestrator/fleet.js';
 import {
   initialNavigation,
   NAVIGATION_KINDS,
@@ -47,6 +47,15 @@ const generators: {
   'filter-runs-by-host': fc.record({
     type: fc.constant('filter-runs-by-host' as const),
     host: fc.constantFrom('host-a', 'host-b', null),
+  }),
+  'sort-runs': fc.record({
+    type: fc.constant('sort-runs' as const),
+    column: fc.constantFrom(...FLEET_COLUMNS),
+  }),
+  'resize-runs-column': fc.record({
+    type: fc.constant('resize-runs-column' as const),
+    column: fc.constantFrom('status', 'best', 'cost'),
+    width: fc.option(fc.integer({min: -5, max: 900}), {nil: null}),
   }),
   'open-cost': fc.constant({type: 'open-cost' as const}),
   'open-machines': fc.constant({type: 'open-machines' as const}),
@@ -201,7 +210,65 @@ describe('navigation', () => {
   });
 
   it('starts with every run shown and no row selected', () => {
-    expect(initialNavigation.fleet).toEqual({state: 'all', host: null, selected: null});
+    expect(initialNavigation.fleet).toEqual({
+      state: 'all',
+      host: null,
+      selected: null,
+      sort: null,
+      widths: {},
+    });
+  });
+
+  it('sorts by a column through the three presses, and keeps the sort through a run and the rail', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...FLEET_COLUMNS),
+        fc.constantFrom(...FLEET_COLUMNS),
+        (column, other) => {
+          const press = (nav: Navigation, by: typeof column): Navigation =>
+            navigationReducer(nav, {type: 'sort-runs', column: by});
+          const once = press(initialNavigation, column);
+          expect(once.fleet.sort).toEqual({column, direction: 'asc'});
+          const twice = press(once, column);
+          expect(twice.fleet.sort).toEqual({column, direction: 'desc'});
+          expect(press(twice, column).fleet.sort).toBeNull();
+          // Another column's header starts that column over, ascending.
+          expect(press(twice, other).fleet.sort).toEqual(
+            other === column ? null : {column: other, direction: 'asc'},
+          );
+          const away = navigationReducer(
+            navigationReducer(once, {type: 'open-run', host: 'host-a', runId: 'run-1'}),
+            {type: 'open-settings'},
+          );
+          expect(away.fleet.sort).toEqual({column, direction: 'asc'});
+        },
+      ),
+    );
+  });
+
+  it('keeps a column width a person dragged, drops it for null or no width, and ignores it off the list', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 1, max: 900}), fc.integer({min: -50, max: 0}), (width, none) => {
+        const sized = navigationReducer(initialNavigation, {
+          type: 'resize-runs-column',
+          column: 'cost',
+          width,
+        });
+        expect(sized.fleet.widths).toEqual({cost: width});
+        expect(
+          navigationReducer(sized, {type: 'resize-runs-column', column: 'cost', width: null}).fleet
+            .widths,
+        ).toEqual({});
+        expect(
+          navigationReducer(sized, {type: 'resize-runs-column', column: 'cost', width: none}).fleet
+            .widths,
+        ).toEqual({});
+        const away = navigationReducer(sized, {type: 'open-settings'});
+        expect(navigationReducer(away, {type: 'resize-runs-column', column: 'best', width})).toBe(
+          away,
+        );
+      }),
+    );
   });
 
   it('keeps the list filters through a run, the settings and the rail, and finds the opened row again', () => {
@@ -230,7 +297,7 @@ describe('navigation', () => {
             ),
           ]) {
             expect(home.runs).toEqual({screen: 'runs'});
-            expect(home.fleet).toEqual({state, host, selected: 'host-b/run-2'});
+            expect(home.fleet).toMatchObject({state, host, selected: 'host-b/run-2'});
           }
         },
       ),

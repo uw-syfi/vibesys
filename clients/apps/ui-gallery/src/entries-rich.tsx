@@ -891,11 +891,7 @@ export const RICH_ENTRIES = {
   EmptyState: {
     render: () => (
       <Card>
-        <EmptyState
-          title="Nothing here yet"
-          body="What you start shows up here."
-          action={<Button variant="primary" icon="plus" text="Start one" press={noop} />}
-        />
+        <EmptyState title="Nothing here yet" body="What you start shows up here." />
       </Card>
     ),
   },

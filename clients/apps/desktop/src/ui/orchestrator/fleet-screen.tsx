@@ -24,6 +24,7 @@ import {
 import type {JSX, ReactNode} from 'react';
 import {
   FLEET_STATES,
+  type FleetColumn,
   type FleetFilter,
   type FleetHostInput,
   type FleetHostRef,
@@ -40,6 +41,8 @@ import {useDisplayClock} from '../display-clock.js';
 import type {DisplayClock} from '../display-time.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {hostStatusWord} from '../host-status-words.js';
+import {sortedRows} from './fleet-sort.js';
+import {rowTitle, rowTitleParts} from './fleet-title.js';
 import {
   ago,
   attentionWords,
@@ -47,24 +50,27 @@ import {
   percent,
   resultHint,
   resultWords,
-  runTitle,
   span,
   unreadTitle,
 } from './fleet-words.js';
-import {runStateWord, setupTitle} from './setup/index.js';
+import {runStateWord} from './setup/index.js';
 
 /** A row whose run started, or ended, within this long is new on screen: it arrives with a flash. */
 const FRESH_MS = 10_000;
 /** The host control's value for every host: no host key is empty. */
 const ALL_HOSTS = '';
-/** What a row is called: its task's title, or, in setup with no task, the state and the repository. */
-const rowTitle = (row: FleetRow): string =>
-  row.setup ? setupTitle(row.repository) : runTitle(row.card, row.name);
-
 /** Objectives a row names before it says how many more there are. */
 const OBJECTIVE_LINES = 2;
 
 const STATE_WORD: Readonly<Record<FleetState, string>> = {all: 'All', live: 'Live', ended: 'Ended'};
+
+/** What an empty list says, by the state the person chose: the filter is in the words. */
+const EMPTY_TITLE: Readonly<Record<FleetState, string>> = {
+  all: 'No runs',
+  live: 'No live runs',
+  ended: 'No ended runs',
+};
+const emptyTitle = (state: FleetState): string => EMPTY_TITLE[state];
 
 const isFresh = (row: FleetRow, nowMs: number): boolean => {
   const at = row.live ? row.startedMs : row.endedMs;
@@ -153,17 +159,30 @@ function statusHint(row: FleetRow, nowMs: number, clock: DisplayClock): string {
 const hostWords = (host: FleetHostRef): string =>
   host.status.kind === 'live' ? host.label : `${host.label} · ${hostStatusWord(host.status).label}`;
 
+/** How a column's header sorts: its direction now and the press that sorts by it; none if it cannot. */
+type SortOf = (column: FleetColumn) => ListColumn<FleetRow>['sort'];
+
 /** The columns that name a run and say how it stands, and where it is. */
-function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColumn<FleetRow>[] {
+function identityColumns(
+  nowMs: number,
+  clock: DisplayClock,
+  sortOf: SortOf,
+): readonly ListColumn<FleetRow>[] {
   return [
     {
       key: 'name',
       header: 'Run',
+      sort: sortOf('name'),
       size: 'fill',
       hint: row => [rowTitle(row), row.repository, `On ${hostWords(row.host)}`].join('\n'),
       cell: row => (
         <CellLines
-          main={<Text variant="body-strong">{rowTitle(row)}</Text>}
+          main={<Text variant="body-strong">{rowTitleParts(row).subject}</Text>}
+          mainTail={
+            rowTitleParts(row).hardware === '' ? null : (
+              <Text variant="body-strong">{` \u00b7 ${rowTitleParts(row).hardware}`}</Text>
+            )
+          }
           note={
             <Text variant="small" tone="muted">
               {withoutPaths(row.repository)}
@@ -177,6 +196,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
     {
       key: 'status',
       header: 'Status',
+      sort: sortOf('status'),
       size: 'wide',
       narrow: 'short',
       hint: row => statusHint(row, nowMs, clock),
@@ -199,6 +219,7 @@ function identityColumns(nowMs: number, clock: DisplayClock): readonly ListColum
     {
       key: 'host',
       header: 'Host',
+      sort: sortOf('host'),
       size: 'wide',
       optional: true,
       hint: row => `${row.host.label}\n${hostStatusWord(row.host.status).label}`,
@@ -249,6 +270,7 @@ function trendCell(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNo
 /** The columns of figures: the measured history, the best results, the agents working and the cost. */
 function figureColumns(
   objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+  sortOf: SortOf,
 ): readonly ListColumn<FleetRow>[] {
   return [
     {
@@ -261,6 +283,7 @@ function figureColumns(
     {
       key: 'best',
       header: 'Best',
+      sort: sortOf('best'),
       size: 'wide',
       narrow: 'short',
       note: {
@@ -278,6 +301,7 @@ function figureColumns(
     {
       key: 'agents',
       header: 'Agents',
+      sort: sortOf('agents'),
       size: 'compact',
       align: 'end',
       optional: true,
@@ -288,6 +312,7 @@ function figureColumns(
     {
       key: 'cost',
       header: 'Cost',
+      sort: sortOf('cost'),
       size: 'short',
       narrow: 'compact',
       align: 'end',
@@ -309,9 +334,10 @@ const columns = (
   nowMs: number,
   clock: DisplayClock,
   objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
+  sortOf: SortOf,
 ): readonly ListColumn<FleetRow>[] => [
-  ...identityColumns(nowMs, clock),
-  ...figureColumns(objectivesOf),
+  ...identityColumns(nowMs, clock, sortOf),
+  ...figureColumns(objectivesOf, sortOf),
 ];
 
 const describe = (row: FleetRow, nowMs: number, clock: DisplayClock): string =>
@@ -438,14 +464,20 @@ export function FleetScreen(props: {
   readonly go: (action: NavigationAction) => void;
   /** The person asked to try a host again. */
   readonly retryHost: (host: string) => void;
-  /** The way to start a run, kept in the page's header. */
+  /** The way to start a run: in the page's header in every state, even with no runs. */
   readonly newRun: ReactNode;
 }): JSX.Element {
   const {place, nowMs, go} = props;
   const clock = useDisplayClock();
   const filter: FleetFilter = {state: place.state, host: place.host};
   const view = fleetView(props.hosts, filter);
-  const rows = [...view.live, ...view.history];
+  const live = sortedRows(view.live, place.sort);
+  const history = sortedRows(view.history, place.sort);
+  const rows = [...live, ...history];
+  const sortOf: SortOf = column => ({
+    direction: place.sort?.column === column ? place.sort.direction : null,
+    press: () => go({type: 'sort-runs', column}),
+  });
   const objectivesOf = rowObjectives(props.hosts);
   const unread = view.hosts.some(
     host => host.freshness === 'empty' || host.freshness === 'unavailable',
@@ -457,10 +489,12 @@ export function FleetScreen(props: {
   const list = (label: string, shown: readonly FleetRow[]): JSX.Element => (
     <ColumnList
       label={label}
-      columns={columns(nowMs, clock, objectivesOf)}
+      columns={columns(nowMs, clock, objectivesOf, sortOf)}
       rows={shown}
       rowKey={row => row.key}
       lines={2}
+      widths={place.widths}
+      resize={(column, width) => go({type: 'resize-runs-column', column, width})}
       selected={place.selected ?? undefined}
       select={open}
       marks={row => ({fresh: isFresh(row, nowMs)})}
@@ -477,7 +511,7 @@ export function FleetScreen(props: {
           <Text as="h1" variant="title">
             Runs
           </Text>
-          {rows.length === 0 && !unread ? null : props.newRun}
+          {props.newRun}
         </Row>
       }
     >
@@ -495,23 +529,21 @@ export function FleetScreen(props: {
         </Row>
         {rows.length === 0 ? (
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
+          // Text only: New run is in the header in every state, so it never moves with the filter.
           <EmptyState
-            title={unread ? unreadTitle(view.hosts) : 'No runs'}
+            title={unread ? unreadTitle(view.hosts) : emptyTitle(place.state)}
             align="start"
-            // The header's own New run is the one a screen with rows has; this one is the way out of
-            // having none.
-            {...(unread ? {} : {action: props.newRun})}
           />
         ) : (
           <>
-            {view.live.length === 0 ? null : (
-              <Section title="Live" count={view.live.length}>
-                {list('Live runs', view.live)}
+            {live.length === 0 ? null : (
+              <Section title="Live" count={live.length}>
+                {list('Live runs', live)}
               </Section>
             )}
-            {view.history.length === 0 ? null : (
-              <Section title="History" count={view.history.length}>
-                {list('Run history', view.history)}
+            {history.length === 0 ? null : (
+              <Section title="History" count={history.length}>
+                {list('Run history', history)}
               </Section>
             )}
           </>

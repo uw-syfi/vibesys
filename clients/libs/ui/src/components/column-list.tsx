@@ -3,13 +3,24 @@ import {
   type CSSProperties,
   type FocusEvent,
   type JSX,
+  type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
   useCallback,
   useId,
   useRef,
+  useState,
 } from 'react';
 import {SIZE, SPACE, TYPE} from '../tokens/index.js';
-import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
+import {
+  type ColumnSize,
+  type ColumnWidths,
+  clampColumnWidth,
+  columnTier,
+  MAX_COLUMN_WIDTH,
+  MIN_COLUMN_WIDTH,
+  tracksOf,
+} from './column-tracks.js';
 import {Icon} from './icon.js';
 import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
@@ -51,10 +62,13 @@ export interface ListColumn<Row> {
   readonly note?: {readonly label: string; readonly hint: string};
   readonly cell: (row: Row) => ReactNode;
   /**
-   * Pressing the header sorts by the column. `marked` draws the arrow on the column the list is
-   * sorted by, whose header is a label: pressing it would change nothing.
+   * Pressing the header sorts by the column. `direction` is the way the list is sorted by it, or
+   * null while it is not: its arrow is drawn in a slot every sortable header keeps, so a header is as
+   * wide sorted as not and pressing it moves nothing.
    */
-  readonly sort?: {readonly marked: boolean; readonly press: () => void};
+  readonly sort?:
+    | {readonly direction: 'asc' | 'desc' | null; readonly press: () => void}
+    | undefined;
 }
 
 /** What a row of a `ColumnList` is marked as, beside whether it is the selected one. */
@@ -89,10 +103,77 @@ function useWidthWatch(
   }, []);
 }
 
+/** How far an arrow key moves a column's edge, in px. */
+const KEY_STEP = 16;
+
+/**
+ * The edge of a column's header, a vertical separator to drag (or to move with the arrow keys; a
+ * double press puts the column back to its own width). Dragging shows the width as it goes and gives
+ * it to `commit` when the pointer is released; a key gives each step.
+ */
+function Grip(props: {
+  readonly header: string;
+  readonly width: number;
+  readonly dragging: (width: number | null) => void;
+  readonly commit: (width: number | null) => void;
+}): JSX.Element {
+  const start = useRef<{readonly x: number; readonly width: number} | null>(null);
+  const move = (event: PointerEvent<HTMLElement>): void => {
+    const from = start.current;
+    if (from !== null) props.dragging(clampColumnWidth(from.width + event.clientX - from.x));
+  };
+  const end = (event: PointerEvent<HTMLElement>): void => {
+    const from = start.current;
+    start.current = null;
+    props.dragging(null);
+    if (from !== null) props.commit(clampColumnWidth(from.width + event.clientX - from.x));
+  };
+  const key = (event: KeyboardEvent<HTMLElement>): void => {
+    const by = event.key === 'ArrowRight' ? KEY_STEP : event.key === 'ArrowLeft' ? -KEY_STEP : 0;
+    if (by !== 0) props.commit(clampColumnWidth(props.width + by));
+    else if (event.key === 'Enter' || event.key === 'Escape') props.commit(null);
+    else return;
+    event.preventDefault();
+  };
+  return (
+    <hr
+      className="vs-columnlist-grip"
+      aria-orientation="vertical"
+      aria-label={`Resize ${props.header}`}
+      aria-valuemin={MIN_COLUMN_WIDTH}
+      aria-valuemax={MAX_COLUMN_WIDTH}
+      aria-valuenow={Math.floor(props.width + 0.5)}
+      tabIndex={0}
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        start.current = {x: event.clientX, width: props.width};
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      }}
+      onPointerMove={move}
+      onPointerUp={end}
+      onPointerCancel={() => {
+        start.current = null;
+        props.dragging(null);
+      }}
+      onDoubleClick={() => props.commit(null)}
+      onKeyDown={key}
+    />
+  );
+}
+
 function Header<Row>(props: {
   readonly columns: readonly ListColumn<Row>[];
   readonly id: string;
   readonly watch: (element: HTMLElement | null) => (() => void) | undefined;
+  /** Gives columns an edge to drag; the width a column has now, for its edge to start from. */
+  readonly resize:
+    | {
+        readonly dragging: (key: string, width: number | null) => void;
+        readonly commit: (key: string, width: number | null) => void;
+        readonly widthOf: (key: string) => number;
+      }
+    | undefined;
 }): JSX.Element {
   return (
     <div className="vs-columnlist-head" id={props.id} ref={props.watch}>
@@ -100,26 +181,40 @@ function Header<Row>(props: {
         <span
           key={column.key}
           className="vs-columnlist-headcell"
+          data-key={column.key}
           data-align={column.align}
           data-optional={column.optional || undefined}
-          data-marked={column.sort?.marked || undefined}
+          data-sorted={column.sort?.direction ?? undefined}
           data-tight-blank={column.tight === 'dot' || undefined}
           title={column.header}
         >
-          {column.sort === undefined || column.sort.marked ? (
-            <span className="vs-columnlist-marked">
-              {column.header}
-              {column.sort?.marked ? <Icon name="chevron-down" /> : null}
-            </span>
+          {column.sort === undefined ? (
+            <span className="vs-columnlist-marked">{column.header}</span>
           ) : (
-            <button type="button" onClick={column.sort.press} title={`Sort by ${column.header}`}>
+            <button
+              type="button"
+              onClick={column.sort.press}
+              title={`Sort by ${column.header}`}
+              aria-label={`Sort by ${column.header}`}
+            >
               {column.header}
+              <span className="vs-columnlist-sortmark" aria-hidden="true">
+                {column.sort.direction === null ? null : <Icon name="arrow-up" />}
+              </span>
             </button>
           )}
           {column.note === undefined ? null : (
             <span className="vs-columnlist-note" title={column.note.hint}>
               {column.note.label}
             </span>
+          )}
+          {props.resize === undefined || column.size === 'fill' ? null : (
+            <Grip
+              header={column.header}
+              width={props.resize.widthOf(column.key)}
+              dragging={width => props.resize?.dragging(column.key, width)}
+              commit={width => props.resize?.commit(column.key, width)}
+            />
           )}
         </span>
       ))}
@@ -187,6 +282,28 @@ function Row<Row>(props: {
   );
 }
 
+/** What the headers' edges need to drag a column: show its width as it goes, give it, read it now. */
+function useGrips(
+  resize: ((key: string, width: number | null) => void) | undefined,
+  widths: ColumnWidths,
+  setDrag: (drag: {readonly key: string; readonly width: number} | null) => void,
+  list: {readonly current: HTMLElement | null},
+) {
+  if (resize === undefined) return undefined;
+  return {
+    dragging: (key: string, dragged: number | null) =>
+      setDrag(dragged === null ? null : {key, width: dragged}),
+    commit: (key: string, committed: number | null) => resize(key, committed),
+    // A column's width now: the one given it, else what the header draws it at.
+    widthOf: (key: string) => {
+      const given = widths[key];
+      if (given !== undefined) return given;
+      const cell = list.current?.querySelector(`.vs-columnlist-head [data-key="${key}"]`);
+      return cell?.getBoundingClientRect().width ?? 0;
+    },
+  };
+}
+
 /**
  * A list of rows in columns to choose from: a listbox with one tab stop, whose header names the
  * columns and sorts by the ones that offer it. It scrolls inside itself and draws only the rows near
@@ -222,8 +339,20 @@ export function ColumnList<Row>(props: {
    * it moves when the rows are measured).
    */
   readonly lines?: 1 | 2;
+  /**
+   * The widths a person gave columns by dragging their edges, by column key. With `resize`, every
+   * column but the one that fills gets an edge to drag; `resize` is told the width a drag, or an arrow
+   * key, ends on (px), or null to put the column back to its own.
+   */
+  readonly widths?: ColumnWidths;
+  readonly resize?: (key: string, width: number | null) => void;
 }): JSX.Element {
   const headerId = useId();
+  // The width a column has while its edge is dragged: shown at once, given away when it is let go.
+  const [drag, setDrag] = useState<{readonly key: string; readonly width: number} | null>(null);
+  const widths: ColumnWidths =
+    drag === null ? (props.widths ?? {}) : {...props.widths, [drag.key]: drag.width};
+  const list = useRef<HTMLDivElement | null>(null);
   const ids = props.rows.map(props.rowKey);
   const win = useWindowed({
     count: props.rows.length,
@@ -238,27 +367,42 @@ export function ColumnList<Row>(props: {
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
   const [measure, width] = useInlineSize();
+  const attach = useCallback(
+    (element: HTMLDivElement | null) => {
+      list.current = element;
+      return measure(element);
+    },
+    [measure],
+  );
   // A width that changes rewraps the rows: the picked row stays in view, as an idea opened beside the
   // list narrows it.
   const watch = useWidthWatch(() => {
     if (selectedIndex >= 0) win.reveal(selectedIndex, () => undefined);
   });
-  const tier = columnTier(width, props.columns, props.crowded === true);
+  const tracked = props.columns.map(column => ({
+    key: column.key,
+    size: column.size,
+    optional: column.optional,
+    narrow: column.narrow,
+    tight: column.tight,
+  }));
+  const tier = columnTier(width, tracked, props.crowded === true, widths);
   const tracks = {
-    '--columns': tracksOf(props.columns, 'wide'),
-    '--columns-narrow': tracksOf(props.columns, 'narrow'),
-    '--columns-tight': tracksOf(props.columns, 'tight'),
+    '--columns': tracksOf(tracked, 'wide', widths),
+    '--columns-narrow': tracksOf(tracked, 'narrow', widths),
+    '--columns-tight': tracksOf(tracked, 'tight', widths),
   } as CSSProperties;
+  const grips = useGrips(props.resize, widths, setDrag, list);
   return (
     <div
       className="vs-columnlist"
-      ref={measure}
+      ref={attach}
       style={tracks}
       data-tier={tier}
       data-size={props.size ?? 'default'}
       data-lines={props.lines === 2 ? 2 : undefined}
     >
-      <Header columns={props.columns} id={headerId} watch={watch} />
+      <Header columns={props.columns} id={headerId} watch={watch} resize={grips} />
       <ScrollArea
         kind="feed"
         ref={win.scroller}
@@ -299,15 +443,25 @@ export function ColumnList<Row>(props: {
 /**
  * A cell's two lines: the figure and a quieter line under it (a status and its cause). The note is
  * text, set small and muted; a note that is more than text (parts that come and go with the list's
- * width) is the caller's own element, which then sets its own face.
+ * width) is the caller's own element, which then sets its own face. `mainTail` is a part that follows
+ * the figure on its line and is never cut: when the cell is too narrow the figure gives way to it
+ * (a part number after a name), with an ellipsis, and the tail stays whole.
  */
 export function CellLines(props: {
   readonly main: ReactNode;
+  readonly mainTail?: ReactNode;
   readonly note?: ReactNode;
 }): JSX.Element {
   return (
     <span className="vs-columnlist-lines">
-      {props.main}
+      {props.mainTail === undefined || props.mainTail === null ? (
+        props.main
+      ) : (
+        <span className="vs-columnlist-split">
+          <span className="vs-columnlist-split-lead">{props.main}</span>
+          <span className="vs-columnlist-split-tail">{props.mainTail}</span>
+        </span>
+      )}
       {props.note === undefined || props.note === null ? null : typeof props.note === 'string' ? (
         <Text variant="small" tone="muted">
           {props.note}

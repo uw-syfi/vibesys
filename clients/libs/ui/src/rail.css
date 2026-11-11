@@ -83,6 +83,19 @@
   margin-bottom: var(--space-1);
   border-bottom: var(--hairline) solid var(--line);
 }
+/* The app's mark: an item's box and place, none of its states (it is a picture, not a button). */
+.vs-rail-mark-icon {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control);
+  padding: var(--space-3) var(--space-0);
+  border: var(--hairline) solid transparent;
+  color: var(--muted);
+  cursor: default;
+  -webkit-app-region: drag;
+}
 .vs-rail-item {
   box-sizing: border-box;
   display: flex;

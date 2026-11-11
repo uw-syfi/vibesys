@@ -266,7 +266,7 @@ const READING_COLUMNS: readonly ListColumn<Reading>[] = [
     header: 'Throughput',
     size: 'wide',
     note: {label: '+2', hint: '2 more objectives'},
-    sort: {marked: true, press: noop},
+    sort: {direction: 'desc', press: noop},
     cell: row => (
       <CellInline>
         <CellMark on={row.set} />
@@ -280,7 +280,7 @@ const READING_COLUMNS: readonly ListColumn<Reading>[] = [
     size: 'short',
     align: 'end',
     optional: true,
-    sort: {marked: false, press: noop},
+    sort: {direction: null, press: noop},
     cell: row => <Text variant="code">{row.time}</Text>,
   },
 ];
