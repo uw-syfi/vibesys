@@ -313,6 +313,54 @@
 .vs-table[data-middle] td {
   vertical-align: middle;
 }
+/* Rows set close: the least padding of the scale, a row as tall as a dense control. */
+.vs-table[data-dense] th,
+.vs-table[data-dense] td {
+  padding: var(--space-2) var(--space-3);
+}
+/* A table of many rows: a box of its own height, scrolling down, with its header kept in view. */
+.vs-table-scroll[data-down] {
+  max-height: var(--table-rows);
+}
+/* A header that sorts: its words as a plain control, the arrow of the order beside it. */
+.vs-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.vs-table-sort:hover,
+.vs-table-sort[data-active] {
+  color: var(--text);
+}
+.vs-table-sort:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+/* The arrow takes its room whether or not the column is the sorted one, so a header never moves. */
+.vs-table-sort-arrow {
+  display: inline-flex;
+  width: var(--icon);
+  height: var(--icon);
+  opacity: 0;
+}
+.vs-table-sort[data-active] .vs-table-sort-arrow {
+  opacity: 1;
+}
+.vs-table-sort[data-direction="descending"] .vs-table-sort-arrow {
+  transform: rotate(180deg);
+}
+.vs-table [data-align="end"] .vs-table-sort {
+  flex-direction: row-reverse;
+}
 .vs-table td[data-mono] {
   font-family: var(--text-code-family);
   font-size: var(--text-code-size);

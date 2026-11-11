@@ -2,8 +2,8 @@ import type {JSX, ReactNode} from 'react';
 import type {TextStyle} from '../tokens/index.js';
 import type {StyleWithVars} from './css-vars.js';
 
-/** The color text is drawn in: the body's, secondary, or a status. */
-export type TextTone = 'default' | 'muted' | 'ok' | 'warn' | 'err';
+/** The color text is drawn in: the body's, secondary, the accent, or a status. */
+export type TextTone = 'default' | 'muted' | 'accent' | 'ok' | 'warn' | 'err';
 /** The element a `Text` renders, for the document outline; its look comes from `variant` alone. */
 export type TextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
 

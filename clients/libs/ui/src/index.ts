@@ -27,11 +27,13 @@ export {
   ChartLegend,
   type ChartLegendItem,
   type ChartLegendMark,
+  type ChartNote,
   ChartPanel,
   type ChartPoint,
   type ChartReference,
   type ChartSize,
   type ChartTick,
+  type ChartTimeAxis,
   type ChartTip,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';
@@ -88,12 +90,14 @@ export {
 export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {type AxisLabel, labelsFit, type PlacedLabel, placeLabels} from './components/label-fit.js';
+export {type LabelledField, LabelledLine} from './components/labelled-line.js';
 export {
   type Align,
   Dock,
   Grid,
   type GridColumn,
   type Justify,
+  MainSide,
   Page,
   type PageState,
   type PageWidth,
@@ -168,6 +172,13 @@ export {
   type RowTrail,
 } from './components/pick-list.js';
 export {RailFrame, RailItem} from './components/rail.js';
+export {
+  RangeStrip,
+  type RangeWindow,
+  type StripPoint,
+  windowMoved,
+  windowOfDrag,
+} from './components/range-strip.js';
 export {type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
@@ -199,7 +210,7 @@ export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
-export {Table, type TableColumn} from './components/table.js';
+export {Table, type TableColumn, type TableSort} from './components/table.js';
 export {Tabs} from './components/tabs.js';
 export {
   Text,

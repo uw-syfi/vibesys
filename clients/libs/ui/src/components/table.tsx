@@ -7,6 +7,8 @@ export interface TableColumn<Row> {
   readonly key: string;
   readonly header: string;
   readonly cell: (row: Row) => ReactNode;
+  /** The header is a control that sorts the table by this column (see `sort`). */
+  readonly sortable?: boolean;
   /** Mono and muted, for identifiers, numbers and durations. */
   readonly mono?: boolean;
   readonly align?: 'start' | 'end';
@@ -45,6 +47,14 @@ export interface TableFold {
   readonly label: string;
 }
 
+/** How a table is ordered: by which column, which way, and what pressing a sortable header asks for. */
+export interface TableSort {
+  readonly key: string;
+  readonly direction: 'ascending' | 'descending';
+  /** A press of a sortable header: the same column turns the order over, another column starts over. */
+  readonly change: (key: string) => void;
+}
+
 /** A row beneath another (`sub`), or the table's total (`total`): neither can be selected. */
 export type TableRowKind = 'sub' | 'total';
 
@@ -62,6 +72,16 @@ export function Table<Row>(props: {
   readonly rowKey: (row: Row) => string;
   readonly selected?: string;
   readonly middle?: boolean;
+  /** Rows set close, for a table that holds many: the least padding the scale has. */
+  readonly dense?: boolean;
+  /**
+   * Where a table that outgrows its box scrolls: `across` (the default) when a column cannot be
+   * narrower, or `down`, in a box as tall as `table-rows` with the header kept in view, for a
+   * table with many rows whose cells cut their text instead of widening.
+   */
+  readonly scroll?: 'across' | 'down';
+  /** The order the rows are in, and the control that asks for another. */
+  readonly sort?: TableSort;
   /** The rows are being read again: they stay, quieter, until the answer replaces them. */
   readonly dim?: boolean;
   readonly select?: (key: string) => void;
@@ -79,8 +99,9 @@ export function Table<Row>(props: {
   return (
     <ScrollArea
       as="section"
-      kind="table"
+      kind={props.scroll === 'down' ? 'feed' : 'table'}
       className="vs-table-scroll"
+      data-down={props.scroll === 'down' || undefined}
       aria-label={props.label}
       tabIndex={0}
     >
@@ -88,6 +109,7 @@ export function Table<Row>(props: {
         className="vs-table"
         aria-label={props.label}
         data-middle={props.middle || undefined}
+        data-dense={props.dense || undefined}
         data-dim={props.dim || undefined}
       >
         <thead>
@@ -98,9 +120,12 @@ export function Table<Row>(props: {
                 scope="col"
                 data-align={column.align}
                 data-wide={column.wide === true || undefined}
+                aria-sort={sortOf(props.sort, column)}
               >
                 {column.control === true ? (
                   <span className="vs-table-hidden-header">{column.header}</span>
+                ) : column.sortable === true && props.sort !== undefined ? (
+                  <SortHeader column={column} sort={props.sort} />
                 ) : (
                   column.header
                 )}
@@ -153,6 +178,37 @@ export function Table<Row>(props: {
         </tbody>
       </table>
     </ScrollArea>
+  );
+}
+
+/** What a header says of the order: `aria-sort` on the column the rows are sorted by. */
+function sortOf<Row>(
+  sort: TableSort | undefined,
+  column: TableColumn<Row>,
+): 'ascending' | 'descending' | undefined {
+  return column.sortable === true && sort?.key === column.key ? sort.direction : undefined;
+}
+
+/** A header that sorts: its words as a button, with the arrow of the order on the column in force. */
+function SortHeader<Row>(props: {
+  readonly column: TableColumn<Row>;
+  readonly sort: TableSort;
+}): JSX.Element {
+  const {column, sort} = props;
+  const active = sort.key === column.key;
+  return (
+    <button
+      type="button"
+      className="vs-table-sort"
+      data-active={active || undefined}
+      data-direction={active ? sort.direction : undefined}
+      onClick={() => sort.change(column.key)}
+    >
+      {column.header}
+      <span className="vs-table-sort-arrow" aria-hidden="true">
+        <Icon name="arrow-up" />
+      </span>
+    </button>
   );
 }
 

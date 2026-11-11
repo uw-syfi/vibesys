@@ -1,0 +1,76 @@
+/*
+ * The labelled line, the overview strip and the rows of a band (imported by components.css). Every
+ * value is a token variable from `tokens.css`.
+ */
+
+/* --- labelled line: a column of label, then a lead and its fields ------------------------------ */
+
+.vs-labelled-line {
+  display: grid;
+  grid-template-columns: var(--lead-label) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-1) var(--space-5);
+  min-width: 0;
+}
+.vs-labelled-line-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.vs-labelled-line-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-labelled-line-lead {
+  min-width: 0;
+}
+.vs-labelled-line-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+.vs-labelled-line-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-labelled-line-field dd {
+  margin: 0;
+}
+
+/* --- range strip: the whole axis, thin, with the window chosen on it --------------------------- */
+
+.vs-range-strip {
+  min-width: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+.vs-range-strip:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-range-strip-plot {
+  display: block;
+}
+.vs-range-strip-frame {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: var(--hairline);
+}
+.vs-range-strip-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-opacity: 0.6;
+  stroke-width: 1.2;
+}
+.vs-range-strip-window {
+  fill: var(--accent);
+  fill-opacity: 0.12;
+  stroke: var(--accent);
+  stroke-opacity: 0.7;
+  stroke-width: var(--hairline);
+}

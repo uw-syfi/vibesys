@@ -63,11 +63,12 @@ interface FlexProps {
   readonly apart?: boolean;
   /**
    * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
+   * a summary (`summary`), a block of a few lines beside a chart, as wide as a name and a figure need; or
    * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
    * row leaves it less than a readable width; or a column of text to be read (`reading`), as wide as
    * a page of text reads well and centred in what holds it.
    */
-  readonly width?: 'figure' | 'chart' | 'reading';
+  readonly width?: 'figure' | 'summary' | 'chart' | 'reading';
   readonly children: ReactNode;
 }
 
@@ -348,6 +349,28 @@ export function SectionLayout(props: {
         <div className="vs-section-content">{props.children}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A main column and a side column of a fixed width beside it. Which holds is decided by the width
+ * of what holds the pair, not of the window: below about 1180 px the side goes under the main
+ * column and its children share a row as far as they fit, so the page never scrolls sideways and
+ * nothing has to be hidden. Both columns keep their children where they are as the data grows.
+ */
+export function MainSide(props: {
+  /** Names the pair of columns for assistive technology. */
+  readonly label: string;
+  readonly main: ReactNode;
+  readonly side: ReactNode;
+}): JSX.Element {
+  return (
+    <section className="vs-mainside" aria-label={props.label}>
+      <div className="vs-mainside-grid">
+        <div className="vs-mainside-main">{props.main}</div>
+        <div className="vs-mainside-side">{props.side}</div>
+      </div>
+    </section>
   );
 }
 

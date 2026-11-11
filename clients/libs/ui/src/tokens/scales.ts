@@ -42,6 +42,7 @@ export type SizeToken =
   | 'content-narrow'
   | 'column-main'
   | 'column-aside'
+  | 'column-side'
   | 'column-field'
   | 'column-tile'
   | 'column-swatch'
@@ -58,6 +59,10 @@ export type SizeToken =
   | 'pane-master'
   | 'panes-floor'
   | 'row-dense'
+  | 'table-rows'
+  | 'overview-strip'
+  | 'band-summary'
+  | 'lead-label'
   | 'gantt-label'
   | 'gantt-label-max'
   | 'gantt-figure'
@@ -87,6 +92,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'content-narrow': 900,
   'column-main': 520,
   'column-aside': 300,
+  'column-side': 400,
   'column-field': 240,
   'column-tile': 200,
   'column-swatch': 160,
@@ -103,6 +109,10 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'pane-master': 480,
   'panes-floor': 288,
   'row-dense': 28,
+  'table-rows': 372,
+  'overview-strip': 32,
+  'band-summary': 200,
+  'lead-label': 112,
   'gantt-label': 220,
   'gantt-label-max': 420,
   'gantt-figure': 96,

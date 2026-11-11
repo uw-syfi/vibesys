@@ -1586,6 +1586,27 @@ button.vs-crumb:focus-visible {
 .vs-chart-tip-box {
   fill: var(--text);
 }
+/* The frame of a plot with nothing in it yet, and the state's words in the middle of it. */
+.vs-chart-frame {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: var(--hairline);
+}
+.vs-chart-state {
+  fill: var(--muted);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+}
+/* A value beside a corner of the line, over a halo of the panel so no line or dot cuts it. */
+.vs-chart-note {
+  fill: var(--text);
+  stroke: var(--panel);
+  stroke-width: 3;
+  paint-order: stroke;
+  stroke-linejoin: round;
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
 .vs-chart-tip-text {
   fill: var(--panel);
   font-family: var(--text-section-family);
