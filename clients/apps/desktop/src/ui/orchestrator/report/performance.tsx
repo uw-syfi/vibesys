@@ -270,7 +270,7 @@ function Overview(props: {
     <Row gap="space-4" rowGap="space-2" wrap align="center">
       <Stack gap="space-0" width="summary">
         <Text variant="small" tone="muted">
-          Whole run · drag to choose a window
+          Drag to zoom
         </Text>
       </Stack>
       <Stack gap="space-0" width="chart">

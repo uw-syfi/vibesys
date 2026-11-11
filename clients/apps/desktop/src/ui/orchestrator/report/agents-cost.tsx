@@ -76,6 +76,34 @@ function FeedProblem(props: {
 }
 
 /**
+ * What the table's figures leave unsaid: how many turns there were, and what a dash or a ≥ in the
+ * Cost column means. Each sentence is there only when the table has such a figure.
+ */
+function CostNotes(props: {
+  readonly cost: CostView;
+  readonly rows: readonly AgentCostRow[];
+}): JSX.Element {
+  const {cost, rows} = props;
+  const unknown = rows.some(row => row.costUsd === null && (row.turns ?? 0) > 0);
+  const floor = rows.some(row => row.costUsd !== null && row.unpricedTurns > 0);
+  const notes = [
+    `${formatCount(cost.turns)} ${cost.turns === 1 ? 'turn' : 'turns'}.`,
+    cost.unpricedTurns === 0 ? '' : `${formatCount(cost.unpricedTurns)} of them reported no price.`,
+    unknown
+      ? `${NOT_REPORTED} means no turn of that type reported a price, so its cost is unknown.`
+      : '',
+    floor
+      ? `${FLOOR.trim()} means some turns of that type reported no price, so its cost is at least this.`
+      : '',
+  ].filter(note => note !== '');
+  return (
+    <Text variant="small" tone="muted">
+      {notes.join(' ')}
+    </Text>
+  );
+}
+
+/**
  * The agents of the run by type with what each type has cost: how many are working of how many the
  * run has had, their turns, tokens and cost, every figure the host's. The spend against its cap is the
  * facts line's and the Cost page's; the links in the heading open that page and the Agents page. A cost that is not read
@@ -120,6 +148,7 @@ export function AgentsAndCost(props: {
           columns={columns(precisionOf(cost?.total.costUsd ?? null))}
           empty="No agents yet"
         />
+        {cost === undefined ? null : <CostNotes cost={cost} rows={rows} />}
         {cost === undefined && feed.status._tag !== 'Failed' ? (
           <Text tone="muted" variant="small">
             Reading cost

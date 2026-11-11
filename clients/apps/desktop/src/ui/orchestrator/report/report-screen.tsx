@@ -81,7 +81,7 @@ export function ReportScreen(props: {
             <ReportMeta report={report} host={props.host} nowMs={props.nowMs} />
             {props.reading}
           </Row>
-          <FactsLine facts={report.facts} nowMs={props.nowMs} />
+          <FactsLine facts={report.facts} />
         </Stack>
       }
       actions={
@@ -102,7 +102,7 @@ export function ReportScreen(props: {
           done="Stop"
           retry={props.retryStop}
         />
-        <LeadSummary summary={report.summary} nowMs={props.nowMs} />
+        <LeadSummary summary={report.summary} nowMs={props.nowMs} openCatchUp={props.openCatchUp} />
         <MainSide
           label="The report"
           main={
@@ -146,6 +146,7 @@ export function ReportScreen(props: {
                 rows={report.latest}
                 objectives={report.objectives}
                 nowMs={props.nowMs}
+                latestMs={report.facts.measured.latestMs}
                 runOver={over}
               />
               {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}

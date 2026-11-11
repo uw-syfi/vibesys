@@ -80,7 +80,7 @@ describe('the Cost destination of a run', () => {
   it('is a page of its own that shows the served figures, with the report one step back', () => {
     const {screen} = openCost(hostWith(COSTS, live));
     // The run opens on its report, which shows the spend in brief and links to the Cost page.
-    expect(screen.text()).toContain('≥ $318');
+    expect(screen.text()).toContain('$318 spent');
     expect(title(screen)).not.toBe('Cost');
     screen.press(screen.control('Open cost'));
     expect(title(screen)).toBe('Cost');

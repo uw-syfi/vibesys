@@ -30,8 +30,6 @@ export interface RunFacts {
         readonly usd: number | null;
         /** Turns without a price are behind the figure, so it is a floor. */
         readonly floor: boolean;
-        readonly turns: number;
-        readonly unpricedTurns: number;
       }
     | undefined;
 }
@@ -70,8 +68,6 @@ export function runFacts(
         : {
             usd: cost.total.costUsd,
             floor: cost.total.costUsd !== null && cost.unpricedTurns > 0,
-            turns: cost.turns,
-            unpricedTurns: cost.unpricedTurns,
           },
   };
 }

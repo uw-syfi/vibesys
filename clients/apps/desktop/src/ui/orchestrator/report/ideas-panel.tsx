@@ -6,7 +6,6 @@ import {
   SearchBox,
   SegmentedControl,
   Stack,
-  type StatusTone,
   Table,
   type TableColumn,
   Text,
@@ -32,23 +31,10 @@ import {
 import {useDisplayClock} from '../../display-clock.js';
 import {nameOf} from '../names.js';
 import {formatAge, formatExact, formatGain, withUnit} from './format.js';
+import {VERDICT_TONES, VERDICT_WORDS} from './verdicts.js';
 
 type Scope = 'run' | 'all' | 'window';
 type VerdictFilter = 'any' | Verdict;
-
-const VERDICT_WORDS = {
-  open: 'Open',
-  kept: 'Kept',
-  rejected: 'Rejected',
-  parked: 'Parked',
-} as const satisfies Record<Verdict, string>;
-
-const VERDICT_TONES = {
-  open: 'warn',
-  kept: 'ok',
-  rejected: 'neutral',
-  parked: 'live',
-} as const satisfies Record<Verdict, StatusTone>;
 
 /** What a hover says of an idea's gains: every objective, with the values behind the ratio. */
 function gainHint(gains: readonly GainView[], units: ReadonlyMap<string, string | null>): string {
@@ -165,6 +151,18 @@ const SORT_KEYS: readonly IdeaSortKey[] = [
   'agent',
   'updated',
 ];
+
+/** What the count of measurements that name no plan says: the baseline and the ones made without one. */
+const unplannedWords = (count: number): string =>
+  `${formatExact(count)} ${count === 1 ? 'measurement' : 'measurements'} had no plan`;
+
+/** What the table says with no row to show: nothing proposed yet (and what was measured meanwhile), or no match. */
+function emptyWords(ideas: number, unplanned: number): string {
+  if (ideas > 0) return 'No ideas match';
+  return unplanned === 0
+    ? 'No ideas yet · they appear here as agents propose them'
+    : `No ideas yet · ${unplannedWords(unplanned)}`;
+}
 
 /** What the controls over the table have chosen: the scope, the verdict, the search and the order. */
 interface Controls {
@@ -352,17 +350,18 @@ export function IdeasPanel(props: {
               },
             }}
             columns={ideaColumns(words)}
-            empty={
-              all.length === 0
-                ? 'No ideas yet · they appear here as agents propose them'
-                : 'No ideas match'
-            }
+            empty={emptyWords(all.length, props.ideas?.unplanned ?? 0)}
           />
         </div>
         {props.ideas === undefined ||
+        all.length === 0 ||
         (props.ideas.unplanned === 0 && !props.ideas.truncated) ? null : (
           <Row gap="space-4" wrap>
-            <Text variant="small" tone="muted">{`${props.ideas.unplanned} unplanned`}</Text>
+            {props.ideas.unplanned === 0 ? null : (
+              <Text variant="small" tone="muted">
+                {unplannedWords(props.ideas.unplanned)}
+              </Text>
+            )}
             {props.ideas.truncated ? <Chip label="Some left out" tone="warn" /> : null}
           </Row>
         )}

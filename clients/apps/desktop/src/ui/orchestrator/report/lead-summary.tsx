@@ -1,4 +1,4 @@
-import {Chip, LabelledLine, Text} from '@vibesys/ui';
+import {Brief, type BriefField, Button} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
 import {withShortCommits} from '../../commit-text.js';
@@ -11,38 +11,38 @@ const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
 };
 
 /**
- * The lead's latest report as a labelled row under the facts, not a card: the label column holds
- * how long ago it was written (and that it is the final one), then the lead's own words (the
- * headline, then the parts it filled in, in columns). A run whose lead has not reported says only
- * that, in one line. What the lead wrote is its own words and wraps.
+ * The lead's latest report as one block under the facts: whose it is and how old, its headline (cut
+ * at two lines) and the parts it filled in, each under its label (cut at three lines; a part the
+ * lead left empty is left out, label and all). What the lead writes has no bound on its length, so
+ * it is set in body sizes only, a long word breaks inside itself, and whatever is cut is whole on
+ * hover and in Catch me up, which one link under the block opens, when anything is cut. A run whose
+ * lead has not reported says only that, in one line.
  */
 export function LeadSummary(props: {
   readonly summary: SummaryView | undefined;
   readonly nowMs: number;
+  /** Open the run's Catch me up page, where the whole report is. */
+  readonly openCatchUp: () => void;
 }): JSX.Element {
   const {summary} = props;
-  if (summary === undefined) {
-    return (
-      <LabelledLine
-        label="Lead"
-        lead={
-          <Text tone="muted" variant="small">
-            No report yet
-          </Text>
-        }
-      />
-    );
-  }
+  if (summary === undefined) return <Brief empty="The lead has not reported yet" />;
+  const fields: BriefField[] = summary.fields
+    .filter(({text}) => text.trim() !== '')
+    .map(({field, text}) => ({
+      label: FIELD_LABELS[field],
+      text: withShortCommits(text),
+      title: text,
+    }));
   return (
-    <LabelledLine
-      label="Lead"
-      note={formatAge(props.nowMs - summary.atMs)}
-      {...(summary.final ? {badge: <Chip label="Final" tone="ok" />} : {})}
-      lead={<Text as="p">{withShortCommits(summary.headline)}</Text>}
-      fields={summary.fields.map(({field, text}) => ({
-        label: FIELD_LABELS[field],
-        text: withShortCommits(text),
-      }))}
+    <Brief
+      label={`Lead's ${summary.final ? 'final ' : ''}summary · ${formatAge(props.nowMs - summary.atMs)}`}
+      {...(summary.headline.trim() === ''
+        ? {}
+        : {lead: withShortCommits(summary.headline), leadTitle: summary.headline})}
+      fields={fields}
+      more={
+        <Button text="Read the whole report" variant="quiet" size="sm" press={props.openCatchUp} />
+      }
     />
   );
 }

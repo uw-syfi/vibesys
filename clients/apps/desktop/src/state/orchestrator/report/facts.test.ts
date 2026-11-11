@@ -60,8 +60,6 @@ describe('the facts line of a report', () => {
           const {spend} = runFacts(undefined, undefined, NO_AGENTS, cost({usd, turns, unpriced}));
           expect(spend?.usd).toBe(usd);
           expect(spend?.floor).toBe(usd !== null && unpriced > 0);
-          expect(spend?.turns).toBe(turns);
-          expect(spend?.unpricedTurns).toBe(unpriced);
         },
       ),
       {seed: 42},

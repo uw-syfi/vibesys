@@ -1,9 +1,9 @@
-import {Card, ChartLegend, Table, type TableColumn, Text} from '@vibesys/ui';
+import {Card, Row, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {LatestMeasurement, ObjectiveReport} from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
 import {useDisplayClock} from '../../display-clock.js';
-import {formatElapsed, formatExact, formatFigure, withUnit} from './format.js';
+import {formatAge, formatElapsed, formatExact, formatFigure, withUnit} from './format.js';
 
 /** What a row says of the idea its job measured: its plan numbers, `No plan`, or a dash while no ideas are served. */
 function ideaWords(plans: readonly number[] | undefined): string {
@@ -13,7 +13,8 @@ function ideaWords(plans: readonly number[] | undefined): string {
 
 /**
  * The newest measurements as a table: when, which idea, one value for each objective and the commit.
- * A value that set a new best is the accent's, which the key in the heading says. A run whose
+ * A value that set a new best is the accent's, which the key under the table says; the heading says
+ * how long ago the newest measurement was made. A run whose
  * measurements are over (it has ended) writes the time of day, since "how long ago" is of a moment
  * that no longer matters; a live one writes how long ago. Every value is the host's.
  */
@@ -21,6 +22,8 @@ export function LatestMeasurements(props: {
   readonly rows: readonly LatestMeasurement[];
   readonly objectives: readonly ObjectiveReport[];
   readonly nowMs: number;
+  /** When the newest measurement of the run was recorded; null with none. */
+  readonly latestMs: number | null;
   readonly runOver: boolean;
 }): JSX.Element {
   const clock = useDisplayClock();
@@ -61,7 +64,15 @@ export function LatestMeasurements(props: {
     <Card
       dense
       section="Latest measurements"
-      action={<ChartLegend label="Key to the values" items={[{label: 'New best', mark: 'line'}]} />}
+      action={
+        props.latestMs === null ? undefined : (
+          <Text variant="small" tone="muted">
+            {props.runOver
+              ? `latest at ${clock.reportTime(props.latestMs)}`
+              : `latest ${formatAge(props.nowMs - props.latestMs)}`}
+          </Text>
+        )
+      }
     >
       <Table
         label="Latest measurements"
@@ -72,6 +83,15 @@ export function LatestMeasurements(props: {
         columns={columns}
         empty="No measurements yet"
       />
+      {/* The key draws what the table draws: a value that set a new best is in the accent color. */}
+      <Row gap="space-2">
+        <Text variant="code" tone="accent">
+          12.3
+        </Text>
+        <Text variant="small" tone="muted">
+          New best
+        </Text>
+      </Row>
     </Card>
   );
 }

@@ -79,6 +79,8 @@ interface World {
   readonly ideas?: number;
   readonly truncated?: boolean;
   readonly window?: IdeaWindow | null;
+  /** The plans were made by the agents the run has, so the Agent column names them. */
+  readonly named?: boolean;
   /** When the screen is drawn; the end of the scenario and some minutes when absent. */
   readonly nowMs?: number;
 }
@@ -104,6 +106,13 @@ function stateOf(world: World): OrchestratorState {
     objectives: world.objectives ?? SERVING,
     ...(world.revisedBound === undefined ? {} : {revisedBound: world.revisedBound}),
     ...(world.ideas === undefined ? {} : {ideas: world.ideas}),
+    ...(world.named === true
+      ? {
+          agents: Object.values(withText.changes.reduce(applyChange, emptyState).agents).map(
+            a => a.id,
+          ),
+        }
+      : {}),
   };
   let state = withText.changes.reduce(applyChange, emptyState);
   const search = measuredSearch(RUN, options, {stale: world.stale === true});
@@ -165,9 +174,9 @@ const cardText = (root: HTMLElement, heading: string): string =>
 const cards = (root: HTMLElement): string[] =>
   [...root.querySelectorAll('section.vs-card h2')].map(heading => heading.textContent ?? '');
 
-/** The facts line as one string, a space between its facts. */
+/** The facts of the facts line, one string each, a bar between them. */
 const factsOf = (root: HTMLElement): string =>
-  [...root.querySelectorAll('.vs-factline .vs-fact')].map(fact => fact.textContent).join(' ');
+  [...root.querySelectorAll('.vs-factline .vs-fact')].map(fact => fact.textContent).join(' | ');
 
 /** The charts of the performance panel: one per band, and not the trade-off's. */
 const bandCharts = (root: HTMLElement): SVGElement[] =>
@@ -206,9 +215,10 @@ describe('the report as a page of the run', () => {
     const {screen} = render({ideas: 12});
     const root = screen.container;
     expect(root.querySelector('.vs-page-meta .vs-factline')).not.toBeNull();
-    // The lead is a labelled row and not a card; there is no row of objective tiles at all.
-    const lead = root.querySelector('section.vs-labelled-line');
-    expect(lead?.textContent).toContain('Lead');
+    // The lead is a block with a rule on its left and not a card, and has no label column; there is no
+    // row of objective tiles at all.
+    const lead = root.querySelector('section.vs-brief');
+    expect(lead?.textContent).toContain('Lead’s summary'.replace('’', "'"));
     expect(cards(root)).not.toContain('Lead summary');
     expect(root.querySelector('.vs-tiles, .vs-tile')).toBeNull();
     const columns = root.querySelector('.vs-mainside');
@@ -232,21 +242,29 @@ describe('the report as a page of the run', () => {
   it('says the whole run in the facts line: what was measured and when last, the ideas, the agents and the cost', () => {
     const {screen} = render({ideas: 12});
     const facts = factsOf(screen.container);
-    expect(facts).toMatch(/^40 measured latest \d+m ago/);
-    expect(facts).toMatch(/\d+ ideas/);
-    expect(facts).toMatch(/\d+ of \d+ agents running/);
-    expect(facts).toMatch(/≥\s\$318 spent · 1,433 turns · 41 unpriced$/);
+    // Four facts and no more, each with a real space between its figure and its words, and no mark between.
+    expect(facts).toMatch(/^40 measured \| \d+ ideas \| \d+ of \d+ agents running \| \$318 spent$/);
+    expect(screen.container.querySelector('.vs-factline')?.textContent).not.toMatch(/[·≥]/);
+    // The turns, what is unpriced and the age of the newest measurement are the panels'.
+    expect(cardText(screen.container, 'Latest measurements')).toMatch(/latest \d+m ago/);
+    expect(cardText(screen.container, 'Agents and cost')).toMatch(
+      /1,433 turns\. 41 of them reported no price\./,
+    );
     screen.unmount();
-    // The host cut what it served short: the count is a floor, and says so.
+    // The host cut what it served short: the fact says so on hover, and carries no mark.
     const cut = render({ideas: 12, truncated: true});
-    expect(factsOf(cut.screen.container)).toMatch(/^≥\s40 measured/);
+    const measured = [...cut.screen.container.querySelectorAll('.vs-fact')].find(fact =>
+      fact.textContent?.includes('measured'),
+    );
+    expect(measured?.textContent).toBe('40 measured');
+    expect(measured?.getAttribute('title')).toMatch(/only part/);
     cut.screen.unmount();
   });
 
   it('says nothing was measured and no ideas, and that the cost is being read, before there is any of them', () => {
     const {screen} = render({candidates: 0, cost: null});
     expect(factsOf(screen.container)).toMatch(
-      /^nothing measured yet · no ideas yet · \d+ of \d+ agents running · reading cost$/,
+      /^nothing measured yet \| no ideas yet \| \d+ of \d+ agents running \| reading cost$/,
     );
     screen.unmount();
   });
@@ -260,11 +278,9 @@ describe('the report as a page of the run', () => {
 
   it('writes the age of the report and the time the run has run in the words of the Runs list', () => {
     const {screen} = render({});
-    expect(screen.container.querySelector('section.vs-labelled-line')?.textContent).toContain(
-      '23m ago',
-    );
+    expect(screen.container.querySelector('section.vs-brief')?.textContent).toContain('· 23m ago');
     expect(screen.container.querySelector('.vs-page-meta')?.textContent).toMatch(
-      /host-a(\d+d \d+h|\d+h \d+m|\d+m|\d+s)Started/,
+      /host-afor (\d+d \d+h|\d+h \d+m|\d+m|\d+s)Started/,
     );
     expect(screen.text()).not.toMatch(/\d+ (s|min|h|d) ago/);
     screen.unmount();
@@ -467,7 +483,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
 
   it('puts the lead’s latest report in the lead row with its age and fields', () => {
     const {screen} = render({});
-    const lead = screen.container.querySelector('section.vs-labelled-line')?.textContent ?? '';
+    const lead = screen.container.querySelector('section.vs-brief')?.textContent ?? '';
     expect(lead).toContain('Throughput is 2.3 times the baseline');
     expect(lead).toContain('23m ago');
     expect(lead).toContain('Fused expert dispatch landed.');
@@ -496,9 +512,12 @@ describe('the report of a run with two objectives and a declared bound', () => {
       series.points.slice(-8).filter(point => point.bestSoFar),
     );
     expect(marked).toHaveLength(servedMarks.length);
-    expect(screen.container.querySelector('ul[aria-label="Key to the values"]')?.textContent).toBe(
-      'New best',
-    );
+    // The key draws what the table draws: a value in the accent color, not a line.
+    const key = [...screen.container.querySelectorAll('section.vs-card')]
+      .find(card => card.querySelector('h2')?.textContent === 'Latest measurements')
+      ?.querySelector('.vs-flex:last-child');
+    expect(key?.querySelector('.vs-text[data-tone="accent"]')).not.toBeNull();
+    expect(key?.textContent).toContain('New best');
     screen.unmount();
   });
 
@@ -647,11 +666,11 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
-  it('says only that there is no report when the lead has posted none, in one line', () => {
+  it('says only that the lead has not reported when it has posted none, in one quiet line with no label', () => {
     const {screen} = render({report: false});
-    const lead = screen.container.querySelector('section.vs-labelled-line');
-    expect(lead?.textContent).toContain('No report yet');
-    expect(lead?.querySelector('dl')).toBeNull();
+    expect(screen.container.querySelector('section.vs-brief')).toBeNull();
+    expect(screen.text()).toContain('The lead has not reported yet');
+    expect(screen.container.querySelector('.vs-brief-field')).toBeNull();
     screen.unmount();
   });
 
@@ -659,8 +678,8 @@ describe('the report with a different amount of data', () => {
     const {screen} = render({live: false});
     expect(screen.controls('Stop run')).toHaveLength(0);
     expect(screen.text()).toContain('Finished');
-    expect(screen.container.querySelector('section.vs-labelled-line')?.textContent).toContain(
-      'Final',
+    expect(screen.container.querySelector('section.vs-brief')?.textContent).toContain(
+      'final summary',
     );
     screen.unmount();
   });
@@ -709,7 +728,8 @@ describe('the report with a different amount of data', () => {
     }
     none.screen.unmount();
     const floor = render({});
-    expect(factsOf(floor.screen.container)).toContain('≥');
+    expect(cardText(floor.screen.container, 'Agents and cost')).toMatch(/at least this/);
+    expect(floor.screen.container.querySelector('.vs-factline')?.textContent).not.toContain('≥');
     floor.screen.unmount();
   });
 
@@ -749,7 +769,7 @@ describe('a run long enough to need a range', () => {
     expect(screen.container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe(
       'Whole run',
     );
-    expect(screen.text()).toContain('Whole run · drag to choose a window');
+    expect(screen.text()).toContain('Drag to zoom');
     screen.unmount();
   });
 
@@ -976,7 +996,7 @@ describe('the ideas and workstreams of the report', () => {
     screen.unmount();
   });
 
-  it('shows the workstreams as compact rows with the host’s counts as a bar and its best gain, and no count of its own', () => {
+  it('shows the workstreams as compact rows: the host’s counts as a bar, their total beside it, and the best gain', () => {
     const {screen} = render({ideas: 12});
     const served = stateOf({ideas: 12}).searches[RUN];
     const rows = rowsOf(screen.container, 'Workstream list');
@@ -996,18 +1016,44 @@ describe('the ideas and workstreams of the report', () => {
         if (count > 0) expect(bars[at]).toContain(`${word} ${count}`);
       }
     });
+    // The count of the ideas is a number beside the bar, the host's counts added.
+    served?.workstreamViews.forEach((view, at) => {
+      const total = view.kept + view.rejected + view.open + view.parked;
+      expect(rows[at]?.[1]).toBe(String(total));
+    });
     expect(cardText(screen.container, 'Workstreams')).toContain('No workstream');
-    // The colors of the bars are named by a key.
-    expect(screen.container.querySelector('[aria-label="Key to the bars"]')?.textContent).toContain(
-      'Kept',
+    // The colors of the bars are named by a key, and are the colors the Ideas chips give the same verdicts.
+    const tones = (heading: string): Map<string, string | null> =>
+      new Map(
+        [
+          ...([...screen.container.querySelectorAll('section.vs-card')]
+            .find(card => card.querySelector('h2')?.textContent === heading)
+            ?.querySelectorAll('.vs-dotlegend-item') ?? []),
+        ].map(item => [
+          item.querySelector('.vs-text')?.textContent ?? '',
+          item.querySelector('.vs-dot')?.getAttribute('data-tone') ?? null,
+        ]),
+      );
+    const ofBars = tones('Workstreams');
+    const ofChips = tones('Ideas');
+    expect([...ofBars.keys()]).toEqual(['Kept', 'Rejected', 'Open', 'Parked']);
+    for (const [verdict, tone] of ofBars) expect(ofChips.get(verdict)).toBe(tone);
+    const segments = [...screen.container.querySelectorAll<HTMLElement>('.vs-share-segment')].map(
+      each => each.style.getPropertyValue('--seg-color'),
     );
+    for (const color of segments) {
+      expect(['var(--ok)', 'var(--muted)', 'var(--warn)', 'var(--accent)']).toContain(color);
+    }
     screen.unmount();
   });
 
   it('says how many candidates name no plan, and marks a state the host cut short, in a label and not a banner', () => {
     const {screen} = render({ideas: 12, truncated: true});
     const served = stateOf({ideas: 12}).searches[RUN];
-    expect(cardText(screen.container, 'Ideas')).toContain(`${served?.unplanned} unplanned`);
+    // What the count is of is said: measurements that had no plan.
+    expect(cardText(screen.container, 'Ideas')).toContain(
+      `${served?.unplanned} measurements had no plan`,
+    );
     expect(cardText(screen.container, 'Ideas')).toContain('Some left out');
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     screen.unmount();
@@ -1226,6 +1272,71 @@ describe('the plan status of the report', () => {
     const screen = mount(<PlansSummary plans={plansView([], 0)} />);
     expect(screen.text()).toContain('No plans');
     expect(screen.text()).toContain('0 jobs with no run');
+    screen.unmount();
+  });
+});
+
+describe('the lead’s block', () => {
+  const labels = (root: HTMLElement): (string | null)[] =>
+    [...root.querySelectorAll('.vs-brief-field > .vs-text')].map(each => each.textContent);
+
+  it('has a label over each part the lead filled in, and leaves out one it left empty, label and all', () => {
+    const {screen} = render({});
+    // The fixture's report fills in the headline and what changed, and nothing else.
+    expect(labels(screen.container)).toEqual(['Changed']);
+    screen.unmount();
+  });
+
+  it('is one column with its age once, and no text in bold or in a heading', () => {
+    const {screen} = render({});
+    const block = screen.container.querySelector('section.vs-brief');
+    expect(block?.textContent?.match(/\d+m ago/g)).toHaveLength(1);
+    expect(block?.querySelector('b, strong, h1, h2, h3, h4')).toBeNull();
+    screen.unmount();
+  });
+});
+
+describe('words that run together', () => {
+  it('never glue a figure to the word after it, on the facts line or in any panel, for any data', () => {
+    const spec = fc.record({
+      candidates: fc.constantFrom(0, 1, 40),
+      ideas: fc.constantFrom(0, 12),
+      live: fc.boolean(),
+      cost: fc.constantFrom(COST, NO_PRICE, null),
+      truncated: fc.boolean(),
+    });
+    fc.assert(
+      fc.property(spec, data => {
+        const {screen} = render({...data});
+        const text = screen.container.textContent ?? '';
+        expect(text).not.toMatch(/\d(measured|ideas|idea|agents?|spent|turns?)\b/);
+        screen.unmount();
+      }),
+      {numRuns: 20, seed: 4052},
+    );
+  });
+});
+
+describe('the ideas and the measurements that had no plan', () => {
+  it('says so in one line when no idea was proposed but some measurements had no plan, the same count the panel gives otherwise', () => {
+    const {screen} = render({candidates: 3, ideas: 0});
+    expect(rowsOf(screen.container, 'Idea list')).toEqual([
+      ['No ideas yet · 3 measurements had no plan'],
+    ]);
+    // Said once: there is no second line under the table.
+    expect(cardText(screen.container, 'Ideas').match(/had no plan/g)).toHaveLength(1);
+    screen.unmount();
+    const some = render({ideas: 12});
+    expect(cardText(some.screen.container, 'Ideas')).toMatch(/\d+ measurements had no plan/);
+    expect(cardText(some.screen.container, 'Ideas')).not.toContain('unplanned');
+    some.screen.unmount();
+  });
+
+  it('names the agent that made each idea as the screen names agents elsewhere', () => {
+    const {screen} = render({ideas: 12, named: true});
+    const names = [...new Set(rowsOf(screen.container, 'Idea list').map(cells => cells[5]))];
+    expect(names.length).toBeGreaterThan(1);
+    for (const name of names) expect(name).not.toBe('An agent');
     screen.unmount();
   });
 });

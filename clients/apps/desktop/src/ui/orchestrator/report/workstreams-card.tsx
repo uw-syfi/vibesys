@@ -1,8 +1,19 @@
 import {WorkstreamStatus} from '@vibesys/orchestrator-proto';
-import {Card, ShareBar, Stack, SwatchLegend, Table, type TableColumn, Text} from '@vibesys/ui';
+import {
+  Card,
+  DotLegend,
+  Fact,
+  Row,
+  ShareBar,
+  Stack,
+  Table,
+  type TableColumn,
+  Text,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {WorkstreamRow} from '../../../state/index.js';
 import {formatGain} from './format.js';
+import {VERDICT_TONES, VERDICT_WORDS} from './verdicts.js';
 
 const STATUS_WORDS = {
   [WorkstreamStatus.UNSPECIFIED]: '',
@@ -10,9 +21,6 @@ const STATUS_WORDS = {
   [WorkstreamStatus.PAUSED]: 'Paused',
   [WorkstreamStatus.CLOSED]: 'Closed',
 } as const satisfies Record<WorkstreamStatus, string>;
-
-/** The palette color of each verdict in the bars, and in the key above them. */
-const SERIES = {kept: 2, rejected: 5, open: 1, parked: 7} as const;
 
 /** What a row's name is: its title, or the ideas that name no workstream. */
 const nameOf = (row: WorkstreamRow): string =>
@@ -24,20 +32,32 @@ function titleOf(row: WorkstreamRow): string {
   return [nameOf(row), status, row.note].filter(part => part !== '').join(' · ');
 }
 
+const VERDICTS = ['kept', 'rejected', 'open', 'parked'] as const;
+
+/** The ideas of a workstream as one bar in the verdicts' colors, and how many they are. */
 function IdeasBar(props: {readonly row: WorkstreamRow}): JSX.Element {
   const {row} = props;
+  const total = VERDICTS.reduce((sum, verdict) => sum + row[verdict], 0);
   return (
-    <ShareBar
-      bare
-      label={`Ideas of ${nameOf(row)} by verdict`}
-      parts={(['kept', 'rejected', 'open', 'parked'] as const).map(verdict => ({
-        key: verdict,
-        label: `${verdict[0]?.toUpperCase()}${verdict.slice(1)}`,
-        value: row[verdict],
-        figure: String(row[verdict]),
-        series: SERIES[verdict],
-      }))}
-    />
+    <Row gap="space-3">
+      <ShareBar
+        bare
+        label={`Ideas of ${nameOf(row)} by verdict`}
+        parts={VERDICTS.map(verdict => ({
+          key: verdict,
+          label: VERDICT_WORDS[verdict],
+          value: row[verdict],
+          figure: String(row[verdict]),
+          series: 0,
+          tone: VERDICT_TONES[verdict],
+        }))}
+      />
+      <Fact>
+        <Text variant="code" tone="muted">
+          {total}
+        </Text>
+      </Fact>
+    </Row>
   );
 }
 
@@ -77,14 +97,11 @@ export function WorkstreamsCard(props: {
   return (
     <Card dense section="Workstreams">
       <Stack gap="space-3">
-        <SwatchLegend
-          label="Key to the bars"
-          items={[
-            {label: 'Kept', series: SERIES.kept},
-            {label: 'Rejected', series: SERIES.rejected},
-            {label: 'Open', series: SERIES.open},
-            {label: 'Parked', series: SERIES.parked},
-          ]}
+        <DotLegend
+          items={VERDICTS.map(verdict => ({
+            tone: VERDICT_TONES[verdict],
+            label: VERDICT_WORDS[verdict],
+          }))}
         />
         <Table
           label="Workstream list"

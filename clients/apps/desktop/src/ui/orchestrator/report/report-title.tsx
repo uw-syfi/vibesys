@@ -63,14 +63,12 @@ export function ReportMeta(props: {
   return (
     <>
       <Chip label={status.label} tone={status.tone} dot />
-      {why === null ? null : <Text variant="small">{why}</Text>}
+      {why === null ? null : <Text>{why}</Text>}
       {props.report.search.state === 'unreadable' ? (
         <UnreadableChip search={props.report.search} nowMs={props.nowMs} />
       ) : null}
       <Chip label={props.host} mono clip />
-      <Text variant="small" title={header.endedMs === null ? 'Running for' : 'Ran for'}>
-        {formatElapsed(header.elapsedMs)}
-      </Text>
+      <Text variant="small">{`${header.endedMs === null ? 'for' : 'ran for'} ${formatElapsed(header.elapsedMs)}`}</Text>
       <Text variant="small" tone="muted">
         {`Started ${clock.reportMoment(header.startedMs)}`}
       </Text>
