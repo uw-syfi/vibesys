@@ -152,6 +152,18 @@ export {
   sinceWindow,
   windowSinceMs,
 } from './orchestrator/host-cost.js';
+export {
+  bucketsInRange,
+  HOST_ORDER,
+  nextRunSort,
+  type RunSort,
+  type RunSortKey,
+  rangeOf,
+  rangesOf,
+  type SpendRange,
+  sortRuns,
+  spendSpanMs,
+} from './orchestrator/host-cost-lists.js';
 export {type ItemOf, itemIs} from './orchestrator/items.js';
 export {type MessageNote, type MessageOf, messageIs, noteOf} from './orchestrator/messages.js';
 export {
