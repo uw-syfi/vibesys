@@ -1,44 +1,34 @@
-import {AgentTurnAttrsSchema} from '@vibesys/proto';
+import {AgentTurnAttrsSchema, GateAttrsSchema, WorkstreamAttrsSchema} from '@vibesys/proto';
 import type {
   ObjectiveProjection,
   ProjectionAvailability,
   ProjectionReason,
+  ProjectionSet,
   RunDetailFreshness,
   RunDetailProjection,
   RunDetailState,
+  UnprojectedSpanProjection,
 } from './types.js';
 
 /** The only UI-facing view: no records, protobuf Any values, or descriptor objects cross it. */
 export function projectRunDetail(state: RunDetailState): RunDetailProjection {
   const freshness = freshnessOf(state);
   const scope = {kind: 'run' as const, runId: state.runId};
-  const agentReasons: ProjectionReason[] = [];
-  const agentIssues = state.issues.filter(
-    issue => issue.attrsType === AgentTurnAttrsSchema.typeName,
+  const agentReasons = spanReasons(
+    state,
+    AgentTurnAttrsSchema.typeName,
+    state.truncation.agentEvictions,
   );
-  if (agentIssues.some(issue => issue.reason === 'undeclared-kind')) {
-    agentReasons.push('declaration-unknown');
-  }
-  if (agentIssues.some(issue => issue.reason === 'descriptor-unknown')) {
-    agentReasons.push('descriptor-unknown');
-  }
-  if (
-    agentIssues.some(
-      issue =>
-        issue.reason === 'missing-span-start' ||
-        issue.reason === 'descriptor-mismatch' ||
-        issue.reason === 'invalid-attributes',
-    )
-  ) {
-    agentReasons.push('invalid-typed-fact');
-  }
-  if (
-    state.truncation.agentEvictions > 0 ||
-    state.truncation.epochEvictions > 0 ||
-    state.truncation.issueEvictions > 0
-  ) {
-    agentReasons.push('state-truncated');
-  }
+  const workstreamReasons = spanReasons(
+    state,
+    WorkstreamAttrsSchema.typeName,
+    state.truncation.workstreamEvictions,
+  );
+  const correctnessReasons = spanReasons(
+    state,
+    GateAttrsSchema.typeName,
+    state.truncation.correctnessGateEvictions,
+  );
   const metricReasons: ProjectionReason[] = [];
   if (
     state.truncation.metricSeriesEvictions > 0 ||
@@ -91,25 +81,28 @@ export function projectRunDetail(state: RunDetailState): RunDetailProjection {
       source: {kind: 'run-log'},
       scope,
       freshness,
-      availability: {kind: 'unavailable', reason: 'projection-not-installed'},
-      observedSpans: undefined,
+      availability: availability(workstreamReasons),
+      values: state.workstreams.map(({startProof: _startProof, ...workstream}) => workstream),
     },
     correctness: {
       source: {kind: 'run-log'},
       scope,
       freshness,
-      availability: {kind: 'unavailable', reason: 'projection-not-installed'},
-      observedSpans: undefined,
+      availability: availability(correctnessReasons),
+      values: state.correctnessGates.map(({startProof: _startProof, ...gate}) => gate),
     },
+    unprojectedSpans: unprojectedSpans(state),
   };
 }
 
 function projectionTruncation(state: RunDetailState): RunDetailProjection['truncation'] {
   return {
     agentEvictions: state.truncation.agentEvictions,
+    correctnessGateEvictions: state.truncation.correctnessGateEvictions,
     epochEvictions: state.truncation.epochEvictions,
     issueEvictions: state.truncation.issueEvictions,
     metricSeriesEvictions: state.truncation.metricSeriesEvictions,
+    workstreamEvictions: state.truncation.workstreamEvictions,
   };
 }
 
@@ -124,6 +117,63 @@ function objectiveAvailability(
     kind: 'unavailable',
     reason: state.truncation.epochEvictions > 0 ? 'state-truncated' : 'typed-fact-not-recorded',
   };
+}
+
+function unprojectedSpans(state: RunDetailState): ProjectionSet<UnprojectedSpanProjection> {
+  const scope = {kind: 'run' as const, runId: state.runId};
+  return {
+    source: {kind: 'run-log'},
+    scope,
+    freshness: freshnessOf(state),
+    availability:
+      state.truncation.issueEvictions > 0
+        ? {kind: 'partial', reasons: ['state-truncated']}
+        : {kind: 'available'},
+    values: state.issues.map(issue => ({
+      spanId: issue.spanId,
+      kind: issue.kind,
+      attrsType: issue.attrsType,
+      declaredAttrsType: issue.declaredAttrsType,
+      reason: issue.reason,
+      source: {kind: 'run-record', sequence: issue.sequence, epoch: issue.epoch},
+      scope: {kind: 'span', runId: state.runId, spanId: issue.spanId},
+    })),
+  };
+}
+
+function spanReasons(
+  state: RunDetailState,
+  attrsType: string,
+  familyEvictions: number,
+): ProjectionReason[] {
+  const issues = state.issues.filter(
+    issue => (issue.declaredAttrsType ?? issue.attrsType) === attrsType,
+  );
+  const reasons: ProjectionReason[] = [];
+  if (issues.some(issue => issue.reason === 'undeclared-kind')) {
+    reasons.push('declaration-unknown');
+  }
+  if (issues.some(issue => issue.reason === 'descriptor-unknown')) {
+    reasons.push('descriptor-unknown');
+  }
+  if (
+    issues.some(
+      issue =>
+        issue.reason === 'missing-span-start' ||
+        issue.reason === 'descriptor-mismatch' ||
+        issue.reason === 'invalid-attributes',
+    )
+  ) {
+    reasons.push('invalid-typed-fact');
+  }
+  if (
+    familyEvictions > 0 ||
+    state.truncation.epochEvictions > 0 ||
+    state.truncation.issueEvictions > 0
+  ) {
+    reasons.push('state-truncated');
+  }
+  return reasons;
 }
 
 function freshnessOf(state: RunDetailState): RunDetailFreshness {

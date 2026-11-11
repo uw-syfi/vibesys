@@ -336,14 +336,8 @@ describe('generic run detail', () => {
       points: [{value: 12}, {value: 15}],
     });
     expect(view.objectives.values).toMatchObject([{series: 'throughput', direction: 'max'}]);
-    expect(view.workstreams.availability).toEqual({
-      kind: 'unavailable',
-      reason: 'projection-not-installed',
-    });
-    expect(view.correctness.availability).toEqual({
-      kind: 'unavailable',
-      reason: 'projection-not-installed',
-    });
+    expect(view.workstreams).toMatchObject({availability: {kind: 'available'}, values: []});
+    expect(view.correctness).toMatchObject({availability: {kind: 'available'}, values: []});
   });
 
   it('uses an amended declaration for existing metrics and objectives across every fold split', () => {

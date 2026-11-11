@@ -1,28 +1,25 @@
 import {
-  type AgentTurnAttrs,
-  AgentTurnAttrsSchema,
   Change,
   Direction,
   descriptorRegistry,
   type EpochStarted,
   type Keyframe,
   Outcome,
-  AgentClient as ProtoAgentClient,
   RecordSchema,
   SeriesRole,
   type SkeletonResponse,
   type Span,
-  SpanStatus,
   type Record as StoreRecord,
   type TailResponse,
   validatedAddressedKeyframe,
-  validatedAnyUnpack,
   validatedFromBinary,
   verifiedDescriptorMessages,
 } from '@vibesys/proto';
+import {projectTypedSpan} from './span-projectors.js';
 import {
-  type AgentLifecycle,
+  type AgentState,
   type AttributeIssue,
+  type CorrectnessGateState,
   DEFAULT_RUN_DETAIL_LIMITS,
   type DescriptorKnowledge,
   type EpochKnowledge,
@@ -34,16 +31,9 @@ import {
   type RunDetailLimits,
   type RunDetailState,
   type RunDetailUpdate,
+  type WorkstreamState,
 } from './types.js';
 
-const AGENT_STATUSES: Partial<Record<SpanStatus, AgentLifecycle>> = {
-  [SpanStatus.RUNNING]: 'running',
-  [SpanStatus.WAITING]: 'waiting',
-  [SpanStatus.PENDING]: 'pending',
-  [SpanStatus.DONE]: 'done',
-  [SpanStatus.FAILED]: 'failed',
-  [SpanStatus.STOPPED]: 'stopped',
-};
 const DIRECTIONS: Partial<Record<Direction, MetricDirection>> = {
   [Direction.MAX]: 'max',
   [Direction.MIN]: 'min',
@@ -57,11 +47,13 @@ const ROLES: Partial<Record<SeriesRole, MetricRole>> = {
 
 const EVIDENCE_LIMITS: RunDetailLimits = {
   maxAgents: Number.MAX_SAFE_INTEGER,
+  maxCorrectnessGates: Number.MAX_SAFE_INTEGER,
   maxDescriptorSets: Number.MAX_SAFE_INTEGER,
   maxEpochVersions: Number.MAX_SAFE_INTEGER,
   maxIssues: Number.MAX_SAFE_INTEGER,
   maxMetricPointsPerSeries: Number.MAX_SAFE_INTEGER,
   maxMetricSeries: Number.MAX_SAFE_INTEGER,
+  maxWorkstreams: Number.MAX_SAFE_INTEGER,
 };
 
 class HistoryEvictedError extends Error {}
@@ -84,16 +76,20 @@ export function emptyRunDetail(
     descriptors: [],
     epochs: [],
     agents: [],
+    workstreams: [],
+    correctnessGates: [],
     metrics: [],
     lifecycle: undefined,
     issues: [],
     undeclaredMetricPoints: 0,
     truncation: {
       agentEvictions: 0,
+      correctnessGateEvictions: 0,
       descriptorSetEvictions: 0,
       epochEvictions: 0,
       issueEvictions: 0,
       metricSeriesEvictions: 0,
+      workstreamEvictions: 0,
     },
   };
 }
@@ -389,13 +385,12 @@ function foldKeyframe(
       }
       case 'span': {
         const epoch = requiredEpochAt(lookup, event.sequence, 'keyframe.spans');
-        const existing = next.agents.find(agent => agent.spanId === event.span.id);
         next = foldSpan(next, {
           sequence: event.sequence,
           epoch: epoch.epoch,
           span: event.span,
           startsSpan: event.startsSpan,
-          startProof: existing?.startProof,
+          startProof: spanStartProofOf(next, event.span.id),
         });
         break;
       }
@@ -513,13 +508,12 @@ function foldRecord(state: RunDetailState, record: StoreRecord): RunDetailState 
     case 'span': {
       const span = body.value.span;
       if (!span) throw new Error(`record ${record.seq}: span.span is required`);
-      const existing = state.agents.find(agent => agent.spanId === span.id);
       return foldSpan(state, {
         sequence: record.seq,
         epoch: record.epoch,
         span,
         startsSpan: body.value.change === Change.STARTED,
-        startProof: existing?.startProof,
+        startProof: spanStartProofOf(state, span.id),
       });
     }
     case 'metric':
@@ -687,18 +681,28 @@ function foldSpan(state: RunDetailState, input: SpanFoldInput): RunDetailState {
   const next = {
     ...state,
     agents: state.agents.filter(agent => agent.spanId !== span.id),
+    workstreams: state.workstreams.filter(workstream => workstream.spanId !== span.id),
+    correctnessGates: state.correctnessGates.filter(gate => gate.spanId !== span.id),
     issues: state.issues.filter(issue => issue.spanId !== span.id),
   };
   const label = span.label;
   if (!label) return next;
   const attrsType = typeName(label.attrs?.typeUrl ?? '');
+  const issue = {
+    spanId: span.id,
+    kind: label.kind,
+    attrsType,
+    sequence,
+    epoch,
+  };
   const resolution = resolveSpanStart(state, input, label.kind, attrsType);
   if (resolution.kind === 'issue') {
     return addIssue(next, {
-      spanId: span.id,
-      kind: label.kind,
-      attrsType,
-      sequence,
+      ...issue,
+      declaredAttrsType: resolution.declaredAttrsType,
+      startedSequence: input.startsSpan ? sequence : input.startProof?.startedSequence,
+      startedEpoch: input.startsSpan ? epoch : input.startProof?.startedEpoch,
+      startProof: undefined,
       reason: resolution.reason,
     });
   }
@@ -706,37 +710,48 @@ function foldSpan(state: RunDetailState, input: SpanFoldInput): RunDetailState {
   if (startProof.kind !== label.kind || startProof.attrsType !== attrsType) {
     if (state.truncation.epochEvictions > 0) throw new HistoryEvictedError();
     return addIssue(next, {
-      spanId: span.id,
-      kind: label.kind,
-      attrsType,
-      sequence,
+      ...issue,
+      declaredAttrsType: startProof.attrsType,
+      startedSequence: startProof.startedSequence,
+      startedEpoch: startProof.startedEpoch,
+      startProof,
       reason: 'descriptor-mismatch',
     });
   }
-  if (attrsType !== AgentTurnAttrsSchema.typeName) return next;
-  const attrs = label.attrs && validatedAnyUnpack(label.attrs, AgentTurnAttrsSchema);
-  const status = AGENT_STATUSES[span.status];
-  if (!attrs || !status) {
-    return addIssue(next, {
-      spanId: span.id,
-      kind: label.kind,
-      attrsType,
-      sequence,
-      reason: 'invalid-attributes',
-    });
+  const projected = projectTypedSpan({
+    runId: state.runId,
+    sequence,
+    epoch,
+    startProof,
+    attrsType,
+    span,
+  });
+  switch (projected.kind) {
+    case 'agent':
+      return addAgent(next, projected.value);
+    case 'workstream':
+      return addWorkstream(next, projected.value);
+    case 'correctness':
+      return addCorrectnessGate(next, projected.value);
+    case 'unsupported':
+      return addIssue(next, {
+        ...issue,
+        declaredAttrsType: startProof.attrsType,
+        startedSequence: startProof.startedSequence,
+        startedEpoch: startProof.startedEpoch,
+        startProof,
+        reason: 'projector-not-installed',
+      });
+    case 'invalid':
+      return addIssue(next, {
+        ...issue,
+        declaredAttrsType: startProof.attrsType,
+        startedSequence: startProof.startedSequence,
+        startedEpoch: startProof.startedEpoch,
+        startProof,
+        reason: 'invalid-attributes',
+      });
   }
-  return addAgent(
-    next,
-    agentProjection({
-      state,
-      sequence,
-      epoch,
-      span,
-      startProof,
-      attrs,
-      lifecycle: status,
-    }),
-  );
 }
 
 function resolveSpanStart(
@@ -746,13 +761,22 @@ function resolveSpanStart(
   attrsType: string,
 ):
   | {readonly kind: 'resolved'; readonly proof: SpanDeclarationProof}
-  | {readonly kind: 'issue'; readonly reason: AttributeIssue['reason']} {
+  | {
+      readonly kind: 'issue';
+      readonly reason: AttributeIssue['reason'];
+      readonly declaredAttrsType: string | undefined;
+    } {
   if (input.startProof) return {kind: 'resolved', proof: input.startProof};
   if (input.startsSpan) return spanStartProof(state, input, kind, attrsType);
-  if (state.truncation.agentEvictions > 0 || state.truncation.issueEvictions > 0) {
+  if (
+    state.truncation.agentEvictions > 0 ||
+    state.truncation.workstreamEvictions > 0 ||
+    state.truncation.correctnessGateEvictions > 0 ||
+    state.truncation.issueEvictions > 0
+  ) {
     throw new HistoryEvictedError();
   }
-  return {kind: 'issue', reason: 'missing-span-start'};
+  return {kind: 'issue', reason: 'missing-span-start', declaredAttrsType: undefined};
 }
 
 function spanStartProof(
@@ -765,12 +789,26 @@ function spanStartProof(
   | {
       readonly kind: 'issue';
       readonly reason: 'undeclared-kind' | 'descriptor-mismatch' | 'descriptor-unknown';
+      readonly declaredAttrsType: string | undefined;
     } {
   const epochKnowledge = epochVersionAt(state, input.epoch, input.sequence);
+  if (!epochKnowledge && state.truncation.epochEvictions > 0) throw new HistoryEvictedError();
   const declaration = epochKnowledge?.spanKinds.find(item => item.kind === kind);
-  if (!declaration) return {kind: 'issue', reason: 'undeclared-kind'};
-  if (declaration.attrsType !== attrsType) return {kind: 'issue', reason: 'descriptor-mismatch'};
-  if (!declaration.descriptorKnown) return {kind: 'issue', reason: 'descriptor-unknown'};
+  if (!declaration) return {kind: 'issue', reason: 'undeclared-kind', declaredAttrsType: undefined};
+  if (declaration.attrsType !== attrsType) {
+    return {
+      kind: 'issue',
+      reason: 'descriptor-mismatch',
+      declaredAttrsType: declaration.attrsType,
+    };
+  }
+  if (!declaration.descriptorKnown) {
+    return {
+      kind: 'issue',
+      reason: 'descriptor-unknown',
+      declaredAttrsType: declaration.attrsType,
+    };
+  }
   return {
     kind: 'resolved',
     proof: {
@@ -782,60 +820,7 @@ function spanStartProof(
   };
 }
 
-interface AgentProjectionInput {
-  readonly state: RunDetailState;
-  readonly sequence: bigint;
-  readonly epoch: number;
-  readonly span: Span;
-  readonly startProof: SpanDeclarationProof;
-  readonly attrs: AgentTurnAttrs;
-  readonly lifecycle: AgentLifecycle;
-}
-
-function agentProjection(input: AgentProjectionInput): RunDetailState['agents'][number] {
-  const {state, sequence, epoch, span, startProof, attrs, lifecycle} = input;
-  return {
-    spanId: span.id,
-    parentSpanId: span.parent,
-    agentId: attrs.agent,
-    role: attrs.role,
-    stage: attrs.stage,
-    startedBy: attrs.startedBy,
-    model: attrs.model,
-    provider: attrs.provider,
-    reasoningEffort: attrs.reasoningEffort,
-    harnessVersion: attrs.harnessVersion,
-    client:
-      attrs.client === ProtoAgentClient.SCRIPTED
-        ? 'scripted'
-        : attrs.client === ProtoAgentClient.PROVIDER
-          ? 'provider'
-          : 'unknown',
-    providerSessionIds: attrs.usageDetails.flatMap(detail =>
-      detail.providerSessionId === undefined ? [] : [detail.providerSessionId],
-    ),
-    lifecycle,
-    usage: attrs.usage
-      ? {
-          inputTokens: attrs.usage.input,
-          cacheReadTokens: attrs.usage.cacheRead,
-          cacheCreationTokens: attrs.usage.cacheCreation,
-          outputTokens: attrs.usage.output,
-          reasoningTokens: attrs.usage.reasoning,
-          costUsd: attrs.usage.costUsd,
-          durationMs: attrs.usage.durationMs,
-        }
-      : undefined,
-    source: {kind: 'run-record', sequence, epoch},
-    scope: {kind: 'span', runId: state.runId, spanId: span.id},
-    startProof,
-  };
-}
-
-function addAgent(
-  state: RunDetailState,
-  projected: RunDetailState['agents'][number],
-): RunDetailState {
+function addAgent(state: RunDetailState, projected: AgentState): RunDetailState {
   const agents = [...state.agents, projected].sort((left, right) =>
     compareSource(left.source.sequence, left.spanId, right.source.sequence, right.spanId),
   );
@@ -845,6 +830,46 @@ function addAgent(
     agents: excess === 0 ? agents : agents.slice(excess),
     truncation: {...state.truncation, agentEvictions: state.truncation.agentEvictions + excess},
   };
+}
+
+function addWorkstream(state: RunDetailState, projected: WorkstreamState): RunDetailState {
+  const workstreams = [...state.workstreams, projected].sort((left, right) =>
+    compareSource(left.source.sequence, left.spanId, right.source.sequence, right.spanId),
+  );
+  const excess = Math.max(0, workstreams.length - state.limits.maxWorkstreams);
+  return {
+    ...state,
+    workstreams: excess === 0 ? workstreams : workstreams.slice(excess),
+    truncation: {
+      ...state.truncation,
+      workstreamEvictions: state.truncation.workstreamEvictions + excess,
+    },
+  };
+}
+
+function addCorrectnessGate(
+  state: RunDetailState,
+  projected: CorrectnessGateState,
+): RunDetailState {
+  const correctnessGates = [...state.correctnessGates, projected].sort((left, right) =>
+    compareSource(left.source.sequence, left.spanId, right.source.sequence, right.spanId),
+  );
+  const excess = Math.max(0, correctnessGates.length - state.limits.maxCorrectnessGates);
+  return {
+    ...state,
+    correctnessGates: excess === 0 ? correctnessGates : correctnessGates.slice(excess),
+    truncation: {
+      ...state.truncation,
+      correctnessGateEvictions: state.truncation.correctnessGateEvictions + excess,
+    },
+  };
+}
+
+function spanStartProofOf(state: RunDetailState, spanId: string): SpanDeclarationProof | undefined {
+  const projected = [...state.agents, ...state.workstreams, ...state.correctnessGates].find(
+    item => item.spanId === spanId,
+  );
+  return projected?.startProof ?? state.issues.find(item => item.spanId === spanId)?.startProof;
 }
 
 function foldMetric(
@@ -947,6 +972,11 @@ function addIssue(state: RunDetailState, issue: AttributeIssue): RunDetailState 
 
 function finalizeEvidence(state: RunDetailState, limits: RunDetailLimits): RunDetailState {
   const agentExcess = Math.max(0, state.agents.length - limits.maxAgents);
+  const workstreamExcess = Math.max(0, state.workstreams.length - limits.maxWorkstreams);
+  const correctnessGateExcess = Math.max(
+    0,
+    state.correctnessGates.length - limits.maxCorrectnessGates,
+  );
   const epochExcess = Math.max(0, state.epochs.length - limits.maxEpochVersions);
   const issueExcess = Math.max(0, state.issues.length - limits.maxIssues);
   const boundedMetrics = state.metrics.map(series => {
@@ -962,15 +992,23 @@ function finalizeEvidence(state: RunDetailState, limits: RunDetailLimits): RunDe
     ...state,
     limits,
     agents: agentExcess === 0 ? state.agents : state.agents.slice(agentExcess),
+    workstreams:
+      workstreamExcess === 0 ? state.workstreams : state.workstreams.slice(workstreamExcess),
+    correctnessGates:
+      correctnessGateExcess === 0
+        ? state.correctnessGates
+        : state.correctnessGates.slice(correctnessGateExcess),
     epochs: epochExcess === 0 ? state.epochs : state.epochs.slice(epochExcess),
     issues: issueExcess === 0 ? state.issues : state.issues.slice(issueExcess),
     metrics: metricSeriesExcess === 0 ? boundedMetrics : boundedMetrics.slice(metricSeriesExcess),
     truncation: {
       agentEvictions: state.truncation.agentEvictions + agentExcess,
+      correctnessGateEvictions: state.truncation.correctnessGateEvictions + correctnessGateExcess,
       descriptorSetEvictions: state.truncation.descriptorSetEvictions,
       epochEvictions: state.truncation.epochEvictions + epochExcess,
       issueEvictions: state.truncation.issueEvictions + issueExcess,
       metricSeriesEvictions: state.truncation.metricSeriesEvictions + metricSeriesExcess,
+      workstreamEvictions: state.truncation.workstreamEvictions + workstreamExcess,
     },
   };
 }
