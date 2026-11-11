@@ -17,9 +17,15 @@ export {
   methodPathOf,
 } from './recordings.js';
 export {
+  REPORT_CASES,
+  type ReportCase,
+  reportCaseWorld,
+} from './report-cases.js';
+export {
   type MeasuredOptions,
   measuredSearch,
   type ObjectiveSpec,
+  SERIES_LIMIT,
   SERVING,
   withReport,
 } from './report-fixtures.js';

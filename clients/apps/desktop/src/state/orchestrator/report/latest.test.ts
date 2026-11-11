@@ -1,7 +1,7 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
+import {reportsOf, searchOf, servedSeries} from '../../../testing/orchestrator/served-points.js';
 import {LATEST_COUNT, latestMeasurements} from './latest.js';
-import {reportsOf, searchOf, servedSeries} from './served-points.js';
 
 describe('the latest measurements of a report', () => {
   it('lists at most the newest eight jobs, newest first, one row for each job, whatever the objectives', () => {

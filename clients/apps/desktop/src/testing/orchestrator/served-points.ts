@@ -3,7 +3,7 @@ import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {Direction, type SearchState, SearchStateSchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {type ObjectiveReport, objectiveReports} from './objectives.js';
+import {type ObjectiveReport, objectiveReports} from '../../state/index.js';
 
 type ServedSeries = NonNullable<MessageInitShape<typeof SearchStateSchema>['series']>;
 

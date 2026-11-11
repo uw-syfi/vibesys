@@ -62,6 +62,26 @@ export const SERVING: readonly ObjectiveSpec[] = [
 
 const RUN_AGENT = 'lead';
 
+/**
+ * What the host serves of a run that measured more than fits: at most this many points of a series
+ * and of the trade-off, and this many jobs and results. A cut series keeps its best-so-far points
+ * before the others, the oldest of each going first, and the state is marked truncated.
+ */
+export const SERIES_LIMIT = 400;
+const RECORDS_LIMIT = 500;
+
+/** `items` cut to `limit`: those `first` wants kept before the others, the oldest of each going first. */
+function keptWithin<T>(items: readonly T[], first: (item: T) => boolean, limit: number): T[] {
+  if (items.length <= limit) return [...items];
+  const wanted = items.filter(first).slice(-limit);
+  const others = items.filter(item => !first(item));
+  const kept = new Set([
+    ...wanted,
+    ...others.slice(Math.max(0, others.length - (limit - wanted.length))),
+  ]);
+  return items.filter(item => kept.has(item));
+}
+
 /** The workstreams of the Fake's ideas: the last has a title longer than any column. */
 const WORKSTREAMS = [
   'GEMM and MoE',
@@ -135,18 +155,22 @@ function seriesOf(options: MeasuredOptions, candidates: readonly Candidate[]) {
       objective: objective.name,
       direction: objective.direction,
       unit: objective.unit,
-      points: candidates.map(candidate => {
-        const value = candidate.values[at] ?? 0;
-        const bestSoFar = best === undefined || beats(objective.direction, value, best);
-        if (bestSoFar) best = value;
-        return {
-          jobId: candidate.jobId,
-          commit: candidate.commit,
-          at: timestampFromMs(candidate.atMs),
-          value,
-          bestSoFar,
-        };
-      }),
+      points: keptWithin(
+        candidates.map(candidate => {
+          const value = candidate.values[at] ?? 0;
+          const bestSoFar = best === undefined || beats(objective.direction, value, best);
+          if (bestSoFar) best = value;
+          return {
+            jobId: candidate.jobId,
+            commit: candidate.commit,
+            at: timestampFromMs(candidate.atMs),
+            value,
+            bestSoFar,
+          };
+        }),
+        point => point.bestSoFar,
+        SERIES_LIMIT,
+      ),
     };
   });
 }
@@ -159,13 +183,17 @@ function tradeoffOf(options: MeasuredOptions, candidates: readonly Candidate[]) 
     directions.some((d, i) => beats(d, a.values[i] ?? 0, b.values[i] ?? 0));
   return {
     objectives: options.objectives.map(({name, direction}) => ({name, direction})),
-    points: candidates.map(candidate => ({
-      jobId: candidate.jobId,
-      commit: candidate.commit,
-      at: timestampFromMs(candidate.atMs),
-      values: [...candidate.values],
-      onFrontier: !candidates.some(other => other !== candidate && dominates(other, candidate)),
-    })),
+    points: keptWithin(
+      candidates.map(candidate => ({
+        jobId: candidate.jobId,
+        commit: candidate.commit,
+        at: timestampFromMs(candidate.atMs),
+        values: [...candidate.values],
+        onFrontier: !candidates.some(other => other !== candidate && dominates(other, candidate)),
+      })),
+      point => point.onFrontier,
+      SERIES_LIMIT,
+    ),
   };
 }
 
@@ -409,22 +437,27 @@ export function measuredSearch(
           }
         : {case: 'liveSince', value: timestampFromMs(options.startMs)},
     },
-    jobs: candidates.map((candidate, index) => ({
-      id: candidate.jobId,
-      plans: (() => {
-        const plan = served.jobPlans[index];
-        return plan === undefined ? [] : [plan];
-      })(),
-      state: JobState.SUCCEEDED,
-      submittedAt: timestampFromMs(candidate.atMs - 60_000),
-      submitters: [submitter],
-    })),
-    results: candidates.map(candidate => ({
+    jobs: candidates.flatMap((candidate, index) => {
+      const plan = served.jobPlans[index];
+      return index < candidates.length - RECORDS_LIMIT
+        ? []
+        : [
+            {
+              id: candidate.jobId,
+              plans: plan === undefined ? [] : [plan],
+              state: JobState.SUCCEEDED,
+              submittedAt: timestampFromMs(candidate.atMs - 60_000),
+              submitters: [submitter],
+            },
+          ];
+    }),
+    results: candidates.slice(-RECORDS_LIMIT).map(candidate => ({
       jobId: candidate.jobId,
       commit: candidate.commit,
       recordedAt: timestampFromMs(candidate.atMs),
       outcome: measureOf(options, candidate),
     })),
+    truncated: candidates.length > SERIES_LIMIT,
     ...(head === undefined
       ? {}
       : {

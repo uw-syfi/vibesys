@@ -261,7 +261,7 @@ describe('the report as a page of the run', () => {
   it('writes the age of the report and the time the run has run in the words of the Runs list', () => {
     const {screen} = render({});
     expect(screen.container.querySelector('section.vs-labelled-line')?.textContent).toContain(
-      'Updated 23m ago',
+      '23m ago',
     );
     expect(screen.container.querySelector('.vs-page-meta')?.textContent).toMatch(
       /host-a(\d+d \d+h|\d+h \d+m|\d+m|\d+s)Started/,
@@ -469,7 +469,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
     const {screen} = render({});
     const lead = screen.container.querySelector('section.vs-labelled-line')?.textContent ?? '';
     expect(lead).toContain('Throughput is 2.3 times the baseline');
-    expect(lead).toContain('Updated 23m ago');
+    expect(lead).toContain('23m ago');
     expect(lead).toContain('Fused expert dispatch landed.');
     screen.unmount();
   });
@@ -483,7 +483,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
         .querySelector('table[aria-label="Latest measurements"]')
         ?.querySelectorAll('thead th') ?? []),
     ].map(cell => cell.textContent);
-    expect(headers).toEqual(['When', 'Idea', 'throughput', 'p99_latency', 'Commit']);
+    expect(headers).toEqual(['Ago', 'Idea', 'throughput', 'p99_latency', 'Commit']);
     const served = stateOf({candidates: 40}).searches[RUN];
     const newest = [...(served?.results ?? [])].slice(-8).reverse();
     expect(rows.map(cells => cells[4])).toEqual(newest.map(result => result.commit.slice(0, 8)));

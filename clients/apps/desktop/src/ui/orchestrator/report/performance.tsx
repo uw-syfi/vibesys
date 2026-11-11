@@ -297,7 +297,7 @@ function Overview(props: {
 /**
  * What the point chosen on a chart is: its job's commit, its value, and the idea each plan it names
  * stands for, with a button to that idea's row. A job that names no plan says so. The line holds its
- * height with no point chosen, so choosing one moves nothing.
+ * height with no point chosen, and says what choosing one does, so choosing one moves nothing.
  */
 function PointDetail(props: {
   readonly objectives: readonly ObjectiveReport[];
@@ -307,7 +307,19 @@ function PointDetail(props: {
   const found = props.objectives.flatMap(objective =>
     objective.points.filter(point => point.id === links.picked).map(point => ({objective, point})),
   )[0];
-  if (found === undefined) return <ChartDetail label="Chosen point" />;
+  if (found === undefined) {
+    const choosable =
+      links.ideas !== undefined && props.objectives.some(each => each.points.length > 0);
+    return (
+      <ChartDetail label="Chosen point">
+        {choosable ? (
+          <Text variant="small" tone="muted">
+            Choose a point to see the idea it measured
+          </Text>
+        ) : null}
+      </ChartDetail>
+    );
+  }
   const {objective, point} = found;
   const plans = plansOf(links, point.id);
   return (

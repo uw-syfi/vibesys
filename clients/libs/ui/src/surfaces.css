@@ -313,10 +313,25 @@
 .vs-table[data-middle] td {
   vertical-align: middle;
 }
-/* Rows set close: the least padding of the scale, a row as tall as a dense control. */
+/* Rows set close: the least padding of the scale, a row as tall as a dense control. The first and
+   last cells have none at the table's edges, so the table starts and ends where the heading above it
+   does (one left edge), and a name cut with an ellipsis takes what the other columns leave. */
 .vs-table[data-dense] th,
 .vs-table[data-dense] td {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2);
+}
+.vs-table[data-dense] tr > :first-child {
+  padding-left: 0;
+}
+.vs-table[data-dense] tr > :last-child {
+  padding-right: 0;
+}
+.vs-table[data-dense] td[data-lead][data-clip] {
+  max-width: 0;
+  width: 100%;
+}
+.vs-table[data-dense] td[data-clip]:not([data-lead]) {
+  max-width: calc(var(--space-8) * 4);
 }
 /* A table of many rows: a box of its own height, scrolling down, with its header kept in view. */
 .vs-table-scroll[data-down] {

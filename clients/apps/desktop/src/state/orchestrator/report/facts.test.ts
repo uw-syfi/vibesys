@@ -1,10 +1,10 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
+import {reportsOf, searchOf, servedSeries} from '../../../testing/orchestrator/served-points.js';
 import type {CostView} from '../cost.js';
 import type {AgentsStrip} from './agents-strip.js';
 import {runFacts} from './facts.js';
 import {ideasReport} from './ideas.js';
-import {reportsOf, searchOf, servedSeries} from './served-points.js';
 
 const NO_AGENTS: AgentsStrip = {types: [], total: 0, running: 0};
 

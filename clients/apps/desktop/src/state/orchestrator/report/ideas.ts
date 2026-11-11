@@ -190,7 +190,7 @@ export type IdeaSortKey = 'id' | 'idea' | 'workstream' | 'verdict' | 'gain' | 'a
 export type SortDirection = 'ascending' | 'descending';
 
 /** The order a column is first sorted in when it is chosen: numbers and times newest or largest first. */
-export const FIRST_DIRECTION: Readonly<Record<IdeaSortKey, SortDirection>> = {
+const FIRST_DIRECTION: Readonly<Record<IdeaSortKey, SortDirection>> = {
   id: 'descending',
   idea: 'ascending',
   workstream: 'ascending',

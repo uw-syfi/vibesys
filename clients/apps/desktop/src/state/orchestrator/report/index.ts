@@ -1,7 +1,7 @@
 /** The run report's view models, as plain reads of the folded state. */
 export {type AgentCostRow, agentCostRows} from './agent-costs.js';
 export {type AgentsStrip, type AgentTypeCount, agentsStrip} from './agents-strip.js';
-export {type RunFacts, runFacts} from './facts.js';
+export type {RunFacts} from './facts.js';
 export {
   type GainView,
   type IdeaRow,
@@ -24,7 +24,6 @@ export {
   LATEST_COUNT,
   type LatestMeasurement,
   type LatestValue,
-  latestMeasurements,
 } from './latest.js';
 export {
   type Better,
@@ -47,7 +46,6 @@ export {
   bandView,
   boundIsDrawn,
   choiceOf,
-  LONG_RUN_MS,
   offersRanges,
   type RangeChoice,
   type RangeView,

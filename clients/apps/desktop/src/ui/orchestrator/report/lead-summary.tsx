@@ -36,7 +36,7 @@ export function LeadSummary(props: {
   return (
     <LabelledLine
       label="Lead"
-      note={`Updated ${formatAge(props.nowMs - summary.atMs)}`}
+      note={formatAge(props.nowMs - summary.atMs)}
       {...(summary.final ? {badge: <Chip label="Final" tone="ok" />} : {})}
       lead={<Text as="p">{withShortCommits(summary.headline)}</Text>}
       fields={summary.fields.map(({field, text}) => ({

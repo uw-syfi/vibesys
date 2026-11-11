@@ -359,7 +359,8 @@ export function IdeasPanel(props: {
             }
           />
         </div>
-        {props.ideas === undefined ? null : (
+        {props.ideas === undefined ||
+        (props.ideas.unplanned === 0 && !props.ideas.truncated) ? null : (
           <Row gap="space-4" wrap>
             <Text variant="small" tone="muted">{`${props.ideas.unplanned} unplanned`}</Text>
             {props.ideas.truncated ? <Chip label="Some left out" tone="warn" /> : null}

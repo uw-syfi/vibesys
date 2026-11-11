@@ -3,7 +3,7 @@ import type {JSX} from 'react';
 import type {LatestMeasurement, ObjectiveReport} from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
 import {useDisplayClock} from '../../display-clock.js';
-import {formatAge, formatExact, formatFigure, withUnit} from './format.js';
+import {formatElapsed, formatExact, formatFigure, withUnit} from './format.js';
 
 /** What a row says of the idea its job measured: its plan numbers, `No plan`, or a dash while no ideas are served. */
 function ideaWords(plans: readonly number[] | undefined): string {
@@ -27,9 +27,12 @@ export function LatestMeasurements(props: {
   const columns: TableColumn<LatestMeasurement>[] = [
     {
       key: 'when',
-      header: 'When',
+      header: props.runOver ? 'At' : 'Ago',
       mono: true,
-      cell: row => (props.runOver ? clock.reportTime(row.atMs) : formatAge(props.nowMs - row.atMs)),
+      cell: row =>
+        props.runOver
+          ? clock.reportTime(row.atMs)
+          : formatElapsed(Math.max(0, props.nowMs - row.atMs)),
     },
     {key: 'idea', header: 'Idea', mono: true, cell: row => ideaWords(row.plans)},
     ...props.objectives.map(

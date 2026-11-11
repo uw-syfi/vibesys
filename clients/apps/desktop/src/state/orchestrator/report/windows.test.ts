@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
-import {reportsOf, searchOf, servedSeries} from './served-points.js';
+import {reportsOf, searchOf, servedSeries} from '../../../testing/orchestrator/served-points.js';
 import {
   bandView,
   boundIsDrawn,
