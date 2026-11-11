@@ -515,6 +515,11 @@
   border-color: var(--chip-err-border);
   background: var(--chip-err-bg);
 }
+.vs-chip[data-tone="alt"] {
+  color: var(--alt);
+  border-color: var(--chip-alt-border);
+  background: var(--chip-alt-bg);
+}
 
 .vs-dot {
   display: inline-block;
@@ -536,5 +541,8 @@
 }
 .vs-dot[data-tone="err"] {
   background: var(--err);
+}
+.vs-dot[data-tone="alt"] {
+  background: var(--alt);
 }
 

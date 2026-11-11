@@ -182,6 +182,9 @@
   --chip-err-bg: color-mix(in srgb, var(--err) 12%, var(--panel));
   --chip-err-border: color-mix(in srgb, var(--err) 35%, var(--panel));
   --banner-err-bg: color-mix(in srgb, var(--err) 8%, var(--bg));
+  --chip-alt-bg: color-mix(in srgb, var(--alt) 12%, var(--panel));
+  --chip-alt-border: color-mix(in srgb, var(--alt) 35%, var(--panel));
+  --banner-alt-bg: color-mix(in srgb, var(--alt) 8%, var(--bg));
   --page: var(--bg);
   --error: var(--err);
   --accent-text: var(--bg);
@@ -200,6 +203,7 @@
   --ok: #146f34;
   --warn: #925500;
   --err: #b42318;
+  --alt: #8a3d93;
   --log-bg: #15161a;
   --log-text: #d9dde5;
   --grid: #19181711;
@@ -217,6 +221,7 @@
     --ok: #3fb950;
     --warn: #d6a03a;
     --err: #f2665f;
+    --alt: #c792ea;
     --log-bg: #050505;
     --log-text: #d4d4d4;
     --grid: #ededed11;
@@ -234,6 +239,7 @@
   --ok: #146f34;
   --warn: #925500;
   --err: #b42318;
+  --alt: #8a3d93;
   --log-bg: #15161a;
   --log-text: #d9dde5;
   --grid: #19181711;
@@ -250,6 +256,7 @@
   --ok: #116c33;
   --warn: #8f5300;
   --err: #b91c1c;
+  --alt: #0f6f78;
   --log-bg: #111522;
   --log-text: #d6dcea;
   --grid: #0f172a11;
@@ -266,6 +273,7 @@
   --ok: #34681a;
   --warn: #8a5000;
   --err: #a8321c;
+  --alt: #8a3d93;
   --log-bg: #1c1913;
   --log-text: #e6dfcf;
   --grid: #29231a11;
@@ -282,6 +290,7 @@
   --ok: #3fb950;
   --warn: #d6a03a;
   --err: #f2665f;
+  --alt: #c792ea;
   --log-bg: #050505;
   --log-text: #d4d4d4;
   --grid: #ededed11;
@@ -298,6 +307,7 @@
   --ok: #4cc38a;
   --warn: #e0aa4f;
   --err: #ff7a85;
+  --alt: #5cc8d9;
   --log-bg: #060a16;
   --log-text: #d3daf0;
   --grid: #e6eaf511;
@@ -314,6 +324,7 @@
   --ok: #3ddc84;
   --warn: #e3c35a;
   --err: #ff6b6b;
+  --alt: #c792ea;
   --log-bg: #020403;
   --log-text: #bdf0cb;
   --grid: #d6f5de11;
@@ -368,6 +379,11 @@
   inherits: true;
   initial-value: transparent;
 }
+@property --alt {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
 @property --log-bg {
   syntax: "<color>";
   inherits: true;
@@ -384,7 +400,7 @@
   initial-value: transparent;
 }
 :root[data-theme-motion] {
-  transition: --bg var(--duration-slow) var(--easing), --panel var(--duration-slow) var(--easing), --panel-2 var(--duration-slow) var(--easing), --line var(--duration-slow) var(--easing), --text var(--duration-slow) var(--easing), --muted var(--duration-slow) var(--easing), --accent var(--duration-slow) var(--easing), --ok var(--duration-slow) var(--easing), --warn var(--duration-slow) var(--easing), --err var(--duration-slow) var(--easing), --log-bg var(--duration-slow) var(--easing), --log-text var(--duration-slow) var(--easing), --grid var(--duration-slow) var(--easing);
+  transition: --bg var(--duration-slow) var(--easing), --panel var(--duration-slow) var(--easing), --panel-2 var(--duration-slow) var(--easing), --line var(--duration-slow) var(--easing), --text var(--duration-slow) var(--easing), --muted var(--duration-slow) var(--easing), --accent var(--duration-slow) var(--easing), --ok var(--duration-slow) var(--easing), --warn var(--duration-slow) var(--easing), --err var(--duration-slow) var(--easing), --alt var(--duration-slow) var(--easing), --log-bg var(--duration-slow) var(--easing), --log-text var(--duration-slow) var(--easing), --grid var(--duration-slow) var(--easing);
 }
 @media (prefers-reduced-motion: reduce) {
   :root {

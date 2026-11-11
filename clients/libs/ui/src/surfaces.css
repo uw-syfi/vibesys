@@ -41,6 +41,16 @@
   /* The link's own height is not the card's: the heading keeps the card's usual distance from its top. */
   margin-block: calc(-1 * var(--space-2));
 }
+.vs-card-beside {
+  /* Left-aligned right after the heading, whatever else is in the line. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The action keeps the end of the line whatever stands between it and the heading. */
+.vs-card-action {
+  margin-left: auto;
+  min-width: 0;
+}
 .vs-card[data-flush] .vs-card-head {
   margin-block: 0;
   padding-inline-end: var(--space-4);
@@ -318,7 +328,17 @@
    does (one left edge), and a name cut with an ellipsis takes what the other columns leave. */
 .vs-table[data-dense] th,
 .vs-table[data-dense] td {
-  padding: var(--space-2);
+  padding: var(--space-2) calc(var(--space-2) + var(--space-1));
+}
+.vs-table-unit {
+  display: block;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  letter-spacing: normal;
+  text-transform: none;
 }
 .vs-table[data-dense] tr > :first-child {
   padding-left: 0;
@@ -331,7 +351,18 @@
   width: 100%;
 }
 .vs-table[data-dense] td[data-clip]:not([data-lead]) {
-  max-width: calc(var(--space-8) * 6);
+  /* A name that is not the row's own title gives way early, so the title has the room. */
+  max-width: calc(var(--space-8) * 3.75);
+}
+/* A wide table gives the cell after a right-aligned one a gap of its own, so a number and the word after it are apart. */
+@container (min-width: 600px) {
+  .vs-table[data-dense] [data-align="end"] + :not([data-align="end"]) {
+    padding-left: var(--space-5);
+  }
+}
+/* The header of the title column takes the flexible width too, so an empty table spreads as a full one. */
+.vs-table[data-dense] th[data-lead] {
+  width: 100%;
 }
 /* A table of many rows: a box of its own height, scrolling down, with its header kept in view. */
 .vs-table-scroll[data-down] {
@@ -340,6 +371,9 @@
 /* A header that sorts: its words as a plain control, the arrow of the order beside it. */
 .vs-table-sort {
   display: inline-flex;
+  /* An inline-flex box sits on the baseline of the box that is its first item, which is the arrow, and
+     that would lift the words above the headers that have no arrow: top-aligned, they share a line. */
+  vertical-align: top;
   align-items: center;
   gap: var(--space-1);
   margin: 0;

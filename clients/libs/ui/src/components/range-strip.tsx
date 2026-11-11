@@ -49,19 +49,27 @@ export function RangeStrip(props: {
   readonly domain: RangeWindow;
   readonly window: RangeWindow | null;
   readonly steps: readonly StripPoint[];
+  /**
+   * Where the axis starts and stops inside the strip, in pixels, so the strip lines up with a chart
+   * over the same axis (`chartPlotMargins`): nothing is drawn or chosen outside it.
+   */
+  readonly inset?: {readonly left: number; readonly right: number};
   /** The window in words (`Everything`, `Last 6 hours`), which assistive technology reads as the value. */
   readonly valueText: string;
   readonly change: (window: RangeWindow | null) => void;
 }): JSX.Element {
   const {domain, window} = props;
   const [measure, measured] = useInlineSize();
-  const width = Math.max(1, measured ?? 1);
+  const full = Math.max(1, measured ?? 1);
+  const {left, right} = props.inset ?? {left: 0, right: 0};
+  // The axis is the strip between its insets: the drag and the line are measured on it.
+  const width = Math.max(1, full - left - right);
   const height = SIZE['overview-strip'];
   const drag = useRef<number | null>(null);
   const along = (at: number): number =>
     ((at - domain[0]) / Math.max(1, domain[1] - domain[0])) * width;
   const xOf = (event: PointerEvent<HTMLDivElement>): number =>
-    event.clientX - event.currentTarget.getBoundingClientRect().left;
+    event.clientX - event.currentTarget.getBoundingClientRect().left - left;
   const ys = props.steps.map(point => point.y);
   const [low, high] = [Math.min(...ys), Math.max(...ys)];
   const inset = 4;
@@ -119,20 +127,22 @@ export function RangeStrip(props: {
     >
       <svg
         className="vs-range-strip-plot"
-        width={width}
+        width={full}
         height={height}
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox={`0 0 ${full} ${height}`}
         aria-hidden="true"
       >
-        <rect className="vs-range-strip-frame" x={0} y={0} width={width} height={height} />
-        {props.steps.length === 0 ? null : <path className="vs-range-strip-line" d={path} />}
-        <rect
-          className="vs-range-strip-window"
-          x={window === null ? 0 : along(window[0])}
-          y={0}
-          width={window === null ? width : Math.max(3, along(window[1]) - along(window[0]))}
-          height={height}
-        />
+        <g transform={`translate(${left} 0)`}>
+          <rect className="vs-range-strip-frame" x={0} y={0} width={width} height={height} />
+          {props.steps.length === 0 ? null : <path className="vs-range-strip-line" d={path} />}
+          <rect
+            className="vs-range-strip-window"
+            x={window === null ? 0 : along(window[0])}
+            y={0}
+            width={window === null ? width : Math.max(3, along(window[1]) - along(window[0]))}
+            height={height}
+          />
+        </g>
       </svg>
     </div>
   );

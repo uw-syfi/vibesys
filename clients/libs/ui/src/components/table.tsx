@@ -6,7 +6,11 @@ import {ScrollArea} from './scroll-area.js';
 export interface TableColumn<Row> {
   readonly key: string;
   readonly header: string;
+  /** What the header means, on the pointer and as its description (a unit, a basis): for a short header. */
+  readonly hint?: string;
   readonly cell: (row: Row) => ReactNode;
+  /** What a column's values are counted in, written small under its header. */
+  readonly unit?: string;
   /** The header is a control that sorts the table by this column (see `sort`). */
   readonly sortable?: boolean;
   /** Mono and muted, for identifiers, numbers and durations. */
@@ -125,14 +129,22 @@ export function Table<Row>(props: {
                 scope="col"
                 data-align={column.align}
                 data-wide={column.wide === true || undefined}
+                data-lead={column.lead === true || undefined}
+                data-clip={column.clip !== undefined || undefined}
                 aria-sort={sortOf(props.sort, column)}
+                title={column.hint}
               >
                 {column.control === true ? (
                   <span className="vs-table-hidden-header">{column.header}</span>
                 ) : column.sortable === true && props.sort !== undefined ? (
                   <SortHeader column={column} sort={props.sort} />
                 ) : (
-                  column.header
+                  <>
+                    {column.header}
+                    {column.unit === undefined ? null : (
+                      <span className="vs-table-unit">{column.unit}</span>
+                    )}
+                  </>
                 )}
               </th>
             ))}

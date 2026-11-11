@@ -1597,6 +1597,13 @@ button.vs-crumb:focus-visible {
   font-family: var(--text-body-family);
   font-size: var(--text-body-size);
 }
+/* Where the drawing of the data changes: a faint rule, and a word along the axis. */
+.vs-chart-marker-rule {
+  stroke: var(--muted);
+  stroke-width: var(--hairline);
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
 /* A value beside a corner of the line, over a halo of the panel so no line or dot cuts it. */
 .vs-chart-note {
   fill: var(--text);

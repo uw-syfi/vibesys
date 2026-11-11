@@ -75,6 +75,13 @@ export interface ChartNote {
   readonly label: string;
 }
 
+/** A place on the x axis worth a rule and a word. */
+export interface ChartMarker {
+  readonly x: number;
+  readonly label: string;
+  readonly hint: string;
+}
+
 /**
  * The x axis as moments of a clock: the labels are chosen to fit the width the chart is drawn at,
  * so each tick is a tidy step of the axis (seconds on an axis of seconds, days on one of days) and
@@ -115,6 +122,21 @@ function plotFor(
   };
 }
 
+/** How far a mark at the very end of the x axis stands from the frame: room for a dot and its ring. */
+const END_ROOM = 8;
+
+/**
+ * The room a chart leaves for its y labels and at its right edge, in pixels: where its plot starts
+ * and how far it stops short of the drawing's right edge. For what is drawn to line up with a plot
+ * (a strip over the same axis), told the longest y label in characters.
+ */
+export function chartPlotMargins(yLabelChars: number): {
+  readonly left: number;
+  readonly right: number;
+} {
+  return {left: plotFor([], yLabelChars, 'default', 0, false, false).left, right: MARGIN_RIGHT};
+}
+
 interface Scale {
   readonly x: (value: number) => number;
   readonly y: (value: number) => number;
@@ -144,8 +166,10 @@ function scale(
 ): Scale {
   const [x0, x1] = widened(xDomain ?? extent(xs));
   const [y0, y1] = widened(yDomain ?? extent(ys));
+  // The ends of the axis stand a little inside the frame, so a mark at either end is drawn whole.
+  const [from, to] = [plot.left + END_ROOM, plot.right - END_ROOM];
   return {
-    x: value => plot.left + ((value - x0) / (x1 - x0)) * (plot.right - plot.left),
+    x: value => from + ((value - x0) / (x1 - x0)) * (to - from),
     y: value => plot.bottom - ((value - y0) / (y1 - y0)) * (plot.bottom - plot.top),
   };
 }
@@ -419,6 +443,11 @@ interface ChartProps {
   /** The x axis as a clock's moments, fitted to the width drawn (instead of `xTicks`). */
   readonly timeAxis?: ChartTimeAxis;
   readonly yTicks?: readonly ChartTick[];
+  /**
+   * A faint vertical rule at `x` with a short `label` along the axis, and `hint` on hover: where
+   * something about the data changes (the point from which every measurement is drawn).
+   */
+  readonly marker?: ChartMarker;
   /** Words beside places on the plot: the value at each corner of the best-so-far line. */
   readonly notes?: readonly ChartNote[];
   /**
@@ -530,7 +559,7 @@ export function Chart(props: ChartProps): JSX.Element {
             {props.start}
           </text>
         )}
-        {props.empty === undefined ? null : <EmptyState plot={plot} words={props.empty} />}
+        <Annotations props={props} plot={plot} at={at} />
         <Plotted
           props={props}
           plot={plot}
@@ -604,6 +633,48 @@ function Plotted(args: {
         <Notes notes={props.notes ?? []} plot={plot} at={at} />
       </g>
     </>
+  );
+}
+
+/** What stands on the plot beside the data: the words of an empty chart, and a marker. */
+function Annotations(args: {
+  readonly props: ChartProps;
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {props, plot, at} = args;
+  return (
+    <>
+      {props.empty === undefined ? null : <EmptyState plot={plot} words={props.empty} />}
+      {props.marker === undefined ? null : <Marker marker={props.marker} plot={plot} at={at} />}
+    </>
+  );
+}
+
+/** The rule of a marker and its word, written beside the rule on the side that has room, along the bottom of the plot. */
+function Marker(props: {
+  readonly marker: ChartMarker;
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {marker, plot} = props;
+  const x = props.at.x(marker.x);
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  const width = marker.label.length * glyph;
+  const onRight = x + NOTE_GAP + width <= plot.right;
+  return (
+    <g className="vs-chart-marker">
+      <title>{marker.hint}</title>
+      <line className="vs-chart-marker-rule" x1={x} x2={x} y1={plot.top} y2={plot.bottom} />
+      <text
+        className="vs-chart-note"
+        x={onRight ? x + NOTE_GAP : x - NOTE_GAP}
+        y={plot.bottom - NOTE_GAP}
+        textAnchor={onRight ? 'start' : 'end'}
+      >
+        {marker.label}
+      </text>
+    </g>
   );
 }
 

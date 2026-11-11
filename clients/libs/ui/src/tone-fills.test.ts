@@ -15,6 +15,7 @@ const MAY_TINT: Readonly<Record<string, string>> = {
   '.vs-chip[data-tone="ok"]': 'a chip is as wide as its label',
   '.vs-chip[data-tone="warn"]': 'a chip is as wide as its label',
   '.vs-chip[data-tone="err"]': 'a chip is as wide as its label',
+  '.vs-chip[data-tone="alt"]': 'a chip is as wide as its label',
   '.vs-toast[data-tone="warn"]': 'a toast is transient and sits top right',
   '.vs-toast[data-tone="err"]': 'a toast is transient and sits top right',
   '.vs-overview-tile[data-attention]': 'an attention tile is one cell of a row of tiles',

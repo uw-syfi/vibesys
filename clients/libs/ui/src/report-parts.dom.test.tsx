@@ -11,7 +11,10 @@ import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   Brief,
+  Card,
   Chart,
+  Chip,
+  chartPlotMargins,
   DotLegend,
   MainSide,
   RangeStrip,
@@ -423,5 +426,120 @@ describe('the overview strip', () => {
     await key('ArrowRight');
     await key('Escape');
     expect(asked).toEqual([[110, 210], null]);
+  });
+});
+
+describe('round three parts', () => {
+  test('a mark at either end of the x axis stands inside the plot, so it is drawn whole', async () => {
+    const root = await mount(
+      <Chart
+        label="c"
+        points={[
+          {x: 0, y: 1},
+          {x: 100, y: 2},
+        ]}
+        xDomain={[0, 100]}
+        yDomain={[0, 3]}
+      />,
+    );
+    const [left, right] = [
+      Number(root.querySelector('line.vs-chart-axis')?.getAttribute('x1')),
+      Number(root.querySelector('line.vs-chart-axis:last-of-type')?.getAttribute('x2')),
+    ];
+    const dots = [...root.querySelectorAll('circle.vs-chart-point')].map(each =>
+      Number(each.getAttribute('cx')),
+    );
+    expect(Math.min(...dots)).toBeGreaterThanOrEqual(left + 3.5);
+    expect(Math.max(...dots)).toBeLessThanOrEqual(right - 3.5);
+  });
+
+  test('a marker is a rule with a word and a hint, and its word stays inside the plot', async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.double({min: 0, max: 100, noNaN: true}), async x => {
+        const root = await mount(
+          <Chart
+            label="c"
+            points={[]}
+            xDomain={[0, 100]}
+            marker={{
+              x,
+              label: 'all measurements from here',
+              hint: 'The earlier ones are summarised.',
+            }}
+          />,
+        );
+        expect(root.querySelector('.vs-chart-marker title')?.textContent).toMatch(/summarised/);
+        const word = root.querySelector('.vs-chart-marker text');
+        const at = Number(word?.getAttribute('x'));
+        const right = Number(
+          root.querySelector('line.vs-chart-axis:last-of-type')?.getAttribute('x2'),
+        );
+        const left = Number(root.querySelector('line.vs-chart-axis')?.getAttribute('x1'));
+        expect(at).toBeGreaterThanOrEqual(left - 1);
+        expect(at).toBeLessThanOrEqual(right + 1);
+      }),
+      {numRuns: 20, seed: 9},
+    );
+  });
+
+  test('the margins a chart tells are where its plot starts', async () => {
+    const root = await mount(
+      <Chart label="c" points={[]} yTicks={[{value: 1, label: '1234'}]} yLabelChars={4} />,
+    );
+    expect(Number(root.querySelector('line.vs-chart-axis')?.getAttribute('x1'))).toBe(
+      chartPlotMargins(4).left,
+    );
+  });
+
+  test('a card puts what stands beside its heading right after it, and its action at the end', async () => {
+    const root = await mount(
+      <Card section="Performance" beside={<span>key</span>} action={<span>range</span>}>
+        x
+      </Card>,
+    );
+    const head = root.querySelector('.vs-card-head');
+    expect([...(head?.children ?? [])].map(each => each.className)).toEqual([
+      'vs-card-title',
+      'vs-card-beside',
+      'vs-card-action',
+    ]);
+  });
+
+  test('a table header writes the unit of its values small beneath it', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={[{a: 1}]}
+        rowKey={row => String(row.a)}
+        columns={[{key: 'a', header: 'Throughput', unit: 'ops/s', cell: row => row.a}]}
+      />,
+    );
+    expect(root.querySelector('th .vs-table-unit')?.textContent).toBe('ops/s');
+  });
+
+  test('a table header says what it means on the pointer, for a short header', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={[{a: 1}]}
+        rowKey={row => String(row.a)}
+        columns={[{key: 'a', header: 'Input', hint: 'Input tokens', cell: row => row.a}]}
+      />,
+    );
+    expect(root.querySelector('th')?.getAttribute('title')).toBe('Input tokens');
+  });
+
+  test('a sortable header sits on the line of the headers that have no arrow, not above them', () => {
+    const css = readFileSync(new URL('./surfaces.css', import.meta.url), 'utf8');
+    const start = css.indexOf('\n.vs-table-sort {');
+    const rule = css.slice(start, css.indexOf('}', start));
+    expect(start).toBeGreaterThan(-1);
+    expect(rule).toContain('vertical-align: top');
+  });
+
+  test('the fifth tone is a chip and a dot of its own', async () => {
+    const root = await mount(<Chip label="Parked" tone="alt" dot />);
+    expect(root.querySelector('.vs-chip')?.getAttribute('data-tone')).toBe('alt');
+    expect(root.querySelector('.vs-dot')?.getAttribute('data-tone')).toBe('alt');
   });
 });

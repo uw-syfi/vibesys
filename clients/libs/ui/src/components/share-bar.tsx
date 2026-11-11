@@ -10,6 +10,7 @@ const TONE_COLOR: Readonly<Record<StatusTone, string>> = {
   ok: 'var(--ok)',
   warn: 'var(--warn)',
   err: 'var(--err)',
+  alt: 'var(--alt)',
 };
 
 /** One part of the whole: a value, in palette color number `series`, and how it is worded. */

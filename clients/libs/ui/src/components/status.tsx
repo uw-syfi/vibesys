@@ -2,10 +2,10 @@ import type {JSX} from 'react';
 import {withoutPaths} from './paths.js';
 
 /**
- * The tones a status reads in. `live` is in progress; it differs from `ok` by the ring of its dot
+ * The tones a status reads in. `alt` is a fifth color, apart from the accent, for a state that is none of the others (set aside). `live` is in progress; it differs from `ok` by the ring of its dot
  * and by its label, never by color alone (one theme draws both in the same green).
  */
-export type StatusTone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
+export type StatusTone = 'neutral' | 'live' | 'ok' | 'warn' | 'err' | 'alt';
 
 /** A status dot, named by `label` for assistive technology; `live` adds a ring. */
 export function StatusDot(props: {readonly tone: StatusTone; readonly label: string}): JSX.Element {

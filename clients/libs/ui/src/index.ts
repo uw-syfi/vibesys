@@ -28,6 +28,7 @@ export {
   ChartLegend,
   type ChartLegendItem,
   type ChartLegendMark,
+  type ChartMarker,
   type ChartNote,
   ChartPanel,
   type ChartPoint,
@@ -36,6 +37,7 @@ export {
   type ChartTick,
   type ChartTimeAxis,
   type ChartTip,
+  chartPlotMargins,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';

@@ -82,7 +82,7 @@ function pairs(
 }
 
 const SURFACES: readonly ColorRole[] = ['bg', 'panel', 'panel-2'];
-const STATUS: readonly ColorRole[] = ['ok', 'warn', 'err'];
+const STATUS: readonly ColorRole[] = ['ok', 'warn', 'err', 'alt'];
 
 /**
  * Every pair every theme must meet. A theme added to `THEMES` is checked against all of them, so
