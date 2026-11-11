@@ -18,6 +18,16 @@ export interface TableColumn<Row> {
   readonly align?: 'start' | 'end';
   /** Shown only when the table has room: it hides below `NARROW` of its own width. */
   readonly wide?: boolean;
+  /**
+   * The column is as wide as its content and never wraps (a chip, a meter with its figure, a
+   * button), so the lead column takes what is left.
+   */
+  readonly fit?: boolean;
+  /**
+   * The widest thing the column will hold, drawn invisibly under its header at no height, so the
+   * column is that wide before its first cell is (a reading that arrives later moves nothing).
+   */
+  readonly reserve?: ReactNode;
   /** The column that names the row: it keeps a readable width, and the table scrolls instead. */
   readonly lead?: boolean;
   /**
@@ -146,6 +156,11 @@ export function Table<Row>(props: {
                     )}
                   </>
                 )}
+                {column.reserve === undefined ? null : (
+                  <span className="vs-table-reserve" aria-hidden="true" inert>
+                    {column.reserve}
+                  </span>
+                )}
               </th>
             ))}
           </tr>
@@ -180,6 +195,7 @@ export function Table<Row>(props: {
                     data-align={column.align}
                     data-wide={column.wide === true || undefined}
                     data-lead={column.lead === true || undefined}
+                    data-fit={column.fit === true || undefined}
                     data-control={column.control === true || undefined}
                     data-clip={column.clip !== undefined || undefined}
                     title={column.clip?.(row)}

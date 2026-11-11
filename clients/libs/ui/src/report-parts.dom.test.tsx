@@ -287,6 +287,48 @@ describe('Table sorting', () => {
   });
 });
 
+describe('Table columns that fit their content', () => {
+  const rows = [{name: 'a'}];
+
+  test('a column that fits never wraps, and the lead column is the one that takes what is left', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={rows}
+        rowKey={row => row.name}
+        columns={[
+          {key: 'name', header: 'Name', lead: true, cell: row => row.name},
+          {key: 'state', header: 'State', fit: true, cell: () => 'Live'},
+        ]}
+      />,
+    );
+    const [name, state] = [...root.querySelectorAll('tbody td')];
+    expect(state?.getAttribute('data-fit')).toBe('true');
+    expect(name?.getAttribute('data-fit')).toBeNull();
+  });
+
+  test('a reserve is drawn in the header for its width, hidden from assistive technology', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={rows}
+        rowKey={row => row.name}
+        columns={[
+          {key: 'name', header: 'Name', cell: row => row.name},
+          {key: 'cpu', header: 'CPU', reserve: '100.0% of it', cell: () => null},
+        ]}
+      />,
+    );
+    const [name, cpu] = [...root.querySelectorAll('th')];
+    expect(name?.querySelector('.vs-table-reserve')).toBeNull();
+    const reserve = cpu?.querySelector('.vs-table-reserve');
+    expect(reserve?.textContent).toBe('100.0% of it');
+    expect(reserve?.getAttribute('aria-hidden')).toBe('true');
+    // The header's own name is what a reader hears, and only that.
+    expect(cpu?.textContent?.startsWith('CPU')).toBe(true);
+  });
+});
+
 describe('the labelled line, the main and side columns, the filter chips', () => {
   test('a brief is one block: its label, its lead, and each field as a label over its text, with nothing bold', async () => {
     const full = await mount(

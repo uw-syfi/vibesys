@@ -79,15 +79,22 @@ export function Gauge(props: {
   readonly tone?: 'ok' | 'warn';
   readonly dim?: boolean;
   readonly note?: string;
+  /**
+   * The label is already on the page (a table column's header): it is drawn no more, and stays the
+   * reading's accessible name, so a column of readings is a meter and a figure each, not a word more.
+   */
+  readonly bare?: boolean;
 }): JSX.Element {
   const known = props.share !== null && Number.isFinite(props.share);
   const share = known ? Math.max(0, Math.min(1, props.share ?? 0)) : null;
   const figure: StyleWithVars = {'--gauge-figure-width': `${props.figureWidth}ch`};
   const drawn = (
     <>
-      <Text variant="small" tone="muted">
-        {props.label}
-      </Text>
+      {props.bare === true ? null : (
+        <Text variant="small" tone="muted">
+          {props.label}
+        </Text>
+      )}
       <Meter
         inline
         decorative
