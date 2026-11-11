@@ -3,43 +3,55 @@
  * value is a token variable from `tokens.css`.
  */
 
-/* --- labelled line: a column of label, then a lead and its fields ------------------------------ */
+/* --- brief: an account by someone else, a rule on its left, nothing bold -------------------------- */
 
-.vs-labelled-line {
-  display: grid;
-  grid-template-columns: var(--lead-label) minmax(0, 1fr);
-  align-items: baseline;
-  gap: var(--space-1) var(--space-5);
-  min-width: 0;
-}
-.vs-labelled-line-label {
+.vs-brief {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: var(--space-1);
+  min-width: 0;
+  max-width: var(--brief);
+  padding-left: var(--space-4);
+  border-left: calc(var(--hairline) * 2) solid var(--line);
 }
-.vs-labelled-line-body {
+.vs-brief-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
+  /* Rows are apart by more than a label is from its text, so each label belongs to the row under it. */
+  gap: var(--space-4);
+  margin-top: var(--space-3);
 }
-.vs-labelled-line-lead {
-  min-width: 0;
-}
-.vs-labelled-line-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
-  gap: var(--space-2) var(--space-5);
-  margin: 0;
-}
-.vs-labelled-line-field {
+.vs-brief-field {
   display: flex;
   flex-direction: column;
+  gap: var(--space-1);
   min-width: 0;
 }
-.vs-labelled-line-field dd {
+/* Text of unknown length: cut at `--clamp-lines`, a long word broken inside itself. */
+.vs-brief-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp-lines);
   margin: 0;
+  overflow: clip;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.vs-brief-clamp[data-kind="lead"] {
+  font-family: var(--text-lead-family);
+  font-size: var(--text-lead-size);
+  line-height: var(--text-lead-line);
+  font-weight: var(--text-lead-weight);
+}
+.vs-brief-clamp[data-kind="field"] {
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-weight);
+}
+.vs-brief-more {
+  /* The link's own padding is not part of the block's left edge. */
+  margin: var(--space-1) 0 0 calc(var(--space-3) * -1);
 }
 
 /* --- range strip: the whole axis, thin, with the window chosen on it --------------------------- */

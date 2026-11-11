@@ -2,6 +2,7 @@ import {
   ActionPanel,
   BRAND_MARK_NAMES,
   BrandMark,
+  Brief,
   Button,
   type ButtonVariant,
   Card,
@@ -14,7 +15,6 @@ import {
   Grid,
   ICON_NAMES,
   Icon,
-  LabelledLine,
   MainSide,
   Measure,
   PathInput,
@@ -386,19 +386,27 @@ export const BASIC_ENTRIES = {
       />
     ),
   },
-  LabelledLine: {
+  Brief: {
     render: () => (
       <Stack>
-        <LabelledLine label="Lead" lead={<Text tone="muted">No report yet</Text>} />
-        <LabelledLine
-          label="Lead"
-          note="2h 15m ago"
-          lead={<Text>Throughput is up 2.4 times on the input.</Text>}
+        <Brief empty="The lead has not reported yet" />
+        <Brief
+          label="Lead's summary · 2h ago"
+          lead="Throughput is up 2.4 times on the input; the ring buffer and batching carry most of it."
+          leadTitle="Throughput is up 2.4 times on the input; the ring buffer and batching carry most of it."
           fields={[
-            {label: 'Changed', text: 'Kept #52 after 3 confirming measures.'},
-            {label: 'Running', text: '6 implementers on backoff tuning.'},
-            {label: 'Decided', text: 'Stop the allocator workstream.'},
+            {
+              label: 'Changed',
+              text: 'Kept #52 after 3 confirming measures.',
+              title: 'Kept #52 after 3 confirming measures.',
+            },
+            {
+              label: 'Running',
+              text: '6 implementers on backoff tuning.',
+              title: '6 implementers on backoff tuning.',
+            },
           ]}
+          more={<Text>Read the whole report</Text>}
         />
       </Stack>
     ),

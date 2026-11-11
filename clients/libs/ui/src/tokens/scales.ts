@@ -62,7 +62,7 @@ export type SizeToken =
   | 'table-rows'
   | 'overview-strip'
   | 'band-summary'
-  | 'lead-label'
+  | 'brief'
   | 'gantt-label'
   | 'gantt-label-max'
   | 'gantt-figure'
@@ -112,7 +112,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'table-rows': 372,
   'overview-strip': 32,
   'band-summary': 200,
-  'lead-label': 112,
+  brief: 760,
   'gantt-label': 220,
   'gantt-label-max': 420,
   'gantt-figure': 96,
@@ -161,6 +161,7 @@ export type TextStyle =
   | 'title'
   | 'heading'
   | 'item'
+  | 'lead'
   | 'body'
   | 'body-strong'
   | 'small'
@@ -201,6 +202,8 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   heading: text('sans', 18, 24, 600),
   // The name of a card, an option or a settings row.
   item: text('sans', 15, 20, 600),
+  // One step above the body for text of unknown length that must stand first (a summary's headline): medium, not bold.
+  lead: text('sans', 15, 22, 500),
   body: text('sans', 14, 20, 400),
   'body-strong': text('sans', 14, 20, 500),
   small: text('sans', 13, 18, 400),

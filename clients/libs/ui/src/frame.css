@@ -1873,6 +1873,9 @@ button.vs-dotlegend-item:focus-visible {
 .vs-factline[data-wrap] {
   flex-wrap: wrap;
 }
+.vs-factline[data-spaced] {
+  column-gap: var(--space-5);
+}
 /* Its facts add nothing to the width of what holds it: the line fills that width and clips. */
 .vs-factline[data-fit="parent"] {
   contain: inline-size;
@@ -1884,6 +1887,7 @@ button.vs-dotlegend-item:focus-visible {
   align-items: center;
   gap: var(--space-1);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 /* It takes what the others leave, down to nothing; on a wrapping line it stays on the line while
    a field's width is left and goes to a line of its own below that. */
@@ -1972,6 +1976,11 @@ button.vs-dotlegend-item:focus-visible {
   gap: var(--space-2);
   margin: 0;
   min-width: 0;
+}
+/* A bar alone, in a row of a table, is a fixed length, so bars of different rows compare. */
+.vs-share[data-bare] {
+  flex: none;
+  width: calc(var(--column-swatch) * 0.6);
 }
 .vs-share-bar {
   display: flex;

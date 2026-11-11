@@ -677,7 +677,7 @@ function placeNotes(notes: readonly ChartNote[], plot: Plot, at: Scale): readonl
     const width = note.label.length * glyph;
     const px = at.x(note.x);
     const py = Math.max(plot.top + NOTE_HEIGHT, at.y(note.y) - NOTE_GAP);
-    const onRight = px + NOTE_GAP + width <= plot.right + PLOT_BLEED;
+    const onRight = px + NOTE_GAP + width <= plot.right;
     const left = onRight ? px + NOTE_GAP : px - NOTE_GAP - width;
     const box = {left, right: left + width, top: py - NOTE_HEIGHT, bottom: py};
     const covers = placed.some(

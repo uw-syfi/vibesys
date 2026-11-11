@@ -331,7 +331,7 @@
   width: 100%;
 }
 .vs-table[data-dense] td[data-clip]:not([data-lead]) {
-  max-width: calc(var(--space-8) * 4);
+  max-width: calc(var(--space-8) * 6);
 }
 /* A table of many rows: a box of its own height, scrolling down, with its header kept in view. */
 .vs-table-scroll[data-down] {

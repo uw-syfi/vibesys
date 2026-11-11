@@ -11,6 +11,7 @@ export {AreaChart, type ChartLayer as AreaChartLayer} from './components/area-ch
 export {type BarColumn, type BarFigures, type BarRow, BarRows} from './components/bar-rows.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {Breadcrumb, type Crumb} from './components/breadcrumb.js';
+export {Brief, type BriefField} from './components/brief.js';
 export {
   Button,
   type ButtonAction,
@@ -90,7 +91,6 @@ export {
 export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {type AxisLabel, labelsFit, type PlacedLabel, placeLabels} from './components/label-fit.js';
-export {type LabelledField, LabelledLine} from './components/labelled-line.js';
 export {
   type Align,
   Dock,

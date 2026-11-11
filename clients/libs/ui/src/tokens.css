@@ -29,6 +29,12 @@
   --text-item-weight: 600;
   --text-item-tracking: 0em;
   --text-item-transform: none;
+  --text-lead-family: var(--font-sans);
+  --text-lead-size: 15px;
+  --text-lead-line: 22px;
+  --text-lead-weight: 500;
+  --text-lead-tracking: 0em;
+  --text-lead-transform: none;
   --text-body-family: var(--font-sans);
   --text-body-size: 14px;
   --text-body-line: 20px;
@@ -117,7 +123,7 @@
   --table-rows: 372px;
   --overview-strip: 32px;
   --band-summary: 200px;
-  --lead-label: 112px;
+  --brief: 760px;
   --gantt-label: 220px;
   --gantt-label-max: 420px;
   --gantt-figure: 96px;

@@ -10,11 +10,12 @@ import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  Brief,
   Chart,
   DotLegend,
-  LabelledLine,
   MainSide,
   RangeStrip,
+  ShareBar,
   Table,
   windowMoved,
   windowOfDrag,
@@ -194,6 +195,24 @@ describe('Chart notes', () => {
   });
 });
 
+describe('Chart notes at the right edge', () => {
+  test('a note that would pass the plot’s right edge is written to the left of its place', async () => {
+    const root = await mount(
+      <Chart
+        label="c"
+        points={[]}
+        xDomain={[0, 100]}
+        yDomain={[0, 10]}
+        notes={[{x: 100, y: 5, label: '15'}]}
+      />,
+    );
+    const note = root.querySelector('text.vs-chart-note');
+    expect(note?.getAttribute('text-anchor')).toBe('end');
+    const right = Number(root.querySelector('line.vs-chart-axis:last-of-type')?.getAttribute('x2'));
+    expect(Number(note?.getAttribute('x'))).toBeLessThan(right);
+  });
+});
+
 describe('Chart clipping', () => {
   test('draws its line and dots inside a clip of the plot, so no mark reaches an axis label', async () => {
     const root = await mount(
@@ -265,24 +284,50 @@ describe('Table sorting', () => {
 });
 
 describe('the labelled line, the main and side columns, the filter chips', () => {
-  test('a line with no fields is only its label and lead, and one with fields lists each under its label', async () => {
-    const bare = await mount(<LabelledLine label="Lead" lead="No report yet" />);
-    expect(bare.querySelector('dl')).toBeNull();
+  test('a brief is one block: its label, its lead, and each field as a label over its text, with nothing bold', async () => {
     const full = await mount(
-      <LabelledLine
-        label="Lead"
-        note="2h ago"
+      <Brief
+        label="Lead's summary · 2h ago"
         lead="Headline"
+        leadTitle="Headline"
         fields={[
-          {label: 'Changed', text: 'a'},
-          {label: 'Decided', text: 'b'},
+          {label: 'Changed', text: 'a', title: 'a'},
+          {label: 'Decided', text: 'b', title: 'b'},
+        ]}
+        more={<button type="button">Read the whole report</button>}
+      />,
+    );
+    const block = full.querySelector('section.vs-brief');
+    expect(
+      [...(block?.querySelectorAll('.vs-brief-field') ?? [])].map(each => each.textContent),
+    ).toEqual(['Changeda', 'Decidedb']);
+    expect(block?.querySelector('.vs-brief-clamp[data-kind="lead"]')?.textContent).toBe('Headline');
+    // Nothing is cut (no layout here measures a cut), so there is no way to the whole text.
+    expect(block?.querySelector('.vs-brief-more')).toBeNull();
+    expect(block?.querySelector('b, strong, h1, h2, h3')).toBeNull();
+  });
+
+  test('a brief with nothing to say yet is its one quiet line', async () => {
+    const none = await mount(<Brief empty="The lead has not reported yet" />);
+    expect(none.textContent).toBe('The lead has not reported yet');
+    expect(none.querySelector('section')).toBeNull();
+  });
+
+  test('a share bar draws a part in the color of its tone, the one its dot has', async () => {
+    const root = await mount(
+      <ShareBar
+        label="x"
+        bare
+        parts={[
+          {key: 'a', label: 'Kept', value: 2, figure: '2', series: 1, tone: 'ok'},
+          {key: 'b', label: 'Open', value: 1, figure: '1', series: 2},
         ]}
       />,
     );
-    expect([...full.querySelectorAll('dt')].map(each => each.textContent)).toEqual([
-      'Changed',
-      'Decided',
-    ]);
+    const colors = [...root.querySelectorAll<HTMLElement>('.vs-share-segment')].map(each =>
+      each.style.getPropertyValue('--seg-color'),
+    );
+    expect(colors).toEqual(['var(--ok)', 'var(--series-2)']);
   });
 
   test('main and side keep the order of reading: the main column first', async () => {
