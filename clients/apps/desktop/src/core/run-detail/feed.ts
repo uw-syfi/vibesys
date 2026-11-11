@@ -41,7 +41,7 @@ type RunDetailStaleReason =
   | 'disconnected';
 
 /** What a consumer knows about delivery, apart from freshness inside the projection itself. */
-type RunDetailDelivery =
+export type RunDetailDelivery =
   | {readonly _tag: 'Loading'}
   | {readonly _tag: 'Live'; readonly projection: RunDetailProjection}
   | {
