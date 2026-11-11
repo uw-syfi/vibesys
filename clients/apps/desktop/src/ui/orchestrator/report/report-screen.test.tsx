@@ -236,7 +236,12 @@ describe('the report as a page of the run', () => {
         each => each.textContent ?? '',
       );
     expect(headings('main')).toEqual(['Performance', 'Ideas', 'Trade-off']);
-    expect(headings('side')).toEqual(['Latest measurements', 'Workstreams', 'Agents and cost']);
+    expect(headings('side')).toEqual([
+      'Latest measurements',
+      'Plan status',
+      'Workstreams',
+      'Agents and cost',
+    ]);
     // Every panel is packed.
     const roomy = [...root.querySelectorAll('section.vs-card')].filter(
       card => !card.hasAttribute('data-dense'),
@@ -594,6 +599,7 @@ describe('the report with a different amount of data', () => {
       'Performance',
       'Ideas',
       'Latest measurements',
+      'Plan status',
       'Workstreams',
       'Agents and cost',
     ]);
@@ -651,6 +657,7 @@ describe('the report with a different amount of data', () => {
           'Performance',
           'Ideas',
           'Latest measurements',
+          'Plan status',
           'Workstreams',
           'Agents and cost',
         ]);
