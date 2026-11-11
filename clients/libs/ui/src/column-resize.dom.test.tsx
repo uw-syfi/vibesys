@@ -92,7 +92,9 @@ describe('a sortable header', () => {
       const container = await mounted({direction, log: []});
       const head = container.querySelector('[data-key="cost"]');
       expect(head?.querySelectorAll('.vs-columnlist-sortmark')).toHaveLength(1);
-      expect(head?.querySelector('.vs-columnlist-sortmark svg') !== null).toBe(direction !== null);
+      const mark = head?.querySelector('.vs-columnlist-sortmark');
+      expect(mark?.querySelector('svg') !== null).toBe(direction !== null);
+      expect(mark?.textContent).toBe(direction === null ? '↕' : '');
       expect(head?.getAttribute('data-sorted')).toBe(direction);
       shapes.push(
         [...(head?.querySelectorAll('*') ?? [])]
@@ -130,6 +132,15 @@ describe('the edge of a column', () => {
       [String(MIN_COLUMN_WIDTH), String(MAX_COLUMN_WIDTH)],
       [String(MIN_COLUMN_WIDTH), String(MAX_COLUMN_WIDTH)],
     ]);
+    expect(grips(container).every(each => each.parentElement?.hasAttribute('data-resizable'))).toBe(
+      true,
+    );
+    const css = readFileSync(new URL('columnlist.css', import.meta.url), 'utf8');
+    const mark = css.slice(
+      css.indexOf('.vs-columnlist-grip::after'),
+      css.indexOf('}', css.indexOf('.vs-columnlist-grip::after')),
+    );
+    expect(mark).toContain('content: "↔";');
   });
 
   test('moves by the arrow keys within the bounds, and goes back to its own width on Enter or a double press', async () => {

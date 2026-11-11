@@ -198,7 +198,7 @@ function identityColumns(
       header: 'Status',
       sort: sortOf('status'),
       size: 'wide',
-      narrow: 'short',
+      narrow: 'medium',
       hint: row => statusHint(row, nowMs, clock),
       cell: row => (
         <CellLines
@@ -250,10 +250,10 @@ function identityColumns(
  */
 function trendCell(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNode {
   const [first] = measured;
-  if (first === undefined) return null;
+  if (first === undefined) return <Text>—</Text>;
   const [start] = first.points;
   const end = first.points.at(-1);
-  if (start === undefined || end === undefined) return null;
+  if (start === undefined || end === undefined) return <Text>—</Text>;
   return (
     <CellSparkline
       label={`${first.name}: every measured candidate and the best so far`}
@@ -277,17 +277,19 @@ function figureColumns(
       key: 'trend',
       header: 'Candidates',
       size: 'wide',
-      optional: true,
+      narrow: 'compact',
       cell: row => trendCell(row, objectivesOf(row)),
     },
     {
       key: 'best',
       header: 'Best',
+      narrowHeader: 'Bound %',
       sort: sortOf('best'),
       size: 'wide',
-      narrow: 'short',
+      narrow: 'compact',
       note: {
         label: '% of bound',
+        narrowLabel: null,
         hint: 'A percent after a result is how close it is to the bound the agents declared, as the host served it',
       },
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
@@ -304,7 +306,6 @@ function figureColumns(
       sort: sortOf('agents'),
       size: 'compact',
       align: 'end',
-      optional: true,
       cell: row => (
         <Text>{row.live && row.agentsRunning !== null ? String(row.agentsRunning) : '—'}</Text>
       ),

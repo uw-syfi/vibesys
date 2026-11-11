@@ -37,9 +37,19 @@ const TWO_LINES_ROW = TYPE.body.line + TYPE.small.line + 2 * SPACE['space-3'] + 
 
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */
 export type {ColumnSize};
+
+interface ColumnNote {
+  readonly label: string;
+  /** A shorter visible label beside the header while narrow; `null` gives way entirely. */
+  readonly narrowLabel?: string | null;
+  readonly hint: string;
+}
+
 export interface ListColumn<Row> {
   readonly key: string;
   readonly header: string;
+  /** A concise visible name while the list is narrow; controls keep `header` as their full name. */
+  readonly narrowHeader?: string;
   readonly size: ColumnSize;
   readonly align?: 'start' | 'end';
   /** Drawn only while the list has room: it gives way when the list is narrow. */
@@ -59,7 +69,7 @@ export interface ListColumn<Row> {
   /** What the pointer shows over a cell whole, for a cell that may be cut short. */
   readonly hint?: (row: Row) => string | undefined;
   /** A small mark after the header (`+2`) and what it stands for, on hover. */
-  readonly note?: {readonly label: string; readonly hint: string};
+  readonly note?: ColumnNote;
   readonly cell: (row: Row) => ReactNode;
   /**
    * Pressing the header sorts by the column. `direction` is the way the list is sorted by it, or
@@ -162,61 +172,104 @@ function Grip(props: {
   );
 }
 
+function HeaderNote(props: {readonly note: ColumnNote}): JSX.Element {
+  if (props.note.narrowLabel === null) {
+    return (
+      <span className="vs-columnlist-note" title={props.note.hint} data-wide-only>
+        {props.note.label}
+      </span>
+    );
+  }
+  return (
+    <span className="vs-columnlist-note" title={props.note.hint}>
+      {props.note.narrowLabel === undefined ? (
+        props.note.label
+      ) : (
+        <>
+          <span data-wide-only>{props.note.label}</span>
+          <span data-narrow-only>{props.note.narrowLabel}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function HeaderLabel<Row>(props: {readonly column: ListColumn<Row>}): ReactNode {
+  return props.column.narrowHeader === undefined ? (
+    props.column.header
+  ) : (
+    <>
+      <span data-wide-only>{props.column.header}</span>
+      <span data-narrow-only>{props.column.narrowHeader}</span>
+    </>
+  );
+}
+
+interface HeaderResize {
+  readonly dragging: (key: string, width: number | null) => void;
+  readonly commit: (key: string, width: number | null) => void;
+  readonly widthOf: (key: string) => number;
+}
+
+function HeaderCell<Row>(props: {
+  readonly column: ListColumn<Row>;
+  readonly resize: HeaderResize | undefined;
+}): JSX.Element {
+  const {column, resize} = props;
+  const resizable = resize !== undefined && column.size !== 'fill';
+  return (
+    <span
+      className="vs-columnlist-headcell"
+      data-key={column.key}
+      data-align={column.align}
+      data-optional={column.optional || undefined}
+      data-sorted={column.sort?.direction ?? undefined}
+      data-sortable={column.sort === undefined ? undefined : true}
+      data-resizable={resizable || undefined}
+      data-tight-blank={column.tight === 'dot' || undefined}
+      title={column.header}
+    >
+      {column.sort === undefined ? (
+        <span className="vs-columnlist-marked">
+          <HeaderLabel column={column} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={column.sort.press}
+          title={`Sort by ${column.header}`}
+          aria-label={`Sort by ${column.header}`}
+        >
+          <HeaderLabel column={column} />
+          <span className="vs-columnlist-sortmark" aria-hidden="true">
+            {column.sort.direction === null ? '↕' : <Icon name="arrow-up" />}
+          </span>
+        </button>
+      )}
+      {column.note === undefined ? null : <HeaderNote note={column.note} />}
+      {!resizable || resize === undefined ? null : (
+        <Grip
+          header={column.header}
+          width={resize.widthOf(column.key)}
+          dragging={width => resize.dragging(column.key, width)}
+          commit={width => resize.commit(column.key, width)}
+        />
+      )}
+    </span>
+  );
+}
+
 function Header<Row>(props: {
   readonly columns: readonly ListColumn<Row>[];
   readonly id: string;
   readonly watch: (element: HTMLElement | null) => (() => void) | undefined;
   /** Gives columns an edge to drag; the width a column has now, for its edge to start from. */
-  readonly resize:
-    | {
-        readonly dragging: (key: string, width: number | null) => void;
-        readonly commit: (key: string, width: number | null) => void;
-        readonly widthOf: (key: string) => number;
-      }
-    | undefined;
+  readonly resize: HeaderResize | undefined;
 }): JSX.Element {
   return (
     <div className="vs-columnlist-head" id={props.id} ref={props.watch}>
       {props.columns.map(column => (
-        <span
-          key={column.key}
-          className="vs-columnlist-headcell"
-          data-key={column.key}
-          data-align={column.align}
-          data-optional={column.optional || undefined}
-          data-sorted={column.sort?.direction ?? undefined}
-          data-tight-blank={column.tight === 'dot' || undefined}
-          title={column.header}
-        >
-          {column.sort === undefined ? (
-            <span className="vs-columnlist-marked">{column.header}</span>
-          ) : (
-            <button
-              type="button"
-              onClick={column.sort.press}
-              title={`Sort by ${column.header}`}
-              aria-label={`Sort by ${column.header}`}
-            >
-              {column.header}
-              <span className="vs-columnlist-sortmark" aria-hidden="true">
-                {column.sort.direction === null ? null : <Icon name="arrow-up" />}
-              </span>
-            </button>
-          )}
-          {column.note === undefined ? null : (
-            <span className="vs-columnlist-note" title={column.note.hint}>
-              {column.note.label}
-            </span>
-          )}
-          {props.resize === undefined || column.size === 'fill' ? null : (
-            <Grip
-              header={column.header}
-              width={props.resize.widthOf(column.key)}
-              dragging={width => props.resize?.dragging(column.key, width)}
-              commit={width => props.resize?.commit(column.key, width)}
-            />
-          )}
-        </span>
+        <HeaderCell key={column.key} column={column} resize={props.resize} />
       ))}
     </div>
   );

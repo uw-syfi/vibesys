@@ -336,6 +336,11 @@ describe('the fleet screen', () => {
     expect(cell(row, 'cost').textContent).toBe('$318of $500');
     expect(cell(row, 'name').textContent).toContain('decode-service');
     expect(cell(row, 'status').querySelector('.vs-chip')?.textContent).toBe('Running 5h 20m');
+    expect(cell(row, 'status').querySelector('.vs-chip')?.getAttribute('title')).toBe(
+      'Running 5h 20m',
+    );
+    expect(cell(row, 'status').getAttribute('title')).toContain('Running, started');
+    expect(cell(row, 'host').getAttribute('title')).toContain('This Mac');
     // A live run's chip grows with its running time; it is cut with an ellipsis, not left to
     // overflow the narrow column's track into Best.
     expect(cell(row, 'status').querySelector('.vs-chip')?.hasAttribute('data-clip')).toBe(true);
@@ -362,6 +367,10 @@ describe('the fleet screen', () => {
       '.vs-columnlist-headcell[title="Best"] .vs-columnlist-note',
     );
     expect(note?.textContent).toBe('% of bound');
+    expect(note?.hasAttribute('data-wide-only')).toBe(true);
+    expect(
+      screen.container.querySelector('[data-key="best"] button [data-narrow-only]')?.textContent,
+    ).toBe('Bound %');
     expect(note?.getAttribute('title')).toContain('how close it is to the bound');
     screen.unmount();
   });
@@ -375,6 +384,19 @@ describe('the fleet screen', () => {
     expect(cell(row, 'agents').textContent).toBe('—');
     expect(cell(row, 'cost').textContent).toBe('$12.40');
     expect(cell(row, 'best').textContent).toBe('—');
+    expect(cell(row, 'trend').textContent).toBe('—');
+    screen.unmount();
+  });
+
+  it('keeps candidate activity and the agent count in a narrow list, while Host moves into Run', () => {
+    const {screen} = open([hostA]);
+    const header = screen.container.querySelector('.vs-columnlist-head');
+    expect(header?.querySelector('[data-key="host"]')?.hasAttribute('data-optional')).toBe(true);
+    for (const key of ['trend', 'agents']) {
+      expect(header?.querySelector(`[data-key="${key}"]`)?.hasAttribute('data-optional')).toBe(
+        false,
+      );
+    }
     screen.unmount();
   });
 
@@ -1037,7 +1059,7 @@ describe('the candidates cell of the fleet screen', () => {
     screen.unmount();
   });
 
-  it('is empty for a run with nothing measured, with no placeholder', () => {
+  it('marks a run with nothing measured as unavailable', () => {
     const {screen} = open([
       withHost([
         {
@@ -1057,16 +1079,16 @@ describe('the candidates cell of the fleet screen', () => {
     ]);
     const trend = trendOf(screen, 'nothing measured');
     expect(trend.querySelector('svg')).toBeNull();
-    expect(trend.textContent).toBe('');
+    expect(trend.textContent).toBe('—');
     screen.unmount();
   });
 
-  it('is empty for a run of a host that serves no series, though it shows the best and the bound', () => {
+  it('marks a missing host series as unavailable, though it shows the best and the bound', () => {
     const {screen} = open([hostA]);
     const row = rowOf(screen, 'queue-rs');
     expect(cell(row, 'best').textContent).toBe('2.31k tok/s · 71%');
     expect(cell(row, 'trend').querySelector('svg')).toBeNull();
-    expect(cell(row, 'trend').textContent).toBe('');
+    expect(cell(row, 'trend').textContent).toBe('—');
     screen.unmount();
   });
 
