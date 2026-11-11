@@ -1,14 +1,16 @@
-"""Client CI downloads stay cached, retried, and off the broken apt source.
+"""Client CI setup stays cached and its real-system path stays scoped.
 
 The setup-clients action is the only place a client job prepares Node, pnpm,
 Electron, and Playwright. These tests hold that contract: the Electron binary
 and the pnpm binary are cached by version, download steps retry through one
-helper. Chromium uses the runner system libraries without apt.
+helper, and a client-only change does not rerun unrelated backend scenarios.
+Chromium uses the runner system libraries without apt.
 """
 
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,8 @@ REPO = Path(__file__).resolve().parents[2]
 SETUP_ACTION = REPO / ".github" / "actions" / "setup-clients" / "action.yml"
 RETRY_HELPER = REPO / ".github" / "actions" / "setup-clients" / "retry-download.sh"
 LOCKFILE = REPO / "clients" / "pnpm-lock.yaml"
+CHECKS = REPO / ".repoctl" / "checks.toml"
+WORKFLOW = REPO / ".github" / "workflows" / "test.yml"
 _DOWNLOADS = (
     "corepack install --global",
     "packaging/fetch_bun.py",
@@ -71,6 +75,15 @@ def _with_field(step: dict[str, object], field: str) -> str:
     value = _mapping(step["with"])[field]
     assert isinstance(value, str)
     return value
+
+
+def _job_steps(workflow: object, name: str) -> list[dict[str, object]]:
+    # PyYAML reads the workflow's `on` key as a boolean; only the jobs mapping is string-keyed.
+    assert isinstance(workflow, dict)
+    jobs = _mapping(workflow["jobs"])
+    steps = _mapping(jobs[name])["steps"]
+    assert isinstance(steps, list)
+    return [_mapping(step) for step in steps]
 
 
 def test_electron_version_reads_the_lockfile_pin() -> None:
@@ -196,7 +209,7 @@ def test_workspace_only_keeps_exactly_the_node_pnpm_and_electron_steps() -> None
 
 
 def test_only_the_desktop_path_job_asks_setup_clients_for_workspace_only() -> None:
-    loaded = _load(REPO / ".github" / "workflows" / "test.yml")
+    loaded = _load(WORKFLOW)
     assert isinstance(loaded, dict)
     asking: list[str] = []
     for name, job in _mapping(loaded["jobs"]).items():
@@ -214,3 +227,52 @@ def test_only_the_desktop_path_job_asks_setup_clients_for_workspace_only() -> No
             ):
                 asking.append(name)
     assert asking == ["desktop-path"]
+
+
+def test_client_only_desktop_path_does_not_rerun_unrelated_backend_scenarios() -> None:
+    checks = tomllib.loads(CHECKS.read_text(encoding="utf-8"))
+    groups = {
+        group["name"]: group
+        for group in checks["check_groups"]
+        if isinstance(group, dict) and isinstance(group.get("name"), str)
+    }
+    assert groups["desktop_client_path_e2e"]["commands"] == [
+        [
+            "go",
+            "test",
+            "-tags",
+            "e2e",
+            "-count=1",
+            "-timeout",
+            "600s",
+            "-run",
+            "^TestTheDesktopPathRunsAnOptimizationEndToEnd$",
+            "./e2e",
+        ]
+    ]
+    assert groups["desktop_path_e2e"]["commands"] == [
+        ["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2e"]
+    ]
+
+    steps = {
+        step["name"]: step
+        for step in _job_steps(_load(WORKFLOW), "desktop-path")
+        if isinstance(step.get("name"), str)
+    }
+    client = steps["Run the client-owned desktop path end to end"]
+    backend = steps["Run every desktop and backend path end to end"]
+    client_run = client["run"]
+    backend_run = backend["run"]
+    assert isinstance(client_run, str)
+    assert isinstance(backend_run, str)
+    assert "--group desktop_client_path_e2e" in client_run
+    assert "--group desktop_path_e2e" in backend_run
+    client_if = client["if"]
+    backend_if = backend["if"]
+    assert isinstance(client_if, str)
+    assert isinstance(backend_if, str)
+    for owner in ("gateway", "cli", "orchestrator", "proto"):
+        assert f"needs.changes.outputs.{owner} != 'true'" in client_if
+        assert f"needs.changes.outputs.{owner} == 'true'" in backend_if
+    assert "github.event_name == 'pull_request'" in client_if
+    assert "github.event_name != 'pull_request'" in backend_if
