@@ -1,5 +1,12 @@
 /** Bounded memo of immutable descriptor sets. Descriptor order has no semantic meaning. */
-import {create, createFileRegistry, type FileRegistry, toBinary} from '@bufbuild/protobuf';
+import {
+  create,
+  createFileRegistry,
+  type DescMessage,
+  type FileRegistry,
+  fromBinary,
+  toBinary,
+} from '@bufbuild/protobuf';
 import {
   type FileDescriptorProto,
   type FileDescriptorSet,
@@ -9,6 +16,29 @@ import {sha256} from '@noble/hashes/sha2.js';
 import {bytesToHex} from '@noble/hashes/utils.js';
 
 const registries = new Map<string, FileRegistry>();
+
+/** Verify the wire address before decoding or resolving any descriptor from it. */
+export function verifiedDescriptorSet(expectedSha256: string, data: Uint8Array): FileDescriptorSet {
+  const actualSha256 = bytesToHex(sha256(data));
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(`descriptor set: expected ${expectedSha256}, got ${actualSha256}`);
+  }
+  const descriptors = fromBinary(FileDescriptorSetSchema, data);
+  descriptorRegistry(descriptors);
+  return descriptors;
+}
+
+/** Verify the wire-addressed bytes before resolving any message type from them. */
+export function verifiedDescriptorMessages(
+  expectedSha256: string,
+  data: Uint8Array,
+): readonly DescMessage[] {
+  const registry = descriptorRegistry(verifiedDescriptorSet(expectedSha256, data));
+  return [...registry].filter(
+    (descriptor): descriptor is DescMessage => descriptor.kind === 'message',
+  );
+}
+
 export function descriptorRegistry(descriptors: FileDescriptorSet): FileRegistry {
   const hash = bytesToHex(sha256(toBinary(FileDescriptorSetSchema, descriptors)));
   const cached = registries.get(hash);

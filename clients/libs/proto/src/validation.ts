@@ -5,8 +5,11 @@ import {
   fromBinary,
   type MessageShape,
 } from '@bufbuild/protobuf';
+import type {Any} from '@bufbuild/protobuf/wkt';
 import {createValidator} from '@bufbuild/protovalidate';
+import {verifiedDescriptorSet} from './descriptor-registry.js';
 import {HostService} from './generated/vibesys/api/v1/host_pb.js';
+import {type Keyframe, KeyframeSchema} from './generated/vibesys/store/v1/skeleton_pb.js';
 
 const validator = createValidator();
 
@@ -19,6 +22,36 @@ export function validatedFromBinary<D extends DescMessage>(
   const result = validator.validate(schema, message);
   if (result.kind !== 'valid') throw result.error;
   return message;
+}
+
+/** Unpack an installed attribute type and apply that message's generated validation rules. */
+export function validatedAnyUnpack<D extends DescMessage>(
+  packed: Any,
+  schema: D,
+): MessageShape<D> | undefined {
+  if (packed.typeUrl.split('/').at(-1) !== schema.typeName) return undefined;
+  return validatedFromBinary(schema, packed.value);
+}
+
+/** Restore the gateway's hash-addressed epoch descriptors, then validate the complete keyframe. */
+export function validatedAddressedKeyframe(
+  bytes: Uint8Array,
+  descriptorSets: ReadonlyMap<string, Uint8Array>,
+): Keyframe {
+  const keyframe = fromBinary(KeyframeSchema, bytes);
+  for (const version of keyframe.epochs) {
+    const hash = version.descriptorsSha256;
+    if (hash === '') continue;
+    const data = descriptorSets.get(hash);
+    if (data === undefined) throw new Error(`keyframe descriptor set: missing ${hash}`);
+    if (version.epoch !== undefined) {
+      version.epoch.descriptors = verifiedDescriptorSet(hash, data);
+      version.descriptorsSha256 = '';
+    }
+  }
+  const result = validator.validate(KeyframeSchema, keyframe);
+  if (result.kind !== 'valid') throw result.error;
+  return keyframe;
 }
 
 /**

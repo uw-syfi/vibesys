@@ -85,6 +85,11 @@ const ORCHESTRATOR_PROTO = [
   '/node_modules/@vibesys/orchestrator-proto/',
 ];
 
+// Generated host/store messages plus their pure validators and descriptor resolver. Run-detail
+// folds decode persisted record bytes and dynamic descriptors; the exception names only the
+// foundation package that owns those generated contracts.
+const HOST_STORE_PROTO = ['^libs/proto/', '/node_modules/@vibesys/proto/'];
+
 // The design system's token tables: plain data and pure functions with no DOM (`@vibesys/ui/tokens`).
 // A fold reads the theme table at run time (the appearance fold, which resolves the theme a mode
 // shows), and a mirrored table would repeat it.
@@ -94,14 +99,19 @@ function desktopAppRules() {
   return [
     {
       // A fold is a function from data to data that a test calls directly. Only a type, which the
-      // compiler erases, may name another module, except the generated orchestrator protocol,
-      // whose enums a fold reads at run time, and the design tokens, whose theme table the
-      // appearance fold reads.
+      // compiler erases, may name another module, except generated protocols whose enums,
+      // validators and descriptor resolver a fold reads at run time, and the design tokens,
+      // whose theme table the appearance fold reads.
       name: 'desktop-state-imports-nothing-outside-itself',
       severity: 'error',
       from: {path: DESKTOP_PART('state'), pathNot: TEST_FILE},
       to: {
-        pathNot: [DESKTOP_PART('state'), ...ORCHESTRATOR_PROTO, ...DESIGN_TOKENS],
+        pathNot: [
+          DESKTOP_PART('state'),
+          ...ORCHESTRATOR_PROTO,
+          ...HOST_STORE_PROTO,
+          ...DESIGN_TOKENS,
+        ],
         dependencyTypesNot: ['type-only'],
       },
     },

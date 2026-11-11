@@ -1,6 +1,10 @@
 /** Host and store schemas generated from proto/. Encode using @bufbuild/protobuf. */
 
-export {descriptorRegistry} from './descriptor-registry.js';
+export {
+  descriptorRegistry,
+  verifiedDescriptorMessages,
+  verifiedDescriptorSet,
+} from './descriptor-registry.js';
 export {
   HOST_API_MAX_MESSAGE_BYTES,
   RUN_LOG_MAGIC,
@@ -86,6 +90,8 @@ export {outcomePresentation, projectLifecycle} from './outcome.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
 export {
+  validatedAddressedKeyframe,
+  validatedAnyUnpack,
   validatedExactFromBinary,
   validatedFromBinary,
   validateHostPayload,
