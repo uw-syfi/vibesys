@@ -165,6 +165,9 @@ async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
   await expect(page.getByRole('button', {name: 'New run'})).toBeVisible();
 }
 
+/** The name `seen` records the run report's title under. */
+const REPORT_SHOT = '2-report';
+
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
   // The lead's final report ended the run, so it is in the run history; a row is named by its run
   // (the task) and says the rest, its state first, in its description.
@@ -176,7 +179,7 @@ async function checkRunIsListedAndRunning(page: Page, world: World): Promise<voi
   await checkTheNewRunPageOpensAndCloses(page);
   await row.click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
-  await seen(page, '2-report');
+  await seen(page, REPORT_SHOT);
   // Stop is offered only while a run runs.
   await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
@@ -319,9 +322,14 @@ async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'Settings'}).click();
   await expect(page.getByRole('heading', {level: 1})).toHaveText('Settings');
   await seen(page, '7-settings');
-  // Every destination has its title where every other has it, left and top.
-  const places = new Set(titles.map(each => `${each.left},${each.top}`));
-  expect(places.size, JSON.stringify(titles)).toBe(1);
+  // Every destination has its title where every other has it, left and top. The run report is the
+  // one page that fills the window (a dense grid that takes all the width the window gives it), so
+  // its title keeps the page gutter as its left edge while the others are centred; its top is the
+  // same as theirs.
+  const top = new Set(titles.map(each => each.top));
+  expect(top.size, JSON.stringify(titles)).toBe(1);
+  const left = new Set(titles.filter(each => each.name !== REPORT_SHOT).map(each => each.left));
+  expect(left.size, JSON.stringify(titles)).toBe(1);
 }
 
 /**
