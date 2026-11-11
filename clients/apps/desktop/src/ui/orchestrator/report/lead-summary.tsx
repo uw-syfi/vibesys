@@ -41,6 +41,7 @@ export function LeadSummary(props: {
     }));
   return (
     <Brief
+      name="Lead summary"
       label={labelOf(summary, props.nowMs, props.over)}
       {...(summary.headline.trim() === ''
         ? {}

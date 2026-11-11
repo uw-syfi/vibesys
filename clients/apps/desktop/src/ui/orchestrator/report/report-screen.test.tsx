@@ -1329,6 +1329,13 @@ describe('the lead’s block', () => {
     screen.unmount();
   });
 
+  it('is a region named Lead summary, which the desktop end-to-end path finds the report by', () => {
+    const {screen} = render({});
+    const region = screen.container.querySelector('section.vs-brief[aria-label="Lead summary"]');
+    expect(region?.textContent).toContain('Changed');
+    screen.unmount();
+  });
+
   it('is one column with its age once, and no text in bold or in a heading', () => {
     const {screen} = render({});
     const block = screen.container.querySelector('section.vs-brief');

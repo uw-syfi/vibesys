@@ -63,6 +63,8 @@ function Clamped(props: {
  * so it is never set large.
  */
 export function Brief(props: {
+  /** What the block is called to a screen reader and to a test: its region's name. Defaults to `label`. */
+  readonly name?: string;
   readonly label?: string;
   readonly lead?: ReactNode;
   readonly leadTitle?: string;
@@ -92,7 +94,7 @@ export function Brief(props: {
   }
   const fields = props.fields ?? [];
   return (
-    <section className="vs-brief" aria-label={props.label}>
+    <section className="vs-brief" aria-label={props.name ?? props.label}>
       {props.label === undefined ? null : (
         <Text variant="caption" tone="muted">
           {props.label}
