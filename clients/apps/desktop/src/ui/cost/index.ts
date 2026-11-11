@@ -14,12 +14,11 @@ export {
   type TokenSplit,
   tokenSplit,
 } from './cost-model.js';
-export {Counted, MutedFact} from './fact-parts.js';
 export {CostScreen} from './cost-screen.js';
 export {
+  bucketWords,
   type CostWords,
   FLOOR,
-  bucketWords,
   formatAxisUsd,
   formatCount,
   formatUsd,

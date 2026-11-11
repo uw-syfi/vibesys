@@ -3,8 +3,10 @@ import {
   Button,
   Card,
   Chip,
+  CountedFact,
   FactLine,
   MainSide,
+  MutedFact,
   Page,
   pageState,
   Row,
@@ -29,12 +31,13 @@ import {
   type RunSortKey,
   type SpendRange,
 } from '../../state/index.js';
-import {Counted, FLOOR, formatAxisUsd, MutedFact} from '../cost/index.js';
+import {FLOOR, formatAxisUsd} from '../cost/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {
   type BudgetCell,
   type CostCell,
   type CostOverviewModelWords,
+  FLOOR_HINT,
   type HostCostScreenModel,
   hostCostModel,
   type ModelLine,
@@ -42,9 +45,8 @@ import {
   type RunLine,
   type TokenCells,
   type TotalFigures,
-  totalFigures,
   type TypeLine,
-  FLOOR_HINT,
+  totalFigures,
   UNPRICED_FACT_HINT,
 } from './cost-overview-model.js';
 
@@ -514,21 +516,21 @@ function Facts(props: {
       {totals.figure === null ? (
         <MutedFact text={totals.complete ? 'nothing spent yet' : 'reading cost'} />
       ) : (
-        <Counted
+        <CountedFact
           figure={floored(totals.figure, totals.floor)}
           words="spent"
           {...(totals.floor ? {hint: FLOOR_HINT} : {})}
         />
       )}
       {totals.lastHour === null ? null : (
-        <Counted
+        <CountedFact
           figure={floored(totals.lastHour, totals.lastHourFloor)}
           words="in the last hour"
           {...(totals.lastHourFloor ? {hint: FLOOR_HINT} : {})}
         />
       )}
-      <Counted figure={totals.runs.count} words={totals.runs.what} />
-      <Counted figure={totals.turns.count} words={totals.turns.what} />
+      <CountedFact figure={totals.runs.count} words={totals.runs.what} />
+      <CountedFact figure={totals.turns.count} words={totals.turns.what} />
       {totals.unpriced === null ? null : (
         <MutedFact
           text={`${totals.unpriced.count} ${totals.unpriced.what}`}
