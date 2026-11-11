@@ -46,7 +46,7 @@ func (e *JobToolTooOldError) Error() string {
 	if e.Build != "" {
 		build = " (build " + e.Build + ")"
 	}
-	return fmt.Sprintf("the job tool %s%s is older than this host needs: it %s, and this host needs %d. Install the vibesys-cli of this release, or choose a newer one with `vibesys-client host configure --job-tool PATH`",
+	return fmt.Sprintf("the job tool %s%s is older than this host needs: it %s, and this host needs %d. Install the vibesys-cli of this release, or choose a newer one with `vibesys-client host configure --job-tool PATH`, then `vibesys-client host restart`",
 		e.Tool, build, what, RequiredJobToolProtocol)
 }
 

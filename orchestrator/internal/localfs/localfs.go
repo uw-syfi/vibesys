@@ -31,8 +31,9 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
-// Remedy says how an operator chooses a state directory.
-const Remedy = "choose one on a local disk with `vibesys-client host configure --state-directory PATH`"
+// Remedy says how an operator chooses a state directory. A host that is already running keeps what
+// it started with until it is told to restart, so the remedy names both steps.
+const Remedy = "choose one on a local disk with `vibesys-client host configure --state-directory PATH`, then `vibesys-client host restart`"
 
 // Filesystem is what a path lives on.
 type Filesystem struct {

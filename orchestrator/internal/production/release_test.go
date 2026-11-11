@@ -59,8 +59,10 @@ func TestTheSidecarCommandIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 		{"a command wins over the release", "my-sidecar --flag", memoryRelease(t, "/opt/vs"), []string{"my-sidecar", "--flag"}, nil},
 		{"a checkout wins over the release", checkout, memoryRelease(t, "/opt/vs"), []string{"uv", "run", "--frozen", "--quiet", "--project", checkout, "python", "-m", "vs_sidecar"}, nil},
 		{"a wrong checkout is not replaced by the release", t.TempDir(), memoryRelease(t, "/opt/vs"), nil, []string{SettingSessionHolder, "pyproject.toml"}},
-		{"unset, a release without its environment", "", memoryRelease(t, "/opt/vs", "sidecar/.venv/bin/python"), nil, []string{SettingSessionHolder, "names no", "sidecar/.venv/bin/python"}},
-		{"unset, a host in no release", "", developerBuild, nil, []string{SettingSessionHolder, "names no", "/home/u/.local/release.json"}},
+		// The running daemon keeps the holder it already resolved until it is restarted, so the error
+		// names that step, not only the setting to change.
+		{"unset, a release without its environment", "", memoryRelease(t, "/opt/vs", "sidecar/.venv/bin/python"), nil, []string{SettingSessionHolder, "names no", "sidecar/.venv/bin/python", "host restart"}},
+		{"unset, a host in no release", "", developerBuild, nil, []string{SettingSessionHolder, "names no", "/home/u/.local/release.json", "host restart"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

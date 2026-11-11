@@ -79,8 +79,10 @@ func TestAJobToolOlderThanTheHostIsRefusedBeforeARunStarts(t *testing.T) {
 		var tooOld *JobToolTooOldError
 		if protocol < RequiredJobToolProtocol {
 			problem := job.GetProblem()
-			if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_TOO_OLD || !strings.Contains(problem.GetDetail(), "/home/u/.local/bin/vibesys-cli") {
-				t.Errorf("protocol %d: readiness %v, want a too-old job tool named", protocol, job)
+			// The running daemon keeps its too-old tool until it is restarted, so the detail says so,
+			// not only which setting picks a newer build.
+			if problem.GetReason() != pb.PartProblemReason_PART_PROBLEM_REASON_TOO_OLD || !strings.Contains(problem.GetDetail(), "/home/u/.local/bin/vibesys-cli") || !strings.Contains(problem.GetDetail(), "host restart") {
+				t.Errorf("protocol %d: readiness %v, want a too-old job tool named, with host restart advice", protocol, job)
 			}
 			if !errors.As(endpointErr, &tooOld) {
 				t.Errorf("protocol %d: endpoint %v, want a *JobToolTooOldError", protocol, endpointErr)
