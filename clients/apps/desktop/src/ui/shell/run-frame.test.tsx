@@ -162,10 +162,12 @@ describe('the pages of a run and the pages of the window', () => {
       title: 'Settings',
     });
     settings.unmount();
-    for (const [name, page] of [
-      ['Machines', <MachinesScreen key="m" rows={[]} />],
+    // Machines, like the report and the Cost page, is a table or a grid that needs the whole area.
+    for (const [name, width, page] of [
+      ['Machines', 'fill', <MachinesScreen key="m" rows={[]} />],
       [
         'Cost',
+        'wide',
         <CostOverviewScreen
           key="c"
           hosts={[]}
@@ -178,7 +180,7 @@ describe('the pages of a run and the pages of the window', () => {
       const screen = mount(page);
       expect(frameOf(screen.container), name).toMatchObject({
         pages: 1,
-        width: 'wide',
+        width,
         trailThenTitle: true,
         headings: 1,
         title: name,

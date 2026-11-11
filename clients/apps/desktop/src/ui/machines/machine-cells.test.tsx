@@ -4,16 +4,24 @@ import type {
   AbsenceCause,
   GpuReading,
   MachineSample,
+  MachineView,
   MemoryUse,
   Section,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
-import {MachineReadings} from './machine-readings.js';
-import {MACHINE_CHIP_WHYS, machineWhyWord} from './machine-words.js';
+import {Reading, type ReadingPart} from './machine-cells.js';
+import {
+  ABSENCE_CAUSES,
+  absenceNote,
+  MACHINE_CHIP_WHYS,
+  machineWhyWord,
+  whyHint,
+} from './machine-words.js';
 
 installDom();
 
 const GIB = 1024 ** 3;
+const PARTS: readonly ReadingPart[] = ['cpu', 'memory', 'gpu'];
 
 const read = <T,>(value: T): Section<T> => ({_tag: 'Read', value});
 const absent = <T,>(cause: AbsenceCause): Section<T> => ({_tag: 'Absent', cause});
@@ -38,146 +46,141 @@ const sampleOf = (over: Partial<MachineSample> = {}): MachineSample => ({
   ...over,
 });
 
-const gaugeNames = (container: HTMLElement): string[] =>
-  [...container.querySelectorAll('.vs-gauge')].map(el => el.getAttribute('aria-label') ?? '');
+const view = (
+  sample: MachineSample,
+  stale: Extract<MachineView, {_tag: 'Shown'}>['stale'] = null,
+) => ({_tag: 'Shown', sample, stale}) as const;
 
-const chips = (container: HTMLElement): HTMLElement[] => [
-  ...container.querySelectorAll<HTMLElement>('.vs-chip'),
+/** The three cells of a row, as the table draws them: one `Reading` for each column. */
+const cells = (v: MachineView | null) =>
+  PARTS.map(which => mount(<Reading view={v} which={which} />).container);
+
+const gauges = (container: HTMLElement): HTMLElement[] => [
+  ...container.querySelectorAll<HTMLElement>('.vs-gauge'),
 ];
 
-const groups = (container: HTMLElement): HTMLElement[] => [
-  ...container.querySelectorAll<HTMLElement>('fieldset.vs-readings-group'),
-];
-
-const chipWhy = fc.constantFrom(...MACHINE_CHIP_WHYS);
-
-describe('what a host machine view draws', () => {
-  it('draws an empty readings row, and no chip, while it is still waiting', () => {
-    const {container} = mount(<MachineReadings view={{_tag: 'Waiting'}} />);
-    expect(container.querySelector('.vs-readings')).not.toBeNull();
-    expect(gaugeNames(container)).toEqual([]);
-    expect(chips(container)).toHaveLength(0);
+describe('the cells of a machine row', () => {
+  it('draw nothing for a window that does not read machine stats', () => {
+    for (const cell of cells(null)) expect(cell.textContent).toBe('');
   });
 
-  it('says nothing more than the status chip when the link is down', () => {
-    const {container} = mount(<MachineReadings view={{_tag: 'Missing', why: 'disconnected'}} />);
-    expect(gaugeNames(container)).toEqual([]);
-    expect(chips(container)).toHaveLength(0);
+  it('say Waiting in the first cell only, while nothing has been read', () => {
+    const [cpu, mem, gpus] = cells({_tag: 'Waiting'});
+    expect(cpu?.textContent).toBe('Waiting');
+    expect(mem?.textContent).toBe('');
+    expect(gpus?.textContent).toBe('');
   });
 
-  it('gives a missing reading one chip, in its own words, for any why but disconnected', () => {
+  it('say No stats once in the first cell, with the reason on hover, for any why', () => {
+    const whys = fc.constantFrom(...MACHINE_CHIP_WHYS, 'disconnected' as const);
     fc.assert(
-      fc.property(chipWhy, why => {
-        const {container} = mount(<MachineReadings view={{_tag: 'Missing', why}} />);
-        const drawn = chips(container);
-        expect(drawn).toHaveLength(1);
-        const word = machineWhyWord(why);
-        const chip = drawn[0];
-        if (chip === undefined) throw new Error('one chip expected');
-        expect(chip.textContent).toBe(word.label);
-        expect(chip.getAttribute('data-tone')).toBe(word.tone);
-        expect(chip.getAttribute('aria-description')).toBe(word.hint);
-        expect(gaugeNames(container)).toEqual([]);
+      fc.property(whys, why => {
+        const [cpu, mem, gpus] = cells({_tag: 'Missing', why});
+        expect(cpu?.textContent).toBe('No stats');
+        expect(cpu?.querySelector('[title]')?.getAttribute('title')).toBe(whyHint(why));
+        expect(mem?.textContent).toBe('');
+        expect(gpus?.textContent).toBe('');
+        // The words say it is a hint, never a second status chip.
+        expect(cpu?.querySelector('.vs-chip')).toBeNull();
       }),
-      {numRuns: MACHINE_CHIP_WHYS.length},
+      {numRuns: MACHINE_CHIP_WHYS.length + 1},
     );
   });
 
-  it('draws CPU and memory gauges, undimmed and chipless, for a current reading', () => {
-    const {container} = mount(
-      <MachineReadings view={{_tag: 'Shown', sample: sampleOf(), stale: null}} />,
-    );
-    expect(gaugeNames(container)).toEqual(['CPU', 'Memory']);
-    for (const el of container.querySelectorAll('.vs-gauge')) {
-      expect(el.hasAttribute('data-dim')).toBe(false);
+  it('hint every chip word in a whole sentence, and disconnected in plain words', () => {
+    for (const why of MACHINE_CHIP_WHYS) {
+      expect(whyHint(why)).toBe(`${machineWhyWord(why).label}. ${machineWhyWord(why).hint}`);
     }
-    expect(chips(container)).toHaveLength(0);
+    expect(whyHint('disconnected')).toContain('link');
   });
 
-  it('dims a stale reading and chips why, but never a second status for a lost link', () => {
+  it('draw a bare meter for CPU and memory, undimmed, for a current reading', () => {
+    const [cpu, mem] = cells(view(sampleOf()));
+    expect(cpu && gauges(cpu).map(each => each.getAttribute('aria-valuetext'))).toEqual(['12.5%']);
+    expect(mem && gauges(mem).map(each => each.getAttribute('aria-valuetext'))).toEqual([
+      '4 / 16 GiB',
+    ]);
+    for (const cell of [cpu, mem]) {
+      // The column header names the reading: the cell draws no label of its own.
+      expect(cell?.textContent?.includes('CPU')).toBe(false);
+      for (const gauge of gauges(cell as HTMLElement))
+        expect(gauge.hasAttribute('data-dim')).toBe(false);
+    }
+  });
+
+  it('draw a memory near its total as a warning', () => {
+    const [, mem] = cells(view(sampleOf({memory: read(memory(15, 16))})));
+    expect(mem?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('warn');
+    const [, calm] = cells(view(sampleOf({memory: read(memory(4, 16))})));
+    expect(calm?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('ok');
+  });
+
+  it('dim a stale reading and say why on hover, with no chip, for any why', () => {
+    const whys = fc.constantFrom(...MACHINE_CHIP_WHYS, 'disconnected' as const);
     fc.assert(
-      fc.property(chipWhy, stale => {
-        const {container} = mount(
-          <MachineReadings view={{_tag: 'Shown', sample: sampleOf(), stale}} />,
-        );
-        for (const el of container.querySelectorAll('.vs-gauge')) {
-          expect(el.hasAttribute('data-dim')).toBe(true);
+      fc.property(whys, stale => {
+        for (const cell of cells(view(sampleOf({gpus: read([gpu(0)])}), stale))) {
+          expect(gauges(cell)).toHaveLength(1);
+          expect(gauges(cell)[0]?.hasAttribute('data-dim')).toBe(true);
+          expect(cell.querySelector('[title]')?.getAttribute('title')).toContain(whyHint(stale));
+          expect(cell.querySelector('.vs-chip')).toBeNull();
         }
-        const drawn = chips(container);
-        expect(drawn).toHaveLength(1);
-        expect(drawn[0]?.textContent).toBe(machineWhyWord(stale).label);
       }),
-      {numRuns: MACHINE_CHIP_WHYS.length},
+      {numRuns: MACHINE_CHIP_WHYS.length + 1},
     );
   });
 
-  it('dims a stale reading that lost its link, and still draws no chip', () => {
-    const {container} = mount(
-      <MachineReadings view={{_tag: 'Shown', sample: sampleOf(), stale: 'disconnected'}} />,
-    );
-    for (const el of container.querySelectorAll('.vs-gauge')) {
-      expect(el.hasAttribute('data-dim')).toBe(true);
-    }
-    expect(chips(container)).toHaveLength(0);
+  it('say "No GPUs" in words for a machine the host says has none, and draw no meter', () => {
+    const [, , gpus] = cells(view(sampleOf({gpus: read([])})));
+    expect(gpus?.textContent).toBe('No GPUs');
+    expect(gauges(gpus as HTMLElement)).toHaveLength(0);
   });
 
-  it('says "No GPUs" in words for a machine the host says has none', () => {
-    const {container} = mount(
-      <MachineReadings view={{_tag: 'Shown', sample: sampleOf({gpus: read([])}), stale: null}} />,
-    );
-    expect(container.textContent).toContain('No GPUs');
-    // The empty list is the host's word, not a reading that could not be made: no GPU gauge.
-    expect(gaugeNames(container)).not.toContain('GPU 0');
-    expect(groups(container)).toHaveLength(0);
-  });
-
-  it('draws an unknown gauge, not "No GPUs", when the GPU section could not be read', () => {
-    const {container} = mount(
-      <MachineReadings
-        view={{_tag: 'Shown', sample: sampleOf({gpus: absent('no-tool')}), stale: null}}
-      />,
-    );
-    expect(container.textContent).not.toContain('No GPUs');
-    const gpuGauge = [...container.querySelectorAll('.vs-gauge')].find(el =>
-      (el.getAttribute('aria-label') ?? '').startsWith('GPU'),
-    );
-    expect(gpuGauge?.getAttribute('role')).toBe('img');
-    expect(gpuGauge?.getAttribute('aria-label')).toContain('unknown');
-  });
-
-  it('draws an unknown gauge for a CPU the host could not read', () => {
-    const {container} = mount(
-      <MachineReadings
-        view={{_tag: 'Shown', sample: sampleOf({cpuPercent: absent('timed-out')}), stale: null}}
-      />,
-    );
-    const cpu = [...container.querySelectorAll('.vs-gauge')].find(el =>
-      (el.getAttribute('aria-label') ?? '').startsWith('CPU'),
-    );
-    expect(cpu?.getAttribute('role')).toBe('img');
-    expect(cpu?.getAttribute('aria-label')).toContain('unknown');
-  });
-
-  it('groups each GPU under its own name, one row per GPU, for any count', () => {
-    const count = fc.integer({min: 0, max: 6});
+  it('draw an unknown meter, never zero, for a section the host could not read, with its cause on hover', () => {
+    const causes = fc.constantFrom(...ABSENCE_CAUSES);
     fc.assert(
-      fc.property(count, n => {
-        const gpus = Array.from({length: n}, (_, i) => gpu(i));
-        const {container} = mount(
-          <MachineReadings
-            view={{_tag: 'Shown', sample: sampleOf({gpus: read(gpus)}), stale: null}}
-          />,
+      fc.property(causes, cause => {
+        const v = view(
+          sampleOf({cpuPercent: absent(cause), memory: absent(cause), gpus: absent(cause)}),
         );
-        const drawn = groups(container);
-        expect(drawn).toHaveLength(n);
-        drawn.forEach((group, i) => {
-          const legend = group.querySelector('legend');
-          expect(legend?.textContent).toBe(`GPU ${i}`);
-          // Each group holds the GPU's own gauge and its memory gauge.
-          const named = [...group.querySelectorAll('.vs-gauge')].map(
-            el => el.getAttribute('aria-label') ?? '',
+        for (const cell of cells(v)) {
+          const [gauge] = gauges(cell);
+          expect(gauge?.getAttribute('role')).toBe('img');
+          expect(gauge?.getAttribute('aria-label')).toContain('unknown');
+          expect(cell.textContent).toBe('–');
+          expect(cell.querySelector('[title]')?.getAttribute('title')).toContain(
+            absenceNote(cause),
           );
-          expect(named).toEqual([`GPU ${i}`, 'Memory']);
+        }
+      }),
+      {numRuns: ABSENCE_CAUSES.length},
+    );
+  });
+
+  it('show one GPU as its own utilization, and many as their mean with how many there are', () => {
+    const one = cells(view(sampleOf({gpus: read([gpu(0, {utilizationPercent: 92})])})))[2];
+    expect(one && gauges(one).map(each => each.getAttribute('aria-valuetext'))).toEqual(['92%']);
+    expect(one?.textContent).not.toContain('GPUs');
+    const two = cells(
+      view(
+        sampleOf({
+          gpus: read([gpu(0, {utilizationPercent: 92}), gpu(1, {utilizationPercent: 0})]),
+        }),
+      ),
+    )[2];
+    expect(two && gauges(two).map(each => each.getAttribute('aria-valuetext'))).toEqual(['46%']);
+    expect(two?.textContent).toContain('2 GPUs');
+  });
+
+  it('keep each GPU’s own utilization and memory on hover, one line each, for any count', () => {
+    fc.assert(
+      fc.property(fc.integer({min: 1, max: 8}), count => {
+        const gpus = Array.from({length: count}, (_, index) => gpu(index));
+        const cell = cells(view(sampleOf({gpus: read(gpus)})))[2];
+        const hover = cell?.querySelector('[title]')?.getAttribute('title') ?? '';
+        expect(hover.split('\n')).toHaveLength(count);
+        gpus.forEach((_, index) => {
+          expect(hover).toContain(`GPU ${index}: 40%, 8 / 24 GiB`);
         });
       }),
       {numRuns: 20},

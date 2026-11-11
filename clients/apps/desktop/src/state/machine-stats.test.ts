@@ -7,6 +7,7 @@ import {FAULT_KINDS, type Fault} from './fault.js';
 import {
   applyMachineEvent,
   emptyMachineStats,
+  gpuOverview,
   type MachineBounds,
   type MachineEnd,
   type MachineEvent,
@@ -404,6 +405,45 @@ describe('the bounds on a stream', () => {
     expect(nextLapse(synced, openedAt(0), {...bounds, staleAfterMs: 0})).toEqual({
       at: bounds.leaseMs,
       lapse: 'lease',
+    });
+  });
+});
+
+describe('a machine’s GPUs as one reading', () => {
+  const gpu = (index: number, utilizationPercent: number, used: number, total: number) => ({
+    index,
+    name: `GPU ${index}`,
+    utilizationPercent,
+    memory: {usedBytes: used, totalBytes: total},
+  });
+
+  it('is nothing for a machine with no GPU', () => {
+    expect(gpuOverview([])).toBeNull();
+  });
+
+  it('counts the GPUs, sums their memory, and averages their utilization between the least and most busy', () => {
+    const percent = fc.double({min: 0, max: 100, noNaN: true});
+    const one = fc.record({percent, used: fc.nat(1000), total: fc.nat(1000)});
+    fc.assert(
+      fc.property(fc.array(one, {minLength: 1, maxLength: 8}), list => {
+        const gpus = list.map((each, index) => gpu(index, each.percent, each.used, each.total));
+        const overview = gpuOverview(gpus);
+        expect(overview?.count).toBe(gpus.length);
+        expect(overview?.memory.usedBytes).toBe(list.reduce((sum, each) => sum + each.used, 0));
+        expect(overview?.memory.totalBytes).toBe(list.reduce((sum, each) => sum + each.total, 0));
+        const percents = list.map(each => each.percent);
+        const mean = overview?.meanUtilizationPercent ?? Number.NaN;
+        expect(mean).toBeGreaterThanOrEqual(Math.min(...percents) - 1e-9);
+        expect(mean).toBeLessThanOrEqual(Math.max(...percents) + 1e-9);
+      }),
+    );
+  });
+
+  it('is its own reading for a single GPU', () => {
+    expect(gpuOverview([gpu(0, 92, 71, 80)])).toEqual({
+      count: 1,
+      meanUtilizationPercent: 92,
+      memory: {usedBytes: 71, totalBytes: 80},
     });
   });
 });
