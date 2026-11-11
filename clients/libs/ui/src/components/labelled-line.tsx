@@ -4,7 +4,7 @@ import {Text} from './text.js';
 /** One labelled part of a `LabelledLine`, set in a column of its own. */
 export interface LabelledField {
   readonly label: string;
-  readonly text: string;
+  readonly text: ReactNode;
 }
 
 /**

@@ -19,6 +19,7 @@ export {
   FLOOR,
   formatCount,
   formatRate,
+  formatTokens,
   NOT_REPORTED,
   precisionOf,
   usdOrNothing,

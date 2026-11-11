@@ -57,7 +57,6 @@ function report(
       host="host-a"
       ideasWindow={null}
       nowMs={nowMs}
-      status={{kind: 'live', cause: null, staleForMs: null}}
       cost={state.costs[runId]}
       costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}

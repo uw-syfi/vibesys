@@ -82,6 +82,11 @@ export function Table<Row>(props: {
   readonly scroll?: 'across' | 'down';
   /** The order the rows are in, and the control that asks for another. */
   readonly sort?: TableSort;
+  /**
+   * What the table says when it has no rows: one row under its headers, in a quiet voice, so the
+   * table holds its columns and its place until the first row comes.
+   */
+  readonly empty?: string;
   /** The rows are being read again: they stay, quieter, until the answer replaces them. */
   readonly dim?: boolean;
   readonly select?: (key: string) => void;
@@ -134,6 +139,11 @@ export function Table<Row>(props: {
           </tr>
         </thead>
         <tbody>
+          {props.rows.length === 0 && props.empty !== undefined ? (
+            <tr data-kind="empty">
+              <td colSpan={columns.length}>{props.empty}</td>
+            </tr>
+          ) : null}
           {props.rows.map(row => {
             const key = rowKey(row);
             const kind = props.rowKind?.(row);

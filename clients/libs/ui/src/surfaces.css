@@ -379,7 +379,8 @@
 .vs-table tr[aria-current="true"] {
   background: var(--selection);
 }
-.vs-table tr[data-kind="sub"] td {
+.vs-table tr[data-kind="sub"] td,
+.vs-table tr[data-kind="empty"] td {
   color: var(--muted);
 }
 .vs-table tr[data-kind="sub"] td:first-child {

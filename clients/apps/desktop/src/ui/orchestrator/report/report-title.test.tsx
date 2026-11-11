@@ -8,18 +8,15 @@ import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
+  RunStatus,
+  RunStopReason,
+  RunStopReasonSchema,
   SearchStateSchema,
   UnreadableReason,
   UnreadableReasonSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {
-  applyChange,
-  applySearch,
-  emptyState,
-  type HostStatus,
-  runReport,
-} from '../../../state/index.js';
+import {applyChange, applySearch, emptyState, runReport} from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
 import {generateScenario} from '../../../testing/orchestrator/index.js';
 import {causeWord} from '../../refusal-words.js';
@@ -32,7 +29,6 @@ const scenario = generateScenario({seed: 4, subagents: 2, live: true});
 const RUN = scenario.runId;
 const NOW = scenario.endMs + 10 * 60_000;
 const held = scenario.changes.reduce(applyChange, emptyState);
-const LIVE: HostStatus = {kind: 'live', cause: null, staleForMs: null};
 
 /** Every reason the protocol names, the unspecified one too. */
 const REASONS = UnreadableReasonSchema.values.map(value => value.number as UnreadableReason);
@@ -62,7 +58,7 @@ function searchChip(unreadable: Unreadable) {
   });
   const report = runReport(applySearch(held, search), RUN, NOW);
   if (report === undefined) throw new Error('the scenario has its run');
-  const screen = mount(<ReportMeta report={report} host="host-a" status={LIVE} nowMs={NOW} />);
+  const screen = mount(<ReportMeta report={report} host="host-a" nowMs={NOW} />);
   // With the host live, the only chip with an account behind it is the search's.
   const chips = [...screen.container.querySelectorAll('.vs-chip[aria-description]')];
   expect(chips).toHaveLength(1);
@@ -128,6 +124,46 @@ describe('the chip of a search the host cannot read', () => {
         },
       ),
       {numRuns: 60},
+    );
+  });
+});
+
+describe('the state of the run in the title row', () => {
+  const metaOf = (status: RunStatus, stopReason: RunStopReason): HTMLElement => {
+    const run = held.runs[RUN];
+    if (run === undefined) throw new Error('the scenario has its run');
+    const state = {...held, runs: {...held.runs, [RUN]: {...run, status, stopReason}}};
+    const report = runReport(state, RUN, NOW);
+    if (report === undefined) throw new Error('the scenario has its run');
+    const screen = mount(<ReportMeta report={report} host="host-a" nowMs={NOW} />);
+    return screen.container;
+  };
+
+  it('says why a run stopped once, in words, beside its state, and says nothing for a run that finished its work', () => {
+    const failed = metaOf(RunStatus.FAILED, RunStopReason.LEAD_GONE);
+    expect(failed.textContent).toContain('Failed');
+    expect(failed.textContent?.match(/Lead agent lost/g)).toHaveLength(1);
+    const finished = metaOf(RunStatus.ENDED, RunStopReason.FINISHED);
+    expect(finished.textContent).toContain('Finished');
+    expect(finished.textContent).not.toMatch(/Stopped|limit|lost/);
+  });
+
+  it('names no stop reason as the protocol spells it, whatever the host recorded', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...RunStopReasonSchema.values.map(each => each.number as RunStopReason)),
+        reason => {
+          const meta = metaOf(RunStatus.FAILED, reason);
+          expect(meta.textContent).not.toMatch(/UNSPECIFIED|STOP_REASON|LEAD_GONE|TIME_LIMIT/);
+        },
+      ),
+    );
+  });
+
+  it('says nothing of the host’s link: the connection status beside it is the one place that does', () => {
+    const meta = metaOf(RunStatus.RUNNING, RunStopReason.UNSPECIFIED);
+    expect(meta.textContent).not.toMatch(
+      /Stale|Catching up|Unavailable|Connecting|Waiting|Unreachable/,
     );
   });
 });

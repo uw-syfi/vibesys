@@ -1,6 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
+import {fittedTimeTicks} from '@vibesys/ui';
 import fc from 'fast-check';
-import {timeTicks} from '../../../state/index.js';
 import {TEST_CLOCK} from '../../test-display-clock.js';
 import {
   clip,
@@ -44,9 +44,53 @@ describe('Seattle time', () => {
 
   it('puts a time axis tick for a day at midnight in Seattle', () => {
     const from = Date.UTC(2026, 9, 28, 20);
-    const ticks = timeTicks(from, from + 9 * 24 * HOUR, 5, seattleOffsetMs);
+    const ticks = fittedTimeTicks(
+      from,
+      from + 9 * 24 * HOUR,
+      700,
+      TEST_CLOCK.reportTick,
+      seattleOffsetMs,
+    );
     expect(ticks.length).toBeGreaterThan(1);
-    for (const tick of ticks) expect(seattleClock(tick)).toBe('12:00\u00a0AM');
+    for (const tick of ticks) expect(seattleClock(tick.at)).toBe('12:00\u00a0AM');
+  });
+});
+
+describe('the labels of the report’s time axis', () => {
+  it('write a tick as fine as its step: tenths of a second, seconds, the time, then the day', () => {
+    const at = Date.UTC(2026, 10, 7, 6, 56, 15, 200);
+    expect(TEST_CLOCK.reportTick(at, 2000, 200)).toBe('10:56:15.2\u00a0PM');
+    expect(TEST_CLOCK.reportTick(at - 200, 40_000, 15_000)).toBe('10:56:15\u00a0PM');
+    expect(TEST_CLOCK.reportTick(at - 15_200, 600_000, 60_000)).toBe('10:56\u00a0PM');
+    // Over more than a day a time carries its day; at the zone's midnight, or for a step of a day, the day alone.
+    const midnight = Date.UTC(2026, 10, 10, 8);
+    expect(TEST_CLOCK.reportTick(midnight + 6 * HOUR, 48 * HOUR, 6 * HOUR)).toBe(
+      'Tue 6:00\u00a0AM',
+    );
+    expect(TEST_CLOCK.reportTick(midnight, 48 * HOUR, 6 * HOUR)).toBe('Tue 10');
+    expect(TEST_CLOCK.reportTick(midnight + 12 * HOUR, 5 * 24 * HOUR, 24 * HOUR)).toBe('Tue 10');
+    expect(TEST_CLOCK.reportTick(midnight, 30 * 24 * HOUR, 7 * 24 * HOUR)).toBe('Nov\u00a010');
+  });
+
+  it('never repeat a label on one axis, for a run of any length from a second to a week, at any width', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({min: 1_700_000_000_000, max: 1_900_000_000_000}),
+        fc.integer({min: 1000, max: 7 * 24 * HOUR}),
+        fc.integer({min: 200, max: 1800}),
+        (from, length, width) => {
+          const labels = fittedTimeTicks(
+            from,
+            from + length,
+            width,
+            TEST_CLOCK.reportTick,
+            seattleOffsetMs,
+          ).map(tick => tick.label);
+          expect(new Set(labels).size).toBe(labels.length);
+        },
+      ),
+      {seed: 35, numRuns: 300},
+    );
   });
 });
 

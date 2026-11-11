@@ -4,43 +4,49 @@ import {
   Chart,
   ChartDetail,
   ChartLegend,
-  ChartPanel,
+  type ChartNote,
   type ChartPoint,
   type ChartReference,
+  type ChartSize,
   type ChartTick,
   Chip,
-  Field,
-  type ParetoAxis,
-  ParetoChart,
-  type ParetoPoint,
+  RangeStrip,
   Row,
-  Select,
+  SegmentedControl,
+  type SegmentOption,
   Stack,
   Text,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
+  type BandView,
+  type Better,
+  bandView,
+  choiceOf,
   type IdeasReport,
   type ObjectiveReport,
-  type RunReport,
-  type TradeoffReport,
-  timeTicks,
+  offersRanges,
+  type RangeChoice,
+  type RangeView,
+  rangeChoices,
+  type Span,
   valueTicks,
+  WHOLE_RUN,
+  windowOf,
 } from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
 import {useDisplayClock} from '../../display-clock.js';
 import type {DisplayClock} from '../../display-time.js';
 import {nameOf} from '../names.js';
-import {clip, formatExact, formatFigure, withUnit} from './format.js';
+import {clip, formatAge, formatExact, formatFigure, withUnit} from './format.js';
+import {ObjectiveSummary} from './objective-summary.js';
 
 /** The longest note of a bound a hover writes whole; the agent's own words go on after it in its store. */
 const NOTE_LIMIT = 600;
-
-/** How many labels a time axis aims for. */
-const X_LABELS = 4;
+/** How many labels a value axis aims for. */
 const Y_LABELS = 3;
-/** The share of the value range left above and below the data, so no point sits on the frame. */
-const PAD = 0.1;
+/** The most measurements a chart writes the value of, beside the corners of its line. */
+const NOTED_UP_TO = 20;
 
 /** How a chart point links to the ideas: what the host served, the point chosen and the idea singled out. */
 export interface PointLinks {
@@ -64,6 +70,9 @@ function planWords(plans: readonly number[] | undefined): string {
   return plans.length === 0 ? 'no plan' : plans.map(plan => `#${plan}`).join(' ');
 }
 
+/** Better is always up: a value of an objective that is better lower is drawn negated, and written as itself. */
+const upward = (better: Better, value: number): number => (better === 'lower' ? -value : value);
+
 function boundReference(
   objective: ObjectiveReport,
   names: ReadonlyMap<string, string>,
@@ -78,7 +87,7 @@ function boundReference(
     .filter(part => part !== '')
     .join(' · ');
   return {
-    y: bound.value,
+    y: upward(objective.better, bound.value),
     label: `Bound ${formatFigure(bound.value)}`,
     hint: [withUnit(formatExact(bound.value), bound.unit), clip(bound.note, NOTE_LIMIT), who]
       .filter(line => line !== '')
@@ -86,43 +95,57 @@ function boundReference(
   };
 }
 
-/** The range of the value axis: the measured values and the bound, a little widened. */
-function valueDomain(objective: ObjectiveReport): readonly [number, number] {
-  const values = [
-    ...objective.points.map(point => point.value),
-    ...(objective.bound === undefined ? [] : [objective.bound.current.value]),
-  ];
-  const low = Math.min(...values);
-  const high = Math.max(...values);
-  const room = (high - low || Math.abs(high) || 1) * PAD;
-  return [low - room, high + room];
+/** What a band's value axis spans, drawn upward, and the labels at its ticks, written as the values they stand for. */
+function valueAxis(
+  better: Better,
+  band: BandView,
+): {readonly domain: readonly [number, number]; readonly ticks: readonly ChartTick[]} {
+  const [low, high] = band.domain;
+  const domain: readonly [number, number] =
+    better === 'lower' ? [upward(better, high), upward(better, low)] : [low, high];
+  return {
+    domain,
+    ticks: valueTicks(domain[0], domain[1], Y_LABELS).map(value => ({
+      value,
+      label: formatFigure(upward(better, value)),
+    })),
+  };
 }
 
-/** The labels of a value axis: the ticks over the objective's range, in figures. */
-function valueLabels(objective: ObjectiveReport): ChartTick[] {
-  const [low, high] = valueDomain(objective);
-  return valueTicks(low, high, Y_LABELS).map(value => ({value, label: formatFigure(value)}));
+/** The words an empty chart stands on: why there is nothing to draw, in one line. */
+function emptyWords(props: {
+  readonly measured: number;
+  readonly runOver: boolean;
+  readonly unreadable: boolean;
+  readonly startedAgo: string;
+}): string {
+  if (props.measured > 0) return 'Nothing measured in this range';
+  if (props.runOver) return 'Nothing was measured';
+  if (props.unreadable) return 'The measurements cannot be read now';
+  return `Waiting for the input's measurement · started ${props.startedAgo}`;
 }
 
+/** One objective's chart: its dots and best-so-far line over the shared time axis, at a height that never changes. */
 function ObjectiveChart(props: {
   readonly objective: ObjectiveReport;
-  readonly span: RunReport['span'];
-  readonly size: 'default' | 'compact';
+  readonly band: BandView;
+  readonly window: Span;
+  readonly size: ChartSize;
   readonly names: ReadonlyMap<string, string>;
   /** The widest value label of any chart on this axis, so every plot starts at one left edge. */
   readonly labelChars: number;
   readonly links: PointLinks;
-}): JSX.Element | null {
-  const {objective, span} = props;
+  readonly empty: string;
+}): JSX.Element {
+  const {objective, band, window} = props;
   const clock = useDisplayClock();
-  if (objective.points.length === 0) return null;
-  const length = span.toMs - span.fromMs;
-  const domain = valueDomain(objective);
-  const points: ChartPoint[] = objective.points.map(point => ({
+  const {better} = objective;
+  const axis = valueAxis(better, band);
+  const points: ChartPoint[] = band.points.map(point => ({
     key: point.id,
     id: point.id,
     x: point.atMs,
-    y: point.value,
+    y: upward(better, point.value),
     selected: props.links.picked === point.id,
     lit: props.links.lit.has(point.id),
     label: [
@@ -139,90 +162,137 @@ function ObjectiveChart(props: {
       detail: withUnit(formatExact(point.value), objective.unit),
     },
   }));
-  const last = objective.bestPath.at(-1);
-  const steps = [
-    ...objective.bestPath.map(point => ({x: point.atMs, y: point.value})),
-    ...(last === undefined ? [] : [{x: Math.max(span.toMs, last.atMs), y: last.value}]),
-  ];
-  const xTicks: ChartTick[] = timeTicks(span.fromMs, span.toMs, X_LABELS, clock.offsetMs).map(
-    value => ({value, label: clock.reportAxis(value, length)}),
-  );
-  const yTicks = valueLabels(objective);
-  const reference = boundReference(objective, props.names, clock);
-  const best =
-    objective.bestValue === undefined
-      ? undefined
-      : withUnit(formatFigure(objective.bestValue), objective.unit);
+  const notes: ChartNote[] =
+    band.points.length > NOTED_UP_TO
+      ? []
+      : band.corners.map(point => ({
+          x: point.atMs,
+          y: upward(better, point.value),
+          label: formatFigure(point.value),
+        }));
+  const reference = band.boundDrawn ? boundReference(objective, props.names, clock) : undefined;
   return (
-    <ChartPanel
-      title={objective.name}
-      note={objective.better === 'lower' ? 'Lower is better' : 'Higher is better'}
-      oneLine
-      {...(best === undefined ? {} : {figure: best, tone: 'muted' as const})}
-    >
-      <Chart
-        label={`${objective.name} of every measured candidate over time, with the best so far`}
-        points={points}
-        steps={steps}
-        xDomain={[span.fromMs, Math.max(span.toMs, span.fromMs + 1)]}
-        yDomain={domain}
-        xTicks={xTicks}
-        yTicks={yTicks}
-        yLabelChars={props.labelChars}
-        pick={props.links.pick}
-        size={props.size}
-        {...(reference === undefined ? {} : {references: [reference]})}
-      />
-    </ChartPanel>
+    <Chart
+      label={`${objective.name} of every measured candidate over time, with the best so far`}
+      size={props.size}
+      points={points}
+      steps={band.steps.map(step => ({x: step.x, y: upward(better, step.y)}))}
+      notes={notes}
+      xDomain={[window.fromMs, Math.max(window.toMs, window.fromMs + 1)]}
+      timeAxis={{label: clock.reportTick, zone: clock.offsetMs}}
+      yDomain={axis.domain}
+      yTicks={band.points.length === 0 ? [] : axis.ticks}
+      yLabelChars={props.labelChars}
+      pick={props.links.pick}
+      {...(band.points.length === 0 ? {empty: props.empty} : {})}
+      {...(reference === undefined ? {} : {references: [reference]})}
+    />
   );
 }
 
-/** Every objective over time, one chart each, on one time axis. */
-export function OverTime(props: {
-  readonly objectives: readonly ObjectiveReport[];
-  readonly span: RunReport['span'];
-  /** What each agent is called on screen, by agent id. */
-  readonly names: ReadonlyMap<string, string>;
-  readonly links: PointLinks;
+/** The key to what the charts draw: every mark and color, the ones not on screen now kept in place. */
+function Key(props: {
+  readonly bound: boolean;
+  readonly picked: boolean;
+  readonly lit: boolean;
 }): JSX.Element {
-  const measured = props.objectives.filter(objective => objective.points.length > 0);
-  const labelChars = Math.max(
-    0,
-    ...measured.flatMap(objective => valueLabels(objective).map(tick => tick.label.length)),
-  );
   return (
-    <Card dense section="Over time">
-      {measured.length === 0 ? (
-        <Text tone="muted">No measurements yet</Text>
-      ) : (
-        <Stack gap="space-4">
-          <ChartLegend
-            label="Key to the charts"
-            items={[
-              {label: 'Best so far', mark: 'line'},
-              {label: 'Measured', mark: 'dot'},
-            ]}
-          />
-          {measured.map(objective => (
-            <ObjectiveChart
-              key={objective.name}
-              objective={objective}
-              span={props.span}
-              names={props.names}
-              links={props.links}
-              labelChars={labelChars}
-              size={measured.length === 1 ? 'default' : 'compact'}
-            />
-          ))}
-          <PointDetail objectives={measured} links={props.links} />
-        </Stack>
-      )}
-    </Card>
+    <ChartLegend
+      label="Key to the charts"
+      items={[
+        {label: 'Best so far', mark: 'line'},
+        {label: 'Measured', mark: 'dot'},
+        {label: 'Bound', mark: 'dash', reserved: !props.bound},
+        {label: 'Chosen point', mark: 'ring', reserved: !props.picked},
+        {label: 'Idea’s measurements', mark: 'chain', reserved: !props.lit},
+      ]}
+    />
   );
 }
 
-/** The longest idea title the line under the charts writes; the table has it whole. */
-const TITLE_LIMIT = 48;
+type Picked = RangeChoice | 'dragged';
+
+const RANGE_WORDS: Readonly<Record<RangeChoice, string>> = {
+  hour: '1h',
+  'six-hours': '6h',
+  day: '1d',
+  all: 'All',
+};
+
+const RANGE_SPOKEN: Readonly<Record<RangeChoice, string>> = {
+  hour: 'Last hour',
+  'six-hours': 'Last 6 hours',
+  day: 'Last day',
+  all: 'Whole run',
+};
+
+/** The range control: the last hour, six hours, a day or all of a run that is long. */
+function RangeControl(props: {
+  readonly span: Span;
+  readonly view: RangeView;
+  readonly change: (view: RangeView) => void;
+}): JSX.Element {
+  const options: SegmentOption<Picked>[] = rangeChoices(props.span).map(choice => ({
+    value: choice,
+    label: RANGE_WORDS[choice],
+  }));
+  return (
+    <SegmentedControl<Picked>
+      label="Range"
+      size="xs"
+      options={options}
+      value={choiceOf(props.view) ?? 'dragged'}
+      change={picked => {
+        if (picked === 'dragged') return;
+        props.change(picked === 'all' ? WHOLE_RUN : {kind: 'last', choice: picked});
+      }}
+    />
+  );
+}
+
+/** The whole run as a thin strip with the window on it, to drag out a window. */
+function Overview(props: {
+  readonly objective: ObjectiveReport | undefined;
+  readonly span: Span;
+  readonly window: Span;
+  readonly view: RangeView;
+  readonly change: (view: RangeView) => void;
+}): JSX.Element {
+  const {span, window, objective} = props;
+  const clock = useDisplayClock();
+  const whole = props.view.kind === 'all';
+  const words =
+    props.view.kind === 'between'
+      ? `${clock.reportMoment(window.fromMs)} to ${clock.reportMoment(window.toMs)}`
+      : RANGE_SPOKEN[choiceOf(props.view) ?? 'all'];
+  const entire = objective === undefined ? undefined : bandView(objective, span);
+  return (
+    <Row gap="space-4" rowGap="space-2" wrap align="center">
+      <Stack gap="space-0" width="summary">
+        <Text variant="small" tone="muted">
+          Whole run · drag to choose a window
+        </Text>
+      </Stack>
+      <Stack gap="space-0" width="chart">
+        <RangeStrip
+          label="The whole run, to choose a window of it"
+          valueText={words}
+          domain={[span.fromMs, span.toMs]}
+          window={whole ? null : [window.fromMs, window.toMs]}
+          steps={(entire?.steps ?? []).map(step => ({
+            x: step.x,
+            y: upward(objective?.better ?? 'higher', step.y),
+          }))}
+          change={chosen =>
+            props.change(
+              chosen === null ? WHOLE_RUN : {kind: 'between', fromMs: chosen[0], toMs: chosen[1]},
+            )
+          }
+        />
+      </Stack>
+    </Row>
+  );
+}
 
 /**
  * What the point chosen on a chart is: its job's commit, its value, and the idea each plan it names
@@ -270,86 +340,122 @@ function PointDetail(props: {
   );
 }
 
-function axisOf(
-  objective: TradeoffReport['objectives'][number],
-  units: ReadonlyMap<string, string | null>,
-): ParetoAxis {
-  return {
-    name: objective.name,
-    unit: units.get(objective.name) ?? '',
-    direction: objective.better,
-  };
-}
+/** The longest idea title the line under the charts writes; the table has it whole. */
+const TITLE_LIMIT = 48;
 
 /**
- * Every candidate measured on all the objectives, two of them at a time (the person picks the pair),
- * with the frontier as the host marked it. With exactly two objectives the frontier is also joined;
- * with more it is marked on any pair and joined on none.
+ * Every objective over time: a band for each, its summary beside its own chart, all on one time axis.
+ * The frame is the same from the first minute to the last: a chart is the same height whatever the
+ * number of points (200 px for one objective, 150 for several), an objective with no measurement
+ * keeps its band with the axis and a line of what it waits for, and a run with no objective yet
+ * holds one band for the measurements to come. A run longer than six hours offers a range and an
+ * overview strip.
  */
-export function TradeOff(props: {
-  readonly tradeoff: TradeoffReport;
+export function PerformancePanel(props: {
   readonly objectives: readonly ObjectiveReport[];
+  readonly span: Span;
+  readonly nowMs: number;
+  readonly runOver: boolean;
+  /** The host cannot read the run's job log now. */
+  readonly unreadable: boolean;
+  /** What each agent is called on screen, by agent id. */
+  readonly names: ReadonlyMap<string, string>;
+  readonly links: PointLinks;
 }): JSX.Element {
-  const {tradeoff} = props;
-  const [chosen, choose] = useState<{x: string; y: string}>({
-    x: tradeoff.objectives[0]?.name ?? '',
-    y: tradeoff.objectives[1]?.name ?? '',
+  const {objectives, span} = props;
+  const clock = useDisplayClock();
+  const [view, setView] = useState<RangeView>(WHOLE_RUN);
+  const window = windowOf(view, span);
+  const long = offersRanges(span);
+  const bands = objectives.map(objective => ({objective, band: bandView(objective, window)}));
+  const labelChars = Math.max(
+    0,
+    ...bands.flatMap(({objective, band}) =>
+      valueAxis(objective.better, band).ticks.map(tick => tick.label.length),
+    ),
+  );
+  const measured = Math.max(0, ...objectives.map(objective => objective.points.length));
+  const size: ChartSize = objectives.length > 1 ? 'strip' : 'tall';
+  const empty = emptyWords({
+    measured,
+    runOver: props.runOver,
+    unreadable: props.unreadable,
+    startedAgo: formatAge(props.nowMs - span.fromMs),
   });
-  const names = tradeoff.objectives.map(objective => objective.name);
-  const xAt = Math.max(0, names.indexOf(chosen.x));
-  const yAt = Math.max(0, names.indexOf(chosen.y));
-  const units = new Map(props.objectives.map(objective => [objective.name, objective.unit]));
-  const x = tradeoff.objectives[xAt];
-  const y = tradeoff.objectives[yAt];
-  const points: ParetoPoint[] = tradeoff.points.map(point => ({
-    id: point.id,
-    label: shortCommit(point.commit),
-    x: point.values[xAt] ?? 0,
-    y: point.values[yAt] ?? 0,
-    time: point.atMs,
-    state: 'passed',
-    onFrontier: point.onFrontier,
-  }));
-  const options = names.map(name => ({value: name, label: name}));
+  const picked = props.links.picked !== null;
   return (
-    <Card dense section="Trade-off">
-      <Stack gap="space-3">
-        <Row gap="space-4" rowGap="space-2" wrap justify="between">
-          <Text variant="small" tone="muted">
-            {`${tradeoff.points.length} ${
-              tradeoff.points.length === 1 ? 'candidate' : 'candidates'
-            } · ${tradeoff.frontierCount} on the frontier`}
-          </Text>
-          {names.length > 2 ? (
-            <Row gap="space-3" wrap>
-              <Field label="X axis">
-                <Select
-                  value={names[xAt] ?? ''}
-                  options={options}
-                  change={name => choose({...chosen, x: name})}
-                  size="sm"
-                />
-              </Field>
-              <Field label="Y axis">
-                <Select
-                  value={names[yAt] ?? ''}
-                  options={options}
-                  change={name => choose({...chosen, y: name})}
-                  size="sm"
-                />
-              </Field>
-            </Row>
-          ) : null}
-        </Row>
-        {x === undefined || y === undefined ? null : (
-          <ParetoChart
-            label="Every measured candidate on two objectives"
-            points={points}
-            x={axisOf(x, units)}
-            y={axisOf(y, units)}
-            joined={names.length === 2}
+    <Card
+      dense
+      section="Performance"
+      action={
+        <Row gap="space-5" rowGap="space-2" wrap justify="end">
+          <Key
+            bound={bands.some(({band}) => band.boundDrawn)}
+            picked={picked}
+            lit={props.links.lit.size > 0}
           />
+          {long ? <RangeControl span={span} view={view} change={setView} /> : null}
+        </Row>
+      }
+    >
+      <Stack gap="space-5">
+        {bands.length === 0 ? (
+          <Row gap="space-4" rowGap="space-3" wrap align="stretch">
+            <Stack gap="space-1" width="summary">
+              <Text variant="item">Measurements</Text>
+              <Text variant="small" tone="muted">
+                Nothing measured yet
+              </Text>
+            </Stack>
+            <Stack gap="space-0" width="chart">
+              <Chart
+                label="Nothing has been measured yet"
+                size={size}
+                points={[]}
+                xDomain={[window.fromMs, Math.max(window.toMs, window.fromMs + 1)]}
+                timeAxis={{label: clock.reportTick, zone: clock.offsetMs}}
+                empty={empty}
+              />
+            </Stack>
+          </Row>
+        ) : (
+          bands.map(({objective, band}) => (
+            <Row key={objective.name} gap="space-4" rowGap="space-3" wrap align="stretch">
+              <Stack gap="space-1" width="summary">
+                <ObjectiveSummary
+                  objective={objective}
+                  inView={
+                    view.kind === 'all' || !long
+                      ? null
+                      : {shown: band.points.length, of: objective.points.length}
+                  }
+                />
+              </Stack>
+              <Stack gap="space-0" width="chart">
+                <ObjectiveChart
+                  objective={objective}
+                  band={band}
+                  window={window}
+                  size={size}
+                  names={props.names}
+                  labelChars={labelChars}
+                  links={props.links}
+                  empty={empty}
+                />
+              </Stack>
+            </Row>
+          ))
         )}
+        {long ? (
+          <Overview
+            objective={objectives.find(each => each.points.length > 0)}
+            span={span}
+            window={window}
+            view={view}
+            change={setView}
+          />
+        ) : null}
+        <PointDetail objectives={objectives} links={props.links} />
       </Stack>
     </Card>
   );

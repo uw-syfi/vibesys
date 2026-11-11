@@ -129,7 +129,10 @@ describe('the pages of a run and the pages of the window', () => {
           const frame = frameOf(screen.container);
           expect(frame, name).toMatchObject({
             pages: 1,
-            width: 'wide',
+            // The report is a grid of panels in two columns (the main one and a side of 400 px) that
+            // stack under 1180 px, which a page of 1100 px never reaches: it takes the window's width.
+            // Its trail band, title row and left edge are the frame every other page has.
+            width: name === 'report' ? 'fill' : 'wide',
             trailThenTitle: true,
             headings: 1,
           });

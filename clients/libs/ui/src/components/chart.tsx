@@ -973,8 +973,8 @@ function Tip(props: {readonly tip: Told; readonly plot: Plot}): JSX.Element {
   );
 }
 
-/** A mark of a key: the line, a dot, or a ring. */
-export type ChartLegendMark = 'line' | 'dot' | 'ring';
+/** A mark of a key: the line, a dashed line (a reference), a dot, a ring, or the accent ring of a chain. */
+export type ChartLegendMark = 'line' | 'dash' | 'dot' | 'ring' | 'chain';
 
 /** One entry of a `ChartLegend`. */
 export interface ChartLegendItem {

@@ -1628,11 +1628,21 @@ button.vs-crumb:focus-visible {
   height: var(--space-1);
   background: var(--accent);
 }
+.vs-chart-legend-mark[data-mark="dash"] {
+  width: var(--space-6);
+  border-top: var(--hairline) dashed var(--muted);
+}
 .vs-chart-legend-mark[data-mark="dot"] {
   width: var(--dot);
   height: var(--dot);
   border-radius: var(--radius-full);
   background: var(--muted);
+}
+.vs-chart-legend-mark[data-mark="chain"] {
+  width: var(--space-4);
+  height: var(--space-4);
+  border: var(--focus-ring) solid var(--accent);
+  border-radius: var(--radius-full);
 }
 .vs-chart-legend-mark[data-mark="ring"] {
   width: var(--space-4);

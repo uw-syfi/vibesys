@@ -13,6 +13,7 @@ import {
   Refusal,
   Rejection,
   RunStatus,
+  RunStopReason,
   type ToolCall,
 } from '@vibesys/orchestrator-proto';
 import type {Fault, FaultKind} from '../../state/index.js';
@@ -61,6 +62,22 @@ const RUN: Readonly<Record<RunStatus, Word>> = {
 };
 
 export const runWord = (status: RunStatus): Word => RUN[status];
+
+/**
+ * Why a run left RUNNING, in a few words beside its state. A run that finished its work has nothing
+ * to add to "Finished", so it says nothing; one with no reason recorded says nothing either.
+ */
+const STOP_REASON: Readonly<Record<RunStopReason, string | null>> = {
+  [RunStopReason.UNSPECIFIED]: null,
+  [RunStopReason.OPERATOR]: 'Stopped on request',
+  [RunStopReason.TIME_LIMIT]: 'Time limit reached',
+  [RunStopReason.LEAD_GONE]: 'Lead agent lost',
+  [RunStopReason.COST_LIMIT]: 'Cost limit reached',
+  [RunStopReason.FINISHED]: null,
+  [RunStopReason.STALLED]: 'Stopped standing still',
+};
+
+export const stopReasonWord = (reason: RunStopReason): string | null => STOP_REASON[reason];
 
 const HARNESS: Readonly<Record<Harness, string>> = {
   [Harness.UNSPECIFIED]: 'Unknown tool',

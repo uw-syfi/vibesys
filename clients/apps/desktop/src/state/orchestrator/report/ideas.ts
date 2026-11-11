@@ -156,3 +156,92 @@ export const ideasInWindow = (
   const counted = new Set(window.plans);
   return ideas.filter(idea => counted.has(idea.planNumber));
 };
+
+/** The verdicts in the order a person reads them: the ideas that stood, then what is open, then the rest. */
+export const VERDICT_ORDER: readonly Verdict[] = ['kept', 'open', 'rejected', 'parked'];
+
+/** How many of `ideas` the host gave each verdict. */
+export function verdictCounts(ideas: readonly IdeaRow[]): Readonly<Record<Verdict, number>> {
+  const counts: Record<Verdict, number> = {kept: 0, open: 0, rejected: 0, parked: 0};
+  for (const idea of ideas) counts[idea.verdict] += 1;
+  return counts;
+}
+
+/**
+ * Display filter: the ideas a search matches, by the words a person reads in a row: the title, the
+ * workstream's title or the idea's number (`12` or `#12`). Every word of the search must be found
+ * in one of them, in any case; no search keeps every idea.
+ */
+export function ideasMatching(ideas: readonly IdeaRow[], search: string): readonly IdeaRow[] {
+  const words = search
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(word => word !== '');
+  if (words.length === 0) return ideas;
+  return ideas.filter(idea => {
+    const text = `#${idea.planNumber} ${idea.title} ${idea.workstreamTitle ?? ''}`.toLowerCase();
+    return words.every(word => text.includes(word));
+  });
+}
+
+/** The columns an ideas table can be ordered by. */
+export type IdeaSortKey = 'id' | 'idea' | 'workstream' | 'verdict' | 'gain' | 'agent' | 'updated';
+
+export type SortDirection = 'ascending' | 'descending';
+
+/** The order a column is first sorted in when it is chosen: numbers and times newest or largest first. */
+export const FIRST_DIRECTION: Readonly<Record<IdeaSortKey, SortDirection>> = {
+  id: 'descending',
+  idea: 'ascending',
+  workstream: 'ascending',
+  verdict: 'ascending',
+  gain: 'descending',
+  agent: 'ascending',
+  updated: 'descending',
+};
+
+/** The sort a press of a header asks for: the same column turns over, another starts in its first order. */
+export function nextSort(
+  current: {readonly key: IdeaSortKey; readonly direction: SortDirection},
+  pressed: IdeaSortKey,
+): {readonly key: IdeaSortKey; readonly direction: SortDirection} {
+  if (current.key !== pressed) return {key: pressed, direction: FIRST_DIRECTION[pressed]};
+  return {key: pressed, direction: current.direction === 'ascending' ? 'descending' : 'ascending'};
+}
+
+type Sortable = number | string | null;
+
+/** The value a row is ordered by in each column; null where it has none, which always comes last. */
+const SORT_VALUE: Readonly<
+  Record<IdeaSortKey, (row: IdeaRow, agentName: (agent: string) => string) => Sortable>
+> = {
+  id: row => row.planNumber,
+  idea: row => row.title.toLowerCase(),
+  workstream: row => row.workstreamTitle?.toLowerCase() ?? null,
+  verdict: row => VERDICT_ORDER.indexOf(row.verdict),
+  gain: row => row.gains[0]?.ratio ?? null,
+  agent: (row, agentName) => (row.agent === '' ? null : agentName(row.agent).toLowerCase()),
+  updated: row => row.updatedMs,
+};
+
+/** How two values of one column order, in the column's own direction; a value that is none comes last. */
+function compared(a: Sortable, b: Sortable, sign: 1 | -1): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+  return (a < b ? -1 : a > b ? 1 : 0) * sign;
+}
+
+/**
+ * The ideas ordered by a column. A row with no value in the column comes last whichever way it is
+ * ordered, and rows that tie keep the order they came in, so a table never shuffles under a live run.
+ */
+export function sortIdeas(
+  ideas: readonly IdeaRow[],
+  sort: {readonly key: IdeaSortKey; readonly direction: SortDirection},
+  agentName: (agent: string) => string,
+): readonly IdeaRow[] {
+  const sign = sort.direction === 'ascending' ? 1 : -1;
+  return ideas
+    .map((row, at) => ({row, at, value: SORT_VALUE[sort.key](row, agentName)}))
+    .sort((a, b) => compared(a.value, b.value, sign) || a.at - b.at)
+    .map(each => each.row);
+}

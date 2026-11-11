@@ -18,6 +18,7 @@ import {
   ReportKind,
   SearchStateSchema,
 } from '@vibesys/orchestrator-proto';
+import {Chip} from '@vibesys/ui';
 import fc from 'fast-check';
 import {act} from 'react';
 import {
@@ -28,14 +29,13 @@ import {
   type CostFeedSnapshot,
   type CostView,
   emptyState,
-  HOST_STATUS_KINDS,
-  type HostStatusKind,
   type IdeaWindow,
   type OrchestratorState,
   objectiveReports,
   type RunView,
   runReport,
 } from '../../../state/index.js';
+import {typeInto} from '../../../testing/dom/fields.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
 import {NO_PRICES, PRICED_AND_UNPRICED} from '../../../testing/orchestrator/cost-views.js';
 import {
@@ -49,8 +49,8 @@ import {
 } from '../../../testing/orchestrator/index.js';
 import {runTitle} from '../fleet-words.js';
 import {agentNames} from '../names.js';
-import {formatExact, formatFigure, withUnit} from './format.js';
-import {ObjectiveTiles} from './objective-tiles.js';
+import {formatFigure} from './format.js';
+import {ObjectiveSummary} from './objective-summary.js';
 import {PlansSummary} from './plans-summary.js';
 import {ReportScreen} from './report-screen.js';
 
@@ -79,6 +79,8 @@ interface World {
   readonly ideas?: number;
   readonly truncated?: boolean;
   readonly window?: IdeaWindow | null;
+  /** When the screen is drawn; the end of the scenario and some minutes when absent. */
+  readonly nowMs?: number;
 }
 
 function stateOf(world: World): OrchestratorState {
@@ -116,14 +118,13 @@ function stateOf(world: World): OrchestratorState {
 function render(
   world: World,
   options: {
-    status?: HostStatusKind;
     costFeed?: CostFeedSnapshot;
     stopProgress?: CommandProgress;
   } = {},
 ) {
   const probe = {shown: [] as RunView[], stops: 0, runs: 0, catchUps: 0};
   const state = stateOf(world);
-  const nowMs = world.live === false ? END + 60_000 : NOW;
+  const nowMs = world.nowMs ?? (world.live === false ? END + 60_000 : NOW);
   const report = runReport(state, RUN, nowMs);
   if (report === undefined) throw new Error('the fixture has its run');
   const screen = mount(
@@ -132,11 +133,6 @@ function render(
       host="host-a"
       ideasWindow={world.window ?? null}
       nowMs={nowMs}
-      status={{
-        kind: options.status ?? 'live',
-        cause: null,
-        staleForMs: options.status === 'stale' ? 90_000 : null,
-      }}
       cost={state.costs[RUN]}
       costFeed={options.costFeed ?? {status: {_tag: 'Live'}, freshness: 'live'}}
       retryCost={() => undefined}
@@ -169,6 +165,22 @@ const cardText = (root: HTMLElement, heading: string): string =>
 const cards = (root: HTMLElement): string[] =>
   [...root.querySelectorAll('section.vs-card h2')].map(heading => heading.textContent ?? '');
 
+/** The facts line as one string, a space between its facts. */
+const factsOf = (root: HTMLElement): string =>
+  [...root.querySelectorAll('.vs-factline .vs-fact')].map(fact => fact.textContent).join(' ');
+
+/** The charts of the performance panel: one per band, and not the trade-off's. */
+const bandCharts = (root: HTMLElement): SVGElement[] =>
+  [...root.querySelectorAll<SVGElement>('svg.vs-chart')].filter(svg =>
+    svg.getAttribute('aria-label')?.includes('over time'),
+  );
+
+/** The cells of the rows of a table with this name. */
+const rowsOf = (root: HTMLElement, name: string): string[][] =>
+  [...(root.querySelector(`table[aria-label="${name}"]`)?.querySelectorAll('tbody tr') ?? [])].map(
+    row => [...row.querySelectorAll('td')].map(cell => cell.textContent ?? ''),
+  );
+
 describe('the report as a page of the run', () => {
   it('opens on the trail, then the title, with Catch me up and Stop run in one group and no best line', () => {
     const {screen} = render({});
@@ -178,10 +190,8 @@ describe('the report as a page of the run', () => {
     expect(header?.querySelector('h1')?.textContent).toBe(
       run === undefined ? 'a title' : runTitle(run.taskCard ?? null, run.task),
     );
-    // What is best so far is the objective tiles', so the header does not say it a second time.
+    // What is best so far is the performance panel's, so the header does not say it a second time.
     expect(header?.textContent).not.toMatch(/\bBest\b/);
-    // Both actions are the standard size, in the one group; the danger one is the outline, the
-    // leading one is the filled button.
     const actions = [...(screen.container.querySelectorAll('.vs-page-actions .vs-button') ?? [])];
     expect(actions.map(button => button.textContent)).toEqual(['Catch me up', 'Stop run']);
     expect(actions.map(button => button.getAttribute('data-size'))).toEqual(['md', 'md']);
@@ -192,58 +202,67 @@ describe('the report as a page of the run', () => {
     screen.unmount();
   });
 
-  it('packs the page as the prototype orders it: a dense summary, dense objective tiles, then the charts', () => {
-    const {screen} = render({});
-    const tiles = screen.container.querySelector('section.vs-tiles[aria-label="Objectives"]');
-    expect(tiles?.hasAttribute('data-dense')).toBe(true);
-    expect(tiles?.querySelectorAll('article.vs-tile').length).toBeGreaterThan(1);
-    const order = [
-      ...screen.container.querySelectorAll('section.vs-tiles, section.vs-card, .vs-chart-columns'),
-    ];
-    const summary = order.find(each => each.textContent?.startsWith('Lead summary'));
-    expect(summary?.hasAttribute('data-dense')).toBe(true);
-    expect(order.indexOf(summary as Element)).toBeLessThan(order.indexOf(tiles as Element));
-    expect(order.indexOf(tiles as Element)).toBeLessThan(
-      order.findIndex(each => each.classList.contains('vs-chart-columns')),
-    );
-    const roomy = [...screen.container.querySelectorAll('section.vs-card')].filter(
+  it('lays the page out in one order: the facts under the title row, the lead as a row, no tiles, then the two columns', () => {
+    const {screen} = render({ideas: 12});
+    const root = screen.container;
+    expect(root.querySelector('.vs-page-meta .vs-factline')).not.toBeNull();
+    // The lead is a labelled row and not a card; there is no row of objective tiles at all.
+    const lead = root.querySelector('section.vs-labelled-line');
+    expect(lead?.textContent).toContain('Lead');
+    expect(cards(root)).not.toContain('Lead summary');
+    expect(root.querySelector('.vs-tiles, .vs-tile')).toBeNull();
+    const columns = root.querySelector('.vs-mainside');
+    expect(
+      lead?.compareDocumentPosition(columns as Node) ?? 0 & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const headings = (side: string): string[] =>
+      [...root.querySelectorAll(`.vs-mainside-${side} section.vs-card h2`)].map(
+        each => each.textContent ?? '',
+      );
+    expect(headings('main')).toEqual(['Performance', 'Ideas', 'Trade-off']);
+    expect(headings('side')).toEqual(['Latest measurements', 'Workstreams', 'Agents and cost']);
+    // Every panel is packed.
+    const roomy = [...root.querySelectorAll('section.vs-card')].filter(
       card => !card.hasAttribute('data-dense'),
     );
     expect(roomy.map(card => card.textContent?.slice(0, 30))).toEqual([]);
     screen.unmount();
   });
 
-  it('calls the agents of a run that is over the agents it had, none of them working, with no rate of spend', () => {
-    const live = render({});
-    expect(cards(live.screen.container)).toContain('Live agents');
-    expect(cardText(live.screen.container, 'Live agents')).toContain('working');
-    expect(cardText(live.screen.container, 'Spend')).toContain('Last hour');
-    live.screen.unmount();
-    const over = render({live: false});
-    expect(cards(over.screen.container)).not.toContain('Live agents');
-    expect(cardText(over.screen.container, 'Agents')).not.toContain('working');
-    expect(cardText(over.screen.container, 'Agents')).toContain('in all');
-    expect(cardText(over.screen.container, 'Spend')).not.toContain('Last hour');
-    expect(cardText(over.screen.container, 'Spend')).not.toContain('/h');
-    over.screen.unmount();
+  it('says the whole run in the facts line: what was measured and when last, the ideas, the agents and the cost', () => {
+    const {screen} = render({ideas: 12});
+    const facts = factsOf(screen.container);
+    expect(facts).toMatch(/^40 measured latest \d+m ago/);
+    expect(facts).toMatch(/\d+ ideas/);
+    expect(facts).toMatch(/\d+ of \d+ agents running/);
+    expect(facts).toMatch(/≥\s\$318 spent · 1,433 turns · 41 unpriced$/);
+    screen.unmount();
+    // The host cut what it served short: the count is a floor, and says so.
+    const cut = render({ideas: 12, truncated: true});
+    expect(factsOf(cut.screen.container)).toMatch(/^≥\s40 measured/);
+    cut.screen.unmount();
   });
 
-  it('says why a spend is a floor beside it, and gives the links of its cards one place and one look', () => {
-    const {screen} = render({});
-    expect(cardText(screen.container, 'Spend')).toMatch(/≥ \$318[\s\S]*41 unpriced/);
-    const links = [...screen.container.querySelectorAll('.vs-card-head .vs-button')];
-    expect(links.map(link => link.textContent)).toEqual(['Details', 'Agents']);
-    // One style, in the heading's line of each card.
-    expect(new Set(links.map(link => link.getAttribute('data-variant')))).toEqual(
-      new Set(['quiet']),
+  it('says nothing was measured and no ideas, and that the cost is being read, before there is any of them', () => {
+    const {screen} = render({candidates: 0, cost: null});
+    expect(factsOf(screen.container)).toMatch(
+      /^nothing measured yet · no ideas yet · \d+ of \d+ agents running · reading cost$/,
     );
-    expect(new Set(links.map(link => link.getAttribute('data-size')))).toEqual(new Set(['sm']));
     screen.unmount();
+  });
+
+  it('shows no rate of spend once the run is over, and counts the agents as the host did', () => {
+    const over = render({live: false});
+    expect(factsOf(over.screen.container)).toMatch(/\b\d+ of \d+ agents running/);
+    expect(over.screen.text()).not.toContain('/h');
+    over.screen.unmount();
   });
 
   it('writes the age of the report and the time the run has run in the words of the Runs list', () => {
     const {screen} = render({});
-    expect(cardText(screen.container, 'Lead summary')).toContain('Updated 23m ago');
+    expect(screen.container.querySelector('section.vs-labelled-line')?.textContent).toContain(
+      'Updated 23m ago',
+    );
     expect(screen.container.querySelector('.vs-page-meta')?.textContent).toMatch(
       /host-a(\d+d \d+h|\d+h \d+m|\d+m|\d+s)Started/,
     );
@@ -270,18 +289,16 @@ describe('the header of a report', () => {
 });
 
 describe('the report of a run with two objectives and a declared bound', () => {
-  it('shows each section the data has, and none of an agent’s turns', () => {
+  it('shows each panel the data has, and none of an agent’s turns', () => {
     const {screen} = render({});
     expect(cards(screen.container)).toEqual([
-      'Lead summary',
+      'Performance',
+      'Ideas',
       'Trade-off',
-      'Over time',
+      'Latest measurements',
       'Plan status',
       'Workstreams',
-      'Spend',
-      'By agent type',
-      'Ideas',
-      'Live agents',
+      'Agents and cost',
     ]);
     const text = screen.text();
     for (const word of ['throughput', 'p99_latency', 'Running', 'host-a', 'Started']) {
@@ -299,19 +316,32 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
-  it('gives each objective a tile with the best’s percent of the bound exactly as the host sent it', () => {
+  /** The block beside an objective's chart, found by its name. */
+  const summaryOf = (root: HTMLElement, name: string): string =>
+    root.querySelector(`.vs-flex [title="${name}"]`)?.parentElement?.textContent ?? '';
+
+  it('gives each objective a band whose summary says the best’s percent of the bound exactly as the host sent it', () => {
     const {screen} = render({});
     const sent = stateOf({}).searches[RUN]?.bounds ?? [];
     expect(sent).toHaveLength(2);
-    const tiles = [...screen.container.querySelectorAll('.vs-tile')].map(tile => tile.textContent);
     for (const bound of sent) {
-      const tile = tiles.find(text => text?.includes(bound.objective));
-      expect(tile).toContain(`${Math.round(bound.bestPercentOfBound ?? Number.NaN)}% of bound`);
+      expect(summaryOf(screen.container, bound.objective)).toContain(
+        `${Math.round(bound.bestPercentOfBound ?? Number.NaN)}% of bound`,
+      );
     }
     screen.unmount();
   });
 
-  it('shows one number for an objective’s best in its tile and its chart, whatever the head scored', () => {
+  it('says which way is better, and the best with its unit, and no change against the input the host does not serve', () => {
+    const {screen} = render({});
+    expect(summaryOf(screen.container, 'throughput')).toContain('Higher is better');
+    expect(summaryOf(screen.container, 'p99_latency')).toContain('Lower is better');
+    expect(summaryOf(screen.container, 'throughput')).toContain('tok/s');
+    expect(screen.text()).not.toMatch(/vs input|against the input/i);
+    screen.unmount();
+  });
+
+  it('shows one number for an objective’s best in its summary, whatever the head scored', () => {
     const {screen} = render({});
     const search = stateOf({}).searches[RUN];
     const objectives = search?.series ?? [];
@@ -319,27 +349,17 @@ describe('the report of a run with two objectives and a declared bound', () => {
     let headDiffers = 0;
     for (const series of objectives) {
       const bound = search?.bounds.find(entry => entry.objective === series.objective);
-      const unit = bound?.versions.at(-1)?.unit ?? null;
       const best = series.points.filter(point => point.bestSoFar).at(-1)?.value ?? Number.NaN;
       const figure = formatFigure(best);
-      // The tile and the chart panel say it in their text.
-      const tile = [...screen.container.querySelectorAll('.vs-tile')].find(each =>
-        each.textContent?.includes(series.objective),
-      );
-      expect(tile?.textContent).toContain(figure);
-      const panel = [...screen.container.querySelectorAll('.vs-chart-panel')].find(each =>
-        each.textContent?.includes(series.objective),
-      );
-      expect(panel?.textContent).toContain(figure);
+      expect(summaryOf(screen.container, series.objective)).toContain(figure);
       // The head is the best of the first objective only: on the other it scored something else, and
-      // that is not what any of the three says.
+      // that is not what the summary says.
       const head = bound?.headValue;
       if (head !== undefined && formatFigure(head) !== figure) {
         headDiffers += 1;
-        expect(tile?.textContent).not.toContain(formatFigure(head));
-        expect(
-          screen.container.querySelector(`[title="${withUnit(formatExact(head), unit)}"]`),
-        ).toBeNull();
+        expect(summaryOf(screen.container, series.objective)).not.toContain(
+          `${formatFigure(head)} `,
+        );
       }
     }
     expect(headDiffers).toBeGreaterThan(0);
@@ -352,26 +372,83 @@ describe('the report of a run with two objectives and a declared bound', () => {
       {name: 'large', direction: 1 as never, unit: 'x', base: 1000, best: 98_000},
     ];
     const {screen} = render({objectives: wide});
-    const lefts = [...screen.container.querySelectorAll('svg.vs-chart')]
-      .filter(svg => svg.getAttribute('aria-label')?.includes('over time'))
-      .map(svg => svg.querySelector('line.vs-chart-axis')?.getAttribute('x1'));
+    const lefts = bandCharts(screen.container).map(svg =>
+      svg.querySelector('line.vs-chart-axis')?.getAttribute('x1'),
+    );
     expect(lefts).toHaveLength(2);
     expect(new Set(lefts).size).toBe(1);
     screen.unmount();
   });
 
-  it('draws each measured candidate as a point and the best so far as a line, per objective', () => {
+  it('draws each measured candidate as a point and the best so far as a line, per objective, with a key to both', () => {
     const {screen} = render({candidates: 25});
-    const charts = [...screen.container.querySelectorAll('.vs-chart-panel')].filter(panel =>
-      panel.querySelector('svg.vs-chart')?.getAttribute('aria-label')?.includes('over time'),
-    );
+    const charts = bandCharts(screen.container);
     expect(charts).toHaveLength(2);
     for (const chart of charts) {
       expect(chart.querySelectorAll('circle.vs-chart-point')).toHaveLength(25);
       expect(chart.querySelectorAll('path.vs-chart-step')).toHaveLength(1);
-      const label = chart.querySelector('.vs-chart-reference-label');
-      expect(label?.getAttribute('aria-description')).toContain('Derived from');
-      expect(chart.querySelectorAll('.vs-chart-reference')).toHaveLength(1);
+    }
+    const key = [...screen.container.querySelectorAll('ul[aria-label="Key to the charts"] li')]
+      .filter(item => item.getAttribute('aria-hidden') !== 'true')
+      .map(item => item.textContent);
+    expect(key).toEqual(['Best so far', 'Measured']);
+    screen.unmount();
+  });
+
+  it('writes the value beside each new-best corner while there are 20 measurements or fewer, and not beyond', () => {
+    const few = render({candidates: 12});
+    for (const chart of bandCharts(few.screen.container)) {
+      const corners = chart.querySelectorAll('text.vs-chart-note').length;
+      expect(corners).toBeGreaterThan(0);
+    }
+    few.screen.unmount();
+    const many = render({candidates: 21});
+    for (const chart of bandCharts(many.screen.container)) {
+      expect(chart.querySelectorAll('text.vs-chart-note')).toHaveLength(0);
+    }
+    many.screen.unmount();
+  });
+
+  it('draws a bound that is near the data with its provenance and names it in the key, and leaves a far one out', () => {
+    const near: readonly ObjectiveSpec[] = [
+      {name: 'throughput', direction: 1 as never, unit: 'ops/s', base: 100, best: 120, bound: 135},
+    ];
+    const drawn = render({objectives: near, candidates: 25});
+    const chart = bandCharts(drawn.screen.container)[0];
+    expect(chart?.querySelectorAll('.vs-chart-reference')).toHaveLength(1);
+    const label = drawn.screen.container.querySelector('.vs-chart-reference-label');
+    expect(label?.getAttribute('aria-description')).toContain('Derived from');
+    const named = [
+      ...drawn.screen.container.querySelectorAll('ul[aria-label="Key to the charts"] li'),
+    ]
+      .filter(item => item.getAttribute('aria-hidden') !== 'true')
+      .map(item => item.textContent);
+    expect(named).toContain('Bound');
+    drawn.screen.unmount();
+    const far: readonly ObjectiveSpec[] = [
+      {name: 'throughput', direction: 1 as never, unit: 'ops/s', base: 100, best: 120, bound: 900},
+    ];
+    const left = render({objectives: far, candidates: 25});
+    expect(left.screen.container.querySelectorAll('.vs-chart-reference')).toHaveLength(0);
+    // The share of the bound is still said, in the summary.
+    expect(left.screen.text()).toContain('% of bound');
+    left.screen.unmount();
+  });
+
+  it('draws better upward on every chart: a value that is better lower is drawn higher', () => {
+    const {screen} = render({candidates: 25});
+    const [, latency] = bandCharts(screen.container);
+    const served = stateOf({candidates: 25}).searches[RUN]?.series.find(
+      series => series.objective === 'p99_latency',
+    );
+    const corners = (served?.points ?? []).filter(point => point.bestSoFar);
+    const ys = [...(latency?.querySelectorAll('path.vs-chart-step') ?? [])].map(path =>
+      [...(path.getAttribute('d') ?? '').matchAll(/V(-?[\d.]+)/g)].map(match => Number(match[1])),
+    )[0];
+    // The line steps up the page (a smaller y) with each new best.
+    expect(corners.length).toBeGreaterThan(1);
+    for (const [at, y] of (ys ?? []).entries()) {
+      if (at > 0) expect(y).toBeLessThanOrEqual(ys?.[at - 1] ?? Number.POSITIVE_INFINITY);
     }
     screen.unmount();
   });
@@ -388,33 +465,52 @@ describe('the report of a run with two objectives and a declared bound', () => {
     screen.unmount();
   });
 
-  it('puts the lead’s latest report in the summary with its age', () => {
+  it('puts the lead’s latest report in the lead row with its age and fields', () => {
     const {screen} = render({});
-    const summary = screen.container.querySelector('section.vs-card')?.textContent ?? '';
-    expect(summary).toContain('Throughput is 2.3 times the baseline');
-    expect(summary).toContain('Updated 23m ago');
-    expect(summary).toContain('Fused expert dispatch landed.');
+    const lead = screen.container.querySelector('section.vs-labelled-line')?.textContent ?? '';
+    expect(lead).toContain('Throughput is 2.3 times the baseline');
+    expect(lead).toContain('Updated 23m ago');
+    expect(lead).toContain('Fused expert dispatch landed.');
     screen.unmount();
   });
 
-  it('shows the cost as the host sent it: spend against its cap, the last hour, and the split by type', () => {
-    const {screen} = render({});
-    const spend = cardText(screen.container, 'Spend');
-    expect(spend).toContain('$318');
-    expect(spend).toContain('of $500');
-    expect(spend).toContain('Last hour');
-    expect(spend).toContain('1,433');
-    expect(cardText(screen.container, 'By agent type')).toContain('Worker');
-    screen.unmount();
-  });
-
-  it('counts the agents by type', () => {
-    const {screen} = render({});
-    const agents = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
-      card.textContent?.startsWith('Live agents'),
+  it('lists the newest eight measurements, newest first, a value for each objective, and the new bests as the host marked them', () => {
+    const {screen} = render({candidates: 40});
+    const rows = rowsOf(screen.container, 'Latest measurements');
+    expect(rows).toHaveLength(8);
+    const headers = [
+      ...(screen.container
+        .querySelector('table[aria-label="Latest measurements"]')
+        ?.querySelectorAll('thead th') ?? []),
+    ].map(cell => cell.textContent);
+    expect(headers).toEqual(['When', 'Idea', 'throughput', 'p99_latency', 'Commit']);
+    const served = stateOf({candidates: 40}).searches[RUN];
+    const newest = [...(served?.results ?? [])].slice(-8).reverse();
+    expect(rows.map(cells => cells[4])).toEqual(newest.map(result => result.commit.slice(0, 8)));
+    const marked = [
+      ...screen.container.querySelectorAll(
+        'table[aria-label="Latest measurements"] .vs-text[data-tone="accent"]',
+      ),
+    ];
+    const servedMarks = (served?.series ?? []).flatMap(series =>
+      series.points.slice(-8).filter(point => point.bestSoFar),
     );
-    expect(agents?.textContent).toMatch(/Worker\d+of \d+/);
-    expect(agents?.textContent).toContain('in all');
+    expect(marked).toHaveLength(servedMarks.length);
+    expect(screen.container.querySelector('ul[aria-label="Key to the values"]')?.textContent).toBe(
+      'New best',
+    );
+    screen.unmount();
+  });
+
+  it('counts the agents by type, how many are working of how many it has had, beside the cost of the type', () => {
+    const {screen} = render({});
+    const rows = rowsOf(screen.container, 'Agents and cost by type');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const cells of rows) {
+      expect(cells[1]).toMatch(/^\d+ of \d+$/);
+      expect(cells[4]).toMatch(/^(≥\s)?(\$[\d,.]+|—)$/);
+    }
+    expect(rows.map(cells => cells[0])).toContain('Worker');
     screen.unmount();
   });
 });
@@ -438,7 +534,7 @@ describe('the report with a different amount of data', () => {
   it('has no trade-off with one objective, and its chart is the only one', () => {
     const {screen} = render({objectives: SERVING.slice(0, 1)});
     expect(cards(screen.container)).not.toContain('Trade-off');
-    expect(screen.container.querySelectorAll('.vs-chart-panel')).toHaveLength(1);
+    expect(bandCharts(screen.container)).toHaveLength(1);
     screen.unmount();
   });
 
@@ -461,13 +557,86 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
-  it('says there is nothing measured yet, and draws no tile, chart or trade-off', () => {
-    const {screen} = render({candidates: 0, objectives: SERVING.map(o => ({...o}))});
-    const text = screen.text();
-    expect(text).toContain('No measurements yet');
-    expect(cards(screen.container)).not.toContain('Trade-off');
-    expect(screen.container.querySelectorAll('svg.vs-chart')).toHaveLength(0);
+  it('keeps every panel in its place with nothing measured, each with its frame and one line of what it waits for', () => {
+    const {screen} = render({candidates: 0, ideas: 0});
+    const root = screen.container;
+    expect(cards(root)).toEqual([
+      'Performance',
+      'Ideas',
+      'Latest measurements',
+      'Workstreams',
+      'Agents and cost',
+    ]);
+    // A chart frame with the run's time axis, and why there is nothing in it.
+    const frames = root.querySelectorAll('svg.vs-chart .vs-chart-frame');
+    expect(frames.length).toBeGreaterThan(0);
+    expect(root.querySelector('.vs-chart-state')?.textContent).toMatch(
+      /^Waiting for the input's measurement · started \d+[smhd]/,
+    );
+    expect(root.querySelectorAll('svg.vs-chart text.vs-chart-label').length).toBeGreaterThan(1);
+    // The tables keep their headers and say it in one row.
+    expect(rowsOf(root, 'Idea list')).toEqual([
+      ['No ideas yet · they appear here as agents propose them'],
+    ]);
+    expect(rowsOf(root, 'Latest measurements')).toEqual([['No measurements yet']]);
+    expect(rowsOf(root, 'Workstream list')).toEqual([['No workstreams yet']]);
+    const headers = (name: string): (string | null)[] =>
+      [...root.querySelectorAll(`table[aria-label="${name}"] thead th`)].map(
+        each => each.textContent,
+      );
+    expect(headers('Idea list')).toEqual([
+      '#',
+      'Idea',
+      'Workstream',
+      'Verdict',
+      'Gain',
+      'Agent',
+      'Updated',
+    ]);
+    expect(root.querySelector('[role="alert"]')).toBeNull();
     screen.unmount();
+  });
+
+  it('holds one layout for any amount of data: the same panels in the same order, and a chart as tall as its band is', () => {
+    const spec = fc.record({
+      candidates: fc.constantFrom(0, 1, 3, 20, 21, 60, 400),
+      objectives: fc.integer({min: 1, max: 3}),
+      ideas: fc.constantFrom(0, 12),
+      live: fc.boolean(),
+    });
+    const all: readonly ObjectiveSpec[] = [
+      ...SERVING,
+      {name: 'memory', direction: 2 as never, unit: 'GB', base: 61, best: 58, bound: 40},
+    ];
+    fc.assert(
+      fc.property(spec, data => {
+        const {screen} = render({
+          objectives: all.slice(0, data.objectives),
+          candidates: data.candidates,
+          ideas: data.ideas,
+          live: data.live,
+        });
+        const panels = cards(screen.container).filter(heading => heading !== 'Trade-off');
+        expect(panels).toEqual([
+          'Performance',
+          'Ideas',
+          'Latest measurements',
+          'Workstreams',
+          'Agents and cost',
+        ]);
+        // 200 px for one objective, 150 px each for several, whatever the number of points.
+        const performance = [...screen.container.querySelectorAll('section.vs-card')].find(
+          card => card.querySelector('h2')?.textContent === 'Performance',
+        );
+        const heights = [...(performance?.querySelectorAll('svg.vs-chart') ?? [])].map(svg =>
+          svg.getAttribute('height'),
+        );
+        expect(heights).toHaveLength(data.objectives);
+        expect(new Set(heights)).toEqual(new Set([data.objectives === 1 ? '200' : '150']));
+        screen.unmount();
+      }),
+      {numRuns: 30, seed: 4051},
+    );
   });
 
   it('shows no bound and no share of one when none was declared', () => {
@@ -475,16 +644,14 @@ describe('the report with a different amount of data', () => {
     expect(screen.container.querySelectorAll('.vs-chart-reference-label')).toHaveLength(0);
     expect(screen.container.querySelectorAll('.vs-chart-reference')).toHaveLength(0);
     expect(screen.text()).not.toContain('% of bound');
-    // The tiles still show what the head measured.
-    expect(screen.container.querySelectorAll('.vs-tile')).toHaveLength(2);
     screen.unmount();
   });
 
-  it('says only that there is no report when the lead has posted none', () => {
+  it('says only that there is no report when the lead has posted none, in one line', () => {
     const {screen} = render({report: false});
-    expect(screen.container.querySelector('section.vs-card')?.textContent).toContain(
-      'No report yet',
-    );
+    const lead = screen.container.querySelector('section.vs-labelled-line');
+    expect(lead?.textContent).toContain('No report yet');
+    expect(lead?.querySelector('dl')).toBeNull();
     screen.unmount();
   });
 
@@ -492,7 +659,17 @@ describe('the report with a different amount of data', () => {
     const {screen} = render({live: false});
     expect(screen.controls('Stop run')).toHaveLength(0);
     expect(screen.text()).toContain('Finished');
-    expect(screen.container.querySelector('section.vs-card')?.textContent).toContain('Final');
+    expect(screen.container.querySelector('section.vs-labelled-line')?.textContent).toContain(
+      'Final',
+    );
+    screen.unmount();
+  });
+
+  it('says what an ended run with nothing measured, did not measure, rather than that it waits', () => {
+    const {screen} = render({live: false, candidates: 0});
+    expect(screen.container.querySelector('.vs-chart-state')?.textContent).toBe(
+      'Nothing was measured',
+    );
     screen.unmount();
   });
 
@@ -526,26 +703,19 @@ describe('the report with a different amount of data', () => {
 
   it('shows a dash for a cost no turn priced, and says the others are floors', () => {
     const none = render({cost: NO_PRICE});
-    expect(cardText(none.screen.container, 'Spend')).toContain('\u2014');
+    expect(factsOf(none.screen.container)).toContain('— spent');
+    for (const cells of rowsOf(none.screen.container, 'Agents and cost by type')) {
+      expect(cells[4]).toBe('—');
+    }
     none.screen.unmount();
     const floor = render({});
-    expect(cardText(floor.screen.container, 'Spend')).toContain('\u2265');
+    expect(factsOf(floor.screen.container)).toContain('≥');
     floor.screen.unmount();
-  });
-
-  it('shows no cap and no meter for a run with no cost limit', () => {
-    const {screen} = render({cost: {...COST, maxCostUsd: null}});
-    const spend = [...screen.container.querySelectorAll('section.vs-card')].find(card =>
-      card.textContent?.startsWith('Spend'),
-    );
-    expect(spend?.textContent).not.toContain(' of $');
-    expect(spend?.querySelectorAll('.vs-meter')).toHaveLength(0);
-    screen.unmount();
   });
 
   it('says the cost is being read until the host has sent it, and why it failed when it did', () => {
     const reading = render({cost: null});
-    expect(cardText(reading.screen.container, 'Cost')).toContain('Reading cost');
+    expect(cardText(reading.screen.container, 'Agents and cost')).toContain('Reading cost');
     reading.screen.unmount();
     const failed = render(
       {cost: null},
@@ -556,40 +726,96 @@ describe('the report with a different amount of data', () => {
         },
       },
     );
-    expect(cardText(failed.screen.container, 'Cost')).toContain('Unreachable');
+    expect(cardText(failed.screen.container, 'Agents and cost')).toContain('Unreachable');
     expect(failed.screen.controls('Retry cost')).toHaveLength(1);
     failed.screen.unmount();
   });
 });
 
-describe('what the header says about freshness', () => {
-  it('says nothing while the data is current, and says when it is not', () => {
-    const live = render({});
-    expect(live.screen.text()).not.toMatch(/Stale|Catching up|Unavailable|Connecting|Waiting/);
-    live.screen.unmount();
-    fc.assert(
-      fc.property(fc.constantFrom(...HOST_STATUS_KINDS.filter(kind => kind !== 'live')), status => {
-        const {screen} = render({}, {status});
-        expect(screen.text()).toMatch(
-          /Stale|Catching up|Unavailable|Connecting|Waiting|Unreachable|Incompatible|Refused/,
-        );
-        screen.unmount();
-      }),
-      {numRuns: 8},
-    );
-  });
+describe('a run long enough to need a range', () => {
+  const HOUR = 3_600_000;
+  const long = {nowMs: START + 30 * HOUR};
 
-  it('says how long the data has been stale, in the chip itself', () => {
-    const {screen} = render({}, {status: 'stale'});
-    const chips = [...screen.container.querySelectorAll('.vs-chip')].map(each => each.textContent);
-    expect(chips).toContain('Stale 1m');
+  it('offers the last hour, six hours, a day and all of it, with the whole run chosen, and an overview to drag', () => {
+    const {screen} = render(long);
+    const segments = [...screen.container.querySelectorAll('[aria-label="Range"] label')].map(
+      each => each.textContent,
+    );
+    expect(segments).toEqual(['1h', '6h', '1d', 'All']);
+    const chosen = screen.container.querySelector<HTMLInputElement>(
+      '[aria-label="Range"] input:checked',
+    );
+    expect(chosen?.value).toBe('all');
+    expect(screen.container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe(
+      'Whole run',
+    );
+    expect(screen.text()).toContain('Whole run · drag to choose a window');
     screen.unmount();
   });
 
+  it('offers none of it for a run that is not long, and the whole run is all there is', () => {
+    const {screen} = render({nowMs: START + 5 * HOUR});
+    expect(screen.container.querySelector('[aria-label="Range"]')).toBeNull();
+    expect(screen.container.querySelector('[role="slider"]')).toBeNull();
+    screen.unmount();
+  });
+
+  it('shows how many measurements are in view once a window is chosen, and keeps the charts’ height', () => {
+    const {screen} = render(long);
+    const before = bandCharts(screen.container).map(svg => svg.getAttribute('height'));
+    const hour = [...screen.container.querySelectorAll('[aria-label="Range"] label')].find(
+      each => each.textContent === '1h',
+    );
+    act(() => hour?.querySelector<HTMLInputElement>('input')?.click());
+    expect(screen.text()).toMatch(/\d+ of 40 in view/);
+    expect(bandCharts(screen.container).map(svg => svg.getAttribute('height'))).toEqual(before);
+    expect(screen.container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe(
+      'Last hour',
+    );
+    // The measurements are long past: the window says so instead of drawing nothing in silence.
+    expect(screen.container.querySelector('.vs-chart-state')?.textContent).toBe(
+      'Nothing measured in this range',
+    );
+    screen.unmount();
+  });
+});
+
+describe('what the header says about the host’s data', () => {
   it('says the search state is stale in the header, not as a banner', () => {
     const {screen} = render({stale: true});
     expect(screen.text()).toContain('Search stale');
     expect(screen.container.querySelector('[role="alert"], .vs-banner')).toBeNull();
+    screen.unmount();
+  });
+
+  it('puts the words it is given beside the title once, and adds none of its own about the link', () => {
+    const state = stateOf({});
+    const report = runReport(state, RUN, NOW);
+    if (report === undefined) throw new Error('the fixture has its run');
+    const screen = mount(
+      <ReportScreen
+        report={report}
+        host="host-a"
+        ideasWindow={null}
+        nowMs={NOW}
+        cost={state.costs[RUN]}
+        costFeed={{status: {_tag: 'Live'}, freshness: 'live'}}
+        retryCost={() => undefined}
+        stopProgress={undefined}
+        stop={() => undefined}
+        retryStop={() => undefined}
+        openCatchUp={() => undefined}
+        goRuns={() => undefined}
+        openAgents={() => undefined}
+        openCost={() => undefined}
+        names={agentNames(state, RUN)}
+        reading={<Chip label="Stale 1m" tone="warn" dot />}
+      />,
+    );
+    const chips = [...screen.container.querySelectorAll('.vs-page-meta .vs-chip')].map(
+      each => each.textContent,
+    );
+    expect(chips.filter(text => text === 'Stale 1m')).toHaveLength(1);
     screen.unmount();
   });
 });
@@ -604,7 +830,7 @@ describe('the report across any data', () => {
     live: fc.boolean(),
   });
 
-  it('renders, names nothing from the protocol, and shows one chart per measured objective', () => {
+  it('renders, names nothing from the protocol, and shows one chart per objective', () => {
     const all: readonly ObjectiveSpec[] = [
       ...SERVING,
       {name: 'memory', direction: 2 as never, unit: 'GB', base: 61, best: 58, bound: 40},
@@ -624,10 +850,13 @@ describe('the report across any data', () => {
           cost: data.priced ? COST : NO_PRICE,
         });
         expect(screen.text()).not.toMatch(/UNSPECIFIED|undefined|NaN|\[object|null/);
-        const charts = [...screen.container.querySelectorAll('svg.vs-chart')].filter(svg =>
-          svg.getAttribute('aria-label')?.includes('over time'),
+        const performance = [...screen.container.querySelectorAll('section.vs-card')].find(
+          card => card.querySelector('h2')?.textContent === 'Performance',
         );
-        expect(charts).toHaveLength(data.candidates === 0 ? 0 : data.objectives);
+        const charts = performance?.querySelectorAll('svg.vs-chart') ?? [];
+        // A chart for each objective; with none declared yet, one for the measurements to come.
+        const bands = data.candidates === 0 && !data.bounded ? 1 : data.objectives;
+        expect(charts).toHaveLength(bands);
         screen.unmount();
       }),
       {numRuns: 25, seed: 4050},
@@ -638,10 +867,6 @@ describe('the report across any data', () => {
 describe('the ideas and workstreams of the report', () => {
   const table = (root: HTMLElement, name: string): HTMLTableElement | null =>
     root.querySelector(`table[aria-label="${name}"]`);
-  const rowsOf = (root: HTMLElement, name: string): string[][] =>
-    [...(table(root, name)?.querySelectorAll('tbody tr') ?? [])].map(row =>
-      [...row.querySelectorAll('td')].map(cell => cell.textContent ?? ''),
-    );
 
   /** Chooses the segment with this label, as a person does. */
   const choose = (root: HTMLElement, label: string): void => {
@@ -653,7 +878,9 @@ describe('the ideas and workstreams of the report', () => {
     act(() => input.click());
   };
 
-  it('shows the ideas the run worked on by default, each with its served verdict, gain and candidate count', () => {
+  const VERDICT = {1: 'Open', 2: 'Kept', 3: 'Rejected', 4: 'Parked'} as const;
+
+  it('shows the ideas the run worked on by default, each with its served verdict and gain, updated newest first', () => {
     const {screen} = render({ideas: 12});
     const served = stateOf({ideas: 12}).searches[RUN];
     const inRun = (served?.ideas ?? []).filter(view => view.inRun);
@@ -663,19 +890,84 @@ describe('the ideas and workstreams of the report', () => {
     expect(rows).toHaveLength(inRun.length);
     for (const view of inRun) {
       const row = rows.find(cells => cells[0] === `#${view.planNumber}`);
-      expect(row?.[5]).toBe(String(view.candidateJobIds.length));
+      expect(row?.[3]).toBe(VERDICT[view.verdict as 1 | 2 | 3 | 4]);
       const gain = view.best[0];
       expect(row?.[4]).toBe(gain === undefined ? '—' : `${gain.ratio.toFixed(2)}×`);
     }
-    // Newest first.
+    // Newest update first: here a later plan is a later update.
     const numbers = rows.map(cells => Number(cells[0]?.slice(1)));
     expect(numbers).toEqual([...numbers].sort((a, b) => b - a));
     screen.unmount();
   });
 
+  it('counts each verdict on its chip, with the verdict’s color, and shows only that verdict when it is pressed', () => {
+    const {screen} = render({ideas: 12});
+    const served = stateOf({ideas: 12}).searches[RUN];
+    const inRun = (served?.ideas ?? []).filter(view => view.inRun);
+    const chip = (word: string): HTMLButtonElement => {
+      const found = [
+        ...screen.container.querySelectorAll<HTMLButtonElement>('button.vs-dotlegend-item'),
+      ].find(each => each.textContent?.startsWith(word));
+      if (found === undefined) throw new Error(`no chip ${word}`);
+      return found;
+    };
+    expect(chip('All').textContent).toBe(`All${inRun.length}`);
+    for (const [number, word] of Object.entries(VERDICT)) {
+      const count = inRun.filter(view => view.verdict === Number(number)).length;
+      expect(chip(word).textContent).toBe(`${word}${count}`);
+      expect(chip(word).hasAttribute('disabled')).toBe(count === 0);
+    }
+    const kept = inRun.filter(view => view.verdict === 2).length;
+    screen.press(chip('Kept'));
+    const rows = rowsOf(screen.container, 'Idea list');
+    expect(rows).toHaveLength(kept);
+    for (const cells of rows) expect(cells[3]).toBe('Kept');
+    // Pressing it again shows every idea again.
+    screen.press(chip('Kept'));
+    expect(rowsOf(screen.container, 'Idea list')).toHaveLength(inRun.length);
+    screen.unmount();
+  });
+
+  it('finds an idea by the words in its row, and says when none match', () => {
+    const {screen} = render({ideas: 12});
+    const box = screen.container.querySelector<HTMLInputElement>('input[type="search"]');
+    if (box === null) throw new Error('no search field');
+    typeInto(box, 'fp8');
+    const rows = rowsOf(screen.container, 'Idea list');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const cells of rows) expect(cells[1]?.toLowerCase()).toContain('fp8');
+    typeInto(box, 'no idea is called this');
+    expect(rowsOf(screen.container, 'Idea list')).toEqual([['No ideas match']]);
+    screen.unmount();
+  });
+
+  it('sorts by a header, and turns the order over when it is pressed again', () => {
+    const {screen} = render({ideas: 12});
+    const header = (name: string): HTMLButtonElement => {
+      const found = [...screen.container.querySelectorAll<HTMLButtonElement>('th button')].find(
+        each => each.textContent === name,
+      );
+      if (found === undefined) throw new Error(`no header ${name}`);
+      return found;
+    };
+    const titles = (): string[] =>
+      rowsOf(screen.container, 'Idea list').map(cells => cells[1] ?? '');
+    screen.press(header('Idea'));
+    expect(titles()).toEqual(
+      [...titles()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
+    );
+    expect(header('Idea').closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    screen.press(header('Idea'));
+    expect(header('Idea').closest('th')?.getAttribute('aria-sort')).toBe('descending');
+    expect(titles()).toEqual(
+      [...titles()].sort((a, b) => b.toLowerCase().localeCompare(a.toLowerCase())),
+    );
+    screen.unmount();
+  });
+
   it('cuts a long title to its column and says it whole on hover', () => {
     const {screen} = render({ideas: 12});
-    choose(screen.container, 'All 12');
+    choose(screen.container, 'All ideas 12');
     const long = [...screen.container.querySelectorAll('td[data-clip]')].find(cell =>
       cell.getAttribute('title')?.startsWith('A speculative draft reuse'),
     );
@@ -684,16 +976,31 @@ describe('the ideas and workstreams of the report', () => {
     screen.unmount();
   });
 
-  it('shows the workstreams with the host’s counts and best gain, and no count of its own', () => {
+  it('shows the workstreams as compact rows with the host’s counts as a bar and its best gain, and no count of its own', () => {
     const {screen} = render({ideas: 12});
     const served = stateOf({ideas: 12}).searches[RUN];
     const rows = rowsOf(screen.container, 'Workstream list');
     expect(rows).toHaveLength(served?.workstreamViews.length ?? -1);
-    for (const view of served?.workstreamViews ?? []) {
-      const total = view.kept + view.rejected + view.open + view.parked;
-      expect(rows.some(cells => cells[2] === String(total))).toBe(true);
-    }
+    const bars = [
+      ...(table(screen.container, 'Workstream list')?.querySelectorAll('tbody tr') ?? []),
+    ].map(row =>
+      [...row.querySelectorAll('.vs-share-segment')].map(segment => segment.getAttribute('title')),
+    );
+    served?.workstreamViews.forEach((view, at) => {
+      for (const [word, count] of [
+        ['Kept', view.kept],
+        ['Rejected', view.rejected],
+        ['Open', view.open],
+        ['Parked', view.parked],
+      ] as const) {
+        if (count > 0) expect(bars[at]).toContain(`${word} ${count}`);
+      }
+    });
     expect(cardText(screen.container, 'Workstreams')).toContain('No workstream');
+    // The colors of the bars are named by a key.
+    expect(screen.container.querySelector('[aria-label="Key to the bars"]')?.textContent).toContain(
+      'Kept',
+    );
     screen.unmount();
   });
 
@@ -711,7 +1018,7 @@ describe('the ideas and workstreams of the report', () => {
 
   it('has an empty state for a run with no ideas', () => {
     const {screen} = render({ideas: 0});
-    expect(cardText(screen.container, 'Ideas')).toContain('No ideas');
+    expect(cardText(screen.container, 'Ideas')).toContain('No ideas yet');
     expect(cardText(screen.container, 'Workstreams')).toContain('No workstreams');
     screen.unmount();
   });
@@ -723,7 +1030,7 @@ describe('the ideas and workstreams of the report', () => {
     const {screen} = render({ideas: 12, window: {plans: counted}});
     expect(rowsOf(screen.container, 'Idea list')).toHaveLength(counted.length);
     expect(screen.text()).toContain(`Check-in ${counted.length}`);
-    choose(screen.container, 'All 12');
+    choose(screen.container, 'All ideas 12');
     expect(rowsOf(screen.container, 'Idea list')).toHaveLength(12);
     screen.unmount();
   });
@@ -775,7 +1082,7 @@ describe('the ideas and workstreams of the report', () => {
   });
 });
 
-describe('the objective tiles and the bound’s unit', () => {
+describe('the summary of an objective and the bound’s unit', () => {
   const search = create(SearchStateSchema, {
     series: [
       {
@@ -785,7 +1092,7 @@ describe('the objective tiles and the bound’s unit', () => {
       },
     ],
   });
-  const tileText = (check: BoundUnitCheck): string => {
+  const summaryText = (check: BoundUnitCheck): string => {
     const standing = create(ObjectiveStandingSchema, {
       name: 'tok_s',
       bestValue: 5,
@@ -794,23 +1101,53 @@ describe('the objective tiles and the bound’s unit', () => {
       boundUnitCheck: check,
       bestPercentOfBound: 40,
     });
-    const screen = mount(<ObjectiveTiles objectives={objectiveReports(search, [standing])} />);
+    const [objective] = objectiveReports(search, [standing]);
+    if (objective === undefined) throw new Error('the series has its objective');
+    const screen = mount(<ObjectiveSummary objective={objective} inView={null} />);
     const text = screen.text();
     screen.unmount();
     return text;
   };
 
   it('names both units in a short label when the bound is in another unit, and shows the measured unit beside the best', () => {
-    const text = tileText(BoundUnitCheck.MISMATCH);
+    const text = summaryText(BoundUnitCheck.MISMATCH);
     expect(text).toContain('tok/s vs bound ms');
     expect(text).toContain('tok/s');
     expect(text).not.toContain('% of bound');
   });
 
   it('shows the share of the bound as verified, unverified or not at all as the host checked it', () => {
-    expect(tileText(BoundUnitCheck.MATCH)).toContain('40% of bound');
-    expect(tileText(BoundUnitCheck.MATCH)).not.toContain('unverified');
-    expect(tileText(BoundUnitCheck.UNKNOWN)).toContain('40% of bound · unverified');
+    expect(summaryText(BoundUnitCheck.MATCH)).toContain('40% of bound');
+    expect(summaryText(BoundUnitCheck.MATCH)).not.toContain('unverified');
+    expect(summaryText(BoundUnitCheck.UNKNOWN)).toContain('40% of bound · unverified');
+  });
+
+  it('says not measured yet, with a dash for the best and no unit, before there is a measurement', () => {
+    const [objective] = objectiveReports(create(SearchStateSchema, {}), []);
+    expect(objective).toBeUndefined();
+    const empty = mount(
+      <ObjectiveSummary
+        objective={{
+          name: 'tok_s',
+          better: 'higher',
+          unit: 'tok/s',
+          points: [],
+          bestPath: [],
+          bestValue: undefined,
+          headValue: undefined,
+          percentOfBound: undefined,
+          bestPercentOfBound: undefined,
+          bound: undefined,
+          boundUnit: null,
+          boundUnitCheck: BoundUnitCheck.UNSPECIFIED,
+        }}
+        inView={null}
+      />,
+    );
+    expect(empty.text()).toContain('—');
+    expect(empty.text()).toContain('Not measured yet');
+    expect(empty.text()).not.toContain('tok/s');
+    empty.unmount();
   });
 });
 

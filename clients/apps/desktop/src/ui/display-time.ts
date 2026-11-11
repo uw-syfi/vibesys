@@ -6,6 +6,8 @@
  */
 
 const SECOND = 1000;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 
 /** The clocks of one zone, by what each screen writes. Offsets are milliseconds ahead of UTC. */
@@ -32,8 +34,14 @@ export interface DisplayClock {
   readonly reportTime: (atMs: number) => string;
   /** `Mon 2:40 AM` with a no-break space, as the run report writes a moment. */
   readonly reportMoment: (atMs: number) => string;
-  /** An axis label for a span under a day and a half: the time; else with its day. */
-  readonly reportAxis: (atMs: number, spanMs: number) => string;
+  /**
+   * The label of a tick of the report's time axis, which spans `spanMs` in ticks `stepMs` apart,
+   * written as finely as the step needs and as widely as the span needs, so no two ticks of one axis
+   * read alike: tenths of a second under a second, seconds under a minute, the time under a day;
+   * with its day (`Tue 6:00 AM`) when the axis spans more than a day; and at a midnight, or for a
+   * step of a day or more, the day alone (`Tue 10`, or `Nov 10` on an axis of weeks).
+   */
+  readonly reportTick: (atMs: number, spanMs: number, stepMs: number) => string;
 }
 
 /** A formatter of `parts` in `zone`; an unknown zone fails here, naming it. */
@@ -54,6 +62,49 @@ const settled = (text: string): string => text.replace(/[  ]/g, ' ');
 
 const partsOf = (format: Intl.DateTimeFormat, atMs: number): Map<string, string> =>
   new Map(format.formatToParts(atMs).map(each => [each.type, each.value]));
+
+/**
+ * The finest clock a step of `stepMs` needs, by the step it is at least as long as: a minute and
+ * more are written in minutes, a second in seconds, then tenths, hundredths and thousandths.
+ */
+type Fineness = 'minutes' | 'seconds' | 'tenths' | 'hundredths' | 'thousandths';
+const FINENESS: readonly (readonly [number, Fineness])[] = [
+  [MINUTE_MS, 'minutes'],
+  [SECOND, 'seconds'],
+  [100, 'tenths'],
+  [10, 'hundredths'],
+  [0, 'thousandths'],
+];
+
+/** `reportTick` of the clock of `zone`: see `DisplayClock.reportTick`. */
+function tickLabeller(
+  zone: string,
+  offsetMs: (atMs: number) => number,
+  settle: (text: string) => string,
+): DisplayClock['reportTick'] {
+  const hourMinute = {hour: 'numeric', minute: '2-digit'} as const;
+  const clocks = {
+    minutes: formatterIn(zone, hourMinute),
+    seconds: formatterIn(zone, {...hourMinute, second: '2-digit'}),
+    tenths: formatterIn(zone, {...hourMinute, second: '2-digit', fractionalSecondDigits: 1}),
+    hundredths: formatterIn(zone, {...hourMinute, second: '2-digit', fractionalSecondDigits: 2}),
+    thousandths: formatterIn(zone, {...hourMinute, second: '2-digit', fractionalSecondDigits: 3}),
+  };
+  const weekdayDay = formatterIn(zone, {weekday: 'short', day: 'numeric'});
+  const monthDay = formatterIn(zone, {month: 'short', day: 'numeric'});
+  const weekdayOf = (atMs: number): string => partsOf(weekdayDay, atMs).get('weekday') ?? '';
+  return (atMs, spanMs, stepMs) => {
+    const midnight = (atMs + offsetMs(atMs)) % DAY_MS === 0;
+    if (stepMs >= DAY_MS || (midnight && stepMs >= HOUR_MS)) {
+      return spanMs >= 14 * DAY_MS
+        ? settle(monthDay.format(atMs))
+        : `${weekdayOf(atMs)} ${partsOf(weekdayDay, atMs).get('day')}`;
+    }
+    const fineness = FINENESS.find(([least]) => stepMs >= least)?.[1] ?? 'thousandths';
+    const time = settle(clocks[fineness].format(atMs));
+    return spanMs > DAY_MS ? `${weekdayOf(atMs)} ${time}` : time;
+  };
+}
 
 /** The clocks of `zone`, an IANA name such as `Europe/London`. */
 export function makeDisplayClock(zone: string): DisplayClock {
@@ -132,8 +183,7 @@ export function makeDisplayClock(zone: string): DisplayClock {
     },
     reportTime: atMs => settled(clock.format(atMs)),
     reportMoment,
-    reportAxis: (atMs, spanMs) =>
-      spanMs < 1.5 * DAY_MS ? settled(clock.format(atMs)) : reportMoment(atMs),
+    reportTick: tickLabeller(zone, offsetMs, settled),
   };
 }
 

@@ -1,8 +1,7 @@
-import {Card, Chip, KeyValue, Row, Text} from '@vibesys/ui';
+import {Chip, LabelledLine, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {SummaryField, SummaryView} from '../../../state/index.js';
 import {withShortCommits} from '../../commit-text.js';
-import {useDisplayClock} from '../../display-clock.js';
 import {formatAge} from './format.js';
 
 const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
@@ -12,45 +11,38 @@ const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
 };
 
 /**
- * The lead's latest report as the run's summary: a compact card whose heading line carries how long
- * ago it was written, over the lead's own words (the headline, then the parts it filled in). A run
- * whose lead has not reported says only that. What the lead wrote is its own words and wraps.
+ * The lead's latest report as a labelled row under the facts, not a card: the label column holds
+ * how long ago it was written (and that it is the final one), then the lead's own words (the
+ * headline, then the parts it filled in, in columns). A run whose lead has not reported says only
+ * that, in one line. What the lead wrote is its own words and wraps.
  */
 export function LeadSummary(props: {
   readonly summary: SummaryView | undefined;
   readonly nowMs: number;
 }): JSX.Element {
   const {summary} = props;
-  const clock = useDisplayClock();
-  const rest = (summary?.fields ?? []).map(({field, text}) => ({
-    key: FIELD_LABELS[field],
-    value: withShortCommits(text),
-  }));
+  if (summary === undefined) {
+    return (
+      <LabelledLine
+        label="Lead"
+        lead={
+          <Text tone="muted" variant="small">
+            No report yet
+          </Text>
+        }
+      />
+    );
+  }
   return (
-    <Card
-      dense
-      section="Lead summary"
-      {...(summary === undefined
-        ? {}
-        : {
-            action: (
-              <Row gap="space-3">
-                {summary.final ? <Chip label="Final" tone="ok" /> : null}
-                <Text variant="small" tone="muted" title={clock.reportMoment(summary.atMs)}>
-                  {`Updated ${formatAge(props.nowMs - summary.atMs)}`}
-                </Text>
-              </Row>
-            ),
-          })}
-    >
-      {summary === undefined ? (
-        <Text tone="muted">No report yet</Text>
-      ) : (
-        <>
-          <Text as="p">{withShortCommits(summary.headline)}</Text>
-          {rest.length === 0 ? null : <KeyValue items={rest} />}
-        </>
-      )}
-    </Card>
+    <LabelledLine
+      label="Lead"
+      note={`Updated ${formatAge(props.nowMs - summary.atMs)}`}
+      {...(summary.final ? {badge: <Chip label="Final" tone="ok" />} : {})}
+      lead={<Text as="p">{withShortCommits(summary.headline)}</Text>}
+      fields={summary.fields.map(({field, text}) => ({
+        label: FIELD_LABELS[field],
+        text: withShortCommits(text),
+      }))}
+    />
   );
 }

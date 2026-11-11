@@ -1,32 +1,34 @@
 import {RunStatus} from '@vibesys/orchestrator-proto';
-import {ChartColumns, Page, Stack} from '@vibesys/ui';
+import {MainSide, Page, Row, Stack} from '@vibesys/ui';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {
   CommandProgress,
   CostFeedSnapshot,
   CostView,
-  HostStatus,
   IdeaWindow,
   RunReport,
 } from '../../../state/index.js';
 import {CommandLine} from '../command-line.js';
 import {runTitle} from '../fleet-words.js';
-import {AgentsCard} from './agents-card.js';
-import {CostCard} from './cost-card.js';
-import {IdeasCard} from './ideas-card.js';
+import {AgentsAndCost} from './agents-cost.js';
+import {FactsLine} from './facts-line.js';
+import {IdeasPanel} from './ideas-panel.js';
+import {LatestMeasurements} from './latest-measurements.js';
 import {LeadSummary} from './lead-summary.js';
-import {ObjectiveTiles} from './objective-tiles.js';
-import {OverTime, TradeOff} from './performance.js';
 import {PlansSummary} from './plans-summary.js';
+import {PerformancePanel} from './performance.js';
 import {isStoppable, ReportActions, ReportMeta} from './report-title.js';
+import {TradeOff} from './trade-off.js';
 import {WorkstreamsCard} from './workstreams-card.js';
 
 /**
- * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row), what
- * the lead says, how each objective is doing, the candidates measured over time and against each
- * other, the agents by type and what it costs. It shows no agent's turns: the agents and the cost
- * each open their own screen. The run's workstreams and ideas follow the charts once a search state
- * is served; a point of a chart links to the idea it measured and back.
+ * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row and the
+ * facts line under it), what the lead says in one row, and then two columns. The main column is how
+ * each objective is doing over time and the run's ideas; the side column is the latest measurements,
+ * the workstreams, and the agents with their cost. The layout is one for every state: every panel is
+ * in its place from the first minute, an empty one shows its frame and says in a line what it waits
+ * for, and none moves as the run grows. It shows no agent's turns: the agents and the cost each open
+ * their own screen. A point of a chart links to the idea it measured and back.
  */
 export function ReportScreen(props: {
   readonly report: RunReport;
@@ -34,8 +36,6 @@ export function ReportScreen(props: {
   readonly settings?: ReactNode;
   readonly host: string;
   readonly nowMs: number;
-  /** The host's one status; the header says so when it is not live. */
-  readonly status: HostStatus;
   /** The run's cost, as the host last sent it, and how its stream is going. */
   readonly cost: CostView | undefined;
   readonly costFeed: CostFeedSnapshot;
@@ -50,7 +50,7 @@ export function ReportScreen(props: {
   readonly openCost: () => void;
   /** What each agent is called on screen, by agent id. */
   readonly names: ReadonlyMap<string, string>;
-  /** Where the read of the run's history stands, among the state words beside the title. */
+  /** Where the read of the run's history stands, and how the host's link stands, among the state words beside the title. */
   readonly reading: ReactNode;
   /** The check-in span the ideas are narrowed to on arrival (from Catch me up); null for the run's own. */
   readonly ideasWindow: IdeaWindow | null;
@@ -65,19 +65,10 @@ export function ReportScreen(props: {
   const title = runTitle(report.header.card, report.header.name);
   const lit = new Set(ideas?.ideas.find(idea => idea.planNumber === selected)?.candidateJobIds);
   const units = new Map(report.objectives.map(objective => [objective.name, objective.unit]));
-  const cost = (
-    <CostCard
-      cost={props.cost}
-      feed={props.costFeed}
-      runOver={over}
-      retry={props.retryCost}
-      open={props.openCost}
-    />
-  );
   return (
     <Page
       key="report"
-      width="wide"
+      width="fill"
       state="ready"
       trail={[
         {id: 'runs', label: 'Runs', press: props.goRuns},
@@ -85,10 +76,13 @@ export function ReportScreen(props: {
       ]}
       title={title}
       meta={
-        <>
-          <ReportMeta report={report} host={props.host} status={props.status} nowMs={props.nowMs} />
-          {props.reading}
-        </>
+        <Stack gap="space-2">
+          <Row gap="space-4" rowGap="space-2" wrap>
+            <ReportMeta report={report} host={props.host} nowMs={props.nowMs} />
+            {props.reading}
+          </Row>
+          <FactsLine facts={report.facts} nowMs={props.nowMs} />
+        </Stack>
       }
       actions={
         <>
@@ -102,58 +96,71 @@ export function ReportScreen(props: {
         </>
       }
     >
-      <Stack>
+      <Stack gap="space-4">
         <CommandLine
           progress={over ? undefined : props.stopProgress}
           done="Stop"
           retry={props.retryStop}
         />
         <LeadSummary summary={report.summary} nowMs={props.nowMs} />
-        <ObjectiveTiles objectives={report.objectives} />
-        <ChartColumns dense>
-          {report.tradeoff === undefined ? null : (
-            <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
-          )}
-          <OverTime
-            objectives={report.objectives}
-            span={report.span}
-            names={props.names}
-            links={{
-              ideas,
-              picked,
-              lit,
-              pick: jobId => setPicked(jobId === picked ? null : jobId),
-              showIdea: plan => {
-                setSelected(plan);
-                setReveal(reveal + 1);
-              },
-            }}
-          />
-        </ChartColumns>
-        {ideas === undefined ? (
-          <ChartColumns dense align="start">
-            <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
-            {cost}
-          </ChartColumns>
-        ) : (
-          <>
-            {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}
-            <ChartColumns dense align="start">
-              <WorkstreamsCard workstreams={ideas.workstreams} />
-              {cost}
-            </ChartColumns>
-            <IdeasCard
-              ideas={ideas}
-              names={props.names}
-              units={units}
-              window={props.ideasWindow}
-              selected={selected}
-              select={setSelected}
-              reveal={reveal}
-            />
-            <AgentsCard agents={report.agents} runOver={over} open={props.openAgents} />
-          </>
-        )}
+        <MainSide
+          label="The report"
+          main={
+            <>
+              <PerformancePanel
+                objectives={report.objectives}
+                span={report.span}
+                nowMs={props.nowMs}
+                runOver={over}
+                unreadable={report.search.state === 'unreadable'}
+                names={props.names}
+                links={{
+                  ideas,
+                  picked,
+                  lit,
+                  pick: jobId => setPicked(jobId === picked ? null : jobId),
+                  showIdea: plan => {
+                    setSelected(plan);
+                    setReveal(reveal + 1);
+                  },
+                }}
+              />
+              <IdeasPanel
+                ideas={ideas}
+                names={props.names}
+                units={units}
+                nowMs={props.nowMs}
+                window={props.ideasWindow}
+                selected={selected}
+                select={setSelected}
+                reveal={reveal}
+              />
+              {report.tradeoff === undefined ? null : (
+                <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
+              )}
+            </>
+          }
+          side={
+            <>
+              <LatestMeasurements
+                rows={report.latest}
+                objectives={report.objectives}
+                nowMs={props.nowMs}
+                runOver={over}
+              />
+              {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}
+              <WorkstreamsCard workstreams={ideas?.workstreams ?? []} />
+              <AgentsAndCost
+                agents={report.agents}
+                cost={props.cost}
+                feed={props.costFeed}
+                retry={props.retryCost}
+                openAgents={props.openAgents}
+                open={props.openCost}
+              />
+            </>
+          }
+        />
       </Stack>
     </Page>
   );
