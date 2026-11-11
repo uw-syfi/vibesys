@@ -17,6 +17,14 @@ invent them, and do not move a value in the name of this spec.
    empty padding does not count). The sidebar and the window's own controls are
    not part of the page, and a box counts by its outer edge, not its inset text.
    A reader allows 2 CSS pixels.
+
+   *Exception: the run report's width.* A page is centred at its content width, so its title sits
+   at the same left edge as every other page's; the run report instead fills the window, so its
+   title sits at the page gutter. The reason: its dense grid of charts, tables and a side column
+   needs all the width the window gives it, and its title still shares one top with every other
+   page's. Enforced by the desktop path end-to-end spec, which requires one top for every title
+   and one left edge for every title but the report's; that this exception is worth it is a
+   judgment the user made.
 2. **Size follows depth.** A child is never larger than its parent, and a screen
    has one focal point: the title is the largest text in its page, and a heading
    is never larger than a heading above it. A figure is text here, so a tile's

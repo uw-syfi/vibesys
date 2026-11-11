@@ -322,10 +322,10 @@ async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'Settings'}).click();
   await expect(page.getByRole('heading', {level: 1})).toHaveText('Settings');
   await seen(page, '7-settings');
-  // Every destination has its title where every other has it, left and top. The run report is the
-  // one page that fills the window (a dense grid that takes all the width the window gives it), so
-  // its title keeps the page gutter as its left edge while the others are centred; its top is the
-  // same as theirs.
+  // Every destination has its title where every other has it, left and top, except the run report:
+  // it fills the window, so its title keeps the page gutter as its left edge while the others are
+  // centred, and its top is the same as theirs. The exception is recorded under law 1 of the visual
+  // spec (`.agents/skills/verify-desktop-ui/references/visual-spec.md`).
   const top = new Set(titles.map(each => each.top));
   expect(top.size, JSON.stringify(titles)).toBe(1);
   const left = new Set(titles.filter(each => each.name !== REPORT_SHOT).map(each => each.left));
