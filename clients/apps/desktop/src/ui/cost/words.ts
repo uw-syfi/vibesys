@@ -3,6 +3,7 @@
  * a figure the host served and says it in words, the same way for every figure of a screen so
  * that a column of them lines up.
  */
+import {wordsOfId} from '@vibesys/display-names';
 import type {AgentRole, Harness} from '@vibesys/orchestrator-proto';
 import type {CostModel, FaultKind} from '../../state/index.js';
 
@@ -174,13 +175,30 @@ export function bucketWords(bucketMs: number): string {
 }
 
 /**
- * The name of a model: the id the host served. Every model label is drawn in the code face wherever it
- * appears, the harness's default included, so a column or a legend of them reads alike. No source of
- * display names for models exists (they are agentshim's and the host does not serve them), so none is
- * made up here. A harness's own default model has no id: it is the harness's name and the word `default`.
+ * The readable name of a model. Agentshim owns model ids and the host does not serve display names,
+ * so the shared id-to-words boundary supplies a deterministic fallback instead of making each screen
+ * map providers itself. A harness's own default model has no id: it is the harness's name and the word
+ * `default`. The raw id remains in `modelTitle` for provenance and copying.
  */
 export function modelName(model: CostModel, words: CostWords): string {
-  return model.model === '' ? `${words.harness(model.harness)} default` : model.model;
+  if (model.model === '') return `${words.harness(model.harness)} default`;
+  return wordsOfId(model.model)
+    .split(' ')
+    .map(word => {
+      const lower = word.toLowerCase();
+      return /^[a-z]{1,3}$/.test(lower)
+        ? lower.toUpperCase()
+        : `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+    })
+    .join(' ')
+    .replace(/\b(\d{1,2}) (\d{1,2})(?=\s|$)/g, '$1.$2');
+}
+
+/** The model's source identifier and harness, whole, for the pointer. */
+export function modelTitle(model: CostModel, words: CostWords): string {
+  return model.model === ''
+    ? `${words.harness(model.harness)} default model`
+    : `${model.model} on ${words.harness(model.harness)}`;
 }
 
 /** What identifies a model across views of a run. */

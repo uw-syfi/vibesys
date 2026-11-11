@@ -31,6 +31,8 @@ export function Swatch(props: {
 /** One entry of a `SwatchLegend`. */
 export interface SwatchItem {
   readonly label: string;
+  /** What the pointer shows when the readable label stands for an external identifier. */
+  readonly title?: string;
   readonly series?: number;
   readonly hatched?: boolean;
   /** Flat grey, like a Gantt piece that is no work. */
@@ -53,7 +55,11 @@ export function SwatchLegend(props: {
             {...(item.hatched === true ? {hatched: true} : {})}
             {...(item.muted === true ? {muted: true} : {})}
           />
-          <Text variant={item.mono === true ? 'code' : 'small'} tone="muted" title={item.label}>
+          <Text
+            variant={item.mono === true ? 'code' : 'small'}
+            tone="muted"
+            title={item.title ?? item.label}
+          >
             {item.label}
           </Text>
         </li>

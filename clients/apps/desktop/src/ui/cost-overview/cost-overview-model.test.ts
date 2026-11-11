@@ -164,13 +164,16 @@ describe('the screen model of a host', () => {
     expect(short.ranges).toEqual([]);
   });
 
-  it('names a model by the id the host served, and keeps the harness default in words, every legend name in the code face', () => {
+  it('writes model ids as readable words, keeps raw ids in titles, and names a harness default', () => {
     const week = model(views.week);
     const names = week.chart?.legend.map(item => item.label) ?? [];
-    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
+    expect(names).toEqual(expect.arrayContaining(['Claude Opus 5.5', 'GPT 5 Codex']));
     expect(names).toContain('Codex default');
-    expect(week.chart?.legend.every(item => item.mono === true)).toBe(true);
-    const opus = week.models.find(line => line.name === 'claude-opus-5-5');
+    expect(week.chart?.legend.every(item => item.mono === undefined)).toBe(true);
+    expect(week.chart?.legend.find(item => item.label === 'Claude Opus 5.5')?.title).toBe(
+      'claude-opus-5-5 on Claude Code',
+    );
+    const opus = week.models.find(line => line.name === 'Claude Opus 5.5');
     expect(opus?.title).toBe('claude-opus-5-5 on Claude Code');
     expect(week.models.find(line => line.name === 'Codex default')?.title).toBe(
       'Codex default model',
@@ -203,6 +206,30 @@ describe('the screen model of a host', () => {
       const item = legend.find(each => each.label === line.name);
       expect(item?.series).toBe(line.series);
     }
+  });
+
+  it('keeps spend from models outside the bounded split as an explicit part of each bar', () => {
+    const view = views.short;
+    const at = view.series.buckets.findIndex(bucket => bucket.costUsd > 0);
+    const bucket = view.series.buckets[at];
+    if (bucket === undefined) throw new Error('the short case has spend');
+    const omitted = 2.5;
+    const changed = {
+      ...view,
+      modelsTruncated: true,
+      series: {
+        ...view.series,
+        buckets: view.series.buckets.map((each, index) =>
+          index === at ? {...each, costUsd: each.costUsd + omitted} : each,
+        ),
+      },
+    };
+    const chart = model(changed).chart;
+    const bar = chart?.bars.find(each => each.startMs === bucket.startMs);
+    expect(bar?.segments.reduce((sum, segment) => sum + segment.value, 0)).toBe(bar?.total);
+    expect(bar?.title).toContain('Other models $2.50');
+    expect(chart?.legend.find(item => item.label === 'Other models')?.series).toBeDefined();
+    expect(model(changed).modelsTruncated).toBe(true);
   });
 
   it('carries the mark of a floor on every figure that leaves out unpriced turns, the last hour too', () => {

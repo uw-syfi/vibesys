@@ -82,6 +82,20 @@ describe('the Cost page of one host', () => {
     const reading = mount(page(undefined, [], {kind: 'waiting', cause: null, staleForMs: null}));
     expect(reading.text()).toContain('Reading cost');
     reading.unmount();
+
+    const run = views.none.runs[0];
+    if (run === undefined) throw new Error('the no-spend case has its live run');
+    const unpriced = mount(
+      page({
+        ...views.none,
+        turns: 1,
+        unpricedTurns: 1,
+        runs: [{...run, turns: 1, unpricedTurns: 1}],
+      }),
+    );
+    expect(unpriced.text()).toContain('spend unknown');
+    expect(unpriced.text()).not.toContain('nothing spent yet');
+    unpriced.unmount();
   });
 
   it('puts the status and the facts on one line under the title, with no card of figures', () => {
@@ -167,17 +181,28 @@ describe('the Cost page of one host', () => {
     }
   });
 
-  it('draws a model by its id in the code face, with its color beside it in the table, and no made-up name', () => {
+  it('draws readable model names with colors, and keeps the source ids whole on hover', () => {
     const screen = mount(page(views.week));
     const table = screen.container.querySelector('table[aria-label="Cost by model on Host A"]');
-    const names = [...(table?.querySelectorAll('tbody td:first-child [data-mono-id]') ?? [])].map(
-      each => each.textContent,
+    const names = [...(table?.querySelectorAll('tbody td:first-child') ?? [])].map(each =>
+      each.textContent?.trim(),
     );
-    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
+    expect(names).toEqual(expect.arrayContaining(['Claude Opus 5.5', 'GPT 5 Codex']));
+    expect(table?.textContent).not.toContain('claude-opus-5-5');
+    expect(
+      table?.querySelector('tbody td:first-child[title="claude-opus-5-5 on Claude Code"]'),
+    ).not.toBeNull();
     expect(table?.querySelectorAll('tbody .vs-series-swatch').length).toBe(
       table?.querySelectorAll('tbody tr').length,
     );
-    expect(screen.text()).not.toContain('Claude Opus');
+    screen.unmount();
+  });
+
+  it('says when the bounded model list or one of its names was shortened', () => {
+    const screen = mount(page({...views.short, modelsTruncated: true}));
+    expect(screen.text()).toContain(
+      'The host shortened the model list or a model name. Totals still include every model.',
+    );
     screen.unmount();
   });
 

@@ -11,6 +11,7 @@ import {
   formatUsd,
   labelStride,
   modelName,
+  modelTitle,
   type Precision,
   precisionOf,
 } from './words.js';
@@ -142,11 +143,21 @@ describe('which buckets are labelled', () => {
 describe('naming a model', () => {
   const words = {harness: () => 'Codex'};
 
-  it('is the id the host served, and for a harness default the harness and the word default', () => {
+  it('turns an external id into words, keeps it whole in the title, and names a harness default', () => {
     const named = {harness: 1, model: 'claude-opus-5-5'};
     const own = {harness: 1, model: ''};
-    expect(modelName(named, words as never)).toBe('claude-opus-5-5');
+    expect(modelName(named, words as never)).toBe('Claude Opus 5.5');
+    expect(modelTitle(named, words as never)).toBe('claude-opus-5-5 on Codex');
     expect(modelName(own, words as never)).toBe('Codex default');
+    expect(modelTitle(own, words as never)).toBe('Codex default model');
+  });
+
+  it.each([
+    ['gpt-5-codex', 'GPT 5 Codex'],
+    ['model-a', 'Model A'],
+    ['o3-mini', 'O3 Mini'],
+  ])('makes %s readable without a provider-specific name table', (id, readable) => {
+    expect(modelName({harness: 1, model: id}, words as never)).toBe(readable);
   });
 });
 

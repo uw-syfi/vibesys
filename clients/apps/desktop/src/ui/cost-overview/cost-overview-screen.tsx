@@ -216,13 +216,13 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
 
 const INPUT_HINT = 'Input tokens: fresh input, cache reads and cache writes';
 
-/** A model's name, in the code face when it is an id, after the swatch of its color on the chart. */
+/** A model's readable name, after the swatch of its color on the chart. */
 function ModelName(props: {readonly line: ModelLine}): JSX.Element {
   const {line} = props;
   return (
     <Row gap="space-2">
       {line.series === null ? <Swatch muted /> : <Swatch series={line.series} />}
-      <Text variant="code">{line.name}</Text>
+      <Text>{line.name}</Text>
     </Row>
   );
 }
@@ -399,15 +399,22 @@ function SplitCards(props: {
         </Stack>
       </Card>
       <Card dense section="By model">
-        <Table
-          label={`Cost by model on ${host.label}`}
-          dense
-          middle
-          columns={MODEL_COLUMNS}
-          rows={model.models}
-          rowKey={line => line.key}
-          empty={missingWords(model, 'No models')}
-        />
+        <Stack gap="space-3">
+          <Table
+            label={`Cost by model on ${host.label}`}
+            dense
+            middle
+            columns={MODEL_COLUMNS}
+            rows={model.models}
+            rowKey={line => line.key}
+            empty={missingWords(model, 'No models')}
+          />
+          {model.modelsTruncated ? (
+            <Text variant="small" tone="muted">
+              The host shortened the model list or a model name. Totals still include every model.
+            </Text>
+          ) : null}
+        </Stack>
       </Card>
     </>
   );
@@ -468,7 +475,15 @@ function Facts(props: {
     <FactLine spaced>
       {props.status === undefined ? null : <HostStatusChip status={props.status} />}
       {totals.figure === null ? (
-        <MutedFact text={totals.complete ? 'nothing spent yet' : 'reading cost'} />
+        <MutedFact
+          text={
+            !totals.complete
+              ? 'reading cost'
+              : totals.unpriced === null
+                ? 'nothing spent yet'
+                : 'spend unknown'
+          }
+        />
       ) : (
         <CountedFact
           figure={marked(totals.figure, totals.floor)}

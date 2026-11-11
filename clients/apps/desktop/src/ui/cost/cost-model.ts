@@ -17,6 +17,7 @@ import {
   labelStride,
   modelKey,
   modelName,
+  modelTitle,
   type Precision,
   precisionOf,
   tokensOrNothing,
@@ -62,7 +63,10 @@ const KINDS = [
 ] as const;
 
 /** What the splits and the chart are drawn from: the lists a run's cost view and a host's both carry. */
-export type CostSplitSource = Pick<CostView, 'total' | 'roles' | 'models' | 'series'>;
+export type CostSplitSource = Pick<
+  CostView,
+  'total' | 'roles' | 'models' | 'series' | 'modelsTruncated'
+>;
 
 export interface CostScreenModel {
   /** No turn has finished: there is nothing to split yet. */
@@ -95,6 +99,9 @@ export function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
   for (const bucket of view.series.buckets) {
     for (const spend of bucket.byModel) keys.add(modelKey(spend.model));
   }
+  if (view.modelsTruncated && view.series.buckets.some(bucket => residualCost(bucket) > 0)) {
+    keys.add(OTHER_MODELS_KEY);
+  }
   const slots = new Map<string, number>();
   const taken = new Set<number>();
   for (const key of [...keys].sort()) {
@@ -109,6 +116,14 @@ export function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
 
 /** How many colors the series palette has (`--series-0` to `--series-7`). */
 const PALETTE = 8;
+
+/** Spend included in a bucket's total but omitted from its bounded model split. */
+const residualCost = (bucket: SpendSeriesView['buckets'][number]): number =>
+  Math.max(0, bucket.costUsd - bucket.byModel.reduce((total, spend) => total + spend.costUsd, 0));
+
+/** A palette key no protocol model can have: model keys always begin with a numeric harness and `/`. */
+const OTHER_MODELS_KEY = 'other-models';
+const OTHER_MODELS_LABEL = 'Other models';
 
 /** The slot a key hashes to (FNV-1a), the same for the same key in every run of the program. */
 function slotOfKey(key: string): number {
@@ -139,11 +154,16 @@ function bucketTitle(
   startMs: number,
   costUsd: number,
   byModel: readonly {readonly model: CostModel; readonly costUsd: number}[],
+  otherModelsUsd: number,
 ): string {
   return [
     words.moment(startMs),
     formatUsd(costUsd, 2),
-    ...byModel.map(spend => `${modelName(spend.model, words)} ${formatUsd(spend.costUsd, 2)}`),
+    ...byModel.map(
+      spend =>
+        `${modelName(spend.model, words)} (${modelTitle(spend.model, words)}) ${formatUsd(spend.costUsd, 2)}`,
+    ),
+    ...(otherModelsUsd > 0 ? [`${OTHER_MODELS_LABEL} ${formatUsd(otherModelsUsd, 2)}`] : []),
   ].join('\n');
 }
 
@@ -173,38 +193,59 @@ export function spendChart(
   marker: BarMarker,
 ): SpendChart | null {
   const {buckets} = view.series;
-  // A bucket has a model's spend only where a turn was priced: with none anywhere there is no
-  // spend to draw, and an axis would make up a scale for it.
-  if (buckets.every(bucket => bucket.byModel.length === 0)) return null;
+  // A bounded model split may omit every contributing model. Otherwise a priced bucket has a named
+  // model. With neither anywhere there is no attributed spend to draw and an axis would be invented.
+  if (
+    buckets.every(
+      bucket => bucket.byModel.length === 0 && !(view.modelsTruncated && residualCost(bucket) > 0),
+    )
+  )
+    return null;
   const slot = (model: CostModel): number => slots.get(modelKey(model)) ?? 0;
-  const bars = buckets.map(
-    (bucket): StackedBar => ({
+  const otherSlot = slots.get(OTHER_MODELS_KEY) ?? 0;
+  const bars = buckets.map((bucket): StackedBar => {
+    const other = view.modelsTruncated ? residualCost(bucket) : 0;
+    return {
       id: String(bucket.startMs),
       startMs: bucket.startMs,
       widthMs: view.series.bucketMs,
       total: bucket.costUsd,
-      title: bucketTitle(words, bucket.startMs, bucket.costUsd, bucket.byModel),
+      title: bucketTitle(words, bucket.startMs, bucket.costUsd, bucket.byModel, other),
       // Stacked in the palette's order, so a model keeps its place in the stack while the run goes on.
-      segments: bucket.byModel
-        .map(spend => ({
+      segments: [
+        ...bucket.byModel.map(spend => ({
           key: `${bucket.startMs}/${modelKey(spend.model)}`,
           series: slot(spend.model),
           value: spend.costUsd,
-        }))
-        .sort((a, b) => a.series - b.series),
-    }),
-  );
-  const legend = view.models.map(
-    (cost): SwatchItem => ({
-      // A model with no priced turn has no bar: its swatch is the flat grey of a series with none.
-      label:
-        cost.usage.costUsd === null
-          ? `${modelName(cost.model, words)} (unpriced)`
-          : modelName(cost.model, words),
-      ...(cost.usage.costUsd === null ? {muted: true} : {series: slot(cost.model)}),
-      mono: true,
-    }),
-  );
+        })),
+        ...(other > 0
+          ? [
+              {
+                key: `${bucket.startMs}/${OTHER_MODELS_KEY}`,
+                series: otherSlot,
+                value: other,
+              },
+            ]
+          : []),
+      ].sort((a, b) => a.series - b.series),
+    };
+  });
+  const legend: SwatchItem[] = [
+    ...view.models.map(
+      (cost): SwatchItem => ({
+        // A model with no priced turn has no bar: its swatch is the flat grey of a series with none.
+        label:
+          cost.usage.costUsd === null
+            ? `${modelName(cost.model, words)} (unpriced)`
+            : modelName(cost.model, words),
+        title: modelTitle(cost.model, words),
+        ...(cost.usage.costUsd === null ? {muted: true} : {series: slot(cost.model)}),
+      }),
+    ),
+    ...(view.modelsTruncated && buckets.some(bucket => residualCost(bucket) > 0)
+      ? [{label: OTHER_MODELS_LABEL, series: otherSlot}]
+      : []),
+  ];
   const fromMs = buckets[0]?.startMs ?? view.series.startMs;
   const endMs = (buckets.at(-1)?.startMs ?? view.series.startMs) + view.series.bucketMs;
   return {
@@ -259,7 +300,7 @@ const modelRows = (
     (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
-      mono: true,
+      title: modelTitle(cost.model, words),
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),
