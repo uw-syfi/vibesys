@@ -242,7 +242,10 @@ async function checkEveryAgentShowsItsHarness(page: Page, world: World): Promise
     await expect(title).not.toHaveText('Agents');
     if (at === 0) await seen(page, '5-agent');
     const name = (await title.textContent()) ?? '';
-    const role = Object.entries(ROLE_WORD).find(([, word]) => name.startsWith(word.toLowerCase()));
+    // An agent is named by its capitalised role and number (`Worker 3`, `Lead`), as every screen says it.
+    const role = Object.entries(ROLE_WORD).find(([, word]) =>
+      name.toLowerCase().startsWith(word.toLowerCase()),
+    );
     expect(role, `the page of ${name} names a role`).toBeDefined();
     let harness: string | undefined;
     for (const [id, word] of Object.entries(HARNESS_WORD)) {
