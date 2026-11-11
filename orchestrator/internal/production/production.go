@@ -148,10 +148,10 @@ func secretIn(dir string) ([]byte, error) {
 	return data, nil
 }
 
-// Wiring is what a daemon needs that this build does not provide itself. The job source and the
-// plan reader are vibesys-cli's; until they are wired the daemon refuses them with a message that
-// says so. A nil Jobs means there is no job source, which the daemon treats as no source and not as
-// a source with no jobs.
+// Wiring is what a daemon needs that this build does not provide itself. The production host wires
+// Search and Jobs to vibesys-cli. Tests may leave either absent: nil Search means there is no live
+// search view or fresh job-log reader, and nil Jobs means there is no job source rather than a
+// source with no jobs.
 type Wiring struct {
 	Search *Reconciler
 	// Root is the root this process is the host of, which it records as the state directory's holder.
