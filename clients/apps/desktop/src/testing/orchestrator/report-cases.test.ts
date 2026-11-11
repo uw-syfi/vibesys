@@ -56,4 +56,36 @@ describe('the report cases', () => {
     expect(report.ideas?.ideas.length).toBe(64);
     expect(report.latest).toHaveLength(8);
   });
+
+  it('gives the three cases a lead report of three lengths: none, short with an empty field, very long', () => {
+    expect(reportOf('started').summary).toBeUndefined();
+    const short = reportOf('failed').summary;
+    expect(short?.headline.length).toBeLessThan(80);
+    expect(short?.fields.map(field => field.field)).toEqual(['inFlight']);
+    const long = reportOf('week').summary;
+    expect(long?.headline.length).toBeGreaterThan(300);
+    expect(long?.fields).toHaveLength(3);
+    expect(long?.fields.some(field => /\S{100,}/.test(field.text))).toBe(true);
+  });
+
+  it('measures the week like a real search: most points well under the best, across the whole run', () => {
+    const [throughput] = reportOf('week').objectives;
+    if (throughput === undefined) throw new Error('the case has its objective');
+    const best = throughput.bestValue ?? 0;
+    const others = throughput.points.filter(point => !point.bestSoFar);
+    const below = others.filter(point => point.value < 0.95 * best);
+    expect(below.length).toBeGreaterThan(0.6 * others.length);
+    // The points are in every sixth of the run, not in one blob.
+    const [first, last] = [throughput.points[0]?.atMs ?? 0, throughput.points.at(-1)?.atMs ?? 0];
+    const sixths = new Set(
+      throughput.points.map(point => Math.floor(((point.atMs - first) / (last - first + 1)) * 6)),
+    );
+    expect(sixths.size).toBe(6);
+  });
+
+  it('has the week’s ideas made by the agents the run has, and some of them very long', () => {
+    const report = reportOf('week');
+    expect(new Set(report.ideas?.ideas.map(idea => idea.agent)).size).toBeGreaterThan(1);
+    expect(report.ideas?.ideas.some(idea => idea.title.length > 120)).toBe(true);
+  });
 });

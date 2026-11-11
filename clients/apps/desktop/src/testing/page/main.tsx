@@ -154,8 +154,13 @@ function baseScenario() {
  * against it and the screens read it as Effect's `Clock`.
  */
 const NOW_MS = baseScenario().endMs + 60_000;
-// The moment the page means by "now". The screens' own clock ticks from the browser's, so a script that
-// reads the screens' ages fixes the browser's clock here (Playwright's `page.clock.setFixedTime`).
+// The moment the page means by "now". The screens read their ages from the browser's clock, which would
+// say the scenario (a fixed date) is days or years old, so the page sets that clock to the scenario's
+// "now" when it loads and lets it run on from there. This is the fixture page only: no product code
+// reads a clock differently, and a test never reaches it.
+const clockOrigin = Date.now();
+const realNow = Date.now.bind(Date);
+Date.now = () => NOW_MS + (realNow() - clockOrigin);
 document.documentElement.dataset.nowMs = String(NOW_MS);
 const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.defaultValue()), {
   currentTimeMillisUnsafe: () => NOW_MS,

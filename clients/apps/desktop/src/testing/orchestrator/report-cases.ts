@@ -211,6 +211,31 @@ const QUEUE: readonly ObjectiveSpec[] = [
   {name: 'p99 latency', direction: Direction.MINIMIZE, unit: 'µs', base: 820, best: 331},
 ];
 
+/** A report no screen can show whole: a headline of several sentences, paragraphs, and one unbroken path. */
+const LONG_HEADLINE =
+  'Throughput plateaued at 2.4 times the input for the last 18 hours: every idea in the backoff workstream measured within noise of the head, the per-core queue prototype regressed p99 by 30 percent under contention, and the allocator work is parked, so I am redirecting effort to the consumer wake-up path, which the profiler now shows as 41 percent of the cycles.';
+const LONG_CHANGED =
+  'Kept #52 (relax the tail CAS) after three confirming measures on the 16-producer configuration. Rejected #53, #55 and #57: each improved throughput by under one percent, inside the noise of the bench, and two of them raised p99 latency. Parked #54 (slab allocator) because the profile no longer shows allocation in the top ten. Re-ran the input twice to confirm the baseline has not drifted; it has not, within 0.4 percent.\n\nSplit the queue workstream into "wake-up path" and "per-core queues" so the two can be judged apart. The profile of the last build is in /srv/builds/mpmc-queue/target/release/deps/libmpmc_queue-4f8a2c91d0e3b7a5c61e09b2d7f35a8e.rlib/profile/perf-record-2026-11-06T22-56-12.data.';
+const LONG_RUNNING =
+  'Six implementers: two on futex-based wake-ups, two on batching wake-ups per 32 items, one on a per-core queue variant that avoids the cross-core steal, and one re-measuring #52 on the 64-producer configuration to make sure the gain holds at the highest contention level we test.';
+const LONG_DECIDED =
+  'Stop the allocator workstream unless p99 regresses. Treat any gain under 1.5 percent as noise until the bench variance is reduced. Do not pursue lock-free MPMC rewrites; the effort is out of proportion to the measured headroom.';
+
+/** Plan titles longer than any column: a sentence, and a sentence with a path in it. */
+const LONG_TITLES = [
+  'Replace the spin-then-park consumer wake-up with a futex wait on the head index, batching the wake-ups per 32 items and falling back to the spin only under contention',
+  'Pin each producer to a core and give it a private slot array in /srv/builds/mpmc-queue/target/release/deps/libmpmc_queue-4f8a2c91d0e3b7a5c61e09b2d7f35a8e.rlib so the tail CAS never crosses a socket',
+];
+
+/** The ids of the workers of a scenario, in the order they started: who makes the plans. */
+const workersOf = (scenario: Scenario): readonly string[] => [
+  ...new Set(
+    scenario.changes.flatMap(({body}) =>
+      oneofIs(body, 'agent', KINDS) && body.value.role === AgentRole.WORKER ? [body.value.id] : [],
+    ),
+  ),
+];
+
 /** The world of a named case. */
 export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
   if (name === 'started') {
@@ -228,7 +253,14 @@ export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
     };
   }
   if (name === 'failed') {
-    const lived = generateScenario({seed: 5, subagents: 0, live: true});
+    const generated = generateScenario({seed: 5, subagents: 0, live: true});
+    // A short report with a field the lead left empty (what changed): the block leaves it out.
+    const lived = withReport(generated, {
+      sequence: 1,
+      atMs: generated.endMs - 10_000,
+      headline: 'Measured the input; planning the first ideas.',
+      inFlight: 'Profiler on the hot path.',
+    });
     const scenario = withRunOver(lived, {
       atMs: lived.endMs + 5_000,
       status: RunStatus.FAILED,
@@ -253,12 +285,10 @@ export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
     {
       sequence: 9,
       atMs: endMs - 2 * COST_HOUR - 14 * MINUTE,
-      headline:
-        'Throughput is up 2.4 times on the input; the ring buffer and batching carry most of it. The latency tail is now the limit.',
-      changed:
-        'Kept #52 (relax the tail CAS) after 3 confirming measures; parked the allocator work.',
-      inFlight: '6 implementers on backoff tuning and per-core queues.',
-      decisions: 'Stop the allocator workstream unless p99 regresses.',
+      headline: LONG_HEADLINE,
+      changed: LONG_CHANGED,
+      inFlight: LONG_RUNNING,
+      decisions: LONG_DECIDED,
     },
   );
   return {
@@ -270,6 +300,9 @@ export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
       endMs,
       objectives: QUEUE,
       ideas: 64,
+      spread: true,
+      agents: workersOf(scenario),
+      extraTitles: LONG_TITLES,
     }),
     cost: WEEK_COST,
   };

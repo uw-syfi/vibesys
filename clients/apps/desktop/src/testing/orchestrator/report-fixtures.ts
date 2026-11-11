@@ -45,6 +45,16 @@ export interface MeasuredOptions {
   readonly revisedBound?: boolean;
   /** The lead's agents made this many plans, linked to the candidates, in a few workstreams. */
   readonly ideas?: number;
+  /** The agents that made the plans, by id, in turn; `impl-1`… when absent. */
+  readonly agents?: readonly string[];
+  /** More titles for the plans, after the usual ones: a very long one, say. */
+  readonly extraTitles?: readonly string[];
+  /**
+   * Measure like a real search: a candidate is mostly worse than the best so far (some of them well
+   * worse, for noise), a few set a new best, and the pace slows as the run goes on, so the points
+   * lie across the whole run instead of on the best line.
+   */
+  readonly spread?: boolean;
 }
 
 /** The two objectives of a serving task, with their declared bounds. */
@@ -122,24 +132,55 @@ interface Candidate {
   readonly values: readonly number[];
 }
 
+/** The agent that made plan number `at`: one of the options' agents in turn. */
+function agentOf(options: MeasuredOptions, at: number): string {
+  const agents = options.agents ?? [];
+  return agents.length === 0 ? `impl-${(at % 3) + 1}` : (agents[at % agents.length] ?? '');
+}
+
+/** The titles the plans take in turn: the usual ones, then the options' own. */
+const titlesOf = (options: MeasuredOptions): readonly string[] => [
+  ...IDEA_TITLES,
+  ...(options.extraTitles ?? []),
+];
+
 function hex40(rng: Rng): string {
   return Array.from({length: 40}, () => rng.int(16).toString(16)).join('');
+}
+
+/** How much worse than the best so far a candidate is: most a little, a fifth well, a few not at all. */
+function shortfallOf(rng: Rng): number {
+  const draw = rng.next();
+  return draw < 0.12 ? -0.01 : draw < 0.6 ? 0.03 + 0.1 * rng.next() : 0.15 + 0.4 * rng.next();
 }
 
 function candidatesOf(options: MeasuredOptions): readonly Candidate[] {
   const rng = new Rng(options.seed);
   return Array.from({length: options.candidates}, (_, index) => {
     const progress = (index + 1) / options.candidates;
+    const commit = hex40(rng);
+    // The time: the early candidates come fast, the later ones slower, when the run is spread.
+    const along = options.spread === true ? progress ** 2.4 : Math.sqrt(progress);
+    const atMs = Math.round(options.startMs + (options.endMs - options.startMs) * along * 0.98);
+    // How much worse than the best so far this candidate is: most a little, a fifth well, a few not at all.
+    const worse = options.spread === true ? shortfallOf(rng) : 0;
     return {
       jobId: `job-${options.seed}-${index + 1}`,
-      commit: hex40(rng),
-      atMs: Math.round(
-        options.startMs + (options.endMs - options.startMs) * Math.sqrt(progress) * 0.98,
-      ),
-      values: options.objectives.map(
-        objective =>
-          objective.base + (objective.best - objective.base) * progress * (0.7 + 0.3 * rng.next()),
-      ),
+      commit,
+      atMs,
+      values: options.objectives.map(objective => {
+        if (options.spread !== true) {
+          return (
+            objective.base + (objective.best - objective.base) * progress * (0.7 + 0.3 * rng.next())
+          );
+        }
+        // The best so far at this point of the run, and the candidate's own shortfall from it.
+        const level = objective.base + (objective.best - objective.base) * Math.sqrt(progress);
+        const shortfall = worse * (0.8 + 0.4 * rng.next());
+        return objective.direction === Direction.MINIMIZE
+          ? level * (1 + shortfall)
+          : level * (1 - shortfall);
+      }),
     };
   });
 }
@@ -276,12 +317,12 @@ function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], run
     );
     return {
       number,
-      title: IDEA_TITLES[at % IDEA_TITLES.length] ?? '',
+      title: titlesOf(options)[at % titlesOf(options).length] ?? '',
       status,
       createdAt: when,
       updatedAt: when,
       workstream: at % (WORKSTREAMS.length + 1),
-      origin: {runId, agent: `impl-${(at % 3) + 1}`, at: when},
+      origin: {runId, agent: agentOf(options, at), at: when},
     };
   });
   const linked = (number: number): readonly Candidate[] =>
