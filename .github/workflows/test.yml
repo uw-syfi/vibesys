@@ -613,7 +613,9 @@ jobs:
   # launched against that world and a Playwright journey checks the run list, each agent's harness
   # and the lead's report on screen and presses Stop (VIBESYS_E2E_DESKTOP_UI=1). Its own job, so it
   # adds no time to the gateway, cli or orchestrator jobs; it builds vibesys-host and vibesys-cli from
-  # the Go caches those jobs share. Runs on every push to main for the same reason as `gateway`.
+  # the Go caches those jobs share. A client-only pull request runs that named path, not the unrelated
+  # gateway/e2e scenarios; a backend change and every main push still run the whole package. Runs on
+  # every push to main for the same reason as `gateway`.
   desktop-path:
     needs: changes
     if: needs.changes.outputs.desktop_path == 'true' || github.event_name == 'push'
@@ -645,7 +647,13 @@ jobs:
         with:
           workspace-only: true
 
-      - name: Run the desktop path end to end
+      - name: Run the client-owned desktop path end to end
+        if: >-
+          github.event_name == 'pull_request' &&
+          needs.changes.outputs.gateway != 'true' &&
+          needs.changes.outputs.cli != 'true' &&
+          needs.changes.outputs.orchestrator != 'true' &&
+          needs.changes.outputs.proto != 'true'
         env:
           VIBESYS_E2E_DESKTOP_UI: "1"
           # Chromium's SUID sandbox helper cannot have the ownership it needs on a hosted runner. This
@@ -653,6 +661,18 @@ jobs:
           VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
         # Electron's native windows require a display; Ubuntu runners provide Xvfb. The wrapper owns
         # the display for this one check group.
+        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_client_path_e2e
+
+      - name: Run every desktop and backend path end to end
+        if: >-
+          github.event_name != 'pull_request' ||
+          needs.changes.outputs.gateway == 'true' ||
+          needs.changes.outputs.cli == 'true' ||
+          needs.changes.outputs.orchestrator == 'true' ||
+          needs.changes.outputs.proto == 'true'
+        env:
+          VIBESYS_E2E_DESKTOP_UI: "1"
+          VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_path_e2e
 
   # The installed product end to end: builds a bundle, installs it with install.sh in a clean Debian

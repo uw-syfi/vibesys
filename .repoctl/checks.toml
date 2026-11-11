@@ -572,6 +572,25 @@ directory = "gateway"
 timeout_seconds = 660
 commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2e"]]
 
+# A client-only pull request cannot affect the other gateway/e2e scenarios. It still runs the one
+# full-system test that builds and observes the Electron app. Backend changes and main pushes use
+# desktop_path_e2e above, so every scenario remains covered when an owner it exercises changes.
+# test_client_only_desktop_path_does_not_rerun_unrelated_backend_scenarios holds both commands and
+# their complementary workflow selection.
+[[check_groups]]
+name = "desktop_client_path_e2e"
+trigger_job = "desktop_path"
+# Local affected checks already run desktop_path_e2e, the strict superset. This group exists only
+# for CI to scope a client-only pull request without weakening backend or main-push coverage.
+local_skip = "repoctl test runs the full desktop_path_e2e superset"
+language = "go"
+directory = "gateway"
+timeout_seconds = 660
+commands = [[
+  "go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s",
+  "-run", "^TestTheDesktopPathRunsAnOptimizationEndToEnd$", "./e2e",
+]]
+
 [[check_groups]]
 name = "managed_install_tests"
 trigger_job = "managed_install"

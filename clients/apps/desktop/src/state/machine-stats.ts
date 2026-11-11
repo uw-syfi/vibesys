@@ -9,7 +9,12 @@
  * with this machine's.
  */
 import type {HostConnectionState} from './connection.js';
-import type {Fault} from './fault.js';
+import {
+  type TopicRefusal as DeliveryRefusal,
+  type TopicRetry as DeliveryRetry,
+  type TopicEnd,
+  topicRetry,
+} from './topic-delivery.js';
 
 /** Why the host has no reading of a section (`AbsenceReason`). */
 export type AbsenceCause =
@@ -53,30 +58,10 @@ export interface MachineSample {
 }
 
 /** What the host refused the topic for (`TopicFailureCode`). */
-export type TopicRefusal =
-  /** This host cannot produce the topic: no retry helps. */
-  | 'unsupported'
-  /** A bound on keys, values or subscriptions was exceeded. */
-  | 'over-limit'
-  /** The sampler failed or stopped; a new stream starts a new one. */
-  | 'source-failed'
-  /** A defect in the host. */
-  | 'internal';
+type TopicRefusal = DeliveryRefusal;
 
 /** How a stream of the topic ended. */
-export type MachineEnd =
-  | {readonly _tag: 'Refused'; readonly refusal: TopicRefusal}
-  /** Nothing came within a bound: the wait inside the snapshot, or the lease on any frame. */
-  | {readonly _tag: 'Silent'}
-  /** The host ended the stream without saying why. */
-  | {readonly _tag: 'Closed'}
-  /**
-   * A frame broke the topic's contract: another topic's value, more keys than allowed, or a frame
-   * its schema rejects.
-   */
-  | {readonly _tag: 'Invalid'; readonly detail: string}
-  /** The call failed. */
-  | {readonly _tag: 'Failed'; readonly fault: Fault};
+export type MachineEnd = TopicEnd;
 
 /** What happened, in the order the feed saw it. */
 export type MachineEvent =
@@ -178,11 +163,7 @@ export function applyMachineEvent(
  * a lost link and open the next one on the new link; or wait, without blaming the link, until the
  * link is new anyway.
  */
-export type MachineRetry = 'backoff' | 'lost' | 'next-link';
-
-/** The call failed for a reason that says the link is down. */
-const linkDown = (fault: Fault): boolean =>
-  fault.kind !== 'FellBehind' && (fault.retryable || fault.kind === 'NoBridge');
+export type MachineRetry = DeliveryRetry;
 
 /**
  * Which ends a new stream may cure soon. A refusal that no retry helps, a contract the host broke
@@ -190,18 +171,7 @@ const linkDown = (fault: Fault): boolean =>
  * upgraded meanwhile); a lost link is the connection's to redial.
  */
 export function machineRetry(end: MachineEnd): MachineRetry {
-  switch (end._tag) {
-    case 'Refused':
-      return end.refusal === 'unsupported' ? 'next-link' : 'backoff';
-    case 'Silent':
-    case 'Closed':
-      return 'backoff';
-    case 'Invalid':
-      return 'next-link';
-    case 'Failed':
-      if (end.fault.kind === 'FellBehind') return 'backoff';
-      return linkDown(end.fault) ? 'lost' : 'next-link';
-  }
+  return topicRetry(end);
 }
 
 /** The bounds `subscribe.proto` holds a stream of the topic to, in milliseconds. */
@@ -315,7 +285,7 @@ function endWhy(end: MachineEnd): MachineWhy {
       if (end.fault.kind === 'InvalidMessage') return 'bad-readings';
       // A reader that fell behind opens a new stream after a short wait.
       if (end.fault.kind === 'FellBehind') return 'updating';
-      return linkDown(end.fault) ? 'disconnected' : 'failed';
+      return topicRetry(end) === 'lost' ? 'disconnected' : 'failed';
   }
 }
 

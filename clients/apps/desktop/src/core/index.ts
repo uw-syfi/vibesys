@@ -82,6 +82,12 @@ export {
 } from './protocol.js';
 export {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 export {makeRunHistory, type RunHistory, type RunHistoryStatus} from './run-history.js';
+export {
+  makeRunsTopicFeed,
+  type RunsTopicFeed,
+  type RunsTopicParts,
+  type RunsTopicState,
+} from './runs-topic-feed.js';
 export {makeRunsView, type RunsView} from './runs-view.js';
 export {type AppearanceStore, makeAppearance} from './settings/appearance.js';
 export {

@@ -132,7 +132,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"gateway/internal/server/host.go"},
 			wantCI:      []string{"desktop_path", "gateway", "managed_install"},
 			wantGroups:  []string{"always_on", "desktop_path_e2e", "gateway_checks"},
-			wantSkipped: []string{"managed_install_macos_tests", "managed_install_tests"},
+			wantSkipped: []string{"desktop_client_path_e2e", "managed_install_macos_tests", "managed_install_tests"},
 			wantTargets: 0,
 		},
 		{
@@ -140,7 +140,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"gateway/gen/vibesys/api/v1/host.pb.go"},
 			wantCI:      []string{"desktop_path", "gateway", "managed_install", "proto"},
 			wantGroups:  []string{"always_on", "desktop_path_e2e", "gateway_checks", "proto"},
-			wantSkipped: []string{"managed_install_macos_tests", "managed_install_tests"},
+			wantSkipped: []string{"desktop_client_path_e2e", "managed_install_macos_tests", "managed_install_tests"},
 			wantTargets: 0,
 		},
 		{
@@ -164,7 +164,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"clients/libs/ui/src/apply-theme.ts"},
 			wantCI:      []string{"clients", "desktop_path"},
 			wantGroups:  []string{"always_on", "clients_build", "clients_quality", "clients_tests", "desktop_path_e2e"},
-			wantSkipped: []string{"clients_e2e"},
+			wantSkipped: []string{"clients_e2e", "desktop_client_path_e2e"},
 			wantTargets: 0,
 		},
 		{
@@ -268,8 +268,8 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 					t.Errorf("checks-only included test group %s", name)
 				}
 			}
-			if tc.name == "clients" && !reflect.DeepEqual(skipped, []string{"clients_e2e"}) {
-				t.Errorf("skipped = %v, want [clients_e2e]", skipped)
+			if tc.name == "clients" && !reflect.DeepEqual(skipped, []string{"clients_e2e", "desktop_client_path_e2e"}) {
+				t.Errorf("skipped = %v, want [clients_e2e desktop_client_path_e2e]", skipped)
 			}
 		})
 	}

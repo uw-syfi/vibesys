@@ -27,6 +27,7 @@ import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
 import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
+import {makeRunsTopicFeed, type RunsTopicFeed} from './runs-topic-feed.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
 import type {GatewayTransport} from './transport/gateway-transport.js';
 
@@ -45,6 +46,8 @@ export interface HostSession {
   readonly hostCosts: HostCostFeed;
   /** The CPU, memory and GPUs of the machine the host runs on. */
   readonly machine: MachineStatsFeed;
+  /** The host gateway's latest-value run index. Managed orchestrator runs remain in `runs`. */
+  readonly runIndex: RunsTopicFeed;
   readonly commands: Commands;
   /** The host's answer about the repository path being typed in the Start form. */
   readonly repositoryCheck: RepositoryCheck;
@@ -77,6 +80,11 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     costs: yield* makeCostFeed(parts),
     hostCosts: yield* makeHostCostFeed(parts),
     machine: yield* makeMachineStatsFeed({
+      client: yield* makeClient(HostService, host),
+      connection,
+      ambient,
+    }),
+    runIndex: yield* makeRunsTopicFeed({
       client: yield* makeClient(HostService, host),
       connection,
       ambient,
