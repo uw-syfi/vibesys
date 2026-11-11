@@ -165,6 +165,11 @@ jobs:
       - name: Check conceptual architecture
         run: python3 -m scripts.check_architecture_conceptual
 
+      # Public observation streams intentionally have different delivery and recovery semantics.
+      # Keep every app-facing server stream and Subscribe topic explicitly classified.
+      - name: Check public stream contracts
+        run: python3 -m scripts.check_public_stream_contracts
+
       # Here as well as in python_quality: `.repoctl/components.toml` ignores `.agents/`,
       # so a skills-only change selects no Python job. Stdlib only, about a second.
       - name: Check agent skills

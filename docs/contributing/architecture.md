@@ -54,7 +54,7 @@ Process boundaries use typed gRPC services defined by Protocol Buffers. The proc
 
 | Link | Carries | Shape |
 |---|---|---|
-| App to `vibesys-host` | The run as a snapshot, then live changes; commands from the operator. For runs of the older Python engine, a tail of their append-only log | Reads are streams, writes are single commands. Local or tunneled over ssh |
+| App to `vibesys-host` | Typed observations of runs, agents, costs and hosts; commands from the operator. For runs of the older Python engine, a tail of their append-only log | Reads declare ordered, replacement, conflated or composite delivery; writes are single commands. Local or tunneled over ssh |
 | `vibesys-host` to orchestrator | The same services, in the same process | A direct call. It is still the typed service, so a client cannot tell |
 | Orchestrator to sidecar | Commands in; the sidecar's ordered event log out | Commands are single calls with ids. Events are read as a stream from the last offset the orchestrator committed |
 | Orchestrator to `vibesysd` | Watching jobs and results of a run | A stream that starts with the whole state, then changes |
@@ -68,6 +68,34 @@ Rules for the whole picture:
 - The older Python engine publishes an append-only run log as a public contract. Each record carries a checksum
   and follows the shared Protocol Buffers definition. `vibesys-host` tails it and does not interpret it.
 - The desktop app sees the whole system through generated types. Its protocol bindings come from the shared service contracts; display names come from the Python catalog.
+
+### Public observation streams
+
+A public observation stream declares how its frames relate. Sharing gRPC does not make two streams
+the same kind of state:
+
+- An **ordered** stream carries every committed value after a sequence or offset. A snapshot or page
+  establishes the starting boundary; a gap requires a reset or a new snapshot.
+- A **replacement** stream carries a whole view each time. The receiver keeps one frame and restarts
+  from a new whole view after reconnecting; it never combines two frames.
+- A **conflated** stream carries latest state by key. Entries and removals through the sync marker are
+  one snapshot, later changes stay ordered per key, and intermediate values may be skipped.
+- A **composite** stream declares the rule of every response arm. One cursor does not silently make
+  sideband replacement views part of an ordered log.
+
+The [public stream registry](https://github.com/uw-syfi/vibesys/blob/main/scripts/public_stream_contracts.toml)
+classifies every server stream and topic on the app-facing host services. It records the initial
+boundary, ordering and cursor scope, completeness, bounds, liveness, failure carrier and compatibility
+gate. The always-on public-stream check discovers those RPCs and topic arms from their Protocol Buffer
+owners, rejects an unclassified or stale entry and requires every arm of a composite stream. The
+registry does not copy fields, limits or timing values from the schemas.
+
+Each feed has its own freshness and failure state. A client joins feeds only by typed identity and a
+declared watermark; it never assumes separately delivered frames were atomic. Missing, stale, zero and
+unavailable remain different states. Agent instructions may choose optimization strategy, but throughput,
+resource use, token usage, cost, objectives, correctness and workstreams reach a client only from the
+typed owner of that fact, with its scope intact. In particular, host-wide GPU use is not run-attributed
+GPU use.
 
 The orchestrator also projects deterministic search state for the app: jobs, results,
 judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator.
@@ -121,9 +149,11 @@ Every such link follows the same rules, so a new link is a variation on a known 
    sides test against it. A caller never scans for sockets or reads process-id files.
 4. **The first call is a version handshake.** The answer is compatible, caller too old or daemon too old. A
    missing or incompatible daemon is a named state with a reason, never an empty answer.
-5. **A read is a stream that starts with the whole state.** Then come changes tagged with an epoch and a
-   sequence number. The caller applies a full state at its end marker and keeps its resume token there. A daemon
-   that cannot honor a token sends the whole state again. Protocol 3 always starts with a reset. Nobody polls a daemon for state.
+5. **A read declares its delivery contract.** An ordered state read starts with the whole state, then
+   changes tagged with an epoch and sequence number. The caller applies a full state at its end marker
+   and keeps its resume token there. A daemon that cannot honor a token sends the whole state again.
+   Protocol 3 always starts with a reset. Replacement views restart from a whole view; keyed latest-value
+   state restarts from an empty keyspace and a complete snapshot. Nobody polls a daemon for state.
 6. **A write is one bounded command.** It carries an id the callee deduplicates, so repeating it is safe, and the
    caller gives it a deadline.
 7. **Identity travels in the message.** Run, task and agent are part of every call. A shell receives identity through its launch environment, with the carrier names declared once in the contract.
@@ -140,7 +170,8 @@ Enforcement for these rules:
 2. Enforced for the CLI daemon by runtime-directory and Locate checks. New daemon transport choices are unenforced because they need design review.
 3. Enforced for CLI discovery by golden checks and `fs-reads`. A golden for a new daemon is unenforced because no check requires one.
 4. Enforced for the CLI daemon by its contract suite and conformance corpus. The first call for a new link is unenforced because it needs review.
-5. Enforced by the transcript corpus and session property checks. Polling is unenforced because a check cannot distinguish it from other loops.
+5. Enforced for public app-facing reads by the public-stream registry check, and for daemon transcripts by
+   the transcript corpus and session property checks. Polling is unenforced because a check cannot distinguish it from other loops.
 6. Unenforced: idempotency and deadlines need review of the operation.
 7. Enforced by identity carrier golden and carrier checks.
 8. Enforced in the orchestrator by `exec-confined` for process starts. Ownership of starts and stops is unenforced because it needs design review.
