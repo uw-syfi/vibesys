@@ -220,6 +220,8 @@ describe('the Cost page by run', () => {
               feed: {_tag: 'Live'},
               view,
               titles,
+              started: {},
+              working: new Map(),
             },
           ]}
           words={COST_OVERVIEW_WORDS}

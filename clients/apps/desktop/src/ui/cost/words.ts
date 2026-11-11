@@ -3,6 +3,7 @@
  * a figure the host served and says it in words, the same way for every figure of a screen so
  * that a column of them lines up.
  */
+import {wordsOfId} from '@vibesys/display-names';
 import type {AgentRole, Harness} from '@vibesys/orchestrator-proto';
 import type {CostModel, FaultKind} from '../../state/index.js';
 
@@ -80,7 +81,12 @@ function decimalsOf(step: number): number {
  * numbers, so each reads exactly.
  */
 export function formatAxisUsd(usd: number, step: number): string {
-  return `$${usd.toFixed(decimalsOf(step))}`;
+  const decimals = decimalsOf(step);
+  const figure = usd.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `$${figure}`;
 }
 
 const UNITS = [
@@ -158,9 +164,41 @@ export function labelStride(bucketMs: number, buckets: number): number {
   return Math.max(1, Math.round(step / bucketMs));
 }
 
-/** The name of a model: the id the host served, or the harness's own words for its default. */
+/** How long each bar of the spend chart is, in the words of its header: `per hour`, `per 3 hours`, `per day`. */
+export function bucketWords(bucketMs: number): string {
+  const per = (count: number, unit: string): string =>
+    count === 1 ? `per ${unit}` : `per ${formatCount(count)} ${unit}s`;
+  const minutes = Math.round(bucketMs / MINUTE);
+  if (minutes < 60) return per(minutes, 'minute');
+  if (minutes < 24 * 60) return per(Math.round(minutes / 60), 'hour');
+  return per(Math.round(minutes / (24 * 60)), 'day');
+}
+
+/**
+ * The readable name of a model. Agentshim owns model ids and the host does not serve display names,
+ * so the shared id-to-words boundary supplies a deterministic fallback instead of making each screen
+ * map providers itself. A harness's own default model has no id: it is the harness's name and the word
+ * `default`. The raw id remains in `modelTitle` for provenance and copying.
+ */
 export function modelName(model: CostModel, words: CostWords): string {
-  return model.model === '' ? words.harness(model.harness) : model.model;
+  if (model.model === '') return `${words.harness(model.harness)} default`;
+  return wordsOfId(model.model)
+    .split(' ')
+    .map(word => {
+      const lower = word.toLowerCase();
+      return /^[a-z]{1,3}$/.test(lower)
+        ? lower.toUpperCase()
+        : `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+    })
+    .join(' ')
+    .replace(/\b(\d{1,2}) (\d{1,2})(?=\s|$)/g, '$1.$2');
+}
+
+/** The model's source identifier and harness, whole, for the pointer. */
+export function modelTitle(model: CostModel, words: CostWords): string {
+  return model.model === ''
+    ? `${words.harness(model.harness)} default model`
+    : `${model.model} on ${words.harness(model.harness)}`;
 }
 
 /** What identifies a model across views of a run. */

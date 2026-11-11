@@ -1,5 +1,6 @@
 /** Realistic orchestrated runs as event streams, and a fake daemon that serves them. */
 export {busyFacts} from './check-ins.js';
+export {COST_CASES, type CostCase, costCaseScenario, costCaseView} from './cost-cases.js';
 export {
   ELIDE_OVER,
   FAKE_VIEWER,

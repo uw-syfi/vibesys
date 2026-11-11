@@ -1,5 +1,7 @@
 import {describe, expect, expectTypeOf, it} from '@effect/vitest';
+import {Harness} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
+import type {CostView} from '../../state/index.js';
 import {costViewArb} from '../../testing/orchestrator/cost-arbitrary.js';
 import {
   ENDED_RUN,
@@ -14,6 +16,7 @@ import {
   costScreenModel,
   KIND_COLUMNS,
   MODEL_COLUMNS,
+  slotsOf,
   TYPE_COLUMNS,
 } from './cost-model.js';
 import {formatTokens} from './words.js';
@@ -108,13 +111,18 @@ describe('the cost screen model', () => {
         expect(model.types.map(row => row.value)).toEqual(view.roles.map(r => r.usage.costUsd));
         expect(model.models.map(row => row.value)).toEqual(view.models.map(m => m.usage.costUsd));
         if (model.chart !== null) {
+          const hasOther = (bucket: CostView['series']['buckets'][number]): boolean =>
+            view.modelsTruncated &&
+            bucket.costUsd > bucket.byModel.reduce((sum, spend) => sum + spend.costUsd, 0);
           expect(model.chart.bars.map(bar => bar.total)).toEqual(
             view.series.buckets.map(bucket => bucket.costUsd),
           );
           expect(model.chart.bars.map(bar => bar.segments.length)).toEqual(
-            view.series.buckets.map(bucket => bucket.byModel.length),
+            view.series.buckets.map(bucket => bucket.byModel.length + (hasOther(bucket) ? 1 : 0)),
           );
-          expect(model.chart.legend.length).toBe(view.models.length);
+          expect(model.chart.legend.length).toBe(
+            view.models.length + (view.series.buckets.some(hasOther) ? 1 : 0),
+          );
         }
       }),
     );
@@ -190,12 +198,17 @@ describe('the cost screen model', () => {
     expect(cents(cheap.spend.lastHour)).toBe(true);
   });
 
-  it('draws no chart where no bucket holds a priced model, and a chart where one does', () => {
+  it('draws a chart for named or explicitly truncated model spend, and none without either', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).chart).toBeNull();
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).chart).not.toBeNull();
     fc.assert(
       fc.property(costViewArb, view => {
-        const priced = view.series.buckets.some(bucket => bucket.byModel.length > 0);
+        const priced = view.series.buckets.some(
+          bucket =>
+            bucket.byModel.length > 0 ||
+            (view.modelsTruncated &&
+              bucket.costUsd > bucket.byModel.reduce((sum, spend) => sum + spend.costUsd, 0)),
+        );
         expect(costScreenModel(view, COST_WORDS).chart === null).toBe(!priced);
       }),
     );
@@ -225,15 +238,53 @@ describe('the cost screen model', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
-  it('shows the model id as the host served it, and the harness for its own default', () => {
+  it('writes model ids as readable words, keeps raw ids in titles, and names a harness default', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
-      'model-a',
-      'model-b',
-      'Codex',
+      'Model A',
+      'Model B',
+      'Codex default',
     ]);
     const long = costScreenModel(LONG_NAMES, COST_WORDS);
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
-    expect(long.models[0]?.mono).toBe(true);
-    expect(long.chart?.legend[0]?.mono).toBe(true);
+    expect(long.models[0]?.title).toContain(LONG_NAMES.models[0]?.model.model ?? 'missing');
+    expect(long.chart?.legend[0]?.title).toContain(LONG_NAMES.models[0]?.model.model ?? 'missing');
+    expect(long.models[0]?.mono).toBeUndefined();
+    expect(long.chart?.legend[0]?.mono).toBeUndefined();
+    const own = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.at(-1);
+    expect(own?.name).toBe('Codex default');
+    expect(own?.title).toBe('Codex default model');
+    const all = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
+    expect(all.models.every(row => row.mono === undefined)).toBe(true);
+    expect(all.chart?.legend.every(item => item.mono === undefined)).toBe(true);
+  });
+
+  it('gives a model a color that is its own: the same in every view, whoever else is on the page', () => {
+    const colors = (ids: readonly string[]) => {
+      const view = {
+        ...PRICED_AND_UNPRICED,
+        models: ids.map(model => ({
+          ...(PRICED_AND_UNPRICED.models[0] as (typeof PRICED_AND_UNPRICED.models)[number]),
+          model: {harness: Harness.CODEX, model},
+        })),
+        series: {...PRICED_AND_UNPRICED.series, buckets: []},
+      };
+      return slotsOf(view);
+    };
+    const key = (model: string) => `${Harness.CODEX}/${model}`;
+    // Alone or with others, a model that no other holds the slot of keeps it.
+    const alone = colors(['claude-opus-5-5']).get(key('claude-opus-5-5'));
+    for (const others of [['gpt-5-codex'], ['model-a', 'model-b'], ['claude-haiku-5-5', 'zzz']]) {
+      const together = colors(['claude-opus-5-5', ...others]);
+      const slots = [...together.values()];
+      // No two models of a view draw alike, and all are in the palette.
+      expect(new Set(slots).size).toBe(slots.length);
+      for (const slot of slots) expect(slot).toBeLessThan(8);
+      if (together.get(key('claude-opus-5-5')) !== alone) {
+        // Only a clash of the hash moves a model, and then to a slot nobody else holds.
+        expect(others.some(other => together.get(key(other)) === alone)).toBe(true);
+      }
+    }
+    // The same models in any order are the same colors.
+    expect(colors(['a1', 'b2', 'c3'])).toEqual(colors(['c3', 'a1', 'b2']));
   });
 });

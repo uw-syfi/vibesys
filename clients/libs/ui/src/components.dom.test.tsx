@@ -1210,6 +1210,36 @@ describe('StackedBars', () => {
     );
     expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
   });
+
+  test('has a compact size, a plot about as tall as a card holds among others, that fills its panel', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Usage"
+        unit="tokens"
+        size="compact"
+        bars={[bar('a', [3]), bar('b', [1])]}
+      />,
+    );
+    expect(container.querySelector('.vs-bars')?.getAttribute('data-size')).toBe('compact');
+    const css = readFileSync(new URL('./bars.css', import.meta.url), 'utf8');
+    // The plot is shorter than `tall` (four steps of the scale), and no longer capped to the width of
+    // its bars: each bar sits in an equal slot, so the labels under the slots line up with them.
+    expect(css).toMatch(
+      /data-size="compact"\] \.vs-bars-plot \{\s*height: calc\(var\(--space-8\) \* 3/,
+    );
+    expect(css).toMatch(
+      /data-size="compact"\] \.vs-bars-plot,\s*\.vs-bars\[data-size="compact"\] \.vs-bars-marks \{\s*max-width: none/,
+    );
+  });
+});
+
+describe('a dense table in a narrow column', () => {
+  test('lets its name column give way to a width of one and a half steps, so five columns of figures fit a 374 px card', () => {
+    const css = readFileSync(new URL('./surfaces.css', import.meta.url), 'utf8');
+    expect(css).toMatch(
+      /\.vs-table\[data-dense\] td\[data-lead\] \{\s*min-width: calc\(var\(--space-8\) \* 1\.5\);/,
+    );
+  });
 });
 
 describe('StackedBars with an axis', () => {
@@ -1269,7 +1299,14 @@ describe('StackedBars with an axis', () => {
 describe('BarRows', () => {
   const columns = [{header: 'Turns'}, {header: 'Cost', strong: true}] as const;
   const rows: readonly BarRow<2>[] = [
-    {key: 'a', name: 'builder', series: 1, value: 200, figures: ['774', '$200']},
+    {
+      key: 'a',
+      name: 'Builder',
+      title: 'builder-id',
+      series: 1,
+      value: 200,
+      figures: ['774', '$200'],
+    },
     {key: 'b', name: 'planner', series: 2, value: 50, figures: ['148', '$50']},
     {key: 'c', name: 'profiler', value: null, note: 'No price', figures: ['41', null]},
   ];
@@ -1304,7 +1341,7 @@ describe('BarRows', () => {
     ]);
     expect(
       [...container.querySelectorAll('.vs-bar-rows-label')].map(each => each.getAttribute('title')),
-    ).toEqual(['builder', 'planner', 'profiler']);
+    ).toEqual(['builder-id', 'planner', 'profiler']);
     expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('By type');
   });
 

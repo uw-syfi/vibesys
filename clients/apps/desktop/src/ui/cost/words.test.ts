@@ -2,6 +2,7 @@ import {describe, expect, it} from '@effect/vitest';
 import {niceScale} from '@vibesys/ui';
 import fc from 'fast-check';
 import {
+  bucketWords,
   formatAxisUsd,
   formatCount,
   formatElapsed,
@@ -9,6 +10,8 @@ import {
   formatTokens,
   formatUsd,
   labelStride,
+  modelName,
+  modelTitle,
   type Precision,
   precisionOf,
 } from './words.js';
@@ -81,7 +84,9 @@ describe('writing dollars', () => {
         const step = ticks[1] ?? 1;
         const written = ticks.map(tick => formatAxisUsd(tick, step));
         ticks.forEach((tick, at) => {
-          expect(Math.abs(Number((written[at] ?? '').slice(1)) - tick)).toBeLessThan(1e-9);
+          expect(
+            Math.abs(Number((written[at] ?? '').slice(1).replaceAll(',', '')) - tick),
+          ).toBeLessThan(1e-9);
         });
         // One axis, one number of decimals.
         expect(new Set(written.map(text => text.split('.')[1]?.length ?? 0)).size).toBe(1);
@@ -90,6 +95,8 @@ describe('writing dollars', () => {
     expect([0.05, 0.1, 0.15].map(v => formatAxisUsd(v, 0.05))).toEqual(['$0.05', '$0.10', '$0.15']);
     expect([20, 40].map(v => formatAxisUsd(v, 20))).toEqual(['$20', '$40']);
     expect([2.5, 5, 7.5].map(v => formatAxisUsd(v, 2.5))).toEqual(['$2.5', '$5.0', '$7.5']);
+    // Thousands are separated, as every other figure of the page is.
+    expect([1000, 2000].map(v => formatAxisUsd(v, 1000))).toEqual(['$1,000', '$2,000']);
   });
 });
 
@@ -130,5 +137,37 @@ describe('which buckets are labelled', () => {
 
   it('has no stride for a bucket of no length', () => {
     expect(labelStride(0, 10)).toBe(1);
+  });
+});
+
+describe('naming a model', () => {
+  const words = {harness: () => 'Codex'};
+
+  it('turns an external id into words, keeps it whole in the title, and names a harness default', () => {
+    const named = {harness: 1, model: 'claude-opus-5-5'};
+    const own = {harness: 1, model: ''};
+    expect(modelName(named, words as never)).toBe('Claude Opus 5.5');
+    expect(modelTitle(named, words as never)).toBe('claude-opus-5-5 on Codex');
+    expect(modelName(own, words as never)).toBe('Codex default');
+    expect(modelTitle(own, words as never)).toBe('Codex default model');
+  });
+
+  it.each([
+    ['gpt-5-codex', 'GPT 5 Codex'],
+    ['model-a', 'Model A'],
+    ['o3-mini', 'O3 Mini'],
+  ])('makes %s readable without a provider-specific name table', (id, readable) => {
+    expect(modelName({harness: 1, model: id}, words as never)).toBe(readable);
+  });
+});
+
+describe('the words of a bucket of the spend chart', () => {
+  it('says how long it lasts in the unit it is closest to', () => {
+    const MIN = 60_000;
+    expect(bucketWords(MIN)).toBe('per minute');
+    expect(bucketWords(15 * MIN)).toBe('per 15 minutes');
+    expect(bucketWords(60 * MIN)).toBe('per hour');
+    expect(bucketWords(180 * MIN)).toBe('per 3 hours');
+    expect(bucketWords(24 * 60 * MIN)).toBe('per day');
   });
 });

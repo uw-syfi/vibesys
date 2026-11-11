@@ -22,6 +22,27 @@
 .vs-bars[data-size="tall"] .vs-bars-plot {
   height: calc(var(--space-8) * 4);
 }
+.vs-bars[data-size="compact"] .vs-bars-plot {
+  height: calc(var(--space-8) * 3 + var(--space-4));
+}
+/* The top figure of the axis is centred on its line, so it rises above the plot: room for half of it. */
+.vs-bars[data-size="compact"] {
+  padding-top: var(--space-3);
+}
+/* A compact chart is one panel among many and fills its panel: each bar sits in an equal slot of the
+   plot (so the labels under the slots line up), and a bar is never wider than a bar, centred in its
+   slot, so two bars are two bars in a plot as wide as the panel, not two slabs. */
+.vs-bars[data-size="compact"] .vs-bars-plot,
+.vs-bars[data-size="compact"] .vs-bars-marks {
+  max-width: none;
+}
+.vs-bars[data-size="compact"] .vs-bars-bar {
+  align-items: center;
+}
+.vs-bars[data-size="compact"] .vs-bars-segment {
+  width: 100%;
+  max-width: calc(var(--space-8) + var(--space-5));
+}
 /* A chart with a value axis or labelled bars: the axis figures in a column of their own, and the
    plot, the labels and the two ends of the axis all in the column beside it, so they share its
    edges. */
@@ -209,4 +230,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- a linear time axis: each bar at its own moment, with its own width -------------------------- */
+
+.vs-bars-plot[data-timed] {
+  /* The bars are placed by time on a plot as wide as its panel, whatever their number. */
+  max-width: none;
+}
+.vs-bars[data-scaled] .vs-bars-plot[data-timed] ~ .vs-bars-marks {
+  max-width: none;
+}
+.vs-bars-plot[data-timed] > .vs-bars-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* A hairline either side of a bar, so bars of neighbouring buckets are told apart. */
+  padding-inline: var(--hairline);
+  align-items: stretch;
+}
+.vs-bars-plot[data-timed] > .vs-bars-bar > .vs-bars-segment {
+  width: 100%;
+  max-width: none;
+}
+/* The day or hour lines the labels stand under: faint, behind the bars. */
+.vs-bars-vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--mark-at);
+  width: var(--hairline);
+  background: var(--line);
 }
