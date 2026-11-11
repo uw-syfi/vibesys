@@ -65,6 +65,22 @@ const WHY_WORD: Readonly<Record<MachineChipWhy, MachineWhyWord>> = {
   },
 };
 
+/** Why a machine has no reading, in a few words that fit a row (after `No stats ·`). */
+const WHY_SHORT: Readonly<Record<MachineWhy, string>> = {
+  disconnected: 'the link is down',
+  updating: 'reading started',
+  'not-updating': 'not updating',
+  silent: 'the host did not answer',
+  'no-readings': 'the host sent none',
+  unsupported: 'not supported on this host',
+  'over-limit': 'the host broke a limit',
+  'read-failed': 'the host could not read',
+  'bad-readings': 'the host sent bad data',
+  failed: 'the host refused the call',
+};
+
+export const whyShort = (why: MachineWhy): string => WHY_SHORT[why];
+
 /**
  * What a hover says of why a machine has no current reading, for any `MachineWhy`: the account of its
  * chip word, and for `disconnected` (which has no chip, the status chip says it) the plain cause.

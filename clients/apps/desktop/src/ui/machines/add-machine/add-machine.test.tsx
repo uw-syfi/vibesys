@@ -174,8 +174,8 @@ describe('adding and removing a machine', () => {
       const screen = mount(
         <Screen actions={actions} dispatch={dispatch} hosts={['local', 'ssh:host-a']} />,
       );
-      expect(screen.controls('Remove This Mac')).toHaveLength(0);
-      screen.press(screen.control('Remove host-a'));
+      expect(screen.controls('Remove This Mac from this app')).toHaveLength(0);
+      screen.press(screen.control('Remove host-a from this app'));
       yield* flush;
       expect(saved.size).toBe(0);
       expect(screen.text()).toContain('Removed host-a');

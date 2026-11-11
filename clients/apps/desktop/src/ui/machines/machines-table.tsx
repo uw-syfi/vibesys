@@ -1,12 +1,12 @@
-import {Button, Chip, Row, Stale, Table, type TableColumn, Text} from '@vibesys/ui';
+import {Button, Card, Chip, Row, Stale, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {type MachineTableRow, machineKey, type Reach} from '../../state/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {offerWords} from '../orchestrator/new-run/words.js';
-import {Reading, ReadingReserve} from './machine-cells.js';
+import {Reading, ReadingReserve, readingSpan} from './machine-cells.js';
 
 const REACH_TONE: Readonly<Record<Reach, 'ok' | 'err' | 'neutral'>> = {
-  reachable: 'ok',
+  reachable: 'neutral',
   unreachable: 'err',
   'not probed': 'neutral',
 };
@@ -53,7 +53,7 @@ function NameCell(props: {readonly row: MachineTableRow}): JSX.Element {
   const {row} = props;
   switch (row.kind) {
     case 'machine':
-      return <Text variant="body-strong">{row.entry.row.label}</Text>;
+      return <Text variant="item">{row.entry.row.label}</Text>;
     case 'place':
       return (
         <Stale stale={row.dim}>
@@ -125,8 +125,8 @@ function ActionsCell(props: {
           variant="quiet"
           size="sm"
           icon="refresh"
-          label={`Refresh ${label}`}
-          hint="Refresh job places"
+          label={`Refresh job places on ${label}`}
+          hint={`Refresh job places on ${label}`}
           press={() => actions.refresh?.(key)}
           {...(reading ? {disabledReason: 'Reading', quietReason: true} : {})}
         />
@@ -136,8 +136,8 @@ function ActionsCell(props: {
           variant="quiet"
           size="sm"
           icon="cross"
-          label={`Remove ${label}`}
-          hint="Remove"
+          label={`Remove ${label} from this app`}
+          hint={`Remove ${label} from this app`}
           press={() => actions.remove?.(key)}
         />
       )}
@@ -173,6 +173,7 @@ function columnsOf(
         header: 'CPU',
         fit: true,
         reserve: <ReadingReserve which="cpu" />,
+        span: row => (row.kind === 'machine' ? readingSpan(row.entry.stats) : 1),
         cell: row =>
           row.kind === 'machine' ? <Reading view={row.entry.stats} which="cpu" /> : null,
       },
@@ -225,24 +226,27 @@ export function MachinesTable(props: {
 }): JSX.Element {
   const {select} = props;
   return (
-    <Table
-      label="Machines"
-      dense
-      middle
-      empty="No machines"
-      columns={columnsOf(props.actions, props.readings, props.places)}
-      rows={props.rows}
-      rowKey={row => row.key}
-      rowKind={row => (row.kind === 'machine' ? undefined : 'sub')}
-      {...(props.selected === null ? {} : {selected: machineKey(props.selected)})}
-      {...(select === undefined
-        ? {}
-        : {
-            select: (key: string) => {
-              const row = props.rows.find(each => each.key === key);
-              if (row?.kind === 'machine') select(row.entry.row.key);
-            },
-          })}
-    />
+    <Card dense>
+      <Table
+        label="Machines"
+        dense
+        grouped
+        middle
+        empty="No machines"
+        columns={columnsOf(props.actions, props.readings, props.places)}
+        rows={props.rows}
+        rowKey={row => row.key}
+        rowKind={row => (row.kind === 'machine' ? undefined : 'sub')}
+        {...(props.selected === null ? {} : {selected: machineKey(props.selected)})}
+        {...(select === undefined
+          ? {}
+          : {
+              select: (key: string) => {
+                const row = props.rows.find(each => each.key === key);
+                if (row?.kind === 'machine') select(row.entry.row.key);
+              },
+            })}
+      />
+    </Card>
   );
 }

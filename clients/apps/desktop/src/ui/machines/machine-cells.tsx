@@ -1,10 +1,12 @@
 /**
- * What a machine's row says of its CPU, memory and GPU: each a meter with its figure, set in the
- * column that names it, so no cell repeats its own name. A machine with no current reading shows one
- * muted word in the first of the three cells (`Waiting`, or `No stats` with the reason on hover) and
- * leaves the others empty, so the row keeps its columns whatever the host has said. A reading that is
- * no longer current stays, dimmed, with why on hover. `disconnected` only dims: the row's status chip
- * already says the link is down.
+ * What a machine's row says of its CPU, memory and GPU: each a meter with its figure directly after
+ * it, set in the column that names it, so no cell repeats its own name. A machine with no current
+ * reading says why in one line across the three cells (`No stats · not supported on this host`, or
+ * `Waiting for the first reading`), with the longer account on hover. A reading that is no longer
+ * current stays, dimmed, with why on hover; a section the host could not read says `unknown`, muted,
+ * with its cause on hover (never a bar, which would read as a zero). `disconnected` only dims: the
+ * row's status chip already says the link is down. The load meters share one accent fill; only a
+ * memory near its total is drawn as a warning.
  */
 import {Gauge, Row, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -16,6 +18,7 @@ import {
   type MemoryUse,
   type Section,
 } from '../../state/index.js';
+import {UNKNOWN} from '../plain-words.js';
 import {
   gpuLines,
   HOT_SHARE,
@@ -24,9 +27,8 @@ import {
   memoryShare,
   PERCENT_WIDTH,
   percentFigure,
-  UNREADABLE,
 } from './machine-figures.js';
-import {absenceNote, machineWhyWord, whyHint} from './machine-words.js';
+import {absenceNote, machineWhyWord, whyHint, whyShort} from './machine-words.js';
 
 /** The three columns of readings. */
 export type ReadingPart = 'cpu' | 'memory' | 'gpu';
@@ -55,25 +57,20 @@ const hovered = (...lines: readonly string[]): string | undefined => {
   return text === '' ? undefined : text;
 };
 
-/** A reading the host made not, as an empty meter and a dash, with the reason it gave. */
+/** A section the host could not read: the word `unknown`, quiet, and the cause on hover. */
 function Unread(props: {
   readonly label: string;
   readonly cause: Parameters<typeof absenceNote>[0];
   readonly currency: Currency;
 }): JSX.Element {
-  const why = absenceNote(props.cause);
   return (
-    <span title={hovered(`${props.label}: ${why}`, props.currency.hover)}>
-      <Gauge
-        bare
-        label={props.label}
-        share={null}
-        figure={UNREADABLE}
-        figureWidth={Math.max(PERCENT_WIDTH, UNREADABLE.length)}
-        dim={props.currency.dim}
-        note={why}
-      />
-    </span>
+    <Text
+      variant="small"
+      tone="muted"
+      title={hovered(`${props.label}: ${absenceNote(props.cause)}`, props.currency.hover) ?? ''}
+    >
+      {UNKNOWN}
+    </Text>
   );
 }
 
@@ -93,6 +90,7 @@ function CpuReading(props: {
         share={section.value / 100}
         figure={percentFigure(section.value)}
         figureWidth={PERCENT_WIDTH}
+        tone="accent"
         dim={currency.dim}
         {...(currency.note === undefined ? {} : {note: currency.note})}
       />
@@ -118,7 +116,7 @@ function MemoryReading(props: {
         share={share}
         figure={figure}
         figureWidth={Math.max(MEMORY_WIDTH, figure.length)}
-        tone={share >= HOT_SHARE ? 'warn' : 'ok'}
+        tone={share >= HOT_SHARE ? 'warn' : 'accent'}
         dim={currency.dim}
         {...(currency.note === undefined ? {} : {note: currency.note})}
       />
@@ -157,13 +155,14 @@ function GpuReadings(props: {
           share={overview.meanUtilizationPercent / 100}
           figure={percentFigure(overview.meanUtilizationPercent)}
           figureWidth={PERCENT_WIDTH}
+          tone="accent"
           dim={currency.dim}
           {...(currency.note === undefined ? {} : {note: currency.note})}
         />
       </span>
       {many ? (
         <Text variant="small" tone="muted" {...(hover === undefined ? {} : {title: hover})}>
-          {`${overview.count} GPUs`}
+          {`· ${overview.count} GPUs`}
         </Text>
       ) : null}
     </Row>
@@ -181,9 +180,16 @@ const part = (sample: MachineSample, which: ReadingPart, currency: Currency): JS
   }
 };
 
+/** How many cells the readings of `view` cover from the first: all three when there is no reading to put in them. */
+export const readingSpan = (view: MachineView | null): number =>
+  view === null || view._tag === 'Shown' ? 1 : READING_PARTS.length;
+
+const READING_PARTS: readonly ReadingPart[] = ['cpu', 'memory', 'gpu'];
+
 /**
  * One cell of a machine row: `which` part of its readings. `view` is null for a window that does not
- * read machine stats at all, which draws nothing.
+ * read machine stats at all, which draws nothing. A view with no reading is one line in the first
+ * cell, which the row's table lets span the three (`readingSpan`).
  */
 export function Reading(props: {
   readonly view: MachineView | null;
@@ -192,23 +198,18 @@ export function Reading(props: {
   const {view, which} = props;
   if (view === null) return null;
   if (view._tag === 'Shown') return part(view.sample, which, currencyOf(view));
-  // The word goes in the first cell only: one word for the whole row's readings, not three.
   if (which !== 'cpu') return null;
   if (view._tag === 'Waiting') {
     return (
-      <span title="The first reading has not arrived yet.">
-        <Text variant="small" tone="muted">
-          Waiting
-        </Text>
-      </span>
+      <Text variant="small" tone="muted" title="The first reading has not arrived yet.">
+        Waiting for the first reading
+      </Text>
     );
   }
   return (
-    <span title={whyHint(view.why)}>
-      <Text variant="small" tone="muted">
-        No stats
-      </Text>
-    </span>
+    <Text variant="small" tone="muted" title={whyHint(view.why)}>
+      {`No stats · ${whyShort(view.why)}`}
+    </Text>
   );
 }
 
@@ -230,7 +231,7 @@ export function ReadingReserve(props: {readonly which: ReadingPart}): JSX.Elemen
       return (
         <Row gap="space-2">
           {empty(PERCENT_WIDTH)}
-          <Text variant="small">16 GPUs</Text>
+          <Text variant="small">· 16 GPUs</Text>
         </Row>
       );
   }

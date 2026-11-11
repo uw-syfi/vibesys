@@ -6,6 +6,7 @@ import {
   ListEvalPlacesResponseSchema,
   OffersUnreadableReason,
 } from '@vibesys/orchestrator-proto';
+import fc from 'fast-check';
 import {
   failedOf,
   type MachineRow,
@@ -16,6 +17,7 @@ import {
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {richPlaces} from '../../testing/orchestrator/new-run-catalogue.js';
+import {MachinesFactsLine} from './machines-facts.js';
 import {type MachineStatsHost, MachinesScreen, type PlacesHost} from './machines-screen.js';
 
 installDom();
@@ -156,9 +158,9 @@ describe('the Machines page', () => {
   it('says what the readings and places wait for in the same rows, so nothing moves as they come', () => {
     const {screen} = open({rows: [live, refused]});
     expect(cells(screen.container)).toEqual([
-      ['machine', 'This machine', 'Live', 'Waiting', '', '', ''],
+      ['machine', 'This machine', 'Live', 'Waiting for the first reading', ''],
       ['sub', 'Waiting for job places', '', '', '', '', ''],
-      ['machine', 'host-b', 'Refused', 'Waiting', '', '', ''],
+      ['machine', 'host-b', 'Refused', 'Waiting for the first reading', ''],
       ['sub', 'Waiting for job places', '', '', '', '', ''],
     ]);
     screen.unmount();
@@ -171,7 +173,7 @@ describe('the Machines page', () => {
       places: {'ssh:host-b': failedOf(NOT_READ, 'host unreachable')},
     });
     const rows = cells(screen.container);
-    expect(rows[0]?.[3]).toBe('No stats');
+    expect(rows[0]?.[3]).toBe('No stats · not supported on this host');
     expect(rows[1]).toEqual(['sub', 'Job places not read', 'Not read', '', '', '', '']);
     const hint = screen.container.querySelector('.vs-chip[aria-description]');
     expect(hint?.getAttribute('aria-description')).toBe('host unreachable');
@@ -198,8 +200,55 @@ describe('the Machines page', () => {
 
   it('says in one line how many machines, how many are live, how many places and how many cannot be reached', () => {
     const {screen} = open({rows: [live, refused], places: {local: readOf(response)}});
-    expect(screen.container.querySelector('.vs-factline')?.textContent).toBe(
-      '2 machines·1 live·5 job places·1 unreachable·places not read on 1',
+    const facts = [...screen.container.querySelectorAll('.vs-fact')].map(each => each.textContent);
+    expect(facts).toEqual([
+      '2 machines',
+      '1 live',
+      '5 job places',
+      '1 place unreachable',
+      'job places not read on 1 machine',
+    ]);
+    screen.unmount();
+  });
+
+  it('keeps a space between every figure and its word, whatever the counts', () => {
+    fc.assert(
+      fc.property(fc.nat(30), fc.nat(30), fc.nat(30), (machines, live, places) => {
+        const facts = {machines, live, places, unreachable: machines, unread: live};
+        const screen = mount(<MachinesFactsLine facts={facts} />);
+        for (const fact of screen.container.querySelectorAll('.vs-fact')) {
+          expect(fact.textContent).not.toMatch(/\d[A-Za-z]/);
+          expect(fact.textContent).toMatch(/\d+ \S/);
+        }
+        screen.unmount();
+      }),
+      {numRuns: 20},
+    );
+  });
+
+  it('draws a place as a quiet chip when it is reachable and in colour only when something is wrong', () => {
+    const {screen} = open({places: {local: readOf(response)}});
+    const tones = new Map(
+      [...screen.container.querySelectorAll('.vs-chip')].map(chip => [
+        chip.textContent,
+        chip.getAttribute('data-tone'),
+      ]),
+    );
+    expect(tones.get('Reachable')).toBe('neutral');
+    expect(tones.get('Unreachable')).toBe('err');
+    screen.unmount();
+  });
+
+  it('sets its table in a card, so its first column is inset like the other dense tables', () => {
+    const {screen} = open();
+    expect(screen.container.querySelector('.vs-card table[aria-label="Machines"]')).not.toBeNull();
+    screen.unmount();
+  });
+
+  it('names each icon by what it acts on, for hover and assistive technology', () => {
+    const {screen} = open({rows: [live, refused]});
+    expect(screen.control('Refresh job places on host-b').getAttribute('aria-label')).toBe(
+      'Refresh job places on host-b',
     );
     screen.unmount();
   });
@@ -221,7 +270,7 @@ describe('the Machines page', () => {
 describe('Refresh of a machine’s places', () => {
   it('asks the host to probe again, and offers no editing', () => {
     const {screen, refreshed} = open({places: {local: readOf(response)}});
-    screen.press(screen.control('Refresh This machine'));
+    screen.press(screen.control('Refresh job places on This machine'));
     expect(refreshed).toEqual(['local']);
     expect(
       screen.container.querySelectorAll('table input, table select, table textarea'),
@@ -246,14 +295,16 @@ describe('Refresh of a machine’s places', () => {
 
   it('dims that machine’s places while the read the person asked for goes on, and swaps once to the answer', () => {
     const {screen, draw} = open({places: {local: readOf(response)}});
-    screen.press(screen.control('Refresh This machine'));
+    screen.press(screen.control('Refresh job places on This machine'));
     // The host's answer to the press is not in yet: nothing is dimmed before the read begins.
     expect(dimmed(screen.container)).toBe(0);
     screen.render(draw({local: readingOf(readOf(response))}));
     // Each place dims its name, its reach and its offers.
     expect(dimmed(screen.container)).toBe(5 * 3);
     expect(cells(screen.container)).toHaveLength(6);
-    expect(screen.control('Refresh This machine').getAttribute('aria-disabled')).toBe('true');
+    expect(screen.control('Refresh job places on This machine').getAttribute('aria-disabled')).toBe(
+      'true',
+    );
     const answer = create(ListEvalPlacesResponseSchema, {places: [notProbed]});
     screen.render(draw({local: readOf(answer)}));
     expect(dimmed(screen.container)).toBe(0);
@@ -265,7 +316,7 @@ describe('Refresh of a machine’s places', () => {
     const rows = [live, refused];
     const both = {local: readOf(response), 'ssh:host-b': readOf(response)};
     const {screen, draw} = open({rows, places: both});
-    screen.press(screen.control('Refresh This machine'));
+    screen.press(screen.control('Refresh job places on This machine'));
     screen.render(draw({...both, local: readingOf(readOf(response))}));
     expect(dimmed(screen.container)).toBe(5 * 3);
     screen.unmount();

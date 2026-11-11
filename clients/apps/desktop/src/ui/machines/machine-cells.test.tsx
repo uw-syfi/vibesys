@@ -9,13 +9,14 @@ import type {
   Section,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
-import {Reading, type ReadingPart} from './machine-cells.js';
+import {Reading, type ReadingPart, readingSpan} from './machine-cells.js';
 import {
   ABSENCE_CAUSES,
   absenceNote,
   MACHINE_CHIP_WHYS,
   machineWhyWord,
   whyHint,
+  whyShort,
 } from './machine-words.js';
 
 installDom();
@@ -64,19 +65,21 @@ describe('the cells of a machine row', () => {
     for (const cell of cells(null)) expect(cell.textContent).toBe('');
   });
 
-  it('say Waiting in the first cell only, while nothing has been read', () => {
+  it('say Waiting in the first cell only, which spans all three, while nothing has been read', () => {
+    expect(readingSpan({_tag: 'Waiting'})).toBe(3);
     const [cpu, mem, gpus] = cells({_tag: 'Waiting'});
-    expect(cpu?.textContent).toBe('Waiting');
+    expect(cpu?.textContent).toBe('Waiting for the first reading');
     expect(mem?.textContent).toBe('');
     expect(gpus?.textContent).toBe('');
   });
 
-  it('say No stats once in the first cell, with the reason on hover, for any why', () => {
+  it('say No stats and why in one line across the cells, with the longer account on hover, for any why', () => {
     const whys = fc.constantFrom(...MACHINE_CHIP_WHYS, 'disconnected' as const);
     fc.assert(
       fc.property(whys, why => {
         const [cpu, mem, gpus] = cells({_tag: 'Missing', why});
-        expect(cpu?.textContent).toBe('No stats');
+        expect(readingSpan({_tag: 'Missing', why})).toBe(3);
+        expect(cpu?.textContent).toBe(`No stats · ${whyShort(why)}`);
         expect(cpu?.querySelector('[title]')?.getAttribute('title')).toBe(whyHint(why));
         expect(mem?.textContent).toBe('');
         expect(gpus?.textContent).toBe('');
@@ -112,7 +115,10 @@ describe('the cells of a machine row', () => {
     const [, mem] = cells(view(sampleOf({memory: read(memory(15, 16))})));
     expect(mem?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('warn');
     const [, calm] = cells(view(sampleOf({memory: read(memory(4, 16))})));
-    expect(calm?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('ok');
+    // Load is one fill; green is not drawn for health, so it never means two things.
+    expect(calm?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('accent');
+    const [cpu] = cells(view(sampleOf({cpuPercent: read(99)})));
+    expect(cpu?.querySelector('.vs-meter')?.getAttribute('data-tone')).toBe('accent');
   });
 
   it('dim a stale reading and say why on hover, with no chip, for any why', () => {
@@ -136,7 +142,7 @@ describe('the cells of a machine row', () => {
     expect(gauges(gpus as HTMLElement)).toHaveLength(0);
   });
 
-  it('draw an unknown meter, never zero, for a section the host could not read, with its cause on hover', () => {
+  it('say unknown, quietly and with the cause on hover, never a bar, for a section the host could not read', () => {
     const causes = fc.constantFrom(...ABSENCE_CAUSES);
     fc.assert(
       fc.property(causes, cause => {
@@ -144,10 +150,9 @@ describe('the cells of a machine row', () => {
           sampleOf({cpuPercent: absent(cause), memory: absent(cause), gpus: absent(cause)}),
         );
         for (const cell of cells(v)) {
-          const [gauge] = gauges(cell);
-          expect(gauge?.getAttribute('role')).toBe('img');
-          expect(gauge?.getAttribute('aria-label')).toContain('unknown');
-          expect(cell.textContent).toBe('–');
+          expect(cell.textContent).toBe('unknown');
+          expect(gauges(cell)).toHaveLength(0);
+          expect(cell.querySelector('.vs-meter')).toBeNull();
           expect(cell.querySelector('[title]')?.getAttribute('title')).toContain(
             absenceNote(cause),
           );
@@ -155,6 +160,15 @@ describe('the cells of a machine row', () => {
       }),
       {numRuns: ABSENCE_CAUSES.length},
     );
+  });
+
+  it('say unknown for a GPU section that is missing and No GPUs for a machine with none, never alike', () => {
+    const missing = cells(view(sampleOf({gpus: absent('no-tool')})))[2];
+    const none = cells(view(sampleOf({gpus: read([])})))[2];
+    expect(missing?.textContent).toBe('unknown');
+    expect(none?.textContent).toBe('No GPUs');
+    expect(missing?.querySelector('.vs-meter')).toBeNull();
+    expect(none?.querySelector('.vs-meter')).toBeNull();
   });
 
   it('show one GPU as its own utilization, and many as their mean with how many there are', () => {
@@ -169,7 +183,9 @@ describe('the cells of a machine row', () => {
       ),
     )[2];
     expect(two && gauges(two).map(each => each.getAttribute('aria-valuetext'))).toEqual(['46%']);
-    expect(two?.textContent).toContain('2 GPUs');
+    expect(two?.textContent).toContain('· 2 GPUs');
+    // The count is set apart from the percent by its mark, so no two figures touch.
+    expect(two?.textContent).not.toMatch(/%\d/);
   });
 
   it('keep each GPU’s own utilization and memory on hover, one line each, for any count', () => {

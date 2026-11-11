@@ -1,28 +1,7 @@
-import {Fact, FactLine, Text} from '@vibesys/ui';
+import {CountedFact, FactLine} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {MachinesFacts} from '../../state/index.js';
-
-/** A count in the facts line's emphasis, with what it counts after it. */
-function Counted(props: {readonly count: number; readonly what: string}): JSX.Element {
-  return (
-    <Fact>
-      <Text variant="body-strong">{String(props.count)}</Text>{' '}
-      <Text variant="small" tone="muted">
-        {props.what}
-      </Text>
-    </Fact>
-  );
-}
-
-const Dot = (): JSX.Element => (
-  <Fact>
-    <Text variant="small" tone="muted">
-      ·
-    </Text>
-  </Fact>
-);
-
-const plural = (count: number, one: string, many: string): string => (count === 1 ? one : many);
+import {plural} from '../plain-words.js';
 
 /**
  * The page in one line: how many machines, how many are live, how many places jobs can run at and how
@@ -32,31 +11,24 @@ const plural = (count: number, one: string, many: string): string => (count === 
 export function MachinesFactsLine(props: {readonly facts: MachinesFacts}): JSX.Element {
   const {machines, live, places, unreachable, unread} = props.facts;
   return (
-    <FactLine>
-      <Counted count={machines} what={plural(machines, 'machine', 'machines')} />
-      <Dot />
-      <Counted count={live} what="live" />
+    <FactLine spaced>
+      <CountedFact figure={String(machines)} words={plural(machines, 'machine', 'machines')} />
+      <CountedFact figure={String(live)} words="live" />
       {places === null ? null : (
-        <>
-          <Dot />
-          <Counted count={places} what={plural(places, 'job place', 'job places')} />
-        </>
+        <CountedFact figure={String(places)} words={plural(places, 'job place', 'job places')} />
       )}
       {unreachable === 0 ? null : (
-        <>
-          <Dot />
-          <Counted count={unreachable} what="unreachable" />
-        </>
+        <CountedFact
+          figure={String(unreachable)}
+          words={plural(unreachable, 'place unreachable', 'places unreachable')}
+        />
       )}
       {unread === 0 ? null : (
-        <>
-          <Dot />
-          <Fact>
-            <Text variant="small" tone="muted">
-              {`places not read on ${unread}`}
-            </Text>
-          </Fact>
-        </>
+        <CountedFact
+          lead="job places not read on"
+          figure={String(unread)}
+          words={plural(unread, 'machine', 'machines')}
+        />
       )}
     </FactLine>
   );

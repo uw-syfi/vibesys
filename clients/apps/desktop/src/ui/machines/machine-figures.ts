@@ -1,26 +1,26 @@
 /** How a machine's readings are written in the table: short figures that keep their width. */
 import type {GpuReading, MemoryUse} from '../../state/index.js';
-import {formatFigure} from '../figures.js';
 
-/** A reading the host never made: distinct from a zero, which would claim one. */
-export const UNREADABLE = '–';
-/** Wide enough for every percent this topic sends (0 to 100, four significant figures). */
-export const PERCENT_WIDTH = 6;
-/** The width of the widest memory figure (`1.797 / 2 TiB`), so every row's figures end at one edge. */
-export const MEMORY_WIDTH = 14;
+/** The width of the widest percent (`100%`, `37.5%`), so every row's figures start after their bars alike. */
+export const PERCENT_WIDTH = 5;
+/** The width of a wide memory figure (`41.5 / 128 GiB`); a wider one only takes more room. */
+export const MEMORY_WIDTH = 15;
 /** A memory reading at or past this share of its total reads as hot. */
 export const HOT_SHARE = 0.9;
 
 const GIB = 1024 ** 3;
 const TIB = 1024 ** 4;
 
-export const percentFigure = (percent: number): string => `${formatFigure(percent)}%`;
+/** `value` with at most one decimal, and none when it is whole: `41`, `1.8`. */
+const short = (value: number): string => String(Number(value.toFixed(1)));
 
-/** `usedBytes` of `totalBytes`, in GiB, or TiB once the total reaches 1000 GiB. */
+export const percentFigure = (percent: number): string => `${short(percent)}%`;
+
+/** `usedBytes` of `totalBytes`, in GiB, or TiB once the total reaches 1000 GiB: one decimal at most in either. */
 export function memoryFigure(memory: MemoryUse): string {
   const inTib = memory.totalBytes >= 1000 * GIB;
   const unit = inTib ? TIB : GIB;
-  return `${formatFigure(memory.usedBytes / unit)} / ${formatFigure(memory.totalBytes / unit)} ${inTib ? 'TiB' : 'GiB'}`;
+  return `${short(memory.usedBytes / unit)} / ${short(memory.totalBytes / unit)} ${inTib ? 'TiB' : 'GiB'}`;
 }
 
 export const memoryShare = (memory: MemoryUse): number =>
