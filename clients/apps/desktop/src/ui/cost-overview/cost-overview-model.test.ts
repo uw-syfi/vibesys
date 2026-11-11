@@ -164,16 +164,17 @@ describe('the screen model of a host', () => {
     expect(short.ranges).toEqual([]);
   });
 
-  it('names a model by the id the host served, drawn as an id, and keeps the harness default in words', () => {
+  it('names a model by the id the host served, and keeps the harness default in words, every legend name in the code face', () => {
     const week = model(views.week);
     const names = week.chart?.legend.map(item => item.label) ?? [];
     expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
     expect(names).toContain('Codex default');
-    expect(week.chart?.legend.filter(item => item.mono).length).toBe(names.length - 1);
+    expect(week.chart?.legend.every(item => item.mono === true)).toBe(true);
     const opus = week.models.find(line => line.name === 'claude-opus-5-5');
-    expect(opus?.id).toBe(true);
     expect(opus?.title).toBe('claude-opus-5-5 on Claude Code');
-    expect(week.models.find(line => line.name === 'Codex default')?.id).toBe(false);
+    expect(week.models.find(line => line.name === 'Codex default')?.title).toBe(
+      'Codex default model',
+    );
   });
 
   it('puts every bucket at its own moment: bars grow in time, last as long as the host cut them, and the axis holds them all', () => {

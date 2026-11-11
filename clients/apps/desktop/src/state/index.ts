@@ -261,6 +261,7 @@ export {
   runAgents,
   unbrokenFrom,
 } from './orchestrator/views.js';
+export {workingByRole} from './orchestrator/working-by-role.js';
 export {
   type RepositoryAnswer,
   type RepositoryChecked,

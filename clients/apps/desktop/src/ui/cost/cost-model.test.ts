@@ -227,7 +227,7 @@ describe('the cost screen model', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
-  it('names a model by the id the host served, in the code face, and a default by its harness', () => {
+  it('names a model by the id the host served, and a default by its harness, every name in the code face', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
       'model-a',
       'model-b',
@@ -237,8 +237,13 @@ describe('the cost screen model', () => {
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
     expect(long.models[0]?.mono).toBe(true);
     expect(long.chart?.legend[0]?.mono).toBe(true);
+    // The harness's default is no id, but it stands in the same column and legend, so it reads alike.
     const own = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.at(-1);
-    expect(own?.mono).toBeUndefined();
+    expect(own?.name).toBe('Codex default');
+    expect(own?.mono).toBe(true);
+    const all = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
+    expect(all.models.every(row => row.mono === true)).toBe(true);
+    expect(all.chart?.legend.every(item => item.mono === true)).toBe(true);
   });
 
   it('gives a model a color that is its own: the same in every view, whoever else is on the page', () => {

@@ -7,7 +7,7 @@ import {useAtomMount, useAtomValue} from '@effect/atom-react';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
-import {hostStatusOf, staleForMs} from '../../state/index.js';
+import {hostStatusOf, staleForMs, workingByRole} from '../../state/index.js';
 import {ms} from '../../state/orchestrator/time.js';
 import {type CostOverviewHost, CostOverviewScreen} from '../cost-overview/index.js';
 import {useDisplayClock} from '../display-clock.js';
@@ -43,6 +43,7 @@ const hostsOf = (hosts: readonly ConnectedHost[]): Atom.Atom<readonly CostOvervi
             return startedMs === null ? [] : [[run.id, startedMs] as const];
           }),
         ),
+        working: workingByRole(data.summaries),
         feed,
         status: hostStatusOf({
           connection: get(session.connection.state),

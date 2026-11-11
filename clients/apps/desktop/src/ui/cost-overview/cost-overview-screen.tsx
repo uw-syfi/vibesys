@@ -1,4 +1,4 @@
-import type {RunStatus} from '@vibesys/orchestrator-proto';
+import type {AgentRole, RunStatus} from '@vibesys/orchestrator-proto';
 import {
   Button,
   Card,
@@ -31,21 +31,17 @@ import {
   type RunSortKey,
   type SpendRange,
 } from '../../state/index.js';
-import {FLOOR, formatAxisUsd} from '../cost/index.js';
+import {AgentTypeTable, type CostCell, FLOOR_HINT, floored, formatAxisUsd} from '../cost/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {
   type BudgetCell,
-  type CostCell,
   type CostOverviewModelWords,
-  FLOOR_HINT,
   type HostCostScreenModel,
   hostCostModel,
   type ModelLine,
   NO_VIEW,
   type RunLine,
-  type TokenCells,
   type TotalFigures,
-  type TypeLine,
   totalFigures,
   UNPRICED_FACT_HINT,
 } from './cost-overview-model.js';
@@ -70,6 +66,8 @@ export interface CostOverviewHost {
   readonly titles: Readonly<Record<string, string>>;
   /** When each run the client holds a card for began, by run id. */
   readonly started: Readonly<Record<string, number>>;
+  /** How many agents of each type are working now, from the runs' summaries the host served. */
+  readonly working: ReadonlyMap<AgentRole, number>;
 }
 
 function Problem(props: {
@@ -99,17 +97,6 @@ function Problem(props: {
 const CostText = (props: {readonly cost: CostCell}): JSX.Element => (
   <Text variant="code" {...(props.cost.hint === undefined ? {} : {title: props.cost.hint})}>
     {props.cost.text}
-  </Text>
-);
-
-/** Input tokens, with the cached share of them on hover where the table has no column for it. */
-const InputText = (props: {readonly tokens: TokenCells}): JSX.Element => (
-  <Text
-    variant="code"
-    tone="muted"
-    title={`${props.tokens.cached} of the input was read from a cache`}
-  >
-    {props.tokens.input}
   </Text>
 );
 
@@ -229,42 +216,13 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
 
 const INPUT_HINT = 'Input tokens: fresh input, cache reads and cache writes';
 
-const TYPE_COLUMNS: readonly TableColumn<TypeLine>[] = [
-  {key: 'type', header: 'Type', lead: true, clip: line => line.name, cell: line => line.name},
-  {
-    key: 'cost',
-    header: 'Cost',
-    mono: true,
-    align: 'end',
-    cell: line => <CostText cost={line.cost} />,
-  },
-  {key: 'agents', header: 'Agents', mono: true, align: 'end', cell: line => line.agents},
-  {key: 'turns', header: 'Turns', mono: true, align: 'end', cell: line => line.turns},
-  {
-    key: 'input',
-    header: 'Input',
-    hint: INPUT_HINT,
-    mono: true,
-    align: 'end',
-    cell: line => <InputText tokens={line.tokens} />,
-  },
-  {
-    key: 'output',
-    header: 'Output',
-    hint: 'Output tokens',
-    mono: true,
-    align: 'end',
-    cell: line => line.tokens.output,
-  },
-];
-
 /** A model's name, in the code face when it is an id, after the swatch of its color on the chart. */
 function ModelName(props: {readonly line: ModelLine}): JSX.Element {
   const {line} = props;
   return (
     <Row gap="space-2">
       {line.series === null ? <Swatch muted /> : <Swatch series={line.series} />}
-      <Text variant={line.id ? 'code' : 'body'}>{line.name}</Text>
+      <Text variant="code">{line.name}</Text>
     </Row>
   );
 }
@@ -428,13 +386,9 @@ function SplitCards(props: {
     <>
       <Card dense section="By agent type">
         <Stack gap="space-3">
-          <Table
+          <AgentTypeTable
             label={`Cost by agent type on ${host.label}`}
-            dense
-            middle
-            columns={TYPE_COLUMNS}
             rows={model.types}
-            rowKey={line => line.key}
             empty={missingWords(model, 'No agents')}
           />
           {model.unpricedNote === null ? null : (
@@ -474,6 +428,7 @@ function HostPanels(props: {
       : hostCostModel(host.key, host.view, words, {
           titles: host.titles,
           started: host.started,
+          working: host.working,
           range,
           sort,
         });
@@ -508,8 +463,7 @@ function Facts(props: {
   readonly status: HostStatus | undefined;
 }): JSX.Element {
   const {totals} = props;
-  const floored = (figure: string, floor: boolean): string =>
-    floor ? `${FLOOR.trim()}\u00a0${figure}` : figure;
+  const marked = (figure: string, floor: boolean): string => (floor ? floored(figure) : figure);
   return (
     <FactLine spaced>
       {props.status === undefined ? null : <HostStatusChip status={props.status} />}
@@ -517,14 +471,14 @@ function Facts(props: {
         <MutedFact text={totals.complete ? 'nothing spent yet' : 'reading cost'} />
       ) : (
         <CountedFact
-          figure={floored(totals.figure, totals.floor)}
+          figure={marked(totals.figure, totals.floor)}
           words="spent"
           {...(totals.floor ? {hint: FLOOR_HINT} : {})}
         />
       )}
       {totals.lastHour === null ? null : (
         <CountedFact
-          figure={floored(totals.lastHour, totals.lastHourFloor)}
+          figure={marked(totals.lastHour, totals.lastHourFloor)}
           words="in the last hour"
           {...(totals.lastHourFloor ? {hint: FLOOR_HINT} : {})}
         />

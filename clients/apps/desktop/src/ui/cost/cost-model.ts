@@ -7,7 +7,6 @@
  */
 import type {BarColumn, BarMark, BarRow, StackedBar, SwatchItem} from '@vibesys/ui';
 import type {CostModel, CostUsage, CostView, SpendSeriesView} from '../../state/index.js';
-import {UNKNOWN} from '../plain-words.js';
 import {
   type CostWords,
   formatCount,
@@ -15,11 +14,9 @@ import {
   formatRate,
   formatTokens,
   formatUsd,
-  isModelId,
   labelStride,
   modelKey,
   modelName,
-  NOT_REPORTED,
   type Precision,
   precisionOf,
   tokensOrNothing,
@@ -78,45 +75,6 @@ export interface CostScreenModel {
   readonly models: readonly BarRow<3>[];
   /** By kind of token: tokens. */
   readonly kinds: readonly BarRow<1>[];
-}
-
-/**
- * A usage's tokens as principle 19 writes them: the input apart from the output, the input with the
- * share of it that was read from a cache, and a kind nobody reported as `unknown`, never zero. The
- * host's kinds do not overlap (`total_tokens` is their sum), so the input is the sum of its three
- * kinds: fresh input, cache reads and cache writes. Tokens are counts, not costs: this sums counts
- * the host served and prices nothing. Before a turn has finished every part is `—`, not `unknown`.
- */
-export interface TokenSplit {
-  readonly input: string;
-  /** The cache reads' share of the input, in whole percent. */
-  readonly cached: string;
-  readonly output: string;
-}
-
-export function tokenSplit(usage: CostUsage, turns: number): TokenSplit {
-  // No turn has finished: there is nothing to report yet, which is not the same as nobody reporting.
-  if (turns === 0) return {input: NOT_REPORTED, cached: NOT_REPORTED, output: NOT_REPORTED};
-  const kinds = [usage.inputTokens, usage.cacheReadTokens, usage.cacheCreationTokens].filter(
-    (tokens): tokens is number => tokens !== null,
-  );
-  const input = kinds.length === 0 ? null : kinds.reduce((sum, tokens) => sum + tokens, 0);
-  const share =
-    input === null || input === 0 || usage.cacheReadTokens === null
-      ? null
-      : usage.cacheReadTokens / input;
-  return {
-    input: input === null ? UNKNOWN : formatTokens(input),
-    cached:
-      usage.cacheReadTokens === null
-        ? UNKNOWN
-        : share === null
-          ? NOT_REPORTED
-          : share > 0 && share < 0.005
-            ? '<1%'
-            : `${Math.round(share * 100)}%`,
-    output: usage.outputTokens === null ? UNKNOWN : formatTokens(usage.outputTokens),
-  };
 }
 
 /** What a row says is missing from its cost: all of it, or the turns that left it a floor. */
@@ -244,7 +202,7 @@ export function spendChart(
           ? `${modelName(cost.model, words)} (unpriced)`
           : modelName(cost.model, words),
       ...(cost.usage.costUsd === null ? {muted: true} : {series: slot(cost.model)}),
-      ...(isModelId(cost.model) ? {mono: true} : {}),
+      mono: true,
     }),
   );
   const fromMs = buckets[0]?.startMs ?? view.series.startMs;
@@ -301,7 +259,7 @@ const modelRows = (
     (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
-      ...(isModelId(cost.model) ? {mono: true} : {}),
+      mono: true,
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),

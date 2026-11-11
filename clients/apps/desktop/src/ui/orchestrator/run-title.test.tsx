@@ -221,6 +221,7 @@ describe('the Cost page by run', () => {
               view,
               titles,
               started: {},
+              working: new Map(),
             },
           ]}
           words={COST_OVERVIEW_WORDS}

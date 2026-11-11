@@ -174,17 +174,14 @@ export function bucketWords(bucketMs: number): string {
 }
 
 /**
- * The name of a model: the id the host served, an identifier drawn in the code face wherever it
- * appears (`isModelId`). No source of display names for models exists (they are agentshim's and the
- * host does not serve them), so none is made up here. A harness's own default model has no id: it is
- * the harness's name and the word `default`.
+ * The name of a model: the id the host served. Every model label is drawn in the code face wherever it
+ * appears, the harness's default included, so a column or a legend of them reads alike. No source of
+ * display names for models exists (they are agentshim's and the host does not serve them), so none is
+ * made up here. A harness's own default model has no id: it is the harness's name and the word `default`.
  */
 export function modelName(model: CostModel, words: CostWords): string {
   return model.model === '' ? `${words.harness(model.harness)} default` : model.model;
 }
-
-/** Whether the model is named by an id, which is drawn in the code face, and not by words. */
-export const isModelId = (model: CostModel): boolean => model.model !== '';
 
 /** What identifies a model across views of a run. */
 export const modelKey = (model: CostModel): string => `${model.harness}/${model.model}`;

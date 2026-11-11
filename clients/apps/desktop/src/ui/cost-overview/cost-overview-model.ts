@@ -9,10 +9,9 @@
  *
  * A figure nobody reported is `unknown` (or `—` where there is nothing yet to report), never a zero.
  */
-import type {RunStatus} from '@vibesys/orchestrator-proto';
+import type {AgentRole, RunStatus} from '@vibesys/orchestrator-proto';
 import {
   bucketsInRange,
-  type CostUsage,
   type HostCostView,
   type RunSort,
   rangeOf,
@@ -21,12 +20,15 @@ import {
   sortRuns,
 } from '../../state/index.js';
 import {
+  type AgentTypeLine,
+  agentTypeLine,
   bucketWords,
+  type CostCell,
   type CostWords,
+  costCell,
   FLOOR,
   formatCount,
   formatUsd,
-  isModelId,
   modelKey,
   modelName,
   NOT_REPORTED,
@@ -39,16 +41,10 @@ import {
   tokenSplit,
   usdOrNothing,
 } from '../cost/index.js';
-import {plural, UNKNOWN} from '../plain-words.js';
+import {plural} from '../plain-words.js';
 
 /** The tokens of a row, split as principle 19 writes them. */
-export type TokenCells = TokenSplit;
-
-/** A cost as a cell writes it, and what hovering it says of the turns that have no price. */
-export interface CostCell {
-  readonly text: string;
-  readonly hint: string | undefined;
-}
+type TokenCells = TokenSplit;
 
 /** One row of a host's runs by cost: a run, or the runs the host's list leaves out, summed. */
 export interface RunLine {
@@ -77,22 +73,10 @@ export interface BudgetCell {
   readonly hint: string;
 }
 
-/** One row of the host's cost by type of agent. */
-export interface TypeLine {
-  readonly key: string;
-  readonly name: string;
-  readonly agents: string;
-  readonly turns: string;
-  readonly tokens: TokenCells;
-  readonly cost: CostCell;
-}
-
 /** One row of the host's cost by model. */
 export interface ModelLine {
   readonly key: string;
   readonly name: string;
-  /** The name is an id (drawn in the code face), not words. */
-  readonly id: boolean;
   /** The palette slot of its bars; null for a model with no priced turn, which has none. */
   readonly series: number | null;
   /** The model's id and harness, whole, for the pointer. */
@@ -141,7 +125,7 @@ export interface HostCostScreenModel {
   /** The range the chart shows, which is the whole span whenever the one chosen is not offered. */
   readonly range: SpendRange;
   readonly runs: readonly RunLine[];
-  readonly types: readonly TypeLine[];
+  readonly types: readonly AgentTypeLine[];
   readonly models: readonly ModelLine[];
   /** What a `≥` in the lists means, said once; null while no turn is unpriced. */
   readonly unpricedNote: string | null;
@@ -158,33 +142,6 @@ export interface CostOverviewModelWords extends CostWords {
 }
 
 const RANGE_LABELS: Readonly<Record<SpendRange, string>> = {'1d': '1d', '7d': '7d', all: 'All'};
-
-const unpricedHint = (turns: number): string =>
-  `${formatCount(turns)} ${plural(turns, 'turn', 'turns')} reported tokens and no price. ` +
-  'Their tokens are counted and their cost is not, so the cost is at least this.';
-
-/**
- * A cost as a cell writes it: the figure, with `≥` while unpriced turns are behind it (and the
- * count of them on hover); `unknown` where turns ran and none was priced, `—` where none ran.
- */
-function costCell(
-  usage: CostUsage,
-  turns: number,
-  unpricedTurns: number,
-  precision: Precision,
-): CostCell {
-  const usd = usdOrNothing(usage.costUsd, precision);
-  if (usd === null) {
-    return turns === 0
-      ? {text: NOT_REPORTED, hint: undefined}
-      : {text: UNKNOWN, hint: 'No turn reported a price.'};
-  }
-  // The mark and the figure are one word to the eye: a no-break space, so it never reads as a
-  // comparison with the cell beside it.
-  return unpricedTurns > 0
-    ? {text: `${FLOOR.trim()}\u00a0${usd}`, hint: unpricedHint(unpricedTurns)}
-    : {text: usd, hint: undefined};
-}
 
 /** A part of the whole, in whole percent; `<1%` for a part that would round to nothing. */
 function shareOf(part: number | null, whole: number | null): string {
@@ -225,10 +182,6 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
     complete: views.length === hostCount,
   };
 }
-
-/** What a `≥` on a figure of the facts line says on hover. */
-export const FLOOR_HINT =
-  'At least this much: turns that reported tokens and no price are not in it.';
 
 /** What the facts line's unpriced fact says on hover. */
 export const UNPRICED_FACT_HINT =
@@ -312,6 +265,8 @@ export function hostCostModel(
     readonly started?: Readonly<Record<string, number>>;
     readonly range: SpendRange;
     readonly sort: RunSort;
+    /** How many agents of each type are working now, from the runs' summaries the host served. */
+    readonly working?: ReadonlyMap<AgentRole, number>;
   },
 ): HostCostScreenModel {
   const titles = choices.titles ?? {};
@@ -359,18 +314,19 @@ export function hostCostModel(
         ? null
         : `${FLOOR.trim()} the cost leaves out ${formatCount(view.unpricedTurns)} ${plural(view.unpricedTurns, 'turn', 'turns')} with tokens and no price`,
     runs: lines,
-    types: view.roles.map(role => ({
-      key: `role-${role.role}`,
-      name: words.role(role.role),
-      agents: formatCount(role.agents),
-      turns: formatCount(role.turns),
-      tokens: tokenSplit(role.usage, role.turns),
-      cost: costCell(role.usage, role.turns, role.unpricedTurns, precision),
-    })),
+    types: view.roles.map(role =>
+      agentTypeLine({
+        key: `role-${role.role}`,
+        name: words.role(role.role),
+        running: choices.working?.get(role.role) ?? 0,
+        total: role.agents,
+        spend: {turns: role.turns, unpricedTurns: role.unpricedTurns, usage: role.usage},
+        precision,
+      }),
+    ),
     models: view.models.map(cost => ({
       key: `${cost.model.harness}/${cost.model.model}`,
       name: modelName(cost.model, words),
-      id: isModelId(cost.model),
       series: cost.usage.costUsd === null ? null : (slots.get(modelKey(cost.model)) ?? 0),
       title:
         cost.model.model === ''

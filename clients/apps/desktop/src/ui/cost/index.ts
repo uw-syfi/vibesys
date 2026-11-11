@@ -5,16 +5,11 @@
  * a run's cost in brief with the same figures (`usdOrNothing`, `formatTokens`, `formatCount`).
  */
 
-export {AgentTypeTable, agentTypeLine} from './agent-types.js';
-export {FLOOR_HINT, floored} from './cost-cell.js';
-export {
-  type SpendChart,
-  slotsOf,
-  spendChart,
-  type TokenSplit,
-  tokenSplit,
-} from './cost-model.js';
+export {type AgentTypeLine, AgentTypeTable, agentTypeLine} from './agent-types.js';
+export {type CostCell, costCell, FLOOR_HINT, floored} from './cost-cell.js';
+export {type SpendChart, slotsOf, spendChart} from './cost-model.js';
 export {CostScreen} from './cost-screen.js';
+export {type TokenSplit, tokenSplit} from './token-split.js';
 export {
   bucketWords,
   type CostWords,
@@ -22,7 +17,6 @@ export {
   formatAxisUsd,
   formatCount,
   formatUsd,
-  isModelId,
   modelKey,
   modelName,
   NOT_REPORTED,

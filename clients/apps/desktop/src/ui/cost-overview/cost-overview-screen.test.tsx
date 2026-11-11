@@ -1,4 +1,5 @@
 import {describe, expect, it} from '@effect/vitest';
+import type {AgentRole} from '@vibesys/orchestrator-proto';
 import type {JSX} from 'react';
 import type {HostCostView, HostStatus} from '../../state/index.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
@@ -18,6 +19,7 @@ function page(
   view: HostCostView | undefined,
   opened: string[] = [],
   status: HostStatus = LIVE,
+  working: ReadonlyMap<AgentRole, number> = new Map(),
 ): JSX.Element {
   return (
     <CostOverviewScreen
@@ -30,6 +32,7 @@ function page(
           view,
           titles: {},
           started: {},
+          working,
         },
       ]}
       words={COST_OVERVIEW_WORDS}
@@ -97,6 +100,31 @@ describe('the Cost page of one host', () => {
     );
     expect(unpriced?.getAttribute('title')).toMatch(/tokens and no price/);
     expect(screen.text()).not.toContain('Last hour');
+    screen.unmount();
+  });
+
+  it('draws its agents by type in the columns the run report uses, with how many are working of how many there have been', () => {
+    const view = views.short;
+    const [first] = view.roles;
+    if (first === undefined) throw new Error('the case has a type');
+    const screen = mount(page(view, [], LIVE, new Map([[first.role, 1]])));
+    const table = screen.container.querySelector(
+      'table[aria-label="Cost by agent type on Host A"]',
+    );
+    expect([...(table?.querySelectorAll('thead th') ?? [])].map(cell => cell.textContent)).toEqual([
+      'Type',
+      'Running',
+      'Turns',
+      'Input',
+      'Output',
+      'Cost',
+    ]);
+    const rows = [...(table?.querySelectorAll('tbody tr') ?? [])].map(row =>
+      [...row.children].map(cell => cell.textContent),
+    );
+    expect(rows.map(cells => cells[1])).toEqual(
+      view.roles.map((role, at) => `${at === 0 ? 1 : 0} of ${role.agents}`),
+    );
     screen.unmount();
   });
 

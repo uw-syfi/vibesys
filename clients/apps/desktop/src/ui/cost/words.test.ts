@@ -9,7 +9,6 @@ import {
   formatRate,
   formatTokens,
   formatUsd,
-  isModelId,
   labelStride,
   modelName,
   type Precision,
@@ -143,13 +142,11 @@ describe('which buckets are labelled', () => {
 describe('naming a model', () => {
   const words = {harness: () => 'Codex'};
 
-  it('is the id the host served, drawn as an id, and for a harness default the harness and the word default', () => {
+  it('is the id the host served, and for a harness default the harness and the word default', () => {
     const named = {harness: 1, model: 'claude-opus-5-5'};
     const own = {harness: 1, model: ''};
     expect(modelName(named, words as never)).toBe('claude-opus-5-5');
-    expect(isModelId(named)).toBe(true);
     expect(modelName(own, words as never)).toBe('Codex default');
-    expect(isModelId(own)).toBe(false);
   });
 });
 
