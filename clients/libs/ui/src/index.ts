@@ -203,7 +203,10 @@ export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {type AreaLayer, StackedArea} from './components/stacked-area.js';
 export {
   type BarMark,
+  type BarPlace,
   type BarSegment,
+  type BarTimeAxis,
+  placeBars,
   type StackedBar,
   StackedBars,
 } from './components/stacked-bars.js';
