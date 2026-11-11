@@ -37,13 +37,15 @@ import {type CallMetadata, openSession} from './grpc-session.js';
 const SERVICES = [HostService, OrchestratorService, HostControlService];
 
 /**
- * The methods the window may call: the handshake, the host's `Subscribe` (the app reads the host's
- * machine stats through it), every orchestrator method, and the host's `Identify`, which says why a
- * host does not serve. Never `Stop`: the app does not end hosts.
+ * The methods the window may call: the handshake, the host's latest-value `Subscribe`, its
+ * `Skeleton` plus ordered `Tail` run detail, every orchestrator method, and the host's `Identify`,
+ * which says why a host does not serve. Never `Stop`: the app does not end hosts.
  */
 const ALLOWED: ReadonlySet<string> = new Set([
   HELLO_METHOD,
   `/${HostService.typeName}/${HostService.method.subscribe.name}`,
+  `/${HostService.typeName}/${HostService.method.skeleton.name}`,
+  `/${HostService.typeName}/${HostService.method.tail.name}`,
   ...OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
   `/${HostControlService.typeName}/${HostControlService.method.identify.name}`,
 ]);

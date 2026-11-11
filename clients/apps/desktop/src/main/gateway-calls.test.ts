@@ -9,8 +9,12 @@ import {
 import {
   DesktopRefusal,
   HostService,
+  SkeletonRequestSchema,
+  SkeletonResponseSchema,
   SubscribeRequestSchema,
   SubscribeResponseSchema,
+  TailRequestSchema,
+  TailResponseSchema,
 } from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -35,6 +39,8 @@ const request = toBinary(
 const reply = toBinary(ListItemsResponseSchema, create(ListItemsResponseSchema, {page: {}}));
 const hostMethod = (name: string) => `/${HostService.typeName}/${name}`;
 const SUBSCRIBE = hostMethod(HostService.method.subscribe.name);
+const SKELETON = hostMethod(HostService.method.skeleton.name);
+const TAIL = hostMethod(HostService.method.tail.name);
 
 /** A world of fake gateways, one per host, and a record of the dials. */
 function world(options: {failing?: ReadonlySet<HostKey>} = {}) {
@@ -223,7 +229,12 @@ describe('gateway calls', () => {
         w.peer(HOST_A).calls[0]?.end();
         yield* Fiber.join(stream);
         expect(heard).toEqual([frame]);
-        const used = new Set([HostService.method.hello.name, HostService.method.subscribe.name]);
+        const used = new Set([
+          HostService.method.hello.name,
+          HostService.method.subscribe.name,
+          HostService.method.skeleton.name,
+          HostService.method.tail.name,
+        ]);
         const unused = HostService.methods.filter(method => !used.has(method.name));
         expect(unused).not.toEqual([]);
         for (const method of unused) {
@@ -240,15 +251,54 @@ describe('gateway calls', () => {
       }),
   );
 
+  it.effect('forwards validated Skeleton and Tail run-detail calls', () =>
+    Effect.gen(function* () {
+      const w = world();
+      const {made, scope} = yield* calls(w);
+      const skeletonRequest = toBinary(
+        SkeletonRequestSchema,
+        create(SkeletonRequestSchema, {runId: 'run-1'}),
+      );
+      const skeletonReply = toBinary(
+        SkeletonResponseSchema,
+        create(SkeletonResponseSchema, {committedSeq: 0n, nextSeq: 1n, complete: true}),
+      );
+      const loading = yield* Effect.forkChild(made.unary(HOST_A, SKELETON, skeletonRequest));
+      yield* untilTrue(() => w.peer(HOST_A).calls.length === 1);
+      expect(w.peer(HOST_A).calls[0]?.method).toBe(SKELETON);
+      w.peer(HOST_A).calls[0]?.send(skeletonReply);
+      w.peer(HOST_A).calls[0]?.end();
+      expect(yield* Fiber.join(loading)).toEqual(skeletonReply);
+
+      const tailRequest = toBinary(
+        TailRequestSchema,
+        create(TailRequestSchema, {runId: 'run-1', fromSeq: 1n}),
+      );
+      const tailReply = toBinary(
+        TailResponseSchema,
+        create(TailResponseSchema, {records: [Uint8Array.of(1)], throughSeq: 1n}),
+      );
+      const heard: Uint8Array[] = [];
+      const following = yield* Effect.forkChild(
+        made.stream(HOST_A, TAIL, tailRequest, bytes => heard.push(bytes)),
+      );
+      yield* untilTrue(() => w.peer(HOST_A).calls.length === 2);
+      expect(w.peer(HOST_A).calls[1]?.method).toBe(TAIL);
+      w.peer(HOST_A).calls[1]?.send(tailReply);
+      w.peer(HOST_A).calls[1]?.end();
+      yield* Fiber.join(following);
+      expect(heard).toEqual([tailReply]);
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
   it.effect(
     "refuses a method outside the app's, and a payload its schema rejects, before dialing",
     () =>
       Effect.gen(function* () {
         const w = world();
         const {made, scope} = yield* calls(w);
-        const unknown = yield* Effect.flip(
-          made.unary(HOST_A, '/vibesys.host.v1.HostService/Tail', request),
-        );
+        const unknown = yield* Effect.flip(made.unary(HOST_A, hostMethod('Stop'), request));
         expect(unknown).toMatchObject({
           _tag: 'GatewayRefused',
           refusal: DesktopRefusal.METHOD_NOT_AVAILABLE,
