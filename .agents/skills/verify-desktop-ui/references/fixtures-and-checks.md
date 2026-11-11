@@ -31,6 +31,21 @@ week case's lead report is very long, with an unbroken path in it, and some of i
 very long: the cut text, the ellipses and the "Read the whole report" link are on screen there. The
 failed case's report is short with an empty field; the started case has none.
 
+## The three Machines worlds
+
+The Machines page is one table (a row for each machine, its places beneath it), so it has three named
+worlds (`machine-cases.ts` in the desktop app's `testing` folder). Each names the hosts it shows,
+replaces any `host` parameter, and is opened by the Machines entry of the sidebar:
+
+| World | Address | What it is |
+| --- | --- | --- |
+| One machine | `fixture.html?machines=one` | This machine, live, with CPU, memory and two GPUs, and four places (one unreachable). |
+| Several | `fixture.html?machines=several` | Five machines: live with stats, live with eight GPUs, reconnecting (its link drops after its first sample, so its readings dim), refused (no host program), and one with a 70-character alias whose GPU section has no tool; with places reachable and not, and one machine whose places could not be read. |
+| Unsupported | `fixture.html?machines=unsupported` | This machine, live, whose host refuses the stats topic: `No stats` with the reason on hover. |
+
+Check each at windows of 1000, 1440 and 1920. Add machine opens its input; the fixture refuses the
+add and the remove in words, because the hosts shown are fixed by the address.
+
 ## Add a case
 
 Add the state to the scenario generator in the `testing` folder's orchestrator Fakes, not to the

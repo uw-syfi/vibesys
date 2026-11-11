@@ -3,7 +3,7 @@
  * knows no service: a test, or a domain's own recordings, decide what the frames mean. Time is the
  * ambient clock, so a test under `TestClock` decides when each step happens.
  */
-import type {DesktopLinkProblem} from '@vibesys/proto';
+import type {DesktopLinkProblem, DesktopRefusal} from '@vibesys/proto';
 import * as Cause from 'effect/Cause';
 import * as Deferred from 'effect/Deferred';
 import type * as Duration from 'effect/Duration';
@@ -25,6 +25,7 @@ export type Step =
         readonly message?: string;
         readonly status?: number;
         readonly linkProblem?: DesktopLinkProblem;
+        readonly refusal?: DesktopRefusal;
       };
     }
   /** End a stream cleanly. */
@@ -79,15 +80,18 @@ const endedBy = ({
   message,
   status,
   linkProblem,
+  refusal,
 }: {
   message?: string;
   status?: number;
   linkProblem?: DesktopLinkProblem;
+  refusal?: DesktopRefusal;
 }): CallEnded =>
   new CallEnded({
     message: message ?? '',
     ...(status === undefined ? {} : {status}),
     ...(linkProblem === undefined ? {} : {linkProblem}),
+    ...(refusal === undefined ? {} : {refusal}),
   });
 
 /** Where a played step sends its effect; `false` from `frame` stops the playback. */
