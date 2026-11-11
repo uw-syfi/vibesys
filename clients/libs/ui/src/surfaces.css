@@ -350,6 +350,12 @@
   max-width: 0;
   width: 100%;
 }
+/* A dense table sits in a narrow column as well as a wide one, so its name column keeps room for a
+   short name and no more: the figures beside it must not push the table wider than its box (a
+   five-column split of cost in a 374 px card does not fit with a name column of two steps). */
+.vs-table[data-dense] td[data-lead] {
+  min-width: calc(var(--space-8) * 1.5);
+}
 .vs-table[data-dense] td[data-clip]:not([data-lead]) {
   /* A name that is not the row's own title gives way early, so the title has the room. */
   max-width: calc(var(--space-8) * 3.75);

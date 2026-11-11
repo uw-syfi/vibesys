@@ -22,6 +22,23 @@
 .vs-bars[data-size="tall"] .vs-bars-plot {
   height: calc(var(--space-8) * 4);
 }
+.vs-bars[data-size="compact"] .vs-bars-plot {
+  height: calc(var(--space-8) * 3 + var(--space-4));
+}
+/* A compact chart is one panel among many and fills its panel: each bar sits in an equal slot of the
+   plot (so the labels under the slots line up), and a bar is never wider than a bar, centred in its
+   slot, so two bars are two bars in a plot as wide as the panel, not two slabs. */
+.vs-bars[data-size="compact"] .vs-bars-plot,
+.vs-bars[data-size="compact"] .vs-bars-marks {
+  max-width: none;
+}
+.vs-bars[data-size="compact"] .vs-bars-bar {
+  align-items: center;
+}
+.vs-bars[data-size="compact"] .vs-bars-segment {
+  width: 100%;
+  max-width: calc(var(--space-8) + var(--space-5));
+}
 /* A chart with a value axis or labelled bars: the axis figures in a column of their own, and the
    plot, the labels and the two ends of the axis all in the column beside it, so they share its
    edges. */

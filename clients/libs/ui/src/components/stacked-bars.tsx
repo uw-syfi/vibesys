@@ -91,8 +91,11 @@ export function StackedBars(props: {
   readonly to?: string;
   readonly valueFormat?: (value: number, step: number) => string;
   readonly marks?: readonly BarMark[];
-  /** The plot's height: the default, or `tall` for a chart that is the point of its screen. */
-  readonly size?: 'tall';
+  /**
+   * The plot's height: the default, `tall` for a chart that is the point of its screen, or `compact`
+   * for one panel among many (about 180 px with its labels).
+   */
+  readonly size?: 'tall' | 'compact';
 }): JSX.Element {
   const tallest = Math.max(0, ...props.bars.map(bar => bar.total));
   const format = props.valueFormat;
