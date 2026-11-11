@@ -4,6 +4,9 @@
  * vocabulary comes in as `CostWords`; nothing here imports another feature. The run report writes
  * a run's cost in brief with the same figures (`usdOrNothing`, `formatTokens`, `formatCount`).
  */
+
+export {AgentTypeTable, agentTypeLine} from './agent-types.js';
+export {FLOOR_HINT, floored} from './cost-cell.js';
 export {
   type CostSplits,
   costSplits,
@@ -17,7 +20,6 @@ export {
   FLOOR,
   formatCount,
   formatRate,
-  formatTokens,
   NOT_REPORTED,
   precisionOf,
   usdOrNothing,

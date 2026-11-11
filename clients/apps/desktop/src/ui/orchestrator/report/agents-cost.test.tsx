@@ -35,6 +35,7 @@ function tableOf(
       retry={() => undefined}
       openAgents={() => undefined}
       open={() => undefined}
+      runOver={false}
     />,
   );
   const table = screen.container.querySelector('table');
@@ -64,15 +65,17 @@ describe('the agents and cost panel', () => {
     );
   });
 
-  it('shows dollars, or a dash for a price never reported, under Cost, counts under Tokens, and who is working under Running', () => {
+  it('shows dollars, unknown for a price never reported, under Cost, counts under Input and Output, and who is working under Running', () => {
     const view = {...PRICED_AND_UNPRICED};
     const table = tableOf(view, stripOf(view));
     const at = (header: string): number => table.headers.indexOf(header);
-    expect(table.headers).toEqual(['Type', 'Running', 'Turns', 'Tokens', 'Cost']);
+    expect(table.headers).toEqual(['Type', 'Running', 'Turns', 'Input', 'Output', 'Cost']);
     expect(table.rows.length).toBeGreaterThan(0);
     for (const cells of table.rows) {
-      expect(cells[at('Cost')]).toMatch(/^(≥\s)?(\$[\d,.]+|—)$/);
-      expect(cells[at('Tokens')]).toMatch(/^[\d.,]+[kKMBT]?$/);
+      expect(cells[at('Cost')]).toMatch(/^(≥\s)?(\$[\d,.]+|unknown|—)$/);
+      // Principle 19: input and output apart, and a part nobody reported is unknown, never zero.
+      expect(cells[at('Input')]).toMatch(/^([\d.,]+[kKMBT]?|unknown|—)$/);
+      expect(cells[at('Output')]).toMatch(/^([\d.,]+[kKMBT]?|unknown|—)$/);
       expect(cells[at('Running')]).toMatch(/^\d+ of \d+$/);
     }
   });
@@ -81,13 +84,31 @@ describe('the agents and cost panel', () => {
     const view = {...PRICED_AND_UNPRICED};
     const table = tableOf(undefined, stripOf(view));
     expect(table.rows).toHaveLength(view.roles.length);
-    for (const cells of table.rows) expect(cells.slice(2)).toEqual(['—', '—', '—']);
+    for (const cells of table.rows) expect(cells.slice(2)).toEqual(['—', '—', '—', '—']);
     expect(table.text).toContain('Reading cost');
   });
 
   it('says one line when there is no agent, under the same headers', () => {
     const table = tableOf(undefined, {types: [], total: 0, running: 0});
-    expect(table.headers).toEqual(['Type', 'Running', 'Turns', 'Tokens', 'Cost']);
+    expect(table.headers).toEqual(['Type', 'Running', 'Turns', 'Input', 'Output', 'Cost']);
     expect(table.rows).toEqual([['No agents yet']]);
+  });
+});
+
+describe('the agents and cost panel of a run that is over', () => {
+  it('says there is no agent, with no "yet" to promise one', () => {
+    const screen = mount(
+      <AgentsAndCost
+        agents={{types: [], total: 0, running: 0}}
+        cost={undefined}
+        feed={live}
+        retry={() => undefined}
+        openAgents={() => undefined}
+        open={() => undefined}
+        runOver
+      />,
+    );
+    expect(screen.container.querySelector('tbody')?.textContent).toBe('No agents');
+    screen.unmount();
   });
 });

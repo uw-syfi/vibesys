@@ -14,8 +14,8 @@ export const VERDICT_WORDS = {
 } as const satisfies Record<Verdict, string>;
 
 export const VERDICT_TONES = {
-  open: 'warn',
+  open: 'live',
   kept: 'ok',
   rejected: 'neutral',
-  parked: 'live',
+  parked: 'alt',
 } as const satisfies Record<Verdict, StatusTone>;

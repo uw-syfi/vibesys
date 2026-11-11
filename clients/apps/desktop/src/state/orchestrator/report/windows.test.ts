@@ -5,6 +5,7 @@ import {
   bandView,
   boundIsDrawn,
   choiceOf,
+  historyStart,
   LONG_RUN_MS,
   offersRanges,
   type RangeView,
@@ -149,5 +150,24 @@ describe('what a chart draws of a window', () => {
     expect(boundIsDrawn(4800, 11_100, 14_000)).toBe(true);
     expect(boundIsDrawn(4800, 11_100, 15_600)).toBe(false);
     expect(boundIsDrawn(212, 118, 74)).toBe(false);
+  });
+});
+
+describe('where the whole history starts', () => {
+  it('is the oldest measurement that did not set a best, only for a series the host cut, and none for one it did not', () => {
+    fc.assert(
+      fc.property(servedSeries, series => {
+        for (const objective of reportsOf(searchOf(series))) {
+          expect(historyStart(objective, false)).toBeNull();
+          const others = objective.points
+            .filter(point => !point.bestSoFar)
+            .map(point => point.atMs);
+          expect(historyStart(objective, true)).toBe(
+            others.length === 0 ? null : Math.min(...others),
+          );
+        }
+      }),
+      {seed: 65},
+    );
   });
 });

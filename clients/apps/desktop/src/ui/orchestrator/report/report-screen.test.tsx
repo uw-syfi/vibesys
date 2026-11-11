@@ -47,6 +47,7 @@ import {
   serveSummaries,
   withReport,
 } from '../../../testing/orchestrator/index.js';
+import {FLOOR_HINT} from '../../cost/index.js';
 import {runTitle} from '../fleet-words.js';
 import {agentNames} from '../names.js';
 import {formatFigure} from './format.js';
@@ -79,6 +80,8 @@ interface World {
   readonly ideas?: number;
   readonly truncated?: boolean;
   readonly window?: IdeaWindow | null;
+  /** The lead's report is a note along the way even when the run is over. */
+  readonly finalReport?: boolean;
   /** The plans were made by the agents the run has, so the Agent column names them. */
   readonly named?: boolean;
   /** When the screen is drawn; the end of the scenario and some minutes when absent. */
@@ -93,7 +96,10 @@ function stateOf(world: World): OrchestratorState {
       ? scenario
       : withReport(scenario, {
           sequence: 2,
-          kind: world.live === false ? ReportKind.FINAL : ReportKind.PROGRESS,
+          kind:
+            world.live === false && world.finalReport !== false
+              ? ReportKind.FINAL
+              : ReportKind.PROGRESS,
           atMs: REPORT_AT,
           headline: 'Throughput is 2.3 times the baseline at p99 118 ms.',
           changed: 'Fused expert dispatch landed.',
@@ -243,12 +249,14 @@ describe('the report as a page of the run', () => {
     const {screen} = render({ideas: 12});
     const facts = factsOf(screen.container);
     // Four facts and no more, each with a real space between its figure and its words, and no mark between.
-    expect(facts).toMatch(/^40 measured \| \d+ ideas \| \d+ of \d+ agents running \| \$318 spent$/);
-    expect(screen.container.querySelector('.vs-factline')?.textContent).not.toMatch(/[·≥]/);
+    expect(facts).toMatch(
+      /^40 measured \| \d+ ideas \| \d+ of \d+ agents running \| ≥\u00a0\$318 spent$/,
+    );
+    expect(screen.container.querySelector('.vs-factline')?.textContent).not.toContain('·');
     // The turns, what is unpriced and the age of the newest measurement are the panels'.
     expect(cardText(screen.container, 'Latest measurements')).toMatch(/latest \d+m ago/);
     expect(cardText(screen.container, 'Agents and cost')).toMatch(
-      /1,433 turns\. 41 of them reported no price\./,
+      /41 of 1,433 turns reported no price\./,
     );
     screen.unmount();
     // The host cut what it served short: the fact says so on hover, and carries no mark.
@@ -499,7 +507,8 @@ describe('the report of a run with two objectives and a declared bound', () => {
         .querySelector('table[aria-label="Latest measurements"]')
         ?.querySelectorAll('thead th') ?? []),
     ].map(cell => cell.textContent);
-    expect(headers).toEqual(['Ago', 'Idea', 'throughput', 'p99_latency', 'Commit']);
+    // Each value column says what it is counted in, small under its name.
+    expect(headers).toEqual(['Ago', 'Idea', 'throughputtok/s', 'p99_latencyms', 'Commit']);
     const served = stateOf({candidates: 40}).searches[RUN];
     const newest = [...(served?.results ?? [])].slice(-8).reverse();
     expect(rows.map(cells => cells[4])).toEqual(newest.map(result => result.commit.slice(0, 8)));
@@ -512,12 +521,14 @@ describe('the report of a run with two objectives and a declared bound', () => {
       series.points.slice(-8).filter(point => point.bestSoFar),
     );
     expect(marked).toHaveLength(servedMarks.length);
-    // The key draws what the table draws: a value in the accent color, not a line.
-    const key = [...screen.container.querySelectorAll('section.vs-card')]
-      .find(card => card.querySelector('h2')?.textContent === 'Latest measurements')
-      ?.querySelector('.vs-flex:last-child');
-    expect(key?.querySelector('.vs-text[data-tone="accent"]')).not.toBeNull();
-    expect(key?.textContent).toContain('New best');
+    // The key is the words "New best" in the style the table gives a new best, and no number.
+    const latest = [...screen.container.querySelectorAll('section.vs-card')].find(
+      card => card.querySelector('h2')?.textContent === 'Latest measurements',
+    );
+    const key = [...(latest?.querySelectorAll('.vs-text[data-tone="accent"]') ?? [])].filter(
+      each => each.closest('table') === null,
+    );
+    expect(key.map(each => each.textContent)).toEqual(['New best']);
     screen.unmount();
   });
 
@@ -527,7 +538,7 @@ describe('the report of a run with two objectives and a declared bound', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const cells of rows) {
       expect(cells[1]).toMatch(/^\d+ of \d+$/);
-      expect(cells[4]).toMatch(/^(≥\s)?(\$[\d,.]+|—)$/);
+      expect(cells[5]).toMatch(/^(≥\s)?(\$[\d,.]+|unknown|—)$/);
     }
     expect(rows.map(cells => cells[0])).toContain('Worker');
     screen.unmount();
@@ -720,16 +731,39 @@ describe('the report with a different amount of data', () => {
     }
   });
 
+  it('drops "yet" from what an ended run has none of, since no more will come, and keeps it while the run lives', () => {
+    for (const live of [true, false]) {
+      const {screen} = render({live, candidates: 0, ideas: 0});
+      const yet = live ? ' yet' : '';
+      expect(factsOf(screen.container)).toContain(`nothing measured${yet} | no ideas${yet} |`);
+      expect(cardText(screen.container, 'Ideas')).toContain(
+        live ? 'No ideas yet · they appear here as agents propose them' : 'No ideas',
+      );
+      expect(cardText(screen.container, 'Workstreams')).toContain(`No workstreams${yet}`);
+      if (!live)
+        expect(screen.text()).not.toMatch(
+          /No (ideas|workstreams|agents) yet|nothing measured yet/i,
+        );
+      screen.unmount();
+    }
+  });
+
   it('shows a dash for a cost no turn priced, and says the others are floors', () => {
     const none = render({cost: NO_PRICE});
-    expect(factsOf(none.screen.container)).toContain('— spent');
+    // Turns ran and none was priced: unknown, never zero; a dash is only for a type with no turn yet.
+    expect(factsOf(none.screen.container)).toContain('unknown spent');
     for (const cells of rowsOf(none.screen.container, 'Agents and cost by type')) {
-      expect(cells[4]).toBe('—');
+      expect(cells[5]).toBe(cells[2] === '0' ? '—' : 'unknown');
     }
     none.screen.unmount();
     const floor = render({});
     expect(cardText(floor.screen.container, 'Agents and cost')).toMatch(/at least this/);
-    expect(floor.screen.container.querySelector('.vs-factline')?.textContent).not.toContain('≥');
+    // The spend on the facts line is a floor too, marked and explained as the Cost page does.
+    const spent = [...floor.screen.container.querySelectorAll('.vs-factline .vs-fact')].find(each =>
+      each.textContent?.endsWith('spent'),
+    );
+    expect(spent?.textContent).toContain('≥');
+    expect(spent?.getAttribute('title')).toBe(FLOOR_HINT);
     floor.screen.unmount();
   });
 
@@ -1042,7 +1076,7 @@ describe('the ideas and workstreams of the report', () => {
       each => each.style.getPropertyValue('--seg-color'),
     );
     for (const color of segments) {
-      expect(['var(--ok)', 'var(--muted)', 'var(--warn)', 'var(--accent)']).toContain(color);
+      expect(['var(--ok)', 'var(--muted)', 'var(--accent)', 'var(--alt)']).toContain(color);
     }
     screen.unmount();
   });
@@ -1149,7 +1183,7 @@ describe('the summary of an objective and the bound’s unit', () => {
     });
     const [objective] = objectiveReports(search, [standing]);
     if (objective === undefined) throw new Error('the series has its objective');
-    const screen = mount(<ObjectiveSummary objective={objective} inView={null} />);
+    const screen = mount(<ObjectiveSummary objective={objective} inView={null} runOver={false} />);
     const text = screen.text();
     screen.unmount();
     return text;
@@ -1188,6 +1222,7 @@ describe('the summary of an objective and the bound’s unit', () => {
           boundUnitCheck: BoundUnitCheck.UNSPECIFIED,
         }}
         inView={null}
+        runOver={false}
       />,
     );
     expect(empty.text()).toContain('—');
@@ -1337,6 +1372,84 @@ describe('the ideas and the measurements that had no plan', () => {
     const names = [...new Set(rowsOf(screen.container, 'Idea list').map(cells => cells[5]))];
     expect(names.length).toBeGreaterThan(1);
     for (const name of names) expect(name).not.toBe('An agent');
+    screen.unmount();
+  });
+});
+
+describe('the report’s latest measurements with no row', () => {
+  it('shows no key to new bests when there is no row, so no bare number reads as a best', () => {
+    const {screen} = render({candidates: 0});
+    expect(cardText(screen.container, 'Latest measurements')).not.toContain('New best');
+    expect(cardText(screen.container, 'Latest measurements')).not.toMatch(/\d+\.\d/);
+    screen.unmount();
+  });
+});
+
+describe('the lead’s summary of a run that is over', () => {
+  it('is not about now: the last summary of an ended run says it was before the end, and what was running was running', () => {
+    const {screen} = render({live: false, finalReport: false});
+    const block = screen.container.querySelector('section.vs-brief')?.textContent ?? '';
+    expect(block).toContain("Lead's last summary · before the run ended");
+    expect(block).not.toMatch(/\bRunning\b/);
+    screen.unmount();
+    const live = render({});
+    expect(live.screen.container.querySelector('section.vs-brief')?.textContent).toMatch(
+      /summary · \d+m ago/,
+    );
+    live.screen.unmount();
+  });
+});
+
+describe('the cost notes', () => {
+  it('count the turns that reported no price as the view says, and explain a mark only when the table has it', () => {
+    const {screen} = render({});
+    const note = cardText(screen.container, 'Agents and cost');
+    expect(note).toContain('41 of 1,433 turns reported no price.');
+    expect(note).toContain('≥ marks a cost that is at least this.');
+    screen.unmount();
+    const none = render({cost: NO_PRICE});
+    const dashes = cardText(none.screen.container, 'Agents and cost');
+    expect(dashes).toContain('9 of 9 turns reported no price.');
+    expect(dashes).toContain('unknown marks a type none of whose turns was priced.');
+    expect(dashes).toContain('— marks a type with no turn yet.');
+    expect(dashes).not.toContain('≥ marks');
+    none.screen.unmount();
+  });
+});
+
+describe('where the whole history starts', () => {
+  it('is marked on each chart when the host served only part of the measurements, with a hint, and not otherwise', () => {
+    const cut = render({truncated: true, candidates: 40});
+    const markers = cut.screen.container.querySelectorAll('svg.vs-chart .vs-chart-marker');
+    expect(markers).toHaveLength(2);
+    for (const marker of markers) {
+      expect(marker.querySelector('text')?.textContent).toBe('all measurements from here');
+      expect(marker.querySelector('title')?.textContent).toMatch(/best-so-far line/);
+    }
+    cut.screen.unmount();
+    const whole = render({candidates: 40});
+    expect(whole.screen.container.querySelector('.vs-chart-marker')).toBeNull();
+    whole.screen.unmount();
+  });
+});
+
+describe('the colors of verdicts and gains', () => {
+  it('gives each verdict a tone of its own, Open a calm one that is no warning, and draws no gain in the color of a kept idea', () => {
+    const {screen} = render({ideas: 12});
+    const ideas = [...screen.container.querySelectorAll('section.vs-card')].find(
+      card => card.querySelector('h2')?.textContent === 'Ideas',
+    );
+    const tones = [...(ideas?.querySelectorAll('button.vs-dotlegend-item') ?? [])].map(item =>
+      item.querySelector('.vs-dot')?.getAttribute('data-tone'),
+    );
+    // All, Kept, Open, Rejected, Parked.
+    expect(tones).toEqual(['neutral', 'ok', 'live', 'neutral', 'alt']);
+    // Amber is a warning everywhere else (Stale, Stopping, Not read): no verdict is drawn in it.
+    expect(tones).not.toContain('warn');
+    const gains = screen.container.querySelectorAll(
+      'table[aria-label="Idea list"] td[data-align="end"] .vs-text[data-tone="ok"], table[aria-label="Workstream list"] .vs-text[data-tone="ok"]',
+    );
+    expect(gains).toHaveLength(0);
     screen.unmount();
   });
 });

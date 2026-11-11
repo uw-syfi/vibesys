@@ -21,6 +21,46 @@ import {isStoppable, ReportActions, ReportMeta} from './report-title.js';
 import {TradeOff} from './trade-off.js';
 import {WorkstreamsCard} from './workstreams-card.js';
 
+/** Whether the run is over: ended or failed, so nothing more will come of it. */
+const isOver = (status: RunStatus): boolean =>
+  status === RunStatus.ENDED || status === RunStatus.FAILED;
+
+/** The side column: the latest measurements, the workstreams, and the agents with their cost. */
+function SideColumn(props: {
+  readonly report: RunReport;
+  readonly over: boolean;
+  readonly nowMs: number;
+  readonly cost: CostView | undefined;
+  readonly costFeed: CostFeedSnapshot;
+  readonly retryCost: () => void;
+  readonly openAgents: () => void;
+  readonly openCost: () => void;
+}): JSX.Element {
+  const {report} = props;
+  return (
+    <>
+      <LatestMeasurements
+        rows={report.latest}
+        objectives={report.objectives}
+        nowMs={props.nowMs}
+        latestMs={report.facts.measured.latestMs}
+        runOver={props.over}
+      />
+      {props.report.plans === undefined ? null : <PlansSummary plans={props.report.plans} />}
+      <WorkstreamsCard workstreams={report.ideas?.workstreams ?? []} runOver={props.over} />
+      <AgentsAndCost
+        agents={report.agents}
+        cost={props.cost}
+        feed={props.costFeed}
+        retry={props.retryCost}
+        openAgents={props.openAgents}
+        open={props.openCost}
+        runOver={props.over}
+      />
+    </>
+  );
+}
+
 /**
  * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row and the
  * facts line under it), what the lead says in one row, and then two columns. The main column is how
@@ -56,8 +96,7 @@ export function ReportScreen(props: {
   readonly ideasWindow: IdeaWindow | null;
 }): JSX.Element {
   const {report} = props;
-  const over =
-    report.header.status === RunStatus.ENDED || report.header.status === RunStatus.FAILED;
+  const over = isOver(report.header.status);
   const [picked, setPicked] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [reveal, setReveal] = useState(0);
@@ -81,7 +120,7 @@ export function ReportScreen(props: {
             <ReportMeta report={report} host={props.host} nowMs={props.nowMs} />
             {props.reading}
           </Row>
-          <FactsLine facts={report.facts} />
+          <FactsLine facts={report.facts} over={over} />
         </Stack>
       }
       actions={
@@ -102,7 +141,12 @@ export function ReportScreen(props: {
           done="Stop"
           retry={props.retryStop}
         />
-        <LeadSummary summary={report.summary} nowMs={props.nowMs} openCatchUp={props.openCatchUp} />
+        <LeadSummary
+          summary={report.summary}
+          nowMs={props.nowMs}
+          over={over}
+          openCatchUp={props.openCatchUp}
+        />
         <MainSide
           label="The report"
           main={
@@ -113,6 +157,7 @@ export function ReportScreen(props: {
                 nowMs={props.nowMs}
                 runOver={over}
                 unreadable={report.search.state === 'unreadable'}
+                truncated={report.truncated}
                 names={props.names}
                 links={{
                   ideas,
@@ -134,6 +179,7 @@ export function ReportScreen(props: {
                 selected={selected}
                 select={setSelected}
                 reveal={reveal}
+                runOver={over}
               />
               {report.tradeoff === undefined ? null : (
                 <TradeOff tradeoff={report.tradeoff} objectives={report.objectives} />
@@ -141,25 +187,16 @@ export function ReportScreen(props: {
             </>
           }
           side={
-            <>
-              <LatestMeasurements
-                rows={report.latest}
-                objectives={report.objectives}
-                nowMs={props.nowMs}
-                latestMs={report.facts.measured.latestMs}
-                runOver={over}
-              />
-              {report.plans === undefined ? null : <PlansSummary plans={report.plans} />}
-              <WorkstreamsCard workstreams={ideas?.workstreams ?? []} />
-              <AgentsAndCost
-                agents={report.agents}
-                cost={props.cost}
-                feed={props.costFeed}
-                retry={props.retryCost}
-                openAgents={props.openAgents}
-                open={props.openCost}
-              />
-            </>
+            <SideColumn
+              report={report}
+              over={over}
+              nowMs={props.nowMs}
+              cost={props.cost}
+              costFeed={props.costFeed}
+              retryCost={props.retryCost}
+              openAgents={props.openAgents}
+              openCost={props.openCost}
+            />
           }
         />
       </Stack>

@@ -32,6 +32,7 @@ import {useDisplayClock} from '../../display-clock.js';
 import {nameOf} from '../names.js';
 import {formatAge, formatExact, formatGain, withUnit} from './format.js';
 import {VERDICT_TONES, VERDICT_WORDS} from './verdicts.js';
+import {yet} from './yet.js';
 
 type Scope = 'run' | 'all' | 'window';
 type VerdictFilter = 'any' | Verdict;
@@ -54,11 +55,7 @@ function GainCell(props: {
   const first = props.gains[0];
   if (first === undefined) return <Text tone="muted">—</Text>;
   return (
-    <Text
-      variant="code"
-      tone={first.ratio > 1 ? 'ok' : 'muted'}
-      title={gainHint(props.gains, props.units)}
-    >
+    <Text variant="code" title={gainHint(props.gains, props.units)}>
       {formatGain(first.ratio)}
     </Text>
   );
@@ -157,11 +154,11 @@ const unplannedWords = (count: number): string =>
   `${formatExact(count)} ${count === 1 ? 'measurement' : 'measurements'} had no plan`;
 
 /** What the table says with no row to show: nothing proposed yet (and what was measured meanwhile), or no match. */
-function emptyWords(ideas: number, unplanned: number): string {
+function emptyWords(ideas: number, unplanned: number, over: boolean): string {
   if (ideas > 0) return 'No ideas match';
-  return unplanned === 0
-    ? 'No ideas yet · they appear here as agents propose them'
-    : `No ideas yet · ${unplannedWords(unplanned)}`;
+  const none = yet('No ideas', over);
+  if (unplanned > 0) return `${none} · ${unplannedWords(unplanned)}`;
+  return over ? none : `${none} · they appear here as agents propose them`;
 }
 
 /** What the controls over the table have chosen: the scope, the verdict, the search and the order. */
@@ -276,6 +273,8 @@ export function IdeasPanel(props: {
   readonly select: (plan: number | null) => void;
   /** A chart point asked to see its idea: a new count each time, so the table shows every row. */
   readonly reveal: number;
+  /** The run has ended: no idea is still to come. */
+  readonly runOver: boolean;
 }): JSX.Element {
   const clock = useDisplayClock();
   const all = props.ideas?.ideas ?? [];
@@ -350,7 +349,7 @@ export function IdeasPanel(props: {
               },
             }}
             columns={ideaColumns(words)}
-            empty={emptyWords(all.length, props.ideas?.unplanned ?? 0)}
+            empty={emptyWords(all.length, props.ideas?.unplanned ?? 0, props.runOver)}
           />
         </div>
         {props.ideas === undefined ||

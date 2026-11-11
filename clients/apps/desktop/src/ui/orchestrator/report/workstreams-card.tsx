@@ -14,6 +14,7 @@ import type {JSX} from 'react';
 import type {WorkstreamRow} from '../../../state/index.js';
 import {formatGain} from './format.js';
 import {VERDICT_TONES, VERDICT_WORDS} from './verdicts.js';
+import {yet} from './yet.js';
 
 const STATUS_WORDS = {
   [WorkstreamStatus.UNSPECIFIED]: '',
@@ -76,7 +77,6 @@ const COLUMNS: TableColumn<WorkstreamRow>[] = [
       ) : (
         <Text
           variant="code"
-          tone={first.ratio > 1 ? 'ok' : 'muted'}
           title={row.gains.map(gain => `${gain.metric} ${formatGain(gain.ratio)}`).join('\n')}
         >
           {formatGain(first.ratio)}
@@ -93,6 +93,8 @@ const COLUMNS: TableColumn<WorkstreamRow>[] = [
  */
 export function WorkstreamsCard(props: {
   readonly workstreams: readonly WorkstreamRow[];
+  /** The run has ended: no workstream is still to come. */
+  readonly runOver: boolean;
 }): JSX.Element {
   return (
     <Card dense section="Workstreams">
@@ -110,7 +112,7 @@ export function WorkstreamsCard(props: {
           rows={props.workstreams}
           rowKey={row => String(row.number)}
           columns={COLUMNS}
-          empty="No workstreams yet"
+          empty={yet('No workstreams', props.runOver)}
         />
       </Stack>
     </Card>

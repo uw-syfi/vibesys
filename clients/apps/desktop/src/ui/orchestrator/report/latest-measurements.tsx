@@ -1,9 +1,20 @@
-import {Card, Row, Table, type TableColumn, Text} from '@vibesys/ui';
+import {Card, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {LatestMeasurement, ObjectiveReport} from '../../../state/index.js';
 import {shortCommit} from '../../commit-text.js';
 import {useDisplayClock} from '../../display-clock.js';
 import {formatAge, formatElapsed, formatExact, formatFigure, withUnit} from './format.js';
+
+/** The finest a time of day is written when a run is over: seconds, so near measurements are told apart. */
+const SECOND = 1000;
+const MINUTE = 60_000;
+const HOUR = 3_600_000;
+
+/** How long the listed measurements span: under an hour their times need seconds, and are told with them. */
+function spanOf(rows: readonly LatestMeasurement[]): number {
+  const times = rows.map(row => row.atMs);
+  return Math.max(0, Math.max(...times) - Math.min(...times));
+}
 
 /** What a row says of the idea its job measured: its plan numbers, `No plan`, or a dash while no ideas are served. */
 function ideaWords(plans: readonly number[] | undefined): string {
@@ -27,6 +38,7 @@ export function LatestMeasurements(props: {
   readonly runOver: boolean;
 }): JSX.Element {
   const clock = useDisplayClock();
+  const span = spanOf(props.rows);
   const columns: TableColumn<LatestMeasurement>[] = [
     {
       key: 'when',
@@ -34,7 +46,7 @@ export function LatestMeasurements(props: {
       mono: true,
       cell: row =>
         props.runOver
-          ? clock.reportTime(row.atMs)
+          ? clock.reportTick(row.atMs, span, span < HOUR ? SECOND : MINUTE)
           : formatElapsed(Math.max(0, props.nowMs - row.atMs)),
     },
     {key: 'idea', header: 'Idea', mono: true, cell: row => ideaWords(row.plans)},
@@ -42,6 +54,7 @@ export function LatestMeasurements(props: {
       (objective, at): TableColumn<LatestMeasurement> => ({
         key: `value-${objective.name}`,
         header: objective.name,
+        ...(objective.unit === null ? {} : {unit: objective.unit}),
         align: 'end',
         cell: row => {
           const value = row.values[at];
@@ -83,15 +96,11 @@ export function LatestMeasurements(props: {
         columns={columns}
         empty="No measurements yet"
       />
-      {/* The key draws what the table draws: a value that set a new best is in the accent color. */}
-      <Row gap="space-2">
-        <Text variant="code" tone="accent">
-          12.3
-        </Text>
-        <Text variant="small" tone="muted">
+      {props.rows.length === 0 ? null : (
+        <Text variant="small" tone="accent">
           New best
         </Text>
-      </Row>
+      )}
     </Card>
   );
 }

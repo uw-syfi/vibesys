@@ -46,6 +46,7 @@ export {
   bandView,
   boundIsDrawn,
   choiceOf,
+  historyStart,
   offersRanges,
   type RangeChoice,
   type RangeView,

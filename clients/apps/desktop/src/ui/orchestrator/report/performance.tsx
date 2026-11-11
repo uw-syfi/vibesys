@@ -4,12 +4,14 @@ import {
   Chart,
   ChartDetail,
   ChartLegend,
+  type ChartMarker,
   type ChartNote,
   type ChartPoint,
   type ChartReference,
   type ChartSize,
   type ChartTick,
   Chip,
+  chartPlotMargins,
   RangeStrip,
   Row,
   SegmentedControl,
@@ -23,6 +25,7 @@ import {
   type Better,
   bandView,
   choiceOf,
+  historyStart,
   type IdeasReport,
   type ObjectiveReport,
   offersRanges,
@@ -125,6 +128,10 @@ function emptyWords(props: {
   return `Waiting for the input's measurement · started ${props.startedAgo}`;
 }
 
+/** What the marker on the time axis says on hover: why the line is all there is before it. */
+const HISTORY_HINT =
+  'The host keeps the measurements that set a best, and only the newest of the others. Before this line, the best-so-far line stands for the rest; from here, every measurement is drawn.';
+
 /** One objective's chart: its dots and best-so-far line over the shared time axis, at a height that never changes. */
 function ObjectiveChart(props: {
   readonly objective: ObjectiveReport;
@@ -136,6 +143,8 @@ function ObjectiveChart(props: {
   readonly labelChars: number;
   readonly links: PointLinks;
   readonly empty: string;
+  /** From when every measurement is drawn, when the host kept only the newest of the others; null otherwise. */
+  readonly historyFrom: number | null;
 }): JSX.Element {
   const {objective, band, window} = props;
   const clock = useDisplayClock();
@@ -170,6 +179,11 @@ function ObjectiveChart(props: {
           y: upward(better, point.value),
           label: formatFigure(point.value),
         }));
+  const from = props.historyFrom;
+  const marker: ChartMarker | undefined =
+    from === null || from <= window.fromMs || from >= window.toMs
+      ? undefined
+      : {x: from, label: 'all measurements from here', hint: HISTORY_HINT};
   const reference = band.boundDrawn ? boundReference(objective, props.names, clock) : undefined;
   return (
     <Chart
@@ -185,6 +199,7 @@ function ObjectiveChart(props: {
       yLabelChars={props.labelChars}
       pick={props.links.pick}
       {...(band.points.length === 0 ? {empty: props.empty} : {})}
+      {...(marker === undefined ? {} : {marker})}
       {...(reference === undefined ? {} : {references: [reference]})}
     />
   );
@@ -253,6 +268,8 @@ function RangeControl(props: {
 /** The whole run as a thin strip with the window on it, to drag out a window. */
 function Overview(props: {
   readonly objective: ObjectiveReport | undefined;
+  /** Where the charts' plots start and stop, so the strip lines up with them. */
+  readonly inset: {readonly left: number; readonly right: number};
   readonly span: Span;
   readonly window: Span;
   readonly view: RangeView;
@@ -278,6 +295,7 @@ function Overview(props: {
           label="The whole run, to choose a window of it"
           valueText={words}
           domain={[span.fromMs, span.toMs]}
+          inset={props.inset}
           window={whole ? null : [window.fromMs, window.toMs]}
           steps={(entire?.steps ?? []).map(step => ({
             x: step.x,
@@ -370,6 +388,8 @@ export function PerformancePanel(props: {
   readonly runOver: boolean;
   /** The host cannot read the run's job log now. */
   readonly unreadable: boolean;
+  /** The host served only part of the measurements. */
+  readonly truncated: boolean;
   /** What each agent is called on screen, by agent id. */
   readonly names: ReadonlyMap<string, string>;
   readonly links: PointLinks;
@@ -399,16 +419,14 @@ export function PerformancePanel(props: {
     <Card
       dense
       section="Performance"
-      action={
-        <Row gap="space-5" rowGap="space-2" wrap justify="end">
-          <Key
-            bound={bands.some(({band}) => band.boundDrawn)}
-            picked={picked}
-            lit={props.links.lit.size > 0}
-          />
-          {long ? <RangeControl span={span} view={view} change={setView} /> : null}
-        </Row>
+      beside={
+        <Key
+          bound={bands.some(({band}) => band.boundDrawn)}
+          picked={picked}
+          lit={props.links.lit.size > 0}
+        />
       }
+      action={long ? <RangeControl span={span} view={view} change={setView} /> : undefined}
     >
       <Stack gap="space-5">
         {bands.length === 0 ? (
@@ -416,7 +434,7 @@ export function PerformancePanel(props: {
             <Stack gap="space-1" width="summary">
               <Text variant="item">Measurements</Text>
               <Text variant="small" tone="muted">
-                Nothing measured yet
+                {props.runOver ? 'Nothing was measured' : 'Nothing measured yet'}
               </Text>
             </Stack>
             <Stack gap="space-0" width="chart">
@@ -436,6 +454,7 @@ export function PerformancePanel(props: {
               <Stack gap="space-1" width="summary">
                 <ObjectiveSummary
                   objective={objective}
+                  runOver={props.runOver}
                   inView={
                     view.kind === 'all' || !long
                       ? null
@@ -453,6 +472,7 @@ export function PerformancePanel(props: {
                   labelChars={labelChars}
                   links={props.links}
                   empty={empty}
+                  historyFrom={historyStart(objective, props.truncated)}
                 />
               </Stack>
             </Row>
@@ -461,6 +481,7 @@ export function PerformancePanel(props: {
         {long ? (
           <Overview
             objective={objectives.find(each => each.points.length > 0)}
+            inset={chartPlotMargins(labelChars)}
             span={span}
             window={window}
             view={view}

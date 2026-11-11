@@ -80,6 +80,18 @@ export interface BandView {
   readonly boundDrawn: boolean;
 }
 
+/**
+ * From when every measurement of the objective is in what the host served, or null when none is
+ * missing. A host that cuts a long series keeps the points that set a best and then the newest of
+ * the others, so the others are all there from the oldest one kept: before it, only the best-so-far
+ * points remain, and the line summarises the rest.
+ */
+export function historyStart(objective: ObjectiveReport, truncated: boolean): number | null {
+  if (!truncated) return null;
+  const others = objective.points.filter(point => !point.bestSoFar);
+  return others.length === 0 ? null : Math.min(...others.map(point => point.atMs));
+}
+
 /** The share of the value range left above and below the data, so no point sits on the frame. */
 const PAD = 0.1;
 /** A bound farther than this share of the data's magnitude outside it is not drawn: it would flatten the data. */

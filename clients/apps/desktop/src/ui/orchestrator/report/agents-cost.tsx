@@ -1,4 +1,4 @@
-import {Button, Card, Row, Stack, Table, type TableColumn, Text} from '@vibesys/ui';
+import {Button, Card, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   type AgentCostRow,
@@ -8,53 +8,16 @@ import {
   type CostView,
 } from '../../../state/index.js';
 import {
+  AgentTypeTable,
+  agentTypeLine,
   FLOOR,
   formatCount,
-  formatTokens,
   NOT_REPORTED,
   precisionOf,
-  usdOrNothing,
 } from '../../cost/index.js';
+import {plural, UNKNOWN} from '../../plain-words.js';
 import {faultWord, roleWord} from '../words.js';
-
-/** The columns of the agents-and-cost table: the type, who is working, and what the type has cost. */
-function columns(precision: ReturnType<typeof precisionOf>): TableColumn<AgentCostRow>[] {
-  return [
-    {key: 'type', header: 'Type', lead: true, cell: row => roleWord(row.role)},
-    {
-      key: 'running',
-      header: 'Running',
-      mono: true,
-      align: 'end',
-      cell: row => `${row.running} of ${row.total}`,
-    },
-    {
-      key: 'turns',
-      header: 'Turns',
-      mono: true,
-      align: 'end',
-      cell: row => (row.turns === null ? NOT_REPORTED : formatCount(row.turns)),
-    },
-    {
-      key: 'tokens',
-      header: 'Tokens',
-      mono: true,
-      align: 'end',
-      cell: row => (row.tokens === null ? NOT_REPORTED : formatTokens(row.tokens)),
-    },
-    {
-      key: 'cost',
-      header: 'Cost',
-      mono: true,
-      align: 'end',
-      cell: row => {
-        const usd = usdOrNothing(row.costUsd, precision);
-        if (usd === null) return NOT_REPORTED;
-        return row.unpricedTurns > 0 ? `${FLOOR}${usd}` : usd;
-      },
-    },
-  ];
-}
+import {yet} from './yet.js';
 
 /** What went wrong with the cost stream, beside the figures it last delivered, and the way to retry. */
 function FeedProblem(props: {
@@ -76,25 +39,29 @@ function FeedProblem(props: {
 }
 
 /**
- * What the table's figures leave unsaid: how many turns there were, and what a dash or a ≥ in the
- * Cost column means. Each sentence is there only when the table has such a figure.
+ * What the table's figures leave unsaid: how many turns there were, and what an unknown, a dash or a ≥
+ * in the Cost column means. Each sentence is there only when the table has such a figure.
  */
 function CostNotes(props: {
   readonly cost: CostView;
   readonly rows: readonly AgentCostRow[];
 }): JSX.Element {
   const {cost, rows} = props;
-  const unknown = rows.some(row => row.costUsd === null && (row.turns ?? 0) > 0);
-  const floor = rows.some(row => row.costUsd !== null && row.unpricedTurns > 0);
+  const known = (row: AgentCostRow): boolean => row.spend !== null;
+  const unknown = rows.some(
+    row => known(row) && row.spend?.usage.costUsd === null && row.spend.turns > 0,
+  );
+  const nothingYet = rows.some(row => row.spend?.turns === 0);
+  const floor = rows.some(
+    row => row.spend?.usage.costUsd !== null && (row.spend?.unpricedTurns ?? 0) > 0,
+  );
   const notes = [
-    `${formatCount(cost.turns)} ${cost.turns === 1 ? 'turn' : 'turns'}.`,
-    cost.unpricedTurns === 0 ? '' : `${formatCount(cost.unpricedTurns)} of them reported no price.`,
-    unknown
-      ? `${NOT_REPORTED} means no turn of that type reported a price, so its cost is unknown.`
-      : '',
-    floor
-      ? `${FLOOR.trim()} means some turns of that type reported no price, so its cost is at least this.`
-      : '',
+    cost.unpricedTurns === 0
+      ? `${formatCount(cost.turns)} ${plural(cost.turns, 'turn', 'turns')}.`
+      : `${formatCount(cost.unpricedTurns)} of ${formatCount(cost.turns)} turns reported no price.`,
+    floor ? `${FLOOR.trim()} marks a cost that is at least this.` : '',
+    unknown ? `${UNKNOWN} marks a type none of whose turns was priced.` : '',
+    nothingYet ? `${NOT_REPORTED} marks a type with no turn yet.` : '',
   ].filter(note => note !== '');
   return (
     <Text variant="small" tone="muted">
@@ -118,9 +85,12 @@ export function AgentsAndCost(props: {
   readonly openAgents: () => void;
   /** Open the Cost page of the run. */
   readonly open: () => void;
+  /** The run has ended: no agent is still to come. */
+  readonly runOver: boolean;
 }): JSX.Element {
   const {agents, cost, feed} = props;
   const rows = agentCostRows(agents, cost);
+  const precision = precisionOf(cost?.total.costUsd ?? null);
   return (
     <Card
       dense
@@ -128,25 +98,36 @@ export function AgentsAndCost(props: {
       action={
         <Row gap="space-1">
           <Button
-            text="Agents"
-            label="Open agents"
+            text="Open agents"
+            end="chevron-right"
             variant="quiet"
             size="sm"
             press={props.openAgents}
           />
-          <Button text="Cost" label="Open cost" variant="quiet" size="sm" press={props.open} />
+          <Button
+            text="Open cost"
+            end="chevron-right"
+            variant="quiet"
+            size="sm"
+            press={props.open}
+          />
         </Row>
       }
     >
       <Stack gap="space-3">
-        <Table
+        <AgentTypeTable
           label="Agents and cost by type"
-          dense
-          middle
-          rows={rows}
-          rowKey={row => String(row.role)}
-          columns={columns(precisionOf(cost?.total.costUsd ?? null))}
-          empty="No agents yet"
+          rows={rows.map(row =>
+            agentTypeLine({
+              key: String(row.role),
+              name: roleWord(row.role),
+              running: row.running,
+              total: row.total,
+              spend: row.spend,
+              precision,
+            }),
+          )}
+          empty={yet('No agents', props.runOver)}
         />
         {cost === undefined ? null : <CostNotes cost={cost} rows={rows} />}
         {cost === undefined && feed.status._tag !== 'Failed' ? (

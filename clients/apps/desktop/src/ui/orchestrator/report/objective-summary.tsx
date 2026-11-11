@@ -3,6 +3,7 @@ import {Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {ObjectiveReport} from '../../../state/index.js';
 import {formatExact, formatFigure, withUnit} from './format.js';
+import {yet} from './yet.js';
 
 /** The words a figure's hover says: what the head scored, the best and the bound. Head and best differ when the head is the best of another objective. */
 function hintOf(objective: ObjectiveReport): string | undefined {
@@ -43,6 +44,8 @@ export function ObjectiveSummary(props: {
   readonly objective: ObjectiveReport;
   /** How many measurements the chart shows, when it shows a window and not the whole run. */
   readonly inView: {readonly shown: number; readonly of: number} | null;
+  /** The run has ended: a value not measured by now never will be. */
+  readonly runOver: boolean;
 }): JSX.Element {
   const {objective, inView} = props;
   const best = objective.bestValue;
@@ -72,7 +75,7 @@ export function ObjectiveSummary(props: {
       </Row>
       {best === undefined ? (
         <Text variant="small" tone="muted">
-          Not measured yet
+          {yet('Not measured', props.runOver)}
         </Text>
       ) : null}
       {bound === null ? null : (

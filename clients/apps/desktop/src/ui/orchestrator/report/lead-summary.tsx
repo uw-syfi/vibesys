@@ -4,11 +4,15 @@ import type {SummaryField, SummaryView} from '../../../state/index.js';
 import {withShortCommits} from '../../commit-text.js';
 import {formatAge} from './format.js';
 
-const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
-  changed: 'Changed',
-  inFlight: 'Running',
-  decisions: 'Decided',
-};
+/** The parts' labels: what was running is past tense once the run is over, or it would contradict its state. */
+const fieldLabel = (field: SummaryField, over: boolean): string =>
+  ({changed: 'Changed', inFlight: over ? 'Was running' : 'Running', decisions: 'Decided'})[field];
+
+/** Whose it is and how old; for a run that is over, a report that was not the final one is the last it wrote, not a state of now. */
+function labelOf(summary: SummaryView, nowMs: number, over: boolean): string {
+  if (over && !summary.final) return "Lead's last summary · before the run ended";
+  return `Lead's ${summary.final ? 'final ' : ''}summary · ${formatAge(nowMs - summary.atMs)}`;
+}
 
 /**
  * The lead's latest report as one block under the facts: whose it is and how old, its headline (cut
@@ -21,6 +25,8 @@ const FIELD_LABELS: Readonly<Record<SummaryField, string>> = {
 export function LeadSummary(props: {
   readonly summary: SummaryView | undefined;
   readonly nowMs: number;
+  /** The run has ended or failed: its last report is not about now. */
+  readonly over: boolean;
   /** Open the run's Catch me up page, where the whole report is. */
   readonly openCatchUp: () => void;
 }): JSX.Element {
@@ -29,13 +35,13 @@ export function LeadSummary(props: {
   const fields: BriefField[] = summary.fields
     .filter(({text}) => text.trim() !== '')
     .map(({field, text}) => ({
-      label: FIELD_LABELS[field],
+      label: fieldLabel(field, props.over),
       text: withShortCommits(text),
       title: text,
     }));
   return (
     <Brief
-      label={`Lead's ${summary.final ? 'final ' : ''}summary · ${formatAge(props.nowMs - summary.atMs)}`}
+      label={labelOf(summary, props.nowMs, props.over)}
       {...(summary.headline.trim() === ''
         ? {}
         : {lead: withShortCommits(summary.headline), leadTitle: summary.headline})}

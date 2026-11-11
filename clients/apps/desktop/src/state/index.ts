@@ -165,6 +165,7 @@ export {
   boundIsDrawn,
   choiceOf,
   type GainView,
+  historyStart,
   type IdeaRow,
   type IdeaSortKey,
   type IdeasReport,
