@@ -132,6 +132,72 @@ interface Candidate {
   readonly values: readonly number[];
 }
 
+const PLAN_VERBS = [
+  'Try',
+  'Replace',
+  'Pad',
+  'Batch',
+  'Split',
+  'Inline',
+  'Pin',
+  'Relax',
+  'Prefetch',
+  'Coalesce',
+  'Shard',
+  'Reuse',
+];
+const PLAN_THINGS = [
+  'the head index',
+  'the tail CAS loop',
+  'consumer wake-ups',
+  'node allocation',
+  'the slot array',
+  'sequentially consistent fences',
+  'producer batches of 32',
+  'per-core queues',
+  'futex waits',
+  'the spin budget',
+  'false sharing on counters',
+  'hazard pointers',
+];
+
+/**
+ * A title no other plan has: a verb and a thing, the usual long ones in two places and the options'
+ * own (very long) titles on the newest plans.
+ */
+function distinctTitle(options: MeasuredOptions, at: number, count: number): string {
+  const extra = options.extraTitles ?? [];
+  const newest = count - 1 - at;
+  if (newest % 8 === 0 && newest / 8 < extra.length) return extra[newest / 8] ?? '';
+  if (at === 2 || at === 20) return IDEA_TITLES[2] ?? '';
+  return `${PLAN_VERBS[at % PLAN_VERBS.length]} ${PLAN_THINGS[(Math.floor(at / PLAN_VERBS.length) + at) % PLAN_THINGS.length]}`;
+}
+
+/** Where a plan ends up: a verdict drawn at random, weighted toward being turned down. */
+function statusOf(rng: Rng): PlanStatus {
+  const draw = rng.next();
+  return draw < 0.22
+    ? PlanStatus.WON
+    : draw < 0.6
+      ? PlanStatus.REJECTED
+      : draw < 0.82
+        ? PlanStatus.PARKED
+        : PlanStatus.OPEN;
+}
+
+/** The workstream of a plan `along` the run: the early lines of work take the early plans. */
+function workstreamOf(rng: Rng, along: number): number {
+  const weights =
+    along < 0.4 ? [1, 5, 2.5, 1.5, 0] : along < 0.7 ? [0.5, 3, 4, 2.5, 0] : [0.5, 1.5, 2.5, 5, 0];
+  const draw = rng.next() * weights.reduce((sum, weight) => sum + weight, 0);
+  let passed = 0;
+  for (const [at, weight] of weights.entries()) {
+    passed += weight;
+    if (draw < passed) return at;
+  }
+  return 1;
+}
+
 /** The agent that made plan number `at`: one of the options' agents in turn. */
 function agentOf(options: MeasuredOptions, at: number): string {
   const agents = options.agents ?? [];
@@ -307,21 +373,32 @@ function gainsAgainst(options: MeasuredOptions, candidates: readonly Candidate[]
  */
 function ideasOf(options: MeasuredOptions, candidates: readonly Candidate[], runId: string) {
   const count = options.ideas ?? 0;
-  const planOf = (index: number): number | undefined =>
-    count === 0 || index === 0 || index % 7 === 6 ? undefined : (index % count) + 1;
+  const spread = options.spread === true;
+  const rng = new Rng(options.seed + 101);
+  // A spread search tries its plans one after another, so a plan's candidates are near in time.
+  const planOf = (index: number): number | undefined => {
+    if (count === 0 || index === 0 || index % 7 === 6) return undefined;
+    return spread
+      ? Math.min(count, Math.floor((index / candidates.length) * count) + 1)
+      : (index % count) + 1;
+  };
   const plans = Array.from({length: count}, (_, at) => {
     const number = at + 1;
-    const status = PLAN_STATUSES[at % PLAN_STATUSES.length] ?? PlanStatus.OPEN;
+    const status = spread
+      ? statusOf(rng)
+      : (PLAN_STATUSES[at % PLAN_STATUSES.length] ?? PlanStatus.OPEN);
     const when = timestampFromMs(
       options.startMs + Math.round(((options.endMs - options.startMs) * number) / (count + 1)),
     );
     return {
       number,
-      title: titlesOf(options)[at % titlesOf(options).length] ?? '',
+      title: spread
+        ? distinctTitle(options, at, count)
+        : (titlesOf(options)[at % titlesOf(options).length] ?? ''),
       status,
       createdAt: when,
       updatedAt: when,
-      workstream: at % (WORKSTREAMS.length + 1),
+      workstream: spread ? workstreamOf(rng, at / count) : at % (WORKSTREAMS.length + 1),
       origin: {runId, agent: agentOf(options, at), at: when},
     };
   });

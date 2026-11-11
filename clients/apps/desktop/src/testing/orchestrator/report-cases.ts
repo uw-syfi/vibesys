@@ -8,7 +8,9 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
+  type Agent,
   AgentRole,
+  AgentSchema,
   AgentStatus,
   Direction,
   oneofIs,
@@ -26,6 +28,8 @@ import {generateScenario, type Scenario, START_MS} from './scenario.js';
 /** The names a fixture address gives the three cases (`?case=started`). */
 export const REPORT_CASES = ['started', 'failed', 'week'] as const;
 export type ReportCase = (typeof REPORT_CASES)[number];
+
+export {FAILED_COST, STARTED_COST, WEEK_COST};
 
 /** What a case serves: the run's changes, its search view and its cost. */
 export interface ReportCaseWorld {
@@ -48,6 +52,35 @@ const KINDS = {
   checkIn: true,
   runUpdated: true,
 } as const;
+
+/**
+ * The scenario with one more agent of each role named, each a child of the lead that has already
+ * ended its session: the agents a cost view that lists their types has to be about.
+ */
+function withEndedAgents(scenario: Scenario, roles: readonly AgentRole[]): Scenario {
+  const lead = scenario.changes
+    .map(change => change.body)
+    .flatMap(body =>
+      oneofIs(body, 'agent', KINDS) && body.value.role === AgentRole.LEAD ? [body.value] : [],
+    )[0];
+  if (lead === undefined) throw new Error('the scenario has its lead');
+  const added = roles.map((role, at): RunChange => {
+    const agent: Agent = create(AgentSchema, {
+      ...lead,
+      id: `${lead.id}-${at + 1}`,
+      role,
+      parentAgentId: lead.id,
+      status: AgentStatus.ENDED,
+    });
+    return create(RunChangeSchema, {
+      sequence: BigInt(scenario.changes.length + at + 1),
+      runId: scenario.runId,
+      at: timestampFromMs(scenario.endMs - 30_000),
+      body: {case: 'agent', value: agent},
+    });
+  });
+  return {...scenario, changes: [...scenario.changes, ...added]};
+}
 
 /** The scenario with its run (and its lead) over at `atMs`, in the state and for the reason given. */
 function withRunOver(
@@ -112,11 +145,14 @@ const STARTED_COST: CostView = {
   modelsTruncated: false,
 };
 
-/** A run that failed within a minute and a half: three agents' turns, one of them unpriced. */
+/**
+ * A run that failed within a minute and a half: the lead's seven turns and the judge's one are
+ * priced, the worker's one turn reported no price (so its type has no cost, and the run's is a floor).
+ */
 const FAILED_COST: CostView = {
   ...STARTED_COST,
-  total: usage({inputTokens: 190_000, outputTokens: 8_000, costUsd: 0.11}),
-  turns: 10,
+  total: usage({inputTokens: 190_000, outputTokens: 8_000, costUsd: 0.1}),
+  turns: 9,
   unpricedTurns: 1,
   roles: [
     {
@@ -138,7 +174,7 @@ const FAILED_COST: CostView = {
     {
       role: AgentRole.WORKER,
       agents: 1,
-      turns: 2,
+      turns: 1,
       unpricedTurns: 1,
       usage: usage({inputTokens: 46_000, outputTokens: 2_000}),
       totalTokens: 48_000,
@@ -160,30 +196,73 @@ const WEEK_COST: CostView = {
   maxCostUsd: 600,
   turns: 1284,
   unpricedTurns: 3,
+  // The agents of the case's scenario by type (see `generateScenario` with 27 subagents), so the
+  // table of the report and its facts line count the same twenty-eight agents.
   roles: [
     {
       role: AgentRole.WORKER,
-      agents: 28,
-      turns: 702,
+      agents: 23,
+      turns: 680,
       unpricedTurns: 0,
-      usage: usage({outputTokens: 22_000_000, costUsd: 268.4}),
-      totalTokens: 2_300_000_000,
+      usage: usage({
+        inputTokens: 480_000_000,
+        cacheReadTokens: 2_300_000_000,
+        outputTokens: 21_000_000,
+        costUsd: 255.4,
+      }),
+      totalTokens: 2_801_000_000,
     },
     {
       role: AgentRole.LEAD,
       agents: 1,
       turns: 412,
       unpricedTurns: 3,
-      usage: usage({outputTokens: 14_000_000, costUsd: 96.2}),
-      totalTokens: 1_100_000_000,
+      usage: usage({
+        inputTokens: 110_000_000,
+        cacheReadTokens: 640_000_000,
+        outputTokens: 14_000_000,
+        costUsd: 96.2,
+      }),
+      totalTokens: 764_000_000,
     },
     {
       role: AgentRole.JUDGE,
-      agents: 12,
+      agents: 1,
       turns: 170,
       unpricedTurns: 0,
-      usage: usage({outputTokens: 5_000_000, costUsd: 48.2}),
-      totalTokens: 310_000_000,
+      usage: usage({
+        inputTokens: 14_000_000,
+        cacheReadTokens: 60_000_000,
+        outputTokens: 5_000_000,
+        costUsd: 48.2,
+      }),
+      totalTokens: 79_000_000,
+    },
+    {
+      role: AgentRole.PLANNER,
+      agents: 2,
+      turns: 12,
+      unpricedTurns: 0,
+      usage: usage({
+        inputTokens: 4_000_000,
+        cacheReadTokens: 20_000_000,
+        outputTokens: 400_000,
+        costUsd: 6,
+      }),
+      totalTokens: 24_400_000,
+    },
+    {
+      role: AgentRole.PROFILER,
+      agents: 1,
+      turns: 10,
+      unpricedTurns: 0,
+      usage: usage({
+        inputTokens: 4_000_000,
+        cacheReadTokens: 80_000_000,
+        outputTokens: 600_000,
+        costUsd: 7,
+      }),
+      totalTokens: 84_600_000,
     },
   ],
   series: {
@@ -255,7 +334,7 @@ export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
   if (name === 'failed') {
     const generated = generateScenario({seed: 5, subagents: 0, live: true});
     // A short report with a field the lead left empty (what changed): the block leaves it out.
-    const lived = withReport(generated, {
+    const lived = withReport(withEndedAgents(generated, [AgentRole.JUDGE, AgentRole.WORKER]), {
       sequence: 1,
       atMs: generated.endMs - 10_000,
       headline: 'Measured the input; planning the first ideas.',
@@ -278,7 +357,7 @@ export function reportCaseWorld(name: ReportCase): ReportCaseWorld {
       cost: FAILED_COST,
     };
   }
-  const lived = generateScenario({seed: 5, subagents: 27, live: true});
+  const lived = generateScenario({seed: 5, subagents: 27, live: true, tree: true});
   const endMs = START_MS + 6 * DAY + 4 * COST_HOUR;
   const scenario = withReport(
     {...lived, endMs},
