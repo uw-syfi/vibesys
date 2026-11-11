@@ -41,6 +41,18 @@ can decide it.
 6. **Nothing important is collapsed by default.** Fields a reviewer must read
    (a plan's fields, a reply's fields) are shown, not behind a toggle. Folding
    is for detail nobody has to read. Unenforced: judgment.
+
+   *Exception: agent-written text on the run report.* The lead's summary is text of no bounded
+   length (the proto limits neither `headline` nor `changed`, `in_flight` or `decisions`), so
+   the report cuts its headline at two lines and each field at three, with the whole text on hover
+   and a "Read the whole report" link to Catch me up under the block whenever anything is cut. The
+   reason: the whole report is one click away, and unbounded text must not push the charts and
+   tables, which the page is for, off the screen. Nothing is hidden behind a toggle, a cut part is
+   marked by its ellipsis and its link, and a field the lead left empty is left out. The rule that
+   goes with it: large or bold type is only for text that is short by construction (the run
+   title, figures, our own labels); agent text is always body size and always has a length limit.
+   Enforced by the `truncation` check (a cut text has its whole text on hover); the limits
+   themselves are Unenforced.
 7. **Rows of one kind share one layout.** The same columns in the same order,
    the same state words, the same figures, at every level. Unenforced: judgment.
 

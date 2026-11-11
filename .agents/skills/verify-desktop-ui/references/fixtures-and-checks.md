@@ -23,10 +23,13 @@ cost, and no other parameter changes them. Open the run on the Runs list to see 
 | Failed | `fixture.html?case=failed` | Failed within a minute and a half (lead lost), one objective with 3 measurements, one unpriced turn. |
 | Six days | `fixture.html?case=week` | Live for six days: two objectives with 400 points served of 3,000 (the host's cap, so the state is truncated), 64 ideas, workstreams, a lead report, a cost of $413. |
 
-Check each at windows of 1000 (the columns stack), 1440 and 1920. The screens read their ages from
-the browser's clock, so a script that reads them fixes it at the moment the page means by "now",
-which the page puts in `document.documentElement.dataset.nowMs` (Playwright's
-`page.clock.setFixedTime`).
+Check each at windows of 1000 (the columns stack), 1440 and 1920. The fixture page sets the
+browser's clock to the scenario's "now" when it loads and lets it run on from there (it replaces
+`Date.now` in the page only), so the ages the screens write are the scenario's, not the
+distance to a fixed date. The same moment is in `document.documentElement.dataset.nowMs`. The
+week case's lead report is very long, with an unbroken path in it, and some of its idea titles are
+very long: the cut text, the ellipses and the "Read the whole report" link are on screen there. The
+failed case's report is short with an empty field; the started case has none.
 
 ## Add a case
 

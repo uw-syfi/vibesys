@@ -51,6 +51,16 @@ invent them, and do not move a value in the name of this spec.
    reads a progress bar with no value as a box with nothing in it. Unenforced: "no
    card of its own" needs to know what a box means, and a state that says what is
    happening and how far along it is needs a reader.
+
+   *Exception: the run report's panels.* A panel of the report with nothing in it yet (the
+   performance chart before the first measurement, the ideas table before the first idea) keeps its
+   frame, its axes and its headers, and says in one line what it waits for. This is as large as
+   the panel will be with data, on purpose: the user chose one layout for every state, so that a
+   live run's panels never move or change height as the first measurement or idea arrives. The
+   empty frame has no card of its own beyond the panel's, and still says how long it has waited.
+   Enforced for the chart's height by the report's tests (one height whatever the number of
+   points); that this exception is worth its room is a judgment the user made.
+
 6. **Labels earn their place.** A group label appears only with a parallel
    sibling; a label or a control says what it does in the words of the user's
    task. Unenforced: whether two groups are parallel is a judgment of meaning, so
