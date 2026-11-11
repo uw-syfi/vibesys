@@ -48,7 +48,22 @@ export interface FleetOptions {
   readonly nowMs: number;
   /** Give every nth run a model name too long for a cell, to see how it cuts it. */
   readonly longEvery?: number;
+  /** How many hours apart the runs begin, newest first; 3 when absent. A fleet of days needs more. */
+  readonly stepHours?: number;
+  /** The harness and model each worker runs on, in turn by its place in the run; two models of the Codex tool when absent. */
+  readonly workers?: readonly WorkerModel[];
 }
+
+/** What a worker agent of a fleet runs on. */
+interface WorkerModel {
+  readonly harness: Harness;
+  readonly model: string;
+}
+
+const CODEX_WORKERS: readonly WorkerModel[] = [
+  {harness: Harness.CODEX, model: 'model-b'},
+  {harness: Harness.CODEX, model: 'model-a'},
+];
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -161,7 +176,9 @@ interface Timing {
 
 function timingOf(rng: Rng, options: FleetOptions, index: number): Timing {
   const live = index < options.live;
-  const startMs = options.nowMs - (live ? (1 + rng.int(60)) * HOUR : (2 + index) * HOUR * 3);
+  const startMs =
+    options.nowMs -
+    (live ? (1 + rng.int(60)) * HOUR : (2 + index) * HOUR * (options.stepHours ?? 3));
   if (live) {
     const status = rng.int(8) === 0 ? RunStatus.STOPPING : RunStatus.RUNNING;
     return {live, startMs, endMs: undefined, status};
@@ -276,17 +293,19 @@ function agentStatusOf(rng: Rng, run: Run, lead: boolean): AgentStatus {
   return idle ? AgentStatus.IDLE : AgentStatus.ACTIVE;
 }
 
-function agentOf(rng: Rng, run: Run, index: number): Agent {
+function agentOf(rng: Rng, options: FleetOptions, run: Run, index: number): Agent {
   const lead = index === 0;
+  const workers = options.workers ?? CODEX_WORKERS;
+  const worker = workers[index % workers.length];
   const startMs = (ms(run.createdAt) ?? 0) + MINUTE;
   return create(AgentSchema, {
     id: `${run.id}-${lead ? 'lead' : `a${index}`}`,
     runId: run.id,
     parentAgentId: lead ? '' : run.leadAgentId,
     role: lead ? AgentRole.LEAD : AgentRole.WORKER,
-    harness: Harness.CODEX,
+    harness: lead || worker === undefined ? Harness.CODEX : worker.harness,
     // The lead runs on the host's default model, which no price is known for; the workers on named ones.
-    model: lead ? '' : index % 2 === 0 ? 'model-b' : 'model-a',
+    model: lead ? '' : (worker?.model ?? ''),
     status: agentStatusOf(rng, run, lead),
     session: 1,
     stopStage: AgentStopStage.NONE,
@@ -323,7 +342,7 @@ function pushRun(
   const startMs = ms(run.createdAt) ?? options.nowMs;
   log.push(startMs, {case: 'run', value: run});
   const agents = 1 + rng.int(5);
-  const members = Array.from({length: agents}, (_, agent) => agentOf(rng, run, agent));
+  const members = Array.from({length: agents}, (_, agent) => agentOf(rng, options, run, agent));
   for (const member of members) log.push(startMs + MINUTE, {case: 'agent', value: member});
   // The turns come from a stream of their own, so adding them moved nothing else of the fleet.
   for (const {at, turn} of fleetTurns(options.seed, run, members, options.nowMs))

@@ -46,6 +46,20 @@ replaces any `host` parameter, and is opened by the Machines entry of the sideba
 Check each at windows of 1000, 1440 and 1920. Add machine opens its input; the fixture refuses the
 add and the remove in words, because the hosts shown are fixed by the address.
 
+## The three Cost cases
+
+The Cost page must hold one layout from a host with no spend to a host with a week of it, so it has three
+named worlds (`cost-cases.ts` in the orchestrator Fakes). Each replaces the scenario, so the Runs page
+holds the same runs; open Cost on the rail to see it:
+
+| Case | Address | What it is |
+| --- | --- | --- |
+| No spend yet | `fixture.html?spend=none` | One live run with its agents and no finished turn: every panel keeps its frame and says what is missing. |
+| One short run | `fixture.html?spend=short` | One run of nine turns (four unpriced) within a few minutes, on three models and four agent types. |
+| A week | `fixture.html?spend=week` | Sixteen runs over a week on four models and two tools, some agents unpriced, some runs with a budget; offers the 1d range. |
+
+Check each at windows of 1000 (the columns stack), 1440 and 1920 (main and side columns).
+
 ## Add a case
 
 Add the state to the scenario generator in the `testing` folder's orchestrator Fakes, not to the

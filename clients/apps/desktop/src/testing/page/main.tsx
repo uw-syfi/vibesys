@@ -30,6 +30,9 @@
  * just started with nothing measured; one that failed within a minute and a half with three
  * measurements; one of six days with two objectives, 400 measurements served of 3,000, 64 ideas and 28
  * agents): it replaces the scenario, the search view and the cost, and no other parameter changes them.
+ * `spend=<none|short|week>` is one of three hosts the Cost page must hold in one layout (one run that
+ * has finished no turn; one short run of nine turns, four unpriced; sixteen runs over a week on
+ * four models and two tools, some agents unpriced): it replaces the scenario.
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
@@ -80,6 +83,8 @@ import {
   setupScenario,
 } from '../orchestrator/fake-setup.js';
 import {
+  COST_CASES,
+  costCaseScenario,
   FAKE_VIEWER,
   FakeDaemon,
   FIXTURE_FILES,
@@ -149,8 +154,12 @@ const setupFlavor: SetupFlavor | undefined = SETUP_FLAVORS.find(
 const reportCase = REPORT_CASES.find(each => each === query.get('case'));
 const caseWorld = reportCase === undefined ? undefined : reportCaseWorld(reportCase);
 
+/** The host the address names for the Cost page (`spend=none|short|week`); none when it names none. */
+const costCase = COST_CASES.find(each => each === query.get('spend'));
+
 function baseScenario() {
   if (caseWorld !== undefined) return caseWorld.scenario;
+  if (costCase !== undefined) return costCaseScenario(costCase);
   return setupFlavor === undefined ? scenarioOf(window.location.search) : setupScenario();
 }
 
