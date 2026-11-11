@@ -28,6 +28,11 @@ export interface TableColumn<Row> {
    * column is that wide before its first cell is (a reading that arrives later moves nothing).
    */
   readonly reserve?: ReactNode;
+  /**
+   * How many columns this row's cell here covers, itself included (the cells it covers are not drawn):
+   * one line of words across the columns of a row that has no figures to put in them.
+   */
+  readonly span?: (row: Row) => number | undefined;
   /** The column that names the row: it keeps a readable width, and the table scrolls instead. */
   readonly lead?: boolean;
   /**
@@ -89,6 +94,11 @@ export function Table<Row>(props: {
   /** Rows set close, for a table that holds many: the least padding the scale has. */
   readonly dense?: boolean;
   /**
+   * The rows beneath another (`sub`) belong to it: the row that opens a group has more room above it
+   * than the rows within one, so the groups read without a line between their rows.
+   */
+  readonly grouped?: boolean;
+  /**
    * Where a table that outgrows its box scrolls: `across` (the default) when a column cannot be
    * narrower, or `down`, in a box as tall as `table-rows` with the header kept in view, for a
    * table with many rows whose cells cut their text instead of widening.
@@ -129,6 +139,7 @@ export function Table<Row>(props: {
         aria-label={props.label}
         data-middle={props.middle || undefined}
         data-dense={props.dense || undefined}
+        data-grouped={props.grouped || undefined}
         data-dim={props.dim || undefined}
       >
         <thead>
@@ -137,10 +148,7 @@ export function Table<Row>(props: {
               <th
                 key={column.key}
                 scope="col"
-                data-align={column.align}
-                data-wide={column.wide === true || undefined}
-                data-lead={column.lead === true || undefined}
-                data-clip={column.clip !== undefined || undefined}
+                {...marksOf(column)}
                 aria-sort={sortOf(props.sort, column)}
                 title={column.hint}
               >
@@ -187,17 +195,14 @@ export function Table<Row>(props: {
                 }
                 onKeyDown={pickable ? event => keyDown(event, key) : undefined}
               >
-                {columns.map((column, at) => (
+                {cellsOf(columns, row).map(({column, at, span}) => (
                   <td
                     key={column.key}
+                    colSpan={span > 1 ? span : undefined}
+                    {...marksOf(column)}
                     data-mono={column.mono}
                     data-mono-id={column.mono}
-                    data-align={column.align}
-                    data-wide={column.wide === true || undefined}
-                    data-lead={column.lead === true || undefined}
-                    data-fit={column.fit === true || undefined}
                     data-control={column.control === true || undefined}
-                    data-clip={column.clip !== undefined || undefined}
                     title={column.clip?.(row)}
                   >
                     {at === 0 && props.fold !== undefined ? (
@@ -217,6 +222,42 @@ export function Table<Row>(props: {
       </table>
     </ScrollArea>
   );
+}
+
+/** The attributes a column's header and cells share, which the stylesheet sets its width and look by. */
+function marksOf<Row>(column: TableColumn<Row>): {
+  'data-align': TableColumn<Row>['align'];
+  'data-wide': true | undefined;
+  'data-lead': true | undefined;
+  'data-fit': true | undefined;
+  'data-clip': true | undefined;
+} {
+  return {
+    'data-align': column.align,
+    'data-wide': column.wide === true || undefined,
+    'data-lead': column.lead === true || undefined,
+    'data-fit': column.fit === true || undefined,
+    'data-clip': column.clip !== undefined || undefined,
+  };
+}
+
+/** The cells a row draws: one for each column, except those a cell before it covers (`span`). */
+function cellsOf<Row>(
+  columns: readonly TableColumn<Row>[],
+  row: Row,
+): {column: TableColumn<Row>; at: number; span: number}[] {
+  const cells: {column: TableColumn<Row>; at: number; span: number}[] = [];
+  let covered = 0;
+  columns.forEach((column, at) => {
+    if (covered > 0) {
+      covered -= 1;
+      return;
+    }
+    const span = Math.max(1, Math.min(column.span?.(row) ?? 1, columns.length - at));
+    covered = span - 1;
+    cells.push({column, at, span});
+  });
+  return cells;
 }
 
 /** What a header says of the order: `aria-sort` on the column the rows are sorted by. */

@@ -10,6 +10,7 @@ import {
   CellMark,
   CellSparkline,
   ColumnList,
+  CountedFact,
   Dock,
   DotLegend,
   Fact,
@@ -26,6 +27,7 @@ import {
   MetricTile,
   MetricTiles,
   MiddleText,
+  MutedFact,
   Narrative,
   NewBelow,
   Pane,
@@ -1001,6 +1003,23 @@ export const FRAME_ENTRIES = {
   Fact: {
     render: () => (
       <Text tone="muted">Facts are the entries of the FactLine above: whole, or shrinking.</Text>
+    ),
+  },
+  CountedFact: {
+    render: () => (
+      <FactLine spaced>
+        <CountedFact figure="12" words="measured" />
+        <CountedFact figure="$0.10" words="spent" hint="At least this much." />
+        <CountedFact lead="job places not read on" figure="2" words="machines" />
+      </FactLine>
+    ),
+  },
+  MutedFact: {
+    render: () => (
+      <FactLine spaced>
+        <MutedFact text="no ideas yet" />
+        <MutedFact text="reading cost" hint="The host has not answered yet." />
+      </FactLine>
     ),
   },
   Dock: {

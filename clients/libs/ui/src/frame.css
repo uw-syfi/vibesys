@@ -540,6 +540,12 @@ button.vs-crumb:focus-visible {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.vs-gauge[data-bare] .vs-meter[data-inline] {
+  width: var(--space-8);
+}
+.vs-gauge[data-bare] .vs-gauge-figure {
+  text-align: start;
+}
 .vs-readings {
   display: flex;
   flex-wrap: wrap;

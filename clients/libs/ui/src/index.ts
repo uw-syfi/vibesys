@@ -77,7 +77,7 @@ export {
   Stat,
 } from './components/display.js';
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
-export {Fact, FactLine} from './components/facts.js';
+export {CountedFact, Fact, FactLine, MutedFact} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';
 export {
   Gantt,
