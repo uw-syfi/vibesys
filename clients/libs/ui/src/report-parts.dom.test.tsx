@@ -22,7 +22,9 @@ import {
   MainSide,
   MutedFact,
   RangeStrip,
+  Row,
   ShareBar,
+  Stack,
   Table,
   windowMoved,
   windowOfDrag,
@@ -609,6 +611,22 @@ describe('round three parts', () => {
     expect(declarations('.vs-card-title')).toContain('flex: none;');
     expect(declarations('.vs-card-title')).toContain('white-space: nowrap;');
     expect(declarations('.vs-card-head')).toContain('flex-wrap: wrap;');
+  });
+
+  test('a chart beside its summary takes the next line before its plot becomes too narrow', async () => {
+    const root = await mount(
+      <Row wrap>
+        <Stack width="summary">Summary</Stack>
+        <Stack width="chart">Chart</Stack>
+      </Row>,
+    );
+    expect(root.querySelector('.vs-flex[data-width="chart"]')?.textContent).toBe('Chart');
+    const css = readFileSync(new URL('./base.css', import.meta.url), 'utf8');
+    const start = css.indexOf('\n.vs-flex[data-width="chart"] {');
+    expect(start).toBeGreaterThan(-1);
+    const declarations = css.slice(start, css.indexOf('}', start));
+    expect(declarations).toContain('flex: 1 1 var(--chart-flex-min);');
+    expect(declarations).toContain('min-width: min(100%, var(--chart-flex-min));');
   });
 
   test('a table header writes the unit of its values small beneath it', async () => {
