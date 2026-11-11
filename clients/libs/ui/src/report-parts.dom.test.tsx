@@ -599,6 +599,18 @@ describe('round three parts', () => {
     ]);
   });
 
+  test('a card keeps its section label whole when its key and action need the same narrow line', () => {
+    const css = readFileSync(new URL('./surfaces.css', import.meta.url), 'utf8');
+    const declarations = (selector: string): string => {
+      const start = css.indexOf(`\n${selector} {`);
+      expect(start).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf('}', start));
+    };
+    expect(declarations('.vs-card-title')).toContain('flex: none;');
+    expect(declarations('.vs-card-title')).toContain('white-space: nowrap;');
+    expect(declarations('.vs-card-head')).toContain('flex-wrap: wrap;');
+  });
+
   test('a table header writes the unit of its values small beneath it', async () => {
     const root = await mount(
       <Table
