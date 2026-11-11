@@ -1,4 +1,4 @@
-import {Fact, FactLine, Text} from '@vibesys/ui';
+import {CountedFact, FactLine, MutedFact} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {RunFacts} from '../../../state/index.js';
 import {
@@ -11,26 +11,6 @@ import {
 } from '../../cost/index.js';
 import {UNKNOWN} from '../../plain-words.js';
 import {yet} from './yet.js';
-
-/**
- * One fact: its figure in the text color and its words muted, in one run of text so the space between
- * them is a real space (a fact is a flex box, which drops a space between its children and leaves a
- * 2 px gap). With a `hint` the pointer says more.
- */
-function Counted(props: {
-  readonly figure: string;
-  readonly words: string;
-  readonly hint?: string;
-}): JSX.Element {
-  return (
-    <Fact {...(props.hint === undefined ? {} : {title: props.hint})}>
-      <Text variant="small" tone="muted">
-        <Text variant="small">{props.figure}</Text>
-        {` ${props.words}`}
-      </Text>
-    </Fact>
-  );
-}
 
 /**
  * The spend as the Cost page writes it: a figure with `≥` while turns without a price are behind it (and
@@ -56,7 +36,7 @@ const CUT = 'The host served only part of this, so there are more than it shows.
  * it has cost. Figures are the host's (`RunFacts`), in the text color; the words are quiet. Where
  * the host cut what it served short the fact says so on hover, and where the spend leaves out
  * turns without a price it says that. The age of the newest measurement and the turns behind the
- * spend are the panels' own to say.
+ * spend are the panels' own to say. Once the run is over nothing is "yet" to come.
  */
 export function FactsLine(props: {readonly facts: RunFacts; readonly over: boolean}): JSX.Element {
   const {measured, ideas, agents, spend} = props.facts;
@@ -65,43 +45,31 @@ export function FactsLine(props: {readonly facts: RunFacts; readonly over: boole
   return (
     <FactLine spaced>
       {measured.count === 0 ? (
-        <Fact>
-          <Text variant="small" tone="muted">
-            {yet('nothing measured', over)}
-          </Text>
-        </Fact>
+        <MutedFact text={yet('nothing measured', over)} />
       ) : (
-        <Counted
+        <CountedFact
           figure={formatCount(measured.count)}
           words="measured"
           {...(measured.atLeast ? {hint: CUT} : {})}
         />
       )}
       {ideas === null || ideas.count === 0 ? (
-        <Fact>
-          <Text variant="small" tone="muted">
-            {yet('no ideas', over)}
-          </Text>
-        </Fact>
+        <MutedFact text={yet('no ideas', over)} />
       ) : (
-        <Counted
+        <CountedFact
           figure={formatCount(ideas.count)}
           words="ideas"
           {...(ideas.atLeast ? {hint: CUT} : {})}
         />
       )}
-      <Counted
+      <CountedFact
         figure={`${agents.running} of ${agents.total}`}
         words={agents.total === 1 ? 'agent running' : 'agents running'}
       />
       {money === null ? (
-        <Fact>
-          <Text variant="small" tone="muted">
-            reading cost
-          </Text>
-        </Fact>
+        <MutedFact text="reading cost" />
       ) : (
-        <Counted
+        <CountedFact
           figure={money.figure}
           words="spent"
           {...(money.hint === undefined ? {} : {hint: money.hint})}

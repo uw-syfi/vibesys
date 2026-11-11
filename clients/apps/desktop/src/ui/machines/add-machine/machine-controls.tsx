@@ -1,4 +1,4 @@
-import {Button, Row, ToastStack} from '@vibesys/ui';
+import {Button, ToastStack} from '@vibesys/ui';
 import type * as Effect from 'effect/Effect';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {MachineActions, MachineUndo} from '../../../core/index.js';
@@ -15,10 +15,12 @@ import {AddMachine} from './add-machine.js';
 /** Runs `effect` and hands its answer to `then`; the entry owns where it runs. */
 export type MachineDispatch = <A>(effect: Effect.Effect<A>, then: (value: A) => void) => void;
 
-/** What the Machines page shows of the machines controls: the Add machine bar, a remove, and the toasts of a removal. */
+/** What the Machines page shows of the machines controls: Add machine and its input, a remove, and the toasts of a removal. */
 export interface MachineControls {
-  /** The Add machine button, or the open input in its place. */
-  readonly bar: ReactNode;
+  /** The Add machine button, for the page's header; it waits while the input is open. */
+  readonly action: ReactNode;
+  /** The open input that adds a machine, or nothing while it is closed. */
+  readonly form: ReactNode;
   /** Removes the machine of this host key, offering to put it back. */
   readonly remove: (key: string) => void;
   /** The toasts a removal leaves. */
@@ -81,7 +83,16 @@ export function useMachineControls(
     });
   };
   const drop = (id: string): void => setRemoved(list => list.filter(item => item.id !== id));
-  const bar: JSX.Element = open ? (
+  const action: JSX.Element = (
+    <Button
+      variant="secondary"
+      icon="plus"
+      text="Add machine"
+      press={opened}
+      {...(open ? {disabledReason: 'Type a host or paste an ssh command', quietReason: true} : {})}
+    />
+  );
+  const form: JSX.Element | null = open ? (
     <AddMachine
       state={add}
       type={type}
@@ -89,11 +100,7 @@ export function useMachineControls(
       submit={() => submitText(add.input)}
       close={close}
     />
-  ) : (
-    <Row justify="start">
-      <Button variant="secondary" icon="plus" text="Add machine" press={opened} />
-    </Row>
-  );
+  ) : null;
   const toasts: JSX.Element = (
     <ToastStack
       label="Machines"
@@ -114,5 +121,5 @@ export function useMachineControls(
       }}
     />
   );
-  return {bar, remove, toasts, selected, select};
+  return {action, form, remove, toasts, selected, select};
 }

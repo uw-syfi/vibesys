@@ -343,9 +343,10 @@ describe('the machines page', () => {
     screen.unmount();
   });
 
-  it('shows an empty list as a table with no rows, not as an error', () => {
+  it('shows an empty list as a table with one quiet row, not as an error', () => {
     const screen = mount(<MachinesScreen rows={[]} />);
-    expect(screen.container.querySelectorAll('tbody tr').length).toBe(0);
+    const rows = [...screen.container.querySelectorAll('tbody tr')];
+    expect(rows.map(row => row.textContent)).toEqual(['No machines']);
     screen.unmount();
   });
 });

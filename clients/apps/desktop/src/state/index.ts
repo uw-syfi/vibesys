@@ -79,7 +79,9 @@ export {
 } from './host-status.js';
 export {
   type AbsenceCause,
+  type GpuOverview,
   type GpuReading,
+  gpuOverview,
   type MachineSample,
   type MachineView,
   type MachineWhy,
@@ -284,6 +286,20 @@ export {
   addMachineStep,
   emptyAddMachine,
 } from './settings/machines.js';
+export {
+  type MachineEntry,
+  type MachineSources,
+  type MachinesFacts,
+  type MachineTableRow,
+  machineEntries,
+  machineKey,
+  machinesFacts,
+  machineTableRows,
+  type PlaceAsk,
+  type PlaceNote,
+  placesAsked,
+  settleAsks,
+} from './settings/machines-page.js';
 export {
   checkRepositoriesFolder,
   type FolderCheck,

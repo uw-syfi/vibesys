@@ -432,6 +432,14 @@
 .vs-table tr[data-kind="empty"] td {
   color: var(--muted);
 }
+/* The row that opens a group has more room above it than the rows within one. */
+.vs-table[data-grouped] tbody tr:not([data-kind]):not(:first-child) td {
+  padding-top: var(--space-4);
+}
+/* A row beneath another belongs to it: the line is the one above the group, not between its rows. */
+.vs-table tr[data-kind="sub"] td {
+  border-top-color: transparent;
+}
 .vs-table tr[data-kind="sub"] td:first-child {
   padding-left: var(--space-7);
 }
@@ -452,6 +460,25 @@
 }
 .vs-table td[data-lead] {
   min-width: calc(var(--space-8) * 3);
+}
+/* No height, so it adds nothing to the header: only the width of what the column will hold. */
+.vs-table-reserve {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+.vs-table td[data-fit] {
+  white-space: nowrap;
+}
+/* Columns that fit their content keep clear of their neighbours: the gap between columns is larger
+   than the one inside a cell. */
+.vs-table[data-dense] th[data-fit],
+.vs-table[data-dense] td[data-fit] {
+  padding-inline: var(--space-3);
+}
+.vs-table[data-dense] td[data-fit]:last-child {
+  padding-right: 0;
 }
 .vs-table td[data-clip] {
   max-width: calc(var(--space-8) * 6);

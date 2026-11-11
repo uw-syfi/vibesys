@@ -22,6 +22,10 @@
  * `measured`), and `staleDetail=<words>` gives its own words about it (with `measured`); a name
  * that is no reason fails the page; `appearance=<mode>-<light theme>-<dark theme>` sets what is
  * saved. Saved appearance lives in memory, so a reload starts again from the address.
+ * `machines=<one|several|unsupported>` is a world for the Machines page (`machine-cases.ts`): `one` is this
+ * machine live with its readings and four places; `several` is five machines (live, reconnecting, refused,
+ * a very long alias) with places reachable and not; `unsupported` is a machine whose host cannot sample
+ * its stats. It names the hosts shown, so `host` parameters are ignored; open Machines to see it.
  * `case=<started|failed|week>` is one of three runs the report must hold in one layout (a run that has
  * just started with nothing measured; one that failed within a minute and a half with three
  * measurements; one of six days with two objectives, 400 measurements served of 3,000, 64 ideas and 28
@@ -60,6 +64,7 @@ import {
   ThemeDocumentLive,
 } from '../../ui/shell/browser-layers.js';
 import {ConnectedShell} from '../../ui/shell/connected.js';
+import {MACHINE_CASES, machineCaseHosts, machineCaseRecording} from '../machine-cases.js';
 import {CATCH_UP_SHAPES, seedCheckIns} from '../orchestrator/check-in-fixtures.js';
 import {
   ENDED_RUN,
@@ -92,6 +97,7 @@ import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {servedHostCost} from '../orchestrator/served-host-cost.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
+import {fixtureMachineActions} from '../settings/machine-actions.js';
 import {memoryFolders} from '../settings/machine-folders.js';
 import {makeFakeTransport, type Recording} from '../transport/index.js';
 import {makeFakeViewerBridge} from '../viewer/fakes.js';
@@ -168,8 +174,15 @@ const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.default
   currentTimeNanosUnsafe: () => BigInt(NOW_MS) * 1_000_000n,
   currentTimeNanos: Effect.succeed(BigInt(NOW_MS) * 1_000_000n),
 });
+/** The Machines world the address names, if it names one. */
+const machineCase = MACHINE_CASES.find(each => each === query.get('machines'));
 const named = hostsOfAddress(window.location.search);
-const shown = named.length === 0 ? [THIS_MACHINE] : named;
+const shown =
+  machineCase !== undefined
+    ? machineCaseHosts(machineCase)
+    : named.length === 0
+      ? [THIS_MACHINE]
+      : named;
 
 /** The host at position `down` loses its link after its first snapshot: its run stream ends. */
 const downAt = query.has('down') ? Number(query.get('down')) : undefined;
@@ -298,7 +311,9 @@ const fake = makeFakeTransport(
         }
       : query.get('cost') === 'old'
         ? withoutCostStream
-        : served,
+        : machineCase === undefined
+          ? served
+          : machineCaseRecording(machineCase, served),
 );
 const saved = savedAppearance(query);
 const preferences = makeFakePreferencesBridge(saved === undefined ? {} : {saved});
@@ -327,6 +342,7 @@ Effect.runFork(
             appearance={appearance}
             viewerId={viewer}
             folders={folders}
+            machines={fixtureMachineActions()}
             dispatch={(effect, then) => {
               Effect.runFork(Effect.map(effect, then));
             }}

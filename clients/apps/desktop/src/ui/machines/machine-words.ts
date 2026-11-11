@@ -1,10 +1,10 @@
 /**
  * What a machine's reading is called when it is not current, or absent: the `MachineWhy` a
- * `MachineView`'s `stale` or `Missing.why` carries, and the `AbsenceCause` a single section
- * (CPU, memory or GPU) carries when the host's snapshot has no reading for it. `disconnected` has
- * no word here on purpose: the host's one status chip (`host-status-words.ts`) already says the
- * link is down, so the readings only dim and say nothing more about it (no second status for the
- * same host).
+ * `MachineView`'s `stale` or `Missing.why` carries, and the `AbsenceCause` a single section (CPU,
+ * memory or GPU) carries when the host's snapshot has no reading for it. They are said on hover over
+ * the machine's cells, never as a chip: the host's one status chip (`host-status-words.ts`) is the
+ * only status a row shows. `disconnected` has no word of its own for that reason; the hover says the
+ * link is down in plain words, and the readings dim.
  */
 import type {StatusTone} from '@vibesys/ui';
 import type {AbsenceCause, MachineWhy} from '../../state/index.js';
@@ -63,6 +63,33 @@ const WHY_WORD: Readonly<Record<MachineChipWhy, MachineWhyWord>> = {
     tone: 'err',
     hint: 'The host refused the call, or it failed for another reason.',
   },
+};
+
+/** Why a machine has no reading, in a few words that fit a row (after `No stats ·`). */
+const WHY_SHORT: Readonly<Record<MachineWhy, string>> = {
+  disconnected: 'the link is down',
+  updating: 'reading started',
+  'not-updating': 'not updating',
+  silent: 'the host did not answer',
+  'no-readings': 'the host sent none',
+  unsupported: 'not supported on this host',
+  'over-limit': 'the host broke a limit',
+  'read-failed': 'the host could not read',
+  'bad-readings': 'the host sent bad data',
+  failed: 'the host refused the call',
+};
+
+export const whyShort = (why: MachineWhy): string => WHY_SHORT[why];
+
+/**
+ * What a hover says of why a machine has no current reading, for any `MachineWhy`: the account of its
+ * chip word, and for `disconnected` (which has no chip, the status chip says it) the plain cause.
+ */
+export const whyHint = (why: MachineWhy): string => {
+  if (why === 'disconnected')
+    return 'The link to this machine is down, so it has no live readings.';
+  const word = WHY_WORD[why];
+  return `${word.label}. ${word.hint}`;
 };
 
 /** The word for a `MachineWhy` other than `disconnected`, which carries no word of its own. */

@@ -48,6 +48,28 @@ export interface GpuReading {
   readonly memory: MemoryUse;
 }
 
+/** A machine's GPUs as one reading: how many, how busy on average, and the memory they hold together. */
+export interface GpuOverview {
+  readonly count: number;
+  /** The mean of the GPUs' utilization. */
+  readonly meanUtilizationPercent: number;
+  readonly memory: MemoryUse;
+}
+
+/** `gpus` as one reading, or null for a machine with none. */
+export function gpuOverview(gpus: readonly GpuReading[]): GpuOverview | null {
+  if (gpus.length === 0) return null;
+  return {
+    count: gpus.length,
+    meanUtilizationPercent:
+      gpus.reduce((sum, gpu) => sum + gpu.utilizationPercent, 0) / gpus.length,
+    memory: {
+      usedBytes: gpus.reduce((sum, gpu) => sum + gpu.memory.usedBytes, 0),
+      totalBytes: gpus.reduce((sum, gpu) => sum + gpu.memory.totalBytes, 0),
+    },
+  };
+}
+
 /** One reading of the machine the host runs on. */
 export interface MachineSample {
   /** The average over every logical CPU since the previous sample. */

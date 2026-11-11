@@ -1,4 +1,5 @@
 import type {JSX, ReactNode} from 'react';
+import {Text} from './text.js';
 
 /**
  * Facts about one thing that never overlap or break inside: each `Fact` keeps its whole text on
@@ -41,5 +42,39 @@ export function Fact(props: {
     <span className="vs-fact" data-shrink={props.shrink === true || undefined} title={props.title}>
       {props.children}
     </span>
+  );
+}
+
+/**
+ * A fact that is a figure and the words it counts ("12 measured"): the figure in the text color,
+ * the words muted. They are one piece of text, so the space between them is a real space (a fact is
+ * a flex box, which drops a space between its children and leaves a 2 px gap). `lead` words come
+ * before the figure ("job places not read on 2 machines"). `hint` is what the pointer shows.
+ */
+export function CountedFact(props: {
+  readonly figure: string;
+  readonly words: string;
+  readonly lead?: string;
+  readonly hint?: string;
+}): JSX.Element {
+  return (
+    <Fact {...(props.hint === undefined ? {} : {title: props.hint})}>
+      <Text variant="small" tone="muted">
+        {props.lead === undefined ? null : `${props.lead} `}
+        <Text variant="small">{props.figure}</Text>
+        {` ${props.words}`}
+      </Text>
+    </Fact>
+  );
+}
+
+/** A fact in the quiet voice, with what it means on hover. */
+export function MutedFact(props: {readonly text: string; readonly hint?: string}): JSX.Element {
+  return (
+    <Fact {...(props.hint === undefined ? {} : {title: props.hint})}>
+      <Text variant="small" tone="muted">
+        {props.text}
+      </Text>
+    </Fact>
   );
 }

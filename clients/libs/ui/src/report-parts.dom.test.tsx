@@ -15,9 +15,12 @@ import {
   Card,
   Chart,
   Chip,
+  CountedFact,
   chartPlotMargins,
   DotLegend,
+  FactLine,
   MainSide,
+  MutedFact,
   RangeStrip,
   ShareBar,
   Table,
@@ -287,6 +290,96 @@ describe('Table sorting', () => {
   });
 });
 
+describe('Table columns that fit their content', () => {
+  const rows = [{name: 'a'}];
+
+  test('a column that fits never wraps, and the lead column is the one that takes what is left', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={rows}
+        rowKey={row => row.name}
+        columns={[
+          {key: 'name', header: 'Name', lead: true, cell: row => row.name},
+          {key: 'state', header: 'State', fit: true, cell: () => 'Live'},
+        ]}
+      />,
+    );
+    const [name, state] = [...root.querySelectorAll('tbody td')];
+    expect(state?.getAttribute('data-fit')).toBe('true');
+    expect(name?.getAttribute('data-fit')).toBeNull();
+  });
+
+  test('a reserve is drawn in the header for its width, hidden from assistive technology', async () => {
+    const root = await mount(
+      <Table
+        label="t"
+        rows={rows}
+        rowKey={row => row.name}
+        columns={[
+          {key: 'name', header: 'Name', cell: row => row.name},
+          {key: 'cpu', header: 'CPU', reserve: '100.0% of it', cell: () => null},
+        ]}
+      />,
+    );
+    const [name, cpu] = [...root.querySelectorAll('th')];
+    expect(name?.querySelector('.vs-table-reserve')).toBeNull();
+    const reserve = cpu?.querySelector('.vs-table-reserve');
+    expect(reserve?.textContent).toBe('100.0% of it');
+    expect(reserve?.getAttribute('aria-hidden')).toBe('true');
+    // The header's own name is what a reader hears, and only that.
+    expect(cpu?.textContent?.startsWith('CPU')).toBe(true);
+  });
+});
+
+describe('Table cells that span columns, and rows that group', () => {
+  interface Row {
+    readonly name: string;
+    readonly note: boolean;
+  }
+  const rows: Row[] = [
+    {name: 'a', note: true},
+    {name: 'b', note: false},
+  ];
+  const columns = [
+    {key: 'name', header: 'Name', cell: (row: Row) => row.name},
+    {
+      key: 'x',
+      header: 'X',
+      span: (row: Row) => (row.note ? 5 : 1),
+      cell: (row: Row) => (row.note ? 'note' : 'x'),
+    },
+    {key: 'y', header: 'Y', cell: () => 'y'},
+    {key: 'z', header: 'Z', cell: () => 'z'},
+  ];
+
+  test('a cell that spans covers the cells after it, never more than are left, and others keep theirs', async () => {
+    const root = await mount(
+      <Table label="t" rows={rows} rowKey={row => row.name} columns={columns} />,
+    );
+    const [first, second] = [...root.querySelectorAll('tbody tr')];
+    expect([...(first?.querySelectorAll('td') ?? [])].map(cell => cell.textContent)).toEqual([
+      'a',
+      'note',
+    ]);
+    expect(first?.querySelectorAll('td')[1]?.getAttribute('colspan')).toBe('3');
+    expect([...(second?.querySelectorAll('td') ?? [])].map(cell => cell.textContent)).toEqual([
+      'b',
+      'x',
+      'y',
+      'z',
+    ]);
+    expect(second?.querySelector('td[colspan]')).toBeNull();
+  });
+
+  test('a grouped table says so, for the room above the row that opens a group', async () => {
+    const root = await mount(
+      <Table label="t" rows={rows} rowKey={row => row.name} grouped columns={columns} />,
+    );
+    expect(root.querySelector('.vs-table')?.getAttribute('data-grouped')).toBe('true');
+  });
+});
+
 describe('the labelled line, the main and side columns, the filter chips', () => {
   test('a brief is one block: its label, its lead, and each field as a label over its text, with nothing bold', async () => {
     const full = await mount(
@@ -552,5 +645,27 @@ describe('figures in a line of facts', () => {
     const rule = css.slice(start, css.indexOf('}', start));
     expect(start).toBeGreaterThan(-1);
     expect(rule).not.toContain('tabular-nums');
+  });
+
+  test('a counted fact is one piece of text, so its figure and its words have a real space between them', async () => {
+    const root = await mount(
+      <FactLine spaced>
+        <CountedFact figure="$0.10" words="spent" hint="At least this much." />
+        <CountedFact lead="not read on" figure="2" words="machines" />
+        <MutedFact text="no ideas yet" hint="Nothing was proposed." />
+      </FactLine>,
+    );
+    const facts = [...root.querySelectorAll('.vs-fact')];
+    expect(facts.map(each => each.textContent)).toEqual([
+      '$0.10 spent',
+      'not read on 2 machines',
+      'no ideas yet',
+    ]);
+    expect(facts.map(each => each.getAttribute('title'))).toEqual([
+      'At least this much.',
+      null,
+      'Nothing was proposed.',
+    ]);
+    expect(facts[0]?.querySelector('.vs-text .vs-text')?.textContent).toBe('$0.10');
   });
 });

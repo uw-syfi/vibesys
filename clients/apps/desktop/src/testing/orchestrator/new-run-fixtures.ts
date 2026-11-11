@@ -33,7 +33,7 @@ import {
 /** Where the fake host puts a new repository when the call names no parent. */
 export const FIXTURE_REPOSITORIES_DIRECTORY = '/home/user/.vibesys/repos';
 
-const offer = (
+export const offer = (
   model: AcceleratorModel,
   vendor: AcceleratorVendor,
   count: number,
@@ -45,7 +45,7 @@ const offer = (
   deviceName: name,
 });
 
-const place = (
+export const place = (
   name: string,
   kind: EvalPlaceKind,
   offers: ReadonlyArray<ReturnType<typeof offer>>,

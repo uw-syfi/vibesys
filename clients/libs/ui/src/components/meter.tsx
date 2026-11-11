@@ -76,18 +76,26 @@ export function Gauge(props: {
   readonly share: number | null;
   readonly figure: string;
   readonly figureWidth: number;
-  readonly tone?: 'ok' | 'warn';
+  readonly tone?: 'accent' | 'ok' | 'warn';
   readonly dim?: boolean;
   readonly note?: string;
+  /**
+   * The label is already on the page (a table column's header): it is drawn no more, and stays the
+   * reading's accessible name, so a column of readings is a meter and a figure each, not a word more.
+   * Its figure stands directly after its own bar, at the start of the room it reserves.
+   */
+  readonly bare?: boolean;
 }): JSX.Element {
   const known = props.share !== null && Number.isFinite(props.share);
   const share = known ? Math.max(0, Math.min(1, props.share ?? 0)) : null;
   const figure: StyleWithVars = {'--gauge-figure-width': `${props.figureWidth}ch`};
   const drawn = (
     <>
-      <Text variant="small" tone="muted">
-        {props.label}
-      </Text>
+      {props.bare === true ? null : (
+        <Text variant="small" tone="muted">
+          {props.label}
+        </Text>
+      )}
       <Meter
         inline
         decorative
@@ -112,6 +120,7 @@ export function Gauge(props: {
         role="img"
         aria-label={`${props.label} unknown${note}`}
         data-dim={props.dim === true || undefined}
+        data-bare={props.bare === true || undefined}
       >
         {drawn}
       </span>
@@ -128,6 +137,7 @@ export function Gauge(props: {
       aria-valuenow={Number((share * 100).toFixed(0))}
       aria-valuetext={`${props.figure}${note}`}
       data-dim={props.dim === true || undefined}
+      data-bare={props.bare === true || undefined}
     >
       {drawn}
     </span>
