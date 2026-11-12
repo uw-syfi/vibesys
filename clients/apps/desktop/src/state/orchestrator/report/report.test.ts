@@ -217,7 +217,10 @@ describe('the objectives of a report', () => {
           },
         ],
       }),
-      [create(ObjectiveStandingSchema, {name: 'a', headValue: 4})],
+      [
+        create(ObjectiveStandingSchema, {name: 'b'}),
+        create(ObjectiveStandingSchema, {name: 'a', headValue: 4}),
+      ],
     );
     expect(bare?.headValue).toBe(4);
     expect([measured?.name, bare?.name, bare?.points.length, bare?.better]).toEqual([
@@ -226,6 +229,85 @@ describe('the objectives of a report', () => {
       0,
       'lower',
     ]);
+  });
+
+  it('keeps a summary-only declared objective and merges series and bounds into the summary order without inventing its direction', () => {
+    const reports = objectiveReports(
+      create(SearchStateSchema, {
+        series: [
+          {
+            objective: 'measured',
+            direction: Direction.MAXIMIZE,
+            points: [{jobId: 'j', commit: 'c', at: timestampFromMs(1000), value: 3}],
+          },
+        ],
+        bounds: [
+          {
+            objective: 'bounded',
+            direction: Direction.MINIMIZE,
+            versions: [{seq: 1n, value: 5, unit: 'ms', note: 'n', objective: 'bounded'}],
+          },
+        ],
+      }),
+      [
+        create(ObjectiveStandingSchema, {name: 'declared-only', headValue: 7}),
+        create(ObjectiveStandingSchema, {name: 'measured', bestValue: 3}),
+        create(ObjectiveStandingSchema, {name: 'bounded'}),
+      ],
+    );
+
+    expect(reports.map(report => report.name)).toEqual(['declared-only', 'measured', 'bounded']);
+    expect(reports.map(report => report.better)).toEqual([null, 'higher', 'lower']);
+    expect(reports[0]).toMatchObject({headValue: 7, points: [], bound: undefined});
+    expect(reports[1]?.points).toHaveLength(1);
+    expect(reports[2]?.bound?.current.value).toBe(5);
+  });
+
+  it('lists every summary, series and bound objective once, with the summary order first', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.stringMatching(/^[a-z]{1,8}$/), {minLength: 1, maxLength: 8}),
+        names => {
+          const serial = names.filter((_, at) => at % 2 === 0);
+          const bounded = names.filter((_, at) => at % 3 === 0);
+          const extra = 'outside-summary';
+          const reports = objectiveReports(
+            create(SearchStateSchema, {
+              series: [...serial, extra].map((objective, at) => ({
+                objective,
+                direction: at % 2 === 0 ? Direction.MAXIMIZE : Direction.MINIMIZE,
+                points: [
+                  {
+                    jobId: `job-${at}`,
+                    commit: `c${at}`,
+                    at: timestampFromMs(at + 1),
+                    value: at,
+                  },
+                ],
+              })),
+              bounds: bounded.map((objective, at) => ({
+                objective,
+                direction: Direction.MINIMIZE,
+                versions: [{seq: 1n, value: at + 1, unit: 'u', note: '', objective}],
+              })),
+            }),
+            names.map(name => create(ObjectiveStandingSchema, {name})),
+          );
+          expect(reports.map(report => report.name)).toEqual([...names, extra]);
+          expect(new Set(reports.map(report => report.name)).size).toBe(reports.length);
+          for (const report of reports) {
+            if (serial.includes(report.name) || report.name === extra) {
+              expect(report.better).not.toBeNull();
+            } else if (bounded.includes(report.name)) {
+              expect(report.better).toBe('lower');
+            } else {
+              expect(report.better).toBeNull();
+            }
+          }
+        },
+      ),
+      {seed: 14},
+    );
   });
 
   it('are none for a search with nothing measured or declared', () => {
@@ -524,6 +606,22 @@ describe('the run report', () => {
 
   it('has no plans view before a search state is served', () => {
     expect(runReport(stateOf(), 'r', 20_000)?.plans).toBeUndefined();
+  });
+
+  it('keeps the summary objective before the disjoint search stream is served', () => {
+    const state: OrchestratorState = {
+      ...stateOf(),
+      summaries: {
+        r: create(RunSummarySchema, {
+          runId: 'r',
+          objectives: [{name: 'tail latency'}],
+        }),
+      },
+    };
+
+    expect(runReport(state, 'r', 20_000)?.objectives).toMatchObject([
+      {name: 'tail latency', better: null, points: [], bestValue: undefined},
+    ]);
   });
 
   it('counts the run’s plans by status, keeping Chosen and Won apart, with the host’s words', () => {

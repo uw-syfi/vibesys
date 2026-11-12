@@ -5,6 +5,7 @@ export {
 } from './presentation.js';
 export {
   rawSkeleton,
+  representativeRun,
   runHeader,
   runMetric,
   SKELETON,

@@ -351,6 +351,7 @@ describe('a run cost view', () => {
       fc.property(runCost(runIds), sent => {
         const model = applyHostFrame(emptyHostModel, {
           from: 'cost',
+          phase: 'update',
           view: viewOf(arrives(sent)),
         });
         expect(model.data.costs[sent.runId]).toEqual(viewOf(arrives(sent)));
@@ -358,6 +359,31 @@ describe('a run cost view', () => {
         expect(model.data.sequence).toBe(0n);
       }),
       {seed: 13},
+    );
+  });
+
+  it('lets a new stream replace a held view from a later sequence', () => {
+    fc.assert(
+      fc.property(
+        runCost(fc.constant('run-a')),
+        fc.bigInt({min: 1n, max: 1000n}),
+        (cost, ahead) => {
+          const initial = viewOf(arrives(cost));
+          const beforeRestart = viewOf(arrives({...cost, sequence: cost.sequence + ahead}));
+          const held = applyHostFrame(emptyHostModel, {
+            from: 'cost',
+            phase: 'update',
+            view: beforeRestart,
+          });
+          const restarted = applyHostFrame(held, {
+            from: 'cost',
+            phase: 'initial',
+            view: initial,
+          });
+          expect(restarted.data.costs['run-a']).toEqual(initial);
+        },
+      ),
+      {seed: 29},
     );
   });
 });

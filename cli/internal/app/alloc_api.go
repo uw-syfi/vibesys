@@ -275,20 +275,22 @@ func (a *App) EndRunAllocations(ctx context.Context, run core.RunID) ([]Allocati
 
 // jobBound is the longest a job is taken to run, which is what it would ask a backend for on its
 // own: a command's own timeout, and for a check or a measure what its task holds it to (flow.Bound),
-// so a job of a task whose limits are minutes fits an allocation of minutes. A profile that has not
-// been through the daemon's flows yet is given the task's load and server as they will make it.
+// so a job of a task whose limits are minutes fits an allocation of minutes. A command that has not
+// been through the daemon's flows yet is given the limit they will give it.
 func (a *App) jobBound(ctx context.Context, scope core.Scope, spec core.JobSpec) (time.Duration, error) {
 	read := func() (task.Task, error) {
 		return a.taskAt(ctx, string(scope.Repository()), spec.Commit, string(scope.Task()))
 	}
 	switch s := spec.Settings.(type) {
 	case core.CommandSettings:
-		if s.Profile != nil && len(s.Argv) == 0 {
+		if s.Image == core.ImageHarness && spec.Environment != core.EnvironmentHost && s.Candidate == nil {
+			// Perhaps not yet through the daemon's flows: beside a candidate's server, the server's
+			// startup time is added to the command's limit.
 			t, err := read()
 			if err != nil {
 				return 0, err
 			}
-			if s, err = commandOfTwoImages(s, t); err != nil {
+			if s, err = resolveCommand(s, t, a.cfg.DefaultTimeout); err != nil {
 				return 0, err
 			}
 		}

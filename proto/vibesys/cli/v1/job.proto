@@ -43,24 +43,41 @@ message ServiceSpec {
   repeated string probe = 2;
 }
 
+// CommandImage is the image a command job runs in, which the caller always names.
+enum CommandImage {
+  COMMAND_IMAGE_UNSPECIFIED = 0;
+  // The task's image, built from the task's files: where its check and benchmark run (the host
+  // for a task with no Dockerfile). On a task of two images the command runs there beside the
+  // candidate's server, as the check and the benchmark do.
+  COMMAND_IMAGE_HARNESS = 1;
+  // The candidate's image, built from the evaluated commit's [candidate] dockerfile. Only a task of
+  // two images has one.
+  COMMAND_IMAGE_CANDIDATE = 2;
+}
+
 message CommandSettings {
   repeated string argv = 1;
   ServiceSpec service = 2;
   // Zero means the default limit.
   google.protobuf.Duration timeout = 3;
-  // Set for a profile job of a task of two images: the task's [profile] load against the
-  // candidate's server started under the wrapper. A submission gives no argv; the daemon sets the
-  // argv, the timeout and the candidate from the task.
+  // Retired with the profile job: a submission that sets it is refused. A job stored before it
+  // was retired holds its resolved command in the fields beside it and is read without it.
   ProfileRequest profile = 4;
   // Set by the daemon for a job of a task of two images, never by a caller: how the candidate's
-  // image is built, and for a profile the server the command runs against.
+  // image is built, and for a command in the task's image the server the command runs against.
   CandidateSetup candidate = 5;
+  // The image the command runs in. A submission names one; a job stored before the field was
+  // added has none, and its candidate setup says where it ran.
+  CommandImage image = 6;
+  // An argv prefix, which the daemon puts in front of the candidate's server for a command in the
+  // task's image of a task of two images, and otherwise in front of the service when there is one
+  // and of the command when not. A stored job holds it already applied, so it is empty there.
+  repeated string wrap = 7 [(buf.validate.field).repeated.items.string.min_len = 1];
 }
 
-// ProfileRequest is what a profile submission asks for.
+// ProfileRequest is what a retired profile submission asked for.
 message ProfileRequest {
-  // An argv prefix the candidate's server starts under, such as a profiler's command line. The CLI
-  // never reads it.
+  // An argv prefix the candidate's server started under.
   repeated string wrap = 1 [(buf.validate.field).repeated.items.string.min_len = 1];
 }
 

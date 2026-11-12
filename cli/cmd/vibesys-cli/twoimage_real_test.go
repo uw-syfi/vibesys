@@ -43,9 +43,6 @@ command = ['sh', '-c', 'wget -q -O- "$VIBESYS_SERVICE_URL/health" >/dev/null && 
 timeout_seconds = 60
 result_protocol = 2
 
-[profile]
-command = ['sh', '-c', 'wget -q -O- "$VIBESYS_SERVICE_URL/health" && echo loaded']
-timeout_seconds = 60
 `, 0o644)
 	m.write(dir+task.ObjectiveName, "[[objective]]\nname = \"ops\"\ndirection = \"max\"\n", 0o644)
 	m.write(dir+"Dockerfile", "FROM "+pinned+"\nRUN true\n", 0o644)
@@ -76,15 +73,25 @@ func TestRealTwoImageTaskServesTheCandidateBesideTheTask(t *testing.T) {
 	if n := strings.Count(m.logsOf(r), "sampled\n"); n != 2 {
 		t.Fatalf("took %d samples, want 2", n)
 	}
-	// A profile starts the server under the wrapper and loads it with [profile]; it is never reused.
+	// A command in the task's image runs beside the candidate's server, which starts under the
+	// wrapper, as a profile is taken; it is never reused.
+	load := []string{"--", "sh", "-c", `wget -q -O- "$VIBESYS_SERVICE_URL/health" && echo loaded`}
 	for range 2 {
-		r = m.cli("submit", "profile", "HEAD", "--task", "serve", "--wrap", "env PROFILED=1", "--wait")
-		if r.code != exitOK || !strings.Contains(r.stdout, "succeeded") || strings.Contains(r.stdout, "reused") {
-			t.Fatalf("submit profile = %+v\n%s", r, m.logsOf(r))
+		r = m.cli(append([]string{"submit", "command", "HEAD", "--task", "serve", "--image", "harness", "--wrap", "env PROFILED=1", "--wait"}, load...)...)
+		if r.code != exitOK || !strings.Contains(r.stdout, "succeeded") || strings.Contains(r.stdout, "reused") || !strings.Contains(r.stdout, "[harness]") {
+			t.Fatalf("submit command --image harness = %+v\n%s", r, m.logsOf(r))
 		}
-		if logs := m.logsOf(r); !strings.Contains(logs, "loaded") {
-			t.Fatalf("the profile's output %q", logs)
+		if logs := m.logsOf(r); !strings.Contains(logs, "ok\nloaded") || !strings.Contains(logs, "[command] image: harness") {
+			t.Fatalf("the harness command's output %q", logs)
 		}
+	}
+	// A command in the candidate's image runs there, over the commit's serve/ directory, with no server.
+	r = m.cli("submit", "command", "HEAD", "--task", "serve", "--image", "candidate", "--wait", "--", "cat", "/srv/health")
+	if r.code != exitOK || !strings.Contains(r.stdout, "[candidate]") {
+		t.Fatalf("submit command --image candidate = %+v\n%s", r, m.logsOf(r))
+	}
+	if logs := m.logsOf(r); !strings.Contains(logs, "ok\n") || !strings.Contains(logs, "[command] image: candidate") {
+		t.Fatalf("the candidate command's output %q", logs)
 	}
 	if left := m.scopeContainers(); len(left) != 0 {
 		t.Errorf("containers %v left after the jobs", left)

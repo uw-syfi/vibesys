@@ -72,7 +72,8 @@ type submitKind struct {
 	settings func() cliv1.JobSpec
 }
 
-// submitKinds are the kinds of job a user submits: a check, a measure, a command and a profile.
+// submitKinds are the kinds of job a user submits: a check, a measure, and a command in either
+// image, the task's one beside the candidate's server under a wrapper (as a profile is taken).
 var submitKinds = []submitKind{
 	{"check", func() cliv1.JobSpec {
 		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}}
@@ -81,10 +82,10 @@ var submitKinds = []submitKind{
 		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Measure{Measure: &cliv1.MeasureSettings{}}}
 	}},
 	{"command", func() cliv1.JobSpec {
-		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: []string{"exit", "0"}, Timeout: durationpb.New(5 * time.Minute)}}}
+		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE, Argv: []string{"exit", "0"}, Timeout: durationpb.New(5 * time.Minute)}}}
 	}},
-	{"profile", func() cliv1.JobSpec {
-		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{}}}}
+	{"harness", func() cliv1.JobSpec {
+		return cliv1.JobSpec{Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Wrap: []string{"print", "profiler on", ";"}, Argv: []string{"print", "load", ";", "exit", "0"}, Timeout: durationpb.New(5 * time.Minute)}}}
 	}},
 }
 

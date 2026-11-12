@@ -104,11 +104,13 @@ commands:
   submit check <commit> [flags]                  queue the task's check and print the job
   submit measure <commit> [--samples n] [--recheck] [--plan n | --no-plan] [flags]
                                                  queue the task's benchmark and print the job
-  submit command <commit> [--wrap prefix] [flags] -- <argv...>
-                                                 queue a command and print the job
+  submit command <commit> --image harness|candidate [--wrap prefix] [flags] -- <argv...>
+                                                 queue a command in the task's image (harness:
+                                                 where the check and benchmark run, beside the
+                                                 candidate's server, which --wrap wraps, on a task
+                                                 with [candidate]) or in the candidate's image, and
+                                                 print the job
   submit ... --alloc <id>|any                    run the job in a standing allocation of the run
-  submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
-                                                 candidate's server started under the prefix
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job

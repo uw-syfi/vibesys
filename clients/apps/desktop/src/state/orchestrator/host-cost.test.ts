@@ -298,13 +298,44 @@ describe('the windows of a host cost view', () => {
         );
         const held = applyHostFrame(emptyHostModel, {
           from: 'host-cost',
+          phase: 'update',
           window: 'all',
           view: newer,
         });
-        const after = applyHostFrame(held, {from: 'host-cost', window: 'all', view: older});
+        const after = applyHostFrame(held, {
+          from: 'host-cost',
+          phase: 'update',
+          window: 'all',
+          view: older,
+        });
         expect(after.data.hostCosts.all).toBe(newer);
       }),
       {seed: 13},
+    );
+  });
+
+  it('let a new stream replace a held view from a later sequence', () => {
+    fc.assert(
+      fc.property(hostCost, fc.bigInt({min: 1n, max: 1000n}), (cost, ahead) => {
+        const initial = viewOf(arrives(cost));
+        const beforeRestart = viewOf(
+          arrives(create(HostCostSchema, {...cost, sequence: cost.sequence + ahead})),
+        );
+        const held = applyHostFrame(emptyHostModel, {
+          from: 'host-cost',
+          phase: 'update',
+          window: 'all',
+          view: beforeRestart,
+        });
+        const restarted = applyHostFrame(held, {
+          from: 'host-cost',
+          phase: 'initial',
+          window: 'all',
+          view: initial,
+        });
+        expect(restarted.data.hostCosts.all).toEqual(initial);
+      }),
+      {seed: 17},
     );
   });
 });

@@ -49,7 +49,7 @@ func describe(j *cliv1.Job) string {
 	fmt.Fprintf(&b, "\t%s", commit)
 	switch spec := j.GetSpec(); {
 	case spec.GetCommand() != nil:
-		fmt.Fprintf(&b, "\t%s", commandSummary(spec.GetCommand().GetArgv()))
+		fmt.Fprintf(&b, "\t[%s] %s", imageName(spec.GetCommand()), commandSummary(spec.GetCommand().GetArgv()))
 	case spec.GetCheck() != nil:
 		fmt.Fprint(&b, "\tcheck")
 	case spec.GetMeasure() != nil:
@@ -62,6 +62,18 @@ func describe(j *cliv1.Job) string {
 		fmt.Fprintf(&b, "\n\t  note: %s", n.GetText())
 	}
 	return b.String()
+}
+
+// imageName is the image a command job runs in, as --image names it. A job stored before the image
+// was named has none, and its candidate setup says where it ran.
+func imageName(c *cliv1.CommandSettings) string {
+	switch {
+	case c.GetImage() == cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE:
+		return "candidate"
+	case c.GetImage() == cliv1.CommandImage_COMMAND_IMAGE_UNSPECIFIED && c.GetCandidate() != nil && c.GetCandidate().GetServe() == nil:
+		return "candidate"
+	}
+	return "harness"
 }
 
 // commandWidth is the most runes of a command's argv that describe prints.

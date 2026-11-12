@@ -145,6 +145,7 @@ export {
   isFinalItem,
   type OlderFrame,
   type RunHistoryFrame,
+  type WholeViewPhase,
 } from './orchestrator/fold.js';
 export {
   type HostCostRead,

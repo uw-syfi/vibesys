@@ -123,6 +123,11 @@ describe('the edge of a column', () => {
       'Resize Cost',
       'Resize Best',
     ]);
+    expect(grips(container).map(each => each.tagName)).toEqual(['HR', 'HR']);
+    expect(grips(container).map(each => each.getAttribute('title'))).toEqual([
+      'Resize Cost column (drag or use arrow keys; double-click or press Enter to reset)',
+      'Resize Best column (drag or use arrow keys; double-click or press Enter to reset)',
+    ]);
     expect(
       grips(container).map(each => [
         each.getAttribute('aria-valuemin'),
@@ -140,7 +145,15 @@ describe('the edge of a column', () => {
       css.indexOf('.vs-columnlist-grip::after'),
       css.indexOf('}', css.indexOf('.vs-columnlist-grip::after')),
     );
-    expect(mark).toContain('content: "↔";');
+    expect(mark).toContain('content: "";');
+    expect(mark).toContain('width: var(--hairline);');
+    expect(mark).not.toContain('↔');
+    const focus = css.slice(
+      css.indexOf('.vs-columnlist-grip:focus-visible {'),
+      css.indexOf('}', css.indexOf('.vs-columnlist-grip:focus-visible {')),
+    );
+    expect(focus).toContain('outline: none;');
+    expect(focus).not.toContain('border-radius:');
   });
 
   test('moves by the arrow keys within the bounds, and goes back to its own width on Enter or a double press', async () => {

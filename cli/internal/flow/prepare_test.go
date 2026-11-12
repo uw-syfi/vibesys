@@ -84,7 +84,7 @@ func TestAJobRunsUnderTheKeyOfWhereItStarts(t *testing.T) {
 	}
 	for name, job := range map[string]core.Job{
 		"no settings": {ID: "j1"},
-		"a command":   {ID: "j1", Spec: core.JobSpec{Settings: core.CommandSettings{Argv: []string{"x"}}}},
+		"a command":   {ID: "j1", Spec: core.JobSpec{Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"x"}}}},
 	} {
 		if _, err := flow.Prepare(flow.Starting{Job: job, Task: tk, Environment: print_}); err == nil {
 			t.Errorf("%s: accepted", name)
