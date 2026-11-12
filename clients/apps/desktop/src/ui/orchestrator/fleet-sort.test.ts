@@ -15,6 +15,7 @@ const row = fc
   })
   .map(
     ({n, live, host, cost, agents, percent}): FleetRow => ({
+      source: 'managed',
       key: `${host}/r${n}`,
       host: {
         key: host,
@@ -29,6 +30,7 @@ const row = fc
       setup: false,
       status: live ? RunStatus.RUNNING : RunStatus.ENDED,
       live,
+      section: live ? 'live' : 'history',
       startedMs: n,
       endedMs: null,
       objectives:

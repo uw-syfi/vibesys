@@ -704,7 +704,7 @@ func TestOnlyCheckAndMeasureOfARunWithABranchAreHeldToTheBasesTask(t *testing.T)
 		}
 	})
 	t.Run("a command job", func(t *testing.T) {
-		_, err := setup(t, true).Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: changed, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"exit", "0"}}}})
+		_, err := setup(t, true).Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: changed, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}}}})
 		if err != nil {
 			t.Fatal(err)
 		}

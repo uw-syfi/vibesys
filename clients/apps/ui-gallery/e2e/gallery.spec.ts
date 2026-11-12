@@ -252,6 +252,8 @@ test('a selectable table selects a row with Enter', async ({page}) => {
 test('a log pane follows the tail until scrolled up, then offers to jump to it', async ({page}) => {
   await page.goto('./');
   const pane = page.getByRole('log', {name: 'Output', exact: true});
+  const owner = page.locator('[data-gallery-entry="LogPane"] .vs-log');
+  const ownerBefore = await owner.boundingBox();
   const atEnd = () =>
     pane.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight < 2);
   expect(await atEnd()).toBe(true);
@@ -260,6 +262,13 @@ test('a log pane follows the tail until scrolled up, then offers to jump to it',
   });
   const jump = page.getByRole('button', {name: 'New below'});
   await expect(jump).toBeVisible();
+  const paneBox = await pane.boundingBox();
+  const jumpBox = await jump.boundingBox();
+  const ownerAfter = await owner.boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(jumpBox).not.toBeNull();
+  expect(ownerAfter).toEqual(ownerBefore);
+  expect(jumpBox?.y).toBeGreaterThanOrEqual((paneBox?.y ?? 0) + (paneBox?.height ?? 0));
   await jump.click();
   await expect(jump).toHaveCount(0);
   expect(await atEnd()).toBe(true);
@@ -270,19 +279,56 @@ test('a thread follows its tail until scrolled up, and opens a block from the ke
 }) => {
   await page.goto('./');
   const pane = page.getByRole('list', {name: 'Turn by turn', exact: true});
+  const owner = page.locator('[data-gallery-entry="Thread"] .vs-thread');
+  const ownerBefore = await owner.boundingBox();
   await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
   await pane.evaluate(element => {
     element.scrollTop = 0;
   });
-  await expect(page.getByRole('button', {name: 'New below'})).toBeVisible();
+  const jump = page.getByRole('button', {name: 'New below'});
+  await expect(jump).toBeVisible();
+  const paneBox = await pane.boundingBox();
+  const jumpBox = await jump.boundingBox();
+  const ownerAfter = await owner.boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(jumpBox).not.toBeNull();
+  expect(ownerAfter).toEqual(ownerBefore);
+  expect(jumpBox?.y).toBeGreaterThanOrEqual((paneBox?.y ?? 0) + (paneBox?.height ?? 0));
   const reasoning = pane.getByRole('button', {name: /Reasoning/});
   await reasoning.focus();
   await expect(reasoning).toHaveAttribute('aria-expanded', 'false');
   await page.keyboard.press('Enter');
   await expect(reasoning).toHaveAttribute('aria-expanded', 'true');
   await expect(pane.getByText('Padding costs memory but removes the false sharing.')).toBeVisible();
-  await page.getByRole('button', {name: 'New below'}).click();
+  await jump.click();
   await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
+});
+
+test('every followed prose viewport keeps its tail control outside the content', async ({page}) => {
+  await page.setViewportSize({width: 640, height: 600});
+  await page.goto('./');
+  for (const view of [
+    {entry: 'Conversation', label: 'A conversation', owner: '.vs-conversation'},
+    {entry: 'Narrative', label: 'Turn', owner: '.vs-narrative-wrap'},
+  ]) {
+    const entry = page.locator(`[data-gallery-entry="${view.entry}"]`);
+    const pane = entry.locator(`[aria-label="${view.label}"]`);
+    const owner = entry.locator(view.owner);
+    const ownerBefore = await owner.boundingBox();
+    await pane.evaluate(element => {
+      element.scrollTop = 0;
+    });
+    const jump = entry.getByRole('button', {name: 'New below'});
+    await expect(jump).toBeVisible();
+    const paneBox = await pane.boundingBox();
+    const jumpBox = await jump.boundingBox();
+    expect(await owner.boundingBox(), `${view.entry}: owner stays put`).toEqual(ownerBefore);
+    expect(jumpBox?.y, `${view.entry}: control starts after viewport`).toBeGreaterThanOrEqual(
+      (paneBox?.y ?? 0) + (paneBox?.height ?? 0),
+    );
+    await jump.click();
+    await expect(jump).toHaveCount(0);
+  }
 });
 
 test('a scrubber steps with the arrow keys and goes back to live', async ({page}) => {

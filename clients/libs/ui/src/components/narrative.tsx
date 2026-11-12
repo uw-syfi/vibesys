@@ -4,7 +4,7 @@ import {Icon, type IconName} from './icon.js';
 import {Markdown} from './markdown.js';
 import {markdownToPlain} from './markdown-plain.js';
 import type {ToolState} from './message.js';
-import {NewBelow} from './new-below.js';
+import {NewBelowSlot} from './new-below.js';
 import {ScrollArea} from './scroll-area.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
@@ -59,11 +59,7 @@ export function Narrative(props: {
         ))}
         <div aria-hidden="true" style={{height: win.after}} />
       </ScrollArea>
-      {win.behind ? (
-        <span className="vs-narrative-jump">
-          <NewBelow text="New below" press={win.jump} />
-        </span>
-      ) : null}
+      {win.behind ? <NewBelowSlot text="New below" press={win.jump} /> : null}
     </div>
   );
 }

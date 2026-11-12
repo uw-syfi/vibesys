@@ -99,20 +99,27 @@ func ToCommandCandidate(field string, c *cliv1.CandidateSetup) (*core.CommandCan
 	return out, nil
 }
 
-func profileRequest(p *core.ProfileRequest) *cliv1.ProfileRequest {
-	if p == nil {
-		return nil
+// CommandImage is the contract's value for the image of a command job.
+func CommandImage(i core.CommandImage) cliv1.CommandImage {
+	switch i {
+	case core.ImageHarness:
+		return cliv1.CommandImage_COMMAND_IMAGE_HARNESS
+	case core.ImageCandidate:
+		return cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE
 	}
-	return &cliv1.ProfileRequest{Wrap: slices.Clone(p.Wrap)}
+	return cliv1.CommandImage_COMMAND_IMAGE_UNSPECIFIED
 }
 
-// ToProfileRequest reads the profile request of a command job, nil when it is not a profile.
-func ToProfileRequest(field string, p *cliv1.ProfileRequest) (*core.ProfileRequest, error) {
-	if p == nil {
-		return nil, nil
+// ToCommandImage reads the image of a command job. Unspecified reads as core.ImageUnspecified,
+// which only a job stored before the image was named holds; the daemon refuses a submission of it.
+func ToCommandImage(field string, i cliv1.CommandImage) (core.CommandImage, error) {
+	switch i {
+	case cliv1.CommandImage_COMMAND_IMAGE_UNSPECIFIED:
+		return core.ImageUnspecified, nil
+	case cliv1.CommandImage_COMMAND_IMAGE_HARNESS:
+		return core.ImageHarness, nil
+	case cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE:
+		return core.ImageCandidate, nil
 	}
-	if slices.Contains(p.GetWrap(), "") {
-		return nil, invalid("%s.wrap: a word of the wrapper is empty", field)
-	}
-	return &core.ProfileRequest{Wrap: slices.Clone(p.GetWrap())}, nil
+	return "", invalid("%s: %d is not an image (harness or candidate)", field, int32(i))
 }

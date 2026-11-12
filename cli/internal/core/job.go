@@ -83,34 +83,61 @@ type ServiceSpec struct {
 	Probe []string
 }
 
+// CommandImage is the image a command job runs in, which a submission always names.
+type CommandImage string
+
+const (
+	// ImageUnspecified is a job stored before the image was named, whose Candidate says where it
+	// ran (CommandSettings.RanIn). A submission that names none is refused.
+	ImageUnspecified CommandImage = ""
+	// ImageHarness is the task's image, built from the task's files, where its check and benchmark
+	// run (the host for a task with no Dockerfile). On a task of two images the command runs there
+	// beside the candidate's server, as the check and the benchmark do.
+	ImageHarness CommandImage = "harness"
+	// ImageCandidate is the candidate's image, built from the job's commit by the task's
+	// [candidate] dockerfile. Only a task of two images has one.
+	ImageCandidate CommandImage = "candidate"
+)
+
+// CommandImages is every image a submission may name, in the order a message lists them.
+func CommandImages() []CommandImage { return []CommandImage{ImageHarness, ImageCandidate} }
+
 // CommandSettings configures a command job.
 type CommandSettings struct {
 	Argv    []string
 	Service *ServiceSpec
 	// Timeout is zero for the default limit.
 	Timeout time.Duration
-	// Profile, when set, asks for the task's standard profile, a job of a task of two images: the
-	// task's [profile] load against the candidate's server started under the wrapper. A submission
-	// gives no Argv, and the daemon sets it, Timeout and Candidate from the task.
-	Profile *ProfileRequest
+	// Image is the image the command runs in, which the submission names.
+	Image CommandImage
+	// Wrap is an argv prefix the daemon applies when it accepts the job: in front of the
+	// candidate's server for a command in the task's image of a task of two images, and otherwise
+	// in front of the service when there is one and of the command when not. A stored job holds
+	// it applied, so it is empty there.
+	Wrap []string
 	// Candidate is set by the daemon for a job of a task of two images: how the job's candidate image
-	// is built, and the server the command runs against for a profile. It is never the caller's.
+	// is built, and the server a command in the task's image runs against. It is never the caller's.
 	Candidate *CommandCandidate
 }
 
-// ProfileRequest is what a profile submission asks for.
-type ProfileRequest struct {
-	// Wrap is an argv prefix the candidate's server starts under, such as a profiler's command
-	// line. The daemon never reads it.
-	Wrap []string
+// RanIn is the image the command runs in: the one it names, or for a job stored before an image was
+// named, the one its candidate setup implies.
+func (c CommandSettings) RanIn() CommandImage {
+	switch {
+	case c.Image != ImageUnspecified:
+		return c.Image
+	case c.Candidate != nil && c.Candidate.Serve == nil:
+		return ImageCandidate
+	}
+	return ImageHarness
 }
 
 // CommandCandidate is how a command job of a task of two images uses the candidate's image.
 type CommandCandidate struct {
 	Build CandidateBuild
-	// Serve, set for a profile, starts the server in the candidate's image, with the checkout's root
-	// not yet resolved, and the command runs in the task's image against it. Nil runs the command in
-	// the candidate's image.
+	// Serve, set for a command in the task's image, starts the server in the candidate's image, with
+	// the checkout's root not yet resolved, and the command runs in the task's image against it. Nil
+	// runs the command in the candidate's image.
 	Serve *CandidateServe
 }
 

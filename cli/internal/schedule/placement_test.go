@@ -49,7 +49,7 @@ func randomKinds(r *rand.Rand) []core.ResourceKind {
 func TestAJobMayRunOnEveryPlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	envs := []core.EnvironmentKind{core.EnvironmentDocker, core.EnvironmentDocker, core.EnvironmentHost}
-	settings := []core.Settings{core.CheckSettings{}, core.MeasureSettings{}, core.CommandSettings{Argv: []string{"true"}}}
+	settings := []core.Settings{core.CheckSettings{}, core.MeasureSettings{}, core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}}}
 	for range 3000 {
 		d := randomDemand(r)
 		job := core.Job{Needs: randomKinds(r), Spec: core.JobSpec{

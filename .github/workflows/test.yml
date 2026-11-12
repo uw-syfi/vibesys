@@ -476,11 +476,12 @@ jobs:
 
   # The UI gallery's measuring and accessibility suite (Playwright, Chromium on Linux; no pixel snapshots), the one
   # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
-  # `clients-tests`.
+  # `clients-tests`. Pin the OS because Playwright 1.55 refuses Ubuntu 26.04 before it can install
+  # Chromium; `ubuntu-latest` moved underneath this required check on 2026-11-12.
   clients-e2e:
     needs: changes
     if: needs.changes.outputs.clients == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -550,11 +551,12 @@ jobs:
   # The checks of vibesys-cli are two jobs that run at once (cli/check.sh, `race` and `plain`): as one
   # job they took 200 s on a fast runner and 320 s on a slow one, against the commit stage's 360 s limit.
   # Both run on every push to main for the same reason as `gateway`: a merge-queue run restores the
-  # Go caches a passing main run saved.
+  # Go caches a passing main run saved. Pin the race job because Ubuntu 26 took longer than its
+  # seven-minute hard limit without reaching a test failure when `ubuntu-latest` moved underneath it.
   cli:
     needs: changes
     if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 7
 
     steps:
@@ -572,7 +574,7 @@ jobs:
   cli-plain:
     needs: changes
     if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 7
 
     steps:
@@ -588,12 +590,13 @@ jobs:
         run: ./support/repoctl/repoctl run-checks --group cli_plain_checks
 
   # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
-  # Go caches a passing main run saved.
+  # Go caches a passing main run saved. Pin the runner because a cold Ubuntu 26 merge-queue run
+  # exceeded the orchestrator check's four-minute repoctl budget without a test failure.
   orchestrator:
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

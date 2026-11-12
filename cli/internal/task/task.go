@@ -130,11 +130,8 @@ type Task struct {
 	Schema SchemaVersion
 	// Candidate is set for a task of two images (a Schema02 manifest with [candidate]): the candidate's
 	// image and server. Its
-	// Check, Benchmark and Profile run in the task's image against that server.
+	// Check and Benchmark run in the task's image against that server.
 	Candidate *Candidate
-	// Profile is the standard profile load of a task of two images, when it declares one. It is
-	// never scored.
-	Profile *Command
 	// Service is set for a task of one image with a job-scoped server (a Schema02 manifest with
 	// [service]): a job starts it once and runs its samples against it.
 	Service *Service

@@ -8,6 +8,7 @@
  */
 
 export {sendMessageCommand} from './commands.js';
+export {ORCHESTRATOR_MAX_MESSAGE_BYTES} from './framing.generated.js';
 export type {ObjectiveBound} from './generated/vibesys/cli/v1/bound_pb.js';
 export {
   AcceleratorModel,
@@ -55,9 +56,5 @@ export * from './generated/vibesys/orchestrator/v1/provision_pb.js';
 export * from './generated/vibesys/orchestrator/v1/search_pb.js';
 export * from './generated/vibesys/orchestrator/v1/service_pb.js';
 export * from './generated/vibesys/orchestrator/v1/setup_pb.js';
-export {decodeValidated, decodeValidatedJson, encodeJson, encodeMessage} from './validated.js';
-
-/** Maximum encoded response on the orchestrator link; checked before allocating a frame. */
-export const ORCHESTRATOR_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
-
 export {oneofIs} from './oneof.js';
+export {decodeValidated, decodeValidatedJson, encodeJson, encodeMessage} from './validated.js';

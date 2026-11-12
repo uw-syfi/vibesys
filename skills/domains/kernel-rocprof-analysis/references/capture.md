@@ -36,37 +36,47 @@ found through `$ROCPROF_ATT_LIBRARY_PATH` or `$ROCM_PATH/lib`; install it in the
 
 ## Two kinds of capture job
 
-Both go through `vibesys-cli` (the `vibesys:measure` skill says how to submit and wait). `--wrap`
-is an argv prefix the CLI puts in front of a command without reading it; `capture.py` and its
-options, ending with `--`, are that prefix.
+Both go through `vibesys-cli submit command` (the `vibesys:measure` skill says how to submit and
+wait), which names the image the command runs in. `--wrap` is an argv prefix the CLI puts in front
+of a command without reading it; `capture.py` and its options, ending with `--`, are that prefix.
+`capture.py` and the profiler must be in the candidate's image, where the server runs.
 
-**A standard capture** profiles the server under the task's own profile load: the task's `[profile]`
-command, the same for every candidate, so two captures of two commits are comparable.
+**A standard capture** profiles the server under a fixed load from the task's own image, the same
+for every candidate, so two captures of two commits are comparable. With `--image harness` on a
+task with `[candidate]`, the command runs in the task's image beside the candidate's server, as the
+benchmark does, and `--wrap` goes in front of the server. Use the task's own short load when it has
+one (its README or harness says, such as a `profile` mode of its benchmark script), and the same
+argv for every capture you compare.
 
 ```bash
-vibesys-cli submit profile <sha> --wrap 'python3 tools/capture.py timeline --hip-api --'
+vibesys-cli submit command <sha> --image harness --wrap 'python3 tools/capture.py timeline --hip-api --' -- <the task's load argv>
 ```
 
-The CLI starts the task's server command behind the prefix, waits until it is ready, runs the
-profile load, then stops the server with SIGTERM and waits a short stop grace (the operator's
-setting, 30 seconds unless changed) before it kills it, so the profiler can flush. A profiler still
-writing a large trace when the grace ends is killed mid-write: the job still exits 0, but the
-trace is cut short (see [Complete and bounded captures](#complete-and-bounded-captures)). It never caches or scores the job, and copies the job's artifacts back. Use it first, and
-for every capture you will compare with another.
+The CLI starts the candidate's server behind the prefix, waits until it is ready, runs the load,
+then stops the server with SIGTERM and waits a short stop grace (the operator's setting, 30 seconds
+unless changed) before it kills it, so the profiler can flush. A profiler still writing a large
+trace when the grace ends is killed mid-write: the job still exits 0, but the trace is cut short
+(see [Complete and bounded captures](#complete-and-bounded-captures)). It never caches or scores
+the job, and copies the job's artifacts back. Use it first, and for every capture you will compare
+with another.
 
-**A free-form capture** profiles a load you choose, in the candidate container: one request shape,
-one batch size, a microbenchmark of one kernel. With `--service`, the prefix goes in front of the
-service; without it, in front of the command.
+**A free-form capture** profiles a load you choose: one request shape, one batch size, a
+microbenchmark of one kernel. Your own load against the server goes in the task's image as above,
+with your argv after `--`. A load that runs in the candidate container goes there with `--image
+candidate`; with `--service` the prefix goes in front of the service, and without it in front of
+the command.
 
 ```bash
-# your own load against the server, which runs under the profiler
-vibesys-cli submit command <sha> --wrap 'python3 tools/capture.py counters --pmc TCC_HIT_sum TCC_MISS_sum --kernel-include Cijk_ --' \
-  --service '<server argv>' --probe '<readiness argv>' -- <load argv>
-# a kernel microbenchmark, no server
-vibesys-cli submit command <sha> --wrap 'python3 tools/capture.py thread-trace --kernel-include fmha --' -- python bench/attn.py
+# your own load against the candidate's server, which runs under the profiler
+vibesys-cli submit command <sha> --image harness --wrap 'python3 tools/capture.py counters --pmc TCC_HIT_sum TCC_MISS_sum --kernel-include Cijk_ --' -- <load argv>
+# a kernel microbenchmark in the candidate's image, no server
+vibesys-cli submit command <sha> --image candidate --wrap 'python3 tools/capture.py thread-trace --kernel-include fmha --' -- python bench/attn.py
 # versions only: cheap, run it after any image change
-vibesys-cli submit command <sha> -- python3 tools/capture.py check
+vibesys-cli submit command <sha> --image candidate -- python3 tools/capture.py check
 ```
+
+On a task without `[candidate]`, everything runs in the task's image: use `--image harness`, and
+`--wrap` goes in front of `--service` or of the command, as in the candidate container above.
 
 A free-form capture answers a narrower question faster and cheaper, but its numbers describe your
 load, not the task's; say which load you used when you report it.
@@ -109,8 +119,8 @@ says so.
   seconds, after startup and warmup. Narrow it further with `--kernel-include`. Wrapping rocprofv3
   directly, pass `--collection-period <delay>:<duration>:<repeat>` yourself (seconds unless
   `--collection-period-unit` says otherwise). The flag's form has changed between ROCm releases:
-  read the image's `rocprofv3 --help` first, with a cheap `submit command <sha> -- rocprofv3
-  --help`.
+  read the image's `rocprofv3 --help` first, with a cheap `submit command <sha> --image candidate --
+  rocprofv3 --help`.
 - **Mind the format.** CSV is what `analyze.py` reads, and it spends a line of text on every
   dispatch; JSON is larger still. A bounded window is what keeps a CSV trace small. rocprofv3's
   binary formats (`pftrace` for Perfetto, `otf2`, and `rocpd` from ROCm 7) avoid that text, but

@@ -97,8 +97,7 @@ export function runReport(
   const startedMs = ms(run.createdAt) ?? nowMs;
   const endedMs = ms(run.endedAt);
   const toMs = Math.max(startedMs, endedMs ?? nowMs);
-  const objectives =
-    search === undefined ? [] : objectiveReports(search, state.summaries[runId]?.objectives ?? []);
+  const objectives = objectiveReports(search, state.summaries[runId]?.objectives ?? []);
   const ideas = ideasReport(search);
   const agents = agentsStrip(state, runId);
   return {

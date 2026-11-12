@@ -84,33 +84,49 @@ func FuzzDecodeJob(f *testing.F) {
 	})
 }
 
-// A command job's candidate and profile request, decoded from anything, are what the job runs:
-// a candidate with a Dockerfile and a context, a server with a program and a startup time, and a
-// wrapper of no empty word.
-func FuzzDecodeCommandCandidateAndProfile(f *testing.F) {
+// A command job's settings, decoded from anything, are what the job runs: a known image or none, a
+// wrapper of no empty word, no retired profile request, a candidate with a Dockerfile and a context,
+// and a server with a program and a startup time.
+func FuzzDecodeCommandSettings(f *testing.F) {
 	seedMessages(f,
-		&cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{Wrap: []string{"nsys", "profile"}}, Candidate: &cliv1.CandidateSetup{
+		&cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: []string{"load"}, Wrap: []string{"nsys", "profile"}, Candidate: &cliv1.CandidateSetup{
 			Build: &cliv1.CandidateBuild{Dockerfile: "serve/Dockerfile", Context: "serve", AllowedBases: []string{"python:3.12"}},
 			Serve: &cliv1.CandidateServe{Argv: []string{"serve", "${PORT}"}, Ready: "/health", StartupTimeout: durationpb.New(time.Minute)},
 		}},
-		&cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{Wrap: []string{""}}},
+		&cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: []string{"x"}, Wrap: []string{""}},
+		&cliv1.CommandSettings{Argv: []string{"x"}, Image: 7},
+		&cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: []string{"x"}, Profile: &cliv1.ProfileRequest{Wrap: []string{"nsys"}}},
 		&cliv1.CommandSettings{Candidate: &cliv1.CandidateSetup{Build: &cliv1.CandidateBuild{}}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.CommandSettings{}
 		decode(t, data, message)
-		if p, err := wire.ToProfileRequest("profile", message.GetProfile()); err == nil && p != nil && slices.Contains(p.Wrap, "") {
-			t.Fatalf("a decoded profile wraps the server in an empty word: %+v", p)
+		if i, err := wire.ToCommandImage("image", message.GetImage()); err == nil && i != core.ImageUnspecified && !slices.Contains(core.CommandImages(), i) {
+			t.Fatalf("a decoded image %q is not one", i)
 		}
-		c, err := wire.ToCommandCandidate("candidate", message.GetCandidate())
-		if err != nil || c == nil {
-			return
-		}
-		if c.Build.Dockerfile == "" || c.Build.Context == "" {
+		if c, err := wire.ToCommandCandidate("candidate", message.GetCandidate()); err == nil && c != nil && (c.Build.Dockerfile == "" || c.Build.Context == "") {
 			t.Fatalf("a decoded candidate has no Dockerfile or context: %+v", c.Build)
 		}
-		if s := c.Serve; s != nil && (len(s.Argv) == 0 || s.StartupTimeout <= 0) {
-			t.Fatalf("a decoded server has no program or no startup time: %+v", s)
+		spec, err := wire.ToJobSpec("spec", &cliv1.JobSpec{Commit: strings.Repeat("a", 40), Settings: &cliv1.JobSpec_Command{Command: message}})
+		if err != nil {
+			return
+		}
+		c := spec.Settings.(core.CommandSettings)
+		switch {
+		case message.GetProfile() != nil:
+			t.Fatalf("a retired profile request was accepted: %+v", message)
+		case slices.Contains(c.Wrap, ""):
+			t.Fatalf("a decoded wrapper has an empty word: %+v", c.Wrap)
+		case c.Image != core.ImageUnspecified && !slices.Contains(core.CommandImages(), c.Image):
+			t.Fatalf("a decoded image %q is not one", c.Image)
+		}
+		if cand := c.Candidate; cand != nil {
+			if cand.Build.Dockerfile == "" || cand.Build.Context == "" {
+				t.Fatalf("a decoded candidate has no Dockerfile or context: %+v", cand.Build)
+			}
+			if s := cand.Serve; s != nil && (len(s.Argv) == 0 || s.StartupTimeout <= 0) {
+				t.Fatalf("a decoded server has no program or no startup time: %+v", s)
+			}
 		}
 	})
 }

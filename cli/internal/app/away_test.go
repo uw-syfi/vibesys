@@ -503,7 +503,7 @@ func TestARunningJobOfAGoneRepositoryHoldsTheMachineUpToItsTimeout(t *testing.T)
 	w, o := newOutage(t)
 	first := o.start(w.supervisors())
 	spec := command("hold", "g", ";", "exit", "0")
-	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
+	spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
 	_, err := first.Submit(ctxFor(t), app.SubmitRequest{Context: callA, Spec: spec})
 	if err != nil {
 		t.Fatal(err)
@@ -851,7 +851,7 @@ func TestACommandLeftByAForgetHoldsTheMachineUpToItsLimit(t *testing.T) {
 	o.stopTimeout = time.Millisecond
 	a := o.start(heldCancels{Supervisors: w.supervisors()})
 	spec := command("hold", "g", ";", "exit", "0")
-	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
+	spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
 	if _, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: callA, Spec: spec}); err != nil {
 		t.Fatal(err)
 	}

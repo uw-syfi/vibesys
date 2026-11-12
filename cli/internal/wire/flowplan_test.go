@@ -80,7 +80,7 @@ func launchWith(r *rand.Rand, p *flow.Plan) lifecycle.Launch {
 	l := lifecycle.Launch{Repository: "/repo", Task: "kv", Job: "j1", Plan: p}
 	switch {
 	case p == nil:
-		l.Spec = core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"true"}, Timeout: time.Minute}}
+		l.Spec = core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}, Timeout: time.Minute}}
 	case p.Kind == core.JobCheck:
 		l.Spec = core.JobSpec{Commit: commit, Environment: p.Environment.Kind, Settings: core.CheckSettings{}}
 	default:

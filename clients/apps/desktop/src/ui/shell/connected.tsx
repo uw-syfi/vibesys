@@ -40,10 +40,10 @@ import {ConnectedMachines} from './connected-machines.js';
 import {FocusMemory, placeOf} from './focus-memory.js';
 import {AppShell} from './shell.js';
 
-/** The run streams of every host, followed while this is mounted. */
+/** The disjoint run-discovery streams of every host, followed while the run navigator exists. */
 const watchRuns = (hosts: readonly ConnectedHost[]): Atom.Atom<void> =>
   Atom.make(get => {
-    for (const host of hosts) get(host.session.runs.watch);
+    for (const host of hosts) get(host.session.runNavigation);
   });
 
 /** Each host as the Machines page shows it. */

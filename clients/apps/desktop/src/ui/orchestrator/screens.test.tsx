@@ -228,7 +228,7 @@ describe('the screens', () => {
     expect(page(state, codex)).toContain('waits for its step');
   });
 
-  it('shows Stop only while the run can be stopped, and what became of the press', () => {
+  it('shows Stop run only while the run can be stopped, and names its outcome', () => {
     const {scenario, state, runId} = stateOf(3, 2, true);
     const run = state.runs[runId];
     if (run === undefined) throw new Error('the fixture has its run');
@@ -248,12 +248,12 @@ describe('the screens', () => {
     }
     const command = create(CommandSchema, {id: 'c'});
     const sending = report(as(RunStatus.RUNNING), runId, now, {_tag: 'Sending', command});
-    expect(sending).toContain('Stop: sending');
+    expect(sending).toContain('Stop run: sending');
     const refused = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Refused',
       receipt: create(ReceiptSchema, {commandId: 'c', refusal: Refusal.RUN_NOT_RUNNING}),
     });
-    expect(refused).toContain('Stop refused \u00b7 Not running');
+    expect(refused).toContain('Stop run refused \u00b7 Not running');
     const unsure = report(as(RunStatus.RUNNING), runId, now, {
       _tag: 'Unconfirmed',
       command,

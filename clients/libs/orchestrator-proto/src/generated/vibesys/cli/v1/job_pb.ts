@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/job.proto.
  */
 export const file_vibesys_cli_v1_job: GenFile = /*@__PURE__*/
-  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSLdAQoPQ29tbWFuZFNldHRpbmdzEgwKBGFyZ3YYASADKAkSLAoHc2VydmljZRgCIAEoCzIbLnZpYmVzeXMuY2xpLnYxLlNlcnZpY2VTcGVjEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoHcHJvZmlsZRgEIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlByb2ZpbGVSZXF1ZXN0EjEKCWNhbmRpZGF0ZRgFIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNldHVwIiwKDlByb2ZpbGVSZXF1ZXN0EhoKBHdyYXAYASADKAlCDLpICZIBBiIEcgIQASJMCg5DYW5kaWRhdGVCdWlsZBISCgpkb2NrZXJmaWxlGAEgASgJEg8KB2NvbnRleHQYAiABKAkSFQoNYWxsb3dlZF9iYXNlcxgDIAMoCSJhCg5DYW5kaWRhdGVTZXJ2ZRIMCgRhcmd2GAEgAygJEg0KBXJlYWR5GAIgASgJEjIKD3N0YXJ0dXBfdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiJuCg5DYW5kaWRhdGVTZXR1cBItCgVidWlsZBgBIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZUJ1aWxkEi0KBXNlcnZlGAIgASgLMh4udmliZXN5cy5jbGkudjEuQ2FuZGlkYXRlU2VydmUiMwoPTWVhc3VyZVNldHRpbmdzEg8KB3NhbXBsZXMYASABKA0SDwoHcmVjaGVjaxgCIAEoCCLjAgoHSm9iU3BlYxIOCgZjb21taXQYASABKAkSNAoLZW52aXJvbm1lbnQYAiABKA4yHy52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEtpbmQSNwoJcGxhY2VtZW50GAMgASgJQiS6SCFyHzIdXihbYS16MC05XVthLXowLTlfLV17MCw2Mn0pPyQSNQoKYWxsb2NhdGlvbhgFIAEoCUIhukgechwyGl4oYW55fGFbMS05XVswLTldezAsMTd9KT8kEi4KBWNoZWNrGAogASgLMh0udmliZXN5cy5jbGkudjEuQ2hlY2tTZXR0aW5nc0gAEjIKB2NvbW1hbmQYCyABKAsyHy52aWJlc3lzLmNsaS52MS5Db21tYW5kU2V0dGluZ3NIABIyCgdtZWFzdXJlGAwgASgLMh8udmliZXN5cy5jbGkudjEuTWVhc3VyZVNldHRpbmdzSABCCgoIc2V0dGluZ3MiSwoETm90ZRIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSJ5CglTdWJtaXR0ZXISDgoGcnVuX2lkGAEgASgJEg0KBWFnZW50GAIgASgJEk0KAmF0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIlukgiyAEBsgEcIg0I/4LR/68HEP+T69wDMgsIgJK4w5j+////ASLZAQoHQXR0ZW1wdBIuCgpzdGFydGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCghlbmRlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNAoQY3V0X2JlZm9yZV9zdGFydBgDIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSAASMwoPY3V0X21pZF9jb21tYW5kGAQgASgOMhgudmliZXN5cy5jbGkudjEuQ3V0Q2F1c2VIAEIFCgNlbmQi4gUKA0pvYhIKCgJpZBgBIAEoCRIlCgRzcGVjGAIgASgLMhcudmliZXN5cy5jbGkudjEuSm9iU3BlYxInCgVzdGF0ZRgDIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkpvYlN0YXRlEgsKA2tleRgEIAEoCRI7CgtlbnZpcm9ubWVudBgFIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSIwoFbm90ZXMYBiADKAsyFC52aWJlc3lzLmNsaS52MS5Ob3RlEg0KBXBsYW5zGAcgAygNEjAKDHN1Ym1pdHRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKc3RhcnRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZmluaXNoZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDWNhbmNlbF9yZWFzb24YCyABKAkSFgoJZXhpdF9jb2RlGAwgASgFSACIAQESFQoNcmVzdWx0X2pvYl9pZBgNIAEoCRIUCgxjaGVja19qb2JfaWQYDiABKAkSEAoIbm9fY2FjaGUYDyABKAgSKQoIYXR0ZW1wdHMYECADKAsyFy52aWJlc3lzLmNsaS52MS5BdHRlbXB0Ei0KCnN1Ym1pdHRlcnMYESADKAsyGS52aWJlc3lzLmNsaS52MS5TdWJtaXR0ZXISPgoFbmVlZHMYEiADKA4yHC52aWJlc3lzLmNsaS52MS5SZXNvdXJjZUtpbmRCEbpIDpIBCxgBIgeCAQQQASAAEh4KDHRhc2tfdmVyc2lvbhgTIAEoCUIIukgFcgMYgAISOAoMZmFpbGVkX3N0YWdlGBQgASgOMhgudmliZXN5cy5jbGkudjEuSm9iU3RhZ2VCCLpIBYIBAhABQgwKCl9leGl0X2NvZGUicQoLTGVhc2VIb2xkZXISDAoEdXNlchgBIAEoCRIMCgRob3N0GAIgASgJEgsKA3BpZBgDIAEoDRIOCgZqb2JfaWQYBCABKAkSKQoFc2luY2UYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImoKCldhaXRIb2xkZXISFwoGam9iX2lkGAEgASgJQge6SARyAhABEgwKBHRhc2sYAiABKAkSJQoEa2luZBgDIAEoDjIXLnZpYmVzeXMuY2xpLnYxLkpvYktpbmQSDgoGcnVuX2lkGAQgASgJIrUECgpXYWl0UmVhc29uEjIKBGtpbmQYASABKA4yGC52aWJlc3lzLmNsaS52MS5XYWl0S2luZEIKukgHggEEEAEgABIQCghyZXNvdXJjZRgCIAEoCRIrCgdob2xkZXJzGAMgAygLMhoudmliZXN5cy5jbGkudjEuV2FpdEhvbGRlchIOCgZkZXRhaWwYBCABKAkSLgoJZWxzZXdoZXJlGAUgASgLMhsudmliZXN5cy5jbGkudjEuTGVhc2VIb2xkZXI68wK6SO8CGuwCChF3YWl0X3JlYXNvbi5zaGFwZRKUAWEgd2FpdCBvbiBhIHJlc291cmNlIG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlcnMsIGEgaGVsZCBvciB0cm91YmxlIHdhaXQgc2F5cyB3aHksIGFuZCBhIGxlYXNlZCB3YWl0IG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlciBvciB3aHkavwF0aGlzLmtpbmQgPT0gNSB8fCB0aGlzLmtpbmQgPT0gNiA/IHRoaXMuZGV0YWlsICE9ICcnIDogKHRoaXMua2luZCA9PSA3ID8gKHRoaXMucmVzb3VyY2UgIT0gJycgJiYgKGhhcyh0aGlzLmVsc2V3aGVyZSkgfHwgdGhpcy5kZXRhaWwgIT0gJycpKSA6ICh0aGlzLnJlc291cmNlICE9ICcnICYmIHNpemUodGhpcy5ob2xkZXJzKSA+IDApKSJWCgdKb2JXYWl0EhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIyCgZyZWFzb24YAiABKAsyGi52aWJlc3lzLmNsaS52MS5XYWl0UmVhc29uQga6SAPIAQEqYwoHSm9iS2luZBIYChRKT0JfS0lORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9LSU5EX0NIRUNLEAESFAoQSk9CX0tJTkRfQ09NTUFORBACEhQKEEpPQl9LSU5EX01FQVNVUkUQAyquAQoISm9iU3RhdGUSGQoVSk9CX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQSk9CX1NUQVRFX1FVRVVFRBABEhUKEUpPQl9TVEFURV9SVU5OSU5HEAISFwoTSk9CX1NUQVRFX1NVQ0NFRURFRBADEhQKEEpPQl9TVEFURV9GQUlMRUQQBBIXChNKT0JfU1RBVEVfQ0FOQ0VMTEVEEAUSEgoOSk9CX1NUQVRFX0xPU1QQBipcCghDdXRDYXVzZRIZChVDVVRfQ0FVU0VfVU5TUEVDSUZJRUQQABIdChlDVVRfQ0FVU0VfU1VQRVJWSVNPUl9ESUVEEAESFgoSQ1VUX0NBVVNFX1JFQk9PVEVEEAIqZgoISm9iU3RhZ2USGQoVSk9CX1NUQUdFX1VOU1BFQ0lGSUVEEAASEwoPSk9CX1NUQUdFX0JVSUxEEAESEwoPSk9CX1NUQUdFX0NIRUNLEAISFQoRSk9CX1NUQUdFX01FQVNVUkUQAyrGAQoIV2FpdEtpbmQSGQoVV0FJVF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOV0FJVF9LSU5EX0ZVTEwQARIeChpXQUlUX0tJTkRfSEVMRF9FWENMVVNJVkVMWRACEhQKEFdBSVRfS0lORF9JTl9VU0UQAxIUChBXQUlUX0tJTkRfQkVISU5EEAQSEgoOV0FJVF9LSU5EX0hFTEQQBRIVChFXQUlUX0tJTkRfVFJPVUJMRRAGEhQKEFdBSVRfS0lORF9MRUFTRUQQB0I5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSKmAgoPQ29tbWFuZFNldHRpbmdzEgwKBGFyZ3YYASADKAkSLAoHc2VydmljZRgCIAEoCzIbLnZpYmVzeXMuY2xpLnYxLlNlcnZpY2VTcGVjEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoHcHJvZmlsZRgEIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlByb2ZpbGVSZXF1ZXN0EjEKCWNhbmRpZGF0ZRgFIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNldHVwEisKBWltYWdlGAYgASgOMhwudmliZXN5cy5jbGkudjEuQ29tbWFuZEltYWdlEhoKBHdyYXAYByADKAlCDLpICZIBBiIEcgIQASIsCg5Qcm9maWxlUmVxdWVzdBIaCgR3cmFwGAEgAygJQgy6SAmSAQYiBHICEAEiTAoOQ2FuZGlkYXRlQnVpbGQSEgoKZG9ja2VyZmlsZRgBIAEoCRIPCgdjb250ZXh0GAIgASgJEhUKDWFsbG93ZWRfYmFzZXMYAyADKAkiYQoOQ2FuZGlkYXRlU2VydmUSDAoEYXJndhgBIAMoCRINCgVyZWFkeRgCIAEoCRIyCg9zdGFydHVwX3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24ibgoOQ2FuZGlkYXRlU2V0dXASLQoFYnVpbGQYASABKAsyHi52aWJlc3lzLmNsaS52MS5DYW5kaWRhdGVCdWlsZBItCgVzZXJ2ZRgCIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkNhbmRpZGF0ZVNlcnZlIjMKD01lYXN1cmVTZXR0aW5ncxIPCgdzYW1wbGVzGAEgASgNEg8KB3JlY2hlY2sYAiABKAgi4wIKB0pvYlNwZWMSDgoGY29tbWl0GAEgASgJEjQKC2Vudmlyb25tZW50GAIgASgOMh8udmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRLaW5kEjcKCXBsYWNlbWVudBgDIAEoCUIkukghch8yHV4oW2EtejAtOV1bYS16MC05Xy1dezAsNjJ9KT8kEjUKCmFsbG9jYXRpb24YBSABKAlCIbpIHnIcMhpeKGFueXxhWzEtOV1bMC05XXswLDE3fSk/JBIuCgVjaGVjaxgKIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkNoZWNrU2V0dGluZ3NIABIyCgdjb21tYW5kGAsgASgLMh8udmliZXN5cy5jbGkudjEuQ29tbWFuZFNldHRpbmdzSAASMgoHbWVhc3VyZRgMIAEoCzIfLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVTZXR0aW5nc0gAQgoKCHNldHRpbmdzIksKBE5vdGUSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkieQoJU3VibWl0dGVyEg4KBnJ1bl9pZBgBIAEoCRINCgVhZ2VudBgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEi2QEKB0F0dGVtcHQSLgoKc3RhcnRlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjQKEGN1dF9iZWZvcmVfc3RhcnQYAyABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAEjMKD2N1dF9taWRfY29tbWFuZBgEIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSABCBQoDZW5kIuIFCgNKb2ISCgoCaWQYASABKAkSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSJwoFc3RhdGUYAyABKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRILCgNrZXkYBCABKAkSOwoLZW52aXJvbm1lbnQYBSABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EiMKBW5vdGVzGAYgAygLMhQudmliZXN5cy5jbGkudjEuTm90ZRINCgVwbGFucxgHIAMoDRIwCgxzdWJtaXR0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1jYW5jZWxfcmVhc29uGAsgASgJEhYKCWV4aXRfY29kZRgMIAEoBUgAiAEBEhUKDXJlc3VsdF9qb2JfaWQYDSABKAkSFAoMY2hlY2tfam9iX2lkGA4gASgJEhAKCG5vX2NhY2hlGA8gASgIEikKCGF0dGVtcHRzGBAgAygLMhcudmliZXN5cy5jbGkudjEuQXR0ZW1wdBItCgpzdWJtaXR0ZXJzGBEgAygLMhkudmliZXN5cy5jbGkudjEuU3VibWl0dGVyEj4KBW5lZWRzGBIgAygOMhwudmliZXN5cy5jbGkudjEuUmVzb3VyY2VLaW5kQhG6SA6SAQsYASIHggEEEAEgABIeCgx0YXNrX3ZlcnNpb24YEyABKAlCCLpIBXIDGIACEjgKDGZhaWxlZF9zdGFnZRgUIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkpvYlN0YWdlQgi6SAWCAQIQAUIMCgpfZXhpdF9jb2RlInEKC0xlYXNlSG9sZGVyEgwKBHVzZXIYASABKAkSDAoEaG9zdBgCIAEoCRILCgNwaWQYAyABKA0SDgoGam9iX2lkGAQgASgJEikKBXNpbmNlGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJqCgpXYWl0SG9sZGVyEhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIMCgR0YXNrGAIgASgJEiUKBGtpbmQYAyABKA4yFy52aWJlc3lzLmNsaS52MS5Kb2JLaW5kEg4KBnJ1bl9pZBgEIAEoCSK1BAoKV2FpdFJlYXNvbhIyCgRraW5kGAEgASgOMhgudmliZXN5cy5jbGkudjEuV2FpdEtpbmRCCrpIB4IBBBABIAASEAoIcmVzb3VyY2UYAiABKAkSKwoHaG9sZGVycxgDIAMoCzIaLnZpYmVzeXMuY2xpLnYxLldhaXRIb2xkZXISDgoGZGV0YWlsGAQgASgJEi4KCWVsc2V3aGVyZRgFIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkxlYXNlSG9sZGVyOvMCukjvAhrsAgoRd2FpdF9yZWFzb24uc2hhcGUSlAFhIHdhaXQgb24gYSByZXNvdXJjZSBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXJzLCBhIGhlbGQgb3IgdHJvdWJsZSB3YWl0IHNheXMgd2h5LCBhbmQgYSBsZWFzZWQgd2FpdCBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXIgb3Igd2h5Gr8BdGhpcy5raW5kID09IDUgfHwgdGhpcy5raW5kID09IDYgPyB0aGlzLmRldGFpbCAhPSAnJyA6ICh0aGlzLmtpbmQgPT0gNyA/ICh0aGlzLnJlc291cmNlICE9ICcnICYmIChoYXModGhpcy5lbHNld2hlcmUpIHx8IHRoaXMuZGV0YWlsICE9ICcnKSkgOiAodGhpcy5yZXNvdXJjZSAhPSAnJyAmJiBzaXplKHRoaXMuaG9sZGVycykgPiAwKSkiVgoHSm9iV2FpdBIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESMgoGcmVhc29uGAIgASgLMhoudmliZXN5cy5jbGkudjEuV2FpdFJlYXNvbkIGukgDyAEBKmMKB0pvYktpbmQSGAoUSk9CX0tJTkRfVU5TUEVDSUZJRUQQABISCg5KT0JfS0lORF9DSEVDSxABEhQKEEpPQl9LSU5EX0NPTU1BTkQQAhIUChBKT0JfS0lORF9NRUFTVVJFEAMqrgEKCEpvYlN0YXRlEhkKFUpPQl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEEpPQl9TVEFURV9RVUVVRUQQARIVChFKT0JfU1RBVEVfUlVOTklORxACEhcKE0pPQl9TVEFURV9TVUNDRUVERUQQAxIUChBKT0JfU1RBVEVfRkFJTEVEEAQSFwoTSk9CX1NUQVRFX0NBTkNFTExFRBAFEhIKDkpPQl9TVEFURV9MT1NUEAYqZQoMQ29tbWFuZEltYWdlEh0KGUNPTU1BTkRfSU1BR0VfVU5TUEVDSUZJRUQQABIZChVDT01NQU5EX0lNQUdFX0hBUk5FU1MQARIbChdDT01NQU5EX0lNQUdFX0NBTkRJREFURRACKlwKCEN1dENhdXNlEhkKFUNVVF9DQVVTRV9VTlNQRUNJRklFRBAAEh0KGUNVVF9DQVVTRV9TVVBFUlZJU09SX0RJRUQQARIWChJDVVRfQ0FVU0VfUkVCT09URUQQAipmCghKb2JTdGFnZRIZChVKT0JfU1RBR0VfVU5TUEVDSUZJRUQQABITCg9KT0JfU1RBR0VfQlVJTEQQARITCg9KT0JfU1RBR0VfQ0hFQ0sQAhIVChFKT0JfU1RBR0VfTUVBU1VSRRADKsYBCghXYWl0S2luZBIZChVXQUlUX0tJTkRfVU5TUEVDSUZJRUQQABISCg5XQUlUX0tJTkRfRlVMTBABEh4KGldBSVRfS0lORF9IRUxEX0VYQ0xVU0lWRUxZEAISFAoQV0FJVF9LSU5EX0lOX1VTRRADEhQKEFdBSVRfS0lORF9CRUhJTkQQBBISCg5XQUlUX0tJTkRfSEVMRBAFEhUKEVdBSVRfS0lORF9UUk9VQkxFEAYSFAoQV0FJVF9LSU5EX0xFQVNFRBAHQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.CheckSettings
@@ -80,9 +80,8 @@ export type CommandSettings = Message<"vibesys.cli.v1.CommandSettings"> & {
   timeout?: Duration | undefined;
 
   /**
-   * Set for a profile job of a task of two images: the task's [profile] load against the
-   * candidate's server started under the wrapper. A submission gives no argv; the daemon sets the
-   * argv, the timeout and the candidate from the task.
+   * Retired with the profile job: a submission that sets it is refused. A job stored before it
+   * was retired holds its resolved command in the fields beside it and is read without it.
    *
    * @generated from field: vibesys.cli.v1.ProfileRequest profile = 4;
    */
@@ -90,11 +89,28 @@ export type CommandSettings = Message<"vibesys.cli.v1.CommandSettings"> & {
 
   /**
    * Set by the daemon for a job of a task of two images, never by a caller: how the candidate's
-   * image is built, and for a profile the server the command runs against.
+   * image is built, and for a command in the task's image the server the command runs against.
    *
    * @generated from field: vibesys.cli.v1.CandidateSetup candidate = 5;
    */
   candidate?: CandidateSetup | undefined;
+
+  /**
+   * The image the command runs in. A submission names one; a job stored before the field was
+   * added has none, and its candidate setup says where it ran.
+   *
+   * @generated from field: vibesys.cli.v1.CommandImage image = 6;
+   */
+  image: CommandImage;
+
+  /**
+   * An argv prefix, which the daemon puts in front of the candidate's server for a command in the
+   * task's image of a task of two images, and otherwise in front of the service when there is one
+   * and of the command when not. A stored job holds it already applied, so it is empty there.
+   *
+   * @generated from field: repeated string wrap = 7;
+   */
+  wrap: string[];
 };
 
 /**
@@ -105,14 +121,13 @@ export const CommandSettingsSchema: GenMessage<CommandSettings> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_job, 2);
 
 /**
- * ProfileRequest is what a profile submission asks for.
+ * ProfileRequest is what a retired profile submission asked for.
  *
  * @generated from message vibesys.cli.v1.ProfileRequest
  */
 export type ProfileRequest = Message<"vibesys.cli.v1.ProfileRequest"> & {
   /**
-   * An argv prefix the candidate's server starts under, such as a profiler's command line. The CLI
-   * never reads it.
+   * An argv prefix the candidate's server started under.
    *
    * @generated from field: repeated string wrap = 1;
    */
@@ -828,6 +843,41 @@ export const JobStateSchema: GenEnum<JobState> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_job, 1);
 
 /**
+ * CommandImage is the image a command job runs in, which the caller always names.
+ *
+ * @generated from enum vibesys.cli.v1.CommandImage
+ */
+export enum CommandImage {
+  /**
+   * @generated from enum value: COMMAND_IMAGE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The task's image, built from the task's files: where its check and benchmark run (the host
+   * for a task with no Dockerfile). On a task of two images the command runs there beside the
+   * candidate's server, as the check and the benchmark do.
+   *
+   * @generated from enum value: COMMAND_IMAGE_HARNESS = 1;
+   */
+  HARNESS = 1,
+
+  /**
+   * The candidate's image, built from the evaluated commit's [candidate] dockerfile. Only a task of
+   * two images has one.
+   *
+   * @generated from enum value: COMMAND_IMAGE_CANDIDATE = 2;
+   */
+  CANDIDATE = 2,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.CommandImage.
+ */
+export const CommandImageSchema: GenEnum<CommandImage> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_job, 2);
+
+/**
  * CutCause is how an attempt's supervisor was proved gone.
  *
  * @generated from enum vibesys.cli.v1.CutCause
@@ -857,7 +907,7 @@ export enum CutCause {
  * Describes the enum vibesys.cli.v1.CutCause.
  */
 export const CutCauseSchema: GenEnum<CutCause> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 2);
+  enumDesc(file_vibesys_cli_v1_job, 3);
 
 /**
  * JobStage is the step of a check or measure job that ended it.
@@ -896,7 +946,7 @@ export enum JobStage {
  * Describes the enum vibesys.cli.v1.JobStage.
  */
 export const JobStageSchema: GenEnum<JobStage> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 3);
+  enumDesc(file_vibesys_cli_v1_job, 4);
 
 /**
  * WaitKind is why a queued job has not started.
@@ -965,5 +1015,5 @@ export enum WaitKind {
  * Describes the enum vibesys.cli.v1.WaitKind.
  */
 export const WaitKindSchema: GenEnum<WaitKind> = /*@__PURE__*/
-  enumDesc(file_vibesys_cli_v1_job, 4);
+  enumDesc(file_vibesys_cli_v1_job, 5);
 

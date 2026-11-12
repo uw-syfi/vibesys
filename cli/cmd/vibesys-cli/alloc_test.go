@@ -66,7 +66,7 @@ func TestAnAllocationIsDrivenFromTheCommandLine(t *testing.T) {
 	if got := c.allocOK("ls").stdout; !strings.HasPrefix(got, "a1\trunning\t") {
 		t.Fatalf("ls printed %q", got)
 	}
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--alloc", "a1", "--json", "--", "print", "hi", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--alloc", "a1", "--json", "--", "print", "hi", ";", "exit", "0")...)
 	if r.code != exitOK {
 		t.Fatalf("submit --alloc a1: exit %d: %s", r.code, r.stderr)
 	}

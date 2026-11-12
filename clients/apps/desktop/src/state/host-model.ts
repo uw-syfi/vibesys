@@ -16,6 +16,9 @@ import {
   applySnapshot,
   applySummary,
   type RunHistoryFrame,
+  replaceCost,
+  replaceHostCost,
+  type WholeViewPhase,
 } from './orchestrator/fold.js';
 import type {HostCostView, HostCostWindow} from './orchestrator/host-cost.js';
 import {emptyState, type OrchestratorState} from './orchestrator/state.js';
@@ -36,9 +39,14 @@ export type HostFrame =
    */
   | {readonly from: 'history'; readonly agentId: string; readonly frame: AgentFrame}
   /** A run's whole cost view, as the host works it out, already read from its message. */
-  | {readonly from: 'cost'; readonly view: CostView}
+  | {readonly from: 'cost'; readonly phase: WholeViewPhase; readonly view: CostView}
   /** The whole host's cost view in one window, as the host works it out, already read from its message. */
-  | {readonly from: 'host-cost'; readonly window: HostCostWindow; readonly view: HostCostView}
+  | {
+      readonly from: 'host-cost';
+      readonly phase: WholeViewPhase;
+      readonly window: HostCostWindow;
+      readonly view: HostCostView;
+    }
   /**
    * One page of a run's history (its agents, turns, messages and check-ins), read on request: a
    * snapshot of runs holds none, and the run stream's cursor does not move for it.
@@ -53,9 +61,21 @@ export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
  */
 export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
   if (frame.from === 'history') return {...model, data: applyAgentFeed(model.data, frame.frame)};
-  if (frame.from === 'cost') return {...model, data: applyCost(model.data, frame.view)};
+  if (frame.from === 'cost') {
+    const data =
+      frame.phase === 'initial'
+        ? replaceCost(model.data, frame.view)
+        : applyCost(model.data, frame.view);
+    return {...model, data};
+  }
   if (frame.from === 'host-cost')
-    return {...model, data: applyHostCost(model.data, frame.window, frame.view)};
+    return {
+      ...model,
+      data:
+        frame.phase === 'initial'
+          ? replaceHostCost(model.data, frame.window, frame.view)
+          : applyHostCost(model.data, frame.window, frame.view),
+    };
   if (frame.from === 'run-history') return {...model, data: applyRunHistory(model.data, frame)};
   if (frame.from === 'agent') {
     const before = model.agentCursors[frame.agentId] ?? 0n;

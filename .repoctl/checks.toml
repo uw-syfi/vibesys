@@ -567,9 +567,10 @@ trigger_job = "orchestrator"
 include_in_test = true
 language = "go"
 directory = "orchestrator"
-# Same shape as cli_checks without the cross-compilation: a cold Go cache costs about a minute on a
-# CI runner (module download, vet and the tests); a warm one seconds.
-timeout_seconds = 240
+# Same shape as cli_checks without the cross-compilation. A cold merge-queue run has no Go cache
+# and takes just over four minutes (module download, vet and the tests); a warm one takes seconds.
+# Five minutes keeps a bounded hang guard with a minute left under CI's commit-stage hard ceiling.
+timeout_seconds = 300
 commands = [["./check.sh"]]
 
 [[check_groups]]

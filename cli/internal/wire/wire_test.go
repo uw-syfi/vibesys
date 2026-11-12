@@ -53,7 +53,7 @@ func anyJob(r *rand.Rand) core.Job {
 		j.Spec = core.JobSpec{Commit: commit, Settings: core.CheckSettings{}}
 		j.Key = "k1"
 	case 1:
-		cs := core.CommandSettings{Argv: append([]string{"run"}, words(r, r.IntN(3))...), Timeout: time.Duration(r.IntN(100)) * time.Second}
+		cs := core.CommandSettings{Image: core.ImageHarness, Argv: append([]string{"run"}, words(r, r.IntN(3))...), Timeout: time.Duration(r.IntN(100)) * time.Second}
 		if r.IntN(2) == 0 {
 			cs.Service = &core.ServiceSpec{Argv: words(r, 1+r.IntN(2)), Probe: words(r, r.IntN(2))}
 		}
@@ -206,7 +206,7 @@ func TestAJobWithAsManyCutAttemptsAsItGetsIsRefused(t *testing.T) {
 func TestASubmittedSpecIsHeldToWhatTheStoreCanHold(t *testing.T) {
 	good := &cliv1.JobSpec{
 		Commit:   strings.Repeat("a", 40),
-		Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: []string{"true"}}},
+		Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: []string{"true"}}},
 	}
 	if _, err := wire.ToJobSpec("spec", good); err != nil {
 		t.Fatalf("a good spec was refused: %v", err)
@@ -353,7 +353,7 @@ func aResult() core.Result {
 func TestALaunchCarriesWhatASupervisorIsPromised(t *testing.T) {
 	good := lifecycle.Launch{Repository: "/repo", Task: "kv", Job: "j1", Spec: core.JobSpec{
 		Commit: core.Commit(strings.Repeat("b", 40)), Environment: core.EnvironmentHost,
-		Settings: core.CommandSettings{Argv: []string{"true"}, Timeout: time.Minute},
+		Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}, Timeout: time.Minute},
 	}}
 	got, err := wire.ToLaunch(wire.Launch(good))
 	if err != nil || !reflect.DeepEqual(got, good) {

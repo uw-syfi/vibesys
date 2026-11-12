@@ -236,7 +236,7 @@ func (w *world) submit() {
 		defer c.Close()
 		_, err = c.Submit(ctx, &cliv1.SubmitRequest{Context: cc, Spec: &cliv1.JobSpec{
 			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_HOST, Allocation: into,
-			Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: sc.argv()}},
+			Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: sc.argv()}},
 		}})
 		if err != nil {
 			w.mu.Lock()

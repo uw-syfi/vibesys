@@ -99,7 +99,7 @@ func newRig(t *testing.T) *rig {
 }
 
 func spec(argv ...string) *cliv1.JobSpec {
-	return wire.JobSpec(core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: argv}})
+	return wire.JobSpec(core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: argv}})
 }
 
 func (r *rig) submit(argv ...string) *cliv1.Job {

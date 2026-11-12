@@ -129,7 +129,7 @@ export function MessageBox(props: {
             </Field>
             <Row>
               <Button
-                text={sending ? 'Sending' : 'Send'}
+                text={sending ? 'Sending message' : 'Send message'}
                 label="Send message"
                 hint={capabilityLine(props.agent)}
                 variant="primary"
@@ -149,7 +149,7 @@ export function MessageBox(props: {
             </Row>
           </>
         ) : null}
-        <CommandLine progress={progress} done="Send" retry={props.retry} />
+        <CommandLine progress={progress} done="Send message" retry={props.retry} />
         <SentMessages pendingAtMs={sentAtMs} sent={props.sent} progress={progress} />
       </Stack>
     </Card>

@@ -153,43 +153,100 @@ func TestTheCandidateImageIsRecordedWithTheResultAndIsNotPartOfItsKey(t *testing
 	}
 }
 
-// A profile wraps the candidate's server, drives it with the task's [profile] load, and is never
-// saved, reused or scored.
-func TestAProfileWrapsTheServerAndIsNeverReusedNorScored(t *testing.T) {
+// A command in the task's image of a task of two images runs beside the candidate's server, which
+// starts under the wrapper, as the check and the benchmark do; it is never saved, reused or scored.
+func TestAHarnessCommandRunsBesideTheWrappedServerAndIsNeverReusedNorScored(t *testing.T) {
 	r := newTwoImageRig(t)
-	profile := core.CommandSettings{Profile: &core.ProfileRequest{Wrap: []string{"print", "profiler on", ";"}}}
-	first, _ := r.submit(t, profile, false)
+	harness := core.CommandSettings{Image: core.ImageHarness, Wrap: []string{"print", "profiler on", ";"}, Argv: []string{"print", "harness load", ";", "exit", "0"}}
+	first, _ := r.submit(t, harness, false)
 	if first.State != core.JobSucceeded {
-		t.Fatalf("profile = %s\n%s", describe(first), logOf(t, r.a, first.ID))
+		t.Fatalf("harness command = %s\n%s", describe(first), logOf(t, r.a, first.ID))
 	}
-	second, disposition := r.submit(t, profile, false)
+	second, disposition := r.submit(t, harness, false)
 	if disposition != core.SubmitCreated || second.ID == first.ID || second.State != core.JobSucceeded {
-		t.Fatalf("the second profile = %s %s, want a new run", disposition, describe(second))
+		t.Fatalf("the second harness command = %s %s, want a new run", disposition, describe(second))
 	}
 	for _, x := range r.w.results(r.a) {
 		if _, measured := x.Outcome.(core.MeasureOutcome); measured {
-			t.Fatalf("a profile saved a measurement: %+v", x)
+			t.Fatalf("a command saved a measurement: %+v", x)
 		}
 	}
 	log := logOf(t, r.a, second.ID)
-	if !strings.Contains(log, "profiler on") || !strings.Contains(log, "profile load") || !strings.Contains(log, "serving on") {
-		t.Fatalf("log %q", log)
+	for _, want := range []string{"profiler on", "harness load", "serving on", "[command] image: harness"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("log %q lacks %q", log, want)
+		}
 	}
 	runs := r.docker.Runs()
 	last := runs[len(runs)-1]
 	if last.Candidate == nil || last.Candidate.Serve == nil || !slices.Equal(last.Candidate.Serve.Argv[:3], []string{"print", "profiler on", ";"}) {
 		t.Fatalf("the server ran unwrapped: %+v", last.Candidate)
 	}
+	if !slices.Equal(last.Argv, harness.Argv) {
+		t.Fatalf("the command ran as %q, want it unwrapped as %q", last.Argv, harness.Argv)
+	}
+	settings := second.Spec.Settings.(core.CommandSettings)
+	if settings.Image != core.ImageHarness || len(settings.Wrap) != 0 || settings.Timeout != app.DefaultCommandTimeout+time.Minute {
+		t.Fatalf("the job records %+v, want the image, the wrapper applied and the server's startup added to the limit", settings)
+	}
 }
 
-func TestAProfileOfATaskOfOneImageIsRefused(t *testing.T) {
+// A command in the candidate's image runs there, wrapped as it asked, with no server.
+func TestACandidateCommandRunsInTheCandidatesImage(t *testing.T) {
+	r := newTwoImageRig(t)
+	job, _ := r.submit(t, core.CommandSettings{Image: core.ImageCandidate, Wrap: []string{"print", "wrapped", ";"}, Argv: []string{"print", "in the candidate", ";", "exit", "0"}}, false)
+	if job.State != core.JobSucceeded {
+		t.Fatalf("candidate command = %s\n%s", describe(job), logOf(t, r.a, job.ID))
+	}
+	runs := r.docker.Runs()
+	last := runs[len(runs)-1]
+	if last.Candidate == nil || last.Candidate.Serve != nil || !slices.Equal(last.Argv[:3], []string{"print", "wrapped", ";"}) {
+		t.Fatalf("ran %q with candidate %+v", last.Argv, last.Candidate)
+	}
+	if log := logOf(t, r.a, job.ID); strings.Contains(log, "serving on") || !strings.Contains(log, "[command] image: candidate") {
+		t.Fatalf("log %q", log)
+	}
+}
+
+// What makes no sense is refused before anything is queued: no image, the candidate's image of a
+// task that has none, and a service of its own beside the candidate's server.
+func TestACommandThatCannotRunWhereItAsksIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		oneImage bool
+		settings core.CommandSettings
+		want     string
+	}{
+		{"no image", false, core.CommandSettings{Argv: []string{"true"}}, "harness"},
+		{"candidate of a task of one image", true, core.CommandSettings{Image: core.ImageCandidate, Argv: []string{"true"}}, "no [candidate]"},
+		{"a service beside the candidate's server", false, core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}, Service: &core.ServiceSpec{Argv: []string{"serve"}}}, "no service of its own"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newTwoImageRig(t)
+			if c.oneImage {
+				r.w.tasks.Put(string(call.Scope.Repository()), commit, tasktest.Scripted("task", passes, scores))
+			}
+			_, err := r.a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: c.settings}})
+			if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, c.want) {
+				t.Fatalf("got %v, want an invalid input naming %q", err, c.want)
+			}
+		})
+	}
+}
+
+// A command in the task's image of a task of one image runs where its check and benchmark run,
+// with the wrapper in front of the command and no candidate built.
+func TestAHarnessCommandOfATaskOfOneImageRunsInTheTaskImage(t *testing.T) {
 	r := newTwoImageRig(t)
 	r.w.tasks.Put(string(call.Scope.Repository()), commit, tasktest.Scripted("task", passes, scores))
-	_, err := r.a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{
-		Commit: commit, Environment: core.EnvironmentDocker, Settings: core.CommandSettings{Profile: &core.ProfileRequest{}},
-	}})
-	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput {
-		t.Fatalf("got %v", err)
+	job, _ := r.submit(t, core.CommandSettings{Image: core.ImageHarness, Wrap: []string{"print", "wrapped", ";"}, Argv: []string{"exit", "0"}}, false)
+	if job.State != core.JobSucceeded {
+		t.Fatalf("harness command = %s\n%s", describe(job), logOf(t, r.a, job.ID))
+	}
+	runs := r.docker.Runs()
+	last := runs[len(runs)-1]
+	if last.Candidate != nil || !slices.Equal(last.Argv, []string{"print", "wrapped", ";", "exit", "0"}) || r.builds.Load() != 0 {
+		t.Fatalf("ran %q with candidate %+v after %d builds", last.Argv, last.Candidate, r.builds.Load())
 	}
 }
 

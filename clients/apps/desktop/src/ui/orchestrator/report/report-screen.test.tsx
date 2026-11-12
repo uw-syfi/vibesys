@@ -52,6 +52,7 @@ import {runTitle} from '../fleet-words.js';
 import {agentNames} from '../names.js';
 import {formatFigure} from './format.js';
 import {ObjectiveSummary} from './objective-summary.js';
+import {PerformancePanel} from './performance.js';
 import {PlansSummary} from './plans-summary.js';
 import {ReportScreen} from './report-screen.js';
 
@@ -717,13 +718,13 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
-  it('shows the outcome of a Stop while the run lives and drops it once the run is over', () => {
+  it('names the run in a stop outcome while it lives and drops the outcome once it is over', () => {
     const accepted: CommandProgress = {_tag: 'Accepted', receipt: create(ReceiptSchema, {})};
     const live = render({}, {stopProgress: accepted});
-    expect(live.screen.text()).toContain('Stop: accepted');
+    expect(live.screen.text()).toContain('Stop run: accepted');
     live.screen.unmount();
     const over = render({live: false}, {stopProgress: accepted});
-    expect(over.screen.text()).not.toContain('Stop: accepted');
+    expect(over.screen.text()).not.toContain('Stop run: accepted');
     over.screen.unmount();
   });
 
@@ -740,7 +741,7 @@ describe('the report with a different amount of data', () => {
     ];
     for (const progress of outcomes) {
       const over = render({live: false}, {stopProgress: progress});
-      expect(over.screen.text()).not.toContain('Stop:');
+      expect(over.screen.text()).not.toContain('Stop run:');
       over.screen.unmount();
     }
   });
@@ -1244,6 +1245,63 @@ describe('the summary of an objective and the bound’s unit', () => {
     expect(empty.text()).toContain('Not measured yet');
     expect(empty.text()).not.toContain('tok/s');
     empty.unmount();
+  });
+
+  it('names an unavailable direction instead of claiming one for a summary-only objective', () => {
+    const [objective] = objectiveReports(create(SearchStateSchema, {}), [
+      create(ObjectiveStandingSchema, {name: 'tail latency'}),
+    ]);
+    if (objective === undefined) throw new Error('the summary declares its objective');
+    const screen = mount(<ObjectiveSummary objective={objective} inView={null} runOver={false} />);
+    expect(screen.text()).toContain('Direction unavailable');
+    expect(screen.text()).not.toContain('Higher is better');
+    expect(screen.text()).not.toContain('Lower is better');
+    screen.unmount();
+  });
+
+  it('does not let another objective’s measurements make a summary-only objective look measured', () => {
+    const objectives = objectiveReports(
+      create(SearchStateSchema, {
+        series: [
+          {
+            objective: 'throughput',
+            direction: Direction.MAXIMIZE,
+            points: [
+              {jobId: 'j', commit: 'c', at: timestampFromMs(1000), value: 5, bestSoFar: true},
+            ],
+          },
+        ],
+      }),
+      [
+        create(ObjectiveStandingSchema, {name: 'throughput', bestValue: 5}),
+        create(ObjectiveStandingSchema, {name: 'tail latency'}),
+      ],
+    );
+    const screen = mount(
+      <PerformancePanel
+        objectives={objectives}
+        span={{fromMs: 0, toMs: 10_000}}
+        nowMs={20_000}
+        runOver={false}
+        unreadable={false}
+        truncated={false}
+        names={new Map()}
+        links={{
+          ideas: undefined,
+          picked: null,
+          lit: new Set(),
+          pick: () => undefined,
+          showIdea: () => undefined,
+        }}
+      />,
+    );
+    const states = [...screen.container.querySelectorAll('.vs-chart-state')].map(
+      state => state.textContent,
+    );
+    expect(states).toHaveLength(1);
+    expect(states[0]).toMatch(/^Waiting for the input's measurement/);
+    expect(states[0]).not.toBe('Nothing measured in this range');
+    screen.unmount();
   });
 });
 

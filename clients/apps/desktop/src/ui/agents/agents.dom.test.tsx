@@ -2,9 +2,16 @@
  * The agents screens by what a person does: unfold a count bar, open an agent from the tree, open
  * a folded thought and a call, and ask for the body a page left out.
  */
+import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {type Agent, AgentStatus} from '@vibesys/orchestrator-proto';
-import {applyChange, emptyState, itemIs, type OrchestratorState} from '../../state/index.js';
+import {type Agent, AgentStatus, CommandSchema} from '@vibesys/orchestrator-proto';
+import {
+  applyChange,
+  type CommandProgress,
+  emptyState,
+  itemIs,
+  type OrchestratorState,
+} from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {AgentPage} from './agent-page.js';
@@ -23,6 +30,10 @@ const MESSAGEABLE = [
   AgentStatus.IDLE,
 ];
 const OVER = [AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST];
+const SENDING: CommandProgress = {
+  _tag: 'Sending',
+  command: create(CommandSchema, {id: 'sending-message'}),
+};
 
 const options = (container: HTMLElement): HTMLElement[] => [
   ...container.querySelectorAll<HTMLElement>('[role="option"]'),
@@ -119,7 +130,7 @@ describe('the agents screen', () => {
 });
 
 describe('an agent page', () => {
-  const page = (agent: Agent) =>
+  const page = (agent: Agent, sendProgress: CommandProgress | undefined = undefined) =>
     mount(
       <AgentPage
         state={state}
@@ -128,7 +139,7 @@ describe('an agent page', () => {
         host="host-a"
         trail={[{id: 'runs', label: 'Runs'}]}
         reading={null}
-        sendProgress={undefined}
+        sendProgress={sendProgress}
         stopProgress={undefined}
         history={{
           earlier: {_tag: 'Idle'},
@@ -174,9 +185,20 @@ describe('an agent page', () => {
       const screen = page({...agent, status});
       const expected = MESSAGEABLE.includes(status) ? 1 : 0;
       expect(screen.controls('Send message')).toHaveLength(expected);
+      if (expected === 1)
+        expect(screen.control('Send message').textContent?.trim()).toBe('Send message');
       expect(screen.text().includes('Message Lead')).toBe(expected === 1);
       screen.unmount();
     }
+  });
+
+  it('keeps the message object in the action and its in-flight outcome', () => {
+    const agent = Object.values(state.agents).find(one => MESSAGEABLE.includes(one.status));
+    if (agent === undefined) throw new Error('the run has a messageable agent');
+    const screen = page(agent, SENDING);
+    expect(screen.control('Send message').textContent?.trim()).toBe('Sending message');
+    expect(screen.text()).toContain('Send message: sending');
+    screen.unmount();
   });
 
   it('says in its header that older turns are not shown with the count the host gave, and only when it left some out', () => {

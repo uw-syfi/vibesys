@@ -1,6 +1,6 @@
 import type {JSX} from 'react';
 import {TYPE} from '../tokens/index.js';
-import {NewBelow} from './new-below.js';
+import {NewBelowSlot} from './new-below.js';
 import {ScrollArea} from './scroll-area.js';
 import {useWindowed} from './windowing.js';
 
@@ -63,11 +63,7 @@ export function LogPane(props: {
         ))}
         <span className="vs-log-gap" style={{height: win.after}} />
       </ScrollArea>
-      {win.behind ? (
-        <span className="vs-log-jump">
-          <NewBelow text="New below" press={win.jump} />
-        </span>
-      ) : null}
+      {win.behind ? <NewBelowSlot text="New below" press={win.jump} /> : null}
     </div>
   );
 }

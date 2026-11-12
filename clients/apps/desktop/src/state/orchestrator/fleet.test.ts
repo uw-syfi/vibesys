@@ -21,6 +21,11 @@ import {
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import type {Freshness} from '../freshness.js';
+import {
+  DORMANT_GENERIC_RUN_INDEX,
+  type GenericRunEntry,
+  type GenericRunIndex,
+} from '../generic-run-index.js';
 import {HOST_STATUS_KINDS, type HostStatus} from '../host-status.js';
 import {
   ATTENTION_KINDS,
@@ -331,6 +336,7 @@ const fleet: fc.Arbitrary<readonly FleetHostInput[]> = fc
       },
       freshness: input.freshness,
       status: input.status,
+      runIndex: DORMANT_GENERIC_RUN_INDEX,
     })),
   );
 
@@ -343,10 +349,180 @@ const keysOf = (rows: readonly FleetRow[]): string[] => rows.map(row => row.key)
 const sorted = (keys: readonly string[]): string[] => [...keys].sort();
 const shown = (hosts: readonly FleetHostInput[], by: FleetFilter): FleetRow[] => {
   const view = fleetView(hosts, by);
-  return [...view.live, ...view.history];
+  return [...view.live, ...view.history, ...view.unknown];
 };
 
+const genericRun = (
+  runId: string,
+  state: GenericRunEntry['state'] = 'running',
+  activity: GenericRunEntry['activity'] = 'live',
+): GenericRunEntry => ({
+  runId,
+  projectRoot: `/projects/${runId}`,
+  state,
+  activity,
+  objective: {name: 'Throughput', unit: 'requests/s', bestValue: 42},
+  costUsd: 1.25,
+  needsUser: false,
+});
+
+const readyIndex = (
+  runs: readonly GenericRunEntry[],
+  freshness: 'current' | 'stale' = 'current',
+): GenericRunIndex => ({
+  _tag: 'Ready',
+  freshness,
+  runs: new Map(runs.map(run => [run.runId, run])),
+});
+
+function mixedHost(managedIds: readonly string[], generic: readonly GenericRunEntry[]) {
+  return {
+    key: 'host-a',
+    label: 'Host A',
+    data: {
+      ...emptyState,
+      runs: Object.fromEntries(
+        managedIds.map(runId => [
+          runId,
+          create(RunSchema, {
+            id: runId,
+            task: `Managed ${runId}`,
+            repository: 'repository',
+            status: RunStatus.RUNNING,
+          }),
+        ]),
+      ),
+    },
+    runIndex: readyIndex(generic),
+    freshness: 'live' as const,
+    status: {kind: 'live' as const, cause: null, staleForMs: null},
+  };
+}
+
 describe('the fleet of runs', () => {
+  it('proves an empty fleet only when both discovery streams are current and complete', () => {
+    const host = mixedHost([], []);
+    const cases = [
+      {freshness: 'live', runIndex: readyIndex([]), expected: {kind: 'complete'}},
+      {freshness: 'live', runIndex: DORMANT_GENERIC_RUN_INDEX, expected: {kind: 'opening'}},
+      {freshness: 'empty', runIndex: readyIndex([]), expected: {kind: 'opening'}},
+      {freshness: 'live', runIndex: readyIndex([], 'stale'), expected: {kind: 'unconfirmed'}},
+      {freshness: 'stale', runIndex: readyIndex([]), expected: {kind: 'unconfirmed'}},
+      {
+        freshness: 'live',
+        runIndex: {_tag: 'Unavailable' as const, reason: 'unsupported' as const},
+        expected: {kind: 'unavailable', reason: 'unsupported'},
+      },
+      {
+        freshness: 'unavailable',
+        runIndex: readyIndex([]),
+        expected: {kind: 'unavailable', reason: null},
+      },
+      {
+        freshness: 'unavailable',
+        runIndex: {_tag: 'Unavailable' as const, reason: 'transport' as const},
+        expected: {kind: 'unavailable', reason: 'transport'},
+      },
+    ] as const;
+    for (const {freshness, runIndex, expected} of cases) {
+      const status =
+        freshness === 'live'
+          ? {kind: 'live' as const, cause: null, staleForMs: null}
+          : freshness === 'empty'
+            ? {kind: 'waiting' as const, cause: null, staleForMs: null}
+            : freshness === 'stale'
+              ? {kind: 'stale' as const, cause: null, staleForMs: 1}
+              : {kind: 'unavailable' as const, cause: null, staleForMs: null};
+      expect(fleetView([{...host, freshness, status, runIndex}], NO_FLEET_FILTER).absence).toEqual(
+        expected,
+      );
+    }
+  });
+
+  it('uses only the selected hosts as absence evidence', () => {
+    const current = {...mixedHost([], []), key: 'current'};
+    const opening = {
+      ...mixedHost([], []),
+      key: 'opening',
+      runIndex: DORMANT_GENERIC_RUN_INDEX,
+    };
+    expect(fleetView([current, opening], NO_FLEET_FILTER).absence).toEqual({kind: 'opening'});
+    expect(fleetView([current, opening], {state: 'all', host: 'current'}).absence).toEqual({
+      kind: 'complete',
+    });
+  });
+
+  it('cannot prove a filtered section empty while a current run has unknown activity', () => {
+    const unknown = genericRun('unknown', 'unknown', 'unknown');
+    const host = mixedHost([], [unknown]);
+    expect(fleetView([host], {state: 'live', host: null}).absence).toEqual({
+      kind: 'unconfirmed',
+    });
+    expect(fleetView([host], {state: 'ended', host: null}).absence).toEqual({
+      kind: 'unconfirmed',
+    });
+    expect(fleetView([host], NO_FLEET_FILTER).absence).toEqual({kind: 'complete'});
+  });
+
+  it('unions generic and managed discovery by host and run id, with the managed row authoritative', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.constantFrom('r1', 'r2', 'r3', 'r4', 'r5')),
+        fc.uniqueArray(fc.constantFrom('r1', 'r2', 'r3', 'r4', 'r5')),
+        (managedIds, genericIds) => {
+          const rows = fleetRows([
+            mixedHost(
+              managedIds,
+              genericIds.map(id => genericRun(id)),
+            ),
+          ]);
+          const expected = new Set([...managedIds, ...genericIds]);
+          const managed = new Set<string>(managedIds);
+          expect(new Set(rows.map(row => row.runId))).toEqual(expected);
+          expect(rows).toHaveLength(expected.size);
+          for (const row of rows) {
+            expect(row.source).toBe(managed.has(row.runId) ? 'managed' : 'generic');
+          }
+        },
+      ),
+      {seed: 49},
+    );
+  });
+
+  it('keeps generic availability and unknown activity explicit instead of calling it ended', () => {
+    const current = genericRun('current');
+    const stale = {...genericRun('stale', 'finished', 'ended'), needsUser: true};
+    const unknown = genericRun('unknown', 'unknown', 'unknown');
+    const host = mixedHost([], [current, stale, unknown]);
+    const view = fleetView(
+      [{...host, runIndex: readyIndex([current, stale, unknown], 'stale')}],
+      NO_FLEET_FILTER,
+    );
+    expect(view.live.map(row => row.runId)).toEqual(['current']);
+    expect(view.history.map(row => row.runId)).toEqual(['stale']);
+    expect(view.unknown.map(row => row.runId)).toEqual(['unknown']);
+    const row = view.live[0];
+    expect(row).toMatchObject({
+      source: 'generic',
+      repository: '/projects/current',
+      indexFreshness: 'stale',
+      costUsd: 1.25,
+      objectives: [{name: 'Throughput', value: 42, unit: 'requests/s'}],
+    });
+    expect(shown([host], {state: 'ended', host: null}).map(each => each.runId)).toEqual(['stale']);
+  });
+
+  it('does not project a failed managed stream onto a current generic row', () => {
+    const host = {
+      ...mixedHost([], [genericRun('generic')]),
+      freshness: 'unavailable' as const,
+      status: {kind: 'unavailable' as const, cause: null, staleForMs: null},
+    };
+    const [row] = fleetRows([host]);
+    expect(row).toMatchObject({source: 'generic', indexFreshness: 'current'});
+    expect(row?.host.status).toEqual({kind: 'live', cause: null, staleForMs: null});
+  });
+
   it('has one row for each run of each host, with a key that is unique across hosts', () => {
     fc.assert(
       fc.property(fleet, hosts => {
@@ -378,8 +554,12 @@ describe('the fleet of runs', () => {
     fc.assert(
       fc.property(fleet, hosts => {
         const view = fleetView(hosts, NO_FLEET_FILTER);
-        expect(view.live.every(row => row.live && isLive(row.status))).toBe(true);
-        expect(view.history.every(row => !row.live && !isLive(row.status))).toBe(true);
+        expect(
+          view.live.every(row => row.source === 'managed' && row.live && isLive(row.status)),
+        ).toBe(true);
+        expect(
+          view.history.every(row => row.source === 'managed' && !row.live && !isLive(row.status)),
+        ).toBe(true);
         const ordered = (rows: readonly FleetRow[], time: (row: FleetRow) => number) => {
           for (const [index, row] of rows.entries()) {
             const next = rows[index + 1];
@@ -563,6 +743,7 @@ describe('the fleet of runs', () => {
           key: 'a',
           label: 'A',
           data: emptyState,
+          runIndex: DORMANT_GENERIC_RUN_INDEX,
           freshness: 'empty',
           status: {kind: 'waiting', cause: null, staleForMs: null},
         },
@@ -575,8 +756,13 @@ describe('the fleet of runs', () => {
       {
         key: 'a',
         label: 'A',
-        freshness: 'empty',
-        status: {kind: 'waiting', cause: null, staleForMs: null},
+        discovery: {
+          managed: {
+            freshness: 'empty',
+            status: {kind: 'waiting', cause: null, staleForMs: null},
+          },
+          generic: {kind: 'opening'},
+        },
         runs: 0,
         runsLeftOut: 0,
       },

@@ -397,7 +397,7 @@ func (s *sim) step() {
 	switch roll := s.pick(100); {
 	case roll < 8 && len(runs) < 3:
 		cmd := &pb.Command{Id: s.id("op"), Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
-			Repository: "/repo", Task: "task", FanoutLimit: uint32(s.pick(4)), Brief: "go",
+			Repository: "/repo", Task: "task", FanoutLimit: uint32(1 + s.pick(4)), Brief: "go",
 			Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE},
 		}}}
 		if s.pick(3) == 0 {

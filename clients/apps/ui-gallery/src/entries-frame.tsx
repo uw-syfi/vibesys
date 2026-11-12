@@ -750,13 +750,15 @@ function NarrativeDemo(): JSX.Element {
   const [thought, setThought] = useState(false);
   const [thinking, setThinking] = useState(true);
   return (
-    <Narrative label="Turn">
+    <Narrative label="Turn" start="end">
       <Thought text={THOUGHT} open={thought} toggle={setThought} />
       <ToolGroup tools={TOOLS.slice(0, 1)} open={false} toggle={noop} />
       <Said text="Head and tail share a cache line. Padding each to 128 bytes should stop it." />
       <ToolGroup tools={TOOLS} open={opened} toggle={setOpened} />
       <ToolGroup tools={TOOLS.slice(1, 2)} open={false} toggle={noop} />
       <Thought live text={THOUGHT} open={thinking} toggle={setThinking} />
+      <Said text="The padded counters remove the shared cache line, but the handoff still crosses sockets. I will keep the simpler local queue and measure the remote path separately." />
+      <ToolGroup tools={TOOLS} open={false} toggle={noop} />
     </Narrative>
   );
 }

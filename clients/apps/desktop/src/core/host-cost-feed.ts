@@ -22,6 +22,7 @@ import {
   type HostCostWindow,
   type HostFrame,
   readHostCost,
+  type WholeViewPhase,
   windowSinceMs,
 } from '../state/index.js';
 import {InvalidMessage} from './errors.js';
@@ -46,6 +47,7 @@ const OPENING: FeedStatus = {_tag: 'Opening'};
 function hostCostFrame(
   window: HostCostWindow,
   response: WatchHostCostResponse,
+  phase: WholeViewPhase,
 ): Effect.Effect<HostFrame, InvalidMessage> {
   const invalid = (detail: string) =>
     Effect.fail(new InvalidMessage({direction: 'response', type: HostCostSchema.typeName, detail}));
@@ -53,16 +55,19 @@ function hostCostFrame(
   const read = readHostCost(response.cost);
   return read._tag === 'Missing'
     ? invalid(`${read.field} is absent`)
-    : Effect.succeed({from: 'host-cost', window, view: read.view});
+    : Effect.succeed({from: 'host-cost', phase, window, view: read.view});
 }
 
 const hostCostSpec = ({client}: HostParts, window: HostCostWindow): FeedSpec<HostFrame> => {
   const sinceMs = windowSinceMs(window);
   return {
     open: () =>
-      client
-        .watchHostCost(sinceMs === null ? {} : {since: timestampFromMs(sinceMs)})
-        .pipe(Stream.mapEffect(response => hostCostFrame(window, response))),
+      client.watchHostCost(sinceMs === null ? {} : {since: timestampFromMs(sinceMs)}).pipe(
+        Stream.zipWithIndex,
+        Stream.mapEffect(([response, index]) =>
+          hostCostFrame(window, response, index === 0 ? 'initial' : 'update'),
+        ),
+      ),
     apply: applyHostFrame,
     gapped: () => false,
   };

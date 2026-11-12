@@ -82,7 +82,7 @@ function boundReference(
   clock: DisplayClock,
 ): ChartReference | undefined {
   const bound = objective.bound?.current;
-  if (bound === undefined) return undefined;
+  if (bound === undefined || objective.better === null) return undefined;
   const who = [
     bound.agent === '' ? '' : nameOf(names, bound.agent),
     bound.atMs === null ? '' : clock.reportMoment(bound.atMs),
@@ -149,30 +149,33 @@ function ObjectiveChart(props: {
   const {objective, band, window} = props;
   const clock = useDisplayClock();
   const {better} = objective;
-  const axis = valueAxis(better, band);
-  const points: ChartPoint[] = band.points.map(point => ({
-    key: point.id,
-    id: point.id,
-    x: point.atMs,
-    y: upward(better, point.value),
-    selected: props.links.picked === point.id,
-    lit: props.links.lit.has(point.id),
-    label: [
-      shortCommit(point.commit),
-      planWords(plansOf(props.links, point.id)),
-      withUnit(formatExact(point.value), objective.unit),
-    ]
-      .filter(part => part !== '')
-      .join(' · '),
-    tip: {
-      lead: [shortCommit(point.commit), planWords(plansOf(props.links, point.id))]
-        .filter(part => part !== '')
-        .join(' · '),
-      detail: withUnit(formatExact(point.value), objective.unit),
-    },
-  }));
+  const axis = better === null ? {domain: band.domain, ticks: []} : valueAxis(better, band);
+  const points: ChartPoint[] =
+    better === null
+      ? []
+      : band.points.map(point => ({
+          key: point.id,
+          id: point.id,
+          x: point.atMs,
+          y: upward(better, point.value),
+          selected: props.links.picked === point.id,
+          lit: props.links.lit.has(point.id),
+          label: [
+            shortCommit(point.commit),
+            planWords(plansOf(props.links, point.id)),
+            withUnit(formatExact(point.value), objective.unit),
+          ]
+            .filter(part => part !== '')
+            .join(' · '),
+          tip: {
+            lead: [shortCommit(point.commit), planWords(plansOf(props.links, point.id))]
+              .filter(part => part !== '')
+              .join(' · '),
+            detail: withUnit(formatExact(point.value), objective.unit),
+          },
+        }));
   const notes: ChartNote[] =
-    band.points.length > NOTED_UP_TO
+    better === null || band.points.length > NOTED_UP_TO
       ? []
       : band.corners.map(point => ({
           x: point.atMs,
@@ -190,7 +193,9 @@ function ObjectiveChart(props: {
       label={`${objective.name} of every measured candidate over time, with the best so far`}
       size={props.size}
       points={points}
-      steps={band.steps.map(step => ({x: step.x, y: upward(better, step.y)}))}
+      steps={
+        better === null ? [] : band.steps.map(step => ({x: step.x, y: upward(better, step.y)}))
+      }
       notes={notes}
       xDomain={[window.fromMs, Math.max(window.toMs, window.fromMs + 1)]}
       timeAxis={{label: clock.reportTick, zone: clock.offsetMs}}
@@ -283,6 +288,7 @@ function Overview(props: {
       ? `${clock.reportMoment(window.fromMs)} to ${clock.reportMoment(window.toMs)}`
       : RANGE_SPOKEN[choiceOf(props.view) ?? 'all'];
   const entire = objective === undefined ? undefined : bandView(objective, span);
+  const better = objective?.better;
   return (
     <Row gap="space-4" rowGap="space-2" wrap align="center">
       <Stack gap="space-0" width="summary">
@@ -297,10 +303,14 @@ function Overview(props: {
           domain={[span.fromMs, span.toMs]}
           inset={props.inset}
           window={whole ? null : [window.fromMs, window.toMs]}
-          steps={(entire?.steps ?? []).map(step => ({
-            x: step.x,
-            y: upward(objective?.better ?? 'higher', step.y),
-          }))}
+          steps={
+            better === undefined || better === null
+              ? []
+              : (entire?.steps ?? []).map(step => ({
+                  x: step.x,
+                  y: upward(better, step.y),
+                }))
+          }
           change={chosen =>
             props.change(
               chosen === null ? WHOLE_RUN : {kind: 'between', fromMs: chosen[0], toMs: chosen[1]},
@@ -403,17 +413,19 @@ export function PerformancePanel(props: {
   const labelChars = Math.max(
     0,
     ...bands.flatMap(({objective, band}) =>
-      valueAxis(objective.better, band).ticks.map(tick => tick.label.length),
+      objective.better === null
+        ? []
+        : valueAxis(objective.better, band).ticks.map(tick => tick.label.length),
     ),
   );
-  const measured = Math.max(0, ...objectives.map(objective => objective.points.length));
   const size: ChartSize = objectives.length > 1 ? 'strip' : 'tall';
-  const empty = emptyWords({
-    measured,
-    runOver: props.runOver,
-    unreadable: props.unreadable,
-    startedAgo: formatAge(props.nowMs - span.fromMs),
-  });
+  const empty = (measured: number): string =>
+    emptyWords({
+      measured,
+      runOver: props.runOver,
+      unreadable: props.unreadable,
+      startedAgo: formatAge(props.nowMs - span.fromMs),
+    });
   const picked = props.links.picked !== null;
   return (
     <Card
@@ -444,7 +456,7 @@ export function PerformancePanel(props: {
                 points={[]}
                 xDomain={[window.fromMs, Math.max(window.toMs, window.fromMs + 1)]}
                 timeAxis={{label: clock.reportTick, zone: clock.offsetMs}}
-                empty={empty}
+                empty={empty(0)}
               />
             </Stack>
           </Row>
@@ -471,7 +483,7 @@ export function PerformancePanel(props: {
                   names={props.names}
                   labelChars={labelChars}
                   links={props.links}
-                  empty={empty}
+                  empty={empty(objective.points.length)}
                   historyFrom={historyStart(objective, props.truncated)}
                 />
               </Stack>

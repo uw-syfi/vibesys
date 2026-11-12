@@ -23,7 +23,7 @@ func TestACommandJobNeverReusesAnything(t *testing.T) {
 	for range properties {
 		q := core.CacheQuery{
 			Key:      "",
-			Settings: core.CommandSettings{Argv: []string{"make"}},
+			Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"make"}},
 			NoCache:  r.IntN(2) == 0,
 			Saved:    []core.Result{checkPass("c1", commitN(1), 1), measurement("m1", commitN(1), []float64{1, 2, 3}, 2)},
 		}
@@ -201,7 +201,7 @@ func TestSubmissionsJoinOnlyJobsThatAnswerThem(t *testing.T) {
 		{"no cache never joins", queuedJob(core.JobCheck, "k", check, core.JobRunning), submit("k", check, true), false},
 		{"another key", queuedJob(core.JobCheck, "k", check, core.JobRunning), submit("j", check, false), false},
 		{"a check does not join a measure", queuedJob(core.JobMeasure, "k", measure(3, false), core.JobRunning), submit("k", check, false), false},
-		{"a command never joins", queuedJob(core.JobCommand, "", core.CommandSettings{Argv: []string{"x"}}, core.JobRunning), submit("", core.CommandSettings{Argv: []string{"x"}}, false), false},
+		{"a command never joins", queuedJob(core.JobCommand, "", core.CommandSettings{Image: core.ImageHarness, Argv: []string{"x"}}, core.JobRunning), submit("", core.CommandSettings{Image: core.ImageHarness, Argv: []string{"x"}}, false), false},
 		{"equal samples", queuedJob(core.JobMeasure, "k", measure(5, false), core.JobRunning), submit("k", measure(5, false), false), true},
 		{"more samples than asked", queuedJob(core.JobMeasure, "k", measure(8, false), core.JobRunning), submit("k", measure(5, false), false), true},
 		{"fewer samples than asked", queuedJob(core.JobMeasure, "k", measure(3, false), core.JobRunning), submit("k", measure(5, false), false), false},

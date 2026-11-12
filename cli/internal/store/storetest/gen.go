@@ -137,7 +137,8 @@ func (g *gen) settings() core.Settings {
 			Argv:    g.strs(),
 			Service: &core.ServiceSpec{Argv: g.strs(), Probe: g.strs()},
 			Timeout: time.Duration(1 + g.r.Int64N(1<<40)),
-			Profile: &core.ProfileRequest{Wrap: g.strs()},
+			Image:   core.CommandImages()[g.pick(2)],
+			Wrap:    g.strs(),
 			Candidate: &core.CommandCandidate{
 				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
 				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},

@@ -452,7 +452,7 @@ func TestTwoWorktreesOfARepositoryShareItsStore(t *testing.T) {
 	c.measured(0, level)
 	c.measured(1, win)
 	inMain := c.submit("exit", "0")
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--repo", "/worktrees/feature/sub", "--", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--repo", "/worktrees/feature/sub", "--", "exit", "0")...)
 	mustExit(t, r, exitOK, "submit in the linked worktree")
 	inLinked := strings.Fields(r.stdout)[0]
 	for _, repo := range []string{"/repo", "/worktrees/feature"} {
@@ -514,7 +514,7 @@ func TestARevisionReadsAsTheCallersWorktreeHasIt(t *testing.T) {
 	if r.code != exitOK || !strings.Contains(r.stdout, "better\t"+shortCommit(string(rev(2)))+" vs "+shortCommit(string(rev(1)))) {
 		t.Fatalf("compare HEAD --against HEAD~1 in the worktree = %+v", r)
 	}
-	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--", "exit", "0")...)
+	r = c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--", "exit", "0")...)
 	mustExit(t, r, exitOK, "submit HEAD in the worktree")
 	submitted := strings.Fields(r.stdout)[0]
 	if listed := c.run(withTask("jobs", "--commit", "c2")...); !strings.Contains(listed.stdout, submitted) {

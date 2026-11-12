@@ -171,6 +171,21 @@ def test_only_the_e2e_job_asks_setup_clients_for_playwright() -> None:
     assert seen
 
 
+def test_jobs_broken_by_the_ubuntu_latest_move_keep_the_proven_runner_and_budget() -> None:
+    workflow = _load(WORKFLOW)
+    assert isinstance(workflow, dict)
+    jobs = _mapping(workflow["jobs"])
+    for name in ("clients-e2e", "cli", "cli-plain", "orchestrator"):
+        assert _mapping(jobs[name])["runs-on"] == "ubuntu-24.04", name
+    assert _mapping(jobs["orchestrator"])["timeout-minutes"] == 6
+
+    checks = tomllib.loads(CHECKS.read_text(encoding="utf-8"))
+    orchestrator = next(
+        group for group in checks["check_groups"] if group.get("name") == "orchestrator_checks"
+    )
+    assert orchestrator["timeout_seconds"] == 300
+
+
 def test_browser_download_attempts_are_bounded() -> None:
     runs = [step.get("run", "") for step in _steps(_load(SETUP_ACTION))]
     install = next(

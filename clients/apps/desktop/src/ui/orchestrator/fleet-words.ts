@@ -5,11 +5,10 @@
  * clock it is on.
  */
 import {AcceleratorVendor, type TaskCard} from '@vibesys/orchestrator-proto';
-import type {FleetAttention, FleetHostRef, FleetObjective} from '../../state/index.js';
+import type {FleetAttention, FleetObjective} from '../../state/index.js';
 import type {DisplayClock} from '../display-time.js';
 import {span} from '../duration.js';
 import {formatFigure} from '../figures.js';
-import {hostStatusWord} from '../host-status-words.js';
 
 const EXACT = new Intl.NumberFormat('en-US', {maximumFractionDigits: 6});
 
@@ -25,20 +24,6 @@ export {span};
 
 /** How long ago: `3s ago`. */
 export const ago = (elapsedMs: number): string => `${span(elapsedMs)} ago`;
-
-/**
- * What the Runs list says when no host has been read: "Not read yet", or the host's own word when
- * every host that has not been read cannot be (it refused for good), since waiting will not read
- * those. A host that is read but cannot run a run is only being read, and says its cause on its chip.
- */
-export function unreadTitle(hosts: readonly Pick<FleetHostRef, 'freshness' | 'status'>[]): string {
-  const unread = hosts.filter(h => h.freshness === 'empty' || h.freshness === 'unavailable');
-  const [first] = unread;
-  return first !== undefined &&
-    unread.every(h => h.freshness === 'unavailable' && h.status.kind === 'refused')
-    ? hostStatusWord(first.status).label
-    : 'Not read yet';
-}
 
 /**
  * One objective's result, for the eye: `2.31 tok/s`; with no declared unit, led by the objective's

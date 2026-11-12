@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -71,20 +72,17 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 // refused when none does; it records the needs, which the scheduler starts it on a placement by. A
 // host job runs on no placement, whatever was asked, as for a check or a measure. The submission
 // records the environment, the restriction and the needs. A command job has no key, so nothing is
-// fingerprinted, and a host one names no task to read.
+// fingerprinted, and a host one in the task's image names no task to read: it runs on this
+// machine as asked, as it always has.
 //
-// A command job of a task of two images runs with the candidate's image (commandOfTwoImages),
-// which the submission records as the daemon decided it, whatever the caller sent.
+// The submission names the image the command runs in, and the daemon reads the task to run it
+// there (resolveCommand), recording the command as it will run, whatever the caller sent.
 func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submission, error) {
 	c, spec := sub.Context, sub.Spec
 	command, _ := spec.Settings.(core.CommandSettings)
-	command.Candidate = nil
 	var needs []core.ResourceKind
 	var t task.Task
-	read := spec.Environment == core.EnvironmentAuto ||
-		spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 ||
-		command.Profile != nil
-	if read {
+	if spec.Environment != core.EnvironmentHost || command.Image == core.ImageCandidate {
 		var err error
 		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 		if err != nil {
@@ -95,13 +93,11 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 		}
 		needs = t.Needs
 	}
-	command, err := commandOfTwoImages(command, t)
+	command, err := resolveCommand(command, t, a.cfg.DefaultTimeout)
 	if err != nil {
 		return sub, err
 	}
-	if _, ok := spec.Settings.(core.CommandSettings); ok {
-		spec.Settings = command
-	}
+	spec.Settings = command
 	if _, err := a.eligibleOf(spec.Environment, needs, spec.Placement); err != nil {
 		return sub, err
 	}
@@ -112,37 +108,60 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	return sub, nil
 }
 
-// commandOfTwoImages is a command job's settings as a task of two images runs them: the command in
-// the candidate's image, built from the job's commit; or, for a profile, the task's [profile] load
-// in the task's image against the candidate's server, which starts under the caller's wrapper.
-// A profile of any other task, or of one with no [profile], is refused, and so is one that names a
-// command or a service of its own, as the load and the server are the task's.
-func commandOfTwoImages(c core.CommandSettings, t task.Task) (core.CommandSettings, error) {
+// resolveCommand is a command job's settings as they run, from the image the caller named and the
+// task: the daemon's, whatever the caller sent for the candidate.
+//
+//   - In the task's image (harness) of a task of two images, the command runs beside the
+//     candidate's server, which starts from [candidate] serve under the wrapper, as the check and
+//     the benchmark do; the server's startup time is added to the command's limit. A service of the
+//     command's own is refused: the command runs against the candidate's server.
+//   - In the task's image of any other task, the command runs where the check and the benchmark do.
+//   - In the candidate's image, the command runs in the image built from the commit's [candidate]
+//     dockerfile; a task without [candidate] has none, and is refused.
+//
+// Except beside the candidate's server, the wrapper goes in front of the service when there is one
+// and of the command when not.
+func resolveCommand(c core.CommandSettings, t task.Task, defaultTimeout time.Duration) (core.CommandSettings, error) {
 	invalid := func(format string, args ...any) error {
 		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(format, args...)}
 	}
 	cand := t.Candidate
+	c.Candidate = nil
+	wrap := c.Wrap
+	c.Wrap = nil
+	switch c.Image {
+	case core.ImageHarness, core.ImageCandidate:
+	case core.ImageUnspecified:
+		return c, invalid("command.image: name the image the command runs in: %q (the task's image, where its check and benchmark run) or %q (the image built from the commit's [candidate] dockerfile)", core.ImageHarness, core.ImageCandidate)
+	default:
+		return c, invalid("command.image: %q is neither %q nor %q", c.Image, core.ImageHarness, core.ImageCandidate)
+	}
 	switch {
-	case cand == nil && c.Profile != nil:
-		return c, invalid("task %q has no candidate image of its own (only a task with a [candidate] does), so it has no standard profile; profile with submit command --wrap instead", t.Name)
-	case cand == nil:
-		return c, nil
-	case c.Profile == nil:
+	case c.Image == core.ImageCandidate && cand == nil:
+		return c, invalid("task %q has no [candidate], so it has no candidate image: its commands run in the task's image (--image %s)", t.Name, core.ImageHarness)
+	case c.Image == core.ImageCandidate:
 		c.Candidate = &core.CommandCandidate{Build: cand.Build}
+	case cand != nil && c.Service != nil:
+		return c, invalid("a command in the task's image of task %q runs against the candidate's server, so it takes no service of its own; --wrap wraps that server", t.Name)
+	case cand != nil:
+		serve := core.CandidateServe{Argv: append(slices.Clone(wrap), cand.Serve...), Ready: cand.Ready, StartupTimeout: cand.StartupTimeout}
+		limit := c.Timeout
+		if limit == 0 {
+			limit = defaultTimeout
+		}
+		c.Timeout = limit + cand.StartupTimeout
+		c.Candidate = &core.CommandCandidate{Build: cand.Build, Serve: &serve}
 		return c, nil
-	case t.Profile == nil:
-		return c, invalid("task %q declares no [profile] load; profile with submit command --wrap instead", t.Name)
-	case len(c.Argv) > 0 || c.Service != nil:
-		return c, invalid("a profile runs the task's [profile] load against the candidate's server, and takes no command or service of its own")
 	}
-	serve := core.CandidateServe{Argv: append(slices.Clone(c.Profile.Wrap), cand.Serve...), Ready: cand.Ready, StartupTimeout: cand.StartupTimeout}
-	c.Argv = slices.Clone(t.Profile.Argv)
-	limit := t.Profile.Timeout
-	if c.Timeout > 0 {
-		limit = c.Timeout
+	if len(wrap) > 0 {
+		if c.Service != nil {
+			svc := *c.Service
+			svc.Argv = append(slices.Clone(wrap), svc.Argv...)
+			c.Service = &svc
+		} else {
+			c.Argv = append(slices.Clone(wrap), c.Argv...)
+		}
 	}
-	c.Timeout = limit + cand.StartupTimeout
-	c.Candidate = &core.CommandCandidate{Build: cand.Build, Serve: &serve}
 	return c, nil
 }
 

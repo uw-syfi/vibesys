@@ -29,7 +29,7 @@ func newJob(kind core.JobKind, state core.JobState) core.Job {
 	case core.JobMeasure:
 		j.Spec.Settings, j.Key = core.MeasureSettings{Samples: 3}, "key-measure"
 	case core.JobCommand:
-		j.Spec.Settings = core.CommandSettings{Argv: []string{"true"}}
+		j.Spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}}
 	}
 	if state != core.JobQueued {
 		pinned := hostEnv

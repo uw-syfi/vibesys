@@ -227,7 +227,7 @@ func TestAMeasureHoldsItsPlacementAndClusterAloneWhileOtherPlacementsRun(t *test
 	on := func(placement, name string) core.Job {
 		t.Helper()
 		spec := core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Placement: placement, Settings: core.CommandSettings{
-			Argv: []string{"mark", "started-" + name, ";", "hold", name, ";", "exit", "0"},
+			Image: core.ImageHarness, Argv: []string{"mark", "started-" + name, ";", "hold", name, ";", "exit", "0"},
 		}}
 		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: spec})
 		if err != nil {
@@ -327,7 +327,7 @@ func TestACommandOfNoEnvironmentRunsWhereItsTaskRunsAndWaitsBehindAMeasure(t *te
 		t.Fatal("the measure did not start")
 	}
 	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Placement: "local", Settings: core.CommandSettings{
-		Argv: []string{"mark", "started", ";", "exit", "0"},
+		Image: core.ImageHarness, Argv: []string{"mark", "started", ";", "exit", "0"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +374,7 @@ func TestACommandJobIsPlacedAsACheckOfTheSameSubmissionIs(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					cmd, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec(core.CommandSettings{Argv: []string{"exit", "0"}})})
+					cmd, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec(core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}})})
 					if err != nil {
 						t.Fatal(err)
 					}

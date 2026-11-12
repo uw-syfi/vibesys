@@ -18,12 +18,14 @@ import {
   Select,
   Stack,
   StatusDot,
+  type StatusTone,
   Text,
   withoutPaths,
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   FLEET_STATES,
+  type FleetAbsence,
   type FleetColumn,
   type FleetFilter,
   type FleetHostInput,
@@ -39,7 +41,6 @@ import {
 } from '../../state/index.js';
 import {useDisplayClock} from '../display-clock.js';
 import type {DisplayClock} from '../display-time.js';
-import {HostStatusChip} from '../host-status-chip.js';
 import {hostStatusWord} from '../host-status-words.js';
 import {sortedRows} from './fleet-sort.js';
 import {rowTitle, rowTitleParts} from './fleet-title.js';
@@ -51,8 +52,14 @@ import {
   resultHint,
   resultWords,
   span,
-  unreadTitle,
 } from './fleet-words.js';
+import {
+  genericDiscoveryIssue,
+  genericIndexUnavailableWord,
+  genericIndexWords,
+  genericRunHint,
+  genericRunWord,
+} from './generic-run-words.js';
 import {runStateWord} from './setup/index.js';
 
 /** A row whose run started, or ended, within this long is new on screen: it arrives with a flash. */
@@ -79,6 +86,7 @@ const isFresh = (row: FleetRow, nowMs: number): boolean => {
 
 /** A run still starting or running says for how long in its chip: `Running 5h 20m`. */
 function statusLabel(row: FleetRow, nowMs: number): string {
+  if (row.source === 'generic') return genericRunWord(row).label;
   const {label} = runStateWord(row.setup, row.status);
   const counting = row.status === RunStatus.STARTING || row.status === RunStatus.RUNNING;
   return counting && row.startedMs !== null ? `${label} ${span(nowMs - row.startedMs)}` : label;
@@ -99,6 +107,7 @@ function resultLines(row: FleetRow): readonly string[] {
 
 /** What a row says when nothing wants a look: the report's age while live, the end time after. */
 function whenLine(row: FleetRow, nowMs: number, clock: DisplayClock): string {
+  if (row.source === 'generic') return genericIndexWords(row);
   if (!row.live) return row.endedMs === null ? '' : clock.datedMoment(row.endedMs);
   return row.lastReportMs === null ? 'No report' : `Report ${ago(nowMs - row.lastReportMs)}`;
 }
@@ -108,6 +117,24 @@ function whenLine(row: FleetRow, nowMs: number, clock: DisplayClock): string {
  * else that the host could not serve the report; else `whenLine`.
  */
 function statusNote(row: FleetRow, nowMs: number, clock: DisplayClock): ReactNode {
+  if (row.source === 'generic') {
+    const availability = genericIndexWords(row);
+    return (
+      <Text
+        variant="small"
+        tone={row.needsUser || row.indexFreshness === 'stale' ? 'warn' : 'muted'}
+      >
+        {row.needsUser ? (
+          <>
+            <span data-wide-only>{`Needs you · ${availability}`}</span>
+            <span data-narrow-only>Needs you</span>
+          </>
+        ) : (
+          availability
+        )}
+      </Text>
+    );
+  }
   const [first, ...others] = row.attention;
   if (first === undefined) {
     return row.reportUnavailable ? (
@@ -135,6 +162,7 @@ function reportHint(row: FleetRow, nowMs: number, clock: DisplayClock): string {
 
 /** The Status cell whole, for the pointer: how long, every reason to look, the report and the limit. */
 function statusHint(row: FleetRow, nowMs: number, clock: DisplayClock): string {
+  if (row.source === 'generic') return genericRunHint(row);
   const {label} = runStateWord(row.setup, row.status);
   const since =
     row.endedMs !== null
@@ -184,11 +212,19 @@ function identityColumns(
             )
           }
           note={
-            <Text variant="small" tone="muted">
-              {withoutPaths(row.repository)}
-              {/* The Host column gives way when the list is narrow; its words move here. */}
-              <span data-narrow-only>{` \u00b7 ${hostWords(row.host)}`}</span>
-            </Text>
+            row.source === 'generic' ? (
+              <Text variant="code" tone="muted" title={row.runId}>
+                {row.runId}
+                {/* The Host column gives way when the list is narrow; its words move here. */}
+                <span data-narrow-only>{` \u00b7 ${hostWords(row.host)}`}</span>
+              </Text>
+            ) : (
+              <Text variant="small" tone="muted">
+                {withoutPaths(row.repository)}
+                {/* The Host column gives way when the list is narrow; its words move here. */}
+                <span data-narrow-only>{` \u00b7 ${hostWords(row.host)}`}</span>
+              </Text>
+            )
           }
         />
       ),
@@ -205,7 +241,11 @@ function identityColumns(
           main={
             <Chip
               label={statusLabel(row, nowMs)}
-              tone={runStateWord(row.setup, row.status).tone}
+              tone={
+                row.source === 'generic'
+                  ? genericRunWord(row).tone
+                  : runStateWord(row.setup, row.status).tone
+              }
               dot
               // The label grows with a live run's running time; cut it instead of spilling into
               // Best when the column is narrow, rather than leaving the row's own wider hint.
@@ -267,6 +307,14 @@ function trendCell(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNo
   );
 }
 
+/** A generic index does not invent a figure that only a run-detail stream could supply. */
+const unavailableFigure = (label: 'Not available' | 'Not listed' | 'Not recorded'): ReactNode => (
+  <Text variant="small" tone="muted" title={label}>
+    <span data-wide-only>{label}</span>
+    <span data-narrow-only>—</span>
+  </Text>
+);
+
 /** The columns of figures: the measured history, the best results, the agents working and the cost. */
 function figureColumns(
   objectivesOf: (row: FleetRow) => readonly ObjectiveReport[],
@@ -278,7 +326,10 @@ function figureColumns(
       header: 'Candidates',
       size: 'wide',
       narrow: 'compact',
-      cell: row => trendCell(row, objectivesOf(row)),
+      cell: row =>
+        row.source === 'generic'
+          ? unavailableFigure('Not available')
+          : trendCell(row, objectivesOf(row)),
     },
     {
       key: 'best',
@@ -294,7 +345,19 @@ function figureColumns(
       },
       hint: row => row.objectives.map(resultHint).join('\n') || undefined,
       cell: row => {
-        const [first = '—', second] = resultLines(row);
+        if (row.source === 'generic') {
+          const [objective] = row.objectives;
+          if (objective === undefined || objective.value === null)
+            return unavailableFigure('Not recorded');
+          return (
+            <Text variant="body-strong" title={resultWords(objective)}>
+              <span data-wide-only>{resultWords(objective)}</span>
+              <span data-narrow-only>—</span>
+            </Text>
+          );
+        }
+        const [first, second] = resultLines(row);
+        if (first === undefined) return <Text variant="body-strong">—</Text>;
         return (
           <CellLines main={<Text variant="body-strong">{first}</Text>} note={second ?? null} />
         );
@@ -306,27 +369,36 @@ function figureColumns(
       sort: sortOf('agents'),
       size: 'compact',
       align: 'end',
-      cell: row => (
-        <Text>{row.live && row.agentsRunning !== null ? String(row.agentsRunning) : '—'}</Text>
-      ),
+      cell: row =>
+        row.source === 'generic' ? (
+          unavailableFigure('Not listed')
+        ) : (
+          <Text>{row.live && row.agentsRunning !== null ? String(row.agentsRunning) : '—'}</Text>
+        ),
     },
     {
       key: 'cost',
       header: 'Cost',
       sort: sortOf('cost'),
       size: 'short',
-      narrow: 'compact',
+      narrow: 'short',
       align: 'end',
       hint: row =>
         row.costUsd === null
-          ? 'No cost reported'
+          ? row.source === 'generic'
+            ? 'Cost was not recorded for this run'
+            : 'No cost reported'
           : `${row.costUsd.toFixed(2)} dollars${row.budgetUsd === null ? '' : ` of ${row.budgetUsd.toFixed(2)}`}`,
-      cell: row => (
-        <CellLines
-          main={<Text>{row.costUsd === null ? '—' : dollars(row.costUsd)}</Text>}
-          note={row.budgetUsd === null ? null : `of ${dollars(row.budgetUsd)}`}
-        />
-      ),
+      cell: row => {
+        if (row.costUsd === null)
+          return row.source === 'generic' ? unavailableFigure('Not recorded') : <Text>—</Text>;
+        return (
+          <CellLines
+            main={<Text>{dollars(row.costUsd)}</Text>}
+            note={row.budgetUsd === null ? null : `of ${dollars(row.budgetUsd)}`}
+          />
+        );
+      },
     },
   ];
 }
@@ -371,6 +443,37 @@ function Section(props: {
   );
 }
 
+interface DiscoveryIssue {
+  readonly label: string;
+  readonly tone: StatusTone;
+  readonly hint?: string;
+}
+
+/** The degraded discovery sources of one host; healthy sources make no claim for failed ones. */
+function discoveryIssues(host: FleetHostView): readonly DiscoveryIssue[] {
+  const found: DiscoveryIssue[] = [];
+  const managed = host.discovery.managed.status;
+  if (managed.kind !== 'live') {
+    const word = hostStatusWord(managed);
+    found.push({
+      label: `Managed details · ${word.label}`,
+      tone: word.tone,
+      ...(word.hint === undefined ? {} : {hint: word.hint}),
+    });
+  }
+  const generic = genericDiscoveryIssue(host.discovery.generic);
+  if (generic !== null) found.push(generic);
+  return found;
+}
+
+/** A filter option names each discovery source that is degraded, never the host as a whole. */
+const fleetHostWords = (host: FleetHostView): string => {
+  const issues = discoveryIssues(host);
+  return issues.length === 0
+    ? host.label
+    : `${host.label} · ${issues.map(issue => issue.label).join(' · ')}`;
+};
+
 function HostFilter(props: {
   readonly hosts: readonly FleetHostView[];
   readonly host: string | null;
@@ -389,7 +492,7 @@ function HostFilter(props: {
           value={props.host ?? ALL_HOSTS}
           options={[
             {value: ALL_HOSTS, label: 'All hosts'},
-            ...hosts.map(host => ({value: host.key, label: hostWords(host)})),
+            ...hosts.map(host => ({value: host.key, label: fleetHostWords(host)})),
           ]}
           change={host =>
             props.go({type: 'filter-runs-by-host', host: host === ALL_HOSTS ? null : host})
@@ -399,18 +502,30 @@ function HostFilter(props: {
     );
   }
   const [only] = hosts;
-  return only === undefined || only.status.kind === 'live' ? null : (
-    <HostStatusChip status={only.status} clip />
+  if (only === undefined) return null;
+  const issues = discoveryIssues(only);
+  return issues.length === 0 ? null : (
+    <Row gap="space-1">
+      {issues.map(issue => (
+        <Chip
+          key={issue.label}
+          label={issue.label}
+          tone={issue.tone}
+          {...(issue.hint === undefined ? {} : {hint: issue.hint})}
+          dot
+          clip
+        />
+      ))}
+    </Row>
   );
 }
 
-/** The widest the count of older runs reads in its chip: the room reserved while there is none. */
-const WIDEST_LEFT_OUT = '999 older runs not shown';
+/** The widest managed-detail limitation: the room reserved while there is none. */
+const WIDEST_LEFT_OUT = '999 older runs lack managed details';
 
 /**
- * How many runs the hosts shown did not list: a status beside the filters. The host says it
- * (`runs_left_out`); the screen never counts the rows it was given. While every run is listed its
- * room is kept empty, so the chip that arrives with a late host never moves the rows under it.
+ * How many older runs the managed stream omitted. The generic index may still restore their rows,
+ * so the words promise only that their managed details are absent, never that the rows are hidden.
  */
 function RunsLeftOut(props: {
   readonly hosts: readonly FleetHostView[];
@@ -420,12 +535,40 @@ function RunsLeftOut(props: {
     .filter(host => props.host === null || host.key === props.host)
     .reduce((sum, host) => sum + host.runsLeftOut, 0);
   return left === 0 ? (
-    <Reserve>
+    <Reserve collapseInNarrowWindow>
       <Chip label={WIDEST_LEFT_OUT} tone="warn" dot />
     </Reserve>
   ) : (
-    <Chip label={`${left} older runs not shown`} tone="warn" dot />
+    <Chip label={`${left} older runs lack managed details`} tone="warn" dot />
   );
+}
+
+function emptyWords(
+  state: FleetState,
+  absence: FleetAbsence,
+): {readonly title: string; readonly body?: string} {
+  switch (absence.kind) {
+    case 'complete':
+      return {title: emptyTitle(state)};
+    case 'opening':
+      return {
+        title: 'Not read yet',
+        body: 'Waiting for every selected host to provide complete run indexes.',
+      };
+    case 'unconfirmed':
+      return {
+        title: 'Run count unconfirmed',
+        body: 'Some run data is stale or cannot yet be classified for this filter.',
+      };
+    case 'unavailable':
+      return {
+        title: 'Run index unavailable',
+        body:
+          absence.reason === null
+            ? 'One or more selected hosts could not provide a complete run index.'
+            : genericIndexUnavailableWord(absence.reason),
+      };
+  }
 }
 
 /** The way to try the hosts that cannot be read again; its room is kept while none needs it. */
@@ -434,21 +577,23 @@ function RetryHosts(props: {
   readonly retryHost: (host: string) => void;
 }): JSX.Element {
   const needRetry = props.hosts.filter(
-    host => host.freshness === 'stale' || host.freshness === 'unavailable',
+    host =>
+      host.discovery.managed.freshness === 'stale' ||
+      host.discovery.managed.freshness === 'unavailable',
   );
   const button = (
     <Button
-      text="Retry"
+      text="Retry managed"
       icon="refresh"
       variant="quiet"
       size="sm"
-      hint={`Try ${needRetry.map(host => host.label).join(', ')} again`}
+      hint={`Retry managed run details for ${needRetry.map(host => host.label).join(', ')}`}
       press={() => {
         for (const host of needRetry) props.retryHost(host.key);
       }}
     />
   );
-  return needRetry.length === 0 ? <Reserve>{button}</Reserve> : button;
+  return needRetry.length === 0 ? <Reserve collapseInNarrowWindow>{button}</Reserve> : button;
 }
 
 /**
@@ -474,15 +619,14 @@ export function FleetScreen(props: {
   const view = fleetView(props.hosts, filter);
   const live = sortedRows(view.live, place.sort);
   const history = sortedRows(view.history, place.sort);
-  const rows = [...live, ...history];
+  const unknown = sortedRows(view.unknown, place.sort);
+  const rows = [...live, ...history, ...unknown];
   const sortOf: SortOf = column => ({
     direction: place.sort?.column === column ? place.sort.direction : null,
     press: () => go({type: 'sort-runs', column}),
   });
   const objectivesOf = rowObjectives(props.hosts);
-  const unread = view.hosts.some(
-    host => host.freshness === 'empty' || host.freshness === 'unavailable',
-  );
+  const empty = emptyWords(place.state, view.absence);
   const open = (key: string): void => {
     const row = rows.find(candidate => candidate.key === key);
     if (row !== undefined) go({type: 'open-run', host: row.host.key, runId: row.runId});
@@ -532,7 +676,8 @@ export function FleetScreen(props: {
           // A host that has said nothing yet is unknown, never a claim that it has no runs.
           // Text only: New run is in the header in every state, so it never moves with the filter.
           <EmptyState
-            title={unread ? unreadTitle(view.hosts) : emptyTitle(place.state)}
+            title={empty.title}
+            {...(empty.body === undefined ? {} : {body: empty.body})}
             align="start"
           />
         ) : (
@@ -545,6 +690,11 @@ export function FleetScreen(props: {
             {history.length === 0 ? null : (
               <Section title="History" count={history.length}>
                 {list('Run history', history)}
+              </Section>
+            )}
+            {unknown.length === 0 ? null : (
+              <Section title="Status unavailable" count={unknown.length}>
+                {list('Runs with unavailable status', unknown)}
               </Section>
             )}
           </>

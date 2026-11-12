@@ -1,11 +1,11 @@
 # Orchestration strategies and the runtime
 
-Every VibeSys orchestration is a search on the `vs-core` lifecycle. `dynamic` and `issue_queue`
-are written as flows: one `@search(...)` function each that runs top to bottom, which the runtime
-journals and replays (see [flows.md](flows.md)). The other searches (`evolve`, `multi`,
-`single`) are still state-machine strategies and are being ported to flows one at a time; the
-rest of this page describes that older form wherever it says "strategy", and says "search" where
-both forms apply. A strategy is a pure
+Every VibeSys orchestration is a search on the `vs-core` lifecycle. Every search
+(`dynamic`, `issue_queue`, `evolve`, `multi` and `single`) is written as a flow: one
+`@search(...)` function each that runs top to bottom, which the runtime journals and replays (see
+[flows.md](flows.md)). The older state-machine form (a `strategy/` package beside each search) has
+been fully ported and removed; this page says "search" throughout and keeps "strategy" only where
+it names the historical shape a search used to take. A strategy is a pure
 object that decides the next step from a read-only view of the run; the runtime owns the
 loop that executes those steps (agent turns, workspaces, measurements, operations) and
 feeds the outcomes back as events. A plugin is the declaration that joins a strategy to its
@@ -17,7 +17,7 @@ The boundary is deliberate:
 
 | Owner | Holds |
 |---|---|
-| `src/vibesys/orchestration/<search>/` | The search: a flow in `search/` (or, until ported, a state-machine strategy in `strategy/`), its core policy (`core_policy/`), prompts, options and plugin declaration |
+| `src/vibesys/orchestration/<search>/` | The search: a flow in `search/`, its core policy (`core_policy/`), prompts, options and plugin declaration |
 | `src/vibesys/*_core.py`, `core_wiring.py`, `core_roles.py` | Thin product wiring: build the plan from the run's facts, register the strategy's operations, and join it to the runtime |
 | `src/vibesys/plugin_catalog.py` | The product registry for declared plugin registrations |
 | `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: open the run's resources, adapt trusted evaluation, translate semantic events, and compose the core host |
@@ -167,7 +167,6 @@ Keep code near the strategy that owns the decision:
 - `plugin.py`: the plugin declaration and registration;
 - `search/`: a search written as a flow, with its roles, config and pure helpers, exposed only
   through `search/api.py`;
-- `strategy/`: for a search not yet ported, the pure strategy, its state and its transitions;
 - `core_policy/`: the plan, limits, projection and reply parsing the runtime joins to the
   strategy, with `prompts/` for the agent-visible templates;
 - `models.py` or focused policy modules: options, reply schemas, deterministic transitions.

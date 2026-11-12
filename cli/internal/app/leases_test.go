@@ -13,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
 	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // leaseSlow is the slow period of the daemons of these tests: a job refused a lease tries again when
@@ -182,8 +183,10 @@ func TestLeasesAreGivenBackOnEveryEnd(t *testing.T) {
 	awaitFinal(t, a, cancelled.ID)
 	takeable("was cancelled")
 
+	// The daemon reads the task of a docker command, which this daemon has no environment to run.
+	w.tasks.Put(string(call.Scope.Repository()), commit, tasktest.Scripted("task", passes, scores))
 	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{
-		Commit: commit, Environment: core.EnvironmentDocker, Settings: core.CommandSettings{Argv: []string{"mark", "alone"}},
+		Commit: commit, Environment: core.EnvironmentDocker, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"mark", "alone"}},
 	}})
 	if err != nil {
 		t.Fatal(err)

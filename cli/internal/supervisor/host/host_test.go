@@ -164,7 +164,7 @@ func TestAReleasedSupervisorDoesNotWaitForACallerThatStoppedReading(t *testing.T
 		Repository: "/repo", Task: "task", Job: "stalled",
 		Spec: core.JobSpec{
 			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
-			Settings: core.CommandSettings{Argv: []string{"print", strings.Repeat("x", 4<<20), ";", "exit", "0"}, Timeout: time.Hour},
+			Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"print", strings.Repeat("x", 4<<20), ";", "exit", "0"}, Timeout: time.Hour},
 		},
 	}
 	frozen, err := r.h.Spawn(ctx, l)
@@ -223,7 +223,7 @@ func TestOnlyProofOfDeathLetsARunGo(t *testing.T) {
 		Repository: "/repo", Task: "task", Job: "unreachable",
 		Spec: core.JobSpec{
 			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
-			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+			Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}, Timeout: time.Hour},
 		},
 	}
 	if _, err := r.h.Spawn(ctx, l); err != nil {
@@ -300,7 +300,7 @@ func TestAMissingRunDirectoryProvesNothingUntilAReboot(t *testing.T) {
 		Repository: "/repo", Task: "task", Job: "wiped",
 		Spec: core.JobSpec{
 			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
-			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+			Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}, Timeout: time.Hour},
 		},
 	}
 	h, err := r.h.Spawn(ctx, l)
@@ -362,7 +362,7 @@ func TestARecordFromBeforeStartMarksMayHaveStarted(t *testing.T) {
 		Repository: "/repo", Task: "task", Job: "old",
 		Spec: core.JobSpec{
 			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
-			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+			Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}, Timeout: time.Hour},
 		},
 	}
 	h, err := r.h.Spawn(ctx, l)

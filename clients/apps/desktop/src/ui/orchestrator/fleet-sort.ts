@@ -1,5 +1,6 @@
 import type {FleetColumn, FleetRow, FleetSort} from '../../state/index.js';
 import {rowTitle} from './fleet-title.js';
+import {genericRunWord} from './generic-run-words.js';
 import {runStateWord} from './setup/index.js';
 
 /** What a row is sorted by in a column: a word, a number, or null when it has nothing there. */
@@ -14,7 +15,10 @@ function bestKey(row: FleetRow): SortKey {
 
 const KEYS: Readonly<Record<FleetColumn, (row: FleetRow) => SortKey>> = {
   name: row => rowTitle(row),
-  status: row => runStateWord(row.setup, row.status).label,
+  status: row =>
+    row.source === 'generic'
+      ? genericRunWord(row).label
+      : runStateWord(row.setup, row.status).label,
   host: row => row.host.label,
   best: bestKey,
   agents: row => (row.live ? row.agentsRunning : null),

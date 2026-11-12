@@ -32,21 +32,29 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | --- | --- |
 | The correctness check on a commit | `vibesys-cli submit check <sha>` |
 | The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5 --plan <n>` |
-| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
+| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> --image harness\|candidate -- <argv...>` |
 
-Each prints a job id and returns at once. A measure says what it tests: `--plan <n>` links it to
+Each prints a job id and returns at once. A command names the image it runs in, with no default:
+`--image harness` is the task's image, where its check and benchmark run, and on a task with
+`[candidate]` it runs beside the candidate's server exactly as the benchmark does
+(`VIBESYS_SERVICE_URL` set), so it is where a load goes; `--image candidate` is the image built
+from the commit's `[candidate]` dockerfile, with no server, for a version print, an import or a
+microbenchmark there, and only a task with `[candidate]` has it. A profile is a harness command
+whose `--wrap '<profiler>'` starts the candidate's server under the profiler:
+`submit command <sha> --image harness --wrap '<profiler>' -- <load argv>`. A measure says what it tests: `--plan <n>` links it to
 your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the
 baseline and a re-measure of the head do. A measure from a run that gives neither is refused,
 naming both flags; give both and it is refused too. `--plan` also links a check or a command job.
 Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
-`--service` with `--probe` runs the command against a service the CLI starts and stops.
+`--service` with `--probe` runs the command against a service the CLI starts and stops (not
+beside a candidate's server, which the CLI already starts).
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
 The candidate's dependencies (its ROCm or CUDA userspace, torch, kernel libraries, profilers) live
 in the candidate Dockerfile that the task's `[candidate]` section names, inside the repository. To
-change one, edit that Dockerfile, commit, then run a cheap `submit command` (for example a version
-print or an import) on the commit: the job builds the image from the commit and smoke-tests it
+change one, edit that Dockerfile, commit, then run a cheap `submit command --image candidate` (for
+example a version print or an import) on the commit: the job builds the image from the commit and smoke-tests it
 before a measure pays for the build.
 
 On a placement where jobs wait hours in a cluster queue, hold capacity with a standing allocation and

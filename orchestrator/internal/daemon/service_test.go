@@ -3,7 +3,7 @@ package daemon_test
 import (
 	"context"
 	"fmt"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
@@ -46,6 +47,31 @@ func TestHelloSaysWhichSideIsTooOld(t *testing.T) {
 	}
 	if _, err := rig.Service.Hello(context.Background(), &pb.HelloRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("a hello without versions gave %v, want InvalidArgument", err)
+	}
+}
+
+// A fan-out of zero can never admit a worker: the first spawn would already be at the limit. Both
+// ways to enter optimization refuse that malformed command instead of committing a run that cannot
+// do work.
+func TestEnteringOptimizationRefusesZeroFanout(t *testing.T) {
+	rig := daemontest.NewRig(t)
+	for _, command := range []*pb.Command{
+		{Id: "start", Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
+			Repository: "/repo", Task: "task", FanoutLimit: 0, Brief: "go",
+			Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE},
+		}}},
+		{Id: "complete", Body: &pb.Command_CompleteSetup{CompleteSetup: &pb.CompleteSetup{
+			RunId: "setup", Task: "task", FanoutLimit: 0, Brief: "go",
+			Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE},
+		}}},
+	} {
+		_, err := rig.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: command})
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "fanout_limit") {
+			t.Errorf("%T with zero fan-out gave %v, want InvalidArgument naming fanout_limit", command.GetBody(), err)
+		}
+	}
+	if runs := rig.Daemon.State().Runs(); len(runs) != 0 {
+		t.Fatalf("the refused commands committed %d runs, want none", len(runs))
 	}
 }
 

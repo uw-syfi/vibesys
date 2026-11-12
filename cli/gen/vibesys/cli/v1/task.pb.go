@@ -261,8 +261,8 @@ func (x *TaskSchema) GetMinor() uint32 {
 // container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
 //
 // It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
-// entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate] and
-// gives [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
+// entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate]. The
+// sections 0.1 accepts without reading them are accepted the same way here, and so is [profile].
 type TaskManifestV02 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The schema version, "0.2".
@@ -281,8 +281,9 @@ type TaskManifestV02 struct {
 	// The benchmark: run in the task container against the candidate's server, once per sample.
 	// [measure] is the same section by its other name; a manifest has one of them.
 	Benchmark *TaskBenchmarkV02 `protobuf:"bytes,6,opt,name=benchmark,proto3" json:"benchmark,omitempty"`
-	// The standard profile load: run in the task container against the candidate's server, which a
-	// profile job starts under its wrapper. It is never scored.
+	// Retired: once the standard profile load of the profile job, which a command job in the task's
+	// image replaced (submit command --image harness --wrap). Accepted, held to its shape, and not read,
+	// so a manifest written for it still loads.
 	Profile *TaskCommandV02 `protobuf:"bytes,7,opt,name=profile,proto3" json:"profile,omitempty"`
 	// What the task needs of the placement a job runs on.
 	Environment *TaskEnvironmentV02 `protobuf:"bytes,8,opt,name=environment,proto3" json:"environment,omitempty"`

@@ -229,7 +229,7 @@ func TestSubmitValidatesBeforeAnythingChanges(t *testing.T) {
 	a := w.newApp()
 	bad := []app.SubmitRequest{
 		{Context: core.CallContext{Run: "run-1"}, Spec: command("exit", "0")},
-		{Context: call, Spec: core.JobSpec{Commit: "abc", Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"x"}}}},
+		{Context: call, Spec: core.JobSpec{Commit: "abc", Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"x"}}}},
 		{Context: call, Spec: command("exit", "0"), Note: strings.Repeat("n", app.DefaultMaxNoteBytes+1)},
 		{Context: call, Spec: core.JobSpec{Commit: commit}},
 	}

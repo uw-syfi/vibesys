@@ -151,7 +151,7 @@ export function ReportScreen(props: ReportScreenProps): JSX.Element {
       <Stack gap="space-4">
         <CommandLine
           progress={over ? undefined : props.stopProgress}
-          done="Stop"
+          done="Stop run"
           retry={props.retryStop}
         />
         <LeadSummary

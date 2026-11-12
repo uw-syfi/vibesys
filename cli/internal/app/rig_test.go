@@ -178,7 +178,7 @@ func ctxFor(t *testing.T) context.Context {
 func noPlan(spec core.JobSpec) bool { return spec.Settings.Kind() == core.JobMeasure }
 
 func command(script ...string) core.JobSpec {
-	return core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: script}}
+	return core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: script}}
 }
 
 func submit(t *testing.T, a *app.App, script ...string) core.Job {

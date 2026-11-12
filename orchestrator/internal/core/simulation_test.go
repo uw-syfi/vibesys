@@ -320,7 +320,7 @@ func subagent(a core.Agent) bool { return a.Role != core.RoleLead }
 
 func (w *sim) startRun() {
 	start := &pb.StartRun{
-		Repository: fmt.Sprintf("repo-%d", w.r.IntN(3)), Task: "task", FanoutLimit: uint32(w.r.IntN(4)), Brief: "go",
+		Repository: fmt.Sprintf("repo-%d", w.r.IntN(3)), Task: "task", FanoutLimit: uint32(1 + w.r.IntN(4)), Brief: "go",
 		Lead: &pb.AgentSpec{Harness: pb.Harness(1 + w.r.IntN(2)), Model: "m"},
 	}
 	for range w.r.IntN(3) {

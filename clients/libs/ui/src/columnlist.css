@@ -91,8 +91,9 @@
   transform: rotate(180deg);
 }
 /*
- * The edge of a header cell to drag: a two-way arrow in a reserved slot at the cell's right side.
- * It is visible before hover, and focus draws a full box rather than a caret-like line.
+ * The edge of a header cell to drag: the hit target keeps a generous width, while the mark is the
+ * hairline at the actual column boundary. Hover and keyboard focus strengthen that line without
+ * filling every header with a persistent boxed glyph.
  */
 .vs-columnlist-grip {
   position: absolute;
@@ -104,33 +105,27 @@
   height: auto;
   margin: 0;
   border: 0;
-  background: var(--panel);
+  background: transparent;
   cursor: col-resize;
   touch-action: none;
   -webkit-app-region: no-drag;
 }
 .vs-columnlist-grip::after {
-  content: "↔";
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border-inline-start: var(--hairline) solid var(--line);
-  color: var(--muted);
-  font-size: var(--text-caption-size);
-  line-height: 1;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--hairline);
+  background: var(--line);
+  content: "";
 }
 .vs-columnlist-grip:hover::after,
+.vs-columnlist-grip:active::after,
 .vs-columnlist-grip:focus-visible::after {
-  border-color: var(--accent);
-  background: var(--panel-2);
-  color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 var(--hairline) var(--accent);
 }
 .vs-columnlist-grip:focus-visible {
-  border-radius: var(--radius-sm);
-  outline: var(--focus-ring) solid var(--accent);
-  outline-offset: calc(-1 * var(--focus-ring));
+  outline: none;
 }
 .vs-columnlist-note {
   margin-left: var(--space-1);

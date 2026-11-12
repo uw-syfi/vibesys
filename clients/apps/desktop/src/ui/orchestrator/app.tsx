@@ -5,7 +5,7 @@ import {
   type Run,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
-import {Button, Chip, type Crumb, Page, Text} from '@vibesys/ui';
+import {Button, Chip, type Crumb, Page, Row, Stack, Text, withoutPaths} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {HistoryStatus, ProvisionExample, RunHistoryStatus} from '../../core/index.js';
 import {
@@ -17,6 +17,8 @@ import {
   type FolderListing,
   followedAgent,
   freshnessOf,
+  type GenericRunEntry,
+  type GenericRunIndex,
   type HostConnectionState,
   type HostFreshness,
   type HostModel,
@@ -47,6 +49,7 @@ import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
 import {costWords} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {runTitle} from './fleet-words.js';
+import {genericIndexUnavailableWord, genericRunTitle, genericRunWord} from './generic-run-words.js';
 import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
@@ -73,6 +76,8 @@ export interface HostSnapshot {
   readonly freshness: HostFreshness;
   /** The run stream's status. */
   readonly runsFeed: FeedStatus;
+  /** The renderer-safe generic run index at its last atomic publication boundary. */
+  readonly runIndex: GenericRunIndex;
   /** The host's latest answer about the repository path typed in the Start form. */
   readonly repositoryChecked: RepositoryChecked | undefined;
   /** The host's listing of each folder the Start form has asked for, by `listingKey`. */
@@ -179,6 +184,7 @@ const fleetInput = (host: HostSnapshot, nowMs: number): FleetHostInput => ({
   key: host.key,
   label: host.label,
   data: host.model.data,
+  runIndex: host.runIndex,
   freshness: freshnessOf(host.connection, host.runsFeed, hasData(host)),
   status: runsStatus(host, nowMs),
 });
@@ -493,7 +499,7 @@ function RunDestination(props: {
   const {runId} = route;
   const run = state.runs[runId];
   const goRuns = (): void => go({type: 'close-run'});
-  if (run === undefined) return <MissingRun goRuns={goRuns} />;
+  if (run === undefined) return <GenericOrMissingRun host={host} runId={runId} goRuns={goRuns} />;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const followed = followedAgent(state, runId, route.agentId);
   const reading = runReading({
@@ -571,6 +577,141 @@ function RunDestination(props: {
       runAgain={() => openNewRun(props.hosts, commands, go)}
       go={go}
     />
+  );
+}
+
+/** Route a generic-only run without mistaking an absent or unpublished index entry for one. */
+function GenericOrMissingRun(props: {
+  readonly host: HostSnapshot;
+  readonly runId: string;
+  readonly goRuns: () => void;
+}): JSX.Element {
+  const runIndex = props.host.runIndex;
+  if (runIndex._tag === 'Dormant' || runIndex._tag === 'Loading')
+    return (
+      <GenericRunIndexState
+        runId={props.runId}
+        title="Run index opening"
+        detail="Waiting for the host's first complete run-index snapshot."
+        goRuns={props.goRuns}
+      />
+    );
+  if (runIndex._tag === 'Unavailable')
+    return (
+      <GenericRunIndexState
+        runId={props.runId}
+        title="Run index unavailable"
+        detail={genericIndexUnavailableWord(runIndex.reason)}
+        goRuns={props.goRuns}
+      />
+    );
+  const run = runIndex.runs.get(props.runId);
+  if (run === undefined && runIndex.freshness === 'stale')
+    return (
+      <GenericRunIndexState
+        runId={props.runId}
+        title="Run status unconfirmed"
+        detail="The last complete run index does not include this run, but that snapshot is stale. Waiting for a current snapshot to confirm."
+        goRuns={props.goRuns}
+      />
+    );
+  return run === undefined ? (
+    <MissingRun goRuns={props.goRuns} />
+  ) : (
+    <GenericRunDestination run={run} freshness={runIndex.freshness} goRuns={props.goRuns} />
+  );
+}
+
+/** A persisted generic route while its independent discovery stream has no whole snapshot. */
+function GenericRunIndexState(props: {
+  readonly runId: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly goRuns: () => void;
+}): JSX.Element {
+  return (
+    <Page
+      key="generic-run-index"
+      width="wide"
+      state="ready"
+      trail={[{id: 'runs', label: TITLE, press: props.goRuns}]}
+      title="Run"
+    >
+      <Stack gap="space-3">
+        <Stack gap="space-1">
+          <Text as="h2" variant="heading">
+            {props.title}
+          </Text>
+          <Text tone="muted">{props.detail}</Text>
+        </Stack>
+        <Stack gap="space-1">
+          <Text variant="code" title={props.runId}>
+            {props.runId}
+          </Text>
+        </Stack>
+      </Stack>
+    </Page>
+  );
+}
+
+/** A generic-only run remains routable while its typed detail feed is introduced separately. */
+function GenericRunDestination(props: {
+  readonly run: GenericRunEntry;
+  readonly freshness: 'current' | 'stale';
+  readonly goRuns: () => void;
+}): JSX.Element {
+  const {run} = props;
+  const title = genericRunTitle({projectRoot: run.projectRoot});
+  const state = genericRunWord({state: run.state});
+  const availability = props.freshness === 'current' ? 'Up to date' : 'Last known';
+  return (
+    <Page
+      key="generic-run"
+      width="wide"
+      state="ready"
+      trail={[
+        {id: 'runs', label: TITLE, press: props.goRuns},
+        {id: run.runId, label: title},
+      ]}
+      title={title}
+    >
+      <Stack gap="space-4">
+        <Row gap="space-2" wrap>
+          <Chip label={state.label} tone={state.tone} dot />
+          <Chip label={availability} tone={props.freshness === 'current' ? 'neutral' : 'warn'} />
+          {run.needsUser ? <Chip label="Needs you" tone="warn" dot /> : null}
+        </Row>
+        {run.needsUser ? (
+          <Stack gap="space-1">
+            <Text as="h2" variant="heading">
+              Input needed
+            </Text>
+            <Text>
+              This run is waiting for a response. Return to the client or workflow that started it
+              to continue.
+            </Text>
+          </Stack>
+        ) : null}
+        <Stack gap="space-1">
+          <Text as="h2" variant="heading">
+            Run details unavailable
+          </Text>
+          <Text tone="muted">
+            This run is listed by the host. Detailed activity is not available in this app version.
+          </Text>
+        </Stack>
+        <Stack gap="space-1">
+          <Text variant="code" title={run.runId}>
+            {run.runId}
+          </Text>
+          <Text variant="small" tone="muted">
+            {run.projectRoot === null
+              ? 'Project unavailable'
+              : `Project ${withoutPaths(run.projectRoot)}`}
+          </Text>
+        </Stack>
+      </Stack>
+    </Page>
   );
 }
 

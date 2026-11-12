@@ -117,7 +117,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 			st, err := first.Create(ctx, scope)
 			must(t, err)
 			out, err := st.Submit(ctx, core.Submission{
-				Spec: core.JobSpec{Commit: "c1", Settings: core.CommandSettings{Argv: []string{"true"}}}, At: time.Unix(1, 0).UTC(),
+				Spec: core.JobSpec{Commit: "c1", Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}}}, At: time.Unix(1, 0).UTC(),
 			})
 			must(t, err)
 			must(t, first.Close())

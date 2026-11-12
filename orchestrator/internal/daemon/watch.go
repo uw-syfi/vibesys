@@ -134,7 +134,7 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 			return w.resync()
 		}
 	}
-	return w.checked(first)
+	return w.recoverPastOversized(first)
 }
 
 func (w *watch[R]) snapshotLocked(state core.State, last uint64, out *[]R) error {
@@ -205,7 +205,7 @@ func (w *watch[R]) Poll() ([]R, error) {
 		w.stampAll(settled, w.sent)
 		out = append(out, settled...)
 	}
-	return w.checked(out)
+	return w.recoverPastOversized(out)
 }
 
 // Ready is signalled when Poll may have something.
@@ -220,15 +220,26 @@ type RunsWatch = watch[*pb.WatchRunsResponse]
 // AgentWatch is a WatchAgent stream.
 type AgentWatch = watch[*pb.WatchAgentResponse]
 
-// checked refuses an oversized legacy event before emitting a transport frame.
-// A new snapshot can still recover past it without replaying that event.
+// checked refuses an oversized frame before emitting it on the transport.
 func (w *watch[R]) checked(out []R) ([]R, error) {
 	if w.maxBytes > 0 {
 		for _, frame := range out {
 			if proto.Size(any(frame).(proto.Message)) > w.maxBytes {
-				return nil, status.Error(codes.ResourceExhausted, "orchestrator response exceeds frame byte budget; reconnect from a snapshot")
+				return nil, status.Error(codes.ResourceExhausted, "orchestrator response exceeds frame byte budget")
 			}
 		}
 	}
 	return out, nil
+}
+
+// recoverPastOversized checks a batch of changes. A legacy event can be larger than today's wire
+// contract; the stream has already applied its sequence, so replace the unsendable batch with a
+// bounded snapshot at the current cut. A snapshot is checked without recovery: if it is oversized,
+// there is no later cursor to advance to and RESOURCE_EXHAUSTED is the truthful terminal answer.
+func (w *watch[R]) recoverPastOversized(out []R) ([]R, error) {
+	checked, err := w.checked(out)
+	if err == nil {
+		return checked, nil
+	}
+	return w.resync()
 }

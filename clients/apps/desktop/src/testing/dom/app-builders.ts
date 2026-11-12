@@ -5,7 +5,12 @@
  */
 import {create} from '@bufbuild/protobuf';
 import {BuildVersionsSchema} from '@vibesys/orchestrator-proto';
-import {emptyState, NOT_PROVISIONING, NOT_READ} from '../../state/index.js';
+import {
+  DORMANT_GENERIC_RUN_INDEX,
+  emptyState,
+  NOT_PROVISIONING,
+  NOT_READ,
+} from '../../state/index.js';
 import type {AppCommands, HostSnapshot} from '../../ui/orchestrator/app.js';
 
 /** A live, ready host with no data and no open streams, unless `overrides` say otherwise. */
@@ -17,6 +22,7 @@ export function hostSnapshotOf(overrides: Partial<HostSnapshot> = {}): HostSnaps
     connection: {_tag: 'Ready', epoch: 1, daemon: create(BuildVersionsSchema)},
     freshness: {status: 'live', lastUpdateMs: null},
     runsFeed: {_tag: 'Live'},
+    runIndex: DORMANT_GENERIC_RUN_INDEX,
     repositoryChecked: undefined,
     directories: new Map(),
     catalogue: NOT_READ,

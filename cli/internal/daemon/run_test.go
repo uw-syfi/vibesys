@@ -136,7 +136,7 @@ func TestAClientThatStoppedReadingDoesNotHoldAStoppingDaemon(t *testing.T) {
 	call := &cliv1.CallContext{Repository: "/repo", Task: "task", RunId: "run", Harness: "h", Agent: "a"}
 	sub, err := c.Submit(ctx, &cliv1.SubmitRequest{Context: call, Spec: &cliv1.JobSpec{
 		Commit: "0123456789abcdef0123456789abcdef01234567", Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_HOST,
-		Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: []string{"print", strings.Repeat("x", 3<<20), ";", "exit", "0"}}},
+		Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS, Argv: []string{"print", strings.Repeat("x", 3<<20), ";", "exit", "0"}}},
 	}})
 	if err != nil {
 		t.Fatal(err)

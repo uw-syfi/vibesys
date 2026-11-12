@@ -95,7 +95,7 @@ func TestNoTwoJobsRunWithOneClusterAtOnce(t *testing.T) {
 			"[placements.b]\nkind = \"local\"\nmax_jobs = 2\n[placements.b.resources.kubernetes]\nkubeconfig = \"/k\"\n" +
 			"[placements.c]\nkind = \"local\"\nmax_jobs = 2\n",
 	}
-	kinds := []core.Settings{core.CheckSettings{}, core.CommandSettings{Argv: []string{"true"}}, core.MeasureSettings{Samples: 3}}
+	kinds := []core.Settings{core.CheckSettings{}, core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}}, core.MeasureSettings{Samples: 3}}
 	for _, text := range configs {
 		op := parse(t, text)
 		claims := map[string][]core.Claim{}

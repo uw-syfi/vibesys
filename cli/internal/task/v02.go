@@ -113,20 +113,9 @@ func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task,
 		}
 		t.Build = &c
 	}
-	if p := m.GetProfile(); p != nil {
-		c, err := makeCommand("profile", p.GetCommand(), int(p.GetTimeoutSeconds()))
-		if err != nil {
-			return Task{}, err
-		}
-		t.Profile = &c
-	}
+	// [profile] is retired: it is held to its shape, as the decoder already did, and not read.
 	for _, c := range []Command{t.Check, t.Benchmark} {
 		if err := checkPlaceholders(c); err != nil {
-			return Task{}, err
-		}
-	}
-	if t.Profile != nil {
-		if err := checkPlaceholders(*t.Profile); err != nil {
 			return Task{}, err
 		}
 	}

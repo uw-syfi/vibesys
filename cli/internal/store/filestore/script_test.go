@@ -163,7 +163,7 @@ func script() []op {
 		appendLog("append to the log of j1", "j1", "hello "),
 		appendLog("append again", "j1", "world"),
 		appendLog("append to the log of j2", "j2", "boom"),
-		submit("create a command job", core.Submission{Spec: core.JobSpec{Commit: "c3", Settings: core.CommandSettings{Argv: []string{"make", "test"}}}, At: at(30)}),
+		submit("create a command job", core.Submission{Spec: core.JobSpec{Commit: "c3", Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"make", "test"}}}, At: at(30)}),
 		move("cancel it", core.Transition{Job: "j3", From: core.JobQueued, To: core.JobCancelled, At: at(31), CancelReason: "not needed"}),
 		startWorkstream("start a workstream", "KV cache layout", 32),
 		{"move the plan into it", func(ctx context.Context, s store.Store) error {

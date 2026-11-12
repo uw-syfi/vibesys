@@ -153,6 +153,7 @@ function Grip(props: {
       aria-valuemin={MIN_COLUMN_WIDTH}
       aria-valuemax={MAX_COLUMN_WIDTH}
       aria-valuenow={Math.floor(props.width + 0.5)}
+      title={`Resize ${props.header} column (drag or use arrow keys; double-click or press Enter to reset)`}
       tabIndex={0}
       onPointerDown={event => {
         if (event.button !== 0) return;

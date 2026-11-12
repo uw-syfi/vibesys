@@ -314,6 +314,13 @@ body > div:first-child {
   flex-direction: column;
   visibility: hidden;
 }
+/* A reserve can hold a wrapped control row steady while there is room. In a narrow window the
+   invisible item must not wrap onto a line of its own; the real control still draws when present. */
+@media (max-width: 799px) {
+  .vs-reserve[data-collapse-narrow] {
+    display: none;
+  }
+}
 .vs-flex[data-width="chart"] {
   /* A performance chart stays readable beside its summary or takes the next flex line whole. */
   flex: 1 1 var(--chart-flex-min);

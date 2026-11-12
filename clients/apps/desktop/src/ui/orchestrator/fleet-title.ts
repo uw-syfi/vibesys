@@ -1,5 +1,6 @@
 import type {FleetRow} from '../../state/index.js';
 import {runTitleParts} from './fleet-words.js';
+import {genericRunTitle} from './generic-run-words.js';
 import {setupTitle} from './setup/index.js';
 
 /**
@@ -9,9 +10,11 @@ import {setupTitle} from './setup/index.js';
 export const rowTitleParts = (
   row: FleetRow,
 ): {readonly subject: string; readonly hardware: string} =>
-  row.setup
-    ? {subject: setupTitle(row.repository), hardware: ''}
-    : runTitleParts(row.card, row.name);
+  row.source === 'generic'
+    ? {subject: genericRunTitle(row), hardware: ''}
+    : row.setup
+      ? {subject: setupTitle(row.repository), hardware: ''}
+      : runTitleParts(row.card, row.name);
 
 /** The row's title whole, for the pointer, for sorting and for assistive technology. */
 export const rowTitle = (row: FleetRow): string => {

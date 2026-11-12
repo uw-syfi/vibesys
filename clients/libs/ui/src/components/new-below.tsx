@@ -13,3 +13,18 @@ export function NewBelow(props: {readonly text: string; readonly press: () => vo
     </button>
   );
 }
+
+/**
+ * The tail control's place beside a followed scroll viewport. Keeping it in normal flow lets the
+ * viewport give the control room instead of drawing rows underneath it.
+ */
+export function NewBelowSlot(props: {
+  readonly text: string;
+  readonly press: () => void;
+}): JSX.Element {
+  return (
+    <span className="vs-new-below-slot">
+      <NewBelow text={props.text} press={props.press} />
+    </span>
+  );
+}

@@ -46,6 +46,15 @@ export {
   staleForMs,
 } from './freshness.js';
 export {
+  DORMANT_GENERIC_RUN_INDEX,
+  type GenericRunActivity,
+  type GenericRunEntry,
+  type GenericRunIndex,
+  type GenericRunIndexUnavailable,
+  type GenericRunObjective,
+  type GenericRunState,
+} from './generic-run-index.js';
+export {
   type HostId,
   type HostKey,
   HostValidationError,
@@ -112,8 +121,10 @@ export {
 export {
   FLEET_COLUMNS,
   FLEET_STATES,
+  type FleetAbsence,
   type FleetAttention,
   type FleetColumn,
+  type FleetDiscoveryStatus,
   type FleetFilter,
   type FleetHostInput,
   type FleetHostRef,
@@ -126,7 +137,10 @@ export {
   fleetKey,
   fleetRows,
   fleetView,
+  type GenericDiscoveryStatus,
+  type GenericFleetRow,
   isLive,
+  type ManagedFleetRow,
   measuredObjectives,
   NO_FLEET_FILTER,
   pressedSort,
@@ -145,6 +159,7 @@ export {
   isFinalItem,
   type OlderFrame,
   type RunHistoryFrame,
+  type WholeViewPhase,
 } from './orchestrator/fold.js';
 export {
   type HostCostRead,
@@ -281,6 +296,7 @@ export {
   type RunView,
   routeReducer,
 } from './route.js';
+export {isManagedRun} from './run-source.js';
 export {
   type AppearanceAction,
   type AppearanceState,

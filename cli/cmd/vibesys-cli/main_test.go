@@ -117,7 +117,7 @@ func withTask(args ...string) []string {
 // submit queues a command job and returns its id.
 func (c *cli) submit(argv ...string) string {
 	c.t.Helper()
-	r := c.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), argv...)...)
+	r := c.run(append(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--"), argv...)...)
 	if r.code != exitOK {
 		c.t.Fatalf("submit: exit %d: %s", r.code, r.stderr)
 	}
@@ -184,16 +184,16 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 	}{
 		{"no kind", []string{"submit"}, "kind of job"},
 		{"unknown kind", []string{"submit", "bogus"}, "bogus"},
-		{"no task", []string{"submit", "command", "HEAD", "--", "true"}, "--task"},
-		{"no command", withTask("submit", "command", "HEAD"), "after --"},
-		{"empty command", withTask("submit", "command", "HEAD", "--"), "after --"},
-		{"no commit", withTask("submit", "command", "--", "true"), "one commit"},
-		{"bad env", withTask("submit", "command", "HEAD", "--env", "vm", "--", "true"), "--env"},
-		{"an unended wrap", withTask("submit", "command", "HEAD", "--wrap", "nsys 'profile", "--", "true"), "--wrap"},
-		{"profile with no commit", withTask("submit", "profile"), "one commit"},
-		{"profile with a command", withTask("submit", "profile", "HEAD", "--", "true"), "no command after --"},
-		{"profile with an unended wrap", withTask("submit", "profile", "HEAD", "--wrap", "nsys \\"), "--wrap"},
-		{"profile with a negative timeout", withTask("submit", "profile", "HEAD", "--timeout=-1s"), "--timeout"},
+		{"no task", []string{"submit", "command", "--image", "harness", "HEAD", "--", "true"}, "--task"},
+		{"no command", withTask("submit", "command", "--image", "harness", "HEAD"), "after --"},
+		{"empty command", withTask("submit", "command", "--image", "harness", "HEAD", "--"), "after --"},
+		{"no commit", withTask("submit", "command", "--image", "harness", "--", "true"), "one commit"},
+		{"bad env", withTask("submit", "command", "--image", "harness", "HEAD", "--env", "vm", "--", "true"), "--env"},
+		{"an unended wrap", withTask("submit", "command", "--image", "harness", "HEAD", "--wrap", "nsys 'profile", "--", "true"), "--wrap"},
+		{"profile, retired", withTask("submit", "profile", "HEAD"), "--image harness --wrap"},
+		{"command with no image", withTask("submit", "command", "HEAD", "--", "true"), "--image is required: harness"},
+		{"command with an unknown image", withTask("submit", "command", "HEAD", "--image", "task", "--", "true"), "neither harness"},
+		{"candidate on the host", withTask("submit", "command", "HEAD", "--image", "candidate", "--env", "host", "--", "true"), "--env host"},
 		{"check with a command", withTask("submit", "check", "HEAD", "--", "true"), "own commands"},
 		{"check with samples", withTask("submit", "check", "HEAD", "--samples", "3"), "--samples"},
 		{"check with recheck", withTask("submit", "check", "HEAD", "--recheck"), "--recheck"},
@@ -205,14 +205,13 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"measure with plan 0", withTask("submit", "measure", "HEAD", "--plan", "0"), "--plan"},
 		{"measure with a plan number no plan has", withTask("submit", "measure", "HEAD", "--plan", "99999999999"), "--plan"},
 		{"check with no plan", withTask("submit", "check", "HEAD", "--no-plan"), "--no-plan"},
-		{"command with no plan", withTask("submit", "command", "HEAD", "--no-plan", "--", "true"), "no-plan"},
-		{"command with plan 0", withTask("submit", "command", "HEAD", "--plan", "0", "--", "true"), "--plan"},
-		{"profile with plan 0", withTask("submit", "profile", "HEAD", "--plan", "0"), "--plan"},
-		{"command on the host with a placement", withTask("submit", "command", "HEAD", "--env", "host", "--placement", "local", "--", "true"), "--placement"},
+		{"command with no plan", withTask("submit", "command", "--image", "harness", "HEAD", "--no-plan", "--", "true"), "no-plan"},
+		{"command with plan 0", withTask("submit", "command", "--image", "harness", "HEAD", "--plan", "0", "--", "true"), "--plan"},
+		{"command on the host with a placement", withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--placement", "local", "--", "true"), "--placement"},
 		{"check on the host with a placement", withTask("submit", "check", "HEAD", "--placement=local", "--env", "host"), "--placement"},
-		{"probe without service", withTask("submit", "command", "HEAD", "--probe", "ok", "--", "true"), "--probe"},
-		{"negative timeout", withTask("submit", "command", "HEAD", "--timeout=-1s", "--", "true"), "--timeout"},
-		{"bad flag", withTask("submit", "command", "HEAD", "--nope", "--", "true"), "nope"},
+		{"probe without service", withTask("submit", "command", "--image", "harness", "HEAD", "--probe", "ok", "--", "true"), "--probe"},
+		{"negative timeout", withTask("submit", "command", "--image", "harness", "HEAD", "--timeout=-1s", "--", "true"), "--timeout"},
+		{"bad flag", withTask("submit", "command", "--image", "harness", "HEAD", "--nope", "--", "true"), "nope"},
 		{"wait no jobs", withTask("wait"), "at least one job"},
 		{"wait negative timeout", withTask("wait", "j1", "--timeout=-1s"), "--timeout"},
 		{"cancel two jobs", withTask("cancel", "j1", "j2"), "one job"},
@@ -223,7 +222,7 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"logs no job", withTask("logs"), "one job"},
 		{"daemon nothing", []string{"daemon"}, "status, ensure, stop, restart or forget"},
 		{"daemon bogus", []string{"daemon", "bogus"}, "bogus"},
-		{"unknown commit", withTask("submit", "command", "no-such-rev", "--", "true"), "no-such-rev"},
+		{"unknown commit", withTask("submit", "command", "--image", "harness", "no-such-rev", "--", "true"), "no-such-rev"},
 	}
 	for _, tc := range cases {
 		r := c.run(tc.args...)
@@ -241,7 +240,7 @@ func TestSubmitWaitAndLogs(t *testing.T) {
 	c := newCLI(t)
 	id := c.submit("print", "hello", ";", "exit", "0")
 	r := c.run(withTask("wait", id)...)
-	if r.code != exitOK || !strings.Contains(r.stdout, id+"\tsucceeded (exit 0)\t0123456789ab\tprint hello ; exit 0") {
+	if r.code != exitOK || !strings.Contains(r.stdout, id+"\tsucceeded (exit 0)\t0123456789ab\t[harness] print hello ; exit 0") {
 		t.Fatalf("wait = %+v", r)
 	}
 	if r := c.run(withTask("logs", id)...); r.code != exitOK || r.stdout != "hello\n" {
@@ -252,7 +251,7 @@ func TestSubmitWaitAndLogs(t *testing.T) {
 // --wrap puts its words in front of the command when there is no --service.
 func TestSubmitCommandWrapsTheCommand(t *testing.T) {
 	c := newCLI(t)
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wrap", "print wrapped ;", "--wait", "--", "print", "hello")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--wrap", "print wrapped ;", "--wait", "--", "print", "hello")...)
 	if r.code != exitOK {
 		t.Fatalf("submit = %+v", r)
 	}
@@ -306,11 +305,11 @@ func TestWaitTimeoutIsExitThreeAndTheJobGoesOn(t *testing.T) {
 
 func TestSubmitWaitBlocksAndExitsLikeWait(t *testing.T) {
 	c := newCLI(t)
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wait", "--", "print", "x", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--wait", "--", "print", "x", ";", "exit", "0")...)
 	if r.code != exitOK || strings.Count(r.stdout, "\n") != 2 || !strings.Contains(r.stdout, "succeeded") {
 		t.Fatalf("submit --wait = %+v, want the queued line and the final line", r)
 	}
-	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wait", "--", "exit", "4")...)
+	r = c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--wait", "--", "exit", "4")...)
 	if r.code != exitFailed {
 		t.Fatalf("submit --wait of a failing command: exit %d, want 1", r.code)
 	}
@@ -364,7 +363,7 @@ func TestNoteAndJobsFilters(t *testing.T) {
 // --json is one JSON message per line, in the contract's field names, on every command.
 func TestJSONOutput(t *testing.T) {
 	c := newCLI(t)
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--json", "--", "print", "j", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--json", "--", "print", "j", ";", "exit", "0")...)
 	var submitted struct {
 		Job struct {
 			ID string `json:"id"`
@@ -423,7 +422,7 @@ func TestJSONErrorsFromBeforeTheCommandRuns(t *testing.T) {
 		{"cancel", "--json", "--no-such-flag"},
 		{"note", "--json", "--no-such-flag"},
 		{"logs", "--json", "--no-such-flag"},
-		{"submit", "command", "--json", "--no-such-flag", "--", "true"},
+		{"submit", "command", "--image", "harness", "--json", "--no-such-flag", "--", "true"},
 		{"daemon", "status", "--json", "--no-such-flag"},
 		{"daemon", "stop", "--json", "--no-such-flag"},
 		{"daemon", "restart", "--json", "--no-such-flag"},
@@ -538,7 +537,7 @@ func TestEnvironmentVariablesFillTheCallContext(t *testing.T) {
 	c.env["VIBESYS_TASK"] = "kv"
 	c.env["VIBESYS_RUN"] = "run-7"
 	c.env["VIBESYS_AGENT"] = "agent-3"
-	r := c.run("submit", "command", "HEAD", "--env", "host", "--note", "n", "--", "exit", "0")
+	r := c.run("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--note", "n", "--", "exit", "0")
 	if r.code != exitOK {
 		t.Fatalf("submit = %+v", r)
 	}
@@ -549,7 +548,7 @@ func TestEnvironmentVariablesFillTheCallContext(t *testing.T) {
 func TestAHostJobIgnoresTheInheritedPlacement(t *testing.T) {
 	c := newCLI(t)
 	c.env["VIBESYS_PLACEMENT"] = "local"
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--json", "--", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--json", "--", "exit", "0")...)
 	if r.code != exitOK || strings.Contains(r.stdout, `"placement"`) {
 		t.Fatalf("submit = %+v; want a host job with no placement", r)
 	}
@@ -661,7 +660,7 @@ func TestEveryCommandTakesTheWholeContext(t *testing.T) {
 func TestJobsPrintsALongArgvOnOneShortLine(t *testing.T) {
 	c := newCLI(t)
 	script := strings.Repeat("import os, sys  # a script passed inline as one argument\n", 40) + strings.Repeat("x", 500)
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--", "print", script, ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--", "print", script, ";", "exit", "0")...)
 	if r.code != exitOK {
 		t.Fatalf("submit = %+v", r)
 	}
@@ -694,5 +693,29 @@ func TestCommandSummaryIsOneBoundedLine(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A command job's line names the image it runs in; a job stored before the image was named shows
+// the one its candidate setup implies.
+func TestAJobsLineNamesItsImage(t *testing.T) {
+	build := &cliv1.CandidateBuild{Dockerfile: "serve/Dockerfile", Context: "serve"}
+	serve := &cliv1.CandidateServe{Argv: []string{"serve"}, Ready: "/health"}
+	for _, c := range []struct {
+		name    string
+		command *cliv1.CommandSettings
+		want    string
+	}{
+		{"harness", &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_HARNESS}, "[harness]"},
+		{"candidate", &cliv1.CommandSettings{Image: cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE}, "[candidate]"},
+		{"old, in the candidate's image", &cliv1.CommandSettings{Candidate: &cliv1.CandidateSetup{Build: build}}, "[candidate]"},
+		{"old profile, beside the server", &cliv1.CommandSettings{Candidate: &cliv1.CandidateSetup{Build: build, Serve: serve}}, "[harness]"},
+		{"old, of a task of one image", &cliv1.CommandSettings{}, "[harness]"},
+	} {
+		c.command.Argv = []string{"load"}
+		got := describe(&cliv1.Job{Id: "j1", Spec: &cliv1.JobSpec{Settings: &cliv1.JobSpec_Command{Command: c.command}}})
+		if !strings.Contains(got, "\t"+c.want+" load") {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
 	}
 }
