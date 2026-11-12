@@ -141,6 +141,7 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       key: 'started',
       header: 'Started',
       mono: true,
+      wide: true,
       cell: line =>
         line.started === null ? (
           '—'
@@ -164,7 +165,6 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       hint: 'This run’s part of the cost of every run on the host',
       mono: true,
       align: 'end',
-      wide: true,
       cell: line => line.share,
     },
     {
@@ -174,7 +174,6 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       sortable: true,
       mono: true,
       align: 'end',
-      wide: true,
       cell: line => <BudgetText budget={line.budget} />,
     },
     {
@@ -192,6 +191,7 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       sortable: true,
       mono: true,
       align: 'end',
+      wide: true,
       cell: line => line.tokens.input,
     },
     {
@@ -209,6 +209,7 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
       hint: 'Output tokens',
       mono: true,
       align: 'end',
+      wide: true,
       cell: line => line.tokens.output,
     },
   ];

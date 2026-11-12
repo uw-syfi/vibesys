@@ -241,6 +241,24 @@ describe('the Cost page of one host', () => {
     screen.unmount();
   });
 
+  it('keeps cost share and budget in the compact table before secondary metadata', () => {
+    const screen = mount(page(views.week));
+    const table = screen.container.querySelector('table[aria-label="Cost by run on Host A"]');
+    const columns = new Map(
+      [...(table?.querySelectorAll('thead th') ?? [])].map(header => [
+        header.textContent,
+        header.hasAttribute('data-wide'),
+      ]),
+    );
+    expect(columns.get('% of total')).toBe(false);
+    expect(columns.get('Budget')).toBe(false);
+    expect(columns.get('Started')).toBe(true);
+    expect(columns.get('Input')).toBe(true);
+    expect(columns.get('% cached')).toBe(true);
+    expect(columns.get('Output')).toBe(true);
+    screen.unmount();
+  });
+
   it('says how long each bar lasts, and writes the axis with a zero and thousands separated', () => {
     const screen = mount(page(views.week));
     expect(screen.text()).toMatch(/per (\d+ )?(minute|hour|day)s?/);
