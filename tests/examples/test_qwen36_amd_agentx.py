@@ -85,7 +85,7 @@ def test_amd_tasks_are_two_image_tasks_of_the_baseline_engine(task: str) -> None
     }
     assert manifest["benchmark"] == {
         "command": _BENCHMARKS[workload],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 10800 if workload == "agentx" else 3600,
         "result_protocol": 2,
     }
     declared = manifest["catalogue"]["hardware"]
@@ -145,6 +145,7 @@ def test_agentx_bench_replays_the_agentx_v1_recipe(task: str, mode: str, tmp_pat
     (kwargs,) = calls
     assert kwargs["mode"] == mode
     assert kwargs.pop("artifacts") == tmp_path / "agentx"
+    assert kwargs.pop("timeout_secs") == 10500.0
     url = "http://127.0.0.1:9"
     replay = _agentx.Replay(**kwargs, url=url, timeout_secs=3300)
     evaluator = SimpleNamespace(
