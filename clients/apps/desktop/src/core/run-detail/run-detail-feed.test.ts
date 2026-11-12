@@ -1,13 +1,13 @@
 import {fromBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {HostService, SkeletonRequestSchema, TailRequestSchema} from '@vibesys/proto';
-import * as Duration from 'effect/Duration';
+import {SkeletonRequestSchema, TailRequestSchema} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
-import type * as Atom from 'effect/reactivity/Atom';
-import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
-import * as Scheduler from 'effect/Scheduler';
-import * as TestClock from 'effect/testing/TestClock';
-import {daemonRecording, FakeDaemon, generateScenario} from '../../testing/orchestrator/index.js';
+import {
+  FakeDaemon,
+  generateScenario,
+  type HostHarness,
+  hostHarness,
+} from '../../testing/orchestrator/index.js';
 import {
   rawSkeleton,
   runHeader,
@@ -18,13 +18,8 @@ import {
   TAIL,
   tail,
 } from '../../testing/run-detail/index.js';
-import {makeQuiescence} from '../../testing/settle.js';
-import {makeFakeTransport, type Step} from '../../testing/transport/index.js';
-import {makeClient} from '../client/make-client.js';
-import {makeHostConnection} from '../connection.js';
+import type {Step} from '../../testing/transport/index.js';
 import {RpcStatus} from '../errors.js';
-import {makeOrchestratorClient} from '../orchestrator-client.js';
-import {makeRunDetailFeed} from './index.js';
 
 const RUN = 'run-dynamic';
 const scenario = generateScenario({seed: 23, subagents: 0, live: false});
@@ -32,38 +27,9 @@ const scenario = generateScenario({seed: 23, subagents: 0, live: false});
 const harness = (
   skeletons: (nth: number) => ReadonlyArray<Step>,
   tails: (nth: number) => ReadonlyArray<Step>,
-) =>
-  Effect.gen(function* () {
-    const {scheduler, settle} = yield* makeQuiescence;
-    const recording = servingRunDetail(skeletons, tails)(daemonRecording(new FakeDaemon(scenario)));
-    const fake = makeFakeTransport(recording);
-    const made = yield* Effect.gen(function* () {
-      const client = yield* makeClient(HostService, 'local');
-      const connection = yield* makeHostConnection(yield* makeOrchestratorClient('local'));
-      const ambient = yield* Effect.context<never>();
-      const feed = yield* makeRunDetailFeed({client, connection, ambient});
-      return {feed, connection};
-    }).pipe(Effect.provide(fake.layer), Effect.provideService(Scheduler.Scheduler, scheduler));
-    const registry = AtomRegistry.make();
-    return {
-      ...made,
-      fake,
-      mount: <A>(atom: Atom.Atom<A>): (() => void) => registry.mount(atom),
-      read: <A>(atom: Atom.Atom<A>) =>
-        Effect.gen(function* () {
-          yield* settle;
-          return registry.get(atom);
-        }),
-      elapse: (seconds: number) =>
-        Effect.gen(function* () {
-          yield* settle;
-          yield* TestClock.adjust(Duration.seconds(seconds));
-          yield* settle;
-        }),
-    };
-  });
+) => hostHarness(new FakeDaemon(scenario), {wrap: servingRunDetail(skeletons, tails)});
 
-type Harness = Effect.Success<ReturnType<typeof harness>>;
+type Harness = HostHarness;
 
 const calls = (h: Harness, method: string) =>
   h.fake.calls().filter(call => call.target.method === method);
@@ -75,9 +41,9 @@ describe('the generic run detail feed', () => {
         () => [skeleton([runHeader(RUN)], 2n)],
         () => [tail([runMetric(2n, 12)]), {hang: true}],
       );
-      expect(yield* h.read(h.feed.state(RUN))).toEqual({_tag: 'Loading'});
-      const unmount = h.mount(h.feed.watch(RUN));
-      const state = yield* h.read(h.feed.state(RUN));
+      expect(yield* h.read(h.session.runDetail.state(RUN))).toEqual({_tag: 'Loading'});
+      const unmount = h.mount(h.session.runDetail.watch(RUN));
+      const state = yield* h.read(h.session.runDetail.state(RUN));
       expect(state._tag).toBe('Live');
       if (state._tag === 'Live') {
         expect(state.projection.metrics.values).toMatchObject([
@@ -99,7 +65,7 @@ describe('the generic run detail feed', () => {
       unmount();
       yield* h.elapse(0);
       expect(calls(h, TAIL)[0]).toMatchObject({open: false, released: 1});
-      expect(yield* h.read(h.feed.state(RUN))).toEqual({_tag: 'Loading'});
+      expect(yield* h.read(h.session.runDetail.state(RUN))).toEqual({_tag: 'Loading'});
     }),
   );
 
@@ -111,8 +77,8 @@ describe('the generic run detail feed', () => {
         nth => (nth === 0 ? [skeleton(records.slice(0, 1), 3n)] : [skeleton(records)]),
         nth => (nth === 0 ? [tail([third]), {hang: true}] : [{hang: true}]),
       );
-      h.mount(h.feed.watch(RUN));
-      const state = yield* h.read(h.feed.state(RUN));
+      h.mount(h.session.runDetail.watch(RUN));
+      const state = yield* h.read(h.session.runDetail.state(RUN));
       expect(state._tag).toBe('Live');
       if (state._tag === 'Live') {
         expect(state.projection.metrics.values[0]?.points.map(point => point.value)).toEqual([
@@ -134,16 +100,18 @@ describe('the generic run detail feed', () => {
         nth => (nth === 0 ? [invalid] : [skeleton([runHeader(RUN)])]),
         () => [{hang: true}],
       );
-      recovered.mount(recovered.feed.watch(RUN));
-      expect(yield* recovered.read(recovered.feed.state(RUN))).toMatchObject({_tag: 'Live'});
+      recovered.mount(recovered.session.runDetail.watch(RUN));
+      expect(yield* recovered.read(recovered.session.runDetail.state(RUN))).toMatchObject({
+        _tag: 'Live',
+      });
       expect(calls(recovered, SKELETON)).toHaveLength(2);
 
       const broken = yield* harness(
         () => [invalid],
         () => [{hang: true}],
       );
-      broken.mount(broken.feed.watch(RUN));
-      expect(yield* broken.read(broken.feed.state(RUN))).toMatchObject({
+      broken.mount(broken.session.runDetail.watch(RUN));
+      expect(yield* broken.read(broken.session.runDetail.state(RUN))).toMatchObject({
         _tag: 'Failed',
         fault: {kind: 'InvalidMessage', retryable: false},
         projection: null,
@@ -162,16 +130,16 @@ describe('the generic run detail feed', () => {
             ? [{end: {status: RpcStatus.UNIMPLEMENTED, message: 'tail is unavailable'}}]
             : [{hang: true}],
       );
-      h.mount(h.feed.watch(RUN));
-      const refused = yield* h.read(h.feed.state(RUN));
+      h.mount(h.session.runDetail.watch(RUN));
+      const refused = yield* h.read(h.session.runDetail.state(RUN));
       expect(refused).toMatchObject({
         _tag: 'Refused',
         fault: {kind: 'Unimplemented', retryable: false},
         projection: {runId: RUN},
       });
       expect(calls(h, SKELETON)).toHaveLength(1);
-      yield* h.feed.retry(RUN);
-      expect(yield* h.read(h.feed.state(RUN))).toMatchObject({_tag: 'Live'});
+      yield* h.session.runDetail.retry(RUN);
+      expect(yield* h.read(h.session.runDetail.state(RUN))).toMatchObject({_tag: 'Live'});
       expect(calls(h, SKELETON)).toHaveLength(2);
       expect(calls(h, TAIL)).toHaveLength(2);
     }),
@@ -187,14 +155,14 @@ describe('the generic run detail feed', () => {
             ? [{end: {status: RpcStatus.UNAVAILABLE, message: 'link lost'}}]
             : [{hang: true}],
       );
-      h.mount(h.feed.watch(RUN));
-      expect(yield* h.read(h.feed.state(RUN))).toMatchObject({
+      h.mount(h.session.runDetail.watch(RUN));
+      expect(yield* h.read(h.session.runDetail.state(RUN))).toMatchObject({
         _tag: 'Stale',
         why: 'disconnected',
         projection: {runId: RUN},
       });
       yield* h.elapse(1);
-      const recovered = yield* h.read(h.feed.state(RUN));
+      const recovered = yield* h.read(h.session.runDetail.state(RUN));
       expect(recovered._tag).toBe('Live');
       if (recovered._tag === 'Live') {
         expect(recovered.projection.metrics.values[0]?.points[0]?.value).toBe(9);

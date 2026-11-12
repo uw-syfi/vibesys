@@ -26,6 +26,7 @@ import {makeNewRun, type NewRun} from './new-run.js';
 import {makeOrchestratorClient} from './orchestrator-client.js';
 import {defaultReconnect} from './reconnect.js';
 import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
+import {makeRunDetailFeed, type RunDetailFeed} from './run-detail/index.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
 import {makeRunsTopicFeed, type RunsTopicFeed} from './runs-topic-feed.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
@@ -48,6 +49,8 @@ export interface HostSession {
   readonly machine: MachineStatsFeed;
   /** The host gateway's latest-value run index. Managed orchestrator runs remain in `runs`. */
   readonly runIndex: RunsTopicFeed;
+  /** One generic run's typed Skeleton/Tail projection, opened only while that run is mounted. */
+  readonly runDetail: RunDetailFeed;
   readonly commands: Commands;
   /** The host's answer about the repository path being typed in the Start form. */
   readonly repositoryCheck: RepositoryCheck;
@@ -70,6 +73,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const parts = {client, connection, store, ambient};
   const commands = yield* makeCommands(parts);
   const directories = yield* makeDirectoryListings(parts);
+  const hostClient = yield* makeClient(HostService, host);
   return {
     connection,
     model: store.atom,
@@ -80,12 +84,17 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     costs: yield* makeCostFeed(parts),
     hostCosts: yield* makeHostCostFeed(parts),
     machine: yield* makeMachineStatsFeed({
-      client: yield* makeClient(HostService, host),
+      client: hostClient,
       connection,
       ambient,
     }),
     runIndex: yield* makeRunsTopicFeed({
-      client: yield* makeClient(HostService, host),
+      client: hostClient,
+      connection,
+      ambient,
+    }),
+    runDetail: yield* makeRunDetailFeed({
+      client: hostClient,
       connection,
       ambient,
     }),

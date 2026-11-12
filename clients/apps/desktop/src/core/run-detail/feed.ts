@@ -60,7 +60,7 @@ type RunDetailDelivery =
       readonly projection: RunDetailProjection | null;
     };
 
-interface RunDetailFeed {
+export interface RunDetailFeed {
   /** Follow `runId` while mounted. Two consumers of the same atom share one lifetime. */
   readonly watch: (runId: string) => Atom.Atom<AsyncResult.AsyncResult<never, never>>;
   /** Delivery and the latest safe typed projection for `runId`. */
