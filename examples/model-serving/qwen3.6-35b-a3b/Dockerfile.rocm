@@ -7,10 +7,33 @@
 # Python 3.12 and ROCm 6.4: torch 2.9.1+rocm6.4, then requirements-agentx.txt. It is part of the
 # candidate, as the engine is: another base, a kernel library or a profiler may replace it.
 #
+# Ubuntu 24.04's Python is 3.12. The ROCm 6.4 user-space runtime (hsa-rocr) and rocminfo come
+# from AMD's apt repository: vibesys-cli checks with rocminfo that the container sees a GPU before
+# the server starts, and Apptainer's --rocm binds the node's rocminfo, which needs the HSA
+# runtime in the image. torch's wheel carries its own ROCm libraries.
+#
 # Model weights are never baked in: the operator mounts the Hugging Face cache read-only as
 # "hf" (the task's [environment] needs), and the engine reads it offline.
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
+ARG ROCM_VERSION=6.4.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3.12 python3-pip python-is-python3 \
+ && mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} noble main" > /etc/apt/sources.list.d/rocm.list \
+ && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' > /etc/apt/preferences.d/rocm-pin-600 \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends hsa-rocr rocminfo \
+ && rm -rf /var/lib/apt/lists/* \
+ && echo /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf \
+ && ldconfig \
+ && test -x /opt/rocm/bin/rocminfo && test -f /opt/rocm/.info/version \
+ && ldconfig -p | grep -q 'libhsa-runtime64.so.1 '
+
+# The image is the environment, so the packages go into the system Python (no venv), which
+# `python` names on any PATH.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 PIP_ROOT_USER_ACTION=ignore
 COPY requirements-agentx.txt /tmp/requirements-agentx.txt
 RUN pip install --no-cache-dir 'torch==2.9.1+rocm6.4' --index-url https://download.pytorch.org/whl/rocm6.4 \
  && pip install --no-cache-dir -r /tmp/requirements-agentx.txt \
