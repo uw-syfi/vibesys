@@ -24,9 +24,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
 )
 
-// MaxReceiveMessageBytes is the explicit receive limit for the orchestrator link.
-const MaxReceiveMessageBytes = 4 << 20
-
 // Dialer opens one connection to the daemon. It is called again after a connection breaks.
 type Dialer func(ctx context.Context) (net.Conn, error)
 

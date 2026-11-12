@@ -9,9 +9,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// MaxWatchFrameBytes is the receive limit used on the orchestrator link.
-const MaxWatchFrameBytes = 4 << 20
-
 // MaxSnapshotCheckIns is how many of a viewer's check-ins in one run a snapshot holds, the newest. A
 // viewer presses Catch me up now and then, so the cut is for a viewer who pressed it very many times.
 const MaxSnapshotCheckIns = 64
