@@ -84,9 +84,8 @@ describe('the Cost screen over served views', () => {
       expect(text).toContain(word);
     }
     expect(text).toMatch(/Profiler No price/);
-    // By model, with the host id made readable rather than leaked as kebab-case.
-    expect(text).toContain('Model A');
-    expect(text).not.toContain('model-a');
+    // By model, as the host named them.
+    expect(text).toContain('model-a');
     expect(text).toContain('$206');
     // By kind, from the host's own totals.
     for (const word of ['Cache read', '212.4M', 'Reasoning', '5.2M', 'Cache write', '9.6M']) {
@@ -204,8 +203,9 @@ describe('the Cost screen over served views', () => {
     const html = screen(LONG_NAMES);
     const longest = LONG_NAMES.models[0]?.model.model ?? '';
     expect(longest.length).toBeGreaterThan(60);
-    expect(html).toContain(`title="${longest} on Claude Code"`);
-    expect(textOf(html)).not.toContain(longest);
+    expect(html).toContain(`title="${longest}"`);
+    // An id is an identifier: it is drawn in the code face.
+    expect(html).toContain('data-mono="true"');
   });
 
   it('reads any view the contract allows without a word of the protocol, a NaN or a missing value', () => {

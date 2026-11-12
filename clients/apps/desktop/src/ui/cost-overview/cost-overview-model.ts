@@ -31,7 +31,6 @@ import {
   formatUsd,
   modelKey,
   modelName,
-  modelTitle,
   NOT_REPORTED,
   type Precision,
   precisionOf,
@@ -332,7 +331,10 @@ export function hostCostModel(
       key: `${cost.model.harness}/${cost.model.model}`,
       name: modelName(cost.model, words),
       series: cost.usage.costUsd === null ? null : (slots.get(modelKey(cost.model)) ?? 0),
-      title: modelTitle(cost.model, words),
+      title:
+        cost.model.model === ''
+          ? `${words.harness(cost.model.harness)} default model`
+          : `${cost.model.model} on ${words.harness(cost.model.harness)}`,
       tokens: tokenSplit(cost.usage, cost.turns),
       cost: costCell(cost.usage, cost.turns, cost.unpricedTurns, precision),
     })),

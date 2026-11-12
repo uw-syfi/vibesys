@@ -19,7 +19,6 @@ export {
   formatUsd,
   modelKey,
   modelName,
-  modelTitle,
   NOT_REPORTED,
   type Precision,
   precisionOf,

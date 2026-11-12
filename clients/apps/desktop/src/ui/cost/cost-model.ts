@@ -17,7 +17,6 @@ import {
   labelStride,
   modelKey,
   modelName,
-  modelTitle,
   type Precision,
   precisionOf,
   tokensOrNothing,
@@ -117,9 +116,18 @@ export function slotsOf(view: CostSplitSource): ReadonlyMap<string, number> {
 /** How many colors the series palette has (`--series-0` to `--series-7`). */
 const PALETTE = 8;
 
+/**
+ * Under half a cent is floating-point noise from summing the models' spend, not spend the split
+ * left out: the screen writes no smaller amount than a cent, so such a residual counts as none.
+ */
+const RESIDUAL_FLOOR_USD = 0.005;
+
 /** Spend included in a bucket's total but omitted from its bounded model split. */
-const residualCost = (bucket: SpendSeriesView['buckets'][number]): number =>
-  Math.max(0, bucket.costUsd - bucket.byModel.reduce((total, spend) => total + spend.costUsd, 0));
+const residualCost = (bucket: SpendSeriesView['buckets'][number]): number => {
+  const residual =
+    bucket.costUsd - bucket.byModel.reduce((total, spend) => total + spend.costUsd, 0);
+  return residual < RESIDUAL_FLOOR_USD ? 0 : residual;
+};
 
 /** A palette key no protocol model can have: model keys always begin with a numeric harness and `/`. */
 const OTHER_MODELS_KEY = 'other-models';
@@ -159,10 +167,7 @@ function bucketTitle(
   return [
     words.moment(startMs),
     formatUsd(costUsd, 2),
-    ...byModel.map(
-      spend =>
-        `${modelName(spend.model, words)} (${modelTitle(spend.model, words)}) ${formatUsd(spend.costUsd, 2)}`,
-    ),
+    ...byModel.map(spend => `${modelName(spend.model, words)} ${formatUsd(spend.costUsd, 2)}`),
     ...(otherModelsUsd > 0 ? [`${OTHER_MODELS_LABEL} ${formatUsd(otherModelsUsd, 2)}`] : []),
   ].join('\n');
 }
@@ -238,8 +243,8 @@ export function spendChart(
           cost.usage.costUsd === null
             ? `${modelName(cost.model, words)} (unpriced)`
             : modelName(cost.model, words),
-        title: modelTitle(cost.model, words),
         ...(cost.usage.costUsd === null ? {muted: true} : {series: slot(cost.model)}),
+        mono: true,
       }),
     ),
     ...(view.modelsTruncated && buckets.some(bucket => residualCost(bucket) > 0)
@@ -300,7 +305,7 @@ const modelRows = (
     (cost): BarRow<3> => ({
       key: modelKey(cost.model),
       name: modelName(cost.model, words),
-      title: modelTitle(cost.model, words),
+      mono: true,
       series: slots.get(modelKey(cost.model)) ?? 0,
       value: cost.usage.costUsd,
       ...optionalNote(noteOf(cost.usage, cost.unpricedTurns)),
