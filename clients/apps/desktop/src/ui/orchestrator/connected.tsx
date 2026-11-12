@@ -20,7 +20,7 @@ import type {
   NavigationAction,
   Route,
 } from '../../state/index.js';
-import {costTarget, followedAgent} from '../../state/index.js';
+import {costTarget, followedAgent, isManagedRun} from '../../state/index.js';
 import {type AppCommands, type HostSnapshot, OrchestratorApp} from './app.js';
 import {nowMs} from './clock.js';
 import {
@@ -90,10 +90,12 @@ const watchOpen = (
   Atom.make(get => {
     const found = hosts.find(candidate => candidate.key === host);
     if (found === undefined) return;
+    const state = get(found.session.model).data;
+    if (!isManagedRun(state, runId)) return;
     // A run in setup is its lead's conversation: that agent is followed with no route naming it.
-    const followed = followedAgent(get(found.session.model).data, runId, agentId);
+    const followed = followedAgent(state, runId, agentId);
     if (followed !== null) get(found.session.agents.watch(followed));
-    if (runId !== undefined) get(found.session.runHistory.watch(runId));
+    get(found.session.runHistory.watch(runId));
   });
 
 /** One run's cost stream on its host, followed while this is mounted. */
@@ -104,7 +106,8 @@ const watchCost = (
 ): Atom.Atom<void> =>
   Atom.make(get => {
     const found = hosts.find(candidate => candidate.key === host);
-    if (found !== undefined && runId !== undefined) get(found.session.costs.watch(runId));
+    if (found !== undefined && isManagedRun(get(found.session.model).data, runId))
+      get(found.session.costs.watch(runId));
   });
 
 /** How the atom below reads another atom. */
@@ -149,9 +152,12 @@ const snapshotOfHost = (
 ): HostSnapshot => {
   const model = get(session.model);
   const here = open.openHost === key;
+  const managedRun = here && isManagedRun(model.data, open.openRun) ? open.openRun : undefined;
   // A run in setup follows its lead as well, which no route names.
-  const agent = here ? followedAgent(model.data, open.openRun, open.openAgent) : null;
+  const agent =
+    managedRun === undefined ? null : followedAgent(model.data, managedRun, open.openAgent);
   const {cost} = open;
+  const managedCost = cost?.host === key && isManagedRun(model.data, cost.runId) ? cost : null;
   return {
     key,
     label,
@@ -159,6 +165,7 @@ const snapshotOfHost = (
     connection: get(session.connection.state),
     freshness: get(session.connection.freshness),
     runsFeed: get(session.runs.status),
+    runIndex: get(session.runIndex.index),
     repositoryChecked: get(session.repositoryCheck.state),
     directories: get(session.directories.state),
     catalogue: get(session.newRun.catalogue),
@@ -167,15 +174,15 @@ const snapshotOfHost = (
     provision: get(session.newRun.provision),
     agentFeeds: agent === null ? {} : {[agent]: get(session.agents.status(agent)) ?? OPENING},
     costFeeds:
-      cost?.host === key
+      managedCost !== null
         ? {
-            [cost.runId]: {
-              status: get(session.costs.status(cost.runId)),
-              freshness: get(session.costs.freshness(cost.runId)),
+            [managedCost.runId]: {
+              status: get(session.costs.status(managedCost.runId)),
+              freshness: get(session.costs.freshness(managedCost.runId)),
             } satisfies CostFeedSnapshot,
           }
         : {},
-    runHistory: openRunHistory(get, session, here ? open.openRun : undefined),
+    runHistory: openRunHistory(get, session, managedRun),
     history: openAgentHistory(get, session, agent),
   };
 };
@@ -318,6 +325,19 @@ function useOpenStreams(hosts: readonly ConnectedHost[], open: ReturnType<typeof
   useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
 }
 
+function retryHostFeeds(
+  dispatch: Dispatch,
+  session: HostSession,
+  snapshot: HostSnapshot | undefined,
+  open: boolean,
+  agentId: string | null | undefined,
+  runId: string | undefined,
+): void {
+  const managedRun =
+    open && snapshot !== undefined && isManagedRun(snapshot.model.data, runId) ? runId : undefined;
+  retryFeeds(dispatch, session, managedRun === undefined ? undefined : agentId, managedRun);
+}
+
 /** The commands that change a live run's settings, whose last outcome is kept by run id. */
 function updateCommands(
   issue: (host: string, intent: Intent, kept: (issued: Issued) => void) => void,
@@ -452,8 +472,8 @@ export function ConnectedApp(props: {
       retryHost={host => {
         const session = sessionOf(host);
         if (session === undefined) return;
-        const open = openHost === host;
-        retryFeeds(dispatch, session, open ? openAgent : undefined, open ? openRun : undefined);
+        const snapshot = view.hosts.find(candidate => candidate.key === host);
+        retryHostFeeds(dispatch, session, snapshot, openHost === host, openAgent, openRun);
       }}
     />
   );

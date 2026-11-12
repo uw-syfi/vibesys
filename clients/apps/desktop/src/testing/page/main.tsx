@@ -9,6 +9,7 @@
  * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
  * long, `down=<n>` has the host at that position lose its link after its first snapshot,
  * `leftOut=<n>` has each host say its snapshot left that many older runs out);
+ * `generic` adds one generic-only run to the host's independent typed run index;
  * Every host serves the cost its own runs add up to (`served-host-cost.ts`), so the Cost page and the Runs
  * page agree; `fleet=0-0` is a host with no runs.
  * `report` has the lead post a report about the whole run, which the report screen sums the run up by
@@ -38,7 +39,7 @@ import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {ReportKind, UnreadableReason, UnreadableReasonSchema} from '@vibesys/orchestrator-proto';
-import {DesktopLinkProblem} from '@vibesys/proto';
+import {DesktopLinkProblem, Direction, RunLiveness, SeriesRole} from '@vibesys/proto';
 import {type Appearance, parseAppearance} from '@vibesys/ui/tokens';
 import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
@@ -101,6 +102,7 @@ import {
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {servedHostCost} from '../orchestrator/served-host-cost.js';
+import {runEntryFrame, runsSyncedFrame, servingRuns} from '../runs-topic.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
 import {fixtureMachineActions} from '../settings/machine-actions.js';
 import {memoryFolders} from '../settings/machine-folders.js';
@@ -304,7 +306,7 @@ const withoutCostStream = {
       : served.respond(...call),
 };
 const fleetSpec = query.get('fleet');
-const fake = makeFakeTransport(
+const selectedRecording =
   fleetSpec !== null
     ? fleetRecording(fleetSpec)
     : query.has('login-failed')
@@ -322,8 +324,33 @@ const fake = makeFakeTransport(
         ? withoutCostStream
         : machineCase === undefined
           ? served
-          : machineCaseRecording(machineCase, served),
-);
+          : machineCaseRecording(machineCase, served);
+const recording = query.has('generic')
+  ? servingRuns(() => [
+      runEntryFrame('generic-run', {
+        liveness: RunLiveness.ALIVE,
+        projectRoot: '/projects/serve',
+        head: {
+          strategy: 'standard',
+          lifecycle: {state: {case: 'running', value: {}}},
+          objective: {
+            series: {
+              name: 'Throughput',
+              unit: 'requests/s',
+              direction: Direction.MAX,
+              role: SeriesRole.OBJECTIVE,
+            },
+            bestValue: 87.5,
+          },
+          usage: {costUsd: 4.25},
+          needsUser: true,
+        },
+      }),
+      runsSyncedFrame,
+      {hang: true},
+    ])(selectedRecording)
+  : selectedRecording;
+const fake = makeFakeTransport(recording);
 const saved = savedAppearance(query);
 const preferences = makeFakePreferencesBridge(saved === undefined ? {} : {saved});
 

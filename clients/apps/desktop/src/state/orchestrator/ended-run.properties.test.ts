@@ -22,6 +22,7 @@ import {
   type ObjectiveSpec,
   serveSummaries,
 } from '../../testing/orchestrator/index.js';
+import {DORMANT_GENERIC_RUN_INDEX} from '../generic-run-index.js';
 import {fleetRows, measuredObjectives} from './fleet.js';
 import {applyChange, applySearch} from './fold.js';
 import {agentsStrip} from './report/agents-strip.js';
@@ -58,6 +59,7 @@ function factsOf(state: OrchestratorState, runId: string) {
       key: 'h',
       label: 'h',
       data: state,
+      runIndex: DORMANT_GENERIC_RUN_INDEX,
       freshness: 'live',
       status: {kind: 'live', cause: null, staleForMs: null},
     },

@@ -32,7 +32,9 @@ const statuses: fc.Arbitrary<HostStatus> = fc.oneof(
 
 /** The words every status chip on screen says: what a screen's text says of a host. */
 const chips = (screen: ReturnType<typeof mount>): string[] =>
-  [...screen.container.querySelectorAll('.vs-chip')].map(chip => chip.textContent ?? '');
+  [...screen.container.querySelectorAll('.vs-chip')]
+    .filter(chip => chip.closest('.vs-reserve') === null)
+    .map(chip => chip.textContent ?? '');
 
 /** The words a different status would say, which no screen may say of this one. */
 const otherWords = (status: HostStatus): string[] =>
@@ -47,7 +49,16 @@ function settings(status: HostStatus) {
 function runs(status: HostStatus) {
   return mount(
     <FleetScreen
-      hosts={[{key: 'ssh:host-a', label: 'host-a', data: emptyState, freshness: 'empty', status}]}
+      hosts={[
+        {
+          key: 'ssh:host-a',
+          label: 'host-a',
+          data: emptyState,
+          runIndex: {_tag: 'Ready', freshness: 'current', runs: new Map()},
+          freshness: 'empty',
+          status,
+        },
+      ]}
       place={initialNavigation.fleet}
       nowMs={0}
       go={() => undefined}
@@ -72,23 +83,26 @@ function cost(status: HostStatus) {
   );
 }
 
-describe('a host that says one thing on every screen', () => {
-  it('reads the same word on Settings, the Runs list and Cost, and no second word beside it', () => {
+describe('a host status keeps its meaning on every screen', () => {
+  it('uses the same word globally and scopes it to managed details in the disjoint Runs view', () => {
     fc.assert(
       fc.property(statuses, status => {
         const {label} = hostStatusWord(status);
-        for (const open of [settings, runs, cost]) {
+        for (const open of [settings, cost]) {
           const screen = open(status);
           const said = chips(screen);
-          // A live host is the quiet case on the Runs list: it says nothing there.
-          const quiet = status.kind === 'live' && open === runs;
-          expect(said.includes(label), open.name).toBe(!quiet);
+          expect(said).toContain(label);
           expect(
             said.filter(word => otherWords(status).includes(word)),
             open.name,
           ).toEqual([]);
           screen.unmount();
         }
+        const list = runs(status);
+        // Runs has two independent discovery sources, so a managed status cannot claim the host or
+        // its generic index as a whole. Live is the quiet, healthy case.
+        expect(chips(list)).toEqual(status.kind === 'live' ? [] : [`Managed details · ${label}`]);
+        list.unmount();
       }),
       {numRuns: 60},
     );
