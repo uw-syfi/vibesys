@@ -319,6 +319,11 @@ describe('Page with a body that fills', () => {
     expect(conversation).toMatch(
       /\[data-size="fill"\] > \.vs-conversation-pane\s*\{[^}]*max-width:\s*none/,
     );
+    // A tail-following pane commonly starts part-way through a row. Its top guard keeps that
+    // clipped row from showing as fragments underneath the fixed cards above the conversation.
+    expect(conversation).toMatch(
+      /\.vs-conversation\[data-size="fill"\]::before\s*\{[^}]*height:\s*var\(--space-4\)[^}]*background:\s*var\(--bg\)/,
+    );
   });
 });
 

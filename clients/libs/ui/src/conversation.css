@@ -11,6 +11,19 @@
   /* Never squeezed out by the rows around it: a short window scrolls its page instead. */
   min-height: var(--log-sm);
 }
+/* A followed tail may begin part-way through a row. Cover that clipped edge under the fixed cards
+   above it; a whole row starts after its own padding and is untouched. */
+.vs-conversation[data-size="fill"]::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--space-4);
+  background: var(--bg);
+  pointer-events: none;
+}
 .vs-conversation-pane {
   box-sizing: border-box;
   height: 75dvh;
