@@ -24,7 +24,7 @@ trap '[[ -z "$warm" ]] || kill "$warm" 2>/dev/null || true' EXIT
 stage layers uv run --locked python -m scripts.check_proto_layers
 stage lint uv run --locked --group proto buf lint
 stage generate ./scripts/generate_proto.sh
-generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/topics_generated.go libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated clients/libs/orchestrator-proto/src/generated gateway/gen cli/gen orchestrator/gen
+generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/topics_generated.go libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated clients/libs/orchestrator-proto/src/generated clients/libs/orchestrator-proto/src/framing.generated.ts gateway/gen cli/gen orchestrator/gen orchestrator/internal/client/framing_generated.go orchestrator/internal/daemon/framing_generated.go
   sdk/vibesys-evaluator/go/gen sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto sdk/vs-evaluator/vseval/internal/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)

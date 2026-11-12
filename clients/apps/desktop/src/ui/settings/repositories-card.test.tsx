@@ -1,5 +1,6 @@
 import {describe, expect, it} from '@effect/vitest';
 import fc from 'fast-check';
+import {act} from 'react';
 import {checkRepositoriesFolder, initialAppearance} from '../../state/index.js';
 import {fieldOf, typeInto} from '../../testing/dom/fields.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
@@ -13,16 +14,28 @@ interface Saved {
   readonly folder: string;
 }
 
-function open(options: {readonly refuse?: string} = {}) {
+function open(
+  options: {
+    readonly refuse?: string;
+    readonly defer?: boolean;
+    readonly rows?: readonly {
+      readonly key: string;
+      readonly label: string;
+      readonly folder: string;
+    }[];
+  } = {},
+) {
   const saved: Saved[] = [];
+  const completions: ((refusal: string | null) => void)[] = [];
   const repositories: RepositoriesControls = {
-    rows: [
+    rows: options.rows ?? [
       {key: 'local', label: 'This machine', folder: ''},
       {key: 'ssh:host-a', label: 'host-a', folder: '~/work'},
     ],
     save: (key, folder, done) => {
       saved.push({key, folder});
-      done(options.refuse ?? null);
+      if (options.defer === true) completions.push(done);
+      else done(options.refuse ?? null);
     },
   };
   const screen = mount(
@@ -32,16 +45,15 @@ function open(options: {readonly refuse?: string} = {}) {
       repositories={repositories}
     />,
   );
-  return {screen, saved};
+  return {screen, saved, completions};
 }
 
 const input = (screen: Screen, label: string) => fieldOf<HTMLInputElement>(screen, label);
 const save = (screen: Screen, label: string): HTMLElement => {
   const field = input(screen, label).closest('.vs-field');
-  const button = [...(field?.querySelectorAll<HTMLElement>('button') ?? [])].find(
-    each => each.textContent?.trim() === 'Save',
-  );
+  const button = field?.querySelector<HTMLElement>('button');
   if (button === undefined) throw new Error(`no Save beside ${label}`);
+  if (button === null) throw new Error(`no Save beside ${label}`);
   return button;
 };
 const disabled = (button: HTMLElement): boolean => button.getAttribute('aria-disabled') === 'true';
@@ -51,6 +63,24 @@ describe('the Repositories folder of each machine', () => {
     const {screen} = open();
     expect(input(screen, 'This machine').value).toBe('');
     expect(input(screen, 'host-a').value).toBe('~/work');
+    screen.unmount();
+  });
+
+  it('names the folder and machine on every Save, clipping only a long visible alias', () => {
+    const long = 'gpu-training-cluster-login-node-01.region-east.research.example.internal';
+    const {screen} = open({
+      rows: [
+        {key: 'local', label: 'This machine', folder: ''},
+        {key: 'ssh:host-a', label: 'host-a', folder: ''},
+        {key: `ssh:${long}`, label: long, folder: ''},
+      ],
+    });
+    expect(save(screen, 'This machine').textContent).toBe('Save local folder');
+    expect(save(screen, 'host-a').textContent).toBe('Save host-a folder');
+    const clipped = save(screen, long);
+    expect(clipped.textContent).toBe('Save gpu-trainin… folder');
+    expect(clipped.getAttribute('aria-label')).toBe(`Save ${long} folder`);
+    expect(clipped.getAttribute('title')).toBe(`Save ${long} folder`);
     screen.unmount();
   });
 
@@ -84,6 +114,45 @@ describe('the Repositories folder of each machine', () => {
     expect(screen.text()).toContain('Repositories: host not saved');
     expect(input(screen, 'This machine').value).toBe('/data');
     screen.unmount();
+  });
+
+  it('keeps a newer edit when an older save succeeds or is refused', () => {
+    for (const refusal of [null, 'Repositories: host not saved']) {
+      const {screen, completions} = open({defer: true});
+      typeInto(input(screen, 'This machine'), '/first');
+      screen.press(save(screen, 'This machine'));
+
+      typeInto(input(screen, 'This machine'), '/second');
+      act(() => completions[0]?.(refusal));
+
+      expect(input(screen, 'This machine').value).toBe('/second');
+      expect(screen.text()).not.toContain('Repositories: host not saved');
+      expect(disabled(save(screen, 'This machine'))).toBe(false);
+      screen.unmount();
+    }
+  });
+
+  it('only applies the newest save completion across later edits and saves', () => {
+    fc.assert(
+      fc.property(fc.nat(), fc.boolean(), (suffix, olderRefused) => {
+        const replacement = `/second-${suffix}`;
+        const {screen, completions} = open({defer: true});
+        typeInto(input(screen, 'This machine'), '/first');
+        screen.press(save(screen, 'This machine'));
+        typeInto(input(screen, 'This machine'), replacement);
+        screen.press(save(screen, 'This machine'));
+
+        act(() => completions[0]?.(olderRefused ? 'Repositories: old refusal' : null));
+        expect(input(screen, 'This machine').value).toBe(replacement);
+        expect(screen.text()).not.toContain('Repositories: old refusal');
+
+        act(() => completions[1]?.('Repositories: newest refusal'));
+        expect(input(screen, 'This machine').value).toBe(replacement);
+        expect(screen.text()).toContain('Repositories: newest refusal');
+        screen.unmount();
+      }),
+      {numRuns: 20},
+    );
   });
 
   it('sends only folders the check accepts, whatever is typed', () => {
