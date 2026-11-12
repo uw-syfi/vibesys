@@ -34,6 +34,10 @@ type watch[R any] struct {
 	change   func(*pb.RunChange) (R, bool)
 	delta    func(*pb.Delta) (R, bool)
 	latest   func(*pb.SearchState) (R, bool)
+	// stamp writes the committed sequence a response is current to. Most watch responses carry
+	// their cursor inside their body; WatchAgentResponse carries it on every arm, so the generic
+	// watch stamps each path instead of asking every constructor to remember it.
+	stamp func(R, uint64)
 	// setup is told that a run's setup observation moved. It sends nothing itself: a stream whose
 	// frames are whole views notes the run, and settle sends the view.
 	setup func(hub.SetupNote)
@@ -44,6 +48,22 @@ type watch[R any] struct {
 	// and returns what the events of the batch and the time since have added up to. A stream whose
 	// frames are whole views uses it to send one view for a batch of events, not one for each.
 	settle func(sent uint64) []R
+}
+
+func (w *watch[R]) stamped(response R, sequence uint64) R {
+	if w.stamp != nil {
+		w.stamp(response, sequence)
+	}
+	return response
+}
+
+func (w *watch[R]) stampAll(responses []R, sequence uint64) {
+	if w.stamp == nil {
+		return
+	}
+	for _, response := range responses {
+		w.stamp(response, sequence)
+	}
 }
 
 // open starts the stream. With after zero the first response is a snapshot; otherwise the stream
@@ -91,7 +111,7 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 				return nil, err
 			}
 			if r, ok := w.change(msg); ok {
-				first = append(first, r)
+				first = append(first, w.stamped(r, rec.Sequence))
 			}
 		}
 	}
@@ -102,6 +122,7 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 		if err := w.e.Cut(func(state core.State, _ uint64) error {
 			var frames []R
 			frames, tooMany = w.current(state)
+			w.stampAll(frames, w.sent)
 			first = append(first, frames...)
 			return nil
 		}); err != nil {
@@ -122,11 +143,12 @@ func (w *watch[R]) snapshotLocked(state core.State, last uint64, out *[]R) error
 		return err
 	}
 	w.sent = last
-	*out = append(*out, snap)
+	*out = append(*out, w.stamped(snap, last))
 	if w.current != nil {
 		// Of a snapshot's follow-ups, the runs that do not fit the burst are sent what they send when
 		// they next change.
 		frames, _ := w.current(state)
+		w.stampAll(frames, last)
 		*out = append(*out, frames...)
 	}
 	return nil
@@ -164,22 +186,24 @@ func (w *watch[R]) Poll() ([]R, error) {
 			}
 			w.sent = seq
 			if r, ok := w.change(m.Stored.Change); ok {
-				out = append(out, r)
+				out = append(out, w.stamped(r, seq))
 			}
 		case m.Search != nil && w.latest != nil:
 			if r, ok := w.latest(m.Search); ok {
-				out = append(out, r)
+				out = append(out, w.stamped(r, w.sent))
 			}
 		case m.Setup != nil && w.setup != nil:
 			w.setup(*m.Setup)
 		case m.Delta != nil:
 			if r, ok := w.delta(m.Delta); ok {
-				out = append(out, r)
+				out = append(out, w.stamped(r, w.sent))
 			}
 		}
 	}
 	if w.settle != nil {
-		out = append(out, w.settle(w.sent)...)
+		settled := w.settle(w.sent)
+		w.stampAll(settled, w.sent)
+		out = append(out, settled...)
 	}
 	return w.checked(out)
 }

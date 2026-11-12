@@ -109,6 +109,90 @@ func byID(page *pb.ItemsPage, id string) *pb.Item {
 	return nil
 }
 
+func agentFrame(t *testing.T, frames []*pb.WatchAgentResponse, kind string) *pb.WatchAgentResponse {
+	t.Helper()
+	for _, frame := range frames {
+		switch kind {
+		case "item":
+			if frame.GetItem() != nil {
+				return frame
+			}
+		case "delta":
+			if frame.GetDelta() != nil {
+				return frame
+			}
+		case "turn":
+			if frame.GetTurn() != nil {
+				return frame
+			}
+		}
+	}
+	t.Fatalf("no %s frame in %v", kind, frames)
+	return nil
+}
+
+// Every arm names the committed sequence it is current to, as WatchAgentResponse promises. The
+// Electron client resumes from this field and uses it to decide whether live progress is newer than
+// the item in its page, so zero would make a reconnect start over and hide a delta after a page.
+func TestEveryAgentFrameNamesTheCommittedSequenceItIsCurrentTo(t *testing.T) {
+	rig := daemontest.NewRig(t)
+	s := openTurn(t, rig)
+	w, first, err := rig.Service.WatchAgentFrom(s.lead.ID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if len(first) != 1 || first[0].GetPage() == nil {
+		t.Fatalf("first frames = %v, want one page", first)
+	}
+	page := first[0]
+	if page.GetSequence() == 0 || page.GetSequence() != page.GetPage().GetSequence() {
+		t.Fatalf("page response sequence = %d, page sequence = %d, want the same nonzero sequence", page.GetSequence(), page.GetPage().GetSequence())
+	}
+
+	s.emit(t, time.Second, s.item("live", pb.ItemStatus_ITEM_STATUS_RUNNING, reasoning("thinking")))
+	frames, err := w.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := agentFrame(t, frames, "item")
+	if item.GetSequence() <= page.GetSequence() {
+		t.Fatalf("item sequence = %d, want after page sequence %d", item.GetSequence(), page.GetSequence())
+	}
+
+	s.emit(t, time.Second, &pb.SessionEvent{Body: &pb.SessionEvent_Delta{Delta: &pb.SessionDelta{
+		ItemId: "live", Body: &pb.SessionDelta_Text{Text: " more"},
+	}}})
+	frames, err = w.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := agentFrame(t, frames, "delta")
+	if delta.GetSequence() != item.GetSequence() {
+		t.Fatalf("delta sequence = %d, want latest committed sequence %d", delta.GetSequence(), item.GetSequence())
+	}
+
+	s.emit(t, time.Second, s.item("live", pb.ItemStatus_ITEM_STATUS_FINISHED, reasoning("thought")))
+	frames, err = w.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := agentFrame(t, frames, "item")
+	if finished.GetSequence() <= item.GetSequence() {
+		t.Fatalf("finished item sequence = %d, want after running item sequence %d", finished.GetSequence(), item.GetSequence())
+	}
+
+	s.end(t)
+	frames, err = w.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := agentFrame(t, frames, "turn")
+	if turn.GetSequence() <= finished.GetSequence() {
+		t.Fatalf("turn sequence = %d, want after final item sequence %d", turn.GetSequence(), finished.GetSequence())
+	}
+}
+
 // An item remembers when it was first seen: an update changes when it was last updated, and the end
 // of its turn, which finishes whatever is still running, does the same.
 func TestAnItemKeepsWhenItWasFirstSeenThroughUpdatesAndTheEndOfItsTurn(t *testing.T) {
