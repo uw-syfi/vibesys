@@ -95,7 +95,11 @@ read-only).
 [the earlier AgentX evaluator](../../../resources/evaluators/agentx/README.md).
 `python /task/bench.py profile` is its smoke replay: two corpus entries for 60
 seconds, never scored. Run it as a command in the task image against the
-candidate's server to try the chat path or to record a profile.
+candidate's server to try the chat path or to record a profile:
+
+```bash
+vibesys-cli submit command <sha> --task mi2104x-agentx --image harness -- python /task/bench.py profile
+```
 
 BF16 weights alone occupy roughly 70 GB. One 64 GB MI210 cannot hold them;
 four MI210s provide 256 GB aggregate HBM, distributed across separate devices.
