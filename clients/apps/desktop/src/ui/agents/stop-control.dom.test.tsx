@@ -1,6 +1,6 @@
 /**
- * The Stop control for one agent, by what a person does: a stoppable agent offers a danger Stop; a
- * press opens a modal that says what a stop costs; Cancel takes it back; the second Stop carries the
+ * The Stop control for one agent, by what a person does: a stoppable agent offers Stop agent; a
+ * press opens a modal that says what a stop costs; Cancel takes it back; the confirmation carries the
  * press; a host refusal is read back in the host's words; and while one is in flight the press is
  * held. The lead and a finished agent offer nothing. `canStopAgent` is the pure predicate behind the
  * showing, pinned on its boundaries.
@@ -66,7 +66,7 @@ function sheet(screen: Screen): HTMLElement {
   return element;
 }
 
-/** The one button named `name` inside the dialog (its Stop, its Cancel, its Close). */
+/** The one button named `name` inside the dialog (its Stop agent, its Cancel, its Close). */
 function inSheet(screen: Screen, name: string): HTMLElement {
   const found = [...sheet(screen).querySelectorAll<HTMLElement>('button')].filter(
     button => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === name,
@@ -106,16 +106,16 @@ describe('whether an agent can be stopped', () => {
 });
 
 describe('the stop control', () => {
-  it('offers a danger Stop for a stoppable agent, and nothing at all for the lead or a finished agent', () => {
+  it('offers a danger Stop agent for a stoppable agent, and nothing for the lead or a finished agent', () => {
     const live = render(agentOf({}), undefined);
-    const button = live.control('Stop this agent');
+    const button = live.control('Stop agent');
     expect(button.getAttribute('data-variant')).toBe('danger');
-    expect(button.textContent?.trim()).toBe('Stop');
+    expect(button.textContent?.trim()).toBe('Stop agent');
     live.unmount();
 
     for (const agent of [agentOf({role: AgentRole.LEAD}), agentOf({status: AgentStatus.ENDED})]) {
       const none = render(agent, undefined);
-      expect(none.controls('Stop this agent')).toHaveLength(0);
+      expect(none.controls('Stop agent')).toHaveLength(0);
       expect(none.text()).toBe('');
       none.unmount();
     }
@@ -124,13 +124,13 @@ describe('the stop control', () => {
   it('a press opens a modal that says the turn ends and the session closes, and the run keeps going', () => {
     const screen = render(agentOf({}), undefined);
     expect(sheet(screen).textContent ?? '').not.toContain('Stop this agent?');
-    screen.press(screen.control('Stop this agent'));
+    screen.press(screen.control('Stop agent'));
     const text = sheet(screen).textContent ?? '';
     expect(text).toContain('Stop this agent?');
     expect(text).toContain('its session closes');
     expect(text).toContain('The run keeps going');
     expect(inSheet(screen, 'Cancel')).toBeDefined();
-    expect(inSheet(screen, 'Stop this agent')).toBeDefined();
+    expect(inSheet(screen, 'Stop agent')).toBeDefined();
     screen.unmount();
   });
 
@@ -139,27 +139,27 @@ describe('the stop control', () => {
     const screen = render(agentOf({}), undefined, () => {
       stops += 1;
     });
-    screen.press(screen.control('Stop this agent'));
+    screen.press(screen.control('Stop agent'));
     screen.press(inSheet(screen, 'Cancel'));
     expect(stops).toBe(0);
     expect(sheet(screen).textContent ?? '').not.toContain('Stop this agent?');
     screen.unmount();
   });
 
-  it('carries the press on the second Stop, once', () => {
+  it('carries the press on the confirmation, once', () => {
     let stops = 0;
     const screen = render(agentOf({}), undefined, () => {
       stops += 1;
     });
-    screen.press(screen.control('Stop this agent'));
-    screen.press(inSheet(screen, 'Stop this agent'));
+    screen.press(screen.control('Stop agent'));
+    screen.press(inSheet(screen, 'Stop agent'));
     expect(stops).toBe(1);
     screen.unmount();
   });
 
   it('reads a host refusal in the host’s own words and leaves only a way to close', () => {
     const screen = render(agentOf({}), refused(Refusal.AGENT_NOT_LIVE));
-    screen.press(screen.control('Stop this agent'));
+    screen.press(screen.control('Stop agent'));
     const text = sheet(screen).textContent ?? '';
     expect(text).toContain('refused');
     expect(text).toContain('Agent finished');
@@ -173,7 +173,7 @@ describe('the stop control', () => {
     const screen = render(agentOf({}), undefined, () => {
       stops += 1;
     });
-    screen.press(screen.control('Stop this agent'));
+    screen.press(screen.control('Stop agent'));
     screen.render(
       <StopControl
         agent={agentOf({})}
@@ -184,8 +184,9 @@ describe('the stop control', () => {
         retry={() => undefined}
       />,
     );
-    const confirm = inSheet(screen, 'Stop this agent');
-    expect(confirm.textContent?.trim()).toBe('Stopping');
+    const confirm = inSheet(screen, 'Stop agent');
+    expect(confirm.textContent?.trim()).toBe('Stopping agent');
+    expect(sheet(screen).textContent ?? '').toContain('Stop agent: sending');
     expect(confirm.getAttribute('aria-disabled')).toBe('true');
     screen.press(confirm);
     expect(stops).toBe(0);
