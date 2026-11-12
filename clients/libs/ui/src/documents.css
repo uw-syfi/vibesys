@@ -317,10 +317,15 @@ button.vs-stage-head {
 .vs-log {
   position: relative;
   min-width: 0;
+  height: var(--log);
+  display: flex;
+  flex-direction: column;
 }
 .vs-log-pane {
   box-sizing: border-box;
-  height: var(--log);
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   margin: 0;
   padding: var(--space-4) var(--space-5);
   border: var(--hairline) solid var(--line);
@@ -333,7 +338,7 @@ button.vs-stage-head {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.vs-log-pane[data-size="sm"] {
+.vs-log[data-size="sm"] {
   height: var(--log-sm);
 }
 .vs-log-line,
@@ -346,9 +351,3 @@ button.vs-stage-head {
 .vs-log-line[data-stream="err"] {
   color: var(--log-err);
 }
-.vs-log-jump {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-}
-

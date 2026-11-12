@@ -262,6 +262,7 @@ button.vs-crumb:focus-visible {
 .vs-log[data-size="fill"],
 .vs-thread[data-size="fill"] {
   flex: 1 1 auto;
+  height: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -592,6 +593,12 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
   cursor: pointer;
+}
+.vs-new-below-slot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-4) 0;
 }
 
 /* --- frame density: compact (dense rows, one-line pane headers, a slim time bar) ---------------- */
@@ -1228,26 +1235,22 @@ button.vs-crumb:focus-visible {
 .vs-narrative-wrap {
   position: relative;
   min-width: 0;
+  max-height: var(--thread);
+  display: flex;
+  flex-direction: column;
 }
 .vs-narrative-wrap[data-size="fill"] {
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  max-height: none;
 }
 .vs-narrative {
   box-sizing: border-box;
-  max-height: var(--thread);
+  flex: 1 1 auto;
   min-height: 0;
 }
 .vs-narrative[data-size="fill"] {
-  flex: 1 1 auto;
   max-height: none;
-}
-.vs-narrative-jump {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
 }
 .vs-narrative > * + * {
   margin-top: var(--space-2);

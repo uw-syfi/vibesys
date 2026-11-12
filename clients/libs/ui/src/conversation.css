@@ -3,11 +3,13 @@
 .vs-conversation {
   position: relative;
   min-width: 0;
-}
-.vs-conversation[data-size="fill"] {
+  height: 75dvh;
   display: flex;
   flex-direction: column;
+}
+.vs-conversation[data-size="fill"] {
   flex: 1 1 0;
+  height: auto;
   /* Never squeezed out by the rows around it: a short window scrolls its page instead. */
   min-height: var(--log-sm);
 }
@@ -26,7 +28,9 @@
 }
 .vs-conversation-pane {
   box-sizing: border-box;
-  height: 75dvh;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   margin: 0 auto;
   padding: 0 0 var(--space-6);
   list-style: none;
@@ -34,9 +38,6 @@
   max-width: var(--content-narrow);
 }
 .vs-conversation[data-size="fill"] > .vs-conversation-pane {
-  flex: 1 1 0;
-  height: auto;
-  min-height: 0;
   /* As wide as what holds it: its edges are the cards' around it. */
   max-width: none;
   width: 100%;
@@ -59,12 +60,6 @@
   justify-content: center;
   padding: var(--space-4) 0;
 }
-.vs-conversation-jump {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-}
-
 /* The rule between two turns: a line, a label, a line. Figures keep one width. */
 .vs-conversation-rule {
   display: flex;
