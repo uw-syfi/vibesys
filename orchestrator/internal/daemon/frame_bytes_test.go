@@ -15,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -117,5 +118,98 @@ func TestLargestSnapshotFitsAndOmittedSearchesFollowWithinTheBurstBudget(t *test
 	// What the snapshot left out follows, but only as much as one burst holds: the rest is sent when it changes.
 	if burst > daemon.MaxFollowUpBytes || len(seen) <= len(snap.Searches) {
 		t.Fatalf("%d bytes followed the snapshot, and %d of 12 views were sent against the snapshot's %d", burst, len(seen), len(snap.Searches))
+	}
+}
+
+// A build before event-size bounds could persist a report larger than the link can carry. Replaying
+// that event must advance by replacing it with a snapshot; returning RESOURCE_EXHAUSTED leaves every
+// client at the old cursor and makes each reconnect replay the same event forever (#3878).
+func TestWatchRunsRecoversPastEveryOversizedLegacyEvent(t *testing.T) {
+	property := func(extra uint16) bool {
+		rig := daemontest.NewRig(t)
+		run := startNamedRun(t, rig, "legacy")
+		lead := rig.Daemon.State().Agents(run)[0].ID
+		after := rig.Daemon.Last()
+		legacy := core.Message{
+			ID: "legacy-oversized", Run: run, From: lead, Delivery: core.DeliveryConsumed,
+			At: rig.Clock.Now(), Body: core.Report{
+				Kind: core.ReportProgress, Scope: core.ReportScopeRun, Sequence: 1,
+				Headline: "legacy", Changed: strings.Repeat("x", daemon.MaxWatchFrameBytes+1+int(extra)),
+			},
+		}
+		if _, err := rig.Store.Commit(store.Result{Events: []core.Event{{Run: run, At: rig.Clock.Now(), Body: legacy}}}); err != nil {
+			t.Fatal(err)
+		}
+		rig.Restart(t)
+
+		watch, frames, err := rig.Service.WatchRunsDetailFrom(core.Operator{}, after, pb.SnapshotDetail_SNAPSHOT_DETAIL_SUMMARY)
+		if err != nil {
+			t.Fatalf("resume after an oversized event: %v", err)
+		}
+		defer watch.Close()
+		if len(frames) == 0 {
+			t.Fatal("resume returned no recovery snapshot")
+		}
+		snapshot := client.WatchRunsSnapshot(frames[0])
+		if snapshot == nil || snapshot.GetSequence() != rig.Daemon.Last() {
+			t.Fatalf("resume returned a non-snapshot at %d, want a snapshot at %d", snapshot.GetSequence(), rig.Daemon.Last())
+		}
+		for _, frame := range frames {
+			if proto.Size(frame) > daemon.MaxWatchFrameBytes {
+				t.Fatalf("recovery frame is %d bytes", proto.Size(frame))
+			}
+		}
+
+		if _, err := rig.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{
+			Id: "after-recovery", Body: &pb.Command_SendMessage{SendMessage: &pb.SendMessage{AgentId: string(lead), Text: "still live"}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		rig.Settle(t)
+		live, err := watch.Poll()
+		if err != nil {
+			t.Fatalf("poll after recovery: %v", err)
+		}
+		for _, frame := range live {
+			_, change, _ := client.DecodeWatchRuns(frame)
+			if change.GetSequence() > snapshot.GetSequence() {
+				return true
+			}
+		}
+		return false
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 5, Rand: rand.New(rand.NewSource(3878))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWatchRunsReplacesAnOversizedLiveEventWithASnapshot(t *testing.T) {
+	rig := daemontest.NewRig(t)
+	run := startNamedRun(t, rig, "live")
+	rig.Settle(t)
+	lead := rig.Daemon.State().Agents(run)[0].ID
+	watch, first, err := rig.Service.WatchRunsDetailFrom(core.Operator{}, 0, pb.SnapshotDetail_SNAPSHOT_DETAIL_SUMMARY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watch.Close()
+	before := client.WatchRunsSnapshot(first[0]).GetSequence()
+
+	post(t, rig, lead, "oversized-live", bigReport(pb.ReportKind_REPORT_KIND_PROGRESS, daemon.MaxWatchFrameBytes+1))
+	frames, err := watch.Poll()
+	if err != nil {
+		t.Fatalf("poll after an oversized live event: %v", err)
+	}
+	if len(frames) == 0 {
+		t.Fatal("poll returned no recovery snapshot")
+	}
+	snapshot := client.WatchRunsSnapshot(frames[0])
+	if snapshot == nil || snapshot.GetSequence() <= before {
+		t.Fatalf("poll recovered at %d, want a snapshot after %d", snapshot.GetSequence(), before)
+	}
+	for _, frame := range frames {
+		if proto.Size(frame) > daemon.MaxWatchFrameBytes {
+			t.Fatalf("recovery frame is %d bytes", proto.Size(frame))
+		}
 	}
 }
