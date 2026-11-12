@@ -3,12 +3,27 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Fiber from 'effect/Fiber';
 import * as Scope from 'effect/Scope';
+import * as TestClock from 'effect/testing/TestClock';
 import {joinDriving, untilTrue} from '../testing/main/drive.js';
 import {fakeSpawner, type Started} from '../testing/main/fake-process.js';
 import {makeLinkPool} from './link-pool.js';
 
 const isExit = (started: Started): boolean =>
   started.args.includes('-O') && started.args.includes('exit');
+
+/**
+ * Drive the virtual clock a second at a time, like `joinDriving`, until `done` holds instead of
+ * until a given fiber ends: the bound here only guards against `done` never holding.
+ */
+const driveUntil = (done: () => boolean): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    for (let turn = 0; turn < 20_000; turn += 1) {
+      if (done()) return;
+      yield* Effect.promise(() => new Promise<void>(resolve => setImmediate(resolve)));
+      yield* TestClock.adjust('1 second');
+    }
+    return yield* Effect.die(new Error('the driven condition never held'));
+  });
 
 /** A pool over a spawner that ends `-O exit` at once (`hold` false) or leaves it open. */
 function poolOver(options: {hold?: boolean; kill?: 'dies' | 'ignores'} = {}) {
@@ -113,5 +128,51 @@ describe('link pool', () => {
       );
       expect(refused.message).toContain('released');
     }),
+  );
+
+  it.effect(
+    'gives up on a frozen host within its own bound when the pool closes, naming it, without delaying a healthy host',
+    () =>
+      Effect.gen(function* () {
+        const lines: string[] = [];
+        // host-a's '-O exit' is left open and ignores every signal, as if its master were frozen
+        // deep enough that nothing ssh-link.ts owns can confirm it gone. host-b answers at once.
+        const spawner = fakeSpawner(started => {
+          if (isExit(started) && started.args.includes('host-b')) started.process.end(0);
+        }, 'ignores');
+        const make = makeLinkPool('/tmp/vsd-1/%C', line => lines.push(line)).pipe(
+          Effect.provide(spawner.layer),
+        );
+        const poolScope = yield* Scope.make();
+        const pool = yield* make.pipe(Effect.provideService(Scope.Scope, poolScope));
+        const held = yield* Scope.make();
+        yield* pool.lease('host-a').pipe(Effect.provideService(Scope.Scope, held));
+        yield* pool.lease('host-b').pipe(Effect.provideService(Scope.Scope, held));
+
+        const closing = yield* Effect.forkChild(Scope.close(poolScope, Exit.void));
+
+        // host-b's exit is answered without the clock moving at all, so its teardown cannot be
+        // waiting behind host-a's, which needs the clock to advance before it can time out once.
+        yield* untilTrue(
+          () => spawner.started.filter(s => isExit(s) && s.args.includes('host-b')).length === 1,
+        );
+        expect(closing.pollUnsafe()).toBeUndefined();
+
+        // The pool's own close gives up on host-a within RETIRE_BOUND_MS, well short of
+        // ssh-link.ts's own full chain for an unanswered '-O exit' whose own kill is also ignored
+        // (a 1 s control-command timeout, then two more 1 s termination graces: 3 s in all).
+        yield* driveUntil(() => closing.pollUnsafe() !== undefined);
+        expect(lines).toEqual([
+          'gave up waiting for host-a to release (still retiring in the background)',
+        ]);
+
+        // "Still retiring in the background" is not just wording: host-a's own retirement keeps
+        // running after the pool gave up waiting on it, and in time reports its own outcome.
+        yield* driveUntil(() => lines.length > 1);
+        expect(lines).toEqual([
+          'gave up waiting for host-a to release (still retiring in the background)',
+          'could not retire host-a',
+        ]);
+      }),
   );
 });

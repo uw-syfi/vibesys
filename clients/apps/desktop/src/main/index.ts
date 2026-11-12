@@ -27,7 +27,7 @@ import {installGatewayIpc, type RunCall} from './gateway.js';
 import {NodeGatewayArtifacts} from './gateway-artifacts.js';
 import {makeGatewayCalls} from './gateway-calls.js';
 import {makeGatewayDialers} from './gateway-dialers.js';
-import {makeLinkPool} from './link-pool.js';
+import {makeLinkPool, RETIRE_BOUND_MS} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
 import {installMachinesIpc, serveMachines, sshArgsFor} from './machines.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
@@ -55,8 +55,14 @@ const GATEWAY_RESOURCES = fileURLToPath(new URL('../gateway/', import.meta.url))
 const USER_DATA_ENV = 'VIBESYS_DESKTOP_USER_DATA';
 /** How long a session started ahead of the first call waits for it: a slow window on a busy Mac. */
 const LOCAL_GATEWAY_WARM = '15 seconds';
-/** How long quitting waits for the hosts to be released before exiting anyway. */
-const RELEASE_BOUND_MS = 5_000;
+/**
+ * How long quitting waits for the hosts to be released before exiting anyway. link-pool.ts's own
+ * closing finalizer already gives up on any one frozen host's retirement past its own
+ * `RETIRE_BOUND_MS` and lets it keep going in the background, so by the time this fires every
+ * host's teardown has either finished or been let go: this is headroom for the rest of the scope's
+ * cleanup after that (the gateway dialers and calls), not the normal way a slow host gets cut off.
+ */
+const RELEASE_BOUND_MS = RETIRE_BOUND_MS + 4_000;
 
 const log = (message: string): void => {
   console.error(`vibesys-desktop: ${message}`);
